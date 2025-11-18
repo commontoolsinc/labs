@@ -337,7 +337,7 @@ function traverseAndCellify(
   return value;
 }
 
-const LLMMessageSchema = {
+export const LLMMessageSchema = {
   type: "object",
   properties: {
     role: { type: "string" },
@@ -366,7 +366,7 @@ const LLMMessageSchema = {
   required: ["role", "content"],
 } as const satisfies JSONSchema;
 
-const LLMToolSchema = {
+export const LLMToolSchema = {
   type: "object",
   properties: {
     description: { type: "string" },
@@ -396,13 +396,14 @@ const LLMToolSchema = {
   required: [],
 } as const satisfies JSONSchema;
 
-const LLMParamsSchema = {
+export const LLMParamsSchema = {
   type: "object",
   properties: {
     messages: { type: "array", items: LLMMessageSchema, default: [] },
     model: { type: "string" },
     maxTokens: { type: "number" },
     system: { type: "string" },
+    stop: { type: "string" },
     tools: { type: "object", additionalProperties: LLMToolSchema, default: {} },
   },
   required: ["messages"],

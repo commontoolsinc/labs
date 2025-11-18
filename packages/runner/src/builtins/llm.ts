@@ -13,13 +13,20 @@ import {
   BuiltInGenerateTextParams,
   BuiltInLLMMessage,
   BuiltInLLMParams,
+  JSONSchema,
+  Schema,
 } from "@commontools/api";
 import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { llmToolExecutionHelpers } from "./llm-dialog.ts";
+import {
+  LLMMessageSchema,
+  LLMParamsSchema,
+  llmToolExecutionHelpers,
+  LLMToolSchema,
+} from "./llm-dialog.ts";
 
 const logger = getLogger("llm", {
   enabled: false,
@@ -31,61 +38,73 @@ const client = new LLMClient();
 // TODO(ja): investigate if generateText should be replaced by
 // fetchData with streaming support
 
-/**
- * Helper function to initialize cells for LLM built-ins.
- * Reduces code duplication across llm, generateText, and generateObject.
- */
-function initializeCells<T>(
-  runtime: IRuntime,
-  parentCell: Cell<any>,
-  cause: any,
-  tx: IExtendedStorageTransaction,
-  builtinName: "llm" | "generateText" | "generateObject",
-): {
-  pending: Cell<boolean>;
-  result: Cell<T | undefined>;
-  error: Cell<unknown>;
-  partial: Cell<string | undefined>;
-  requestHash: Cell<string | undefined>;
-} {
-  const pending = runtime.getCell<boolean>(
-    parentCell.space,
-    { [builtinName]: { pending: cause } },
-    undefined,
-    tx,
-  );
-  pending.send(false);
+const GenerateTextParamsSchema = {
+  type: "object",
+  properties: {
+    prompt: { type: "string" },
+    messages: { type: "array", items: LLMMessageSchema },
+    system: { type: "string" },
+    model: { type: "string" },
+    maxTokens: { type: "number" },
+    tools: { type: "object", additionalProperties: LLMToolSchema },
+  },
+} as const satisfies JSONSchema;
 
-  const result = runtime.getCell<T | undefined>(
-    parentCell.space,
-    { [builtinName]: { result: cause } },
-    undefined,
-    tx,
-  );
+const GenerateObjectParamsSchema = {
+  type: "object",
+  properties: {
+    prompt: { type: "string" },
+    messages: { type: "array", items: LLMMessageSchema },
+    schema: { type: "object" },
+    system: { type: "string" },
+    model: { type: "string" },
+    maxTokens: { type: "number" },
+    cache: { type: "boolean" },
+    metadata: { type: "object" },
+  },
+  required: ["schema"],
+} as const satisfies JSONSchema;
 
-  const error = runtime.getCell<T | undefined>(
-    parentCell.space,
-    { [builtinName]: { error: cause } },
-    undefined,
-    tx,
-  );
+const LLMResultSchema = {
+  type: "object",
+  properties: {
+    pending: { type: "boolean", default: false },
+    result: {
+      anyOf: [
+        { type: "string" },
+        { type: "array", items: { type: "object" } },
+      ],
+    },
+    error: {},
+    partial: { type: "string" },
+    requestHash: { type: "string" },
+  },
+  required: ["pending"],
+} as const satisfies JSONSchema;
 
-  const partial = runtime.getCell<string | undefined>(
-    parentCell.space,
-    { [builtinName]: { partial: cause } },
-    undefined,
-    tx,
-  );
+const GenerateTextResultSchema = {
+  type: "object",
+  properties: {
+    pending: { type: "boolean", default: false },
+    result: { type: "string" },
+    error: {},
+    partial: { type: "string" },
+    requestHash: { type: "string" },
+  },
+  required: ["pending"],
+} as const satisfies JSONSchema;
 
-  const requestHash = runtime.getCell<string | undefined>(
-    parentCell.space,
-    { [builtinName]: { requestHash: cause } },
-    undefined,
-    tx,
-  );
-
-  return { pending, result, error, partial, requestHash };
-}
+const GenerateObjectResultSchema = {
+  type: "object",
+  properties: {
+    pending: { type: "boolean", default: false },
+    result: { type: "object" },
+    error: {},
+    partial: { type: "string" },
+    requestHash: { type: "string" },
+  },
+  required: ["pending"],
+} as const satisfies JSONSchema;
 
 /**
  * Creates an updatePartial callback that safely updates the partial cell
@@ -244,45 +263,39 @@ export function llm(
   parentCell: Cell<any>,
   runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
+  const inputs = inputsCell.asSchema(LLMParamsSchema);
+
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
   let cellsInitialized = false;
-  let pending: Cell<boolean>;
-  let result: Cell<LLMResponse["content"] | undefined>;
-  let error: Cell<unknown>;
-  let partial: Cell<LLMResponse["content"] | undefined>;
-  let requestHash: Cell<string | undefined>;
+  let resultCell: Cell<Schema<typeof LLMResultSchema>>;
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
-      const cells = initializeCells<LLMResponse["content"]>(
-        runtime,
-        parentCell,
-        cause,
+      resultCell = runtime.getCell(
+        parentCell.space,
+        { llm: { result: cause } },
+        LLMResultSchema,
         tx,
-        "llm",
       );
-      pending = cells.pending;
-      result = cells.result;
-      error = cells.error;
-      partial = cells.partial;
-      requestHash = cells.requestHash;
-
-      sendResult(tx, { pending, result, error, partial, requestHash });
+      resultCell.sync();
+      sendResult(tx, resultCell);
       cellsInitialized = true;
     }
+
     const thisRun = ++currentRun;
-    const pendingWithLog = pending.withTx(tx);
-    const resultWithLog = result.withTx(tx);
-    const partialWithLog = partial.withTx(tx);
-    const requestHashWithLog = requestHash.withTx(tx);
+    const pendingWithLog = resultCell.key("pending").withTx(tx);
+    const resultWithLog = resultCell.key("result").withTx(tx);
+    const errorWithLog = resultCell.key("error").withTx(tx);
+    const partialWithLog = resultCell.key("partial").withTx(tx);
+    const requestHashWithLog = resultCell.key("requestHash").withTx(tx);
 
     const { system, messages, stop, maxTokens, model, tools } =
-      inputsCell.getAsQueryResult([], tx) ?? {};
+      inputs.getAsQueryResult([], tx) ?? {};
 
     const llmParams: LLMRequest = {
       system: system ?? "",
-      messages: messages ?? [],
+      messages: (messages as unknown as BuiltInLLMMessage[]) ?? [],
       stop: stop ?? "",
       maxTokens: maxTokens ?? 4096,
       stream: true,
@@ -306,17 +319,19 @@ export function llm(
 
     if (!Array.isArray(messages) || messages.length === 0) {
       resultWithLog.set(undefined);
+      errorWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(false);
       return;
     }
 
     resultWithLog.set(undefined);
+    errorWithLog.set(undefined);
     partialWithLog.set(undefined);
     pendingWithLog.set(true);
 
     const updatePartial = createUpdatePartialCallback(
-      partial,
+      resultCell.key("partial"),
       tx,
       () => currentRun,
       thisRun,
@@ -324,13 +339,13 @@ export function llm(
 
     // Build tool catalog if tools are present, then start execution
     const resultPromise = (async () => {
-      const toolsCell = tools ? inputsCell.key("tools") : undefined;
+      const toolsCell = tools ? inputs.key("tools") : undefined;
       const toolCatalog = toolsCell
-        ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
+        ? await llmToolExecutionHelpers.buildToolCatalog(runtime, toolsCell)
         : undefined;
 
       await executeWithToolsLoop({
-        initialMessages: messages ?? [],
+        initialMessages: (messages as unknown as BuiltInLLMMessage[]) ?? [],
         llmParams,
         toolCatalog: toolCatalog!,
         updatePartial,
@@ -342,11 +357,13 @@ export function llm(
           await runtime.idle();
 
           await runtime.editWithRetry((tx) => {
-            pending.withTx(tx).set(false);
-            result.withTx(tx).set(llmResult.content);
-            error.withTx(tx).set(undefined);
-            partial.withTx(tx).set(extractTextFromLLMResponse(llmResult));
-            requestHash.withTx(tx).set(hash);
+            resultCell.key("pending").withTx(tx).set(false);
+            resultCell.key("result").withTx(tx).set(llmResult.content);
+            resultCell.key("error").withTx(tx).set(undefined);
+            resultCell.key("partial").withTx(tx).set(
+              extractTextFromLLMResponse(llmResult),
+            );
+            resultCell.key("requestHash").withTx(tx).set(hash);
           });
         },
       });
@@ -356,10 +373,10 @@ export function llm(
       handleLLMError(
         e,
         runtime,
-        pending,
-        result,
-        error,
-        partial,
+        resultCell.key("pending"),
+        resultCell.key("result"),
+        resultCell.key("error"),
+        resultCell.key("partial"),
         () => currentRun,
         thisRun,
         () => {
@@ -397,41 +414,33 @@ export function generateText(
   parentCell: Cell<any>,
   runtime: IRuntime,
 ): Action {
+  const inputs = inputsCell.asSchema(GenerateTextParamsSchema);
+
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
   let cellsInitialized = false;
-  let pending: Cell<boolean>;
-  let result: Cell<string | undefined>;
-  let error: Cell<unknown>;
-  let partial: Cell<string | undefined>;
-  let requestHash: Cell<string | undefined>;
+  let resultCell: Cell<Schema<typeof GenerateTextResultSchema>>;
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
-      const cells = initializeCells<string>(
-        runtime,
-        parentCell,
-        cause,
+      resultCell = runtime.getCell(
+        parentCell.space,
+        { generateText: { result: cause } },
+        GenerateTextResultSchema,
         tx,
-        "generateText",
       );
-      pending = cells.pending;
-      result = cells.result;
-      error = cells.error;
-      partial = cells.partial;
-      requestHash = cells.requestHash;
-
-      sendResult(tx, { pending, result, error, partial, requestHash });
+      resultCell.sync();
+      sendResult(tx, resultCell);
       cellsInitialized = true;
     }
-    const pendingWithLog = pending.withTx(tx);
-    const resultWithLog = result.withTx(tx);
-    const errorWithLog = error.withTx(tx);
-    const partialWithLog = partial.withTx(tx);
-    const requestHashWithLog = requestHash.withTx(tx);
+    const pendingWithLog = resultCell.key("pending").withTx(tx);
+    const resultWithLog = resultCell.key("result").withTx(tx);
+    const errorWithLog = resultCell.key("error").withTx(tx);
+    const partialWithLog = resultCell.key("partial").withTx(tx);
+    const requestHashWithLog = resultCell.key("requestHash").withTx(tx);
 
     const { system, prompt, messages, model, maxTokens, tools } =
-      inputsCell.getAsQueryResult([], tx) ?? {};
+      inputs.getAsQueryResult([], tx) ?? {};
 
     // If neither prompt nor messages is provided, don't make a request
     if (!prompt && !messages) {
@@ -443,7 +452,8 @@ export function generateText(
     }
 
     // Convert prompt to messages if provided, otherwise use messages directly
-    const requestMessages: BuiltInLLMMessage[] = messages ||
+    const requestMessages: BuiltInLLMMessage[] =
+      (messages as unknown as BuiltInLLMMessage[]) ||
       [{ role: "user", content: prompt! }];
 
     const llmParams: LLMRequest = {
@@ -490,7 +500,7 @@ export function generateText(
     pendingWithLog.set(true);
 
     const updatePartial = createUpdatePartialCallback(
-      partial,
+      resultCell.key("partial"),
       tx,
       () => currentRun,
       thisRun,
@@ -498,9 +508,9 @@ export function generateText(
 
     // Build tool catalog if tools are present, then start execution
     const resultPromise = (async () => {
-      const toolsCell = tools ? inputsCell.key("tools") : undefined;
+      const toolsCell = tools ? inputs.key("tools") : undefined;
       const toolCatalog = toolsCell
-        ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
+        ? await llmToolExecutionHelpers.buildToolCatalog(runtime, toolsCell)
         : undefined;
 
       await executeWithToolsLoop({
@@ -518,11 +528,11 @@ export function generateText(
           const textResult = extractTextFromLLMResponse(llmResult);
 
           await runtime.editWithRetry((tx) => {
-            pending.withTx(tx).set(false);
-            result.withTx(tx).set(textResult);
-            error.withTx(tx).set(undefined);
-            partial.withTx(tx).set(textResult);
-            requestHash.withTx(tx).set(hash);
+            resultCell.key("pending").withTx(tx).set(false);
+            resultCell.key("result").withTx(tx).set(textResult);
+            resultCell.key("error").withTx(tx).set(undefined);
+            resultCell.key("partial").withTx(tx).set(textResult);
+            resultCell.key("requestHash").withTx(tx).set(hash);
           });
         },
       });
@@ -532,10 +542,10 @@ export function generateText(
       handleLLMError(
         e,
         runtime,
-        pending,
-        result,
-        error,
-        partial,
+        resultCell.key("pending"),
+        resultCell.key("result"),
+        resultCell.key("error"),
+        resultCell.key("partial"),
         () => currentRun,
         thisRun,
         () => {
@@ -567,50 +577,36 @@ export function generateText(
  */
 export function generateObject<T extends Record<string, unknown>>(
   inputsCell: Cell<BuiltInGenerateObjectParams>,
-  sendResult: (tx: IExtendedStorageTransaction, docs: {
-    pending: Cell<boolean>;
-    result: Cell<T | undefined>;
-    error: Cell<unknown>;
-    partial: Cell<string | undefined>;
-    requestHash: Cell<string | undefined>;
-  }) => void,
+  sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: any,
   parentCell: Cell<any>,
   runtime: IRuntime,
 ): Action {
+  const inputs = inputsCell.asSchema(GenerateObjectParamsSchema);
+
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
   let cellsInitialized = false;
-  let pending: Cell<boolean>;
-  let result: Cell<T | undefined>;
-  let error: Cell<unknown>;
-  let partial: Cell<string | undefined>;
-  let requestHash: Cell<string | undefined>;
+  let resultCell: Cell<Schema<typeof GenerateObjectResultSchema>>;
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
-      const cells = initializeCells<T>(
-        runtime,
-        parentCell,
-        cause,
+      resultCell = runtime.getCell(
+        parentCell.space,
+        { generateObject: { result: cause } },
+        GenerateObjectResultSchema,
         tx,
-        "generateObject",
       );
-      pending = cells.pending;
-      result = cells.result;
-      error = cells.error;
-      partial = cells.partial;
-      requestHash = cells.requestHash;
-
-      sendResult(tx, { pending, result, error, partial, requestHash });
+      resultCell.sync();
+      sendResult(tx, resultCell);
       cellsInitialized = true;
     }
-    const pendingWithLog = pending.withTx(tx);
-    const resultWithLog = result.withTx(tx);
-    const errorWithLog = error.withTx(tx);
-    const partialWithLog = partial.withTx(tx);
-    const requestHashWithLog = requestHash.withTx(tx);
+    const pendingWithLog = resultCell.key("pending").withTx(tx);
+    const resultWithLog = resultCell.key("result").withTx(tx);
+    const errorWithLog = resultCell.key("error").withTx(tx);
+    const partialWithLog = resultCell.key("partial").withTx(tx);
+    const requestHashWithLog = resultCell.key("requestHash").withTx(tx);
 
     const {
       prompt,
@@ -622,7 +618,7 @@ export function generateObject<T extends Record<string, unknown>>(
       cache,
       metadata,
       tools,
-    } = inputsCell.getAsQueryResult([], tx) ?? {};
+    } = inputs.getAsQueryResult([], tx) ?? {};
 
     if ((!prompt && (!messages || messages.length === 0)) || !schema) {
       resultWithLog.set(undefined);
@@ -635,7 +631,8 @@ export function generateObject<T extends Record<string, unknown>>(
     const readyMetadata = metadata ? JSON.parse(JSON.stringify(metadata)) : {};
 
     // Convert prompt to messages if provided, otherwise use messages directly
-    const requestMessages: BuiltInLLMMessage[] = messages ||
+    const requestMessages: BuiltInLLMMessage[] =
+      (messages as unknown as BuiltInLLMMessage[]) ||
       [{ role: "user", content: prompt! }];
 
     // Determine whether to use the tool-calling path or the direct generateObject path
@@ -683,7 +680,7 @@ export function generateObject<T extends Record<string, unknown>>(
       pendingWithLog.set(true);
 
       const updatePartial = createUpdatePartialCallback(
-        partial,
+        resultCell.key("partial"),
         tx,
         () => currentRun,
         thisRun,
@@ -691,8 +688,11 @@ export function generateObject<T extends Record<string, unknown>>(
 
       // Build tool catalog with finalResult tool
       const resultPromise = (async () => {
-        const toolsCell = inputsCell.key("tools");
-        const baseCatalog = llmToolExecutionHelpers.buildToolCatalog(toolsCell);
+        const toolsCell = inputs.key("tools");
+        const baseCatalog = await llmToolExecutionHelpers.buildToolCatalog(
+          runtime,
+          toolsCell,
+        );
 
         // Add finalResult builtin tool
         const toolCatalog = {
@@ -793,20 +793,20 @@ export function generateObject<T extends Record<string, unknown>>(
           await runtime.idle();
 
           await runtime.editWithRetry((tx) => {
-            pending.withTx(tx).set(false);
-            result.withTx(tx).set(objectResult);
-            error.withTx(tx).set(undefined);
-            requestHash.withTx(tx).set(hash);
+            resultCell.key("pending").withTx(tx).set(false);
+            resultCell.key("result").withTx(tx).set(objectResult);
+            resultCell.key("error").withTx(tx).set(undefined);
+            resultCell.key("requestHash").withTx(tx).set(hash);
           });
         })
         .catch((e) =>
           handleLLMError(
             e,
             runtime,
-            pending,
-            result,
-            error,
-            partial,
+            resultCell.key("pending"),
+            resultCell.key("result"),
+            resultCell.key("error"),
+            resultCell.key("partial"),
             () => currentRun,
             thisRun,
             () => {
@@ -836,22 +836,27 @@ export function generateObject<T extends Record<string, unknown>>(
       const currentRequestHash = requestHashWithLog.get();
       const currentResult = resultWithLog.get();
 
+      // Return if the same request is being made again
+      // Only skip if we have a result - otherwise we need to (re)make the request
       if (currentResult !== undefined && hash === currentRequestHash) {
         return;
       }
 
+      // Also skip if this is the same request in the current transaction
       if (hash === previousCallHash) {
         return;
       }
 
       previousCallHash = hash;
 
+      // Only increment currentRun if this is a NEW request (different hash)
+      // This prevents abandoning in-flight requests when the same params are re-evaluated
       if (hash !== currentRequestHash) {
         currentRun++;
       }
       const thisRun = currentRun;
 
-      resultWithLog.set(undefined);
+      resultWithLog.set({} as any); // FIXME(ja): setting result to undefined causes a storage conflict
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(true);
@@ -869,20 +874,20 @@ export function generateObject<T extends Record<string, unknown>>(
           await runtime.idle();
 
           await runtime.editWithRetry((tx) => {
-            pending.withTx(tx).set(false);
-            result.withTx(tx).set(response.object);
-            error.withTx(tx).set(undefined);
-            requestHash.withTx(tx).set(hash);
+            resultCell.key("pending").withTx(tx).set(false);
+            resultCell.key("result").withTx(tx).set(response.object as any);
+            resultCell.key("error").withTx(tx).set(undefined);
+            resultCell.key("requestHash").withTx(tx).set(hash);
           });
         })
         .catch((e) =>
           handleLLMError(
             e,
             runtime,
-            pending,
-            result,
-            error,
-            partial,
+            resultCell.key("pending"),
+            resultCell.key("result"),
+            resultCell.key("error"),
+            resultCell.key("partial"),
             () => currentRun,
             thisRun,
             () => {
