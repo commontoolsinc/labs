@@ -43,6 +43,7 @@ describe("generateObject with tools", () => {
   let generateObject: ReturnType<
     typeof createBuilder
   >["commontools"]["generateObject"];
+  let dummyRecipe: any;
 
   beforeEach(() => {
     clearMockResponses(); // Clear mocks from previous tests
@@ -55,6 +56,7 @@ describe("generateObject with tools", () => {
 
     const { commontools } = createBuilder();
     ({ recipe, generateObject, handler, Cell, patternTool, str } = commontools);
+    dummyRecipe = recipe("Dummy Tool", () => ({}));
   });
 
   afterEach(async () => {
@@ -108,7 +110,12 @@ describe("generateObject with tools", () => {
         const result = generateObject({
           prompt: testPrompt,
           schema: resultSchema,
-          tools: {}, // Empty tools object triggers the finalResult path
+          tools: {
+            dummy: {
+              description: "A dummy tool to force tool-calling path",
+              pattern: dummyRecipe,
+            },
+          },
         });
         return result;
       },
@@ -313,7 +320,12 @@ describe("generateObject with tools", () => {
         const result = generateObject({
           prompt: testPrompt,
           schema: resultSchema,
-          tools: {},
+          tools: {
+            dummy: {
+              description: "A dummy tool to force tool-calling path",
+              pattern: dummyRecipe,
+            },
+          },
         });
         return result;
       },
@@ -391,7 +403,12 @@ describe("generateObject with tools", () => {
         const result = generateObject({
           prompt: testPrompt,
           schema: resultSchema,
-          tools: {},
+          tools: {
+            dummy: {
+              description: "A dummy tool to force tool-calling path",
+              pattern: dummyRecipe,
+            },
+          },
         });
         return result;
       },
@@ -475,7 +492,12 @@ describe("generateObject with tools", () => {
         const result = generateObject({
           messages,
           schema: resultSchema,
-          tools: {},
+          tools: {
+            dummy: {
+              description: "A dummy tool to force tool-calling path",
+              pattern: dummyRecipe,
+            },
+          },
         });
         return result;
       },

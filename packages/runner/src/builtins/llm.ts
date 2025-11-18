@@ -21,12 +21,13 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { llmToolExecutionHelpers } from "./llm-dialog.ts";
 import {
   LLMMessageSchema,
   LLMParamsSchema,
-  llmToolExecutionHelpers,
   LLMToolSchema,
-} from "./llm-dialog.ts";
+} from "./llm-schemas.ts";
+import { isObject } from "@commontools/utils/types";
 
 const logger = getLogger("llm", {
   enabled: false,
@@ -46,7 +47,7 @@ const GenerateTextParamsSchema = {
     system: { type: "string" },
     model: { type: "string" },
     maxTokens: { type: "number" },
-    tools: { type: "object", additionalProperties: LLMToolSchema },
+    tools: { type: "object", additionalProperties: LLMToolSchema, default: {} },
   },
 } as const satisfies JSONSchema;
 
@@ -61,6 +62,7 @@ const GenerateObjectParamsSchema = {
     maxTokens: { type: "number" },
     cache: { type: "boolean" },
     metadata: { type: "object" },
+    tools: { type: "object", additionalProperties: LLMToolSchema },
   },
   required: ["schema"],
 } as const satisfies JSONSchema;
@@ -290,8 +292,8 @@ export function llm(
     const partialWithLog = resultCell.key("partial").withTx(tx);
     const requestHashWithLog = resultCell.key("requestHash").withTx(tx);
 
-    const { system, messages, stop, maxTokens, model, tools } =
-      inputs.getAsQueryResult([], tx) ?? {};
+    const { system, messages, stop, maxTokens, model } = inputs.withTx(tx)
+      .get();
 
     const llmParams: LLMRequest = {
       system: system ?? "",
@@ -339,9 +341,12 @@ export function llm(
 
     // Build tool catalog if tools are present, then start execution
     const resultPromise = (async () => {
-      const toolsCell = tools ? inputs.key("tools") : undefined;
+      const toolsCell = inputs.key("tools").asSchema({
+        type: "object",
+        additionalProperties: LLMToolSchema,
+      });
       const toolCatalog = toolsCell
-        ? await llmToolExecutionHelpers.buildToolCatalog(runtime, toolsCell)
+        ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
         : undefined;
 
       await executeWithToolsLoop({
@@ -439,8 +444,8 @@ export function generateText(
     const partialWithLog = resultCell.key("partial").withTx(tx);
     const requestHashWithLog = resultCell.key("requestHash").withTx(tx);
 
-    const { system, prompt, messages, model, maxTokens, tools } =
-      inputs.getAsQueryResult([], tx) ?? {};
+    const { system, prompt, messages, model, maxTokens } = inputs.withTx(tx)
+      .get();
 
     // If neither prompt nor messages is provided, don't make a request
     if (!prompt && !messages) {
@@ -508,9 +513,12 @@ export function generateText(
 
     // Build tool catalog if tools are present, then start execution
     const resultPromise = (async () => {
-      const toolsCell = tools ? inputs.key("tools") : undefined;
+      const toolsCell = inputs.key("tools").asSchema({
+        type: "object",
+        additionalProperties: LLMToolSchema,
+      });
       const toolCatalog = toolsCell
-        ? await llmToolExecutionHelpers.buildToolCatalog(runtime, toolsCell)
+        ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
         : undefined;
 
       await executeWithToolsLoop({
@@ -616,9 +624,9 @@ export function generateObject<T extends Record<string, unknown>>(
       schema,
       system,
       cache,
-      metadata,
       tools,
-    } = inputs.getAsQueryResult([], tx) ?? {};
+      metadata,
+    } = inputs.withTx(tx).get() ?? {};
 
     if ((!prompt && (!messages || messages.length === 0)) || !schema) {
       resultWithLog.set(undefined);
@@ -636,7 +644,7 @@ export function generateObject<T extends Record<string, unknown>>(
       [{ role: "user", content: prompt! }];
 
     // Determine whether to use the tool-calling path or the direct generateObject path
-    const hasTools = tools !== undefined;
+    const hasTools = isObject(tools) && Object.keys(tools).length > 0;
 
     if (hasTools) {
       // Use tool-calling path with finalResult builtin tool
@@ -688,9 +696,11 @@ export function generateObject<T extends Record<string, unknown>>(
 
       // Build tool catalog with finalResult tool
       const resultPromise = (async () => {
-        const toolsCell = inputs.key("tools");
-        const baseCatalog = await llmToolExecutionHelpers.buildToolCatalog(
-          runtime,
+        const toolsCell = inputs.key("tools").asSchema({
+          type: "object",
+          additionalProperties: LLMToolSchema,
+        });
+        const baseCatalog = llmToolExecutionHelpers.buildToolCatalog(
           toolsCell,
         );
 
@@ -856,7 +866,7 @@ export function generateObject<T extends Record<string, unknown>>(
       }
       const thisRun = currentRun;
 
-      resultWithLog.set({} as any); // FIXME(ja): setting result to undefined causes a storage conflict
+      resultWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(true);
@@ -875,7 +885,7 @@ export function generateObject<T extends Record<string, unknown>>(
 
           await runtime.editWithRetry((tx) => {
             resultCell.key("pending").withTx(tx).set(false);
-            resultCell.key("result").withTx(tx).set(response.object as any);
+            resultCell.key("result").withTx(tx).set(response.object);
             resultCell.key("error").withTx(tx).set(undefined);
             resultCell.key("requestHash").withTx(tx).set(hash);
           });
