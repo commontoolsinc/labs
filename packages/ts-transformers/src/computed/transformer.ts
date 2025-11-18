@@ -85,13 +85,16 @@ function createComputedToDeriveVisitor(
       ],
     );
 
-    // Register type using our unified utility
-    // Transfer the type from the original computed() call (registered by OpaqueRef transformer)
+    // Visit children to transform any nested computed() calls
+    const visitedDeriveCall = ts.visitEachChild(deriveCall, visitor, tsContext);
+
+    // Transfer type from original computed() call to the visited derive call
+    // (ts.visitEachChild creates new nodes, so register on the visited node)
     if (context.options.typeRegistry) {
       const computedType = context.options.typeRegistry.get(node);
       if (computedType) {
         registerDeriveCallType(
-          deriveCall,
+          visitedDeriveCall,
           undefined, // resultTypeNode - not needed since we have resultType
           computedType, // resultType from the computed call
           checker,
@@ -99,9 +102,6 @@ function createComputedToDeriveVisitor(
         );
       }
     }
-
-    // Visit children to transform any nested computed() calls
-    const visitedDeriveCall = ts.visitEachChild(deriveCall, visitor, tsContext);
 
     // Set parent pointers on the visited result since ts.visitEachChild creates
     // new nodes. This maintains the parent chain for nested callback analysis.

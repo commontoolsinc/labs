@@ -748,7 +748,10 @@ function inferElementType(
   }
 
   const arrayExpr = mapCall.expression.expression;
-  return inferArrayElementType(arrayExpr, context);
+  return inferArrayElementType(arrayExpr, {
+    ...context,
+    typeRegistry: context.options.typeRegistry,
+  });
 }
 
 /**

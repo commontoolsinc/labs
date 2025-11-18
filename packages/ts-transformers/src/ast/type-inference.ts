@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
+import { getTypeAtLocationWithFallback } from "./utils.ts";
 
 /**
  * Type inference utilities for function signatures
@@ -323,10 +324,15 @@ export function inferArrayElementType(
     checker: ts.TypeChecker;
     factory: ts.NodeFactory;
     sourceFile: ts.SourceFile;
+    typeRegistry?: WeakMap<ts.Node, ts.Type>;
   },
 ): { typeNode: ts.TypeNode; type?: ts.Type } {
-  const { checker, factory } = context;
-  const arrayType = checker.getTypeAtLocation(arrayExpr);
+  const { checker, factory, typeRegistry } = context;
+  // Use getTypeAtLocationWithFallback to check typeRegistry first (for synthetic nodes)
+  // getTypeAtLocationWithFallback handles undefined typeRegistry gracefully
+  const arrayType =
+    getTypeAtLocationWithFallback(arrayExpr, checker, typeRegistry) ??
+      checker.getTypeAtLocation(arrayExpr);
 
   // Try to unwrap OpaqueRef<T[]> → T[] → T
   let actualType = arrayType;
