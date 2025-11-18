@@ -207,22 +207,22 @@ HTML elements (`div`, `span`, `button`, etc.) use JavaScript object syntax for s
 
 ## Custom Elements: String Syntax
 
-CommonTools custom elements (`common-hstack`, `common-vstack`, `ct-card`, etc.) use CSS string syntax:
+CommonTools custom elements (`ct-hstack`, `ct-vstack`, `ct-card`, etc.) use CSS string syntax:
 
 ```tsx
 // ✅ CORRECT - String syntax for custom elements
-<common-hstack gap="sm" style="align-items: center; padding: 1rem;">
-  <common-vstack gap="md" style="flex: 1; max-width: 600px;">
+<ct-hstack gap="1" style="align-items: center; padding: 1rem;">
+  <ct-vstack gap="2" style="flex: 1; max-width: 600px;">
     <ct-card style="border: 1px solid #ccc; padding: 0.5rem;">
       Content here
     </ct-card>
-  </common-vstack>
-</common-hstack>
+  </ct-vstack>
+</ct-hstack>
 
 // ❌ WRONG - Object syntax causes errors on custom elements
-<common-hstack style={{ alignItems: "center" }}>
+<ct-hstack style={{ alignItems: "center" }}>
   {/* Error: Custom elements expect string styles */}
-</common-hstack>
+</ct-hstack>
 ```
 
 **Properties use kebab-case**: `background-color`, `font-size`, `margin-bottom`
@@ -239,12 +239,12 @@ CommonTools custom elements (`common-hstack`, `common-vstack`, `ct-card`, etc.) 
 ```tsx
 // You'll often mix both types in one recipe
 <div style={{ display: "flex", gap: "1rem" }}>
-  <common-vstack gap="md" style="flex: 1; padding: 1rem;">
+  <ct-vstack gap="2" style="flex: 1; padding: 1rem;">
     <span style={{ color: "#333", fontSize: "14px" }}>
       Label Text
     </span>
     <ct-button>Click Me</ct-button>
-  </common-vstack>
+  </ct-vstack>
 </div>
 ```
 
@@ -264,10 +264,10 @@ CommonTools custom elements (`common-hstack`, `common-vstack`, `ct-card`, etc.) 
 
 ```tsx
 // ❌ Problem: Using object on custom element
-<common-hstack style={{ padding: "1rem" }}>
+<ct-hstack style={{ padding: "1rem" }}>
 
 // ✅ Solution: Use string syntax
-<common-hstack style="padding: 1rem;">
+<ct-hstack style="padding: 1rem;">
 ```
 
 ## ct-input

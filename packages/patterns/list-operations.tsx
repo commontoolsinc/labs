@@ -125,7 +125,7 @@ export default recipe<ListInput, ListOutput>(
     return {
       [NAME]: "List demo",
       [UI]: (
-        <common-vstack gap="md">
+        <ct-vstack gap="2">
           <ct-card>
             <ct-button
               id="reset-demo"
@@ -182,7 +182,7 @@ export default recipe<ListInput, ListOutput>(
             <pre id="extended-list">{show(extendedItems)}</pre>
             <pre id="combined-list">{combinedItems}</pre>
           </ct-card>
-        </common-vstack>
+        </ct-vstack>
       ),
       items,
     };

@@ -3034,7 +3034,7 @@ interface CTSendMessageAttributes<T> extends CTHTMLAttributes<T> {
   "value"?: any;
   "placeholder"?: string;
   "appearance"?: "rounded";
-  "onmessagesend"?: EventHandler<{ message: string }>;
+  "onct-send"?: EventHandler<{ message: string }>;
   "inline"?: Booleanish;
 }
 
@@ -3864,14 +3864,6 @@ declare global {
         CTUpdaterAttributes<CTUpdaterElement>,
         CTUpdaterElement
       >;
-      "common-input": CTDOM.DetailedHTMLProps<
-        CTInputLegacyAttributes<CTInputLegacyElement>,
-        CTInputLegacyElement
-      >;
-      "common-send-message": CTDOM.DetailedHTMLProps<
-        CTSendMessageAttributes<CTSendMessageElement>,
-        CTSendMessageElement
-      >;
       "common-google-oauth": CTDOM.DetailedHTMLProps<
         CTGoogleOAuthAttributes<CTGoogleOAuthElement>,
         CTGoogleOAuthElement
@@ -3907,14 +3899,6 @@ declare global {
       >;
       "ct-vstack": CTDOM.DetailedHTMLProps<
         CTStackAttributes<CTVStackElement>,
-        CTVStackElement
-      >;
-      "common-hstack": CTDOM.DetailedHTMLProps<
-        CTStackLegacyAttributes<CTHStackElement>,
-        CTHStackElement
-      >;
-      "common-vstack": CTDOM.DetailedHTMLProps<
-        CTStackLegacyAttributes<CTVStackElement>,
         CTVStackElement
       >;
     }

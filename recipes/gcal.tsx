@@ -608,15 +608,15 @@ export default recipe(
             {ifElse(settings.syncToken, settings.syncToken, "Not yet obtained")}
           </h2>
 
-          <common-hstack gap="sm">
-            <common-vstack gap="sm">
+          <ct-hstack gap="1">
+            <ct-vstack gap="1">
               <div>
                 <label>Import Limit</label>
-                <common-input
+                <ct-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.limit}
                   placeholder="count of events to import"
-                  oncommon-input={updateLimit({ limit: settings.limit })}
+                  onct-input={updateLimit({ limit: settings.limit })}
                 />
               </div>
 
@@ -653,11 +653,11 @@ export default recipe(
 
               <div>
                 <label>Calendar ID</label>
-                <common-input
+                <ct-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.calendarId}
                   placeholder="Calendar ID (e.g. primary)"
-                  oncommon-input={updateCalendarId({
+                  onct-input={updateCalendarId({
                     calendarId: settings.calendarId,
                   })}
                 />
@@ -676,8 +676,8 @@ export default recipe(
               >
                 Clear Events
               </ct-button>
-            </common-vstack>
-          </common-hstack>
+            </ct-vstack>
+          </ct-hstack>
           <common-google-oauth
             $auth={auth}
             scopes={[

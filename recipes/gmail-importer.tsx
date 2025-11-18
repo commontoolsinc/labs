@@ -859,25 +859,25 @@ export default recipe<{
             historyId: {settings.historyId || "none"}
           </div>
 
-          <common-hstack gap="sm">
-            <common-vstack gap="sm">
+          <ct-hstack gap="1">
+            <ct-vstack gap="1">
               <div>
                 <label>Import Limit</label>
-                <common-input
+                <ct-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.limit}
                   placeholder="count of emails to import"
-                  oncommon-input={updateLimit({ limit: settings.limit })}
+                  onct-input={updateLimit({ limit: settings.limit })}
                 />
               </div>
 
               <div>
                 <label>Gmail Filter Query</label>
-                <common-input
+                <ct-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.gmailFilterQuery}
                   placeholder="in:INBOX"
-                  oncommon-input={updateGmailFilterQuery({
+                  onct-input={updateGmailFilterQuery({
                     gmailFilterQuery: settings.gmailFilterQuery,
                   })}
                 />
@@ -892,8 +892,8 @@ export default recipe<{
               >
                 Fetch Emails
               </ct-button>
-            </common-vstack>
-          </common-hstack>
+            </ct-vstack>
+          </ct-hstack>
 
           <div>
             <table>

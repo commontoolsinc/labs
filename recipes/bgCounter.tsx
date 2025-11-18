@@ -48,10 +48,10 @@ export default recipe<
             Update Counter
           </button>
           <p>If error is set, the update function will throw an error</p>
-          <common-input
+          <ct-input
             value={error}
             placeholder="Error"
-            oncommon-input={updateError({ error })}
+            onct-input={updateError({ error })}
           />
           <common-updater
             id="registerBgCounter"

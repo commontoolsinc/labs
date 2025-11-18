@@ -1267,25 +1267,25 @@ export default recipe(
               contacts.length)}
           </h2>
 
-          <common-hstack gap="sm">
-            <common-vstack gap="sm">
+          <ct-hstack gap="1">
+            <ct-vstack gap="1">
               <div>
                 <label>Import Limit</label>
-                <common-input
+                <ct-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.limit}
                   placeholder="number of contacts to import"
-                  oncommon-input={updateLimit({ limit: settings.limit })}
+                  onct-input={updateLimit({ limit: settings.limit })}
                 />
               </div>
 
               <div>
                 <label>Person Fields</label>
-                <common-input
+                <ct-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.personFields}
                   placeholder="names,emailAddresses,phoneNumbers,photos"
-                  oncommon-input={updatePersonFields({
+                  onct-input={updatePersonFields({
                     personFields: settings.personFields,
                   })}
                 />
@@ -1300,8 +1300,8 @@ export default recipe(
               >
                 Clear Contacts
               </ct-button>
-            </common-vstack>
-          </common-hstack>
+            </ct-vstack>
+          </ct-hstack>
           <common-google-oauth
             $auth={auth}
             scopes={[

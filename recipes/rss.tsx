@@ -66,8 +66,8 @@ export default recipe<
             Feed Items: {derive(items, (items) => items.get().length)}
           </h2>
 
-          <common-hstack gap="sm">
-            <common-vstack gap="sm">
+          <ct-hstack gap="1">
+            <ct-vstack gap="1">
               <div>
                 <label>Feed URL</label>
                 <ct-input
@@ -76,8 +76,8 @@ export default recipe<
                   placeholder="https://example.com/feed.xml or https://example.com/atom.xml"
                 />
               </div>
-            </common-vstack>
-          </common-hstack>
+            </ct-vstack>
+          </ct-hstack>
           <div>
             <table>
               <thead>

@@ -141,13 +141,11 @@ export const UserSession = recipe<
             }}
           >
             <label style={{ whiteSpace: "nowrap" }}>Your username:</label>
-            <common-send-message
-              inline="true"
+            <ct-input
               name="Update"
               value={user.name}
               placeholder="Enter new name"
-              appearance="rounded"
-              onmessagesend={setUsername({
+              onct-change={setUsername({
                 user,
               })}
               style="flex: 1; max-width: 400px"
@@ -188,12 +186,11 @@ export const UserSession = recipe<
                         <b>{m.author.name}</b>
                         <span>· {derive(m.timestamp, formatTime)}</span>
                       </div>
-                      <common-send-message
+                      <ct-input
                         name="Save"
                         placeholder="Type message..."
                         value={m.message}
-                        appearance="rounded"
-                        onmessagesend={updateMessage({ messages, index })}
+                        onct-change={updateMessage({ messages, index })}
                         style="margin-top: 5px;"
                       />
                     </div>

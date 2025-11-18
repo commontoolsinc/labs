@@ -111,11 +111,11 @@ export const UserSession = recipe<
           </div>
           <div>
             <h4>Set your display name</h4>
-            <common-send-message
+            <ct-message-input
               name="Set"
               placeholder="Choose a display name"
               appearance="rounded"
-              onmessagesend={setUsername({
+              onct-send={setUsername({
                 user,
               })}
             />
@@ -141,11 +141,11 @@ export const UserSession = recipe<
             </div>
           </div>
           <div>
-            <common-send-message
+            <ct-message-input
               name="Send"
               placeholder="Type your message..."
               appearance="rounded"
-              onmessagesend={sendMessage({
+              onct-send={sendMessage({
                 messages,
                 user,
               })}

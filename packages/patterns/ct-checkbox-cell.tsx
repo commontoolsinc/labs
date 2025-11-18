@@ -27,7 +27,7 @@ export default recipe<CheckboxDemoInput, CheckboxDemoOutput>(
     return {
       [NAME]: "Checkbox Demo",
       [UI]: (
-        <common-vstack gap="md" style="padding: 2rem; max-width: 600px;">
+        <ct-vstack gap="2" style="padding: 2rem; max-width: 600px;">
           <h3>ct-checkbox Bidirectional Binding Demo</h3>
 
           <ct-card>
@@ -78,7 +78,7 @@ export default recipe<CheckboxDemoInput, CheckboxDemoOutput>(
               beyond just updating the value.
             </p>
           </ct-card>
-        </common-vstack>
+        </ct-vstack>
       ),
       simpleEnabled,
       trackedEnabled,

@@ -1,15 +1,7 @@
 /// <cts-enable />
-import {
-  cell,
-  recipe,
-  UI,
-  lift,
-  handler,
-  type Cell,
-} from "commontools";
+import { type Cell, cell, handler, lift, recipe, UI } from "commontools";
 
-const calcAC = (dex: number) : number =>
-  20 + Math.floor((dex - 10) / 2);
+const calcAC = (dex: number): number => 20 + Math.floor((dex - 10) / 2);
 
 const updateName = handler<
   { detail: { message: string } },
@@ -18,7 +10,7 @@ const updateName = handler<
   (event, { characterName }) => {
     console.log("Updating character name to:", event.detail.message);
     characterName.set(event.detail.message);
-  }
+  },
 );
 
 export default recipe("state test", () => {
@@ -31,10 +23,10 @@ export default recipe("state test", () => {
     [UI]: (
       <div>
         <h2>Character name: {characterName}</h2>
-        <common-send-message
+        <ct-message-input
           name="Update"
           placeholder="Update Name"
-          onmessagesend={updateName({ characterName })}
+          onct-send={updateName({ characterName })}
         />
         <li>DEX: {dex}</li>
         <li>DEX Modifier: {Math.floor((dex - 10) / 2)}</li>
