@@ -14,10 +14,11 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import {
   addMockObjectResponse,
   addMockResponse,
+  clearMockResponses,
   enableMockMode,
 } from "@commontools/llm/client";
 import type { BuiltInLLMMessage } from "@commontools/api";
-import type { JSONSchema } from "../src/builder/types.ts";
+import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -44,6 +45,7 @@ describe("generateObject with tools", () => {
   >["commontools"]["generateObject"];
 
   beforeEach(() => {
+    clearMockResponses(); // Clear mocks from previous tests
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -123,22 +125,7 @@ describe("generateObject with tools", () => {
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
-    await expect(
-      new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          cancel();
-          reject(new Error("Timeout waiting for pending to become false"));
-        }, 5000);
-
-        const cancel = result.key("pending").sink((pending: any) => {
-          if (pending === false) {
-            clearTimeout(timeout);
-            cancel();
-            resolve();
-          }
-        });
-      }),
-    ).resolves.toBeUndefined();
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
 
     await runtime.idle();
 
@@ -199,22 +186,7 @@ describe("generateObject with tools", () => {
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
-    await expect(
-      new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          cancel();
-          reject(new Error("Timeout waiting for pending to become false"));
-        }, 5000);
-
-        const cancel = result.key("pending").sink((pending: any) => {
-          if (pending === false) {
-            clearTimeout(timeout);
-            cancel();
-            resolve();
-          }
-        });
-      }),
-    ).resolves.toBeUndefined();
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
 
     await runtime.idle();
 
@@ -277,22 +249,7 @@ describe("generateObject with tools", () => {
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
-    await expect(
-      new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          cancel();
-          reject(new Error("Timeout waiting for pending to become false"));
-        }, 5000);
-
-        const cancel = result.key("pending").sink((pending: any) => {
-          if (pending === false) {
-            clearTimeout(timeout);
-            cancel();
-            resolve();
-          }
-        });
-      }),
-    ).resolves.toBeUndefined();
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
 
     await runtime.idle();
 
@@ -373,22 +330,7 @@ describe("generateObject with tools", () => {
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
-    await expect(
-      new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          cancel();
-          reject(new Error("Timeout waiting for pending to become false"));
-        }, 5000);
-
-        const cancel = result.key("pending").sink((pending: any) => {
-          if (pending === false) {
-            clearTimeout(timeout);
-            cancel();
-            resolve();
-          }
-        });
-      }),
-    ).resolves.toBeUndefined();
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
 
     await runtime.idle();
 
@@ -466,22 +408,7 @@ describe("generateObject with tools", () => {
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
-    await expect(
-      new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          cancel();
-          reject(new Error("Timeout waiting for pending to become false"));
-        }, 5000);
-
-        const cancel = result.key("pending").sink((pending: any) => {
-          if (pending === false) {
-            clearTimeout(timeout);
-            cancel();
-            resolve();
-          }
-        });
-      }),
-    ).resolves.toBeUndefined();
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
 
     await runtime.idle();
 
@@ -565,22 +492,7 @@ describe("generateObject with tools", () => {
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
-    await expect(
-      new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          cancel();
-          reject(new Error("Timeout waiting for pending to become false"));
-        }, 5000);
-
-        const cancel = result.key("pending").sink((pending: any) => {
-          if (pending === false) {
-            clearTimeout(timeout);
-            cancel();
-            resolve();
-          }
-        });
-      }),
-    ).resolves.toBeUndefined();
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
 
     await runtime.idle();
 
@@ -752,22 +664,7 @@ describe("generateObject with tools", () => {
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
-    await expect(
-      new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          cancel();
-          reject(new Error("Timeout waiting for pending to become false"));
-        }, 5000);
-
-        const cancel = result.key("pending").sink((pending: any) => {
-          if (pending === false) {
-            clearTimeout(timeout);
-            cancel();
-            resolve();
-          }
-        });
-      }),
-    ).resolves.toBeUndefined();
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
 
     await runtime.idle();
 
@@ -917,26 +814,12 @@ describe("generateObject with tools", () => {
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
-    await expect(
-      new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          cancel();
-          reject(new Error("Timeout waiting for pending to become false"));
-        }, 5000);
-
-        const cancel = result.key("pending").sink((pending: any) => {
-          if (pending === false) {
-            clearTimeout(timeout);
-            cancel();
-            resolve();
-          }
-        });
-      }),
-    ).resolves.toBeUndefined();
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
 
     await runtime.idle();
 
     expect(result.key("pending").get()).toBe(false);
+    expect(result.key("error").get()).toBeUndefined();
     expect(result.key("result").get()).toEqual({
       name: "Item Collection",
       itemCount: 3,
@@ -1084,24 +967,7 @@ describe("generateObject with tools", () => {
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
-    await expect(
-      new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          cancel();
-          reject(new Error("Timeout waiting for pending to become false"));
-        }, 5000);
-
-        const cancel = result.sink(({ pending, error, result } = {}) => {
-          if (
-            pending === false && (error !== undefined || result !== undefined)
-          ) {
-            clearTimeout(timeout);
-            cancel();
-            resolve();
-          }
-        });
-      }),
-    ).resolves.toBeUndefined();
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
 
     await runtime.idle();
 
@@ -1249,22 +1115,7 @@ describe("generateObject with tools", () => {
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
-    await expect(
-      new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          cancel();
-          reject(new Error("Timeout waiting for pending to become false"));
-        }, 5000);
-
-        const cancel = result.key("pending").sink((pending: any) => {
-          if (pending === false) {
-            clearTimeout(timeout);
-            cancel();
-            resolve();
-          }
-        });
-      }),
-    ).resolves.toBeUndefined();
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
 
     await runtime.idle();
 
@@ -1272,8 +1123,34 @@ describe("generateObject with tools", () => {
     expect(toolCallLog).toContain("toolA");
     expect(toolCallLog).toContain("toolB");
     expect(result.key("pending").get()).toBe(false);
+    expect(result.key("error").get()).toBeUndefined();
     expect(result.key("result").get()).toEqual({
       combined: "A and B",
     });
   });
 });
+
+function waitForPendingToBecomeFalse(result: Cell<any>) {
+  let cancel: () => void;
+  let timeout: ReturnType<typeof setTimeout>;
+  return new Promise<void>((resolve, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error("Timeout waiting for pending to become false"));
+    }, 1000);
+    cancel = result.asSchema({
+      type: "object",
+      properties: {
+        pending: { type: "boolean" },
+        error: true,
+        result: true,
+      },
+    }).sink(({ pending, error, result } = {}) => {
+      if (pending === false && (error !== undefined || result !== undefined)) {
+        resolve();
+      }
+    });
+  }).finally(() => {
+    clearTimeout(timeout);
+    cancel();
+  });
+}

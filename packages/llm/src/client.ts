@@ -101,20 +101,30 @@ class MockCatalog {
   /**
    * Find a matching mock response for the given request.
    * Returns undefined if no match is found.
+   * Removes the matched mock from the catalog after finding it (one-time use).
    */
   findResponse(request: LLMRequest): LLMResponse | undefined {
-    const mock = this.mockResponses.find((m) => m.matcher(request));
-    return mock?.response;
+    const index = this.mockResponses.findIndex((m) => m.matcher(request));
+    if (index === -1) return undefined;
+
+    // Remove and return the matched mock (one-time use)
+    const [mock] = this.mockResponses.splice(index, 1);
+    return mock.response;
   }
 
   /**
    * Find a matching mock object response for the given request.
+   * Removes the matched mock from the catalog after finding it (one-time use).
    */
   findObjectResponse(
     request: LLMGenerateObjectRequest,
   ): LLMGenerateObjectResponse | undefined {
-    const mock = this.mockObjectResponses.find((m) => m.matcher(request));
-    return mock?.response;
+    const index = this.mockObjectResponses.findIndex((m) => m.matcher(request));
+    if (index === -1) return undefined;
+
+    // Remove and return the matched mock (one-time use)
+    const [mock] = this.mockObjectResponses.splice(index, 1);
+    return mock.response;
   }
 }
 
