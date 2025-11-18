@@ -308,7 +308,7 @@ export function llm(
     const resultPromise = (async () => {
       const toolsCell = tools ? inputsCell.key("tools") : undefined;
       const toolCatalog = toolsCell
-        ? llmToolExecutionHelpers.buildToolCatalog(runtime, toolsCell)
+        ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
         : undefined;
 
       await executeWithToolsLoop({
@@ -475,7 +475,7 @@ export function generateText(
     const resultPromise = (async () => {
       const toolsCell = tools ? inputsCell.key("tools") : undefined;
       const toolCatalog = toolsCell
-        ? llmToolExecutionHelpers.buildToolCatalog(runtime, toolsCell)
+        ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
         : undefined;
 
       await executeWithToolsLoop({
@@ -659,10 +659,7 @@ export function generateObject<T extends Record<string, unknown>>(
       // Build tool catalog with finalResult tool
       const resultPromise = (async () => {
         const toolsCell = inputsCell.key("tools");
-        const baseCatalog = llmToolExecutionHelpers.buildToolCatalog(
-          runtime,
-          toolsCell,
-        );
+        const baseCatalog = llmToolExecutionHelpers.buildToolCatalog(toolsCell);
 
         // Add finalResult builtin tool
         const toolCatalog = {

@@ -9,6 +9,7 @@ import type {
   BuiltInLLMMessage,
   BuiltInLLMParams,
   BuiltInLLMTextPart,
+  BuiltInLLMTool,
   BuiltInLLMToolCallPart,
   JSONSchema,
   Schema,
@@ -449,7 +450,7 @@ type ToolCatalog = {
 };
 
 function collectToolEntries(
-  toolsCell: Cell<any>,
+  toolsCell: Cell<Record<string, Schema<typeof LLMToolSchema>>>,
 ): { legacy: LegacyToolEntry[]; charms: CharmToolEntry[] } {
   const tools = toolsCell.get() ?? {};
   const legacy: LegacyToolEntry[] = [];
@@ -784,11 +785,18 @@ function toolsHaveChanged(
 }
 
 function buildToolCatalog(
-  _runtime: IRuntime,
-  toolsCell: Cell<any>,
+  toolsCell:
+    | Cell<Record<string, Schema<typeof LLMToolSchema>>>
+    | Cell<Record<string, BuiltInLLMTool> | undefined>,
 ): ToolCatalog {
-  const { legacy, charms } = collectToolEntries(toolsCell);
-
+  const { legacy, charms } = collectToolEntries(
+    toolsCell.asSchema(
+      {
+        type: "object",
+        additionalProperties: LLMToolSchema,
+      } as const as JSONSchema,
+    ),
+  );
   const llmTools: ToolCatalog["llmTools"] = {};
   const dynamicToolCells = new Map<
     string,
@@ -798,12 +806,17 @@ function buildToolCatalog(
   const handleMap = new Map<string, { charm: Cell<any>; charmName: string }>();
 
   for (const entry of legacy) {
-    const toolValue: any = entry.tool ?? {};
+    const toolValue = entry.tool ?? {};
     const pattern = toolValue?.pattern?.get?.() ?? toolValue?.pattern;
-    const handler = toolValue?.handler;
+    const handler = isCell(toolValue?.handler)
+      ? toolValue.handler.resolveAsCell()
+      : undefined;
     let inputSchema = pattern?.argumentSchema ?? handler?.schema ??
       toolValue?.inputSchema;
-    if (inputSchema === undefined) continue;
+    if (inputSchema === undefined) {
+      logger.warn(`No input schema found for tool ${entry.name}`);
+      continue;
+    }
     inputSchema = normalizeInputSchema(inputSchema);
     const description: string = toolValue.description ??
       (inputSchema as any)?.description ?? "";
@@ -1878,11 +1891,13 @@ function startRequest(
   const { system, maxTokens, model } = inputs.get();
 
   const messagesCell = inputs.key("messages");
-  const toolsCell = inputs.key("tools");
+  const toolsCell = inputs.key("tools") as Cell<
+    Record<string, Schema<typeof LLMToolSchema>>
+  >;
 
   // No need to flatten here; UI handles flattened tools reactively
 
-  const toolCatalog = buildToolCatalog(runtime, toolsCell);
+  const toolCatalog = buildToolCatalog(toolsCell);
 
   // Build charm schemas documentation from attachments and append to system prompt
   const charmSchemasDocs = buildAttachmentsSchemaDocumentation(

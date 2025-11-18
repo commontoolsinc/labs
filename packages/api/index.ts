@@ -919,7 +919,7 @@ export type BuiltInGenerateObjectParams =
     cache?: boolean;
     maxTokens?: number;
     metadata?: Record<string, string | undefined | object>;
-    tools?: Record<string, unknown>;
+    tools?: Record<string, BuiltInLLMTool>;
   }
   | {
     model?: string;
@@ -930,7 +930,7 @@ export type BuiltInGenerateObjectParams =
     cache?: boolean;
     maxTokens?: number;
     metadata?: Record<string, string | undefined | object>;
-    tools?: Record<string, unknown>;
+    tools?: Record<string, BuiltInLLMTool>;
   };
 
 export type BuiltInGenerateTextParams =
