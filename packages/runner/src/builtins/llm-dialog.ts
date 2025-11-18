@@ -492,7 +492,7 @@ function collectToolEntries(
 }
 
 const READ_TOOL_NAME = "read";
-const RUN_TOOL_NAME = "run";
+const INVOKE_TOOL_NAME = "invoke";
 const SCHEMA_TOOL_NAME = "schema";
 const LIST_ATTACHMENTS_TOOL_NAME = "listAttachments";
 const NAVIGATE_TO_TOOL_NAME = "navigateTo";
@@ -517,7 +517,7 @@ const READ_INPUT_SCHEMA: JSONSchema = {
   additionalProperties: false,
 };
 
-const RUN_INPUT_SCHEMA: JSONSchema = {
+const INVOKE_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
     path: {
@@ -729,22 +729,22 @@ function flattenTools(
     description:
       "Read data from any cell. Input: { \"@link\": \"/of:bafyabc123/path\" }. " +
       "Returns the cell's data with nested cells as link objects. " +
-      "Compose with run(): run() returns a link, then read(link) gets the data. " +
+      "Compose with invoke(): invoke() returns a link, then read(link) gets the data. " +
       attachmentContext,
     inputSchema: READ_INPUT_SCHEMA,
   };
-  flattened[RUN_TOOL_NAME] = {
+  flattened[INVOKE_TOOL_NAME] = {
     description:
       "Invoke a handler or pattern. Input: { \"@link\": \"/of:bafyabc123/doThing\" }, plus optional args. " +
       "Returns { \"@link\": \"/of:xyz/result\" } pointing to the result cell. " +
-      "Compose: run() → read(result) or run() → navigateTo(result). " +
+      "Compose: invoke() → read(result) or invoke() → navigateTo(result). " +
       attachmentContext,
-    inputSchema: RUN_INPUT_SCHEMA,
+    inputSchema: INVOKE_INPUT_SCHEMA,
   };
   flattened[NAVIGATE_TO_TOOL_NAME] = {
     description:
       "Navigate the UI to a cell. Input: { \"@link\": \"/of:bafyabc123\" }. " +
-      "Use after run() to show the result, or to view any cell of interest. " +
+      "Use after invoke() to show the result, or to view any cell of interest. " +
       attachmentContext,
     inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
   };
@@ -893,22 +893,22 @@ function buildToolCatalog(
     description:
       "Read data from any cell. Input: { \"@link\": \"/of:bafyabc123/path\" }. " +
       "Returns the cell's data with nested cells as link objects. " +
-      "Compose with run(): run() returns a link, then read(link) gets the data. " +
+      "Compose with invoke(): invoke() returns a link, then read(link) gets the data. " +
       attachmentContext,
     inputSchema: READ_INPUT_SCHEMA,
   };
-  llmTools[RUN_TOOL_NAME] = {
+  llmTools[INVOKE_TOOL_NAME] = {
     description:
       "Invoke a handler or pattern. Input: { \"@link\": \"/of:bafyabc123/doThing\" }, plus optional args. " +
       "Returns { \"@link\": \"/of:xyz/result\" } pointing to the result cell. " +
-      "Compose: run() → read(result) or run() → navigateTo(result). " +
+      "Compose: invoke() → read(result) or invoke() → navigateTo(result). " +
       attachmentContext,
-    inputSchema: RUN_INPUT_SCHEMA,
+    inputSchema: INVOKE_INPUT_SCHEMA,
   };
   llmTools[NAVIGATE_TO_TOOL_NAME] = {
     description:
       "Navigate the UI to a cell. Input: { \"@link\": \"/of:bafyabc123\" }. " +
-      "Use after run() to show the result, or to view any cell of interest. " +
+      "Use after invoke() to show the result, or to view any cell of interest. " +
       attachmentContext,
     inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
   };
@@ -1019,7 +1019,7 @@ type ResolvedToolCall =
   | { type: "navigateTo"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "finalResult"; call: LLMToolCall; result: unknown }
   | {
-    type: "run";
+    type: "invoke";
     call: LLMToolCall;
     // Implementation details for how to invoke the target
     pattern?: Readonly<Recipe>;
@@ -1046,12 +1046,12 @@ function resolveToolCall(
   }
 
   if (
-    name === READ_TOOL_NAME || name === RUN_TOOL_NAME ||
+    name === READ_TOOL_NAME || name === INVOKE_TOOL_NAME ||
     name === SCHEMA_TOOL_NAME || name === LIST_ATTACHMENTS_TOOL_NAME ||
     name === NAVIGATE_TO_TOOL_NAME || name === ADD_ATTACHMENT_TOOL_NAME ||
     name === REMOVE_ATTACHMENT_TOOL_NAME || name === FINAL_RESULT_TOOL_NAME
   ) {
-    // Schema requires attachments, but read/run/listAttachments work with any handle
+    // Schema requires attachments, but read/invoke/listAttachments work with any handle
     if (
       name === SCHEMA_TOOL_NAME &&
       catalog.handleMap.size === 0 && catalog.charmMap.size === 0
@@ -1135,7 +1135,7 @@ function resolveToolCall(
     if (name === READ_TOOL_NAME) {
       // Get cell reference from the link - works for any valid handle
       if (isStream(cellRef.resolveAsCell())) {
-        throw new Error(`Path resolves to a handler; use run("${target}").`);
+        throw new Error(`Path resolves to a handler; use invoke() instead.`);
       }
 
       return {
@@ -1159,7 +1159,7 @@ function resolveToolCall(
 
     if (isStream(cellRef.resolveAsCell())) {
       return {
-        type: "run",
+        type: "invoke",
         handler: cellRef as unknown as Stream<any>,
         charm,
         call: {
@@ -1174,7 +1174,7 @@ function resolveToolCall(
       .getRaw() as unknown as Readonly<Recipe> | undefined;
     if (pattern) {
       return {
-        type: "run",
+        type: "invoke",
         pattern,
         extraParams: cellRef.key("extraParams").get() ?? {},
         charm,
@@ -1547,9 +1547,9 @@ function handleNavigateTo(
 }
 
 /**
- * Handles the run tool call (both pattern and handler execution).
+ * Handles the invoke tool call (both pattern and handler execution).
  */
-async function handleRun(
+async function handleInvoke(
   runtime: IRuntime,
   space: MemorySpace,
   resolved: ResolvedToolCall,
@@ -1568,7 +1568,7 @@ async function handleRun(
       | undefined;
     extraParams = resolved.toolDef.key("extraParams").get() ?? {};
     handler = resolved.toolDef.key("handler");
-  } else if (resolved.type === "run") {
+  } else if (resolved.type === "invoke") {
     pattern = resolved.pattern;
     extraParams = resolved.extraParams ?? {};
     handler = resolved.handler;
@@ -1705,7 +1705,7 @@ async function invokeToolCall(
   }
 
   // Handle run-type tools (external, run with pattern/handler)
-  return await handleRun(runtime, space, resolved);
+  return await handleInvoke(runtime, space, resolved);
 }
 
 /**
@@ -1990,17 +1990,17 @@ Where:
 
 Tools work together by passing links between them:
 
-1. \`run({ "@link": "/of:abc/handler" }, args)\` → Returns \`{ "@link": "/of:xyz/result" }\`
+1. \`invoke({ "@link": "/of:abc/handler" }, args)\` → Returns \`{ "@link": "/of:xyz/result" }\`
 2. \`read({ "@link": "/of:xyz/result" })\` → Returns the data, which may contain nested links
 3. \`navigateTo({ "@link": "/of:xyz" })\` → Navigates the UI to view the result
 4. Data often contains links to other cells: \`{ items: [{ "@link": "/of:123" }, { "@link": "/of:456" }] }\`
 
 ## Pages
 
-Some operations (especially \`run()\` with patterns) create "Pages" - running pattern instances that:
+Some operations (especially \`invoke()\` with patterns) create "Pages" - running pattern instances that:
 - Have their own identity accessible via a link
 - Contain data fields that can be read with \`read()\`
-- Contain handler fields that can be invoked with \`run()\`
+- Contain handler fields that can be invoked with \`invoke()\`
 - May link to other cells in the system
 
 **Use links to navigate between related data and compose operations.**`;
