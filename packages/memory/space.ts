@@ -522,7 +522,8 @@ const getFact = <Space extends MemorySpace>(
   }
 };
 
-const select = <Space extends MemorySpace>(
+// Original JavaScript implementation (renamed)
+const select_jsimpl = <Space extends MemorySpace>(
   session: Session<Space>,
   { since, select }: Query["args"],
 ): Selection<Space>[Space] => {
@@ -550,6 +551,47 @@ const select = <Space extends MemorySpace>(
     }
   }
   return factSelection;
+};
+
+// Import Gleam wrapper and Result types
+import * as GleamSpace from "./gleam/build/dev/javascript/memory_gleam/memory_gleam.mjs";
+import {
+  Error as GleamError,
+  Ok,
+} from "./gleam/build/dev/javascript/prelude.mjs";
+
+// FFI function called from Gleam - wraps the TypeScript implementation
+export function select_ffi(session: unknown, args: unknown) {
+  try {
+    const result = select_jsimpl(
+      session as Session<MemorySpace>,
+      args as Query["args"],
+    );
+    return new Ok(result);
+  } catch (err) {
+    return new GleamError((err as Error).message || String(err));
+  }
+}
+
+// Wrapper that calls Gleam (which calls back to select_jsimpl via select_ffi)
+const select = <Space extends MemorySpace>(
+  session: Session<Space>,
+  args: Query["args"],
+): Selection<Space>[Space] => {
+  // Call Gleam version
+  const result = GleamSpace.select_gleam(session, args);
+
+  // Check if result is Ok or Error using instanceof
+  if (result instanceof Ok) {
+    // Ok case - return the value
+    return result[0];
+  } else if (result instanceof GleamError) {
+    // Error case - Gleam's Error stores message in [0]
+    throw new globalThis.Error(result[0]);
+  } else {
+    // Should never happen, but handle it
+    throw new globalThis.Error("Unexpected result type from Gleam");
+  }
 };
 
 export type FactSelector = {
