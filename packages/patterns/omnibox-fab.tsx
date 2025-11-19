@@ -9,6 +9,7 @@ import {
   ifElse,
   NAME,
   navigateTo,
+  pattern,
   patternTool,
   recipe,
   UI,
@@ -106,8 +107,7 @@ const listPatternIndex = recipe<ListPatternIndexInput>(
   },
 );
 
-export default recipe<OmniboxFABInput>(
-  "OmniboxFAB",
+export default pattern<OmniboxFABInput>(
   (_) => {
     const omnibot = Chatbot({
       system:
