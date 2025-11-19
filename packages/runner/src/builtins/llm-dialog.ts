@@ -430,7 +430,7 @@ const SCHEMA_TOOL_NAME = "schema";
 const ADD_ATTACHMENT_TOOL_NAME = "addAttachment";
 const REMOVE_ATTACHMENT_TOOL_NAME = "removeAttachment";
 const FINAL_RESULT_TOOL_NAME = "finalResult";
-const SET_ARGUMENT_TOOL_NAME = "setArgument";
+const UPDATE_ARGUMENT_TOOL_NAME = "updateArgument";
 
 const READ_INPUT_SCHEMA: JSONSchema = {
   type: "object",
@@ -525,7 +525,7 @@ const REMOVE_ATTACHMENT_INPUT_SCHEMA: JSONSchema = {
   additionalProperties: false,
 };
 
-const SET_ARGUMENT_INPUT_SCHEMA: JSONSchema = {
+const UPDATE_ARGUMENT_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
     path: {
@@ -684,13 +684,13 @@ function flattenTools(
       "Use when you no longer need quick access to a cell.",
     inputSchema: REMOVE_ATTACHMENT_INPUT_SCHEMA,
   };
-  flattened[SET_ARGUMENT_TOOL_NAME] = {
+  flattened[UPDATE_ARGUMENT_TOOL_NAME] = {
     description:
       'Update arguments of a running pattern instance. Input: { "@link": "/of:bafyabc123" } and updates object. ' +
       "The pattern will automatically re-execute with the new arguments. " +
       "Use after invoke() creates a pattern, or to modify attached pattern instances. " +
-      'Example: setArgument({ "@link": "/of:xyz" }, { "query": "new search" })',
-    inputSchema: SET_ARGUMENT_INPUT_SCHEMA,
+      'Example: updateArgument({ "@link": "/of:xyz" }, { "query": "new search" })',
+    inputSchema: UPDATE_ARGUMENT_INPUT_SCHEMA,
   };
   flattened[SCHEMA_TOOL_NAME] = {
     description:
@@ -819,13 +819,13 @@ function buildToolCatalog(
       "Use when you no longer need quick access to a cell.",
     inputSchema: REMOVE_ATTACHMENT_INPUT_SCHEMA,
   };
-  llmTools[SET_ARGUMENT_TOOL_NAME] = {
+  llmTools[UPDATE_ARGUMENT_TOOL_NAME] = {
     description:
       'Update arguments of a running pattern instance. Input: { "@link": "/of:bafyabc123" } and updates object. ' +
       "The pattern will automatically re-execute with the new arguments. " +
       "Use after invoke() creates a pattern, or to modify attached pattern instances. " +
-      'Example: setArgument({ "@link": "/of:xyz" }, { "query": "new search" })',
-    inputSchema: SET_ARGUMENT_INPUT_SCHEMA,
+      'Example: updateArgument({ "@link": "/of:xyz" }, { "query": "new search" })',
+    inputSchema: UPDATE_ARGUMENT_INPUT_SCHEMA,
   };
   llmTools[SCHEMA_TOOL_NAME] = {
     description:
@@ -907,7 +907,7 @@ type ResolvedToolCall =
   | { type: "read"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "finalResult"; call: LLMToolCall; result: unknown }
   | {
-    type: "setArgument";
+    type: "updateArgument";
     call: LLMToolCall;
     cellRef: Cell<any>;
     updates: Record<string, unknown>;
@@ -943,7 +943,7 @@ function resolveToolCall(
     name === READ_TOOL_NAME || name === INVOKE_TOOL_NAME ||
     name === SCHEMA_TOOL_NAME || name === ADD_ATTACHMENT_TOOL_NAME ||
     name === REMOVE_ATTACHMENT_TOOL_NAME || name === FINAL_RESULT_TOOL_NAME ||
-    name === SET_ARGUMENT_TOOL_NAME
+    name === UPDATE_ARGUMENT_TOOL_NAME
   ) {
     // Handle addAttachment
     if (name === ADD_ATTACHMENT_TOOL_NAME) {
@@ -988,8 +988,8 @@ function resolveToolCall(
       };
     }
 
-    // Handle setArgument
-    if (name === SET_ARGUMENT_TOOL_NAME) {
+    // Handle updateArgument
+    if (name === UPDATE_ARGUMENT_TOOL_NAME) {
       const target = extractStringField(
         toolCallPart.input,
         "path",
@@ -1006,7 +1006,7 @@ function resolveToolCall(
       }
 
       return {
-        type: "setArgument",
+        type: "updateArgument",
         cellRef,
         call: { id, name, input: { path: target, updates } },
         updates: updates as Record<string, unknown>,
@@ -1365,11 +1365,11 @@ function handleRead(
 }
 
 /**
- * Handles the setArgument tool call.
+ * Handles the update Argument tool call.
  */
-function handleSetArgument(
+function handleUpdateArgument(
   runtime: IRuntime,
-  resolved: ResolvedToolCall & { type: "setArgument" },
+  resolved: ResolvedToolCall & { type: "updateArgument" },
 ): { type: string; value: any } {
   const cell = resolved.cellRef;
   const updates = resolved.updates;
@@ -1379,29 +1379,24 @@ function handleSetArgument(
   if (!sourceCell) {
     throw new Error(
       "Target is not a pattern instance - no source cell found. " +
-        "setArgument only works with running patterns (e.g., from invoke() or attached patterns).",
+        "updateArgument only works with running patterns (e.g., from invoke() or attached patterns).",
     );
   }
 
   // Access the argument cell
   const argumentCell = sourceCell.key("argument");
+  const cellifiedValue = traverseAndCellify(
+    runtime,
+    argumentCell.space,
+    updates,
+  );
 
   // Apply updates to argument fields
   runtime.editWithRetry((tx) => {
-    const argCellTx = argumentCell.withTx(tx);
-    for (const [fieldPath, value] of Object.entries(updates)) {
-      // Support nested paths like "config.theme" by splitting on "."
-      const pathParts = fieldPath.split(".");
-      let targetCell = argCellTx;
-
-      // Navigate to nested field
-      for (let i = 0; i < pathParts.length - 1; i++) {
-        targetCell = targetCell.key(pathParts[i]);
-      }
-
-      // Set the final field
-      const finalKey = pathParts[pathParts.length - 1];
-      targetCell.key(finalKey).set(value);
+    if (isObject(cellifiedValue) && !isCell(cellifiedValue)) {
+      argumentCell.withTx(tx).update(cellifiedValue);
+    } else {
+      argumentCell.withTx(tx).set(cellifiedValue);
     }
   });
 
@@ -1585,8 +1580,8 @@ async function invokeToolCall(
   }
 
   // Handle run-type tools (external, run with pattern/handler)
-  if (resolved.type === "setArgument") {
-    return handleSetArgument(runtime, resolved);
+  if (resolved.type === "updateArgument") {
+    return handleUpdateArgument(runtime, resolved);
   }
 
   // Handle invoke-type tools (external, invoke with pattern/handler)
@@ -1877,7 +1872,7 @@ Tools work together by passing links between them:
 
 1. \`invoke({ "@link": "/of:abc/handler" }, args)\` → Returns \`{ "@link": "/of:xyz/result" }\`
 2. \`read({ "@link": "/of:xyz/result" })\` → Returns the data, which may contain nested links
-3. \`setArgument({ "@link": "/of:pattern" }, { field: value })\` → Updates running pattern arguments
+3. \`updateArgument({ "@link": "/of:pattern" }, { field: value })\` → Updates running pattern arguments
 4. Data often contains links to other cells: \`{ items: [{ "@link": "/of:123" }, { "@link": "/of:456" }] }\`
 
 ## Pages
@@ -1886,7 +1881,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
 - Have their own identity accessible via a link
 - Contain data fields that can be read with \`read()\`
 - Contain handler fields that can be invoked with \`invoke()\`
-- Arguments can be updated with \`setArgument()\` to change pattern behavior dynamically
+- Arguments can be updated with \`updateArgument()\` to change pattern behavior dynamically
 - May link to other cells in the system
 
 **Use links to navigate between related data and compose operations.**`;
