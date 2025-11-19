@@ -11,6 +11,7 @@ import type {
   URI,
 } from "./interface.ts";
 import { SelectAllString } from "./schema.ts";
+import * as GleamMemory from "./gleam/build/dev/javascript/memory_gleam/memory_gleam.mjs";
 
 export const from = (
   source: Iterable<[fact: Fact, since: number]>,
@@ -101,21 +102,12 @@ export const setEmptyObj = <T>(
   return selection;
 };
 
-export const iterate = function* <T>(
+// Use Gleam implementation
+export const iterate = <T>(
   selection: OfTheCause<T>,
-): Iterable<{ of: URI; the: MIME; cause: CauseString; value: T }> {
-  for (const [of, attributes] of Object.entries(selection)) {
-    for (const [the, causes] of Object.entries(attributes)) {
-      for (const [cause, state] of Object.entries(causes)) {
-        yield {
-          of: of as URI,
-          the: the as MIME,
-          cause: cause as CauseString,
-          value: state,
-        };
-      }
-    }
-  }
+): Iterable<{ of: URI; the: MIME; cause: CauseString; value: T }> => {
+  // Call Gleam iterate which returns a list (array)
+  return GleamMemory.iterate(selection);
 };
 
 type EmptyObj = Record<string | number | symbol, never>;

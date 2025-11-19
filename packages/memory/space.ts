@@ -559,6 +559,7 @@ import {
   Error as GleamError,
   Ok,
 } from "./gleam/build/dev/javascript/prelude.mjs";
+import { toList } from "./gleam/build/dev/javascript/gleam_stdlib/gleam.mjs";
 
 // FFI function called from Gleam - wraps the TypeScript implementation
 export function select_ffi(session: unknown, args: unknown) {
@@ -571,6 +572,38 @@ export function select_ffi(session: unknown, args: unknown) {
   } catch (err) {
     return new GleamError((err as Error).message || String(err));
   }
+}
+
+// FFI wrapper that converts JS objects to Gleam Dicts and calls pure Gleam iterate
+import { iterate_gleam } from "./gleam/build/dev/javascript/memory_gleam/memory_gleam.mjs";
+import * as GleamDict from "./gleam/build/dev/javascript/gleam_stdlib/gleam/dict.mjs";
+
+export function iterate_js_wrapper(selection: unknown) {
+  // Convert the 3-level nested JS object to nested Gleam Dicts
+  // Level 1: of -> Dict
+  // Level 2: the -> Dict
+  // Level 3: cause -> Dict
+  // Level 4: value -> keep as JS object (don't convert)
+
+  const level1Entries = Object.entries(selection as object).map(
+    ([of, attributes]) => {
+      const level2Entries = Object.entries(attributes as object).map(
+        ([the, causes]) => {
+          const level3Entries = Object.entries(causes as object).map(
+            ([cause, value]) => {
+              // Keep value as-is (don't convert to Dict)
+              return [cause, value];
+            },
+          );
+          return [the, GleamDict.from_list(toList(level3Entries))];
+        },
+      );
+      return [of, GleamDict.from_list(toList(level2Entries))];
+    },
+  );
+
+  const gleamDict = GleamDict.from_list(toList(level1Entries));
+  return iterate_gleam(gleamDict);
 }
 
 // Wrapper that calls Gleam (which calls back to select_jsimpl via select_ffi)
