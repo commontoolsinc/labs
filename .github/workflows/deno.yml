@@ -424,6 +424,12 @@ jobs:
   deploy-shell-staging:
     name: "Deploy Shell to Staging"
     if: github.ref == 'refs/heads/main'
+    needs:
+      [
+        "pattern-integration-test",
+        "package-integration-test",
+        "cli-integration-test",
+      ]
     runs-on: ubuntu-latest
     environment: ci
     steps:
