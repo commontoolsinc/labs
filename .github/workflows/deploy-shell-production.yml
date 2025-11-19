@@ -1,0 +1,51 @@
+name: Deploy Shell to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Git SHA to deploy (defaults to main HEAD)"
+        required: false
+        default: ""
+
+jobs:
+  deploy-shell-production:
+    name: "Deploy Shell Assets to Production"
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🏗️ Build shell production assets
+        working-directory: packages/shell
+        run: deno task production
+        env:
+          API_URL: ${{ secrets.CLUSTERDUCK_SHELL_API_URL }}
+
+      - name: 🔑 Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: ⚙️ Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: 📤 Upload shell assets to Production GCS
+        run: |
+          DEPLOY_SHA="${{ inputs.sha || github.sha }}"
+
+          # Upload to SHA-specific directory
+          gsutil -m rsync -r packages/shell/dist gs://production-commontools-dev/builds/${DEPLOY_SHA}/
+
+          # Upload to latest directory (overwrites)
+          gsutil -m rsync -r -d packages/shell/dist gs://production-commontools-dev/builds/latest/
+
+          echo "📦 Production Shell Asset Links"
+          echo "SHA build: https://storage.googleapis.com/production-commontools-dev/builds/${DEPLOY_SHA}/index.html"
+          echo "Latest: https://storage.googleapis.com/production-commontools-dev/builds/latest/index.html"
