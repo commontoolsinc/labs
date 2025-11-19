@@ -6,7 +6,7 @@ interface Config {
 }
 
 const configSchema = toSchema<Config>({
-  default: { value: 42 },
+  "default": { value: 42 },
   description: "Configuration schema",
 });
 export { configSchema };

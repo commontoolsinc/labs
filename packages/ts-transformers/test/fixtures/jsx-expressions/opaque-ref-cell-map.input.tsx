@@ -23,7 +23,7 @@ const createCellRef = lift(
   {
     type: "object",
     properties: {
-      isInitialized: { type: "boolean", default: false, asCell: true },
+      isInitialized: { type: "boolean", "default": false, asCell: true },
       storedCellRef: { type: "object", asCell: true },
     },
   },

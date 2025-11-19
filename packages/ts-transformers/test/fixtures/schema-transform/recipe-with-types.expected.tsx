@@ -21,14 +21,14 @@ const inputSchema = {
     properties: {
         title: {
             type: "string",
-            default: "untitled"
+            "default": "untitled"
         },
         items: {
             type: "array",
             items: {
                 $ref: "#/$defs/Item"
             },
-            default: []
+            "default": []
         }
     },
     required: ["title", "items"],
@@ -38,7 +38,7 @@ const inputSchema = {
             properties: {
                 text: {
                     type: "string",
-                    default: ""
+                    "default": ""
                 }
             },
             required: ["text"]
@@ -53,14 +53,14 @@ const outputSchema = {
         },
         title: {
             type: "string",
-            default: "untitled"
+            "default": "untitled"
         },
         items: {
             type: "array",
             items: {
                 $ref: "#/$defs/Item"
             },
-            default: []
+            "default": []
         }
     },
     required: ["items_count", "title", "items"],
@@ -70,7 +70,7 @@ const outputSchema = {
             properties: {
                 text: {
                     type: "string",
-                    default: ""
+                    "default": ""
                 }
             },
             required: ["text"]
@@ -111,7 +111,7 @@ const addItem = handler // <
             properties: {
                 text: {
                     type: "string",
-                    default: ""
+                    "default": ""
                 }
             },
             required: ["text"]

@@ -475,22 +475,22 @@ export default recipe({
                                         beta: {
                                             anyOf: [{
                                                     type: "boolean",
-                                                    enum: [false],
+                                                    "enum": [false],
                                                     asOpaque: true
                                                 }, {
                                                     type: "boolean",
-                                                    enum: [true],
+                                                    "enum": [true],
                                                     asOpaque: true
                                                 }]
                                         },
                                         darkMode: {
                                             anyOf: [{
                                                     type: "boolean",
-                                                    enum: [false],
+                                                    "enum": [false],
                                                     asOpaque: true
                                                 }, {
                                                     type: "boolean",
-                                                    enum: [true],
+                                                    "enum": [true],
                                                     asOpaque: true
                                                 }]
                                         }
@@ -508,11 +508,11 @@ export default recipe({
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     type: "boolean",
-                    enum: [false],
+                    "enum": [false],
                     asOpaque: true
                 }, {
                     type: "boolean",
-                    enum: [true],
+                    "enum": [true],
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {

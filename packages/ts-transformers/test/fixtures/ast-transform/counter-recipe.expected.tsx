@@ -37,7 +37,7 @@ export default recipe({
     properties: {
         value: {
             type: "number",
-            default: 0
+            "default": 0
         }
     },
     required: ["value"]

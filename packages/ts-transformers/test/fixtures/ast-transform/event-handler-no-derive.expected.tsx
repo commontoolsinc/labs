@@ -24,7 +24,7 @@ export default recipe({
     properties: {
         count: {
             type: "number",
-            default: 0
+            "default": 0
         }
     },
     required: ["count"]

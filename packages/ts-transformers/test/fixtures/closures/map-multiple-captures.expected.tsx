@@ -70,7 +70,7 @@ export default recipe({
                             },
                             multiplier: {
                                 type: "number",
-                                enum: [2]
+                                "enum": [2]
                             }
                         },
                         required: ["state", "multiplier"]
@@ -125,7 +125,7 @@ export default recipe({
                     },
                     multiplier: {
                         type: "number",
-                        enum: [2]
+                        "enum": [2]
                     }
                 },
                 required: ["item", "state", "multiplier"]

@@ -17,7 +17,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             properties: {
                 type: {
                     type: "string",
-                    enum: ["vnode"]
+                    "enum": ["vnode"]
                 },
                 name: {
                     type: "string"
@@ -39,7 +39,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             properties: {
                 type: {
                     type: "string",
-                    enum: ["vnode"]
+                    "enum": ["vnode"]
                 },
                 name: {
                     type: "string"
@@ -63,10 +63,10 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     type: "number"
                 }, {
                     type: "boolean",
-                    enum: [false]
+                    "enum": [false]
                 }, {
                     type: "boolean",
-                    enum: [true]
+                    "enum": [true]
                 }, {
                     $ref: "#/$defs/VNode"
                 }, {
@@ -89,10 +89,10 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                         type: "number"
                     }, {
                         type: "boolean",
-                        enum: [false]
+                        "enum": [false]
                     }, {
                         type: "boolean",
-                        enum: [true]
+                        "enum": [true]
                     }, {
                         type: "object",
                         additionalProperties: true
@@ -129,7 +129,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     type: "boolean",
-                    enum: [false]
+                    "enum": [false]
                 }, {
                     $ref: "#/$defs/Element"
                 }],
@@ -139,7 +139,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     properties: {
                         type: {
                             type: "string",
-                            enum: ["vnode"]
+                            "enum": ["vnode"]
                         },
                         name: {
                             type: "string"
@@ -161,7 +161,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     properties: {
                         type: {
                             type: "string",
-                            enum: ["vnode"]
+                            "enum": ["vnode"]
                         },
                         name: {
                             type: "string"
@@ -185,10 +185,10 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                             type: "number"
                         }, {
                             type: "boolean",
-                            enum: [false]
+                            "enum": [false]
                         }, {
                             type: "boolean",
-                            enum: [true]
+                            "enum": [true]
                         }, {
                             $ref: "#/$defs/VNode"
                         }, {
@@ -211,10 +211,10 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                                 type: "number"
                             }, {
                                 type: "boolean",
-                                enum: [false]
+                                "enum": [false]
                             }, {
                                 type: "boolean",
-                                enum: [true]
+                                "enum": [true]
                             }, {
                                 type: "object",
                                 additionalProperties: true

@@ -28,7 +28,7 @@ const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
             properties: {
                 text: {
                     type: "string",
-                    default: ""
+                    "default": ""
                 }
             },
             required: ["text"]
@@ -45,7 +45,7 @@ export default recipe({
             items: {
                 $ref: "#/$defs/Item"
             },
-            default: []
+            "default": []
         }
     },
     required: ["items"],
@@ -55,7 +55,7 @@ export default recipe({
             properties: {
                 text: {
                     type: "string",
-                    default: ""
+                    "default": ""
                 }
             },
             required: ["text"]
@@ -94,7 +94,7 @@ export default recipe({
                         properties: {
                             text: {
                                 type: "string",
-                                default: ""
+                                "default": ""
                             }
                         },
                         required: ["text"]
