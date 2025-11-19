@@ -5,9 +5,6 @@ import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { CharmController } from "@commontools/charm/ops";
 import * as DefaultPattern from "../lib/default-pattern.ts";
-import { isVNode } from "@commontools/html";
-import { UI } from "@commontools/runner";
-import type { Cell } from "@commontools/runner";
 import "../components/OmniLayout.ts";
 
 export class XBodyView extends BaseView {

@@ -3,7 +3,7 @@ import { BaseElement } from "../../core/base-element.ts";
 import { render } from "@commontools/html";
 import type { Cell } from "@commontools/runner";
 import { getRecipeIdFromCharm } from "@commontools/charm";
-import { UI, type VNode } from "@commontools/runner";
+import { type VNode } from "@commontools/runner";
 
 // Set to true to enable debug logging
 const DEBUG_LOGGING = false;
