@@ -198,6 +198,11 @@ function parseLLMFriendlyLink(
     );
   }
 
+  // Remove path element from trailing slash
+  if (path.length > 0 && path[path.length - 1] === "") {
+    path.pop();
+  }
+
   return {
     id: id as `${string}:${string}`,
     path,
@@ -1472,7 +1477,6 @@ async function handleInvoke(
 
   // Wait for the pattern/handler to complete and write the result
   const cancel = result.sink((r) => {
-    console.log("result", r);
     r !== undefined && resolve(r);
   });
 
@@ -1576,7 +1580,7 @@ async function invokeToolCall(
 
   if (resolved.type === "finalResult") {
     // Return the structured result directly
-    return { type: "json", value: resolved.result };
+    return traverseAndCellify(runtime, space, resolved.result);
   }
 
   // Handle run-type tools (external, run with pattern/handler)
