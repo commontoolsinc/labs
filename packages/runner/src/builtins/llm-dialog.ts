@@ -1615,9 +1615,18 @@ async function handleInvoke(
   // Get the actual entity ID from the result cell
   const resultLink = createLLMFriendlyLink(result.getAsNormalizedFullLink());
 
+  const resultSchema = getCellSchema(result);
+
   // Patterns always write to the result cell, so always return the link
   if (pattern) {
-    return { type: "json", value: { "@link": resultLink } };
+    return {
+      type: "json",
+      value: {
+        "@resultLocation": resultLink,
+        result: traverseAndSerialize(result.get(), resultSchema),
+        schema: resultSchema,
+      },
+    };
   }
 
   // Handlers may or may not write to the result cell
@@ -1626,7 +1635,14 @@ async function handleInvoke(
     const resultValue = result.get();
 
     if (resultValue !== undefined && resultValue !== null) {
-      return { type: "json", value: { "@link": resultLink } };
+      return {
+        type: "json",
+        value: {
+          "@resultLocation": resultLink,
+          result: traverseAndSerialize(resultValue, resultSchema),
+          schema: resultSchema,
+        },
+      };
     }
     // Handler didn't write anything, return null
     return { type: "json", value: null };
