@@ -935,7 +935,7 @@ export type BuiltInGenerateObjectParams =
 
 export type BuiltInGenerateTextParams =
   | {
-    prompt: BuiltInLLMContent;
+    prompt: string;
     messages?: never;
     system?: string;
     model?: string;
