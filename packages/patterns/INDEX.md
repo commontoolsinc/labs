@@ -1,5 +1,7 @@
 # Common Patterns
 
+Prefix the URLs with `https://raw.githubusercontent.com/commontoolsinc/labs/refs/heads/main/packages/patterns/`
+
 ## `counter.tsx`
 
 A simple counter demo.

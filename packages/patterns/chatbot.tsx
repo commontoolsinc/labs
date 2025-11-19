@@ -7,6 +7,7 @@ import {
   fetchData,
   generateObject,
   handler,
+  ifElse,
   llmDialog,
   NAME,
   pattern,
@@ -141,6 +142,19 @@ const listMentionable = pattern<
   },
 );
 
+const listPatternIndex = pattern<
+  { mentionable: Array<MentionableCharm> },
+  { result: string }
+>(
+  ({ mentionable: _mentionable }) => {
+    const { pending, result } = fetchData({
+      url: "/api/patterns/index.md",
+      mode: "text",
+    });
+    return ifElse(pending, undefined, { result });
+  },
+);
+
 const listRecent = handler<
   {
     /** A cell to store the result text */
@@ -166,6 +180,7 @@ export default recipe<ChatInput, ChatOutput>(
 
     const assistantTools = {
       listMentionable: patternTool(listMentionable, { mentionable }),
+      listPatternIndex: patternTool(listPatternIndex, { mentionable }),
       listRecent: {
         description:
           "List all recently viewed charms in the space, read() the result.",
