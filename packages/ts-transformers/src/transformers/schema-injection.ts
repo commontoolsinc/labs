@@ -350,107 +350,115 @@ export class SchemaInjectionTransformer extends Transformer {
       if (callKind?.kind === "builder" && callKind.builderName === "recipe") {
         const factory = transformation.factory;
         const typeArgs = node.typeArguments;
-
-        if (typeArgs && typeArgs.length >= 1) {
-          const schemaArgs = typeArgs.map((typeArg) =>
-            createSchemaCallWithRegistryTransfer(context, typeArg, typeRegistry)
-          );
-
-          const argsArray = Array.from(node.arguments);
-          let remainingArgs = argsArray;
-          if (
-            argsArray.length > 0 &&
-            argsArray[0] && ts.isStringLiteral(argsArray[0])
-          ) {
-            remainingArgs = argsArray.slice(1);
-          }
-
-          const updated = factory.createCallExpression(
-            node.expression,
-            undefined,
-            [...schemaArgs, ...remainingArgs],
-          );
-
-          return ts.visitEachChild(updated, visit, transformation);
-        }
-
-        // Handle recipe() calls - always generate both input and result schemas
         const argsArray = Array.from(node.arguments);
 
-        // Get the recipe function (should be first or second argument)
-        let recipeFunction: ts.Expression | undefined;
-
-        if (argsArray.length === 1) {
-          // Single argument - must be the function
-          recipeFunction = argsArray[0];
-        } else if (
-          argsArray.length === 2 && argsArray[0] &&
-          ts.isStringLiteral(argsArray[0])
-        ) {
-          // Two arguments with first being a string (deprecated name parameter)
-          // Skip the name, use the second argument as the function
-          recipeFunction = argsArray[1];
+        // Find the function argument - it's the last function-like expression in args
+        // Can be: recipe(fn), recipe("name", fn), recipe(schema, fn), recipe(schema, schema, fn)
+        let recipeFunction: ts.ArrowFunction | ts.FunctionExpression | undefined;
+        for (let i = argsArray.length - 1; i >= 0; i--) {
+          const arg = argsArray[i];
+          if (
+            arg &&
+            (ts.isFunctionExpression(arg) || ts.isArrowFunction(arg))
+          ) {
+            recipeFunction = arg;
+            break;
+          }
         }
 
-        if (
-          recipeFunction &&
-          (ts.isFunctionExpression(recipeFunction) ||
-            ts.isArrowFunction(recipeFunction))
-        ) {
-          const recipeFn = recipeFunction;
+        if (!recipeFunction) {
+          // No function found - skip transformation
+          return ts.visitEachChild(node, visit, transformation);
+        }
 
-          // Get the input parameter (may be undefined if recipe has no parameters)
-          const inputParam = recipeFn.parameters[0];
+        // Determine input and result schema TypeNodes based on type arguments
+        let inputTypeNode: ts.TypeNode;
+        let inputType: ts.Type | undefined;
+        let resultTypeNode: ts.TypeNode;
+        let resultType: ts.Type | undefined;
 
-          // Infer types from the function (input parameter and return type)
+        if (typeArgs && typeArgs.length >= 2) {
+          // Case 1: Two or more type arguments → both schemas from type args
+          // Examples: recipe<State, Result>(...), recipe<S, RS>(schema, schema, fn)
+          inputTypeNode = typeArgs[0]!;
+          resultTypeNode = typeArgs[1]!;
+
+          // Check TypeRegistry for closure-captured types
+          if (typeRegistry) {
+            inputType = typeRegistry.get(inputTypeNode);
+            resultType = typeRegistry.get(resultTypeNode);
+          }
+        } else if (typeArgs && typeArgs.length === 1) {
+          // Case 2: One type argument → input from type arg, result inferred
+          // Examples: recipe<State>("name", fn), recipe<State>(schema, fn)
+          inputTypeNode = typeArgs[0]!;
+
+          // Check TypeRegistry for input type
+          if (typeRegistry) {
+            inputType = typeRegistry.get(inputTypeNode);
+          }
+
+          // Infer result type from function
           const inferred = collectFunctionSchemaTypeNodes(
-            recipeFn,
+            recipeFunction,
             checker,
             sourceFile,
           );
-
-          // For input: use inferred type or apply never/unknown refinement
-          const inputTypeNode = inferred.argument ??
-            getParameterSchemaType(factory, inputParam);
-
-          // For result: use inferred return type or default to unknown
-          const resultTypeNode = inferred.result ??
+          resultTypeNode = inferred.result ??
             factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-
-          // Check TypeRegistry for existing types first
-          const inputType = getTypeFromRegistryOrFallback(
-            inputTypeNode,
-            inferred.argumentType,
-            typeRegistry,
-          );
-          const resultType = getTypeFromRegistryOrFallback(
+          resultType = getTypeFromRegistryOrFallback(
             resultTypeNode,
             inferred.resultType,
             typeRegistry,
           );
-
-          // Create both schemas
-          const toSchemaInput = createToSchemaCall(context, inputTypeNode);
-          if (inputType && typeRegistry) {
-            typeRegistry.set(toSchemaInput, inputType);
-          }
-
-          const toSchemaResult = createToSchemaCall(context, resultTypeNode);
-          if (resultType && typeRegistry) {
-            typeRegistry.set(toSchemaResult, resultType);
-          }
-
-          // Always use new API: [inputSchema, resultSchema, function]
-          const newArgs = [toSchemaInput, toSchemaResult, recipeFn];
-
-          const updated = factory.createCallExpression(
-            node.expression,
-            undefined,
-            newArgs,
+        } else {
+          // Case 3: No type arguments → infer both from function
+          // Example: recipe(fn)
+          const inputParam = recipeFunction.parameters[0];
+          const inferred = collectFunctionSchemaTypeNodes(
+            recipeFunction,
+            checker,
+            sourceFile,
           );
 
-          return ts.visitEachChild(updated, visit, transformation);
+          inputTypeNode = inferred.argument ??
+            getParameterSchemaType(factory, inputParam);
+          inputType = getTypeFromRegistryOrFallback(
+            inputTypeNode,
+            inferred.argumentType,
+            typeRegistry,
+          );
+
+          resultTypeNode = inferred.result ??
+            factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+          resultType = getTypeFromRegistryOrFallback(
+            resultTypeNode,
+            inferred.resultType,
+            typeRegistry,
+          );
         }
+
+        // Create both schemas
+        const toSchemaInput = createToSchemaCall(context, inputTypeNode);
+        if (inputType && typeRegistry) {
+          typeRegistry.set(toSchemaInput, inputType);
+        }
+
+        const toSchemaResult = createToSchemaCall(context, resultTypeNode);
+        if (resultType && typeRegistry) {
+          typeRegistry.set(toSchemaResult, resultType);
+        }
+
+        // Always use 2-schema API: [inputSchema, resultSchema, function]
+        const newArgs = [toSchemaInput, toSchemaResult, recipeFunction];
+
+        const updated = factory.createCallExpression(
+          node.expression,
+          undefined,
+          newArgs,
+        );
+
+        return ts.visitEachChild(updated, visit, transformation);
       }
 
       if (callKind?.kind === "builder" && callKind.builderName === "pattern") {
