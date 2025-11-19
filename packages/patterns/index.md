@@ -10,15 +10,15 @@ A simple counter demo.
 ### Input Schema
 
 ```ts
-interface RecipeInput {
-  value?: number;
+interface CounterInput {
+  value: number;
 }
 ```
 
 ### Result Schema
 
 ```ts
-interface RecipeOutput {
+interface CounterOutput {
   value?: number;
   increment: Stream<void>;
   decrement: Stream<void>;
@@ -33,10 +33,8 @@ A chatbot demo.
 
 ```ts
 type ChatInput = {
-  messages?: Cell<Default<Array<BuiltInLLMMessage>, []>>;
-  tools?: any;
-  theme?: any;
-  system?: string;
+  /** The system prompt */
+  system: string;
 };
 ```
 
@@ -49,14 +47,9 @@ type ChatOutput = {
   addMessage: Stream<BuiltInLLMMessage>;
   clearChat: Stream<void>;
   cancelGeneration: Stream<void>;
-  title?: string;
+  title: string;
   attachments: Array<PromptAttachment>;
   tools: any;
-  ui: {
-    chatLog: VNode;
-    promptInput: VNode;
-    attachmentsAndTools: VNode;
-  };
 };
 ```
 
@@ -68,8 +61,10 @@ A note demo.
 
 ```ts
 type NoteInput = {
-  title?: string;
-  content?: string;
+  /** The title of the note */
+  title: string;
+  /** The content of the note */
+  content: string;
 };
 ```
 
@@ -77,11 +72,8 @@ type NoteInput = {
 
 ```ts
 type NoteOutput = {
-  mentioned: Default<Array<MentionableCharm>, []>;
-  backlinks: MentionableCharm[];
-
   /** The content of the note */
-  content?: string;
+  content: string;
   grep: Stream<{ query: string }>;
   translate: Stream<{ language: string }>;
   editContent: Stream<{ detail: { value: string } }>;
