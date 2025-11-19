@@ -8,10 +8,10 @@ import {
   handler,
   NAME,
   navigateTo,
-  type OpaqueRef,
   patternTool,
   recipe,
   str,
+  Stream,
   UI,
   wish,
 } from "commontools";
@@ -27,9 +27,9 @@ type Output = {
 
   /** The content of the note */
   content: Default<string, "">;
-  grep: OpaqueRef<{ query: string }>;
-  translate: OpaqueRef<{ language: string }>;
-  editContent: OpaqueRef<{ detail: { value: string } }>;
+  grep: Stream<{ query: string }>;
+  translate: Stream<{ language: string }>;
+  editContent: Stream<{ detail: { value: string } }>;
 };
 
 const _updateTitle = handler<
@@ -101,7 +101,7 @@ const handleCharmLinkClicked = handler<void, { charm: Cell<MentionableCharm> }>(
 );
 
 function schemaifyWish<T>(path: string, def: T) {
-  return derive(wish<T>(path), (i) => i ?? def);
+  return derive(wish<T>(path) as T, (i) => i ?? def);
 }
 
 const Note = recipe<Input, Output>(

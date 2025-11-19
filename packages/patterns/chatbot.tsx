@@ -7,8 +7,10 @@ import {
   fetchData,
   generateObject,
   handler,
+  ifElse,
   llmDialog,
   NAME,
+  pattern,
   patternTool,
   recipe,
   Stream,
@@ -127,7 +129,7 @@ export const TitleGenerator = recipe<
   return title;
 });
 
-const listMentionable = recipe<
+const listMentionable = pattern<
   { mentionable: Array<MentionableCharm> },
   { result: Array<{ label: string; cell: Cell<unknown> }> }
 >(
@@ -137,6 +139,19 @@ const listMentionable = recipe<
       cell: charm,
     }));
     return { result };
+  },
+);
+
+const listPatternIndex = pattern<
+  { mentionable: Array<MentionableCharm> },
+  { result: string }
+>(
+  ({ mentionable: _mentionable }) => {
+    const { pending, result } = fetchData({
+      url: "/api/patterns/index.md",
+      mode: "text",
+    });
+    return ifElse(pending, undefined, { result });
   },
 );
 
@@ -165,6 +180,7 @@ export default recipe<ChatInput, ChatOutput>(
 
     const assistantTools = {
       listMentionable: patternTool(listMentionable, { mentionable }),
+      listPatternIndex: patternTool(listPatternIndex, { mentionable }),
       listRecent: {
         description:
           "List all recently viewed charms in the space, read() the result.",

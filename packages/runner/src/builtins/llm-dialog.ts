@@ -98,8 +98,8 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
  */
 function getCellSchema(
   cell: Cell<unknown>,
-): JSONSchema | undefined {
-  if (cell.schema) return cell.schema;
+): { schema?: JSONSchema; rootSchema?: JSONSchema } | undefined {
+  if (cell.schema !== undefined) return { schema: cell.schema };
 
   const sourceCell = cell.getSourceCell<{ resultRef: Cell<unknown> }>({
     type: "object",
@@ -108,14 +108,17 @@ function getCellSchema(
   const sourceCellSchema = sourceCell?.key("resultRef").get()?.schema;
   if (sourceCellSchema !== undefined) {
     const cfc = new ContextualFlowControl();
-    return cfc.schemaAtPath(
-      sourceCellSchema,
-      cell.getAsNormalizedFullLink().path,
-      cell.schema,
-    );
+    return {
+      schema: cfc.schemaAtPath(
+        sourceCellSchema,
+        cell.getAsNormalizedFullLink().path,
+        sourceCellSchema,
+      ),
+      rootSchema: sourceCellSchema,
+    };
   }
 
-  return buildMinimalSchemaFromValue(cell);
+  return { schema: buildMinimalSchemaFromValue(cell) };
 }
 
 function buildMinimalSchemaFromValue(charm: Cell<any>): JSONSchema | undefined {
@@ -1505,7 +1508,7 @@ function handleRead(
 ): { type: string; value: unknown } {
   let cell = resolved.cellRef;
   if (!cell.schema) {
-    cell = cell.asSchema(getCellSchema(cell));
+    cell = cell.asSchema(getCellSchema(cell)?.schema);
   }
 
   const schema = cell.schema;
