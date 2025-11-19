@@ -142,16 +142,16 @@ const listMentionable = pattern<
   },
 );
 
-const listPatternIndex = pattern<
-  { mentionable: Array<MentionableCharm> },
+const listPatternIndex = recipe<
+  { query: string },
   { result: string }
 >(
-  ({ mentionable: _mentionable }) => {
+  ({ query: _ }) => {
     const { pending, result } = fetchData({
       url: "/api/patterns/index.md",
       mode: "text",
     });
-    return ifElse(pending, undefined, { result });
+    return ifElse(computed(() => pending || !result), undefined, { result });
   },
 );
 
@@ -180,7 +180,7 @@ export default recipe<ChatInput, ChatOutput>(
 
     const assistantTools = {
       listMentionable: patternTool(listMentionable, { mentionable }),
-      listPatternIndex: patternTool(listPatternIndex, { mentionable }),
+      listPatternIndex: patternTool(listPatternIndex),
       listRecent: {
         description:
           "List all recently viewed charms in the space, read() the result.",

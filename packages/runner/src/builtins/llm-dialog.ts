@@ -1566,7 +1566,7 @@ async function handleInvoke(
   // Create result cell reference that will be set in the transaction
   let result: Cell<any> = null as any;
 
-  runtime.editWithRetry((tx) => {
+  await runtime.editWithRetry((tx) => {
     // Create the result cell within the transaction context
     result = runtime.getCell<any>(
       space,
@@ -1591,8 +1591,11 @@ async function handleInvoke(
     }
   });
 
+  await runtime.idle();
+
   // Wait for the pattern/handler to complete and write the result
   const cancel = result.sink((r) => {
+    console.log("result", r);
     r !== undefined && resolve(r);
   });
 
@@ -1615,9 +1618,22 @@ async function handleInvoke(
   // Get the actual entity ID from the result cell
   const resultLink = createLLMFriendlyLink(result.getAsNormalizedFullLink());
 
-  // Patterns always write to the result cell, so always return the link
+  const resultSchema = getCellSchema(result);
+
+  // Patterns a lways write to the result cell, so always return the link
   if (pattern) {
-    return { type: "json", value: { "@link": resultLink } };
+    return {
+      type: "json",
+      value: {
+        "@resultLocation": resultLink,
+        result: traverseAndSerialize(
+          result.get(),
+          resultSchema?.schema,
+          resultSchema?.rootSchema,
+        ),
+        schema: resultSchema?.schema,
+      },
+    };
   }
 
   // Handlers may or may not write to the result cell
@@ -1626,7 +1642,18 @@ async function handleInvoke(
     const resultValue = result.get();
 
     if (resultValue !== undefined && resultValue !== null) {
-      return { type: "json", value: { "@link": resultLink } };
+      return {
+        type: "json",
+        value: {
+          "@resultLocation": resultLink,
+          result: traverseAndSerialize(
+            resultValue,
+            resultSchema?.schema,
+            resultSchema?.rootSchema,
+          ),
+          schema: resultSchema?.schema,
+        },
+      };
     }
     // Handler didn't write anything, return null
     return { type: "json", value: null };
