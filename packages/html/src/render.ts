@@ -420,6 +420,20 @@ const setProp = <T>(target: T, key: string, value: unknown) => {
         target.setAttribute(key, newValue);
       }
     }
+  } else if (key.includes("-") && target instanceof Element) {
+    // Handle kebab-case attributes (e.g., button-text, aria-label)
+    // These need to be set as HTML attributes for web components to receive them
+    if (value == null) {
+      if (target.hasAttribute(key)) {
+        target.removeAttribute(key);
+      }
+    } else {
+      const currentValue = target.getAttribute(key);
+      const newValue = String(value);
+      if (currentValue !== newValue) {
+        target.setAttribute(key, newValue);
+      }
+    }
   } else if (target[key as keyof T] !== value) {
     target[key as keyof T] = value as T[keyof T];
   }
