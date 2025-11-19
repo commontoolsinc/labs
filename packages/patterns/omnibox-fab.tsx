@@ -3,13 +3,12 @@ import {
   Cell,
   compileAndRun,
   computed,
-  derive,
   fetchData,
   fetchProgram,
   handler,
   ifElse,
   NAME,
-  pattern,
+  navigateTo,
   patternTool,
   recipe,
   UI,
@@ -40,27 +39,65 @@ const dismissPeek = handler<
   peekDismissedIndex.set(assistantMessageCount);
 });
 
-const fetchAndRunPattern = pattern(
-  ({ url, args }: { url: string; args: any }) => {
+/**
+ * `fetchAndRunPattern({ url: "https://...", args: {} })`
+ *
+ * Instantiates patterns (e.g. from listPatternIndex) and returns the cell that
+ * contains the results. The instantiated pattern will keep running and updating
+ * the cell. Pass the resulting cell to `navigateTo` to show the pattern's UI.
+ *
+ * Pass in arguments to initialize the pattern. It's especially useful to pass
+ * in links to other cells as `{ "@link": "/of:bafe.../path/to/data" }`.
+ */
+type FetchAndRunPatternInput = {
+  url: string;
+  args: Cell<any>;
+};
+const fetchAndRunPattern = recipe<FetchAndRunPatternInput>(
+  ({ url, args }) => {
     const { pending: _fetchPending, result: program, error: _fetchError } =
       fetchProgram({ url });
 
-    const compileParams = derive(program, (p) => ({
-      files: p?.files ?? [],
-      main: p?.main ?? "",
+    const { pending, result, error } = compileAndRun({
+      files: program.files,
+      main: program.main,
       input: args,
-    }));
-    const { pending, result, error } = compileAndRun(compileParams);
+    });
 
-    return ifElse(pending, undefined, { result, error });
+    return ifElse(
+      computed(() => pending || (!result && !error)),
+      undefined,
+      {
+        cell: result,
+        error,
+      },
+    );
   },
 );
 
-const listPatternIndex = pattern<
-  { query: string },
-  { result: string }
->(
-  ({ query: _ }) => {
+/**
+ * `navigateTo({ cell: { "@link": "/of:xyz" } })` - Navigates to that cell's UI
+ *
+ * Especially useful after instantiating a pattern with fetchAndRunPattern:
+ * Pass the "@link" you get at `cell` to navigate to the pattern's view.
+ */
+type NavigateToPatternInput = { cell: Cell<any> }; // Hack to steer LLM
+const navigateToPattern = recipe<NavigateToPatternInput>(
+  ({ cell }) => {
+    navigateTo(cell);
+    return { success: ifElse(cell, true, false) };
+  },
+);
+
+/**
+ * `listPatternIndex()` - Returns the index of patterns.
+ *
+ * Useful as input to fetchAndRun.
+ */
+type ListPatternIndexInput = Record<string, never>;
+
+const listPatternIndex = recipe<ListPatternIndexInput>(
+  ({ _ }) => {
     const { pending, result } = fetchData({
       url: "/api/patterns/index.md",
       mode: "text",
@@ -85,12 +122,9 @@ export default recipe<OmniboxFABInput>(
         calculator: {
           pattern: calculator,
         },
-        fetchAndRunPattern: {
-          description:
-            "Fetch a pattern from the URL, compile it and run it. You can pass arguments to the pattern using the 'args' parameter. ",
-          pattern: fetchAndRunPattern,
-        },
+        fetchAndRunPattern: patternTool(fetchAndRunPattern),
         listPatternIndex: patternTool(listPatternIndex),
+        navigateTo: patternTool(navigateToPattern),
       },
     });
 

@@ -114,6 +114,7 @@ declare module "@commontools/api" {
     ): Cell<Schema<S>>;
     asSchema<T>(
       schema?: JSONSchema,
+      rootSchema?: JSONSchema,
     ): Cell<T>;
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
     sink(callback: (value: Readonly<T>) => Cancel | undefined | void): Cancel;
@@ -732,14 +733,15 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   ): Cell<Schema<S>>;
   asSchema<T>(
     schema?: JSONSchema,
+    rootSchema?: JSONSchema,
   ): Cell<T>;
-  asSchema(schema?: JSONSchema): Cell<any> {
+  asSchema(schema?: JSONSchema, rootSchema?: JSONSchema): Cell<any> {
     // asSchema creates a sibling with same identity but different schema
     // Create a new link with modified schema
     const siblingLink: NormalizedLink = {
       ...this._link,
       schema: schema,
-      rootSchema: schema,
+      rootSchema: rootSchema ?? schema,
     };
 
     return new CellImpl(

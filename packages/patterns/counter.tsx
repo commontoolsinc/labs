@@ -24,7 +24,7 @@ export default recipe<RecipeState, RecipeOutput>((state) => {
           Counter is the {nth(state.value)} number
         </span>
         <ct-button onClick={increment({ value: state.value })}>
-          inc to {state.value + 1}
+          inc to {(state.value ?? 0) + 1}
         </ct-button>
       </div>
     ),
