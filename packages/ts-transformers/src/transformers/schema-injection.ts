@@ -331,6 +331,47 @@ function prependSchemaArguments(
   );
 }
 
+/**
+ * Helper to find the function argument in a builder call (recipe/pattern).
+ * Searches from the end of the arguments array for the first function-like expression.
+ */
+function findFunctionArgument(
+  argsArray: readonly ts.Expression[],
+): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  for (let i = argsArray.length - 1; i >= 0; i--) {
+    const arg = argsArray[i];
+    if (
+      arg &&
+      (ts.isFunctionExpression(arg) || ts.isArrowFunction(arg))
+    ) {
+      return arg;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Helper to detect and collect schema arguments (non-function, non-string expressions).
+ * Returns an array of schema expressions found in the arguments.
+ */
+function detectSchemaArguments(
+  argsArray: readonly ts.Expression[],
+  functionArg: ts.Expression,
+): ts.Expression[] {
+  const schemas: ts.Expression[] = [];
+  for (const arg of argsArray) {
+    if (
+      arg &&
+      arg !== functionArg &&
+      !ts.isStringLiteral(arg) &&
+      !ts.isNoSubstitutionTemplateLiteral(arg)
+    ) {
+      schemas.push(arg);
+    }
+  }
+  return schemas;
+}
+
 export class SchemaInjectionTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
     return context.ctHelpers.sourceHasHelpers();
@@ -352,23 +393,8 @@ export class SchemaInjectionTransformer extends Transformer {
         const typeArgs = node.typeArguments;
         const argsArray = Array.from(node.arguments);
 
-        // Find the function argument - it's the last function-like expression in args
-        // Can be: recipe(fn), recipe("name", fn), recipe(schema, fn), recipe(schema, schema, fn)
-        let recipeFunction:
-          | ts.ArrowFunction
-          | ts.FunctionExpression
-          | undefined;
-        for (let i = argsArray.length - 1; i >= 0; i--) {
-          const arg = argsArray[i];
-          if (
-            arg &&
-            (ts.isFunctionExpression(arg) || ts.isArrowFunction(arg))
-          ) {
-            recipeFunction = arg;
-            break;
-          }
-        }
-
+        // Find the function argument using helper
+        const recipeFunction = findFunctionArgument(argsArray);
         if (!recipeFunction) {
           // No function found - skip transformation
           return ts.visitEachChild(node, visit, transformation);
@@ -415,28 +441,19 @@ export class SchemaInjectionTransformer extends Transformer {
             typeRegistry,
           );
         } else {
-          // Check if there's a schema argument (old single-schema format)
-          // Example: recipe(inputSchema, fn) or recipe("name", inputSchema, fn)
-          let existingInputSchema: ts.Expression | undefined;
+          // Detect schema arguments using helper
+          const schemaArgs = detectSchemaArguments(argsArray, recipeFunction);
 
-          // Find non-function, non-string arguments (schema objects)
-          for (const arg of argsArray) {
-            if (
-              arg &&
-              arg !== recipeFunction &&
-              !ts.isStringLiteral(arg) &&
-              !ts.isNoSubstitutionTemplateLiteral(arg)
-            ) {
-              existingInputSchema = arg;
-              break;
-            }
-          }
-
-          if (existingInputSchema) {
-            // Case 3a: Has schema argument but no type args (old format)
+          if (schemaArgs.length >= 2) {
+            // Already has two schemas (input + result) - skip transformation
+            // Example: recipe(inputSchema, resultSchema, fn) or recipe("name", inputSchema, resultSchema, fn)
+            return ts.visitEachChild(node, visit, transformation);
+          } else if (schemaArgs.length === 1) {
+            // Case 3a: Has one schema argument but no type args (old single-schema format)
             // Use existing schema as input, infer result from function
-            // We need to create a type node from the schema expression
-            // Since it's already a schema, we'll use it directly in the toSchema call
+            // Example: recipe(inputSchema, fn) or recipe("name", inputSchema, fn)
+            const existingInputSchema = schemaArgs[0]!;
+
             inputTypeNode = factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
             // Don't set inputType - we'll use the existing schema expression directly
 
@@ -460,7 +477,7 @@ export class SchemaInjectionTransformer extends Transformer {
               typeRegistry.set(toSchemaResult, resultType);
             }
 
-            const newArgs = [existingInputSchema, toSchemaResult, recipeFunction];
+            const newArgs = [existingInputSchema, toSchemaResult, recipeFunction!];
 
             const updated = factory.createCallExpression(
               node.expression,
@@ -525,80 +542,127 @@ export class SchemaInjectionTransformer extends Transformer {
         const typeArgs = node.typeArguments;
         const argsArray = Array.from(node.arguments);
 
-        // Get the function argument (should be the first and only argument)
-        const patternFunction = argsArray[0];
-        if (
-          !patternFunction ||
-          !(ts.isFunctionExpression(patternFunction) ||
-            ts.isArrowFunction(patternFunction))
-        ) {
+        // Find the function argument using helper
+        const patternFunction = findFunctionArgument(argsArray);
+        if (!patternFunction) {
+          // No function found - skip transformation
           return ts.visitEachChild(node, visit, transformation);
         }
 
-        // Handle explicit type arguments: pattern<Input, Output>(fn)
-        if (typeArgs && typeArgs.length >= 2) {
-          const [inputType, resultType] = typeArgs;
+        // Determine input and result schema TypeNodes based on type arguments
+        let argumentTypeNode: ts.TypeNode;
+        let argumentType: ts.Type | undefined;
+        let resultTypeNode: ts.TypeNode;
+        let resultType: ts.Type | undefined;
 
-          if (inputType && resultType) {
-            const argSchemaCall = createSchemaCallWithRegistryTransfer(
-              context,
-              inputType,
+        if (typeArgs && typeArgs.length >= 2) {
+          // Case 1: Two or more type arguments → both schemas from type args
+          // Example: pattern<Input, Output>(fn)
+          argumentTypeNode = typeArgs[0]!;
+          resultTypeNode = typeArgs[1]!;
+
+          // Check TypeRegistry for closure-captured types
+          if (typeRegistry) {
+            argumentType = typeRegistry.get(argumentTypeNode);
+            resultType = typeRegistry.get(resultTypeNode);
+          }
+        } else if (typeArgs && typeArgs.length === 1) {
+          // Case 2: One type argument → input from type arg, result inferred
+          // Example: pattern<Input>(fn)
+          argumentTypeNode = typeArgs[0]!;
+
+          // Check TypeRegistry for closure-captured types
+          if (typeRegistry) {
+            argumentType = typeRegistry.get(argumentTypeNode);
+          }
+
+          // Infer result type from function
+          const inferred = collectFunctionSchemaTypeNodes(
+            patternFunction,
+            checker,
+            sourceFile,
+          );
+          resultTypeNode = inferred.result ??
+            factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+          resultType = getTypeFromRegistryOrFallback(
+            resultTypeNode,
+            inferred.resultType,
+            typeRegistry,
+          );
+        } else {
+          // Case 3: No type arguments - check for schema arguments
+          // Detect schema arguments using helper
+          const schemaArgs = detectSchemaArguments(argsArray, patternFunction);
+
+          if (schemaArgs.length >= 2) {
+            // Already has two schemas (input + result) - skip transformation
+            // Example: pattern(fn, inputSchema, resultSchema)
+            return ts.visitEachChild(node, visit, transformation);
+          } else if (schemaArgs.length === 1) {
+            // Case 3a: Has one schema argument but no type args
+            // Use existing schema as input, infer result from function
+            // Example: pattern(fn, inputSchema)
+            const existingInputSchema = schemaArgs[0]!;
+
+            argumentTypeNode = factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+            // Don't set argumentType - we'll use the existing schema expression directly
+
+            // Infer result type from function
+            const inferred = collectFunctionSchemaTypeNodes(
+              patternFunction,
+              checker,
+              sourceFile,
+            );
+            resultTypeNode = inferred.result ??
+              factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+            resultType = getTypeFromRegistryOrFallback(
+              resultTypeNode,
+              inferred.resultType,
               typeRegistry,
             );
-            const resSchemaCall = createSchemaCallWithRegistryTransfer(
-              context,
-              resultType,
-              typeRegistry,
-            );
+
+            // Use existing schema directly as input, create result schema from type
+            const toSchemaResult = createToSchemaCall(context, resultTypeNode);
+            if (resultType && typeRegistry) {
+              typeRegistry.set(toSchemaResult, resultType);
+            }
 
             const updated = factory.createCallExpression(
               node.expression,
               undefined,
-              [patternFunction, argSchemaCall, resSchemaCall],
+              [patternFunction, existingInputSchema, toSchemaResult],
             );
 
             return ts.visitEachChild(updated, visit, transformation);
+          } else {
+            // Case 3b: No type arguments, no schema args → infer both from function
+            // Example: pattern(fn)
+            const inputParam = patternFunction.parameters[0];
+            const inferred = collectFunctionSchemaTypeNodes(
+              patternFunction,
+              checker,
+              sourceFile,
+            );
+
+            argumentTypeNode = inferred.argument ??
+              getParameterSchemaType(factory, inputParam);
+            argumentType = getTypeFromRegistryOrFallback(
+              argumentTypeNode,
+              inferred.argumentType,
+              typeRegistry,
+            );
+
+            resultTypeNode = inferred.result ??
+              factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+            resultType = getTypeFromRegistryOrFallback(
+              resultTypeNode,
+              inferred.resultType,
+              typeRegistry,
+            );
           }
         }
 
-        // Use type arguments as a hint for inference
-        const typeArgHints: ts.Type[] = [];
-        if (typeArgs) {
-          for (const typeArg of typeArgs) {
-            const type = checker.getTypeFromTypeNode(typeArg);
-            typeArgHints.push(type);
-          }
-        }
-
-        // Collect inferred types from the function
-        const inferred = collectFunctionSchemaTypeNodes(
-          patternFunction,
-          checker,
-          sourceFile,
-          typeArgHints[0], // Pass first type arg as fallback for parameter inference
-        );
-
-        // For argument: use inferred type or apply never/unknown refinement
-        const argumentTypeNode = inferred.argument ??
-          getParameterSchemaType(factory, patternFunction.parameters[0]);
-
-        // For result: use inferred type or default to unknown
-        const resultTypeNode = inferred.result ??
-          factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-
-        // Check TypeRegistry for existing types first (may be synthetic from ClosureTransformer)
-        const argumentType = getTypeFromRegistryOrFallback(
-          argumentTypeNode,
-          inferred.argumentType,
-          typeRegistry,
-        );
-        const resultType = getTypeFromRegistryOrFallback(
-          resultTypeNode,
-          inferred.resultType,
-          typeRegistry,
-        );
-
-        // Always create both schemas
+        // Create both schemas
         const argSchemaCall = createToSchemaCall(context, argumentTypeNode);
         if (argumentType && typeRegistry) {
           typeRegistry.set(argSchemaCall, argumentType);
@@ -609,7 +673,7 @@ export class SchemaInjectionTransformer extends Transformer {
           typeRegistry.set(resSchemaCall, resultType);
         }
 
-        // Always transform with both schemas
+        // Transform to pattern(fn, inputSchema, resultSchema)
         const updated = factory.createCallExpression(
           node.expression,
           undefined,

@@ -46,6 +46,8 @@ export default pattern(({ values }) => {
                     }
                 },
                 required: ["element", "params"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                $ref: "#/$defs/Element"
             } as const satisfies __ctHelpers.JSONSchema, ({ element: value, index: index, params: {} }) => (<div>
               {index}: {value}
             </div>)), {})}
