@@ -124,13 +124,12 @@ export function compileAndRun(
               contents: { type: "string" },
             },
             required: ["name", "contents"],
-            additionalProperties: false,
           },
+          default: [],
         },
-        main: { type: "string" },
+        main: { type: "string", default: "" },
       },
       required: ["files", "main"],
-      additionalProperties: false,
     }).withTx(tx).get();
     const input = inputsCell.withTx(tx).key("input");
 

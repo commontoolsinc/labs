@@ -29,8 +29,6 @@ import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { formatTransactionSummary } from "../storage/transaction-summary.ts";
 import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
-import { resolveLink } from "../link-resolution.ts";
-import { navigateTo } from "./navigate-to.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -196,7 +194,7 @@ function parseLLMFriendlyLink(
   // format)
   if (id === undefined || id.length < 20) {
     throw new Error(
-      `Charm references must use handles (e.g., "/of:bafyabc123/path"), not human names (e.g., "${id}"). Use listAttachments() to see available charm handles and their names.`,
+      `Charm references must use handles (e.g., "/of:bafyabc123/path"), not human names (e.g., "${id}").`,
     );
   }
 
@@ -429,8 +427,6 @@ function collectToolEntries(
 const READ_TOOL_NAME = "read";
 const INVOKE_TOOL_NAME = "invoke";
 const SCHEMA_TOOL_NAME = "schema";
-const LIST_ATTACHMENTS_TOOL_NAME = "listAttachments";
-const NAVIGATE_TO_TOOL_NAME = "navigateTo";
 const ADD_ATTACHMENT_TOOL_NAME = "addAttachment";
 const REMOVE_ATTACHMENT_TOOL_NAME = "removeAttachment";
 const FINAL_RESULT_TOOL_NAME = "finalResult";
@@ -485,29 +481,6 @@ const SCHEMA_INPUT_SCHEMA: JSONSchema = {
       required: ["@link"],
       description:
         'Link to the cell to inspect. Format: { "@link": "/of:bafyabc123" }.',
-    },
-  },
-  required: ["path"],
-  additionalProperties: false,
-};
-
-const LIST_ATTACHMENTS_INPUT_SCHEMA: JSONSchema = {
-  type: "object",
-  properties: {},
-  additionalProperties: false,
-};
-
-const NAVIGATE_TO_INPUT_SCHEMA: JSONSchema = {
-  type: "object",
-  properties: {
-    path: {
-      type: "object",
-      properties: {
-        "@link": { type: "string" },
-      },
-      required: ["@link"],
-      description:
-        'Link to navigate to in the UI. Format: { "@link": "/of:bafyabc123/path" }.',
     },
   },
   required: ["path"],
@@ -695,16 +668,8 @@ function flattenTools(
     description:
       'Invoke a handler or pattern. If you do not know the schema of the the handler, use schema() first. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
       'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ' +
-      "Compose: invoke() → read(result) or invoke() → navigateTo(result). " +
       attachmentContext,
     inputSchema: INVOKE_INPUT_SCHEMA,
-  };
-  flattened[NAVIGATE_TO_TOOL_NAME] = {
-    description:
-      'Navigate the UI to a cell. Input: { "@link": "/of:bafyabc123" }. ' +
-      "Use after fetchAndRun() to view the `/of:bafy...abc/result`, or to view any cell with [UI]. " +
-      attachmentContext,
-    inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
   };
   flattened[ADD_ATTACHMENT_TOOL_NAME] = {
     description:
@@ -718,11 +683,6 @@ function flattenTools(
       'Remove a bookmarked link. Input: { "@link": "/of:bafyabc123" }. ' +
       "Use when you no longer need quick access to a cell.",
     inputSchema: REMOVE_ATTACHMENT_INPUT_SCHEMA,
-  };
-  flattened[LIST_ATTACHMENTS_TOOL_NAME] = {
-    description: "List all bookmarked links with their paths and names. " +
-      "Shows what cells you've attached for quick reference.",
-    inputSchema: LIST_ATTACHMENTS_INPUT_SCHEMA,
   };
   flattened[SET_ARGUMENT_TOOL_NAME] = {
     description:
@@ -843,15 +803,8 @@ function buildToolCatalog(
   llmTools[INVOKE_TOOL_NAME] = {
     description:
       'Invoke a handler or pattern. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
-      'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ' +
-      "Compose: invoke() → read(result) or invoke() → navigateTo(result). ",
+      'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ',
     inputSchema: INVOKE_INPUT_SCHEMA,
-  };
-  llmTools[NAVIGATE_TO_TOOL_NAME] = {
-    description:
-      'Navigate the UI to a cell. Input: { "@link": "/of:bafyabc123" }. ' +
-      "Use after invoke() to show the result, or to view any cell of interest. ",
-    inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
   };
   llmTools[ADD_ATTACHMENT_TOOL_NAME] = {
     description:
@@ -865,11 +818,6 @@ function buildToolCatalog(
       'Remove a bookmarked link. Input: { "@link": "/of:bafyabc123" }. ' +
       "Use when you no longer need quick access to a cell.",
     inputSchema: REMOVE_ATTACHMENT_INPUT_SCHEMA,
-  };
-  llmTools[LIST_ATTACHMENTS_TOOL_NAME] = {
-    description: "List all bookmarked links with their paths and names. " +
-      "Shows what cells you've attached for quick reference.",
-    inputSchema: LIST_ATTACHMENTS_INPUT_SCHEMA,
   };
   llmTools[SET_ARGUMENT_TOOL_NAME] = {
     description:
@@ -953,12 +901,10 @@ type ResolvedToolCall =
     toolDef: Cell<Schema<typeof LLMToolSchema>>;
   }
   // Built-in tools provided by llm-dialog itself
-  | { type: "listAttachments"; call: LLMToolCall }
   | { type: "addAttachment"; call: LLMToolCall; path: string; name: string }
   | { type: "removeAttachment"; call: LLMToolCall; path: string }
   | { type: "schema"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "read"; call: LLMToolCall; cellRef: Cell<any> }
-  | { type: "navigateTo"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "finalResult"; call: LLMToolCall; result: unknown }
   | {
     type: "setArgument";
@@ -995,19 +941,10 @@ function resolveToolCall(
 
   if (
     name === READ_TOOL_NAME || name === INVOKE_TOOL_NAME ||
-    name === SCHEMA_TOOL_NAME || name === LIST_ATTACHMENTS_TOOL_NAME ||
-    name === NAVIGATE_TO_TOOL_NAME || name === ADD_ATTACHMENT_TOOL_NAME ||
+    name === SCHEMA_TOOL_NAME || name === ADD_ATTACHMENT_TOOL_NAME ||
     name === REMOVE_ATTACHMENT_TOOL_NAME || name === FINAL_RESULT_TOOL_NAME ||
     name === SET_ARGUMENT_TOOL_NAME
   ) {
-    // Handle listAttachments
-    if (name === LIST_ATTACHMENTS_TOOL_NAME) {
-      return {
-        type: "listAttachments",
-        call: { id, name, input: {} },
-      };
-    }
-
     // Handle addAttachment
     if (name === ADD_ATTACHMENT_TOOL_NAME) {
       const path = extractStringField(
@@ -1106,14 +1043,6 @@ function resolveToolCall(
 
       return {
         type: "read",
-        cellRef,
-        call: { id, name, input: { path: target } },
-      };
-    }
-
-    if (name === NAVIGATE_TO_TOOL_NAME) {
-      return {
-        type: "navigateTo",
         cellRef,
         call: { id, name, input: { path: target } },
       };
@@ -1407,16 +1336,6 @@ function handleRemoveAttachment(
 }
 
 /**
- * Handles the listAttachments tool call.
- */
-function handleListAttachments(
-  attachments: Cell<Attachment[]>,
-): { type: string; value: any } {
-  const current = attachments.get() || [];
-  return { type: "json", value: current };
-}
-
-/**
  * Handles the schema tool call.
  */
 function handleSchema(
@@ -1443,40 +1362,6 @@ function handleRead(
 
   // Handle undefined by returning null (valid JSON) instead
   return { type: "json", value: serialized ?? null, ...(schema && { schema }) };
-}
-
-/**
- * Handles the navigateTo tool call.
- */
-function handleNavigateTo(
-  runtime: IRuntime,
-  _space: MemorySpace,
-  resolved: ResolvedToolCall & { type: "navigateTo" },
-): { type: string; value: any } {
-  // The cellRef already points to the full path from the link resolution
-  const cellLink = resolved.cellRef.getAsNormalizedFullLink();
-
-  // Resolve any intermediate links and get the final cell
-  // We use "top" as the lastNode to avoid resolving the final link if the cell itself contains one.
-  // This prevents "double resolution" where we navigate to the target of the result instead of the result itself.
-  const resolvedLink = resolveLink(runtime.readTx(), cellLink, "top");
-  const resolvedCell = runtime.getCellFromLink(resolvedLink);
-
-  // Call the navigateTo builtin with the resolved cell
-  runtime.editWithRetry((tx) => {
-    const action = navigateTo(
-      resolvedCell,
-      () => {},
-      () => {},
-      [],
-      resolvedCell,
-      runtime,
-    );
-    action(tx);
-  });
-
-  // Return null since navigation is a side effect, not a value
-  return { type: "json", value: null };
 }
 
 /**
@@ -1686,20 +1571,12 @@ async function invokeToolCall(
     return handleRemoveAttachment(runtime, resolved, attachments!);
   }
 
-  if (resolved.type === "listAttachments") {
-    return handleListAttachments(attachments!);
-  }
-
   if (resolved.type === "schema") {
     return handleSchema(resolved);
   }
 
   if (resolved.type === "read") {
     return handleRead(resolved);
-  }
-
-  if (resolved.type === "navigateTo") {
-    return handleNavigateTo(runtime, space, resolved);
   }
 
   if (resolved.type === "finalResult") {
@@ -2000,9 +1877,8 @@ Tools work together by passing links between them:
 
 1. \`invoke({ "@link": "/of:abc/handler" }, args)\` → Returns \`{ "@link": "/of:xyz/result" }\`
 2. \`read({ "@link": "/of:xyz/result" })\` → Returns the data, which may contain nested links
-3. \`navigateTo({ "@link": "/of:xyz" })\` → Navigates the UI to view the result
-4. \`setArgument({ "@link": "/of:pattern" }, { field: value })\` → Updates running pattern arguments
-5. Data often contains links to other cells: \`{ items: [{ "@link": "/of:123" }, { "@link": "/of:456" }] }\`
+3. \`setArgument({ "@link": "/of:pattern" }, { field: value })\` → Updates running pattern arguments
+4. Data often contains links to other cells: \`{ items: [{ "@link": "/of:123" }, { "@link": "/of:456" }] }\`
 
 ## Pages
 
