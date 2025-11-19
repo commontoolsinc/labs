@@ -2,7 +2,6 @@ import ts from "typescript";
 
 import {
   detectCallKind,
-  getExpressionText,
   inferParameterType,
   inferReturnType,
   isAnyOrUnknownType,
