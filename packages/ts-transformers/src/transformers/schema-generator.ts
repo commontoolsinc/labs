@@ -139,10 +139,20 @@ function evaluateObjectLiteral(
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const prop of node.properties) {
-    if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) {
-      const value = evaluateExpression(prop.initializer, checker);
-      if (value !== undefined) {
-        result[prop.name.text] = value;
+    if (ts.isPropertyAssignment(prop)) {
+      // Handle both identifier and string literal property names
+      let propName: string | undefined;
+      if (ts.isIdentifier(prop.name)) {
+        propName = prop.name.text;
+      } else if (ts.isStringLiteral(prop.name)) {
+        propName = prop.name.text;
+      }
+
+      if (propName !== undefined) {
+        const value = evaluateExpression(prop.initializer, checker);
+        if (value !== undefined) {
+          result[propName] = value;
+        }
       }
     }
   }
