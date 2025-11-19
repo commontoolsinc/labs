@@ -375,17 +375,17 @@ jobs:
           name: shell-assets
           path: ./shell-assets
 
-      - name: 📤 Upload shell assets to GCS
+      - name: 📤 Upload shell assets to Staging GCS
         run: |
           # Upload to SHA-specific directory
-          gsutil -m rsync -r ./shell-assets gs://ct-shell-builds/builds/${{ github.sha }}/
+          gsutil -m rsync -r ./shell-assets gs://staging-commontools-dev/builds/${{ github.sha }}/
 
           # Upload to latest directory (overwrites)
-          gsutil -m rsync -r -d ./shell-assets gs://ct-shell-builds/builds/latest/
+          gsutil -m rsync -r -d ./shell-assets gs://staging-commontools-dev/builds/latest/
 
-          echo "::group::📦 Shell Asset Links"
-          echo "SHA build: https://storage.googleapis.com/ct-shell-builds/builds/${{ github.sha }}/index.html"
-          echo "Latest build: https://storage.googleapis.com/ct-shell-builds/builds/latest/index.html"
+          echo "::group::📦 Staging Shell Asset Links"
+          echo "SHA build: https://storage.googleapis.com/staging-commontools-dev/builds/${{ github.sha }}/index.html"
+          echo "Latest build: https://storage.googleapis.com/staging-commontools-dev/builds/latest/index.html"
           echo "::endgroup::"
 
       - name: 🚀 Upload artifacts to Google Cloud Storage
