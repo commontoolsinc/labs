@@ -99,7 +99,7 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
 function getCellSchema(
   cell: Cell<unknown>,
 ): { schema?: JSONSchema; rootSchema?: JSONSchema } | undefined {
-  if (cell.schema === undefined) return { schema: cell.schema };
+  if (cell.schema !== undefined) return { schema: cell.schema };
 
   const sourceCell = cell.getSourceCell<{ resultRef: Cell<unknown> }>({
     type: "object",
