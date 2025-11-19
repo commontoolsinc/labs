@@ -1508,7 +1508,7 @@ function handleRead(
 ): { type: string; value: unknown } {
   let cell = resolved.cellRef;
   if (!cell.schema) {
-    cell = cell.asSchema(getCellSchema(cell));
+    cell = cell.asSchema(getCellSchema(cell)?.schema);
   }
 
   const schema = cell.schema;
