@@ -3033,6 +3033,7 @@ interface CTStackLegacyAttributes<T> extends CTHTMLAttributes<T> {
 interface CTMessageInputAttributes<T> extends CTHTMLAttributes<T> {
   "name"?: string;
   "placeholder"?: string;
+  "buttonText"?: string;
   "appearance"?: "rounded";
 }
 
