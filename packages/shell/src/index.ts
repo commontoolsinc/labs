@@ -1,7 +1,6 @@
 import "core-js/proposals/explicit-resource-management";
 import "core-js/proposals/async-explicit-resource-management";
-import "@commontools/ui/v1";
-import "@commontools/ui/v2";
+import "@commontools/ui";
 import { setLLMUrl } from "@commontools/llm";
 import { setRecipeEnvironment } from "@commontools/runner";
 import { API_URL, COMMIT_SHA, ENVIRONMENT } from "./lib/env.ts";

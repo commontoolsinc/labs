@@ -1,18 +1,41 @@
-import { css, html, LitElement } from "lit";
-import { baseStyles } from "./style.ts";
-import { CommonCharmElement } from "./common-charm.ts";
+import { css, html } from "lit";
+import { BaseElement } from "../../core/base-element.ts";
+import { CTCharm } from "../ct-charm/ct-charm.ts";
 import { Cell } from "@commontools/runner";
 
-export class CommonUpdaterElement extends LitElement {
+/**
+ * CTUpdater - Button component for registering charms for background updates
+ *
+ * @element ct-updater
+ *
+ * @attr {Cell} state - Cell state object
+ * @attr {string} integration - Integration name/identifier
+ *
+ * @example
+ * <ct-updater .state=${cellState} integration="my-integration"></ct-updater>
+ */
+export class CTUpdater extends BaseElement {
   static override styles = [
-    baseStyles,
+    BaseElement.baseStyles,
     css`
       :host {
-        --button-background: #000;
-        --button-color: #fff;
-        --button-height: 40px;
-        --button-success-background: #2e7d32;
-        --button-error-background: #d32f2f;
+        --button-background: var(
+          --ct-theme-color-primary,
+          var(--ct-color-primary, #3b82f6)
+        );
+        --button-color: var(
+          --ct-theme-color-primary-foreground,
+          var(--ct-color-white, #ffffff)
+        );
+        --button-height: 2.5rem;
+        --button-success-background: var(
+          --ct-theme-color-success,
+          var(--ct-color-green-600, #16a34a)
+        );
+        --button-error-background: var(
+          --ct-theme-color-error,
+          var(--ct-color-red-600, #dc2626)
+        );
         display: block;
       }
 
@@ -26,15 +49,18 @@ export class CommonUpdaterElement extends LitElement {
         color: var(--button-color);
         cursor: pointer;
         display: flex;
-        font-size: var(--body-size);
+        font-size: 0.875rem;
+        font-family: var(--ct-theme-font-family, inherit);
+        font-weight: 500;
         height: var(--button-height);
         justify-content: center;
         overflow: hidden;
-        line-height: 20px;
-        padding: 8px 20px;
+        line-height: 1.25rem;
+        padding: 0.5rem 1.25rem;
         text-align: center;
         text-wrap: nowrap;
         width: 100%;
+        transition: all var(--ct-theme-animation-duration, 0.2s) ease;
       }
 
       .button[data-state="pending"] {
@@ -49,8 +75,23 @@ export class CommonUpdaterElement extends LitElement {
       .button[data-state="error"] {
         background-color: var(--button-error-background);
       }
+
+      .button:hover:not([data-state="pending"]) {
+        opacity: 0.9;
+        transform: translateY(-1px);
+      }
+
+      .button:active:not([data-state="pending"]) {
+        transform: translateY(0);
+      }
     `,
   ];
+
+  static override properties = {
+    state: { type: Object },
+    integration: { type: String },
+  };
+
   declare state: Cell<any>;
   declare integration: string;
   private updateState: "idle" | "pending" | "success" | "error" = "idle";
@@ -61,9 +102,9 @@ export class CommonUpdaterElement extends LitElement {
     this.updateState = "pending";
     this.requestUpdate();
 
-    const container = CommonCharmElement.findCharmContainer(this);
+    const container = CTCharm.findCharmContainer(this);
     if (!container) {
-      throw new Error("No <common-charm> container.");
+      throw new Error("No <ct-charm> container.");
     }
     const { charmId } = container;
     const space = this.state.space;
@@ -120,4 +161,4 @@ export class CommonUpdaterElement extends LitElement {
   }
 }
 
-globalThis.customElements.define("common-updater", CommonUpdaterElement);
+globalThis.customElements.define("ct-updater", CTUpdater);

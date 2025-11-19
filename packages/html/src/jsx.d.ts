@@ -2903,6 +2903,8 @@ interface CTGoogleOAuthElement extends CTHTMLElement {}
 interface CTCanvasElement extends CTHTMLElement {}
 interface CTDraggableElement extends CTHTMLElement {}
 interface CTPlaidLinkElement extends CTHTMLElement {}
+interface CTCharmElement extends CTHTMLElement {}
+interface CTIFrameElement extends CTHTMLElement {}
 
 interface CTDraggableAttributes<T> extends CTHTMLAttributes<T> {
   "key"?: number;
@@ -2931,6 +2933,11 @@ interface CTGoogleOAuthAttributes<T> extends CTHTMLAttributes<T> {
 interface CTUpdaterAttributes<T> extends CTHTMLAttributes<T> {
   "integration"?: string;
   "$state"?: CellLike<any>;
+}
+
+interface CTCharmAttributes<T> extends CTHTMLAttributes<T> {
+  "charm-id"?: string;
+  "space-name"?: string;
 }
 
 interface CTChatAttributes<T> extends CTHTMLAttributes<T> {
@@ -3780,10 +3787,6 @@ declare global {
         CTCopyButtonAttributes<CTCopyButtonElement>,
         CTCopyButtonElement
       >;
-      "common-iframe": CTDOM.DetailedHTMLProps<
-        CTIframeAttributes<CTIFrameElement>,
-        CTIFrameElement
-      >;
       "ct-fab": CTDOM.DetailedHTMLProps<
         CTFabAttributes<CTFabElement>,
         CTFabElement
@@ -3856,18 +3859,6 @@ declare global {
         CTHTMLAttributes<CTCTCollapsibleElement>,
         CTCTCollapsibleElement
       >;
-      "common-fragment": CTDOM.DetailedHTMLProps<
-        CTHTMLAttributes<CTFragmentElement>,
-        CTFragmentElement
-      >;
-      "common-updater": CTDOM.DetailedHTMLProps<
-        CTUpdaterAttributes<CTUpdaterElement>,
-        CTUpdaterElement
-      >;
-      "common-google-oauth": CTDOM.DetailedHTMLProps<
-        CTGoogleOAuthAttributes<CTGoogleOAuthElement>,
-        CTGoogleOAuthElement
-      >;
       "ct-canvas": CTDOM.DetailedHTMLProps<
         CTCanvasAttributes<CTCanvasElement>,
         CTCanvasElement
@@ -3884,15 +3875,30 @@ declare global {
         CTHTMLAttributes<CTHTMLElement>,
         CTHTMLElement
       >;
-      "common-code-editor": CTDOM.DetailedHTMLProps<
-        CTCodeEditorLegacyAttributes<CTCodeEditorLegacyElement>,
-        CTCodeEditorLegacyElement
+      "ct-charm": CTDOM.DetailedHTMLProps<
+        CTCharmAttributes<CTCharmElement>,
+        CTCharmElement
       >;
-      "common-plaid-link": CTDOM.DetailedHTMLProps<
+      "ct-fragment": CTDOM.DetailedHTMLProps<
+        CTHTMLAttributes<CTFragmentElement>,
+        CTFragmentElement
+      >;
+      "ct-iframe": CTDOM.DetailedHTMLProps<
+        CTIframeAttributes<CTIFrameElement>,
+        CTIFrameElement
+      >;
+      "ct-updater": CTDOM.DetailedHTMLProps<
+        CTUpdaterAttributes<CTUpdaterElement>,
+        CTUpdaterElement
+      >;
+      "ct-google-oauth": CTDOM.DetailedHTMLProps<
+        CTGoogleOAuthAttributes<CTGoogleOAuthElement>,
+        CTGoogleOAuthElement
+      >;
+      "ct-plaid-link": CTDOM.DetailedHTMLProps<
         CTPlaidLinkAttributes<CTPlaidLinkElement>,
         CTPlaidLinkElement
       >;
-      // Define both `ct-` and `common-` variants
       "ct-hstack": CTDOM.DetailedHTMLProps<
         CTStackAttributes<CTHStackElement>,
         CTHStackElement

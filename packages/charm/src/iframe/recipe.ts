@@ -39,7 +39,7 @@ export const buildFullRecipe = (iframe: IFrameRecipe) => {
   recipe(argumentSchema, resultSchema, (data) => ({
     [NAME]: name,
     [UI]: (
-      <common-iframe src={src} $context={data}></common-iframe>
+      <ct-iframe src={src} $context={data}></ct-iframe>
     ),
 ${result}
   }));
