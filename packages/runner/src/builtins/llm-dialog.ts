@@ -2078,6 +2078,25 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             llmContent,
             toolCallParts,
           );
+
+          // Add ID to assistant message and publish immediately
+          (assistantMessage as BuiltInLLMMessage & { [ID]: unknown })[ID] = {
+            llmDialog: { message: cause, id: crypto.randomUUID() },
+          };
+
+          await safelyPerformUpdate(
+            runtime,
+            pending,
+            internal,
+            requestId,
+            (tx) => {
+              messagesCell.withTx(tx).push(
+                assistantMessage as Schema<typeof LLMMessageSchema>,
+              );
+            },
+          );
+
+          // Now execute the tool calls
           const toolResults = await executeToolCalls(
             runtime,
             space,
@@ -2120,12 +2139,10 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             return;
           }
 
-          const newMessages: BuiltInLLMMessage[] = [
-            assistantMessage,
-            ...createToolResultMessages(toolResults),
-          ];
+          // Create and publish tool result messages
+          const toolResultMessages = createToolResultMessages(toolResults);
 
-          newMessages.forEach((message) => {
+          toolResultMessages.forEach((message) => {
             (message as BuiltInLLMMessage & { [ID]: unknown })[ID] = {
               llmDialog: { message: cause, id: crypto.randomUUID() },
             };
@@ -2138,7 +2155,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             requestId,
             (tx) => {
               messagesCell.withTx(tx).push(
-                ...(newMessages as Schema<typeof LLMMessageSchema>[]),
+                ...(toolResultMessages as Schema<typeof LLMMessageSchema>[]),
               );
             },
           );
