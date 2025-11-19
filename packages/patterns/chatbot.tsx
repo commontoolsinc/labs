@@ -7,12 +7,10 @@ import {
   fetchData,
   generateObject,
   handler,
-  ifElse,
   llmDialog,
   NAME,
   pattern,
   patternTool,
-  recipe,
   Stream,
   UI,
   VNode,
@@ -92,9 +90,9 @@ type ChatOutput = {
   };
 };
 
-export const TitleGenerator = recipe<
+export const TitleGenerator = pattern<
   { model?: string; messages: Array<BuiltInLLMMessage> }
->("Title Generator", ({ model, messages }) => {
+>(({ model, messages }) => {
   const previewMessage = computed(() => {
     if (!messages || messages.length === 0) return "";
 
@@ -142,37 +140,20 @@ const listMentionable = pattern<
   },
 );
 
-const listPatternIndex = recipe<
-  { query: string },
-  { result: string }
+const listRecent = pattern<
+  { recentCharms: Array<MentionableCharm> },
+  { result: Array<{ label: string; cell: Cell<unknown> }> }
 >(
-  ({ query: _ }) => {
-    const { pending, result } = fetchData({
-      url: "/api/patterns/index.md",
-      mode: "text",
-    });
-    return ifElse(computed(() => pending || !result), undefined, { result });
-  },
-);
-
-const listRecent = handler<
-  {
-    /** A cell to store the result text */
-    result: Cell<string>;
-  },
-  { recentCharms: Cell<MentionableCharm>[] }
->(
-  (args, state) => {
-    const namesList = state.recentCharms.map((charm) => ({
-      label: charm.get()[NAME],
+  ({ recentCharms }) => {
+    const namesList = recentCharms.map((charm) => ({
+      label: charm[NAME]!,
       cell: charm,
     }));
-    args.result.set(JSON.stringify(namesList));
+    return { result: namesList };
   },
 );
 
-export default recipe<ChatInput, ChatOutput>(
-  "Chat",
+export default pattern<ChatInput, ChatOutput>(
   ({ messages, tools, theme, system }) => {
     const model = Cell.of<string>("anthropic:claude-sonnet-4-5");
     const mentionable = schemaifyWish<MentionableCharm[]>("#mentionable");
@@ -180,12 +161,7 @@ export default recipe<ChatInput, ChatOutput>(
 
     const assistantTools = {
       listMentionable: patternTool(listMentionable, { mentionable }),
-      listPatternIndex: patternTool(listPatternIndex),
-      listRecent: {
-        description:
-          "List all recently viewed charms in the space, read() the result.",
-        handler: listRecent({ recentCharms }),
-      },
+      listRecent: patternTool(listRecent, { recentCharms }),
     };
 
     // Merge static and assistant tools

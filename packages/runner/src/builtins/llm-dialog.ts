@@ -693,7 +693,7 @@ function flattenTools(
   };
   flattened[INVOKE_TOOL_NAME] = {
     description:
-      'Invoke a handler or pattern. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
+      'Invoke a handler or pattern. If you do not know the schema of the the handler, use schema() first. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
       'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ' +
       "Compose: invoke() → read(result) or invoke() → navigateTo(result). " +
       attachmentContext,
@@ -702,14 +702,14 @@ function flattenTools(
   flattened[NAVIGATE_TO_TOOL_NAME] = {
     description:
       'Navigate the UI to a cell. Input: { "@link": "/of:bafyabc123" }. ' +
-      "Use after invoke() to show the result, or to view any cell of interest. " +
+      "Use after fetchAndRun() to view the `/of:bafy...abc/result`, or to view any cell with [UI]. " +
       attachmentContext,
     inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
   };
   flattened[ADD_ATTACHMENT_TOOL_NAME] = {
     description:
       'Bookmark a link for easy reference. Input: { "@link": "/of:bafyabc123" } and a name. ' +
-      "Attached links appear in the conversation and can be inspected with read() or schema(). " +
+      "Attached links appear in the system prompt with schema. " +
       "Use to track important cells you're working with.",
     inputSchema: ADD_ATTACHMENT_INPUT_SCHEMA,
   };
@@ -732,17 +732,14 @@ function flattenTools(
       'Example: setArgument({ "@link": "/of:xyz" }, { "query": "new search" })',
     inputSchema: SET_ARGUMENT_INPUT_SCHEMA,
   };
-
-  if (charms.length > 0) {
-    flattened[SCHEMA_TOOL_NAME] = {
-      description:
-        "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
-        'Input: { "@link": "/of:bafyabc123" }. ' +
-        "Returns schema showing what data can be read and what handlers can be invoked. " +
-        attachmentContext,
-      inputSchema: SCHEMA_INPUT_SCHEMA,
-    };
-  }
+  flattened[SCHEMA_TOOL_NAME] = {
+    description:
+      "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
+      'Input: { "@link": "/of:bafyabc123" }. ' +
+      "Returns schema showing what data can be read and what handlers can be invoked. " +
+      attachmentContext,
+    inputSchema: SCHEMA_INPUT_SCHEMA,
+  };
 
   return flattened;
 }

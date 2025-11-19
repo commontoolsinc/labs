@@ -4,12 +4,13 @@ import {
   compileAndRun,
   computed,
   derive,
+  fetchData,
   fetchProgram,
   handler,
   ifElse,
   NAME,
-  navigateTo,
   pattern,
+  patternTool,
   recipe,
   UI,
 } from "commontools";
@@ -39,24 +40,6 @@ const dismissPeek = handler<
   peekDismissedIndex.set(assistantMessageCount);
 });
 
-const _fetchAndRunAndNavigateToPattern = handler<
-  { url: string },
-  { mentionable: Cell<MentionableCharm[]> }
->(({ url }, { mentionable: _mentionable }) => {
-  const { pending: _fetchPending, result: program, error: _fetchError } =
-    fetchProgram({ url });
-
-  const compileParams = derive(program, (p) => ({
-    files: p?.files ?? [],
-    main: p?.main ?? "",
-    input: { value: 10 },
-  }));
-  const { pending: _compilePending, result, error: _compileError } =
-    compileAndRun(compileParams);
-
-  return navigateTo(result);
-});
-
 const fetchAndRunPattern = pattern(
   ({ url, args }: { url: string; args: any }) => {
     const { pending: _fetchPending, result: program, error: _fetchError } =
@@ -73,12 +56,25 @@ const fetchAndRunPattern = pattern(
   },
 );
 
+const listPatternIndex = pattern<
+  { query: string },
+  { result: string }
+>(
+  ({ query: _ }) => {
+    const { pending, result } = fetchData({
+      url: "/api/patterns/index.md",
+      mode: "text",
+    });
+    return ifElse(computed(() => pending || !result), undefined, { result });
+  },
+);
+
 export default recipe<OmniboxFABInput>(
   "OmniboxFAB",
   (_) => {
     const omnibot = Chatbot({
       system:
-        "You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.\n\nTool usage priority:\n- Search this space first: listMentionable → addAttachment to access items\n- Search externally only when clearly needed: searchWeb for current events, external information, or when nothing relevant exists in the space\n\nBe matter-of-fact. Prefer action to explanation.",
+        "You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.\n\nTool usage priority:\n- For patterns: listPatternIndex first\n- For existing pages/notes/content: listRecent or listMentionable to identify what they're referencing\n- Attach relevant items to conversation after instantiation/retrieval if they support ongoing tasks\n- Remove attachments when no longer relevant\n- Search web only as last resort when nothing exists in the space\n\nBe matter-of-fact. Prefer action to explanation.",
       tools: {
         searchWeb: {
           pattern: searchWeb,
@@ -91,9 +87,10 @@ export default recipe<OmniboxFABInput>(
         },
         fetchAndRunPattern: {
           description:
-            "Fetch a pattern from the URL, compile it and run it. You can pass arguments to the pattern using the 'args' parameter. To `navigateTo` the result you MUST append `/result` to the returned path.",
+            "Fetch a pattern from the URL, compile it and run it. You can pass arguments to the pattern using the 'args' parameter. ",
           pattern: fetchAndRunPattern,
         },
+        listPatternIndex: patternTool(listPatternIndex),
       },
     });
 
