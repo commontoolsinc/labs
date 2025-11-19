@@ -8,11 +8,10 @@ import {
   handler,
   NAME,
   navigateTo,
-  type OpaqueRef,
   patternTool,
   recipe,
   str,
-  Stream
+  Stream,
   UI,
   wish,
 } from "commontools";
