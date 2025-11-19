@@ -161,18 +161,8 @@ export class CTRender extends BaseElement {
 
     await cell.sync();
 
-    // Support both usage patterns:
-    // 1. Being passed a UI cell directly (e.g., cell.key(UI))
-    // 2. Being passed a root charm cell (extract UI subcell)
-    let uiCell = cell;
-    const uiSubcell = (cell as Cell<{ [UI]: unknown }>).key(UI);
-    if (uiSubcell.get() !== undefined) {
-      this._log("extracting UI subcell from root charm cell");
-      uiCell = uiSubcell;
-    }
-
     this._log("rendering UI");
-    this._cleanup = render(this._renderContainer, uiCell as Cell<VNode>);
+    this._cleanup = render(this._renderContainer, cell as Cell<VNode>);
   }
 
   private _isSubPath(cell: Cell<unknown>): boolean {

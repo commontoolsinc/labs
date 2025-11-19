@@ -79,6 +79,10 @@ export const renderImpl = (
   options: RenderOptions = {},
 ): Cancel => {
   // If there is no valid vnode, don't render anything
+  if (view === undefined) {
+    // Likely that content hasn't loaded yet
+    return () => {};
+  }
   if (!isVNode(view)) {
     logger.debug("No valid vnode to render", view);
     return () => {};

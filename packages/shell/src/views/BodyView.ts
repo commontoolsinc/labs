@@ -163,19 +163,17 @@ export class XBodyView extends BaseView {
       `
       : null;
 
-    const sidebarCell = this._selectSlotCell(
-      activeCharm,
-      "sidebarUI",
-      defaultCell,
-    );
-    const fabCell = this._selectSlotCell(
-      activeCharm,
-      "fabUI",
-      defaultCell,
-    );
+    // Get sidebar UI from current charm
+    const sidebarCell = activeCharm?.getCell().key("sidebarUI");
+
+    // Get fab UI from default charm
+    const fabCell = defaultCell?.key("fabUI");
 
     // Update sidebar content detection
-    const hasSidebarContent = !!sidebarCell;
+    // TODO(seefeld): Fix possible race here where charm is already set, but
+    // sidebar isn't loaded yet, which will now eventually render the sidebar,
+    // but not the button to hide it.
+    const hasSidebarContent = !!sidebarCell?.get();
     if (this.hasSidebarContent !== hasSidebarContent) {
       this.hasSidebarContent = hasSidebarContent;
       // Notify parent of sidebar content changes
@@ -203,47 +201,6 @@ export class XBodyView extends BaseView {
         </x-omni-layout>
       </div>
     `;
-  }
-
-  private _selectSlotCell(
-    charm: CharmController | undefined,
-    key: string,
-    defaultCell: Cell<unknown> | undefined,
-  ): Cell<unknown> | undefined {
-    if (charm) {
-      const overrideCell = charm.getCell().key(key as never);
-      if (this._cellHasRenderableUi(overrideCell)) {
-        return overrideCell;
-      }
-    }
-
-    if (!defaultCell) {
-      return undefined;
-    }
-
-    const fallbackCell = defaultCell.key(key as never);
-    return this._cellHasRenderableUi(fallbackCell) ? fallbackCell : undefined;
-  }
-
-  private _cellHasRenderableUi(cell: Cell<unknown>): boolean {
-    const value = this._safeGetCellValue(cell);
-    if (value === undefined) {
-      return false;
-    }
-
-    if (isVNode(value)) {
-      return true;
-    }
-
-    return typeof value === "object" && value !== null && UI in value;
-  }
-
-  private _safeGetCellValue(cell: Cell<unknown>): unknown {
-    try {
-      return cell.get();
-    } catch (_error) {
-      return undefined;
-    }
   }
 }
 
