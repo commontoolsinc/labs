@@ -415,30 +415,86 @@ export class SchemaInjectionTransformer extends Transformer {
             typeRegistry,
           );
         } else {
-          // Case 3: No type arguments → infer both from function
-          // Example: recipe(fn)
-          const inputParam = recipeFunction.parameters[0];
-          const inferred = collectFunctionSchemaTypeNodes(
-            recipeFunction,
-            checker,
-            sourceFile,
-          );
+          // Check if there's a schema argument (old single-schema format)
+          // Example: recipe(inputSchema, fn) or recipe("name", inputSchema, fn)
+          let existingInputSchema: ts.Expression | undefined;
 
-          inputTypeNode = inferred.argument ??
-            getParameterSchemaType(factory, inputParam);
-          inputType = getTypeFromRegistryOrFallback(
-            inputTypeNode,
-            inferred.argumentType,
-            typeRegistry,
-          );
+          // Find non-function, non-string arguments (schema objects)
+          for (const arg of argsArray) {
+            if (
+              arg &&
+              arg !== recipeFunction &&
+              !ts.isStringLiteral(arg) &&
+              !ts.isNoSubstitutionTemplateLiteral(arg)
+            ) {
+              existingInputSchema = arg;
+              break;
+            }
+          }
 
-          resultTypeNode = inferred.result ??
-            factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-          resultType = getTypeFromRegistryOrFallback(
-            resultTypeNode,
-            inferred.resultType,
-            typeRegistry,
-          );
+          if (existingInputSchema) {
+            // Case 3a: Has schema argument but no type args (old format)
+            // Use existing schema as input, infer result from function
+            // We need to create a type node from the schema expression
+            // Since it's already a schema, we'll use it directly in the toSchema call
+            inputTypeNode = factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+            // Don't set inputType - we'll use the existing schema expression directly
+
+            // Infer result type from function
+            const inferred = collectFunctionSchemaTypeNodes(
+              recipeFunction,
+              checker,
+              sourceFile,
+            );
+            resultTypeNode = inferred.result ??
+              factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+            resultType = getTypeFromRegistryOrFallback(
+              resultTypeNode,
+              inferred.resultType,
+              typeRegistry,
+            );
+
+            // Use existing schema directly as input, create result schema from type
+            const toSchemaResult = createToSchemaCall(context, resultTypeNode);
+            if (resultType && typeRegistry) {
+              typeRegistry.set(toSchemaResult, resultType);
+            }
+
+            const newArgs = [existingInputSchema, toSchemaResult, recipeFunction];
+
+            const updated = factory.createCallExpression(
+              node.expression,
+              undefined,
+              newArgs,
+            );
+
+            return ts.visitEachChild(updated, visit, transformation);
+          } else {
+            // Case 3b: No type arguments, no schema args → infer both from function
+            // Example: recipe(fn) or recipe("name", fn)
+            const inputParam = recipeFunction.parameters[0];
+            const inferred = collectFunctionSchemaTypeNodes(
+              recipeFunction,
+              checker,
+              sourceFile,
+            );
+
+            inputTypeNode = inferred.argument ??
+              getParameterSchemaType(factory, inputParam);
+            inputType = getTypeFromRegistryOrFallback(
+              inputTypeNode,
+              inferred.argumentType,
+              typeRegistry,
+            );
+
+            resultTypeNode = inferred.result ??
+              factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+            resultType = getTypeFromRegistryOrFallback(
+              resultTypeNode,
+              inferred.resultType,
+              typeRegistry,
+            );
+          }
         }
 
         // Create both schemas
