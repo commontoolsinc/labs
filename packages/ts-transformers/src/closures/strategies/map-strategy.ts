@@ -1,0 +1,804 @@
+import ts from "typescript";
+import type { TransformationContext } from "../../core/mod.ts";
+import type { ClosureTransformationStrategy } from "./strategy.ts";
+import {
+  getCellKind,
+  isOpaqueRefType,
+} from "../../transformers/opaque-ref/opaque-ref.ts";
+import {
+  createDataFlowAnalyzer,
+  detectCallKind,
+  getTypeAtLocationWithFallback,
+  isFunctionLikeExpression,
+
+} from "../../ast/mod.ts";
+import {
+  inferArrayElementType,
+  registerTypeForNode,
+  tryExplicitParameterType,
+} from "../../ast/type-inference.ts";
+import { buildTypeElementsFromCaptureTree } from "../../ast/type-building.ts";
+import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
+import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
+import {
+  createBindingElementsFromNames,
+  createParameterFromBindings,
+  createPropertyName,
+  reserveIdentifier,
+} from "../../utils/identifiers.ts";
+import {
+  analyzeElementBinding,
+  normalizeBindingName,
+  rewriteCallbackBody,
+} from "../computed-aliases.ts";
+import type { ComputedAliasInfo } from "../computed-aliases.ts";
+import { CaptureCollector } from "../capture-collector.ts";
+
+export class MapStrategy implements ClosureTransformationStrategy {
+  canTransform(
+    node: ts.Node,
+    context: TransformationContext,
+  ): boolean {
+    return ts.isCallExpression(node) && isOpaqueRefArrayMapCall(
+      node,
+      context.checker,
+      context.options.typeRegistry,
+      context.options.logger,
+    );
+  }
+
+  transform(
+    node: ts.Node,
+    context: TransformationContext,
+    visitor: ts.Visitor,
+  ): ts.Node | undefined {
+    if (!ts.isCallExpression(node)) return undefined;
+
+    const callback = node.arguments[0];
+    if (callback && isFunctionLikeExpression(callback)) {
+      if (shouldTransformMap(node, context)) {
+        return transformMapCallback(node, callback, context, visitor);
+      }
+    }
+    return undefined;
+  }
+}
+
+/**
+ * Helper to check if a type's type argument is an array.
+ * Handles unions and intersections recursively, similar to isOpaqueRefType.
+ */
+function hasArrayTypeArgument(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
+  // Handle unions - check if any member has an array type argument
+  if (type.flags & ts.TypeFlags.Union) {
+    return (type as ts.UnionType).types.some((t: ts.Type) =>
+      hasArrayTypeArgument(t, checker)
+    );
+  }
+
+  // Handle intersections - check if any member has an array type argument
+  if (type.flags & ts.TypeFlags.Intersection) {
+    return (type as ts.IntersectionType).types.some((t: ts.Type) =>
+      hasArrayTypeArgument(t, checker)
+    );
+  }
+
+  // Handle object types with type references (e.g., OpaqueRef<T[]>)
+  if (type.flags & ts.TypeFlags.Object) {
+    const objectType = type as ts.ObjectType;
+    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+      const typeRef = objectType as ts.TypeReference;
+      if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
+        const innerType = typeRef.typeArguments[0];
+        if (!innerType) return false;
+        // Check if inner type is an array or tuple
+        return checker.isArrayType(innerType) || checker.isTupleType(innerType);
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Checks if this is an OpaqueRef<T[]> or Cell<T[]> map call.
+ * Only transforms map calls on reactive arrays (OpaqueRef/Cell), not plain arrays.
+ *
+ * Also handles method chains like state.items.filter(...).map(...) where:
+ * - The filter returns OpaqueRef<T>[] (array of OpaqueRefs)
+ * - But the origin is OpaqueRef<T[]> (OpaqueRef of array)
+ * - We transform it because JSX transformer will wrap intermediate calls in derive
+ */
+export function isOpaqueRefArrayMapCall(
+  node: ts.CallExpression,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+  logger?: (message: string) => void,
+): boolean {
+  // Check if this is a property access expression with name "map"
+  if (!ts.isPropertyAccessExpression(node.expression)) return false;
+  if (node.expression.name.text !== "map") return false;
+
+  // Get the type of the target (what we're calling .map on)
+  const target = node.expression.expression;
+
+  const targetType = getTypeAtLocationWithFallback(
+    target,
+    checker,
+    typeRegistry,
+    logger,
+  );
+  if (!targetType) {
+    return false;
+  }
+
+  // Special case: If target is a derive call, always treat .map() as needing transformation
+  // Rationale: derive() returns OpaqueRef<T> where T is the callback's return type.
+  // For synthetic derive calls, we can't construct the OpaqueRef<T> wrapper type to register,
+  // so we register the callback's return type instead. This means type-based detection
+  // (isOpaqueRefType + hasArrayTypeArgument) won't recognize it, so we explicitly check
+  // for derive calls. Since derive() always returns opaque values, if we're calling .map()
+  // on it, it must be an array at runtime (otherwise the code would crash), so we should
+  // transform to mapWithPattern.
+  if (ts.isCallExpression(target)) {
+    const callKind = detectCallKind(target, checker);
+    if (callKind?.kind === "derive") {
+      return true;
+    }
+  }
+
+  // Check direct case: target is OpaqueRef<T[]> or Cell<T[]>
+  if (
+    isOpaqueRefType(targetType, checker) &&
+    hasArrayTypeArgument(targetType, checker)
+  ) {
+    return true;
+  }
+
+  // Check method chain case: x.filter(...).map(...) where x is OpaqueRef<T[]>
+  // Array methods that return arrays and might appear before .map()
+  const arrayMethods = [
+    "filter",
+    "slice",
+    "concat",
+    "reverse",
+    "sort",
+    "flat",
+    "flatMap",
+  ];
+
+  let current: ts.Expression = target;
+
+  // Walk back through call chain to find the origin
+  while (
+    ts.isCallExpression(current) &&
+    ts.isPropertyAccessExpression(current.expression) &&
+    arrayMethods.includes(current.expression.name.text)
+  ) {
+    current = current.expression.expression;
+  }
+
+  // Check if origin is OpaqueRef<T[]> or Cell<T[]>
+  const originType = getTypeAtLocationWithFallback(
+    current,
+    checker,
+    typeRegistry,
+    logger,
+  );
+  if (!originType) {
+    return false;
+  }
+
+  return isOpaqueRefType(originType, checker) &&
+    hasArrayTypeArgument(originType, checker);
+}
+
+function determineElementType(
+  mapCall: ts.CallExpression,
+  elemParam: ts.ParameterDeclaration | undefined,
+  context: TransformationContext,
+): { typeNode: ts.TypeNode; type?: ts.Type } {
+  const { checker, factory } = context;
+  const typeRegistry = context.options.typeRegistry;
+
+  // Try explicit annotation
+  const explicit = tryExplicitParameterType(elemParam, checker, typeRegistry);
+  if (explicit) return explicit;
+
+  // Try inference from map call
+  const inferred = inferElementType(mapCall, context);
+  if (inferred.type) {
+    return {
+      typeNode: registerTypeForNode(
+        inferred.typeNode,
+        inferred.type,
+        typeRegistry,
+      ),
+      type: inferred.type,
+    };
+  }
+
+  // Fallback: infer from the map call location itself
+  const type = checker.getTypeAtLocation(mapCall);
+  const typeNode = checker.typeToTypeNode(
+    type,
+    context.sourceFile,
+    ts.NodeBuilderFlags.NoTruncation |
+    ts.NodeBuilderFlags.UseStructuralFallback,
+  ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+  return {
+    typeNode: registerTypeForNode(typeNode, type, typeRegistry),
+    type,
+  };
+}
+
+/**
+ * Build property assignments for captured variables from a capture tree.
+ * Used by map, handler, and derive transformations to build params/input objects.
+ */
+export function buildCapturePropertyAssignments(
+  captureTree: Map<string, CaptureTreeNode>,
+  factory: ts.NodeFactory,
+): ts.PropertyAssignment[] {
+  const properties: ts.PropertyAssignment[] = [];
+  for (const [rootName, node] of captureTree) {
+    properties.push(
+      factory.createPropertyAssignment(
+        createPropertyName(rootName, factory),
+        buildHierarchicalParamsValue(node, rootName, factory),
+      ),
+    );
+  }
+  return properties;
+}
+
+/**
+ * Build a TypeNode for the callback parameter and register property TypeNodes in typeRegistry.
+ * Returns a TypeLiteral representing { element: T, index?: number, array?: T[], params: {...} }
+ */
+function buildCallbackParamTypeNode(
+  mapCall: ts.CallExpression,
+  elemParam: ts.ParameterDeclaration | undefined,
+  indexParam: ts.ParameterDeclaration | undefined,
+  arrayParam: ts.ParameterDeclaration | undefined,
+  captureTree: Map<string, CaptureTreeNode>,
+  context: TransformationContext,
+): ts.TypeNode {
+  const { factory } = context;
+
+  // 1. Determine element type
+  const { typeNode: elemTypeNode } = determineElementType(
+    mapCall,
+    elemParam,
+    context,
+  );
+
+  // 2. Build callback parameter properties
+  const callbackParamProperties: ts.TypeElement[] = [
+    factory.createPropertySignature(
+      undefined,
+      factory.createIdentifier("element"),
+      undefined,
+      elemTypeNode,
+    ),
+  ];
+
+  // 3. Add optional index property if present
+  if (indexParam) {
+    callbackParamProperties.push(
+      factory.createPropertySignature(
+        undefined,
+        factory.createIdentifier("index"),
+        factory.createToken(ts.SyntaxKind.QuestionToken),
+        factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
+      ),
+    );
+  }
+
+  // 4. Add optional array property if present
+  if (arrayParam) {
+    // The array type is T[] where T is the element type
+    const arrayTypeNode = factory.createArrayTypeNode(elemTypeNode);
+    callbackParamProperties.push(
+      factory.createPropertySignature(
+        undefined,
+        factory.createIdentifier("array"),
+        factory.createToken(ts.SyntaxKind.QuestionToken),
+        arrayTypeNode,
+      ),
+    );
+  }
+
+  // 5. Build params object type with hierarchical captures
+  const paramsProperties = buildTypeElementsFromCaptureTree(
+    captureTree,
+    context,
+  );
+
+  // 6. Add params property
+  callbackParamProperties.push(
+    factory.createPropertySignature(
+      undefined,
+      factory.createIdentifier("params"),
+      undefined,
+      factory.createTypeLiteralNode(paramsProperties),
+    ),
+  );
+
+  return factory.createTypeLiteralNode(callbackParamProperties);
+}
+
+/**
+ * Infer the element type from an OpaqueRef<T[]> or Array<T> being mapped.
+ * This is a thin wrapper around inferArrayElementType that extracts the array expression
+ * from the map call.
+ */
+function inferElementType(
+  mapCall: ts.CallExpression,
+  context: TransformationContext,
+): { typeNode: ts.TypeNode; type?: ts.Type } {
+  const { factory } = context;
+
+  if (!ts.isPropertyAccessExpression(mapCall.expression)) {
+    return {
+      typeNode: factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+    };
+  }
+
+  const arrayExpr = mapCall.expression.expression;
+  return inferArrayElementType(arrayExpr, {
+    ...context,
+    typeRegistry: context.options.typeRegistry,
+  });
+}
+
+/**
+ * Check if map call is inside a derive/computed callback with a non-Cell OpaqueRef.
+ * Returns true if we should skip transformation due to OpaqueRef unwrapping.
+ */
+function isInsideDeriveWithOpaqueRef(
+  mapCall: ts.CallExpression,
+  context: TransformationContext,
+): boolean {
+  const { checker } = context;
+  const typeRegistry = context.options.typeRegistry;
+
+  let node: ts.Node = mapCall;
+  while (node.parent) {
+    if (
+      ts.isArrowFunction(node.parent) || ts.isFunctionExpression(node.parent)
+    ) {
+      const callback = node.parent;
+      // Check if this callback's parent is a derive call
+      if (callback.parent && ts.isCallExpression(callback.parent)) {
+        const deriveCall = callback.parent;
+        const callKind = detectCallKind(deriveCall, checker);
+
+        // Check if this is a derive or computed call
+        // Note: Even though ComputedTransformer runs first, callback nodes are reused,
+        // so parent pointers may still point to the original 'computed' call
+        const isDeriveOrComputed = callKind?.kind === "derive" ||
+          (callKind?.kind === "builder" && callKind.builderName === "computed");
+
+        if (
+          isDeriveOrComputed &&
+          ts.isPropertyAccessExpression(mapCall.expression)
+        ) {
+          // We're inside a derive callback - check if target is Cell or OpaqueRef
+          const mapTarget = mapCall.expression.expression;
+
+          const targetType = getTypeAtLocationWithFallback(
+            mapTarget,
+            checker,
+            typeRegistry,
+            context.options.logger,
+          );
+
+          if (targetType && isOpaqueRefType(targetType, checker)) {
+            const kind = getCellKind(targetType, checker);
+            // Only skip transformation for non-Cell OpaqueRefs
+            // Cell<T[]>.map() should still transform even inside derive
+            if (kind !== "cell") {
+              return true;
+            }
+          }
+        }
+      }
+    }
+    node = node.parent;
+  }
+
+  return false;
+}
+
+/**
+ * Find the closest JSX expression ancestor of a node.
+ */
+function findClosestJsxExpression(
+  node: ts.Node,
+): ts.JsxExpression | undefined {
+  let current = node;
+  while (current.parent) {
+    if (ts.isJsxExpression(current.parent)) {
+      return current.parent;
+    }
+    current = current.parent;
+  }
+  return undefined;
+}
+
+/**
+ * Helper to check if a node is contained within a specific argument of a call expression.
+ */
+function isWithinArgument(
+  node: ts.Node,
+  callExpr: ts.CallExpression,
+  argIndex: number,
+): boolean {
+  let current: ts.Node | undefined = node;
+  while (current && current !== callExpr) {
+    if (
+      ts.isCallExpression(current.parent) &&
+      current.parent === callExpr &&
+      current.parent.arguments[argIndex] === current
+    ) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+/**
+ * Check if a map call will be wrapped in a derive by the JSX transformer.
+ * Returns true if wrapping will occur (meaning we should NOT transform the map).
+ */
+function willBeWrappedByJsx(
+  mapCall: ts.CallExpression,
+  closestJsxExpression: ts.JsxExpression,
+  context: TransformationContext,
+): boolean {
+  // JSX expression must have an expression to analyze
+  if (!closestJsxExpression.expression) {
+    return false;
+  }
+
+  const analyze = createDataFlowAnalyzer(context.checker);
+
+  // Case 1: Map is nested in a larger expression within the same JSX expression
+  // Example: {list.length > 0 && list.map(...)}
+  // Only check THIS expression for derive wrapping
+  if (closestJsxExpression.expression !== mapCall) {
+    const analysis = analyze(closestJsxExpression.expression);
+
+    // Special case: ifElse calls only wrap the predicate (first argument),
+    // not the branches (second and third arguments)
+    if (
+      analysis.rewriteHint?.kind === "call-if-else" &&
+      ts.isCallExpression(closestJsxExpression.expression)
+    ) {
+      // If map is in the predicate (arg 0), it will be wrapped
+      // If map is in the branches (args 1 or 2), it won't be wrapped
+      return isWithinArgument(
+        mapCall,
+        closestJsxExpression.expression,
+        0,
+      );
+    }
+
+    // Check if this will be wrapped in a derive (not just transformed in some other way)
+    // Array-map calls have skip-call-rewrite hint, so they won't be wrapped in derive
+    const willBeWrappedInDerive = analysis.requiresRewrite &&
+      !(analysis.rewriteHint?.kind === "skip-call-rewrite" &&
+        analysis.rewriteHint.reason === "array-map");
+    return willBeWrappedInDerive;
+  }
+
+  // Case 2: Map IS the direct content of the JSX expression
+  // Example: <div>{list.map(...)}</div>
+  // Check if an ANCESTOR JSX expression will wrap this in a derive
+  let node: ts.Node | undefined = closestJsxExpression.parent;
+  while (node) {
+    if (ts.isJsxExpression(node) && node.expression) {
+      const analysis = analyze(node.expression);
+
+      // Special case: ifElse calls only wrap the predicate
+      if (
+        analysis.rewriteHint?.kind === "call-if-else" &&
+        ts.isCallExpression(node.expression)
+      ) {
+        // If map is in the predicate, it will be wrapped
+        if (isWithinArgument(mapCall, node.expression, 0)) {
+          return true;
+        }
+        // If map is in the branches, continue checking ancestors
+      } else {
+        const willBeWrappedInDerive = analysis.requiresRewrite &&
+          !(analysis.rewriteHint?.kind === "skip-call-rewrite" &&
+            analysis.rewriteHint.reason === "array-map");
+        if (willBeWrappedInDerive) {
+          // An ancestor JSX expression will wrap this in a derive
+          return true;
+        }
+      }
+    }
+    node = node.parent;
+  }
+
+  // No ancestor will wrap in derive
+  return false;
+}
+
+/**
+ * Check if a map call should be transformed to mapWithPattern.
+ * Returns false if the map will end up inside a derive (where the array is unwrapped).
+ *
+ * This happens when the map is nested inside a larger expression with opaque refs,
+ * e.g., `list.length > 0 && list.map(...)` becomes `derive(list, list => ...)`
+ *
+ * Special case: Inside derive callbacks, Cell<T[]>.map() should still be transformed,
+ * but OpaqueRef<T[]>.map() should not (OpaqueRefs are unwrapped in derive).
+ */
+function shouldTransformMap(
+  mapCall: ts.CallExpression,
+  context: TransformationContext,
+): boolean {
+  // Early exit: Don't transform if inside derive with non-Cell OpaqueRef
+  const insideDeriveWithOpaque = isInsideDeriveWithOpaqueRef(mapCall, context);
+  if (insideDeriveWithOpaque) {
+    return false;
+  }
+
+  // Find the closest containing JSX expression
+  const closestJsxExpression = findClosestJsxExpression(mapCall);
+
+  // If we didn't find a JSX expression, default to transforming
+  // (this handles maps in regular statements like `const x = items.map(...)`)
+  if (!closestJsxExpression || !closestJsxExpression.expression) {
+    return true;
+  }
+
+  // Check if this expression or ancestors will be wrapped by JSX transformer
+  const willBeWrapped = willBeWrappedByJsx(
+    mapCall,
+    closestJsxExpression,
+    context,
+  );
+  const shouldTransform = !willBeWrapped;
+  return shouldTransform;
+}
+
+/**
+ * Create the final recipe call with params object.
+ */
+function createRecipeCallWithParams(
+  mapCall: ts.CallExpression,
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  transformedBody: ts.ConciseBody,
+  elemParam: ts.ParameterDeclaration | undefined,
+  indexParam: ts.ParameterDeclaration | undefined,
+  arrayParam: ts.ParameterDeclaration | undefined,
+  captureTree: Map<string, CaptureTreeNode>,
+  context: TransformationContext,
+  visitor: ts.Visitor,
+): ts.CallExpression {
+  const { factory } = context;
+
+  const bindingElements: ts.BindingElement[] = [];
+  const usedBindingNames = new Set<string>();
+
+  const createBindingIdentifier = (name: string): ts.Identifier => {
+    return reserveIdentifier(name, usedBindingNames, factory);
+  };
+
+  const elementAnalysis = analyzeElementBinding(
+    elemParam,
+    captureTree,
+    context,
+    usedBindingNames,
+    createBindingIdentifier,
+  );
+  const elementBindingName = elementAnalysis.bindingName;
+  const elementPropertyName = ts.isIdentifier(elementBindingName) &&
+    elementBindingName.text === "element"
+    ? undefined
+    : factory.createIdentifier("element");
+  bindingElements.push(
+    factory.createBindingElement(
+      undefined,
+      elementPropertyName,
+      elementBindingName,
+      undefined,
+    ),
+  );
+
+  if (indexParam) {
+    bindingElements.push(
+      factory.createBindingElement(
+        undefined,
+        factory.createIdentifier("index"),
+        normalizeBindingName(indexParam.name, factory, usedBindingNames),
+        undefined,
+      ),
+    );
+  }
+
+  if (arrayParam) {
+    bindingElements.push(
+      factory.createBindingElement(
+        undefined,
+        factory.createIdentifier("array"),
+        normalizeBindingName(arrayParam.name, factory, usedBindingNames),
+        undefined,
+      ),
+    );
+  }
+
+  // Filter out computed aliases from params - they'll be declared as local consts instead
+  const computedAliasNames = new Set(
+    elementAnalysis.computedAliases.map((alias) => alias.aliasName),
+  );
+
+  // Create a filtered capture tree without computed aliases
+  const filteredCaptureTree = new Map(
+    Array.from(captureTree.entries()).filter(
+      ([key]) => !computedAliasNames.has(key),
+    ),
+  );
+
+  const paramsBindings = createBindingElementsFromNames(
+    filteredCaptureTree.keys(),
+    factory,
+    createBindingIdentifier,
+  );
+
+  const paramsPattern = factory.createObjectBindingPattern(paramsBindings);
+
+  bindingElements.push(
+    factory.createBindingElement(
+      undefined,
+      factory.createIdentifier("params"),
+      paramsPattern,
+      undefined,
+    ),
+  );
+
+  const destructuredParam = createParameterFromBindings(
+    bindingElements,
+    factory,
+  );
+
+  const visitedAliases: ComputedAliasInfo[] = elementAnalysis
+    .computedAliases.map((info) => {
+      const keyExpression = ts.visitNode(
+        info.keyExpression,
+        visitor,
+        ts.isExpression,
+      ) ?? info.keyExpression;
+      return { ...info, keyExpression };
+    });
+
+  const rewrittenBody = rewriteCallbackBody(
+    transformedBody,
+    {
+      bindingName: elementAnalysis.bindingName,
+      elementIdentifier: elementAnalysis.elementIdentifier,
+      destructureStatement: elementAnalysis.destructureStatement,
+      computedAliases: visitedAliases,
+    },
+    context,
+  );
+
+  const newCallback = factory.createArrowFunction(
+    callback.modifiers,
+    callback.typeParameters,
+    [destructuredParam],
+    callback.type,
+    ts.isArrowFunction(callback)
+      ? callback.equalsGreaterThanToken
+      : factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+    rewrittenBody,
+  );
+
+  context.markAsMapCallback(newCallback);
+
+  const callbackParamTypeNode = buildCallbackParamTypeNode(
+    mapCall,
+    elemParam,
+    indexParam,
+    arrayParam,
+    filteredCaptureTree,
+    context,
+  );
+
+  const recipeExpr = context.ctHelpers.getHelperExpr("recipe");
+  const recipeCall = factory.createCallExpression(
+    recipeExpr,
+    [callbackParamTypeNode],
+    [newCallback],
+  );
+
+  const paramProperties = buildCapturePropertyAssignments(
+    filteredCaptureTree,
+    factory,
+  );
+
+  const paramsObject = factory.createObjectLiteralExpression(
+    paramProperties,
+    paramProperties.length > 0,
+  );
+
+  if (!ts.isPropertyAccessExpression(mapCall.expression)) {
+    throw new Error(
+      "Expected mapCall.expression to be a PropertyAccessExpression",
+    );
+  }
+
+  // Visit the array expression to transform any derive() calls in the chain
+  // Example: derive({}, () => expr).mapWithPattern(...)
+  const visitedArrayExpr = ts.visitNode(
+    mapCall.expression.expression,
+    visitor,
+    ts.isExpression,
+  ) ?? mapCall.expression.expression;
+
+  const mapWithPatternAccess = factory.createPropertyAccessExpression(
+    visitedArrayExpr,
+    factory.createIdentifier("mapWithPattern"),
+  );
+
+  return factory.createCallExpression(
+    mapWithPatternAccess,
+    mapCall.typeArguments,
+    [recipeCall, paramsObject],
+  );
+}
+
+/**
+ * Transform a map callback for OpaqueRef arrays.
+ * Always transforms to use recipe + mapWithPattern, even with no captures,
+ * to ensure callback parameters become opaque.
+ */
+export function transformMapCallback(
+  mapCall: ts.CallExpression,
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  context: TransformationContext,
+  visitor: ts.Visitor,
+): ts.CallExpression {
+  const { checker } = context;
+
+  // Collect captured variables from the callback
+  const collector = new CaptureCollector(checker);
+  const { captureTree } = collector.analyze(callback);
+
+  // Get callback parameters
+  const originalParams = callback.parameters;
+  const elemParam = originalParams[0];
+  const indexParam = originalParams[1]; // May be undefined
+  const arrayParam = originalParams[2]; // May be undefined
+
+  // IMPORTANT: First, recursively transform any nested map callbacks BEFORE we change
+  // parameter names. This ensures nested callbacks can properly detect captures from
+  // parent callback scope. Reuse the same visitor for consistency.
+  const transformedBody = ts.visitNode(
+    callback.body,
+    visitor,
+  ) as ts.ConciseBody;
+
+  // Create the final recipe call with params
+  return createRecipeCallWithParams(
+    mapCall,
+    callback,
+    transformedBody,
+    elemParam,
+    indexParam,
+    arrayParam,
+    captureTree,
+    context,
+    visitor,
+  );
+}
