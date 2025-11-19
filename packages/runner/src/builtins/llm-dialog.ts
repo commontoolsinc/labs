@@ -1566,7 +1566,7 @@ async function handleInvoke(
   // Create result cell reference that will be set in the transaction
   let result: Cell<any> = null as any;
 
-  runtime.editWithRetry((tx) => {
+  await runtime.editWithRetry((tx) => {
     // Create the result cell within the transaction context
     result = runtime.getCell<any>(
       space,
@@ -1591,8 +1591,11 @@ async function handleInvoke(
     }
   });
 
+  await runtime.idle();
+
   // Wait for the pattern/handler to complete and write the result
   const cancel = result.sink((r) => {
+    console.log("result", r);
     r !== undefined && resolve(r);
   });
 
