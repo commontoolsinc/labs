@@ -2963,7 +2963,7 @@ interface CTPromptInputAttributes<T> extends CTHTMLAttributes<T> {
 
 interface CTAttachmentsBarAttributes<T> extends CTHTMLAttributes<T> {
   "removable"?: boolean;
-  "attachments"?: any;
+  "pinnedCells"?: any;
 }
 
 interface CTTagsAttributes<T> extends CTHTMLAttributes<T> {

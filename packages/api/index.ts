@@ -882,6 +882,11 @@ export interface BuiltInLLMParams {
    * Each tool has a description, input schema, and handler function that runs client-side.
    */
   tools?: Record<string, BuiltInLLMTool>;
+  /**
+   * Context cells to make available to the LLM.
+   * These cells appear in the system prompt with their schemas and current values.
+   */
+  context?: Record<string, Cell<any>>;
 }
 
 export interface BuiltInLLMState {
@@ -906,7 +911,7 @@ export interface BuiltInLLMDialogState {
   cancelGeneration: Stream<void>;
   addMessage: Stream<BuiltInLLMMessage>;
   flattenedTools: Record<string, any>;
-  attachments: Array<{ path: string; name: string }>;
+  pinnedCells: Array<{ path: string; name: string }>;
 }
 
 export type BuiltInGenerateObjectParams =

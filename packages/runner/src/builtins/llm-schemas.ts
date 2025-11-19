@@ -68,6 +68,7 @@ export const LLMParamsSchema = {
     system: { type: "string" },
     stop: { type: "string" },
     tools: { type: "object", additionalProperties: LLMToolSchema, default: {} },
+    context: { type: "object", additionalProperties: { asCell: true }, default: {} },
   },
   required: ["messages"],
 } as const satisfies JSONSchema;

@@ -333,6 +333,549 @@ describe("llmDialog", () => {
     expect(messages[3].role).toBe("assistant");
     expect(messages[3].content).toBe(finalResponse);
   });
+
+  it("should support pinning cells via pin tool", async () => {
+    const initialMessage = "Please pin this cell";
+    const cellPath = "/of:test123";
+    const cellName = "Test Cell";
+
+    // Mock response that calls pin tool
+    addMockResponse(
+      (req) => {
+        const lastMsg = req.messages[req.messages.length - 1];
+        return (
+          typeof lastMsg.content === "string" &&
+          lastMsg.content.includes(initialMessage)
+        );
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "pin_call_1",
+            toolName: "pin",
+            input: {
+              path: { "@link": cellPath },
+              name: cellName,
+            },
+          },
+        ],
+        id: "mock-pin-response",
+      },
+    );
+
+    // Mock final response after pin
+    addMockResponse(
+      (req) => {
+        const toolMsg = req.messages.find(
+          (m) =>
+            m.role === "assistant" &&
+            Array.isArray(m.content) &&
+            m.content.some((c) => c.type === "tool-call" && c.toolName === "pin"),
+        );
+        return !!toolMsg;
+      },
+      {
+        role: "assistant",
+        content: "Cell has been pinned successfully.",
+        id: "mock-pin-final-response",
+      },
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asStream: true },
+        pending: { type: "boolean" },
+        pinnedCells: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              path: { type: "string" },
+              name: { type: "string" },
+            },
+          },
+        },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const testRecipe = recipe(
+      false,
+      resultSchema,
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        const dialog = llmDialog({
+          messages,
+        });
+        return {
+          addMessage: dialog.addMessage,
+          pending: dialog.pending,
+          pinnedCells: dialog.pinnedCells,
+          messages,
+        };
+      },
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-pin-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    tx.commit();
+
+    await runtime.idle();
+
+    const addMessage = result.key("addMessage").get();
+
+    // Send message to trigger pin
+    addMessage.send({
+      role: "user",
+      content: initialMessage,
+    });
+
+    // Wait for: user message, assistant tool call, tool result, final response
+    await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+
+    // Verify pinned cells
+    const pinnedCells = result.key("pinnedCells").get();
+    expect(pinnedCells).toBeDefined();
+    expect(Array.isArray(pinnedCells)).toBe(true);
+    expect(pinnedCells?.length).toBe(1);
+    expect(pinnedCells?.[0].path).toBe(cellPath);
+    expect(pinnedCells?.[0].name).toBe(cellName);
+  });
+
+  it("should support unpinning cells via unpin tool", async () => {
+    const pinMessage = "Please pin this cell";
+    const unpinMessage = "Please unpin that cell";
+    const cellPath = "/of:test123";
+    const cellName = "Test Cell";
+
+    // Mock response that calls pin tool first
+    addMockResponse(
+      (req) => {
+        const lastMsg = req.messages[req.messages.length - 1];
+        return (
+          typeof lastMsg.content === "string" &&
+          lastMsg.content.includes(pinMessage)
+        );
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "pin_call_unpin_test",
+            toolName: "pin",
+            input: {
+              path: { "@link": cellPath },
+              name: cellName,
+            },
+          },
+        ],
+        id: "mock-pin-for-unpin-response",
+      },
+    );
+
+    // Mock response after pin
+    addMockResponse(
+      (req) => {
+        const toolMsg = req.messages.find(
+          (m) =>
+            m.role === "assistant" &&
+            Array.isArray(m.content) &&
+            m.content.some((c) =>
+              c.type === "tool-call" && c.toolName === "pin" &&
+              c.toolCallId === "pin_call_unpin_test"
+            ),
+        );
+        return !!toolMsg;
+      },
+      {
+        role: "assistant",
+        content: "Cell has been pinned.",
+        id: "mock-pin-for-unpin-final",
+      },
+    );
+
+    // Mock response that calls unpin tool
+    addMockResponse(
+      (req) => {
+        const lastMsg = req.messages[req.messages.length - 1];
+        return (
+          typeof lastMsg.content === "string" &&
+          lastMsg.content.includes(unpinMessage)
+        );
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "unpin_call_1",
+            toolName: "unpin",
+            input: {
+              path: { "@link": cellPath },
+            },
+          },
+        ],
+        id: "mock-unpin-response",
+      },
+    );
+
+    // Mock final response after unpin
+    addMockResponse(
+      (req) => {
+        const toolMsg = req.messages.find(
+          (m) =>
+            m.role === "assistant" &&
+            Array.isArray(m.content) &&
+            m.content.some((c) =>
+              c.type === "tool-call" && c.toolName === "unpin"
+            ),
+        );
+        return !!toolMsg;
+      },
+      {
+        role: "assistant",
+        content: "Cell has been unpinned.",
+        id: "mock-unpin-final-response",
+      },
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asStream: true },
+        pending: { type: "boolean" },
+        pinnedCells: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              path: { type: "string" },
+              name: { type: "string" },
+            },
+          },
+        },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const testRecipe = recipe(
+      false,
+      resultSchema,
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        const dialog = llmDialog({
+          messages,
+        });
+        return {
+          addMessage: dialog.addMessage,
+          pending: dialog.pending,
+          pinnedCells: dialog.pinnedCells,
+          messages,
+        };
+      },
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-unpin-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    tx.commit();
+
+    await runtime.idle();
+
+    const addMessage = result.key("addMessage").get();
+
+    // First pin a cell
+    addMessage.send({
+      role: "user",
+      content: pinMessage,
+    });
+
+    // Wait for pin to complete (4 messages: user, assistant tool call, tool result, final)
+    await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+
+    // Verify cell was pinned
+    let pinnedCells = result.key("pinnedCells").get();
+    expect(pinnedCells?.length).toBe(1);
+    expect(pinnedCells?.[0].path).toBe(cellPath);
+
+    // Now unpin it
+    addMessage.send({
+      role: "user",
+      content: unpinMessage,
+    });
+
+    // Wait for unpin to complete (8 messages total: previous 4 + new 4)
+    await expect(waitForMessages(result, 8)).resolves.toBeUndefined();
+
+    // Verify pinned cells is now empty
+    pinnedCells = result.key("pinnedCells").get();
+    expect(pinnedCells).toBeDefined();
+    expect(Array.isArray(pinnedCells)).toBe(true);
+    expect(pinnedCells?.length).toBe(0);
+  });
+
+  it("should include context cells in system prompt", async () => {
+    const initialMessage = "What context do you have?";
+
+    let capturedSystemPrompt = "";
+
+    // Mock response that captures the system prompt
+    addMockResponse(
+      (req) => {
+        capturedSystemPrompt = req.system || "";
+        return true;
+      },
+      {
+        role: "assistant",
+        content: "I have access to the context cells.",
+        id: "mock-context-response",
+      },
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asStream: true },
+        pending: { type: "boolean" },
+        pinnedCells: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              path: { type: "string" },
+              name: { type: "string" },
+            },
+          },
+        },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const testRecipe = recipe(
+      false,
+      resultSchema,
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        // Create context cell inside recipe
+        const contextCell = Cell.of({ value: "test context data" });
+        const dialog = llmDialog({
+          messages,
+          context: {
+            testContext: contextCell,
+          },
+        });
+        return {
+          addMessage: dialog.addMessage,
+          pending: dialog.pending,
+          pinnedCells: dialog.pinnedCells,
+          messages,
+        };
+      },
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-context-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    tx.commit();
+
+    await runtime.idle();
+
+    const addMessage = result.key("addMessage").get();
+
+    // Send message
+    addMessage.send({
+      role: "user",
+      content: initialMessage,
+    });
+
+    // Wait for response
+    await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
+
+    // Verify context cells appear in pinnedCells output
+    const pinnedCells = result.key("pinnedCells").get();
+    expect(pinnedCells).toBeDefined();
+    expect(Array.isArray(pinnedCells)).toBe(true);
+    expect(pinnedCells?.length).toBe(1);
+    expect(pinnedCells?.[0].name).toBe("testContext");
+    expect(pinnedCells?.[0].path).toContain("/of:");
+
+    // Verify system prompt includes context cells
+    expect(capturedSystemPrompt).toContain("# Available Cells");
+    expect(capturedSystemPrompt).toContain("testContext");
+    expect(capturedSystemPrompt).toContain("test context data");
+  });
+
+  it("should merge context and pinned cells in system prompt", async () => {
+    const initialMessage = "Tell me about available cells";
+    const cellPath = "/of:pinned123";
+    const cellName = "Pinned Cell";
+
+    let capturedSystemPrompt = "";
+
+    // Mock response for initial message
+    addMockResponse(
+      (req) => {
+        const lastMsg = req.messages[req.messages.length - 1];
+        return (
+          typeof lastMsg.content === "string" &&
+          lastMsg.content.includes(initialMessage)
+        );
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "pin_call_2",
+            toolName: "pin",
+            input: {
+              path: { "@link": cellPath },
+              name: cellName,
+            },
+          },
+        ],
+        id: "mock-pin-merge-response",
+      },
+    );
+
+    // Mock response after pin (captures system prompt)
+    addMockResponse(
+      (req) => {
+        capturedSystemPrompt = req.system || "";
+        const toolMsg = req.messages.find(
+          (m) =>
+            m.role === "assistant" &&
+            Array.isArray(m.content) &&
+            m.content.some((c) => c.type === "tool-call" && c.toolName === "pin"),
+        );
+        return !!toolMsg;
+      },
+      {
+        role: "assistant",
+        content: "I can see both context and pinned cells now.",
+        id: "mock-merge-final-response",
+      },
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asStream: true },
+        pending: { type: "boolean" },
+        pinnedCells: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              path: { type: "string" },
+              name: { type: "string" },
+            },
+          },
+        },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const testRecipe = recipe(
+      false,
+      resultSchema,
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        // Create context cell inside recipe
+        const contextCell = Cell.of({ value: "context data" });
+        const dialog = llmDialog({
+          messages,
+          context: {
+            contextCell: contextCell,
+          },
+        });
+        return {
+          addMessage: dialog.addMessage,
+          pending: dialog.pending,
+          pinnedCells: dialog.pinnedCells,
+          messages,
+        };
+      },
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-merge-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    tx.commit();
+
+    await runtime.idle();
+
+    const addMessage = result.key("addMessage").get();
+
+    // Send message to trigger pin
+    addMessage.send({
+      role: "user",
+      content: initialMessage,
+    });
+
+    // Wait for: user message, assistant tool call, tool result, final response
+    await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
+
+    // Verify pinnedCells output contains both context cell and tool-pinned cell
+    const pinnedCells = result.key("pinnedCells").get();
+    expect(pinnedCells).toBeDefined();
+    expect(Array.isArray(pinnedCells)).toBe(true);
+    expect(pinnedCells?.length).toBe(2);
+    // Context cell should be first
+    expect(pinnedCells?.[0].name).toBe("contextCell");
+    expect(pinnedCells?.[0].path).toContain("/of:");
+    // Tool-pinned cell should be second
+    expect(pinnedCells?.[1].name).toBe(cellName);
+    expect(pinnedCells?.[1].path).toBe(cellPath);
+
+    // Verify system prompt includes both context and pinned cells
+    expect(capturedSystemPrompt).toContain("# Available Cells");
+    expect(capturedSystemPrompt).toContain("contextCell");
+    expect(capturedSystemPrompt).toContain("context data");
+    // Note: Pinned cell won't appear in system prompt on first request,
+    // only after it's been pinned and the next LLM request is made
+  });
 });
 
 function waitForMessages(result: any, expectedCount: number) {
