@@ -195,7 +195,7 @@ jobs:
 
   attest-binaries:
     name: "Attest and Upload Binaries"
-    # TODO: restore to `if: github.ref == 'refs/heads/main'` after testing
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04-32-core
     needs: [
       "pattern-integration-test",
