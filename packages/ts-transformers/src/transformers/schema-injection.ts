@@ -2,6 +2,7 @@ import ts from "typescript";
 
 import {
   detectCallKind,
+  getExpressionText,
   inferParameterType,
   inferReturnType,
   isAnyOrUnknownType,
@@ -354,7 +355,10 @@ export class SchemaInjectionTransformer extends Transformer {
 
         // Find the function argument - it's the last function-like expression in args
         // Can be: recipe(fn), recipe("name", fn), recipe(schema, fn), recipe(schema, schema, fn)
-        let recipeFunction: ts.ArrowFunction | ts.FunctionExpression | undefined;
+        let recipeFunction:
+          | ts.ArrowFunction
+          | ts.FunctionExpression
+          | undefined;
         for (let i = argsArray.length - 1; i >= 0; i--) {
           const arg = argsArray[i];
           if (
@@ -662,8 +666,9 @@ export class SchemaInjectionTransformer extends Transformer {
             typeRegistry,
             checker,
           );
-          // Don't visit children - we've already transformed this node
-          return updated;
+          // Visit children to catch any recipe calls created by ClosureTransformer
+          // inside the derive callback (e.g., from map transformations)
+          return ts.visitEachChild(updated, visit, transformation);
         };
 
         if (node.typeArguments && node.typeArguments.length >= 2) {
@@ -769,8 +774,9 @@ export class SchemaInjectionTransformer extends Transformer {
             typeRegistry,
             checker,
           );
-          // Don't visit children - we've already transformed this node
-          return updated;
+          // Visit children to catch any recipe calls created by ClosureTransformer
+          // inside the derive callback (e.g., from map transformations)
+          return ts.visitEachChild(updated, visit, transformation);
         };
 
         if (node.typeArguments && node.typeArguments.length >= 2) {
