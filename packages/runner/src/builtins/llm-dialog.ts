@@ -1617,14 +1617,18 @@ async function handleInvoke(
 
   const resultSchema = getCellSchema(result);
 
-  // Patterns always write to the result cell, so always return the link
+  // Patterns a lways write to the result cell, so always return the link
   if (pattern) {
     return {
       type: "json",
       value: {
         "@resultLocation": resultLink,
-        result: traverseAndSerialize(result.get(), resultSchema),
-        schema: resultSchema,
+        result: traverseAndSerialize(
+          result.get(),
+          resultSchema?.schema,
+          resultSchema?.rootSchema,
+        ),
+        schema: resultSchema?.schema,
       },
     };
   }
@@ -1639,8 +1643,12 @@ async function handleInvoke(
         type: "json",
         value: {
           "@resultLocation": resultLink,
-          result: traverseAndSerialize(resultValue, resultSchema),
-          schema: resultSchema,
+          result: traverseAndSerialize(
+            resultValue,
+            resultSchema?.schema,
+            resultSchema?.rootSchema,
+          ),
+          schema: resultSchema?.schema,
         },
       };
     }
