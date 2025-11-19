@@ -423,7 +423,7 @@ jobs:
   # Deploy shell static assets to staging GCS bucket
   deploy-shell-staging:
     name: "Deploy Shell to Staging"
-    # TODO: restore to `if: github.ref == 'refs/heads/main'` after testing
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: ci
     steps:
