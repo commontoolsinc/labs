@@ -299,6 +299,7 @@ export class Logger {
     this._counts.info = 0;
     this._counts.warn = 0;
     this._counts.error = 0;
+    this._lastLoggedAt = 0;
   }
 
   /**
