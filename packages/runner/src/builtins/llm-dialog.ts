@@ -40,7 +40,7 @@ import { ContextualFlowControl } from "../cfc.ts";
 // Avoid importing from @commontools/charm to prevent circular deps in tests
 
 const logger = getLogger("llm-dialog", {
-  enabled: true,
+  enabled: false,
   level: "info",
 });
 
