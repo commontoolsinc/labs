@@ -1415,12 +1415,14 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       }
 
       // Convert schema to object form and merge default value if value is defined
-      const schema: JSONSchema | undefined = value !== undefined
+      // BUT: Don't embed Cell objects in the schema's default property, as this
+      // causes infinite recursion when the schema is serialized
+      const schema: JSONSchema | undefined = value !== undefined && !isCell(value)
         ? {
           ...ContextualFlowControl.toSchemaObj(providedSchema),
           default: value as any,
         }
-        : providedSchema;
+        : ContextualFlowControl.toSchemaObj(providedSchema);
 
       // Create a cell without a link - it will be created on demand via .for()
       const cell = createCell<T>(
