@@ -141,19 +141,6 @@ const listMentionable = pattern<
   },
 );
 
-const listPatternIndex = pattern<
-  { query: string },
-  { result: string }
->(
-  ({ query: _ }) => {
-    const { pending, result } = fetchData({
-      url: "/api/patterns/index.md",
-      mode: "text",
-    });
-    return ifElse(computed(() => pending || !result), undefined, { result });
-  },
-);
-
 const listRecent = pattern<
   { recentCharms: Array<MentionableCharm> },
   { result: Array<{ label: string; cell: Cell<unknown> }> }
@@ -175,7 +162,6 @@ export default pattern<ChatInput, ChatOutput>(
 
     const assistantTools = {
       listMentionable: patternTool(listMentionable, { mentionable }),
-      listPatternIndex: patternTool(listPatternIndex),
       listRecent: patternTool(listRecent, { recentCharms }),
     };
 

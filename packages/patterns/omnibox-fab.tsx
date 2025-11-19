@@ -4,12 +4,13 @@ import {
   compileAndRun,
   computed,
   derive,
+  fetchData,
   fetchProgram,
   handler,
   ifElse,
   NAME,
-  navigateTo,
   pattern,
+  patternTool,
   recipe,
   UI,
 } from "commontools";
@@ -39,24 +40,6 @@ const dismissPeek = handler<
   peekDismissedIndex.set(assistantMessageCount);
 });
 
-const _fetchAndRunAndNavigateToPattern = handler<
-  { url: string },
-  { mentionable: Cell<MentionableCharm[]> }
->(({ url }, { mentionable: _mentionable }) => {
-  const { pending: _fetchPending, result: program, error: _fetchError } =
-    fetchProgram({ url });
-
-  const compileParams = derive(program, (p) => ({
-    files: p?.files ?? [],
-    main: p?.main ?? "",
-    input: { value: 10 },
-  }));
-  const { pending: _compilePending, result, error: _compileError } =
-    compileAndRun(compileParams);
-
-  return navigateTo(result);
-});
-
 const fetchAndRunPattern = pattern(
   ({ url, args }: { url: string; args: any }) => {
     const { pending: _fetchPending, result: program, error: _fetchError } =
@@ -70,6 +53,19 @@ const fetchAndRunPattern = pattern(
     const { pending, result, error } = compileAndRun(compileParams);
 
     return ifElse(pending, undefined, { result, error });
+  },
+);
+
+const listPatternIndex = pattern<
+  { query: string },
+  { result: string }
+>(
+  ({ query: _ }) => {
+    const { pending, result } = fetchData({
+      url: "/api/patterns/index.md",
+      mode: "text",
+    });
+    return ifElse(computed(() => pending || !result), undefined, { result });
   },
 );
 
@@ -94,6 +90,7 @@ export default recipe<OmniboxFABInput>(
             "Fetch a pattern from the URL, compile it and run it. You can pass arguments to the pattern using the 'args' parameter. ",
           pattern: fetchAndRunPattern,
         },
+        listPatternIndex: patternTool(listPatternIndex),
       },
     });
 
