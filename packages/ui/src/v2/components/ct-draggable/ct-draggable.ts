@@ -62,6 +62,8 @@ export class CtDraggable extends BaseElement {
     const target = event.target as HTMLElement;
     if (
       target.tagName === "INPUT" || target.tagName === "BUTTON" ||
+      target.tagName === "CT-INPUT" || target.tagName === "CT-TEXTAREA" ||
+      target.tagName === "CT-SELECT" || target.tagName === "CT-BUTTON" ||
       target.closest("common-send-message")
     ) {
       return;
