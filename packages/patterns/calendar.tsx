@@ -171,14 +171,14 @@ interface TimeSlot {
 }
 
 // OPTIMIZATION v13: ISO date formatter utility (reduces repeated padStart calls)
-const formatISO = (year: number, month: number, day: number): string => {
+const _formatISO = (year: number, month: number, day: number): string => {
   return `${year}-${String(month + 1).padStart(2, "0")}-${
     String(day).padStart(2, "0")
   }`;
 };
 
 // OPTIMIZATION v13: Parse time string utility (reduces repeated split/map)
-const parseTimeStr = (timeStr: string): { h: number; m: number } => {
+const _parseTimeStr = (timeStr: string): { h: number; m: number } => {
   const [h, m] = timeStr.split(":").map(Number);
   return { h, m };
 };
@@ -281,7 +281,7 @@ const parseTimeFromText = (
 
   // Get default times for backward compatibility
   const morningTime = timeLabelMap.get("morning") || "09:00";
-  const eveningTime = timeLabelMap.get("evening") || "18:00";
+  const _eveningTime = timeLabelMap.get("evening") || "18:00";
 
   // PATTERN 0a: Meal/event keywords that imply specific times - "lunch", "breakfast", "dinner"
   // Note: We keep these words in the text since they provide context
@@ -341,7 +341,7 @@ const parseTimeFromText = (
     if (legacyMatch) {
       const keyword = legacyMatch[1].toLowerCase();
       let hour24 = 14;
-      let minute = 0;
+      const minute = 0;
 
       if (keyword === "afternoon") {
         hour24 = 14; // 2 PM
@@ -392,8 +392,8 @@ const parseTimeFromText = (
         const endMinute = match[5] ? parseInt(match[5], 10) : 0;
         const endPeriod = match[6]?.toLowerCase() || "";
 
-        let endIsPM = endPeriod.includes("p");
-        let startIsPM = startPeriod.includes("p") ||
+        const endIsPM = endPeriod.includes("p");
+        const startIsPM = startPeriod.includes("p") ||
           (startPeriod === "" && endIsPM);
 
         let start24 = startHour;
@@ -961,7 +961,7 @@ const parseMultipleEvents = (
 };
 
 // Convert 24-hour time to 12-hour format
-const formatTime12Hour = lift((time: string) => {
+const _formatTime12Hour = lift((time: string) => {
   if (!time) return "";
   const [hours, minutes] = time.split(":").map(Number);
   const period = hours >= 12 ? "PM" : "AM";
@@ -969,7 +969,7 @@ const formatTime12Hour = lift((time: string) => {
   return `${hours12}:${minutes.toString().padStart(2, "0")} ${period}`;
 });
 
-const formatTimeRange = lift(
+const _formatTimeRange = lift(
   ({ startTime, duration }: { startTime: string; duration?: string }) => {
     if (!startTime) return "";
 
@@ -1009,7 +1009,7 @@ const formatTimeRange = lift(
 );
 
 // Generate time slots based on settings
-const generateTimeSlots = lift(
+const _generateTimeSlots = lift(
   (
     { startTime, endTime, timeInterval }: {
       startTime: number;
@@ -1022,7 +1022,7 @@ const generateTimeSlots = lift(
     for (let hour = startTime; hour <= endTime; hour++) {
       const minutes = timeInterval === 60 ? [0] : [0, 30];
 
-      for (let minute of minutes) {
+      for (const minute of minutes) {
         // Skip slots beyond endTime
         if (hour === endTime && minute > 0) continue;
 
@@ -1040,7 +1040,7 @@ const generateTimeSlots = lift(
 );
 
 // Determine icon type for a note
-const getIconForNote = lift((note: Note | undefined) => {
+const _getIconForNote = lift((note: Note | undefined) => {
   if (!note) return "🕐";
 
   // Check if recurring (has seriesId)
@@ -1060,7 +1060,7 @@ const getIconForNote = lift((note: Note | undefined) => {
 });
 
 // Determine button className for a note
-const getButtonClassName = lift((note: Note | undefined) => {
+const _getButtonClassName = lift((note: Note | undefined) => {
   if (!note) return "clock-button";
 
   // Only add alert class if notification is truly enabled
@@ -1156,7 +1156,7 @@ const expandSeriesInRange = (
     "SA": 6,
   };
 
-  let current = new Date(start);
+  const current = new Date(start);
   let count = 0;
   const maxOccurrences = series.count || 1000; // Safety limit
   const until = series.until
@@ -1409,7 +1409,7 @@ export default recipe<Input, Output>(
     );
 
     // OPTIMIZATION v13: Series map for O(1) lookup by seriesId
-    const seriesMap = derive(
+    const _seriesMap = derive(
       recurringSeries,
       (series: RecurringSeries[]) => {
         const map: Record<string, RecurringSeries> = {};
@@ -1421,7 +1421,7 @@ export default recipe<Input, Output>(
     );
 
     // OPTIMIZATION v13: Override map for O(1) lookup by seriesId:date key
-    const overrideMap = derive(
+    const _overrideMap = derive(
       seriesOverrides,
       (overrides: SeriesOverride[]) => {
         const map: Record<string, SeriesOverride> = {};
@@ -1877,7 +1877,7 @@ export default recipe<Input, Output>(
     const currentYear = derive(currentDateInfo, (info: any) => info.year);
 
     // Month items (0-11)
-    const monthItems = [
+    const _monthItems = [
       { value: 0, label: "January" },
       { value: 1, label: "February" },
       { value: 2, label: "March" },
@@ -1928,7 +1928,7 @@ export default recipe<Input, Output>(
     ];
 
     // Year items (current year +/- 10 years)
-    const yearItems = derive(currentDate, (date: any) => {
+    const _yearItems = derive(currentDate, (date: any) => {
       const d = new Date(date + "T00:00:00");
       const year = d.getFullYear();
       const years = [];
@@ -1939,13 +1939,13 @@ export default recipe<Input, Output>(
     });
 
     // Current month index (0-11)
-    const currentMonthIndex = derive(currentDate, (date: any) => {
+    const _currentMonthIndex = derive(currentDate, (date: any) => {
       const d = new Date(date + "T00:00:00");
       return d.getMonth();
     });
 
     // Handler to change month
-    const changeMonth = handler<
+    const _changeMonth = handler<
       { detail: { value: number } },
       { currentDate: Cell<string> }
     >(({ detail }, { currentDate }) => {
@@ -1955,7 +1955,7 @@ export default recipe<Input, Output>(
     });
 
     // Handler to change year
-    const changeYear = handler<
+    const _changeYear = handler<
       { detail: { value: number } },
       { currentDate: Cell<string> }
     >(({ detail }, { currentDate }) => {
@@ -2376,7 +2376,7 @@ export default recipe<Input, Output>(
     });
 
     // Handler to enable inline editing of a note
-    const enableNoteEditing = handler<
+    const _enableNoteEditing = handler<
       never,
       { noteId: string }
     >((_event, { noteId }) => {
@@ -2384,7 +2384,7 @@ export default recipe<Input, Output>(
     });
 
     // Handler to disable inline editing (exit edit mode)
-    const disableNoteEditing = handler<never, never>((_event) => {
+    const _disableNoteEditing = handler<never, never>((_event) => {
       editingNoteId.set("");
     });
 
@@ -2445,7 +2445,7 @@ export default recipe<Input, Output>(
           }`;
         } else if (recurrencePattern.frequency === "monthly") {
           // For monthly, we'll use simple FREQ=MONTHLY for now
-          // TODO: Implement BYMONTHDAY and BYDAY for monthly patterns
+          // NOTE: BYMONTHDAY and BYDAY for monthly patterns not yet implemented
           rrule = `FREQ=MONTHLY${
             recurrencePattern.interval
               ? `;INTERVAL=${recurrencePattern.interval}`
@@ -2470,9 +2470,9 @@ export default recipe<Input, Output>(
         return;
       }
 
-      // If ambiguous, TODO: show confirmation dialog (for now, treat as one-time)
+      // If ambiguous, show confirmation dialog (for now, treat as one-time)
       if (recurrencePattern?.isAmbiguous) {
-        // TODO: Show ambiguity dialog
+        // NOTE: Ambiguity dialog not yet implemented
       }
 
       // Parse the text through NLP to extract times, notifications, etc.
@@ -2627,7 +2627,7 @@ export default recipe<Input, Output>(
       }
     >((
       { date, noteId, scheduledTime },
-      { entries, recurringSeries, seriesOverrides },
+      { entries, recurringSeries: _recurringSeries, seriesOverrides },
     ) => {
       const allEntries = entries.get();
       const existingIndex = allEntries.findIndex((e: DayEntry) =>
@@ -2984,21 +2984,21 @@ export default recipe<Input, Output>(
     });
 
     // Handlers for time grid settings
-    const updateStartTime = handler<
+    const _updateStartTime = handler<
       { target: { value: string } },
       { startTime: Cell<number> }
     >(({ target }, { startTime }) => {
       startTime.set(parseInt(target.value, 10));
     });
 
-    const updateEndTime = handler<
+    const _updateEndTime = handler<
       { target: { value: string } },
       { endTime: Cell<number> }
     >(({ target }, { endTime }) => {
       endTime.set(parseInt(target.value, 10));
     });
 
-    const updateTimeInterval = handler<
+    const _updateTimeInterval = handler<
       { target: { value: string } },
       { timeInterval: Cell<30 | 60> }
     >(({ target }, { timeInterval }) => {
@@ -3082,8 +3082,8 @@ export default recipe<Input, Output>(
     );
 
     // Recurrence ambiguity confirmation (for patterns like "Monday meeting")
-    const recurrenceAmbiguityCell = cell<boolean>(false); // True when showing ambiguity dialog
-    const recurrencePendingCell = cell<
+    const _recurrenceAmbiguityCell = cell<boolean>(false); // True when showing ambiguity dialog
+    const _recurrencePendingCell = cell<
       {
         text: string;
         date: string;
@@ -3108,7 +3108,7 @@ export default recipe<Input, Output>(
     );
 
     // Derive the time from hour and minute cells
-    const combinedTime = derive(
+    const _combinedTime = derive(
       { scheduleHourCell, scheduleMinuteCell },
       ({ scheduleHourCell, scheduleMinuteCell }: any) => {
         return `${scheduleHourCell}:${scheduleMinuteCell}`;
@@ -3288,12 +3288,12 @@ export default recipe<Input, Output>(
 
       // Check if this is a recurring occurrence (noteId format: "seriesId:date")
       let note: Note | undefined;
-      let seriesIdFromNote: string | undefined;
+      let _seriesIdFromNote: string | undefined;
 
       if (noteId.includes(":")) {
         // This is a recurring occurrence
-        const [seriesId, occurrenceDate] = noteId.split(":");
-        seriesIdFromNote = seriesId;
+        const [seriesId, _occurrenceDate] = noteId.split(":");
+        _seriesIdFromNote = seriesId;
 
         // Find the series to get the note data
         const allSeries = recurringSeries.get();
@@ -3496,9 +3496,9 @@ export default recipe<Input, Output>(
         scheduleMinuteCell,
         schedulePeriodCell,
         scheduleDurationCell,
-        scheduleNotifEnabledCell,
-        scheduleNotifValueCell,
-        scheduleNotifUnitCell,
+        scheduleNotifEnabledCell: _scheduleNotifEnabledCell,
+        scheduleNotifValueCell: _scheduleNotifValueCell,
+        scheduleNotifUnitCell: _scheduleNotifUnitCell,
         scheduleRepeatCell,
         scheduleRepeatDaysCell,
         scheduleMonthlyPatternCell,
@@ -3596,7 +3596,7 @@ export default recipe<Input, Output>(
     });
 
     // Handler to stop propagation (no-op, just prevents parent click)
-    const stopPropagation = handler<never, Record<string, never>>(
+    const _stopPropagation = handler<never, Record<string, never>>(
       (_event, _state) => {
         // Do nothing - this just stops the event from bubbling to parent
       },
@@ -3682,7 +3682,7 @@ export default recipe<Input, Output>(
     });
 
     // Handler for magic wand - parse text to extract schedule info
-    const parseScheduleText = handler<
+    const _parseScheduleText = handler<
       never,
       {
         scheduleTextCell: Cell<string>;
@@ -3734,7 +3734,6 @@ export default recipe<Input, Output>(
 
         // Update text to cleaned version (without time info)
         scheduleTextCell.set(cleanedText);
-      } else {
       }
 
       // Parse notification patterns - supports many formats
@@ -3750,7 +3749,7 @@ export default recipe<Input, Output>(
       ];
 
       let cleanedNotifText = scheduleTextCell.get();
-      let foundNotif = false;
+      const _foundNotif = false;
 
       for (let i = 0; i < notifPatterns.length; i++) {
         const match = cleanedNotifText.match(notifPatterns[i]);
@@ -3855,7 +3854,7 @@ export default recipe<Input, Output>(
               : ""
           }`;
         } else if (recurrencePattern.frequency === "monthly") {
-          // TODO: Handle monthly patterns with BYMONTHDAY or BYDAY
+          // NOTE: Monthly patterns with BYMONTHDAY or BYDAY not yet implemented
           rrule = `FREQ=MONTHLY${
             recurrencePattern.interval
               ? `;INTERVAL=${recurrencePattern.interval}`
@@ -3974,7 +3973,7 @@ export default recipe<Input, Output>(
             let combinedTime: string | undefined;
             // Only create time if not '--'
             if (hourStr !== "--" && minute !== "--" && periodVal !== "--") {
-              let hour12 = parseInt(hourStr, 10);
+              const hour12 = parseInt(hourStr, 10);
               let hour24 = hour12;
               if (periodVal === "PM" && hour12 !== 12) {
                 hour24 = hour12 + 12;
@@ -4578,7 +4577,7 @@ export default recipe<Input, Output>(
               // First pass: identify all dates on removed days that need deletion
               const datesToDelete: string[] = [];
               for (
-                let d = new Date(splitDate);
+                const d = new Date(splitDate);
                 d <= endDate;
                 d.setDate(d.getDate() + 1)
               ) {
@@ -4819,7 +4818,7 @@ export default recipe<Input, Output>(
     });
 
     // Handler to update note schedule
-    const updateSchedule = handler<
+    const _updateSchedule = handler<
       {
         time: string;
         notificationEnabled: boolean;
@@ -5593,6 +5592,7 @@ export default recipe<Input, Output>(
           </style>
 
           <button
+            type="button"
             className="settings-button"
             onClick={toggleSettings({ showSettings })}
           >
@@ -5658,6 +5658,7 @@ export default recipe<Input, Output>(
                         Time Labels
                       </label>
                       <button
+                        type="button"
                         onClick={addTimeLabel({ customTimeLabels })}
                         style="background: none; border: none; font-size: 20px; cursor: pointer; color: #007aff; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;"
                         title="Add time label"
@@ -5696,6 +5697,7 @@ export default recipe<Input, Output>(
                             style="width: 100px; padding: 6px 8px; font-size: 14px; border: 1px solid #d1d1d6; border-radius: 6px; background: white;"
                           />
                           <button
+                            type="button"
                             onClick={deleteTimeLabel({
                               customTimeLabels,
                               index,
@@ -5743,6 +5745,7 @@ export default recipe<Input, Output>(
                     Schedule Note
                   </h3>
                   <button
+                    type="button"
                     onClick={closeScheduleModal({
                       scheduleModalState,
                       isNewEventCell,
@@ -5989,6 +5992,7 @@ export default recipe<Input, Output>(
                         <div className="modal-label">Repeat on</div>
                         <div className="day-selector-grid">
                           <button
+                            type="button"
                             className={derive(
                               scheduleRepeatDaysCell,
                               (days: any) =>
@@ -6004,6 +6008,7 @@ export default recipe<Input, Output>(
                             Su
                           </button>
                           <button
+                            type="button"
                             className={derive(
                               scheduleRepeatDaysCell,
                               (days: any) =>
@@ -6019,6 +6024,7 @@ export default recipe<Input, Output>(
                             Mo
                           </button>
                           <button
+                            type="button"
                             className={derive(
                               scheduleRepeatDaysCell,
                               (days: any) =>
@@ -6034,6 +6040,7 @@ export default recipe<Input, Output>(
                             Tu
                           </button>
                           <button
+                            type="button"
                             className={derive(
                               scheduleRepeatDaysCell,
                               (days: any) =>
@@ -6049,6 +6056,7 @@ export default recipe<Input, Output>(
                             We
                           </button>
                           <button
+                            type="button"
                             className={derive(
                               scheduleRepeatDaysCell,
                               (days: any) =>
@@ -6064,6 +6072,7 @@ export default recipe<Input, Output>(
                             Th
                           </button>
                           <button
+                            type="button"
                             className={derive(
                               scheduleRepeatDaysCell,
                               (days: any) =>
@@ -6079,6 +6088,7 @@ export default recipe<Input, Output>(
                             Fr
                           </button>
                           <button
+                            type="button"
                             className={derive(
                               scheduleRepeatDaysCell,
                               (days: any) =>
@@ -6234,6 +6244,7 @@ export default recipe<Input, Output>(
                       }}
                     >
                       <button
+                        type="button"
                         onClick={deleteNoteFromModal({
                           entries,
                           recurringSeries,
@@ -6319,6 +6330,7 @@ export default recipe<Input, Output>(
                     Delete Recurring Event?
                   </h3>
                   <button
+                    type="button"
                     onClick={cancelDeletionConfirmation({
                       deletionConfirmingScopeCell,
                       deletionPendingCell,
@@ -6456,6 +6468,7 @@ export default recipe<Input, Output>(
                   <div className="daily-note-header">
                     <label className="daily-note-label">Daily Notes</label>
                     <button
+                      type="button"
                       className="add-note-button"
                       onClick={addNote({ entries, currentDate })}
                     >
@@ -6473,6 +6486,7 @@ export default recipe<Input, Output>(
                         <div key={idx}>
                           {/* Ghost slot button */}
                           <button
+                            type="button"
                             className="time-slot"
                             style={item.showGhost ? "" : "display: none"}
                             onClick={addNoteAtTime({
@@ -6505,6 +6519,7 @@ export default recipe<Input, Output>(
                                 className="note-textarea"
                               />
                               <button
+                                type="button"
                                 className={item.buttonClass || "clock-button"}
                                 title={theNote.seriesId
                                   ? "Recurring event"
@@ -6543,6 +6558,7 @@ export default recipe<Input, Output>(
                                 {item.icon || "🕐"}
                               </button>
                               <button
+                                type="button"
                                 className="delete-note-button"
                                 onClick={deleteNote({
                                   entries,
@@ -6611,6 +6627,7 @@ export default recipe<Input, Output>(
                                 className="note-textarea"
                               />
                               <button
+                                type="button"
                                 className={item.buttonClass || "clock-button"}
                                 title={theNote.seriesId
                                   ? "Recurring event"
@@ -6649,6 +6666,7 @@ export default recipe<Input, Output>(
                                 {item.icon || "🕐"}
                               </button>
                               <button
+                                type="button"
                                 className="delete-note-button"
                                 onClick={deleteNote({
                                   entries,
