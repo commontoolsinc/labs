@@ -3749,7 +3749,6 @@ export default recipe<Input, Output>(
       ];
 
       let cleanedNotifText = scheduleTextCell.get();
-      const _foundNotif = false;
 
       for (let i = 0; i < notifPatterns.length; i++) {
         const match = cleanedNotifText.match(notifPatterns[i]);
@@ -3781,7 +3780,6 @@ export default recipe<Input, Output>(
           // Remove the notification text from the note
           cleanedNotifText = cleanedNotifText.replace(match[0], "").trim();
           scheduleTextCell.set(cleanedNotifText);
-          foundNotif = true;
           break;
         }
       }
