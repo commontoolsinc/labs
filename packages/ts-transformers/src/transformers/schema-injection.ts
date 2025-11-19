@@ -468,6 +468,32 @@ export class SchemaInjectionTransformer extends Transformer {
           return ts.visitEachChild(node, visit, transformation);
         }
 
+        // Handle explicit type arguments: pattern<Input, Output>(fn)
+        if (typeArgs && typeArgs.length >= 2) {
+          const [inputType, resultType] = typeArgs;
+
+          if (inputType && resultType) {
+            const argSchemaCall = createSchemaCallWithRegistryTransfer(
+              context,
+              inputType,
+              typeRegistry,
+            );
+            const resSchemaCall = createSchemaCallWithRegistryTransfer(
+              context,
+              resultType,
+              typeRegistry,
+            );
+
+            const updated = factory.createCallExpression(
+              node.expression,
+              undefined,
+              [patternFunction, argSchemaCall, resSchemaCall],
+            );
+
+            return ts.visitEachChild(updated, visit, transformation);
+          }
+        }
+
         // Use type arguments as a hint for inference
         const typeArgHints: ts.Type[] = [];
         if (typeArgs) {
