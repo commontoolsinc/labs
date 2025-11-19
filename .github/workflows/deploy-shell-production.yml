@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: 'Git SHA to deploy (defaults to main HEAD)'
+        description: "Git SHA to deploy (defaults to main HEAD)"
         required: false
-        default: ''
+        default: ""
 
 jobs:
   deploy-shell-production:
