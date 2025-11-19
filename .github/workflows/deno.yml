@@ -63,12 +63,6 @@ jobs:
             ./dist/bg-charm-service
             ./dist/ct
 
-      - name: 📤 Upload shell assets for GCS deployment
-        uses: actions/upload-artifact@v4
-        with:
-          name: shell-assets
-          path: ./packages/toolshed/shell-frontend
-
   package-integration-test:
     name: "Package Integration Tests"
     runs-on: ubuntu-latest
@@ -197,11 +191,12 @@ jobs:
     name: "Attest and Upload Binaries"
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04-32-core
-    needs: [
-      "pattern-integration-test",
-      "package-integration-test",
-      "cli-integration-test",
-    ]
+    needs:
+      [
+        "pattern-integration-test",
+        "package-integration-test",
+        "cli-integration-test",
+      ]
     environment: ci
     permissions:
       id-token: write
@@ -369,25 +364,6 @@ jobs:
       - name: ⚙️ Setup Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
 
-      - name: 📥 Download shell assets
-        uses: actions/download-artifact@v4
-        with:
-          name: shell-assets
-          path: ./shell-assets
-
-      - name: 📤 Upload shell assets to Staging GCS
-        run: |
-          # Upload to SHA-specific directory
-          gsutil -m rsync -r ./shell-assets gs://staging-commontools-dev/builds/${{ github.sha }}/
-
-          # Upload to latest directory (overwrites)
-          gsutil -m rsync -r -d ./shell-assets gs://staging-commontools-dev/builds/latest/
-
-          echo "::group::📦 Staging Shell Asset Links"
-          echo "SHA build: https://storage.googleapis.com/staging-commontools-dev/builds/${{ github.sha }}/index.html"
-          echo "Latest build: https://storage.googleapis.com/staging-commontools-dev/builds/latest/index.html"
-          echo "::endgroup::"
-
       - name: 🚀 Upload artifacts to Google Cloud Storage
         run: |
           gsutil cp release/labs-${{ github.sha }}.tar.gz gs://commontools-build-artifacts/workspace-artifacts/
@@ -443,6 +419,42 @@ jobs:
           username: bastion
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
           script: /opt/ct/deploy.sh ${{ vars.DEPLOYMENT_ENVIRONMENT }} ${{ github.sha }}
+
+  # Deploy shell static assets to staging GCS bucket
+  deploy-shell-staging:
+    name: "Deploy Shell to Staging"
+    # TODO: restore to `if: github.ref == 'refs/heads/main'` after testing
+    runs-on: ubuntu-latest
+    environment: ci
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🏗️ Build shell with staging API URL
+        working-directory: packages/shell
+        run: deno task production
+        env:
+          API_URL: ${{ secrets.CLUSTERDUCK_SHELL_API_URL }}
+
+      - name: 🔑 Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: ⚙️ Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: 📤 Upload shell assets to Staging GCS
+        run: |
+          gsutil -m rsync -r packages/shell/dist gs://staging-commontools-dev/builds/${{ github.sha }}/
+          gsutil -m rsync -r -d packages/shell/dist gs://staging-commontools-dev/builds/latest/
+
+          echo "📦 Staging Shell deployed"
+          echo "https://storage.googleapis.com/staging-commontools-dev/builds/${{ github.sha }}"
+          echo "https://storage.googleapis.com/staging-commontools-dev/builds/latest"
 
   # Post-deployment patterns test (runs after deployment, so this will NOT block deployments.)
   post-deploy-patterns-test:
