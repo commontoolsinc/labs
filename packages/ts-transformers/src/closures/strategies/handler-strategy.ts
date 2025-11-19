@@ -2,24 +2,11 @@ import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import { isEventHandlerJsxAttribute } from "../../ast/mod.ts";
-import {
-  registerTypeForNode,
-  tryExplicitParameterType,
-} from "../../ast/type-inference.ts";
-import { buildTypeElementsFromCaptureTree } from "../../ast/type-building.ts";
-import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
-import {
-  createBindingElementsFromNames,
-  getUniqueIdentifier,
-  isSafeIdentifierText,
-} from "../../utils/identifiers.ts";
-import { normalizeBindingName } from "../computed-aliases.ts";
 import { CaptureCollector } from "../capture-collector.ts";
-import {
-  normalizeParameter,
-  unwrapArrowFunction,
-} from "../utils/ast-helpers.ts";
+import { unwrapArrowFunction } from "../utils/ast-helpers.ts";
 import { buildCapturePropertyAssignments } from "./map-strategy.ts";
+import { RecipeBuilder } from "../utils/recipe-builder.ts";
+import { SchemaFactory } from "../utils/schema-factory.ts";
 
 export class HandlerStrategy implements ClosureTransformationStrategy {
   canTransform(
@@ -42,186 +29,6 @@ export class HandlerStrategy implements ClosureTransformationStrategy {
     }
     return undefined;
   }
-}
-
-/**
- * Build a TypeNode for the handler event parameter and register it in TypeRegistry.
- * If the callback has an explicit event type annotation, use it.
- * If there's no event parameter, use never (generates false schema).
- * Otherwise, infer from the parameter location (could be enhanced to infer from JSX context).
- */
-function buildHandlerEventTypeNode(
-  callback: ts.ArrowFunction,
-  context: TransformationContext,
-): ts.TypeNode {
-  const { factory, checker } = context;
-  const typeRegistry = context.options.typeRegistry;
-  const eventParam = callback.parameters[0];
-
-  // If no event parameter exists, use never type (will generate false schema)
-  if (!eventParam) {
-    const neverTypeNode = factory.createKeywordTypeNode(
-      ts.SyntaxKind.NeverKeyword,
-    );
-
-    // Don't register a Type - the synthetic NeverKeyword TypeNode will be handled
-    // by generateSchemaFromSyntheticTypeNode in the schema generator
-    return neverTypeNode;
-  }
-
-  // Try explicit annotation
-  const explicit = tryExplicitParameterType(eventParam, checker, typeRegistry);
-  if (explicit) return explicit.typeNode;
-
-  // Infer from parameter location
-  const type = checker.getTypeAtLocation(eventParam);
-
-  // Try to convert Type to TypeNode
-  const typeNode = checker.typeToTypeNode(
-    type,
-    context.sourceFile,
-    ts.NodeBuilderFlags.NoTruncation |
-    ts.NodeBuilderFlags.UseStructuralFallback,
-  ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-
-  return registerTypeForNode(typeNode, type, typeRegistry);
-}
-
-/**
- * Build a TypeNode for the handler state/params parameter and register it in TypeRegistry.
- * Reuses the same capture tree utilities as map closures.
- */
-function buildHandlerStateTypeNode(
-  captureTree: Map<string, CaptureTreeNode>,
-  callback: ts.ArrowFunction,
-  context: TransformationContext,
-): ts.TypeNode {
-  const { factory, checker } = context;
-  const typeRegistry = context.options.typeRegistry;
-  const stateParam = callback.parameters[1];
-
-  // Try explicit annotation
-  const explicit = tryExplicitParameterType(stateParam, checker, typeRegistry);
-  if (explicit) return explicit.typeNode;
-
-  // Fallback: build from captures (buildTypeElementsFromCaptureTree handles its own registration)
-  const paramsProperties = buildTypeElementsFromCaptureTree(
-    captureTree,
-    context,
-  );
-  return factory.createTypeLiteralNode(paramsProperties);
-}
-
-function createHandlerCallback(
-  callback: ts.ArrowFunction,
-  transformedBody: ts.ConciseBody,
-  captureTree: Map<string, CaptureTreeNode>,
-  context: TransformationContext,
-): ts.ArrowFunction {
-  const { factory } = context;
-  const usedBindingNames = new Set<string>();
-  const rootNames = new Set<string>();
-  for (const [rootName] of captureTree) {
-    rootNames.add(rootName);
-  }
-
-  const eventParam = callback.parameters[0];
-  const stateParam = callback.parameters[1];
-  const extraParams = callback.parameters.slice(2);
-
-  const eventParameter = eventParam
-    ? normalizeParameter(
-      eventParam,
-      normalizeBindingName(eventParam.name, factory, usedBindingNames),
-    )
-    : (() => {
-      const baseName = "__ct_handler_event";
-      let candidate = baseName;
-      let index = 1;
-      while (rootNames.has(candidate)) {
-        candidate = `${baseName}_${index++}`;
-      }
-      return factory.createParameterDeclaration(
-        undefined,
-        undefined,
-        factory.createIdentifier(
-          getUniqueIdentifier(candidate, usedBindingNames, {
-            fallback: baseName,
-          }),
-        ),
-        undefined,
-        undefined,
-        undefined,
-      );
-    })();
-
-  const createBindingIdentifier = (name: string): ts.Identifier => {
-    if (isSafeIdentifierText(name) && !usedBindingNames.has(name)) {
-      usedBindingNames.add(name);
-      return factory.createIdentifier(name);
-    }
-    const fallback = name.length > 0 ? name : "ref";
-    const unique = getUniqueIdentifier(fallback, usedBindingNames, {
-      fallback: "ref",
-    });
-    return factory.createIdentifier(unique);
-  };
-
-  const paramsBindings = createBindingElementsFromNames(
-    captureTree.keys(),
-    factory,
-    createBindingIdentifier,
-  );
-
-  const paramsBindingPattern = factory.createObjectBindingPattern(
-    paramsBindings,
-  );
-
-  let paramsBindingName: ts.BindingName;
-  if (stateParam) {
-    paramsBindingName = normalizeBindingName(
-      stateParam.name,
-      factory,
-      usedBindingNames,
-    );
-  } else if (captureTree.size > 0) {
-    paramsBindingName = paramsBindingPattern;
-  } else {
-    paramsBindingName = factory.createIdentifier(
-      getUniqueIdentifier("__ct_handler_params", usedBindingNames, {
-        fallback: "__ct_handler_params",
-      }),
-    );
-  }
-
-  const paramsParameter = stateParam
-    ? normalizeParameter(stateParam, paramsBindingName)
-    : factory.createParameterDeclaration(
-      undefined,
-      undefined,
-      paramsBindingName,
-      undefined,
-      undefined,
-      undefined,
-    );
-
-  const additionalParameters = extraParams.map((
-    param: ts.ParameterDeclaration,
-  ) =>
-    normalizeParameter(
-      param,
-      normalizeBindingName(param.name, factory, usedBindingNames),
-    )
-  );
-
-  return factory.createArrowFunction(
-    callback.modifiers,
-    callback.typeParameters,
-    [eventParameter, paramsParameter, ...additionalParameters],
-    callback.type,
-    callback.equalsGreaterThanToken,
-    transformedBody,
-  );
 }
 
 export function transformHandlerJsxAttribute(
@@ -252,21 +59,26 @@ export function transformHandlerJsxAttribute(
   const collector = new CaptureCollector(context.checker);
   const { captureTree } = collector.analyze(callback);
 
-  const handlerCallback = createHandlerCallback(
+  // Initialize RecipeBuilder
+  const builder = new RecipeBuilder(context);
+  builder.setCaptureTree(captureTree);
+
+  // Build the new callback using buildHandlerCallback
+  const handlerCallback = builder.buildHandlerCallback(
     callback,
     transformedBody,
-    captureTree,
-    context,
+    "__ct_handler_event",
+    "__ct_handler_params",
   );
 
   const { factory } = context;
 
-  // Build type information for handler params
-  const eventTypeNode = buildHandlerEventTypeNode(callback, context);
-  const stateTypeNode = buildHandlerStateTypeNode(
+  // Build type information for handler params using SchemaFactory
+  const schemaFactory = new SchemaFactory(context);
+  const eventTypeNode = schemaFactory.createHandlerEventSchema(callback);
+  const stateTypeNode = schemaFactory.createHandlerStateSchema(
     captureTree,
-    callback,
-    context,
+    callback.parameters[1] as ts.ParameterDeclaration | undefined,
   );
 
   const handlerExpr = context.ctHelpers.getHelperExpr("handler");

@@ -10,19 +10,10 @@ import {
   detectCallKind,
   getTypeAtLocationWithFallback,
   isFunctionLikeExpression,
-
 } from "../../ast/mod.ts";
-import {
-  inferArrayElementType,
-  registerTypeForNode,
-  tryExplicitParameterType,
-} from "../../ast/type-inference.ts";
-import { buildTypeElementsFromCaptureTree } from "../../ast/type-building.ts";
 import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
-  createBindingElementsFromNames,
-  createParameterFromBindings,
   createPropertyName,
   reserveIdentifier,
 } from "../../utils/identifiers.ts";
@@ -33,6 +24,8 @@ import {
 } from "../computed-aliases.ts";
 import type { ComputedAliasInfo } from "../computed-aliases.ts";
 import { CaptureCollector } from "../capture-collector.ts";
+import { RecipeBuilder } from "../utils/recipe-builder.ts";
+import { SchemaFactory } from "../utils/schema-factory.ts";
 
 export class MapStrategy implements ClosureTransformationStrategy {
   canTransform(
@@ -196,46 +189,6 @@ export function isOpaqueRefArrayMapCall(
     hasArrayTypeArgument(originType, checker);
 }
 
-function determineElementType(
-  mapCall: ts.CallExpression,
-  elemParam: ts.ParameterDeclaration | undefined,
-  context: TransformationContext,
-): { typeNode: ts.TypeNode; type?: ts.Type } {
-  const { checker, factory } = context;
-  const typeRegistry = context.options.typeRegistry;
-
-  // Try explicit annotation
-  const explicit = tryExplicitParameterType(elemParam, checker, typeRegistry);
-  if (explicit) return explicit;
-
-  // Try inference from map call
-  const inferred = inferElementType(mapCall, context);
-  if (inferred.type) {
-    return {
-      typeNode: registerTypeForNode(
-        inferred.typeNode,
-        inferred.type,
-        typeRegistry,
-      ),
-      type: inferred.type,
-    };
-  }
-
-  // Fallback: infer from the map call location itself
-  const type = checker.getTypeAtLocation(mapCall);
-  const typeNode = checker.typeToTypeNode(
-    type,
-    context.sourceFile,
-    ts.NodeBuilderFlags.NoTruncation |
-    ts.NodeBuilderFlags.UseStructuralFallback,
-  ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-
-  return {
-    typeNode: registerTypeForNode(typeNode, type, typeRegistry),
-    type,
-  };
-}
-
 /**
  * Build property assignments for captured variables from a capture tree.
  * Used by map, handler, and derive transformations to build params/input objects.
@@ -254,106 +207,6 @@ export function buildCapturePropertyAssignments(
     );
   }
   return properties;
-}
-
-/**
- * Build a TypeNode for the callback parameter and register property TypeNodes in typeRegistry.
- * Returns a TypeLiteral representing { element: T, index?: number, array?: T[], params: {...} }
- */
-function buildCallbackParamTypeNode(
-  mapCall: ts.CallExpression,
-  elemParam: ts.ParameterDeclaration | undefined,
-  indexParam: ts.ParameterDeclaration | undefined,
-  arrayParam: ts.ParameterDeclaration | undefined,
-  captureTree: Map<string, CaptureTreeNode>,
-  context: TransformationContext,
-): ts.TypeNode {
-  const { factory } = context;
-
-  // 1. Determine element type
-  const { typeNode: elemTypeNode } = determineElementType(
-    mapCall,
-    elemParam,
-    context,
-  );
-
-  // 2. Build callback parameter properties
-  const callbackParamProperties: ts.TypeElement[] = [
-    factory.createPropertySignature(
-      undefined,
-      factory.createIdentifier("element"),
-      undefined,
-      elemTypeNode,
-    ),
-  ];
-
-  // 3. Add optional index property if present
-  if (indexParam) {
-    callbackParamProperties.push(
-      factory.createPropertySignature(
-        undefined,
-        factory.createIdentifier("index"),
-        factory.createToken(ts.SyntaxKind.QuestionToken),
-        factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
-      ),
-    );
-  }
-
-  // 4. Add optional array property if present
-  if (arrayParam) {
-    // The array type is T[] where T is the element type
-    const arrayTypeNode = factory.createArrayTypeNode(elemTypeNode);
-    callbackParamProperties.push(
-      factory.createPropertySignature(
-        undefined,
-        factory.createIdentifier("array"),
-        factory.createToken(ts.SyntaxKind.QuestionToken),
-        arrayTypeNode,
-      ),
-    );
-  }
-
-  // 5. Build params object type with hierarchical captures
-  const paramsProperties = buildTypeElementsFromCaptureTree(
-    captureTree,
-    context,
-  );
-
-  // 6. Add params property
-  callbackParamProperties.push(
-    factory.createPropertySignature(
-      undefined,
-      factory.createIdentifier("params"),
-      undefined,
-      factory.createTypeLiteralNode(paramsProperties),
-    ),
-  );
-
-  return factory.createTypeLiteralNode(callbackParamProperties);
-}
-
-/**
- * Infer the element type from an OpaqueRef<T[]> or Array<T> being mapped.
- * This is a thin wrapper around inferArrayElementType that extracts the array expression
- * from the map call.
- */
-function inferElementType(
-  mapCall: ts.CallExpression,
-  context: TransformationContext,
-): { typeNode: ts.TypeNode; type?: ts.Type } {
-  const { factory } = context;
-
-  if (!ts.isPropertyAccessExpression(mapCall.expression)) {
-    return {
-      typeNode: factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
-    };
-  }
-
-  const arrayExpr = mapCall.expression.expression;
-  return inferArrayElementType(arrayExpr, {
-    ...context,
-    typeRegistry: context.options.typeRegistry,
-  });
 }
 
 /**
@@ -575,6 +428,9 @@ function shouldTransformMap(
 /**
  * Create the final recipe call with params object.
  */
+/**
+ * Create the final recipe call with params object.
+ */
 function createRecipeCallWithParams(
   mapCall: ts.CallExpression,
   callback: ts.ArrowFunction | ts.FunctionExpression,
@@ -587,14 +443,13 @@ function createRecipeCallWithParams(
   visitor: ts.Visitor,
 ): ts.CallExpression {
   const { factory } = context;
-
-  const bindingElements: ts.BindingElement[] = [];
   const usedBindingNames = new Set<string>();
 
   const createBindingIdentifier = (name: string): ts.Identifier => {
     return reserveIdentifier(name, usedBindingNames, factory);
   };
 
+  // Analyze element binding to handle computed aliases
   const elementAnalysis = analyzeElementBinding(
     elemParam,
     captureTree,
@@ -602,76 +457,49 @@ function createRecipeCallWithParams(
     usedBindingNames,
     createBindingIdentifier,
   );
-  const elementBindingName = elementAnalysis.bindingName;
-  const elementPropertyName = ts.isIdentifier(elementBindingName) &&
-    elementBindingName.text === "element"
-    ? undefined
-    : factory.createIdentifier("element");
-  bindingElements.push(
-    factory.createBindingElement(
-      undefined,
-      elementPropertyName,
-      elementBindingName,
-      undefined,
-    ),
-  );
-
-  if (indexParam) {
-    bindingElements.push(
-      factory.createBindingElement(
-        undefined,
-        factory.createIdentifier("index"),
-        normalizeBindingName(indexParam.name, factory, usedBindingNames),
-        undefined,
-      ),
-    );
-  }
-
-  if (arrayParam) {
-    bindingElements.push(
-      factory.createBindingElement(
-        undefined,
-        factory.createIdentifier("array"),
-        normalizeBindingName(arrayParam.name, factory, usedBindingNames),
-        undefined,
-      ),
-    );
-  }
 
   // Filter out computed aliases from params - they'll be declared as local consts instead
   const computedAliasNames = new Set(
     elementAnalysis.computedAliases.map((alias) => alias.aliasName),
   );
-
-  // Create a filtered capture tree without computed aliases
   const filteredCaptureTree = new Map(
     Array.from(captureTree.entries()).filter(
       ([key]) => !computedAliasNames.has(key),
     ),
   );
 
-  const paramsBindings = createBindingElementsFromNames(
-    filteredCaptureTree.keys(),
-    factory,
-    createBindingIdentifier,
+  // Initialize RecipeBuilder
+  const builder = new RecipeBuilder(context);
+  builder.registerUsedNames(usedBindingNames);
+  builder.setCaptureTree(filteredCaptureTree);
+
+  // Add element parameter
+  builder.addParameter(
+    "element",
+    elementAnalysis.bindingName,
+    elementAnalysis.bindingName.kind === ts.SyntaxKind.Identifier &&
+      elementAnalysis.bindingName.text === "element"
+      ? undefined
+      : "element",
   );
 
-  const paramsPattern = factory.createObjectBindingPattern(paramsBindings);
+  // Add index parameter if present
+  if (indexParam) {
+    builder.addParameter(
+      "index",
+      normalizeBindingName(indexParam.name, factory, usedBindingNames),
+    );
+  }
 
-  bindingElements.push(
-    factory.createBindingElement(
-      undefined,
-      factory.createIdentifier("params"),
-      paramsPattern,
-      undefined,
-    ),
-  );
+  // Add array parameter if present
+  if (arrayParam) {
+    builder.addParameter(
+      "array",
+      normalizeBindingName(arrayParam.name, factory, usedBindingNames),
+    );
+  }
 
-  const destructuredParam = createParameterFromBindings(
-    bindingElements,
-    factory,
-  );
-
+  // Rewrite body to handle computed aliases
   const visitedAliases: ComputedAliasInfo[] = elementAnalysis
     .computedAliases.map((info) => {
       const keyExpression = ts.visitNode(
@@ -693,28 +521,21 @@ function createRecipeCallWithParams(
     context,
   );
 
-  const newCallback = factory.createArrowFunction(
-    callback.modifiers,
-    callback.typeParameters,
-    [destructuredParam],
-    callback.type,
-    ts.isArrowFunction(callback)
-      ? callback.equalsGreaterThanToken
-      : factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
-    rewrittenBody,
-  );
-
+  // Build the new callback
+  const newCallback = builder.buildCallback(callback, rewrittenBody, "params");
   context.markAsMapCallback(newCallback);
 
-  const callbackParamTypeNode = buildCallbackParamTypeNode(
+  // Build schema using SchemaFactory
+  const schemaFactory = new SchemaFactory(context);
+  const callbackParamTypeNode = schemaFactory.createMapCallbackSchema(
     mapCall,
     elemParam,
     indexParam,
     arrayParam,
     filteredCaptureTree,
-    context,
   );
 
+  // Create recipe call
   const recipeExpr = context.ctHelpers.getHelperExpr("recipe");
   const recipeCall = factory.createCallExpression(
     recipeExpr,
@@ -722,11 +543,11 @@ function createRecipeCallWithParams(
     [newCallback],
   );
 
+  // Create params object
   const paramProperties = buildCapturePropertyAssignments(
     filteredCaptureTree,
     factory,
   );
-
   const paramsObject = factory.createObjectLiteralExpression(
     paramProperties,
     paramProperties.length > 0,
@@ -738,8 +559,7 @@ function createRecipeCallWithParams(
     );
   }
 
-  // Visit the array expression to transform any derive() calls in the chain
-  // Example: derive({}, () => expr).mapWithPattern(...)
+  // Visit the array expression
   const visitedArrayExpr = ts.visitNode(
     mapCall.expression.expression,
     visitor,

@@ -1,25 +1,15 @@
 import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
-import {
-  detectCallKind,
-  isFunctionLikeExpression,
-  isOptionalPropertyAccess,
-} from "../../ast/mod.ts";
+import { detectCallKind, isFunctionLikeExpression } from "../../ast/mod.ts";
 import { registerDeriveCallType } from "../../ast/type-inference.ts";
-import {
-  buildTypeElementsFromCaptureTree,
-  expressionToTypeNode,
-} from "../../ast/type-building.ts";
 import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
-import {
-  createBindingElementsFromNames,
-  createPropertyName,
-  reserveIdentifier,
-} from "../../utils/identifiers.ts";
+import { createPropertyName } from "../../utils/identifiers.ts";
 import { normalizeBindingName } from "../computed-aliases.ts";
 import { CaptureCollector } from "../capture-collector.ts";
+import { RecipeBuilder } from "../utils/recipe-builder.ts";
+import { SchemaFactory } from "../utils/schema-factory.ts";
 
 export class DeriveStrategy implements ClosureTransformationStrategy {
   canTransform(
@@ -133,7 +123,6 @@ function buildDeriveInputObject(
   // Add the original input as a property UNLESS callback had zero parameters
   // When hadZeroParameters, we only include captures
   if (!hadZeroParameters) {
-    // Use shorthand if the original input is a simple identifier matching the param name
     if (
       ts.isIdentifier(originalInput) &&
       originalInput.text === originalInputParamName
@@ -240,248 +229,6 @@ function rewriteCaptureReferences(
 }
 
 /**
- * Create the derive callback with parameter aliasing to preserve user's parameter name.
- * Example: ({value: v, multiplier}) => v * multiplier
- *
- * When hadZeroParameters is true, build a parameter from just the captures (no original input).
- * This handles the case where user wrote derive({}, () => ...) with captures.
- */
-function createDeriveCallback(
-  callback: ts.ArrowFunction | ts.FunctionExpression,
-  transformedBody: ts.ConciseBody,
-  originalInputParamName: string,
-  captureTree: Map<string, CaptureTreeNode>,
-  captureNameMap: Map<string, string>,
-  context: TransformationContext,
-  hadZeroParameters: boolean,
-): ts.ArrowFunction | ts.FunctionExpression {
-  const { factory } = context;
-  const usedBindingNames = new Set<string>();
-
-  // Get the original parameter
-  const originalParam = callback.parameters[0];
-  if (!originalParam) {
-    // No parameter - if there are captures, build parameter from captures only
-    if (hadZeroParameters && captureTree.size > 0) {
-      // Build binding elements from just the captures (no original input)
-      const createBindingIdentifier = (name: string): ts.Identifier => {
-        return reserveIdentifier(name, usedBindingNames, factory);
-      };
-
-      const bindingElements = createBindingElementsFromNames(
-        captureTree.keys(),
-        factory,
-        createBindingIdentifier,
-      );
-
-      const destructuredParam = factory.createParameterDeclaration(
-        undefined, // modifiers
-        undefined, // dotDotDotToken
-        factory.createObjectBindingPattern(bindingElements),
-        undefined, // questionToken
-        undefined, // type
-        undefined, // initializer
-      );
-
-      return ts.isArrowFunction(callback)
-        ? factory.createArrowFunction(
-          callback.modifiers,
-          callback.typeParameters,
-          [destructuredParam],
-          undefined, // No return type - rely on inference
-          callback.equalsGreaterThanToken,
-          transformedBody,
-        )
-        : factory.createFunctionExpression(
-          callback.modifiers,
-          callback.asteriskToken,
-          callback.name,
-          callback.typeParameters,
-          [destructuredParam],
-          undefined, // No return type - rely on inference
-          transformedBody as ts.Block,
-        );
-    }
-
-    // No parameter and no captures (or not hadZeroParameters) - shouldn't happen, but handle gracefully
-    return ts.isArrowFunction(callback)
-      ? factory.createArrowFunction(
-        callback.modifiers,
-        callback.typeParameters,
-        [],
-        callback.type,
-        callback.equalsGreaterThanToken,
-        transformedBody,
-      )
-      : factory.createFunctionExpression(
-        callback.modifiers,
-        callback.asteriskToken,
-        callback.name,
-        callback.typeParameters,
-        [],
-        callback.type,
-        transformedBody as ts.Block,
-      );
-  }
-
-  // Build the binding elements for the destructured parameter
-  const bindingElements: ts.BindingElement[] = [];
-
-  // Create binding for original input with alias to preserve user's parameter name
-  const originalParamBinding = normalizeBindingName(
-    originalParam.name,
-    factory,
-    usedBindingNames,
-  );
-
-  bindingElements.push(
-    factory.createBindingElement(
-      undefined,
-      factory.createIdentifier(originalInputParamName), // Property name
-      originalParamBinding, // Binding name (what it's called in the function body)
-      originalParam.initializer, // Preserve default value if present
-    ),
-  );
-
-  // Add bindings for captures using the potentially renamed property names
-  const createBindingIdentifier = (name: string): ts.Identifier => {
-    return reserveIdentifier(name, usedBindingNames, factory);
-  };
-
-  // Create binding elements using the renamed capture names
-  const renamedCaptureNames = Array.from(captureTree.keys()).map(
-    (originalName) => captureNameMap.get(originalName) ?? originalName,
-  );
-
-  bindingElements.push(
-    ...createBindingElementsFromNames(
-      renamedCaptureNames,
-      factory,
-      createBindingIdentifier,
-    ),
-  );
-
-  // Create the parameter with object binding pattern
-  const parameter = factory.createParameterDeclaration(
-    undefined,
-    undefined,
-    factory.createObjectBindingPattern(bindingElements),
-    undefined,
-    undefined, // No type annotation - rely on inference
-    undefined,
-  );
-
-  // Rewrite the body to use renamed capture identifiers
-  const rewrittenBody = rewriteCaptureReferences(
-    transformedBody,
-    captureNameMap,
-    factory,
-  );
-
-  // Create the new callback
-  if (ts.isArrowFunction(callback)) {
-    return factory.createArrowFunction(
-      callback.modifiers,
-      callback.typeParameters,
-      [parameter],
-      undefined, // No return type - rely on inference
-      callback.equalsGreaterThanToken,
-      rewrittenBody,
-    );
-  } else {
-    return factory.createFunctionExpression(
-      callback.modifiers,
-      callback.asteriskToken,
-      callback.name,
-      callback.typeParameters,
-      [parameter],
-      undefined, // No return type - rely on inference
-      rewrittenBody as ts.Block,
-    );
-  }
-}
-
-/**
- * Build schema TypeNode for the merged input object.
- * Creates an object schema with properties for input and all captures.
- *
- * When hadZeroParameters is true, skip the input and only include captures.
- */
-function buildDeriveInputSchema(
-  originalInputParamName: string,
-  originalInput: ts.Expression,
-  captureTree: Map<string, CaptureTreeNode>,
-  captureNameMap: Map<string, string>,
-  context: TransformationContext,
-  hadZeroParameters: boolean,
-): ts.TypeNode {
-  const { factory, checker } = context;
-
-  // Build type elements for the object schema
-  const typeElements: ts.TypeElement[] = [];
-
-  // Add type element for original input UNLESS callback had zero parameters
-  if (!hadZeroParameters) {
-    // Add type element for original input using the helper function
-    const inputTypeNode = expressionToTypeNode(originalInput, context);
-
-    // Check if the original input is an optional property access (e.g., config.multiplier where multiplier?: number)
-    let questionToken: ts.QuestionToken | undefined = undefined;
-    if (ts.isPropertyAccessExpression(originalInput)) {
-      if (isOptionalPropertyAccess(originalInput, checker)) {
-        questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
-      }
-    }
-
-    typeElements.push(
-      factory.createPropertySignature(
-        undefined,
-        factory.createIdentifier(originalInputParamName),
-        questionToken,
-        inputTypeNode,
-      ),
-    );
-  }
-
-  // Add type elements for captures using the existing helper
-  const captureTypeElements = buildTypeElementsFromCaptureTree(
-    captureTree,
-    context,
-  );
-
-  // Rename the property signatures if there are collisions
-  for (const typeElement of captureTypeElements) {
-    if (
-      ts.isPropertySignature(typeElement) && ts.isIdentifier(typeElement.name)
-    ) {
-      const originalName = typeElement.name.text;
-      const renamedName = captureNameMap.get(originalName) ?? originalName;
-
-      if (renamedName !== originalName) {
-        // Create a new property signature with the renamed identifier
-        typeElements.push(
-          factory.createPropertySignature(
-            typeElement.modifiers,
-            factory.createIdentifier(renamedName),
-            typeElement.questionToken,
-            typeElement.type,
-          ),
-        );
-      } else {
-        // No renaming needed
-        typeElements.push(typeElement);
-      }
-    } else {
-      // Not a simple property signature, keep as-is
-      typeElements.push(typeElement);
-    }
-  }
-
-  // Create object type literal
-  return factory.createTypeLiteralNode(typeElements);
-}
-
-/**
  * Transform a derive call that has closures in its callback.
  * Converts: derive(value, (v) => v * multiplier.get())
  * To: derive(inputSchema, resultSchema, {value, multiplier}, ({value: v, multiplier}) => v * multiplier)
@@ -569,27 +316,20 @@ export function transformDeriveCall(
     hadZeroParameters,
   );
 
-  // Create new callback with parameter aliasing
-  const newCallback = createDeriveCallback(
-    callback,
+  // Rewrite the body to use renamed capture identifiers
+  const rewrittenBody = rewriteCaptureReferences(
     transformedBody,
-    originalInputParamName,
-    captureTree,
     captureNameMap,
-    context,
-    hadZeroParameters,
+    factory,
   );
 
-  // Build TypeNodes for schema generation (similar to handlers/maps pattern)
-  // These will be registered in typeRegistry for SchemaInjectionTransformer to use
-  const inputTypeNode = buildDeriveInputSchema(
-    originalInputParamName,
-    originalInput,
-    captureTree,
-    captureNameMap,
-    context,
-    hadZeroParameters,
-  );
+  // Initialize RecipeBuilder
+  const builder = new RecipeBuilder(context);
+  builder.setCaptureTree(captureTree);
+  builder.setCaptureRenames(captureNameMap);
+
+  // Register used names (original input param name)
+  builder.registerUsedNames([originalInputParamName]);
 
   // Infer result type from callback
   // SchemaInjectionTransformer will use this to generate the result schema
@@ -629,6 +369,44 @@ export function transformDeriveCall(
       }
     }
   }
+
+  // Add original input parameter if needed
+  if (!hadZeroParameters) {
+    const originalParam = callback.parameters[0];
+    if (originalParam) {
+      builder.addParameter(
+        originalInputParamName,
+        normalizeBindingName(originalParam.name, factory, new Set()),
+        originalInputParamName,
+        originalParam.initializer,
+      );
+    }
+  }
+
+  // Build the new callback
+  // Pass null for paramsPropertyName to merge captures into top-level object
+  // Only pass resultTypeNode if it was explicit in the original callback (non-synthetic)
+  const originalCallback = ts.getOriginalNode(callback) as
+    | ts.ArrowFunction
+    | ts.FunctionExpression;
+  const hasExplicitReturnType = originalCallback.type &&
+    originalCallback.type.pos >= 0;
+
+  const newCallback = builder.buildCallback(
+    callback,
+    rewrittenBody,
+    null, // derive merges captures into top-level object
+    hasExplicitReturnType ? resultTypeNode : null,
+  );
+  // Build TypeNodes for schema generation
+  const schemaFactory = new SchemaFactory(context);
+  const inputTypeNode = schemaFactory.createDeriveInputSchema(
+    originalInputParamName,
+    originalInput,
+    captureTree,
+    captureNameMap,
+    hadZeroParameters,
+  );
 
   // Build the derive call expression
   // If we have a type parameter, omit type arguments entirely to let SchemaInjectionTransformer infer from expressions

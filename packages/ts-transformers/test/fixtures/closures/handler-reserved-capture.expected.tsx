@@ -129,7 +129,7 @@ export default recipe({
                 }
             },
             required: ["__ct_handler_event"]
-        } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event_1, { __ct_handler_event }) => __ct_handler_event)({
+        } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { __ct_handler_event_1 }) => __ct_handler_event)({
             __ct_handler_event: __ct_handler_event
         })}>
         Echo

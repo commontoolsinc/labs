@@ -50,9 +50,10 @@ describe("OpaqueRef map callbacks", () => {
       output,
       "__ctHelpers.recipe({",
     );
+    // Check for correct parameter destructuring
     assertStringIncludes(
       output,
-      "({ element: charm, index: index, params: { state } }) =>",
+      "({ element: charm, index, params: { state } }) =>",
     );
     assertStringIncludes(
       output,
