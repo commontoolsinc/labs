@@ -372,7 +372,9 @@ describe("llmDialog", () => {
           (m) =>
             m.role === "assistant" &&
             Array.isArray(m.content) &&
-            m.content.some((c) => c.type === "tool-call" && c.toolName === "pin"),
+            m.content.some((c) =>
+              c.type === "tool-call" && c.toolName === "pin"
+            ),
         );
         return !!toolMsg;
       },
@@ -778,7 +780,9 @@ describe("llmDialog", () => {
           (m) =>
             m.role === "assistant" &&
             Array.isArray(m.content) &&
-            m.content.some((c) => c.type === "tool-call" && c.toolName === "pin"),
+            m.content.some((c) =>
+              c.type === "tool-call" && c.toolName === "pin"
+            ),
         );
         return !!toolMsg;
       },
