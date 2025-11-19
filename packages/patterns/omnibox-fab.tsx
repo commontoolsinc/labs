@@ -78,7 +78,7 @@ export default recipe<OmniboxFABInput>(
   (_) => {
     const omnibot = Chatbot({
       system:
-        "You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.\n\nTool usage priority:\n- Search this space first: listMentionable → addAttachment to access items\n- Search externally only when clearly needed: searchWeb for current events, external information, or when nothing relevant exists in the space\n\nBe matter-of-fact. Prefer action to explanation.",
+        "You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.\n\nTool usage priority:\n- For patterns: listPatternIndex first\n- For existing pages/notes/content: listRecent or listMentionable to identify what they're referencing\n- Attach relevant items to conversation after instantiation/retrieval if they support ongoing tasks\n- Remove attachments when no longer relevant\n- Search web only as last resort when nothing exists in the space\n\nBe matter-of-fact. Prefer action to explanation.",
       tools: {
         searchWeb: {
           pattern: searchWeb,
@@ -91,7 +91,7 @@ export default recipe<OmniboxFABInput>(
         },
         fetchAndRunPattern: {
           description:
-            "Fetch a pattern from the URL, compile it and run it. You can pass arguments to the pattern using the 'args' parameter. To `navigateTo` the result you MUST append `/result` to the returned path.",
+            "Fetch a pattern from the URL, compile it and run it. You can pass arguments to the pattern using the 'args' parameter. ",
           pattern: fetchAndRunPattern,
         },
       },
