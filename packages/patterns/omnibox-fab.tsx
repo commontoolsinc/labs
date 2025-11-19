@@ -84,8 +84,9 @@ const fetchAndRunPattern = recipe<FetchAndRunPatternInput>(
 type NavigateToPatternInput = { cell: Cell<any> }; // Hack to steer LLM
 const navigateToPattern = recipe<NavigateToPatternInput>(
   ({ cell }) => {
-    navigateTo(cell);
-    return { success: ifElse(cell, true, false) };
+    const success = navigateTo(cell);
+
+    return ifElse(success, { success }, undefined);
   },
 );
 
