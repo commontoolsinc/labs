@@ -3,7 +3,7 @@ import ts from "typescript";
 import type { Emitter } from "../types.ts";
 import { createBindingPlan } from "../bindings.ts";
 import {
-  createDeriveCallForExpression,
+  createComputedCallForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
 import { selectDataFlowsWithin } from "../../../ast/mod.ts";
@@ -60,7 +60,7 @@ export const emitCallExpression: Emitter = ({
     let rewrittenPredicate: ts.Expression = hint.predicate;
     if (relevantPredicateDataFlows.length > 0) {
       const plan = createBindingPlan(relevantPredicateDataFlows);
-      const derivedPredicate = createDeriveCallForExpression(
+      const derivedPredicate = createComputedCallForExpression(
         hint.predicate,
         plan,
         context,
@@ -111,5 +111,5 @@ export const emitCallExpression: Emitter = ({
   if (relevantDataFlows.length === 0) return undefined;
 
   const plan = createBindingPlan(relevantDataFlows);
-  return createDeriveCallForExpression(expression, plan, context);
+  return createComputedCallForExpression(expression, plan, context);
 };

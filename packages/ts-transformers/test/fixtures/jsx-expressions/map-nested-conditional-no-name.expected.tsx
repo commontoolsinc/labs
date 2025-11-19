@@ -234,7 +234,10 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             showList: showList,
             items: items
         }, ({ showList, items }) => showList && (<div>
-            {items.map((item) => (<div>
+            {items.mapWithPattern(__ctHelpers.recipe<{
+                element: { name: string; };
+                params: {};
+            }>(({ element: item, params: {} }) => (<div>
                 {__ctHelpers.derive<{
                 item: {
                     name: __ctHelpers.OpaqueCell<string> & string;
@@ -242,7 +245,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             }, JSX.Element>({ item: {
                     name: item.name
                 } }, ({ item }) => item.name && <span>{item.name}</span>)}
-              </div>))}
+              </div>)), {})}
           </div>))}
       </div>),
     };

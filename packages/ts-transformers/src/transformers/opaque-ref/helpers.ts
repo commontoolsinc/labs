@@ -1,11 +1,10 @@
 import ts from "typescript";
 
-import { createDeriveCall } from "../builtins/derive.ts";
 import {
   type DataFlowAnalysis,
   detectCallKind,
-  getExpressionText,
   type NormalizedDataFlow,
+  setParentPointers,
 } from "../../ast/mod.ts";
 import type { BindingPlan } from "./bindings.ts";
 import { TransformationContext } from "../../core/mod.ts";
@@ -241,17 +240,20 @@ export function filterRelevantDataFlows(
   });
 }
 
-export function createDeriveCallForExpression(
+export function createComputedCallForExpression(
   expression: ts.Expression,
   plan: BindingPlan,
   context: TransformationContext,
 ): ts.Expression | undefined {
   if (plan.entries.length === 0) return undefined;
 
-  // Don't wrap expressions that are already derive calls
+  // Don't wrap expressions that are already derive or computed calls
   if (ts.isCallExpression(expression)) {
     const callKind = detectCallKind(expression, context.checker);
-    if (callKind?.kind === "derive") {
+    if (
+      callKind?.kind === "derive" ||
+      (callKind?.kind === "builder" && callKind.builderName === "computed")
+    ) {
       return undefined;
     }
   }
@@ -263,69 +265,50 @@ export function createDeriveCallForExpression(
     }
   }
 
-  const refs: ts.Expression[] = [];
-  const seen = new Set<ts.Node>();
-  const addRef = (expr: ts.Expression): void => {
-    if (seen.has(expr)) return;
-    seen.add(expr);
-    refs.push(expr);
-  };
-  const normalizeForCanonical = (expr: ts.Expression): ts.Expression => {
-    let current: ts.Expression = expr;
-    while (true) {
-      if (ts.isParenthesizedExpression(current)) {
-        current = current.expression;
-        continue;
-      }
-      if (
-        ts.isAsExpression(current) ||
-        ts.isTypeAssertionExpression(current) ||
-        ts.isNonNullExpression(current)
-      ) {
-        current = current.expression;
-        continue;
-      }
-      if (ts.isCallExpression(current)) {
-        const callee = current.expression;
-        if (
-          ts.isPropertyAccessExpression(callee) ||
-          ts.isElementAccessExpression(callee)
-        ) {
-          current = callee.expression;
-          continue;
-        }
-      }
-      if (
-        ts.isPropertyAccessExpression(current) &&
-        current.parent &&
-        ts.isCallExpression(current.parent) &&
-        current.parent.expression === current
-      ) {
-        current = current.expression;
-        continue;
-      }
-      break;
-    }
-    return current;
-  };
-  for (const entry of plan.entries) {
-    const canonical = entry.dataFlow.expression;
-    const canonicalText = getExpressionText(canonical);
-    addRef(canonical);
-    for (const occurrence of entry.dataFlow.occurrences) {
-      const normalized = normalizeForCanonical(occurrence.expression);
-      if (getExpressionText(normalized) === canonicalText) {
-        addRef(normalized);
-      }
-    }
+  const { factory, checker, sourceFile } = context;
+
+  // Get result type for the computed call
+  let resultTypeNode: ts.TypeNode | undefined;
+  let resultType: ts.Type | undefined;
+
+  try {
+    resultType = checker.getTypeAtLocation(expression);
+    resultTypeNode = checker.typeToTypeNode(
+      resultType,
+      sourceFile,
+      ts.NodeBuilderFlags.NoTruncation |
+        ts.NodeBuilderFlags.UseStructuralFallback,
+    );
+  } catch {
+    resultTypeNode = undefined;
+    resultType = undefined;
   }
 
-  const deriveCall = createDeriveCall(expression, refs, {
-    factory: context.factory,
-    tsContext: context.tsContext,
-    ctHelpers: context.ctHelpers,
-    context: context,
-  });
+  // Create computed(() => expression)
+  const arrowFunction = factory.createArrowFunction(
+    undefined,
+    undefined,
+    [],
+    resultTypeNode,
+    factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+    expression,
+  );
 
-  return deriveCall;
+  const computedCall = factory.createCallExpression(
+    context.ctHelpers.getHelperExpr("computed"),
+    undefined,
+    [arrowFunction],
+  );
+
+  // Register types for both the TypeNode and the computed CallExpression
+  if (resultTypeNode && resultType && context.options.typeRegistry) {
+    context.options.typeRegistry.set(resultTypeNode, resultType);
+    context.options.typeRegistry.set(computedCall, resultType);
+  }
+
+  // CRITICAL: Set parent pointers and connect to parent chain
+  // This maintains the parent chain so walking up from nested callbacks works
+  setParentPointers(computedCall, expression.parent);
+
+  return computedCall;
 }

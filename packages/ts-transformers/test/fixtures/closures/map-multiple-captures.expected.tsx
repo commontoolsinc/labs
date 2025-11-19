@@ -122,9 +122,13 @@ export default recipe({
                             }
                         },
                         required: ["discount", "taxRate"]
+                    },
+                    multiplier: {
+                        type: "number",
+                        enum: [2]
                     }
                 },
-                required: ["item", "state"]
+                required: ["item", "state", "multiplier"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "number"
             } as const satisfies __ctHelpers.JSONSchema, {
@@ -135,8 +139,9 @@ export default recipe({
                 state: {
                     discount: state.discount,
                     taxRate: state.taxRate
-                }
-            }, ({ item, state }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost)}
+                },
+                multiplier: multiplier
+            }, ({ item, state, multiplier }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost)}
           </span>)), {
                 state: {
                     discount: state.discount,

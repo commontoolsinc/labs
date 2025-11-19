@@ -17,6 +17,7 @@ import {
 } from "../ast/mod.ts";
 import {
   inferArrayElementType,
+  registerDeriveCallType,
   registerTypeForNode,
   tryExplicitParameterType,
 } from "../ast/type-inference.ts";
@@ -84,6 +85,16 @@ function shouldCapturePropertyAccess(
   const declarations = symbol.getDeclarations();
   if (!declarations || declarations.length === 0) return undefined;
 
+  // Skip imports - they're module-scoped and don't need to be captured
+  const isImport = declarations.some((decl) =>
+    ts.isImportSpecifier(decl) ||
+    ts.isImportClause(decl) ||
+    ts.isNamespaceImport(decl)
+  );
+  if (isImport) {
+    return undefined;
+  }
+
   // Skip module-scoped declarations
   if (declarations.some((decl) => isModuleScopedDeclaration(decl))) {
     return undefined;
@@ -95,9 +106,10 @@ function shouldCapturePropertyAccess(
   }
 
   // Check if ANY declaration is outside the callback
-  const hasExternalDeclaration = declarations.some((decl) =>
-    !isDeclaredWithinFunction(decl, func)
-  );
+  const hasExternalDeclaration = declarations.some((decl) => {
+    const isWithin = isDeclaredWithinFunction(decl, func);
+    return !isWithin;
+  });
 
   if (hasExternalDeclaration) {
     // Capture the whole property access expression
@@ -421,9 +433,12 @@ function collectCaptures(
         const captured = shouldCapturePropertyAccess(node, func, checker);
         if (captured) {
           captures.add(captured);
-          // Don't visit children
+          // Don't visit children - we've captured the whole property access chain
           return;
         }
+        // If not captured, continue visiting children to check for opaque values
+        // in the expression part (e.g., for state.arr[index].length, we need to
+        // visit state.arr[index] even though .length itself isn't captured)
       }
       // For method calls on identifiers (multiplier.get()), don't capture the property access
       // The identifier will be captured separately
@@ -507,13 +522,31 @@ function isOpaqueRefArrayMapCall(
 
   // Get the type of the target (what we're calling .map on)
   const target = node.expression.expression;
+
   const targetType = getTypeAtLocationWithFallback(
     target,
     checker,
     typeRegistry,
     logger,
   );
-  if (!targetType) return false;
+  if (!targetType) {
+    return false;
+  }
+
+  // Special case: If target is a derive call, always treat .map() as needing transformation
+  // Rationale: derive() returns OpaqueRef<T> where T is the callback's return type.
+  // For synthetic derive calls, we can't construct the OpaqueRef<T> wrapper type to register,
+  // so we register the callback's return type instead. This means type-based detection
+  // (isOpaqueRefType + hasArrayTypeArgument) won't recognize it, so we explicitly check
+  // for derive calls. Since derive() always returns opaque values, if we're calling .map()
+  // on it, it must be an array at runtime (otherwise the code would crash), so we should
+  // transform to mapWithPattern.
+  if (ts.isCallExpression(target)) {
+    const callKind = detectCallKind(target, checker);
+    if (callKind?.kind === "derive") {
+      return true;
+    }
+  }
 
   // Check direct case: target is OpaqueRef<T[]> or Cell<T[]>
   if (
@@ -553,7 +586,9 @@ function isOpaqueRefArrayMapCall(
     typeRegistry,
     logger,
   );
-  if (!originType) return false;
+  if (!originType) {
+    return false;
+  }
 
   return isOpaqueRefType(originType, checker) &&
     hasArrayTypeArgument(originType, checker);
@@ -713,7 +748,10 @@ function inferElementType(
   }
 
   const arrayExpr = mapCall.expression.expression;
-  return inferArrayElementType(arrayExpr, context);
+  return inferArrayElementType(arrayExpr, {
+    ...context,
+    typeRegistry: context.options.typeRegistry,
+  });
 }
 
 /**
@@ -976,7 +1014,8 @@ function shouldTransformMap(
   context: TransformationContext,
 ): boolean {
   // Early exit: Don't transform if inside derive with non-Cell OpaqueRef
-  if (isInsideDeriveWithOpaqueRef(mapCall, context)) {
+  const insideDeriveWithOpaque = isInsideDeriveWithOpaqueRef(mapCall, context);
+  if (insideDeriveWithOpaque) {
     return false;
   }
 
@@ -990,7 +1029,13 @@ function shouldTransformMap(
   }
 
   // Check if this expression or ancestors will be wrapped by JSX transformer
-  return !willBeWrappedByJsx(mapCall, closestJsxExpression, context);
+  const willBeWrapped = willBeWrappedByJsx(
+    mapCall,
+    closestJsxExpression,
+    context,
+  );
+  const shouldTransform = !willBeWrapped;
+  return shouldTransform;
 }
 
 function createClosureTransformVisitor(
@@ -1312,8 +1357,20 @@ function createRecipeCallWithParams(
     );
   }
 
+  // Filter out computed aliases from params - they'll be declared as local consts instead
+  const computedAliasNames = new Set(
+    elementAnalysis.computedAliases.map((alias) => alias.aliasName),
+  );
+
+  // Create a filtered capture tree without computed aliases
+  const filteredCaptureTree = new Map(
+    Array.from(captureTree.entries()).filter(
+      ([key]) => !computedAliasNames.has(key),
+    ),
+  );
+
   const paramsBindings = createBindingElementsFromNames(
-    captureTree.keys(),
+    filteredCaptureTree.keys(),
     factory,
     createBindingIdentifier,
   );
@@ -1373,7 +1430,7 @@ function createRecipeCallWithParams(
     elemParam,
     indexParam,
     arrayParam,
-    captureTree,
+    filteredCaptureTree,
     context,
   );
 
@@ -1384,7 +1441,10 @@ function createRecipeCallWithParams(
     [newCallback],
   );
 
-  const paramProperties = buildCapturePropertyAssignments(captureTree, factory);
+  const paramProperties = buildCapturePropertyAssignments(
+    filteredCaptureTree,
+    factory,
+  );
 
   const paramsObject = factory.createObjectLiteralExpression(
     paramProperties,
@@ -1396,8 +1456,17 @@ function createRecipeCallWithParams(
       "Expected mapCall.expression to be a PropertyAccessExpression",
     );
   }
-  const mapWithPatternAccess = factory.createPropertyAccessExpression(
+
+  // Visit the array expression to transform any derive() calls in the chain
+  // Example: derive({}, () => expr).mapWithPattern(...)
+  const visitedArrayExpr = ts.visitNode(
     mapCall.expression.expression,
+    visitor,
+    ts.isExpression,
+  ) ?? mapCall.expression.expression;
+
+  const mapWithPatternAccess = factory.createPropertyAccessExpression(
+    visitedArrayExpr,
     factory.createIdentifier("mapWithPattern"),
   );
 
@@ -2055,6 +2124,18 @@ function transformDeriveCall(
       : (resultTypeNode ? [inputTypeNode, resultTypeNode] : [inputTypeNode]), // Type arguments
     [mergedInput, newCallback], // Runtime arguments
   );
+
+  // Register the type of the derive call expression itself in the typeRegistry
+  // so that type inference works correctly for synthetic nodes
+  if (context.options.typeRegistry) {
+    registerDeriveCallType(
+      newDeriveCall,
+      resultTypeNode,
+      resultType,
+      context.checker,
+      context.options.typeRegistry,
+    );
+  }
 
   return newDeriveCall;
 }

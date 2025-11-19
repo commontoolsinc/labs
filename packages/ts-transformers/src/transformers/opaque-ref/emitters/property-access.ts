@@ -3,7 +3,7 @@ import ts from "typescript";
 import type { EmitterContext } from "../types.ts";
 import { createBindingPlan } from "../bindings.ts";
 import {
-  createDeriveCallForExpression,
+  createComputedCallForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
 import { isSafeEventHandlerCall } from "../../../ast/mod.ts";
@@ -33,5 +33,5 @@ export function emitPropertyAccess(
   }
 
   const plan = createBindingPlan(relevantDataFlows);
-  return createDeriveCallForExpression(expression, plan, context);
+  return createComputedCallForExpression(expression, plan, context);
 }
