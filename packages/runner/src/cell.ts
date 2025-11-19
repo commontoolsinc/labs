@@ -1423,7 +1423,9 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
             ...ContextualFlowControl.toSchemaObj(providedSchema),
             default: value as any,
           }
-          : providedSchema === undefined ? undefined : ContextualFlowControl.toSchemaObj(providedSchema);
+          : providedSchema === undefined
+          ? undefined
+          : ContextualFlowControl.toSchemaObj(providedSchema);
 
       // Create a cell without a link - it will be created on demand via .for()
       const cell = createCell<T>(
