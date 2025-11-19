@@ -350,7 +350,7 @@ const resultSchema = {
     addMessage: { ...LLMMessageSchema, asStream: true },
     cancelGeneration: { asStream: true },
     flattenedTools: { type: "object", default: {} },
-    attachments: {
+    pinnedCells: {
       type: "array",
       items: {
         type: "object",
@@ -427,8 +427,8 @@ function collectToolEntries(
 const READ_TOOL_NAME = "read";
 const INVOKE_TOOL_NAME = "invoke";
 const SCHEMA_TOOL_NAME = "schema";
-const ADD_ATTACHMENT_TOOL_NAME = "addAttachment";
-const REMOVE_ATTACHMENT_TOOL_NAME = "removeAttachment";
+const PIN_TOOL_NAME = "pin";
+const UNPIN_TOOL_NAME = "unpin";
 const FINAL_RESULT_TOOL_NAME = "finalResult";
 const UPDATE_ARGUMENT_TOOL_NAME = "updateArgument";
 
@@ -487,7 +487,7 @@ const SCHEMA_INPUT_SCHEMA: JSONSchema = {
   additionalProperties: false,
 };
 
-const ADD_ATTACHMENT_INPUT_SCHEMA: JSONSchema = {
+const PIN_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
     path: {
@@ -497,18 +497,18 @@ const ADD_ATTACHMENT_INPUT_SCHEMA: JSONSchema = {
       },
       required: ["@link"],
       description:
-        'Link to attach as a bookmark. Format: { "@link": "/of:bafyabc123" }.',
+        'Link to pin for easy reference. Format: { "@link": "/of:bafyabc123" }.',
     },
     name: {
       type: "string",
-      description: "Human-readable name for this attachment.",
+      description: "Human-readable name for this pinned cell.",
     },
   },
   required: ["path", "name"],
   additionalProperties: false,
 };
 
-const REMOVE_ATTACHMENT_INPUT_SCHEMA: JSONSchema = {
+const UNPIN_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
     path: {
@@ -518,7 +518,7 @@ const REMOVE_ATTACHMENT_INPUT_SCHEMA: JSONSchema = {
       },
       required: ["@link"],
       description:
-        'Link of the attachment to remove. Format: { "@link": "/of:bafyabc123" }.',
+        'Link of the pinned cell to remove. Format: { "@link": "/of:bafyabc123" }.',
     },
   },
   required: ["path"],
@@ -548,10 +548,10 @@ const UPDATE_ARGUMENT_INPUT_SCHEMA: JSONSchema = {
 };
 
 /**
- * Represents an attachment in the conversation.
- * Attachments are links of interest that the LLM can add/remove as a scratchpad.
+ * Represents a pinned cell in the conversation.
+ * Pinned cells are links of interest that the LLM can add/remove as a scratchpad.
  */
-type Attachment = {
+type PinnedCell = {
   path: string; // e.g., "/of:bafyabc123" or "/of:bafyabc123"
   name: string; // Human-readable name for display
 };
@@ -648,12 +648,12 @@ function flattenTools(
     flattened[entry.name] = passThrough;
   }
 
-  // Build attachment context for tool descriptions
+  // Build pinned cells context for tool descriptions
   const handleList = charms.length > 0
     ? charms.map((e) => `${e.charmName} (${e.handle})`).join(", ")
     : "";
-  const attachmentContext = handleList
-    ? `Currently attached: ${handleList}.`
+  const pinnedCellsContext = handleList
+    ? `Currently pinned: ${handleList}.`
     : "";
 
   flattened[READ_TOOL_NAME] = {
@@ -661,28 +661,27 @@ function flattenTools(
       'Read data from any cell. Input: { "@link": "/of:bafyabc123/path" }. ' +
       "Returns the cell's data with nested cells as link objects. " +
       "Compose with invoke(): invoke() returns a link, then read(link) gets the data. " +
-      attachmentContext,
+      pinnedCellsContext,
     inputSchema: READ_INPUT_SCHEMA,
   };
   flattened[INVOKE_TOOL_NAME] = {
     description:
       'Invoke a handler or pattern. If you do not know the schema of the the handler, use schema() first. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
       'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ' +
-      attachmentContext,
+      pinnedCellsContext,
     inputSchema: INVOKE_INPUT_SCHEMA,
   };
-  flattened[ADD_ATTACHMENT_TOOL_NAME] = {
+  flattened[PIN_TOOL_NAME] = {
     description:
-      'Bookmark a link for easy reference. Input: { "@link": "/of:bafyabc123" } and a name. ' +
-      "Attached links appear in the system prompt with schema. " +
+      'Pin a cell for easy reference. Input: { "@link": "/of:bafyabc123" } and a name. ' +
+      "Pinned cells and their values appear in the system prompt. " +
       "Use to track important cells you're working with.",
-    inputSchema: ADD_ATTACHMENT_INPUT_SCHEMA,
+    inputSchema: PIN_INPUT_SCHEMA,
   };
-  flattened[REMOVE_ATTACHMENT_TOOL_NAME] = {
-    description:
-      'Remove a bookmarked link. Input: { "@link": "/of:bafyabc123" }. ' +
+  flattened[UNPIN_TOOL_NAME] = {
+    description: 'Unpin a cell. Input: { "@link": "/of:bafyabc123" }. ' +
       "Use when you no longer need quick access to a cell.",
-    inputSchema: REMOVE_ATTACHMENT_INPUT_SCHEMA,
+    inputSchema: UNPIN_INPUT_SCHEMA,
   };
   flattened[UPDATE_ARGUMENT_TOOL_NAME] = {
     description:
@@ -697,7 +696,7 @@ function flattenTools(
       "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
       'Input: { "@link": "/of:bafyabc123" }. ' +
       "Returns schema showing what data can be read and what handlers can be invoked. " +
-      attachmentContext,
+      pinnedCellsContext,
     inputSchema: SCHEMA_INPUT_SCHEMA,
   };
 
@@ -806,18 +805,17 @@ function buildToolCatalog(
       'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ',
     inputSchema: INVOKE_INPUT_SCHEMA,
   };
-  llmTools[ADD_ATTACHMENT_TOOL_NAME] = {
+  llmTools[PIN_TOOL_NAME] = {
     description:
-      'Bookmark a link for easy reference. Input: { "@link": "/of:bafyabc123" } and a name. ' +
-      "Attached links appear in the conversation and can be inspected with read() or schema(). " +
+      'Pin a cell for easy reference. Input: { "@link": "/of:bafyabc123" } and a name. ' +
+      "Pinned cells and their values appear in the system prompt. " +
       "Use to track important cells you're working with.",
-    inputSchema: ADD_ATTACHMENT_INPUT_SCHEMA,
+    inputSchema: PIN_INPUT_SCHEMA,
   };
-  llmTools[REMOVE_ATTACHMENT_TOOL_NAME] = {
-    description:
-      'Remove a bookmarked link. Input: { "@link": "/of:bafyabc123" }. ' +
+  llmTools[UNPIN_TOOL_NAME] = {
+    description: 'Unpin a cell. Input: { "@link": "/of:bafyabc123" }. ' +
       "Use when you no longer need quick access to a cell.",
-    inputSchema: REMOVE_ATTACHMENT_INPUT_SCHEMA,
+    inputSchema: UNPIN_INPUT_SCHEMA,
   };
   llmTools[UPDATE_ARGUMENT_TOOL_NAME] = {
     description:
@@ -839,57 +837,132 @@ function buildToolCatalog(
 }
 
 /**
- * Build a formatted documentation string describing all attached charm schemas
- * from the attachments list. This is appended to the system prompt so the LLM
- * has immediate context about available charms without needing to call schema() first.
+ * Build a formatted documentation string describing all available cells:
+ * both context cells (passed via the context parameter) and pinned cells
+ * (managed by pin/unpin tools). Includes schemas and current values for each cell.
+ * This is appended to the system prompt so the LLM has immediate context.
  */
-function buildAttachmentsSchemaDocumentation(
+function buildAvailableCellsDocumentation(
   runtime: IRuntime,
   space: MemorySpace,
-  attachments: Cell<Attachment[]>,
+  context: Record<string, Cell<any>> | undefined,
+  pinnedCells: Cell<PinnedCell[]>,
 ): string {
-  const currentAttachments = attachments.get() || [];
-  if (currentAttachments.length === 0) {
-    return "";
+  const entries: string[] = [];
+
+  // First, process context cells (if provided)
+  if (context) {
+    for (const [name, cell] of Object.entries(context)) {
+      try {
+        const resolvedCell = cell.resolveAsCell();
+        const link = resolvedCell.getAsNormalizedFullLink();
+        const path = createLLMFriendlyLink(link);
+        const schemaInfo = getCellSchema(resolvedCell);
+
+        let entry = `## ${name} (${path})\n`;
+
+        if (schemaInfo?.schema) {
+          const schemaJson = JSON.stringify(schemaInfo.schema, null, 2);
+          entry += `- Schema: \`\`\`json\n${schemaJson}\n\`\`\`\n`;
+        }
+
+        try {
+          const value = resolvedCell.get();
+          const serialized = traverseAndSerialize(
+            value,
+            schemaInfo?.schema,
+            schemaInfo?.rootSchema,
+          );
+
+          let valueJson = JSON.stringify(serialized, null, 2);
+
+          const MAX_VALUE_LENGTH = 2000;
+          if (valueJson.length > MAX_VALUE_LENGTH) {
+            valueJson = valueJson.substring(0, MAX_VALUE_LENGTH) +
+              "\n... (truncated)";
+          }
+
+          entry += `- Current Value: \`\`\`json\n${valueJson}\n\`\`\`\n`;
+        } catch (e) {
+          logger.warn(`Failed to serialize value for context cell ${name}:`, e);
+          entry += `- Current Value: (unable to serialize)\n`;
+        }
+
+        entries.push(entry);
+      } catch (e) {
+        logger.warn(`Failed to document context cell ${name}:`, e);
+      }
+    }
   }
 
-  const schemaEntries: string[] = [];
-
-  for (const attachment of currentAttachments) {
+  // Then, process pinned cells
+  const currentPinnedCells = pinnedCells.get() || [];
+  for (const pinnedCell of currentPinnedCells) {
     try {
       // Parse the path using the same parser as read/run tools
-      const link = parseLLMFriendlyLink(attachment.path, space);
+      const link = parseLLMFriendlyLink(pinnedCell.path, space);
 
       // Get cell from link
       const cell = runtime.getCellFromLink(link);
       if (!cell) {
         logger.warn(
-          `Could not resolve attachment ${attachment.path} to a cell`,
+          `Could not resolve pinned cell ${pinnedCell.path} to a cell`,
         );
         continue;
       }
 
+      const resolvedCell = cell.resolveAsCell();
+
       // Get schema for the cell. Resolve picks up all schemas on links from it.
-      const schema = getCellSchema(cell.resolveAsCell());
-      if (schema) {
-        const schemaJson = JSON.stringify(schema, null, 2);
-        schemaEntries.push(
-          `## ${attachment.name} (${attachment.path})\n\`\`\`json\n${schemaJson}\n\`\`\``,
-        );
+      const schemaInfo = getCellSchema(resolvedCell);
+
+      // Build documentation entry with both schema and value
+      let entry = `## ${pinnedCell.name} (${pinnedCell.path})\n`;
+
+      // Add schema if available
+      if (schemaInfo?.schema) {
+        const schemaJson = JSON.stringify(schemaInfo.schema, null, 2);
+        entry += `- Schema: \`\`\`json\n${schemaJson}\n\`\`\`\n`;
       }
+
+      // Add current value
+      try {
+        const value = resolvedCell.get();
+        const serialized = traverseAndSerialize(
+          value,
+          schemaInfo?.schema,
+          schemaInfo?.rootSchema,
+        );
+
+        let valueJson = JSON.stringify(serialized, null, 2);
+
+        // Truncate if too large
+        const MAX_VALUE_LENGTH = 2000;
+        if (valueJson.length > MAX_VALUE_LENGTH) {
+          valueJson = valueJson.substring(0, MAX_VALUE_LENGTH) +
+            "\n... (truncated)";
+        }
+
+        entry += `- Current Value: \`\`\`json\n${valueJson}\n\`\`\`\n`;
+      } catch (e) {
+        logger.warn(`Failed to serialize value for ${pinnedCell.name}:`, e);
+        entry += `- Current Value: (unable to serialize)\n`;
+      }
+
+      entries.push(entry);
     } catch (e) {
       logger.warn(
-        `Failed to get schema for attachment ${attachment.name} (${attachment.path}):`,
+        `Failed to document pinned cell ${pinnedCell.name} (${pinnedCell.path}):`,
         e,
       );
     }
   }
 
-  if (schemaEntries.length === 0) {
+  if (entries.length === 0) {
     return "";
   }
 
-  return "\n\n# Attached Charms\n\n" + schemaEntries.join("\n\n");
+  return "\n\n# Available Cells\n\n" + entries.join("\n\n");
 }
 
 // Discriminated union separating external tools from built-in tools
@@ -901,8 +974,8 @@ type ResolvedToolCall =
     toolDef: Cell<Schema<typeof LLMToolSchema>>;
   }
   // Built-in tools provided by llm-dialog itself
-  | { type: "addAttachment"; call: LLMToolCall; path: string; name: string }
-  | { type: "removeAttachment"; call: LLMToolCall; path: string }
+  | { type: "pin"; call: LLMToolCall; path: string; name: string }
+  | { type: "unpin"; call: LLMToolCall; path: string }
   | { type: "schema"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "read"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "finalResult"; call: LLMToolCall; result: unknown }
@@ -941,39 +1014,39 @@ function resolveToolCall(
 
   if (
     name === READ_TOOL_NAME || name === INVOKE_TOOL_NAME ||
-    name === SCHEMA_TOOL_NAME || name === ADD_ATTACHMENT_TOOL_NAME ||
-    name === REMOVE_ATTACHMENT_TOOL_NAME || name === FINAL_RESULT_TOOL_NAME ||
+    name === SCHEMA_TOOL_NAME || name === PIN_TOOL_NAME ||
+    name === UNPIN_TOOL_NAME || name === FINAL_RESULT_TOOL_NAME ||
     name === UPDATE_ARGUMENT_TOOL_NAME
   ) {
-    // Handle addAttachment
-    if (name === ADD_ATTACHMENT_TOOL_NAME) {
+    // Handle pin
+    if (name === PIN_TOOL_NAME) {
       const path = extractStringField(
         toolCallPart.input,
         "path",
         "/of:bafyabc123",
       );
-      const attachmentName = extractStringField(
+      const pinnedCellName = extractStringField(
         toolCallPart.input,
         "name",
-        "My Charm",
+        "My Cell",
       );
       return {
-        type: "addAttachment",
-        call: { id, name, input: { path, name: attachmentName } },
+        type: "pin",
+        call: { id, name, input: { path, name: pinnedCellName } },
         path,
-        name: attachmentName,
+        name: pinnedCellName,
       };
     }
 
-    // Handle removeAttachment
-    if (name === REMOVE_ATTACHMENT_TOOL_NAME) {
+    // Handle unpin
+    if (name === UNPIN_TOOL_NAME) {
       const path = extractStringField(
         toolCallPart.input,
         "path",
         "/of:bafyabc123",
       );
       return {
-        type: "removeAttachment",
+        type: "unpin",
         call: { id, name, input: { path } },
         path,
       };
@@ -1153,7 +1226,7 @@ async function executeToolCalls(
   space: MemorySpace,
   toolCatalog: ToolCatalog,
   toolCallParts: BuiltInLLMToolCallPart[],
-  attachments?: Cell<Attachment[]>,
+  pinnedCells?: Cell<PinnedCell[]>,
 ): Promise<ToolCallExecutionResult[]> {
   const results: ToolCallExecutionResult[] = [];
   for (const part of toolCallParts) {
@@ -1164,7 +1237,7 @@ async function executeToolCalls(
         space,
         resolved,
         toolCatalog,
-        attachments,
+        pinnedCells,
       );
       results.push({
         id: part.toolCallId,
@@ -1278,27 +1351,27 @@ async function safelyPerformUpdate(
 }
 
 /**
- * Handles the addAttachment tool call.
+ * Handles the pin tool call.
  */
-function handleAddAttachment(
+function handlePin(
   runtime: IRuntime,
-  resolved: ResolvedToolCall & { type: "addAttachment" },
-  attachments: Cell<Attachment[]>,
+  resolved: ResolvedToolCall & { type: "pin" },
+  pinnedCells: Cell<PinnedCell[]>,
 ): { type: string; value: any } {
-  const current = attachments.get() || [];
+  const current = pinnedCells.get() || [];
 
-  // Check if already attached
-  if (current.some((a) => a.path === resolved.path)) {
+  // Check if already pinned
+  if (current.some((p) => p.path === resolved.path)) {
     return {
       type: "json",
-      value: { success: false, message: "Already attached" },
+      value: { success: false, message: "Already pinned" },
     };
   }
 
-  // Add new attachment using a transaction
+  // Add new pinned cell using a transaction
   runtime.editWithRetry((tx) => {
-    const currentInTx = attachments.withTx(tx).get() || [];
-    attachments.withTx(tx).set([
+    const currentInTx = pinnedCells.withTx(tx).get() || [];
+    pinnedCells.withTx(tx).set([
       ...currentInTx,
       { path: resolved.path, name: resolved.name },
     ]);
@@ -1308,15 +1381,15 @@ function handleAddAttachment(
 }
 
 /**
- * Handles the removeAttachment tool call.
+ * Handles the unpin tool call.
  */
-function handleRemoveAttachment(
+function handleUnpin(
   runtime: IRuntime,
-  resolved: ResolvedToolCall & { type: "removeAttachment" },
-  attachments: Cell<Attachment[]>,
+  resolved: ResolvedToolCall & { type: "unpin" },
+  pinnedCells: Cell<PinnedCell[]>,
 ): { type: string; value: any } {
-  const current = attachments.get() || [];
-  const filtered = current.filter((a) => a.path !== resolved.path);
+  const current = pinnedCells.get() || [];
+  const filtered = current.filter((p) => p.path !== resolved.path);
 
   if (filtered.length === current.length) {
     return {
@@ -1325,11 +1398,11 @@ function handleRemoveAttachment(
     };
   }
 
-  // Remove attachment using a transaction
+  // Remove pinned cell using a transaction
   runtime.editWithRetry((tx) => {
-    const currentInTx = attachments.withTx(tx).get() || [];
-    const filteredInTx = currentInTx.filter((a) => a.path !== resolved.path);
-    attachments.withTx(tx).set(filteredInTx);
+    const currentInTx = pinnedCells.withTx(tx).get() || [];
+    const filteredInTx = currentInTx.filter((p) => p.path !== resolved.path);
+    pinnedCells.withTx(tx).set(filteredInTx);
   });
 
   return { type: "json", value: { success: true } };
@@ -1555,15 +1628,15 @@ async function invokeToolCall(
   space: MemorySpace,
   resolved: ResolvedToolCall,
   _catalog?: ToolCatalog,
-  attachments?: Cell<Attachment[]>,
+  pinnedCells?: Cell<PinnedCell[]>,
 ) {
-  // Handle attachment tools
-  if (resolved.type === "addAttachment") {
-    return handleAddAttachment(runtime, resolved, attachments!);
+  // Handle pinned cell tools
+  if (resolved.type === "pin") {
+    return handlePin(runtime, resolved, pinnedCells!);
   }
 
-  if (resolved.type === "removeAttachment") {
-    return handleRemoveAttachment(runtime, resolved, attachments!);
+  if (resolved.type === "unpin") {
+    return handleUnpin(runtime, resolved, pinnedCells!);
   }
 
   if (resolved.type === "schema") {
@@ -1624,7 +1697,7 @@ export function llmDialog(
   let cellsInitialized = false;
   let result: Cell<Schema<typeof resultSchema>>;
   let internal: Cell<Schema<typeof internalSchema>>;
-  let attachments: Cell<Attachment[]>;
+  let pinnedCells: Cell<PinnedCell[]>;
   let requestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
 
@@ -1672,8 +1745,8 @@ export function llmDialog(
       );
       internal.sync(); // Kick off sync, no need to await
 
-      // Create attachments cell to store the internal attachments state
-      const attachmentsSchema = {
+      // Create pinnedCells cell to store the internal pinned cells state
+      const pinnedCellsSchema = {
         type: "array",
         items: {
           type: "object",
@@ -1684,17 +1757,17 @@ export function llmDialog(
           required: ["path", "name"],
         },
       } as const;
-      attachments = runtime.getCell(
+      pinnedCells = runtime.getCell(
         parentCell.space,
-        { llmDialog: { attachments: cause } },
-        attachmentsSchema,
+        { llmDialog: { pinnedCells: cause } },
+        pinnedCellsSchema,
         tx,
       );
-      attachments.sync(); // Kick off sync, no need to await
+      pinnedCells.sync(); // Kick off sync, no need to await
 
       const pending = result.key("pending");
 
-      // Write the stream markers and attachments link into the result cell.
+      // Write the stream markers and initialize pinnedCells as empty array.
       // This write might fail (since the original data wasn't loaded yet), but
       // that's ok, since in that case another instance already wrote these.
       //
@@ -1704,7 +1777,7 @@ export function llmDialog(
         ...result.getRaw(),
         addMessage: { $stream: true },
         cancelGeneration: { $stream: true },
-        attachments: attachments.getAsLink(),
+        pinnedCells: [],
       });
 
       // Declare `addMessage` handler and register
@@ -1758,7 +1831,7 @@ export function llmDialog(
             inputs,
             pending,
             internal,
-            attachments,
+            pinnedCells,
             requestId,
             abortController.signal,
           );
@@ -1802,6 +1875,25 @@ export function llmDialog(
       result.withTx(tx).key("flattenedTools").set(flattened as any);
     }
 
+    // Update merged pinnedCells whenever context or internal pinnedCells change
+    const contextCells = inputs.key("context").withTx(tx).get() ?? {};
+    const toolPinnedCells = pinnedCells.withTx(tx).get() ?? [];
+
+    // Convert context cells to PinnedCell format
+    const contextAsPinnedCells: PinnedCell[] = Object.entries(contextCells).map(
+      ([name, cell]) => {
+        const link = cell.resolveAsCell().getAsNormalizedFullLink();
+        const path = createLLMFriendlyLink(link);
+        return { name, path };
+      },
+    );
+
+    // Merge context cells and tool-pinned cells
+    const mergedPinnedCells = [...contextAsPinnedCells, ...toolPinnedCells];
+
+    // Write to result cell
+    result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
+
     if (
       (!result.withTx(tx).key("pending").get() ||
         requestId !== internal.withTx(tx).key("requestId").get()) && requestId
@@ -1822,7 +1914,7 @@ function startRequest(
   inputs: Cell<Schema<typeof LLMParamsSchema>>,
   pending: Cell<boolean>,
   internal: Cell<Schema<typeof internalSchema>>,
-  attachments: Cell<Attachment[]>,
+  pinnedCells: Cell<PinnedCell[]>,
   requestId: string,
   abortSignal: AbortSignal,
 ) {
@@ -1837,11 +1929,13 @@ function startRequest(
 
   const toolCatalog = buildToolCatalog(toolsCell);
 
-  // Build charm schemas documentation from attachments and append to system prompt
-  const charmSchemasDocs = buildAttachmentsSchemaDocumentation(
+  // Build available cells documentation (both context and pinned cells)
+  const context = inputs.key("context").get();
+  const cellsDocs = buildAvailableCellsDocumentation(
     runtime,
     space,
-    attachments,
+    context,
+    pinnedCells,
   );
 
   const linkModelDocs = `
@@ -1890,7 +1984,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
     "\n\nIf the user's request is unclear or you need context about what they're referring to, " +
     "call listRecent() to see recently viewed charms.";
 
-  const augmentedSystem = (system ?? "") + linkModelDocs + charmSchemasDocs +
+  const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs +
     listRecentHint;
 
   const llmParams: LLMRequest = {
@@ -1973,7 +2067,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             space,
             toolCatalog,
             toolCallParts,
-            attachments,
+            pinnedCells,
           );
 
           // Validate that we have a result for every tool call with matching IDs
@@ -2043,7 +2137,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
               inputs,
               pending,
               internal,
-              attachments,
+              pinnedCells,
               requestId,
               abortSignal,
             );

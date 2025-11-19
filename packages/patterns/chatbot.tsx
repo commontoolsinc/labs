@@ -81,7 +81,7 @@ type ChatOutput = {
   clearChat: Stream<void>;
   cancelGeneration: Stream<void>;
   title?: string;
-  attachments: Array<PromptAttachment>;
+  pinnedCells: Array<PromptAttachment>;
   tools: any;
   ui: {
     chatLog: VNode;
@@ -170,12 +170,15 @@ export default pattern<ChatInput, ChatOutput>(
       ...assistantTools,
     }));
 
+    const latest = computed(() => recentCharms[0]);
+    const latestName = computed(() => recentCharms[0]?.[NAME]);
+
     const {
       addMessage,
       cancelGeneration,
       pending,
       flattenedTools,
-      attachments,
+      pinnedCells,
     } = llmDialog(
       {
         system: computed(() => {
@@ -184,6 +187,9 @@ export default pattern<ChatInput, ChatOutput>(
         messages,
         tools: mergedTools,
         model,
+        context: computed(() => ({
+          [latestName]: latest,
+        })),
       },
     );
 
@@ -202,6 +208,10 @@ export default pattern<ChatInput, ChatOutput>(
     });
 
     const title = TitleGenerator({ model, messages });
+
+    computed(() => {
+      console.log(pinnedCells);
+    });
 
     const promptInput = (
       <ct-prompt-input
@@ -235,7 +245,7 @@ export default pattern<ChatInput, ChatOutput>(
 
     const attachmentsAndTools = (
       <ct-hstack align="center" gap="1">
-        <ct-attachments-bar attachments={attachments} />
+        <ct-attachments-bar pinnedCells={pinnedCells} />
         <ct-tools-chip tools={flattenedTools} />
         <ct-button
           variant="pill"
@@ -274,7 +284,7 @@ export default pattern<ChatInput, ChatOutput>(
       }),
       cancelGeneration,
       title,
-      attachments,
+      pinnedCells,
       tools: flattenedTools,
       ui: {
         chatLog,
