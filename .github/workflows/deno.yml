@@ -63,6 +63,12 @@ jobs:
             ./dist/bg-charm-service
             ./dist/ct
 
+      - name: 📤 Upload shell assets for GCS deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: shell-assets
+          path: ./packages/toolshed/shell-frontend
+
   package-integration-test:
     name: "Package Integration Tests"
     runs-on: ubuntu-latest
@@ -189,7 +195,7 @@ jobs:
 
   attest-binaries:
     name: "Attest and Upload Binaries"
-    if: github.ref == 'refs/heads/main'
+    # TODO: restore to `if: github.ref == 'refs/heads/main'` after testing
     runs-on: ubuntu-24.04-32-core
     needs: [
       "pattern-integration-test",
@@ -362,6 +368,25 @@ jobs:
 
       - name: ⚙️ Setup Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
+
+      - name: 📥 Download shell assets
+        uses: actions/download-artifact@v4
+        with:
+          name: shell-assets
+          path: ./shell-assets
+
+      - name: 📤 Upload shell assets to GCS
+        run: |
+          # Upload to SHA-specific directory
+          gsutil -m rsync -r ./shell-assets gs://ct-shell-builds/builds/${{ github.sha }}/
+
+          # Upload to latest directory (overwrites)
+          gsutil -m rsync -r -d ./shell-assets gs://ct-shell-builds/builds/latest/
+
+          echo "::group::📦 Shell Asset Links"
+          echo "SHA build: https://storage.googleapis.com/ct-shell-builds/builds/${{ github.sha }}/index.html"
+          echo "Latest build: https://storage.googleapis.com/ct-shell-builds/builds/latest/index.html"
+          echo "::endgroup::"
 
       - name: 🚀 Upload artifacts to Google Cloud Storage
         run: |
