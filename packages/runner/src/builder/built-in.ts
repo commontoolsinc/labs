@@ -115,7 +115,7 @@ let ifElseFactory:
 export const navigateTo = createNodeFactory({
   type: "ref",
   implementation: "navigateTo",
-}) as (cell: OpaqueRef<unknown>) => OpaqueRef<string>;
+}) as (cell: OpaqueRef<unknown>) => OpaqueRef<boolean>;
 
 export function wish<T = unknown>(
   target: Opaque<string>,

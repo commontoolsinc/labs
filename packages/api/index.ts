@@ -1243,7 +1243,7 @@ export type CompileAndRunFunction = <T = any, S = any>(
   params: Opaque<BuiltInCompileAndRunParams<T>>,
 ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
 
-export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<string>;
+export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<boolean>;
 export type WishFunction = {
   <T = unknown>(target: Opaque<string>): OpaqueRef<T>;
   <S extends JSONSchema = JSONSchema>(
