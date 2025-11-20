@@ -1439,7 +1439,11 @@ function handleRead(
   const serialized = traverseAndSerialize(cell.get(), schema);
 
   // Handle undefined by returning null (valid JSON) instead
-  return { type: "json", value: serialized ?? null, ...(schema && { schema }) };
+  return {
+    type: "json",
+    value: serialized ?? null,
+    ...(schema !== undefined && { schema }),
+  };
 }
 
 /**

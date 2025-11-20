@@ -57,7 +57,7 @@ export function toJSONWithLegacyAliases(
       return {
         $alias: {
           path: pathToCell as (string | number)[],
-          ...(schema &&
+          ...(schema !== undefined &&
             { schema: sanitizeSchemaForLinks(schema) }),
           ...(rootSchema &&
             { rootSchema: sanitizeSchemaForLinks(rootSchema) }),

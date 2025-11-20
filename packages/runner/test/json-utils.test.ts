@@ -4,7 +4,11 @@ import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
-import { createJsonSchema } from "../src/builder/json-utils.ts";
+import {
+  createJsonSchema,
+  toJSONWithLegacyAliases,
+} from "../src/builder/json-utils.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 
@@ -314,6 +318,34 @@ describe("createJsonSchema", () => {
               },
             },
           },
+        },
+      },
+    });
+  });
+  it("should preserve false schema in toJSONWithLegacyAliases", () => {
+    const cellWithFalseSchema = runtime.getImmutableCell(
+      space,
+      "value",
+      false,
+    );
+
+    const paths = new Map();
+    // Cast to any to bypass strict type checks for test purposes
+    paths.set(cellWithFalseSchema as any, ["path", "to", "cell"]);
+
+    const result = toJSONWithLegacyAliases(
+      cellWithFalseSchema as any,
+      paths,
+    );
+
+    expect(result).toEqual({
+      "/": {
+        [LINK_V1_TAG]: {
+          id: expect.stringContaining("data:application/json"),
+          overwrite: "redirect",
+          path: [],
+          space: space,
+          schema: false,
         },
       },
     });

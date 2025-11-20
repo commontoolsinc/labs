@@ -255,7 +255,7 @@ export function parseLink(
       path: path.map((p) => p.toString()),
       ...(resolvedSpace && { space: resolvedSpace }),
       type: "application/json",
-      ...(link.schema && { schema: link.schema }),
+      ...(link.schema !== undefined && { schema: link.schema }),
       ...(link.rootSchema && { rootSchema: link.rootSchema }),
       ...(link.overwrite === "redirect" && { overwrite: "redirect" }),
     };
@@ -304,7 +304,7 @@ export function parseLink(
         : [],
       ...(base?.space && { space: base.space }),
       type: "application/json",
-      ...(alias.schema && { schema: alias.schema }),
+      ...(alias.schema !== undefined && { schema: alias.schema }),
       ...(alias.rootSchema && { rootSchema: alias.rootSchema }),
       overwrite: "redirect",
     };
@@ -427,7 +427,7 @@ export function createSigilLinkFromParsedLink(
   }
 
   // Include schema if requested
-  if (options.includeSchema && link.schema) {
+  if (options.includeSchema && link.schema !== undefined) {
     reference.schema = sanitizeSchemaForLinks(link.schema);
     reference.rootSchema = sanitizeSchemaForLinks(link.rootSchema);
   }

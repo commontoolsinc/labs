@@ -196,8 +196,8 @@ export function isRecipe(value: unknown): value is Recipe {
   return (
     (typeof value === "function" || typeof value === "object") &&
     value !== null &&
-    !!(value as Recipe).argumentSchema !== undefined &&
-    !!(value as Recipe).resultSchema !== undefined &&
+    (value as Recipe).argumentSchema !== undefined &&
+    (value as Recipe).resultSchema !== undefined &&
     Array.isArray((value as Recipe).nodes)
   );
 }
