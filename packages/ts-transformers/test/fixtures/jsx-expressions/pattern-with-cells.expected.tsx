@@ -54,8 +54,7 @@ export default pattern((cell) => {
             type: "number"
         }
     },
-    required: ["value"],
-    asOpaque: true
+    required: ["value"]
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {

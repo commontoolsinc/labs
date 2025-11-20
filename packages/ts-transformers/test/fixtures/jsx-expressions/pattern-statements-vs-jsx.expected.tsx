@@ -152,8 +152,7 @@ export default pattern((state) => {
             type: "number"
         }
     },
-    required: ["value"],
-    asOpaque: true
+    required: ["value"]
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {

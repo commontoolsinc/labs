@@ -39,6 +39,135 @@ export default recipe({
         }
     },
     required: ["value"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $NAME: {
+            type: "string",
+            asOpaque: true
+        },
+        $UI: {
+            $ref: "#/$defs/Element"
+        },
+        value: {
+            type: "number",
+            asOpaque: true
+        },
+        metadata: {
+            type: "object",
+            properties: {
+                next: {
+                    type: "number"
+                },
+                previous: {
+                    type: "number"
+                },
+                doubled: {
+                    type: "number"
+                }
+            },
+            required: ["next", "previous", "doubled"]
+        }
+    },
+    required: ["$NAME", "$UI", "value", "metadata"],
+    $defs: {
+        Element: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    enum: ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        VNode: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    enum: ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        RenderNode: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "number"
+                }, {
+                    type: "boolean",
+                    enum: [false]
+                }, {
+                    type: "boolean",
+                    enum: [true]
+                }, {
+                    $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/RenderNode"
+                    }
+                }]
+        },
+        Props: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean",
+                        enum: [false]
+                    }, {
+                        type: "boolean",
+                        enum: [true]
+                    }, {
+                        type: "object",
+                        additionalProperties: true
+                    }, {
+                        type: "array",
+                        items: true
+                    }, {
+                        asCell: true
+                    }, {
+                        asStream: true
+                    }, {
+                        type: "null"
+                    }]
+            }
+        }
+    }
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     // These should NOT be transformed (statement context)
     const next = state.value + 1;
