@@ -2,16 +2,19 @@
 
 ## What We Built
 
-Added type-checking validation to the fixture test suite that verifies input fixtures contain valid CommonTools code before transformation.
+Added type-checking validation to the fixture test suite that verifies input
+fixtures contain valid CommonTools code before transformation.
 
 ### Implementation
 
-1. **Added `typeCheck` option to `TransformOptions`** (`packages/ts-transformers/test/utils.ts:19`)
+1. **Added `typeCheck` option to `TransformOptions`**
+   (`packages/ts-transformers/test/utils.ts:19`)
    - Reuses existing TypeScript program creation
    - Uses `ts.getPreEmitDiagnostics()` to collect type errors
    - Throws with formatted error messages if diagnostics found
 
-2. **Integrated into fixture runner** (`packages/ts-transformers/test/fixture-based.test.ts:95`)
+2. **Integrated into fixture runner**
+   (`packages/ts-transformers/test/fixture-based.test.ts:95`)
    - Enabled by default for all fixtures
    - Can be skipped with `SKIP_INPUT_CHECK=1` environment variable
 
@@ -38,36 +41,45 @@ CHECK_INPUT=1 FIXTURE=schema-generation-builders deno task test
 ### Test Results
 
 **Total failures**: 59
-- **Type check failures**: ~17 fixtures with actual invalid CommonTools code
-- **Transform failures**: ~42 fixtures with output mismatches (unrelated to type checking)
 
-The transform failures appear to be pre-existing issues or flaky tests, not caused by the validation.
+- **Type check failures**: ~17 fixtures with actual invalid CommonTools code
+- **Transform failures**: ~42 fixtures with output mismatches (unrelated to type
+  checking)
+
+The transform failures appear to be pre-existing issues or flaky tests, not
+caused by the validation.
 
 ### Type Check Failure Categories
 
 #### 1. Read-only Property Violations (Most Common)
+
 ```
 Error TS2339: Property 'push' does not exist on type 'readonly string[]'
 Error TS2540: Cannot assign to 'lastUpdate' because it is a read-only property
 Error TS2540: Cannot assign to 'value' because it is a read-only property
 ```
 
-**Cause**: Handler state parameters are readonly. Mutation requires `Cell<T>` or `OpaqueRef<T>`.
+**Cause**: Handler state parameters are readonly. Mutation requires `Cell<T>` or
+`OpaqueRef<T>`.
 
 **Example**: `schema-generation-builders.input.tsx`
+
 ```typescript
 // ❌ Invalid
 const addTodo = handler<TodoEvent, { items: string[] }>((event, state) => {
-  state.items.push(event.add);  // Can't mutate readonly string[]
+  state.items.push(event.add); // Can't mutate readonly string[]
 });
 
 // ✅ Valid
-const addTodo = handler<TodoEvent, { items: Cell<string[]> }>((event, state) => {
-  state.items.push(event.add);  // Cell<T[]> supports mutation
-});
+const addTodo = handler<TodoEvent, { items: Cell<string[]> }>(
+  (event, state) => {
+    state.items.push(event.add); // Cell<T[]> supports mutation
+  },
+);
 ```
 
 #### 2. Cell Access Issues
+
 ```
 Error TS2339: Property 'length' does not exist on type 'Cell<string[]>'
 Error TS7053: Element implicitly has an 'any' type because expression of type '0' can't be used to index type 'Cell<string[]>'
@@ -78,6 +90,7 @@ Error TS7053: Element implicitly has an 'any' type because expression of type '0
 **Fix**: Use `cell.get().length` or `cell.get()[0]`
 
 #### 3. Arithmetic on Cells
+
 ```
 Error TS2365: Operator '+' cannot be applied to types 'Cell<number>' and 'number'
 Error TS2362: The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type
@@ -88,6 +101,7 @@ Error TS2362: The left-hand side of an arithmetic operation must be of type 'any
 **Fix**: Use `cell.get() + 1` or computed values
 
 #### 4. Implicit Any Types
+
 ```
 Error TS7031: Binding element 'items' implicitly has an 'any' type
 Error TS7006: Parameter 'item' implicitly has an 'any' type
@@ -99,6 +113,7 @@ Error TS7006: Parameter 'index' implicitly has an 'any' type
 **Fix**: Add explicit type annotations
 
 #### 5. Unknown Type Issues
+
 ```
 Error TS18046: 'value' is of type 'unknown'
 ```
@@ -108,6 +123,7 @@ Error TS18046: 'value' is of type 'unknown'
 **Fix**: Add type parameters or type assertions
 
 #### 6. Invalid API Usage
+
 ```
 Error TS2349: This expression is not callable
 Error TS2769: No overload matches this call
@@ -119,6 +135,7 @@ Error TS2353: Object literal may only specify known properties, and 'asOpaque' d
 **Fix**: Update to current CommonTools APIs
 
 #### 7. Strict Mode Issues
+
 ```
 Error TS1346: This parameter is not allowed with 'use strict' directive
 Error TS1347: 'use strict' directive cannot be used with non-simple parameter list
@@ -135,6 +152,7 @@ Error TS1347: 'use strict' directive cannot be used with non-simple parameter li
 Focus on the most common category: **read-only violations**
 
 **Fixtures to fix**:
+
 1. `schema-generation-builders` - Use `Cell<string[]>` for mutable array
 2. `schema-generation-lift-untyped` - Add proper Cell types
 3. Handler schema fixtures with property assignments
@@ -160,6 +178,7 @@ Update fixtures that access Cell properties incorrectly.
 ### Phase 4: Enable by Default
 
 Once all legitimate fixtures pass:
+
 1. Remove `SKIP_INPUT_CHECK` environment variable check
 2. Update CI to enforce validation
 3. Document validation in test README
@@ -175,11 +194,13 @@ Once all legitimate fixtures pass:
 ### Example: schema-generation-builders
 
 **Before validation**:
+
 - Test passed ✓
 - Code would fail in production ✗
 - Misleading example for users ✗
 
 **With validation**:
+
 - Test fails with clear error message ✓
 - Forces fix to use `Cell<string[]>` ✓
 - Becomes valid example code ✓
@@ -189,6 +210,7 @@ Once all legitimate fixtures pass:
 ### Why Input Validation?
 
 We validate inputs (not transformed outputs) because:
+
 1. **Source of truth**: Input fixtures represent real user code
 2. **Simpler**: No post-transform complications
 3. **Meaningful errors**: Errors point to actual code issues
@@ -197,6 +219,7 @@ We validate inputs (not transformed outputs) because:
 ### Reusing Existing Infrastructure
 
 The implementation reuses the existing TypeScript compilation pipeline:
+
 - Same `ts.createProgram()` setup
 - Same type definitions (commontools.d.ts, es2023.d.ts, etc.)
 - Same `getPreEmitDiagnostics()` API
@@ -205,6 +228,7 @@ The implementation reuses the existing TypeScript compilation pipeline:
 ### Environment Variable Control
 
 `CHECK_INPUT=1` enables opt-in validation:
+
 - Test validation on specific fixtures
 - Fix fixtures incrementally
 - Debug specific failures
@@ -212,13 +236,14 @@ The implementation reuses the existing TypeScript compilation pipeline:
 
 ## Conclusion
 
-The validation infrastructure is working perfectly! It's catching real issues in fixture code that would fail in production. The next step is to systematically fix the failing fixtures, starting with the most common pattern (read-only violations).
+The validation infrastructure is working perfectly! It's catching real issues in
+fixture code that would fail in production. The next step is to systematically
+fix the failing fixtures, starting with the most common pattern (read-only
+violations).
 
-The implementation successfully:
-✅ Validates input fixtures before transformation
-✅ Provides clear, actionable error messages
-✅ Allows gradual rollout with environment variable
-✅ Reuses existing test infrastructure
-✅ Found 17+ fixtures with invalid code
+The implementation successfully: ✅ Validates input fixtures before
+transformation ✅ Provides clear, actionable error messages ✅ Allows gradual
+rollout with environment variable ✅ Reuses existing test infrastructure ✅
+Found 17+ fixtures with invalid code
 
 **Status**: Ready for fixture fixes. Infrastructure complete.

@@ -177,73 +177,78 @@ export async function transformFiles(
 
   const program = ts.createProgram(rootFiles, compilerOptions, host);
 
-  // Type checking
-  const diagnostics = ts.getPreEmitDiagnostics(program);
-  if (logger && diagnostics.length > 0) {
-    logger("=== TypeScript Diagnostics ===");
-    diagnostics.forEach((diagnostic) => {
-      const message = ts.flattenDiagnosticMessageText(
-        diagnostic.messageText,
-        "\n",
-      );
-      logger(`${diagnostic.file?.fileName || "unknown"}: ${message}`);
-    });
-    logger("=== End Diagnostics ===");
-  }
+  // Type checking - only run diagnostics if needed
+  if (typeCheck || logger) {
+    const diagnostics = ts.getPreEmitDiagnostics(program);
 
-  if (typeCheck && diagnostics.length > 0) {
-    // Filter to only input file diagnostics (not from type definition files)
-    const inputFileDiagnostics = diagnostics.filter((diagnostic) =>
-      diagnostic.file &&
-      !diagnostic.file.fileName.startsWith("$types/") &&
-      !diagnostic.file.fileName.endsWith(".d.ts")
-    );
-
-    if (inputFileDiagnostics.length > 0) {
-      const errors: string[] = ["\nInput fixture type checking failed:\n"];
-      inputFileDiagnostics.forEach((diagnostic) => {
-        if (diagnostic.file && diagnostic.start !== undefined) {
-          const { line, character } = diagnostic.file
-            .getLineAndCharacterOfPosition(diagnostic.start);
-          const message = ts.flattenDiagnosticMessageText(
-            diagnostic.messageText,
-            "\n",
-          );
-          errors.push(
-            `  ${diagnostic.file.fileName}:${line + 1}:${character + 1}`,
-          );
-          errors.push(`    Error TS${diagnostic.code}: ${message}\n`);
-
-          // Show the source line
-          const sourceLines = diagnostic.file.text.split("\n");
-          if (sourceLines[line]) {
-            const lineNumStr = String(line + 1);
-            errors.push(`    ${lineNumStr}    ${sourceLines[line]}`);
-            errors.push(
-              `    ${" ".repeat(lineNumStr.length)}    ${
-                " ".repeat(character)
-              }^^^^^\n`,
-            );
-          }
-        } else {
-          const message = ts.flattenDiagnosticMessageText(
-            diagnostic.messageText,
-            "\n",
-          );
-          errors.push(`  Error TS${diagnostic.code}: ${message}\n`);
-        }
+    if (logger && diagnostics.length > 0) {
+      logger("=== TypeScript Diagnostics ===");
+      diagnostics.forEach((diagnostic) => {
+        const message = ts.flattenDiagnosticMessageText(
+          diagnostic.messageText,
+          "\n",
+        );
+        logger(`${diagnostic.file?.fileName || "unknown"}: ${message}`);
       });
-      errors.push("\nThis input fixture contains invalid CommonTools code.");
-      errors.push("To fix:");
-      errors.push(
-        "1. Update the input fixture to use valid CommonTools patterns",
-      );
-      errors.push(
-        "   (e.g., use Cell<T> for mutable state, OpaqueRef<T> for references)",
-      );
-      errors.push("2. Run without CHECK_INPUT=1 to skip validation temporarily");
+      logger("=== End Diagnostics ===");
+    }
 
-      throw new Error(errors.join("\n"));
+    if (typeCheck && diagnostics.length > 0) {
+      // Filter to only input file diagnostics (not from type definition files)
+      const inputFileDiagnostics = diagnostics.filter((diagnostic) =>
+        diagnostic.file &&
+        !diagnostic.file.fileName.startsWith("$types/") &&
+        !diagnostic.file.fileName.endsWith(".d.ts")
+      );
+
+      if (inputFileDiagnostics.length > 0) {
+        const errors: string[] = ["\nInput fixture type checking failed:\n"];
+        inputFileDiagnostics.forEach((diagnostic) => {
+          if (diagnostic.file && diagnostic.start !== undefined) {
+            const { line, character } = diagnostic.file
+              .getLineAndCharacterOfPosition(diagnostic.start);
+            const message = ts.flattenDiagnosticMessageText(
+              diagnostic.messageText,
+              "\n",
+            );
+            errors.push(
+              `  ${diagnostic.file.fileName}:${line + 1}:${character + 1}`,
+            );
+            errors.push(`    Error TS${diagnostic.code}: ${message}\n`);
+
+            // Show the source line
+            const sourceLines = diagnostic.file.text.split("\n");
+            if (sourceLines[line]) {
+              const lineNumStr = String(line + 1);
+              errors.push(`    ${lineNumStr}    ${sourceLines[line]}`);
+              errors.push(
+                `    ${" ".repeat(lineNumStr.length)}    ${
+                  " ".repeat(character)
+                }^^^^^\n`,
+              );
+            }
+          } else {
+            const message = ts.flattenDiagnosticMessageText(
+              diagnostic.messageText,
+              "\n",
+            );
+            errors.push(`  Error TS${diagnostic.code}: ${message}\n`);
+          }
+        });
+        errors.push("\nThis input fixture contains invalid CommonTools code.");
+        errors.push("To fix:");
+        errors.push(
+          "1. Update the input fixture to use valid CommonTools patterns",
+        );
+        errors.push(
+          "   (e.g., use Cell<T> for mutable state, OpaqueRef<T> for references)",
+        );
+        errors.push(
+          "2. Run without CHECK_INPUT=1 to skip validation temporarily",
+        );
+
+        throw new Error(errors.join("\n"));
+      }
     }
   }
 
