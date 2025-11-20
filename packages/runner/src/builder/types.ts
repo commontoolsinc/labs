@@ -192,14 +192,13 @@ declare module "@commontools/api" {
   }
 }
 
-export function isRecipe(value: unknown): value is Recipe {
+export function isRecipe(value: Recipe): value is Recipe {
   return (
     (typeof value === "function" || typeof value === "object") &&
     value !== null &&
-    !!(value as any).argumentSchema &&
-    !!(value as any).resultSchema &&
-    !!(value as any).nodes &&
-    Array.isArray((value as any).nodes)
+    !!(value.argumentSchema !== undefined) &&
+    !!(value.resultSchema !== undefined) &&
+    Array.isArray(value.nodes)
   );
 }
 
