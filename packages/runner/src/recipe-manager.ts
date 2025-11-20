@@ -296,7 +296,9 @@ export class RecipeManager implements IRecipeManager {
     const cell = this.recipeMetaCellById.get(recipeId);
     if (cell) {
       const current = cell.get();
-      cell.set({ ...current, ...fields, id: recipeId });
+      this.runtime.editWithRetry((tx) => {
+        cell.withTx(tx).set({ ...current, ...fields, id: recipeId });
+      });
     } else {
       const pending = this.pendingMetaById.get(recipeId) ?? {};
       this.pendingMetaById.set(recipeId, { ...pending, ...fields });
