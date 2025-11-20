@@ -364,6 +364,13 @@ export class Logger {
    * Increment the count for a specific message key and log level
    */
   private incrementKeyCount(key: string, level: LogLevel): void {
+    // Skip reserved key name "total" to prevent corruption of breakdown totals
+    if (key === "total") {
+      console.warn(
+        `[Logger] Message key "total" is reserved and cannot be used. Please use a different key.`,
+      );
+      return;
+    }
     if (!this._countsByKey[key]) {
       this._countsByKey[key] = { debug: 0, info: 0, warn: 0, error: 0 };
     }
@@ -586,8 +593,11 @@ export function getLoggerCountsBreakdown(): Record<string, LoggerBreakdown> & {
     for (const [name, logger] of Object.entries(global.commontools.logger)) {
       const loggerBreakdown = { total: 0 } as LoggerBreakdown;
 
-      // Add counts by key
+      // Add counts by key (skip "total" to avoid overwriting the reserved property)
       for (const [key, counts] of Object.entries(logger.countsByKey)) {
+        if (key === "total") {
+          continue; // Skip reserved property name
+        }
         loggerBreakdown[key] = counts;
         loggerBreakdown.total += counts.total;
       }
