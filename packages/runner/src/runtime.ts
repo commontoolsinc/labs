@@ -251,7 +251,10 @@ export interface IRecipeManager {
     },
     tx?: IExtendedStorageTransaction,
   ): Promise<void>;
-  setRecipeMetaFields(recipeId: string, fields: Partial<RecipeMeta>): void;
+  setRecipeMetaFields(
+    recipeId: string,
+    fields: Partial<RecipeMeta>,
+  ): Promise<void>;
 }
 
 export interface IModuleRegistry {

@@ -565,7 +565,7 @@ export async function compileRecipe(
   const recipeId = runtime.recipeManager.registerRecipe(recipe, recipeSrc);
 
   // Record metadata fields (spec, parents) for this recipe
-  runtime.recipeManager.setRecipeMetaFields(recipeId, {
+  await runtime.recipeManager.setRecipeMetaFields(recipeId, {
     spec,
     parents: parentsIds,
   } as Partial<Mutable<RecipeMeta>>);
