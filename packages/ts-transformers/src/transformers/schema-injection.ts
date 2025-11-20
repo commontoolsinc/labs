@@ -454,7 +454,9 @@ export class SchemaInjectionTransformer extends Transformer {
             // Example: recipe(inputSchema, fn) or recipe("name", inputSchema, fn)
             const existingInputSchema = schemaArgs[0]!;
 
-            inputTypeNode = factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+            inputTypeNode = factory.createKeywordTypeNode(
+              ts.SyntaxKind.UnknownKeyword,
+            );
             // Don't set inputType - we'll use the existing schema expression directly
 
             // Infer result type from function
@@ -477,7 +479,11 @@ export class SchemaInjectionTransformer extends Transformer {
               typeRegistry.set(toSchemaResult, resultType);
             }
 
-            const newArgs = [existingInputSchema, toSchemaResult, recipeFunction!];
+            const newArgs = [
+              existingInputSchema,
+              toSchemaResult,
+              recipeFunction!,
+            ];
 
             const updated = factory.createCallExpression(
               node.expression,
@@ -604,7 +610,9 @@ export class SchemaInjectionTransformer extends Transformer {
             // Example: pattern(fn, inputSchema)
             const existingInputSchema = schemaArgs[0]!;
 
-            argumentTypeNode = factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+            argumentTypeNode = factory.createKeywordTypeNode(
+              ts.SyntaxKind.UnknownKeyword,
+            );
             // Don't set argumentType - we'll use the existing schema expression directly
 
             // Infer result type from function
