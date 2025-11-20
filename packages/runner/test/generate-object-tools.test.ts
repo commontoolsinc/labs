@@ -22,6 +22,7 @@ import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { parseLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -1181,6 +1182,97 @@ describe("generateObject with tools", () => {
     expect(result.key("result").get()).toEqual({
       combined: "A and B",
     });
+  });
+
+  it("should return a cell when LLM returns a link object", async () => {
+    const finalResultCell = runtime.getCell(
+      space,
+      "generateObject-link-test-result",
+      undefined,
+      tx,
+    );
+
+    const finalResultValue = { test: "success" };
+    finalResultCell.set(finalResultValue);
+    const linkedCellId = finalResultCell.getAsNormalizedFullLink().id;
+
+    const resultSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        link: { type: "object", asCell: true },
+      },
+    };
+
+    const testPrompt = "test-link-response";
+
+    addMockResponse(
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(testPrompt)
+        ) && req.tools?.["finalResult"] !== undefined,
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call_finalResult_link",
+            toolName: "finalResult",
+            input: {
+              link: {
+                "@link": `/${linkedCellId}`,
+              },
+            },
+          },
+        ],
+        id: "mock-link-response",
+      },
+    );
+
+    const testRecipe = recipe<Record<string, never>>(
+      "Generate Object with link response",
+      () => {
+        const result = generateObject({
+          prompt: testPrompt,
+          schema: resultSchema,
+          tools: {
+            dummy: {
+              description: "A dummy tool",
+              pattern: dummyRecipe,
+            },
+          },
+        });
+        return result;
+      },
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "generateObject-link-test",
+      {
+        type: "object",
+        properties: {
+          pending: { type: "boolean" },
+          error: true,
+          result: true,
+        },
+      },
+      tx,
+    );
+
+    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    tx.commit();
+
+    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
+    await runtime.idle();
+
+    expect(result.key("pending").get()).toBe(false);
+
+    // The result should be a cell with the linked ID
+    const value = result.key("result").key("link").get();
+    const link = parseLink(value);
+
+    expect(value).toEqual(finalResultValue);
+    expect(link?.id).toBe(linkedCellId);
   });
 });
 

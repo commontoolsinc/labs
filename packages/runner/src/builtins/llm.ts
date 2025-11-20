@@ -758,13 +758,15 @@ export function generateObject<T extends Record<string, unknown>>(
               toolCallParts,
             );
 
-            // Check if finalResult was called
-            const finalResultCall = toolCallParts.find(
+            // Check if finalResult was called and grab the result.
+            // It's post de-serialization so might contain cells
+            // (unlike the input to the tool)
+            const finalResultCall = toolResults.find(
               (p) =>
                 p.toolName === llmToolExecutionHelpers.FINAL_RESULT_TOOL_NAME,
             );
             if (finalResultCall) {
-              finalResult = finalResultCall.input as T;
+              finalResult = finalResultCall.result as T;
             }
 
             const toolResultMessages = llmToolExecutionHelpers
