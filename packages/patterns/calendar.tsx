@@ -1672,7 +1672,9 @@ export default recipe<Input, Output>(
       (series: RecurringSeries[]) => {
         const map: Record<string, RecurringSeries> = {};
         for (const s of series) {
-          map[s.seriesId] = s;
+          if (s && s.seriesId) {
+            map[s.seriesId] = s;
+          }
         }
         return map;
       },
@@ -1684,7 +1686,9 @@ export default recipe<Input, Output>(
       (overrides: SeriesOverride[]) => {
         const map: Record<string, SeriesOverride> = {};
         for (const o of overrides) {
-          map[`${o.seriesId}:${o.recurrenceDate}`] = o;
+          if (o && o.seriesId && o.recurrenceDate) {
+            map[`${o.seriesId}:${o.recurrenceDate}`] = o;
+          }
         }
         return map;
       },
