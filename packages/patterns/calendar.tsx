@@ -183,6 +183,124 @@ const _parseTimeStr = (timeStr: string): { h: number; m: number } => {
   return { h, m };
 };
 
+// OPTIMIZATION v507: Cached today's date (avoids new Date() in hot paths)
+let _cachedToday: string | null = null;
+let _cachedTodayDate: number = 0; // Store the date (day of month) to detect day changes
+
+const getTodayISO = (): string => {
+  const d = new Date();
+  const currentDate = d.getDate();
+  // Invalidate cache when the day changes (handles midnight correctly)
+  if (!_cachedToday || currentDate !== _cachedTodayDate) {
+    _cachedToday = `${d.getFullYear()}-${
+      String(d.getMonth() + 1).padStart(2, "0")
+    }-${String(currentDate).padStart(2, "0")}`;
+    _cachedTodayDate = currentDate;
+  }
+  return _cachedToday;
+};
+
+// OPTIMIZATION v507: Pure formatISODate without Date objects
+const formatISODate = (year: number, month: number, day: number): string => {
+  return `${year}-${String(month + 1).padStart(2, "0")}-${
+    String(day).padStart(2, "0")
+  }`;
+};
+
+// OPTIMIZATION v507: Zeller's congruence - get day of week without Date object
+// Returns 0=Sunday, 1=Monday, ..., 6=Saturday
+const getFirstDayOfWeek = (year: number, month: number): number => {
+  // Adjust for Zeller's (January=13, February=14 of previous year)
+  let m = month + 1; // Convert 0-indexed to 1-indexed
+  let y = year;
+  if (m < 3) {
+    m += 12;
+    y -= 1;
+  }
+  const q = 1; // First day of month
+  const k = y % 100;
+  const j = Math.floor(y / 100);
+  // Zeller's formula for Gregorian calendar
+  const h = (q + Math.floor((13 * (m + 1)) / 5) + k + Math.floor(k / 4) +
+    Math.floor(j / 4) - 2 * j) % 7;
+  // Convert from Zeller's output (0=Saturday, 1=Sunday, 2=Monday...) to JS convention (0=Sunday)
+  return ((h + 6) % 7);
+};
+
+// OPTIMIZATION v507: Get days in month without Date object
+const getDaysInMonth = (year: number, month: number): number => {
+  const daysPerMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month === 1) {
+    // February - check leap year
+    const isLeap = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+    return isLeap ? 29 : 28;
+  }
+  return daysPerMonth[month];
+};
+
+// OPTIMIZATION v507: Cache for recurring event expansion
+let _recurringCache: {
+  yearMonth: string;
+  seriesKey: string; // Serialized key to detect content changes
+  overridesKey: string; // Serialized key to detect content changes
+  result: Record<string, Note[]>;
+} | null = null;
+
+// Helper to create a cache key from series/overrides that detects content changes
+const getSeriesCacheKey = (series: RecurringSeries[]): string => {
+  return series
+    .map((s) =>
+      s
+        ? `${s.seriesId}:${s.dtstart}:${s.rrule}:${s.text}:${
+          s.scheduledTime || ""
+        }`
+        : ""
+    )
+    .join("|");
+};
+
+const getOverridesCacheKey = (overrides: SeriesOverride[]): string => {
+  return overrides
+    .map((o) =>
+      o
+        ? `${o.seriesId}:${o.recurrenceDate}:${o.canceled || false}:${
+          o.text || ""
+        }:${o.scheduledTime || ""}`
+        : ""
+    )
+    .join("|");
+};
+
+// OPTIMIZATION v508: Lookup tables for month/day names (avoid toLocaleDateString)
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+const MONTH_NAMES_SHORT = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
 // OPTIMIZATION v12: Pure JS functions for pre-computing in derivations (no lift overhead)
 const computeIconForNote = (note: Note | undefined): string => {
   if (!note) return "🕐";
@@ -1092,47 +1210,52 @@ const nextDay = handler<
 });
 
 // Handler to go to today
+// OPTIMIZATION v508: Also update viewedYearMonth when going to today
 const goToToday = handler<
   never,
-  { currentDate: Cell<string> }
->((_event, { currentDate }) => {
-  const today = new Date().toISOString().split("T")[0];
+  { currentDate: Cell<string>; viewedYearMonth: Cell<string> }
+>((_event, { currentDate, viewedYearMonth }) => {
+  const today = getTodayISO();
   currentDate.set(today);
+  viewedYearMonth.set(today.substring(0, 7));
 });
 
 // Handler to navigate to previous month
+// OPTIMIZATION v508: Handlers also update viewedYearMonth for proper separation
 const previousMonth = handler<
   never,
-  { currentDate: Cell<string> }
->((_event, { currentDate }) => {
+  { currentDate: Cell<string>; viewedYearMonth: Cell<string> }
+>((_event, { currentDate, viewedYearMonth }) => {
   const current = new Date(currentDate.get() + "T00:00:00");
   current.setMonth(current.getMonth() - 1);
-  currentDate.set(current.toISOString().split("T")[0]);
+  const newDate = current.toISOString().split("T")[0];
+  currentDate.set(newDate);
+  viewedYearMonth.set(newDate.substring(0, 7));
 });
 
 // Handler to navigate to next month
 const nextMonth = handler<
   never,
-  { currentDate: Cell<string> }
->((_event, { currentDate }) => {
+  { currentDate: Cell<string>; viewedYearMonth: Cell<string> }
+>((_event, { currentDate, viewedYearMonth }) => {
   const current = new Date(currentDate.get() + "T00:00:00");
   current.setMonth(current.getMonth() + 1);
-  currentDate.set(current.toISOString().split("T")[0]);
+  const newDate = current.toISOString().split("T")[0];
+  currentDate.set(newDate);
+  viewedYearMonth.set(newDate.substring(0, 7));
 });
 
 // RRULE expansion logic
+// OPTIMIZATION v506: Direct calculation instead of day-by-day iteration
+// Reduces O(n × days) to O(n × occurrences)
 const expandSeriesInRange = (
   series: RecurringSeries,
   rangeStart: string, // ISO date
   rangeEnd: string, // ISO date
 ): string[] => {
   const dates: string[] = [];
-  // Parse dates as local time to avoid timezone shifts
-  const start = new Date(series.dtstart + "T00:00:00");
-  const end = new Date(rangeEnd + "T00:00:00");
-  const windowStart = new Date(rangeStart + "T00:00:00");
 
-  // Parse RRULE
+  // Parse RRULE once
   const rruleParts: Record<string, string> = {};
   series.rrule.split(";").forEach((part) => {
     const [key, value] = part.split("=");
@@ -1140,12 +1263,13 @@ const expandSeriesInRange = (
   });
 
   const freq = rruleParts["FREQ"];
+  const interval = parseInt(rruleParts["INTERVAL"] || "1", 10);
   const byday = rruleParts["BYDAY"]?.split(",") || [];
   const bymonthday = rruleParts["BYMONTHDAY"]
     ? parseInt(rruleParts["BYMONTHDAY"], 10)
     : null;
 
-  // Helper: day name to JS day number (SU=0, MO=1, etc.)
+  // Day name to JS day number
   const dayMap: Record<string, number> = {
     "SU": 0,
     "MO": 1,
@@ -1156,95 +1280,174 @@ const expandSeriesInRange = (
     "SA": 6,
   };
 
-  const current = new Date(start);
-  let count = 0;
-  const maxOccurrences = series.count || 1000; // Safety limit
-  const until = series.until
-    ? new Date(series.until + "T00:00:00")
-    : new Date("2099-12-31T00:00:00");
+  // Parse dates as timestamps for fast comparison
+  const dtstartTime = new Date(series.dtstart + "T00:00:00").getTime();
+  const rangeStartTime = new Date(rangeStart + "T00:00:00").getTime();
+  const rangeEndTime = new Date(rangeEnd + "T00:00:00").getTime();
+  const untilTime = series.until
+    ? new Date(series.until + "T00:00:00").getTime()
+    : new Date("2099-12-31T00:00:00").getTime();
 
-  while (current <= end && current <= until && count < maxOccurrences) {
-    const dateStr = current.toISOString().split("T")[0];
+  const effectiveEnd = Math.min(rangeEndTime, untilTime);
+  const effectiveStart = Math.max(rangeStartTime, dtstartTime);
 
-    // Check if this occurrence is in our viewing window
-    if (current >= windowStart && current <= end) {
-      let include = false;
+  if (effectiveStart > effectiveEnd) return dates;
 
-      if (freq === "DAILY") {
-        include = true;
-      } else if (freq === "WEEKLY") {
-        const dayOfWeek = current.getDay();
-        if (byday.length > 0) {
-          // Specific days specified
-          include = byday.some((day) => dayMap[day] === dayOfWeek);
-        } else {
-          // No specific days - repeat on same day of week as dtstart
-          const startDayOfWeek = start.getDay();
-          include = dayOfWeek === startDayOfWeek;
+  const maxOccurrences = series.count || 1000;
+  const MS_PER_DAY = 86400000;
+
+  // Helper to format timestamp to ISO date string
+  const toDateStr = (ts: number): string => {
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${
+      String(d.getDate()).padStart(2, "0")
+    }`;
+  };
+
+  if (freq === "DAILY") {
+    // Direct calculation: find first occurrence >= effectiveStart
+    const daysSinceStart = Math.floor(
+      (effectiveStart - dtstartTime) / MS_PER_DAY,
+    );
+    const firstOccurrenceOffset = Math.ceil(daysSinceStart / interval) *
+      interval;
+    let currentTime = dtstartTime + firstOccurrenceOffset * MS_PER_DAY;
+
+    // Adjust if we're before the range
+    if (currentTime < effectiveStart) {
+      currentTime += interval * MS_PER_DAY;
+    }
+
+    let count = 0;
+    while (currentTime <= effectiveEnd && count < maxOccurrences) {
+      dates.push(toDateStr(currentTime));
+      currentTime += interval * MS_PER_DAY;
+      count++;
+    }
+  } else if (freq === "WEEKLY") {
+    // Get target days of week
+    const startDate = new Date(dtstartTime);
+    const targetDays = byday.length > 0
+      ? byday.map((d) => dayMap[d]).filter((d) => d !== undefined)
+      : [startDate.getDay()];
+
+    // Sort target days for consistent iteration
+    targetDays.sort((a, b) => a - b);
+
+    // Find the first week that could contain occurrences
+    const daysSinceStart = Math.floor(
+      (effectiveStart - dtstartTime) / MS_PER_DAY,
+    );
+    const weeksSinceStart = Math.floor(daysSinceStart / 7);
+    const firstWeekOffset = Math.floor(weeksSinceStart / interval) * interval;
+
+    let currentWeekStart = dtstartTime + firstWeekOffset * 7 * MS_PER_DAY;
+    // Adjust to actual week start (Sunday)
+    const startDayOfWeek = startDate.getDay();
+    currentWeekStart -= startDayOfWeek * MS_PER_DAY;
+
+    let count = 0;
+    while (currentWeekStart <= effectiveEnd && count < maxOccurrences) {
+      for (const dayOfWeek of targetDays) {
+        const occurrenceTime = currentWeekStart + dayOfWeek * MS_PER_DAY;
+
+        if (
+          occurrenceTime >= effectiveStart &&
+          occurrenceTime <= effectiveEnd &&
+          occurrenceTime >= dtstartTime
+        ) {
+          dates.push(toDateStr(occurrenceTime));
+          count++;
+          if (count >= maxOccurrences) break;
         }
-      } else if (freq === "MONTHLY") {
-        if (bymonthday !== null) {
-          // Monthly on specific day of month (e.g., 15th)
-          include = current.getDate() === bymonthday;
-        } else if (byday.length > 0 && byday[0].length > 2) {
-          // Monthly on specific weekday position (e.g., 2TH = second Thursday)
-          const byDayPattern = byday[0];
-          const position = parseInt(
-            byDayPattern.substring(0, byDayPattern.length - 2),
-            10,
-          );
-          const dayCode = byDayPattern.substring(byDayPattern.length - 2);
-          const targetDayOfWeek = dayMap[dayCode];
+      }
+      currentWeekStart += interval * 7 * MS_PER_DAY;
+    }
+  } else if (freq === "MONTHLY") {
+    const startDate = new Date(dtstartTime);
+    const rangeStartDate = new Date(effectiveStart);
 
-          if (targetDayOfWeek !== undefined) {
-            const dayOfWeek = current.getDay();
-            const dayOfMonth = current.getDate();
+    // Determine starting month
+    let year = rangeStartDate.getFullYear();
+    let month = rangeStartDate.getMonth();
 
-            // Check if this is the correct day of week
-            if (dayOfWeek === targetDayOfWeek) {
-              // Calculate which occurrence of this weekday in the month this is
-              const weekOfMonth = Math.floor((dayOfMonth - 1) / 7) + 1;
-              include = weekOfMonth === position;
-            }
+    // Adjust for interval
+    const startYear = startDate.getFullYear();
+    const startMonth = startDate.getMonth();
+    const monthsSinceStart = (year - startYear) * 12 + (month - startMonth);
+    const monthOffset = Math.floor(monthsSinceStart / interval) * interval;
+    year = startYear + Math.floor((startMonth + monthOffset) / 12);
+    month = (startMonth + monthOffset) % 12;
+
+    let count = 0;
+    while (count < maxOccurrences) {
+      let targetDay: number | null = null;
+
+      if (bymonthday !== null) {
+        // Specific day of month
+        targetDay = bymonthday;
+      } else if (byday.length > 0 && byday[0].length > 2) {
+        // Nth weekday of month (e.g., "2TH" = second Thursday)
+        const byDayPattern = byday[0];
+        const position = parseInt(
+          byDayPattern.substring(0, byDayPattern.length - 2),
+          10,
+        );
+        const dayCode = byDayPattern.substring(byDayPattern.length - 2);
+        const targetDayOfWeek = dayMap[dayCode];
+
+        if (targetDayOfWeek !== undefined) {
+          // Find the Nth occurrence of this weekday in the month
+          const firstOfMonth = new Date(year, month, 1);
+          const firstDayOfWeek = firstOfMonth.getDay();
+          let dayOfMonth = 1 + ((targetDayOfWeek - firstDayOfWeek + 7) % 7);
+          dayOfMonth += (position - 1) * 7;
+
+          // Check if this day exists in the month
+          const lastDayOfMonth = new Date(year, month + 1, 0).getDate();
+          if (dayOfMonth <= lastDayOfMonth) {
+            targetDay = dayOfMonth;
           }
-        } else {
-          // No specific pattern - repeat on same day of month as dtstart
-          const startDayOfMonth = start.getDate();
-          include = current.getDate() === startDayOfMonth;
+        }
+      } else {
+        // Same day of month as dtstart
+        targetDay = startDate.getDate();
+      }
+
+      if (targetDay !== null) {
+        // Check if day exists in this month
+        const lastDayOfMonth = new Date(year, month + 1, 0).getDate();
+        if (targetDay <= lastDayOfMonth) {
+          const occurrenceTime = new Date(year, month, targetDay).getTime();
+
+          if (occurrenceTime > effectiveEnd) break;
+
+          if (
+            occurrenceTime >= effectiveStart && occurrenceTime >= dtstartTime
+          ) {
+            dates.push(toDateStr(occurrenceTime));
+            count++;
+          }
         }
       }
 
-      if (include) {
-        dates.push(dateStr);
-        count++;
+      // Advance by interval months
+      month += interval;
+      while (month >= 12) {
+        month -= 12;
+        year++;
       }
-    }
 
-    // Advance to next potential occurrence
-    if (freq === "DAILY") {
-      current.setDate(current.getDate() + 1);
-    } else if (freq === "WEEKLY") {
-      // For weekly, advance by 7 days if no BYDAY, or 1 day if checking multiple days
-      if (byday.length === 0) {
-        current.setDate(current.getDate() + 7);
-      } else {
-        current.setDate(current.getDate() + 1);
-      }
-    } else if (freq === "MONTHLY") {
-      // For monthly, advance by 1 day to check each day in each month
-      current.setDate(current.getDate() + 1);
-    } else {
-      break; // Unknown frequency
+      // Safety check - don't go past year 2100
+      if (year > 2100) break;
     }
-
-    // Safety: if we've gone way past the window, stop
-    if (current > end) break;
   }
 
   return dates;
 };
 
 // Expand all series for a given month and apply overrides
+// OPTIMIZATION v507: Added memoization to avoid recomputing when inputs unchanged
 const expandRecurringEventsForMonth = lift(
   ({
     series,
@@ -1260,9 +1463,22 @@ const expandRecurringEventsForMonth = lift(
       return {};
     }
 
+    // OPTIMIZATION v507: Check cache first (using content-based keys)
+    const seriesKey = getSeriesCacheKey(series);
+    const overridesKey = getOverridesCacheKey(overrides);
+    if (
+      _recurringCache &&
+      _recurringCache.yearMonth === yearMonth &&
+      _recurringCache.seriesKey === seriesKey &&
+      _recurringCache.overridesKey === overridesKey
+    ) {
+      return _recurringCache.result;
+    }
+
     const [year, month] = yearMonth.split("-").map(Number);
     const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
-    const lastDay = new Date(year, month, 0).getDate();
+    // OPTIMIZATION v507: Use getDaysInMonth instead of Date object
+    const lastDay = getDaysInMonth(year, month - 1); // month is 1-indexed here
     const monthEnd = `${year}-${String(month).padStart(2, "0")}-${
       String(lastDay).padStart(2, "0")
     }`;
@@ -1310,6 +1526,14 @@ const expandRecurringEventsForMonth = lift(
       });
     });
 
+    // OPTIMIZATION v507: Cache result
+    _recurringCache = {
+      yearMonth,
+      seriesKey,
+      overridesKey,
+      result: notesByDate,
+    };
+
     return notesByDate;
   },
 );
@@ -1328,18 +1552,40 @@ export default recipe<Input, Output>(
       timeInterval,
     },
   ) => {
-    // Current date being viewed (default to today)
-    // Get local date to avoid timezone issues
-    const now = new Date();
-    const today = `${now.getFullYear()}-${
-      String(now.getMonth() + 1).padStart(2, "0")
-    }-${String(now.getDate()).padStart(2, "0")}`;
+    // OPTIMIZATION v508: Use cached today instead of new Date() in hot path
+    const today = getTodayISO();
     const currentDate = cell<string>(today);
 
-    // Extract year-month from currentDate for recurring event expansion
-    const currentYearMonth = derive(currentDate, (date: any) => {
-      return date.substring(0, 7); // "2025-11-12" -> "2025-11"
+    // OPTIMIZATION v508: Separate viewedYearMonth from currentDate
+    // This allows day selection within month without recomputing grid
+    const viewedYearMonth = cell<string>(today.substring(0, 7));
+
+    // OPTIMIZATION v508: Consolidated date parsing - single derivation for all date info
+    // Eliminates redundant Date object creations in currentDateInfo, _yearItems, _currentMonthIndex
+    const currentDateParsed = derive(currentDate, (date: string) => {
+      const [year, month, day] = date.split("-").map(Number);
+      const monthIndex = month - 1;
+      return {
+        year,
+        month,
+        day,
+        monthIndex,
+        monthName: MONTH_NAMES[monthIndex],
+        monthNameShort: MONTH_NAMES_SHORT[monthIndex],
+        yearMonth: date.substring(0, 7),
+        // Pre-compute year dropdown items (±10 years)
+        yearItems: Array.from({ length: 21 }, (_, i) => ({
+          value: year - 10 + i,
+          label: (year - 10 + i).toString(),
+        })),
+      };
     });
+
+    // Keep currentYearMonth for backward compatibility (derived from parsed)
+    const currentYearMonth = derive(
+      currentDateParsed,
+      (parsed: any) => parsed.yearMonth,
+    );
 
     // Expand recurring events for the current month
     const recurringNotesByDate = expandRecurringEventsForMonth({
@@ -1349,6 +1595,7 @@ export default recipe<Input, Output>(
     });
 
     // Merge one-off entries with recurring events
+    // OPTIMIZATION v508: Use concat and reference reuse to reduce allocations
     const mergedEntries = derive(
       { entries, recurringNotesByDate },
       (
@@ -1357,35 +1604,46 @@ export default recipe<Input, Output>(
           recurringNotesByDate: Record<string, Note[]> | null | undefined;
         },
       ) => {
-        // Start with existing entries
-        const entryMap = new Map<string, DayEntry>();
-        entries.forEach((entry: DayEntry) => {
-          entryMap.set(entry.date, { ...entry });
-        });
-
-        // Add recurring events to each date (if any exist)
-        if (recurringNotesByDate) {
-          Object.keys(recurringNotesByDate).forEach((date: string) => {
-            const existing = entryMap.get(date);
-            const recurringNotes = recurringNotesByDate[date];
-
-            if (existing) {
-              // Merge with existing entry
-              entryMap.set(date, {
-                ...existing,
-                notes: [...existing.notes, ...recurringNotes],
-              });
-            } else {
-              // Create new entry with recurring notes
-              entryMap.set(date, {
-                date,
-                notes: recurringNotes,
-              });
-            }
-          });
+        // Fast path: no recurring events, return original array
+        if (
+          !recurringNotesByDate ||
+          Object.keys(recurringNotesByDate).length === 0
+        ) {
+          return entries;
         }
 
-        return Array.from(entryMap.values());
+        // Build result array with optimized allocations
+        const result: DayEntry[] = [];
+        const processedDates = new Set<string>();
+
+        // Process entries, merging with recurring where needed
+        for (const entry of entries) {
+          processedDates.add(entry.date);
+          const recurring = recurringNotesByDate[entry.date];
+
+          if (recurring) {
+            // Use concat instead of spread for better performance
+            result.push({
+              date: entry.date,
+              notes: entry.notes.concat(recurring),
+            });
+          } else {
+            // Reuse reference when no merge needed
+            result.push(entry);
+          }
+        }
+
+        // Add dates that only have recurring events
+        for (const date in recurringNotesByDate) {
+          if (!processedDates.has(date)) {
+            result.push({
+              date,
+              notes: recurringNotesByDate[date],
+            });
+          }
+        }
+
+        return result;
       },
     );
 
@@ -1414,7 +1672,9 @@ export default recipe<Input, Output>(
       (series: RecurringSeries[]) => {
         const map: Record<string, RecurringSeries> = {};
         for (const s of series) {
-          map[s.seriesId] = s;
+          if (s && s.seriesId) {
+            map[s.seriesId] = s;
+          }
         }
         return map;
       },
@@ -1426,7 +1686,9 @@ export default recipe<Input, Output>(
       (overrides: SeriesOverride[]) => {
         const map: Record<string, SeriesOverride> = {};
         for (const o of overrides) {
-          map[`${o.seriesId}:${o.recurrenceDate}`] = o;
+          if (o && o.seriesId && o.recurrenceDate) {
+            map[`${o.seriesId}:${o.recurrenceDate}`] = o;
+          }
         }
         return map;
       },
@@ -1725,18 +1987,27 @@ export default recipe<Input, Output>(
     );
 
     // Handler to select a day from the calendar
+    // OPTIMIZATION v508: Also update viewedYearMonth when selecting a day
     const selectDayFromCalendar = handler<
       { target: { dataset: { date: string } } },
-      { currentDate: Cell<string> }
-    >(({ target }, { currentDate }) => {
+      { currentDate: Cell<string>; viewedYearMonth: Cell<string> }
+    >(({ target }, { currentDate, viewedYearMonth }) => {
       const date = target.dataset.date;
       if (date) {
         currentDate.set(date);
+        // Update viewed month if selecting a day in a different month
+        const newYearMonth = date.substring(0, 7);
+        if (viewedYearMonth.get() !== newYearMonth) {
+          viewedYearMonth.set(newYearMonth);
+        }
       }
     });
 
     // Create the handler closure once at the recipe level
-    const selectDayHandler = selectDayFromCalendar({ currentDate });
+    const selectDayHandler = selectDayFromCalendar({
+      currentDate,
+      viewedYearMonth,
+    });
 
     // OPTIMIZATION: Pre-compute a Record of dates that have entries for O(1) lookup
     // Using Record<string, true> instead of Set because Sets don't serialize through derive()
@@ -1753,60 +2024,49 @@ export default recipe<Input, Output>(
       },
     );
 
-    // Generate calendar grid for the current month
-    // OPTIMIZATION: Now uses O(1) object property lookup instead of O(n) array.some() for each day
-    const calendarDays = derive(
-      { currentDate, datesWithEntries },
-      ({ currentDate, datesWithEntries }: any) => {
-        const date = new Date(currentDate + "T00:00:00");
-        const year = date.getFullYear();
-        const month = date.getMonth();
+    // OPTIMIZATION v507: Split calendar grid from state for faster month navigation
+    // Grid structure only depends on year-month, not selected day or entries
 
-        // Get today's date for comparison (using local time)
-        const now = new Date();
-        const today = `${now.getFullYear()}-${
-          String(now.getMonth() + 1).padStart(2, "0")
-        }-${String(now.getDate()).padStart(2, "0")}`;
+    // Step 1: Pure calendar grid structure - uses Zeller's congruence and pure math
+    // OPTIMIZATION v508: Depends on viewedYearMonth, not currentDate
+    // Only recomputes when month view changes, not when day selection changes
+    const calendarGridStructure = derive(
+      viewedYearMonth,
+      (yearMonth: string) => {
+        const [year, month] = yearMonth.split("-").map(Number);
+        const monthIndex = month - 1; // Convert to 0-indexed
 
-        // First day of the month
-        const firstDay = new Date(year, month, 1);
-        const firstDayOfWeek = firstDay.getDay(); // 0 = Sunday
+        // OPTIMIZATION v507: Use pure math instead of Date objects
+        const firstDayOfWeek = getFirstDayOfWeek(year, monthIndex);
+        const daysInMonth = getDaysInMonth(year, monthIndex);
 
-        // Last day of the month
-        const lastDay = new Date(year, month + 1, 0);
-        const daysInMonth = lastDay.getDate();
-
-        // Calculate how many weeks we need (only show complete weeks that contain current month days)
+        // Calculate how many weeks we need
         const totalDaysNeeded = firstDayOfWeek + daysInMonth;
         const weeksNeeded = Math.ceil(totalDaysNeeded / 7);
         const totalCells = weeksNeeded * 7;
 
-        // Create array of day objects
-        const days = [];
+        // Create array of day objects with date strings only
+        const days: Array<{
+          date: string;
+          day: string;
+          isEmpty: boolean;
+          isOtherMonth: boolean;
+        }> = [];
 
         // Add days from previous month
         if (firstDayOfWeek > 0) {
-          const prevMonth = month === 0 ? 11 : month - 1;
-          const prevYear = month === 0 ? year - 1 : year;
-          const prevMonthLastDay = new Date(prevYear, prevMonth + 1, 0)
-            .getDate();
+          const prevMonth = monthIndex === 0 ? 11 : monthIndex - 1;
+          const prevYear = monthIndex === 0 ? year - 1 : year;
+          const prevMonthLastDay = getDaysInMonth(prevYear, prevMonth);
 
           for (let i = firstDayOfWeek - 1; i >= 0; i--) {
             const day = prevMonthLastDay - i;
-            const dayDate =
-              new Date(prevYear, prevMonth, day).toISOString().split("T")[0];
-            const hasEntry = !!datesWithEntries[dayDate];
-            const isSelected = dayDate === currentDate;
-            const isToday = dayDate === today;
-            const isPast = dayDate < today;
+            // OPTIMIZATION v507: Use formatISODate instead of Date objects
+            const dayDate = formatISODate(prevYear, prevMonth, day);
             days.push({
               date: dayDate,
               day: day.toString(),
               isEmpty: false,
-              hasEntry,
-              isSelected,
-              isToday,
-              isPast,
               isOtherMonth: true,
             });
           }
@@ -1814,45 +2074,27 @@ export default recipe<Input, Output>(
 
         // Add days of the current month
         for (let day = 1; day <= daysInMonth; day++) {
-          const dayDate =
-            new Date(year, month, day).toISOString().split("T")[0];
-          const hasEntry = !!datesWithEntries[dayDate];
-          const isSelected = dayDate === currentDate;
-          const isToday = dayDate === today;
-          const isPast = dayDate < today;
+          const dayDate = formatISODate(year, monthIndex, day);
           days.push({
             date: dayDate,
             day: day.toString(),
             isEmpty: false,
-            hasEntry,
-            isSelected,
-            isToday,
-            isPast,
             isOtherMonth: false,
           });
         }
 
-        // Add days from next month to complete the final week only
+        // Add days from next month to complete the final week
         const remainingCells = totalCells - days.length;
         if (remainingCells > 0) {
-          const nextMonth = month === 11 ? 0 : month + 1;
-          const nextYear = month === 11 ? year + 1 : year;
+          const nextMonth = monthIndex === 11 ? 0 : monthIndex + 1;
+          const nextYear = monthIndex === 11 ? year + 1 : year;
 
           for (let day = 1; day <= remainingCells; day++) {
-            const dayDate =
-              new Date(nextYear, nextMonth, day).toISOString().split("T")[0];
-            const hasEntry = !!datesWithEntries[dayDate];
-            const isSelected = dayDate === currentDate;
-            const isToday = dayDate === today;
-            const isPast = dayDate < today;
+            const dayDate = formatISODate(nextYear, nextMonth, day);
             days.push({
               date: dayDate,
               day: day.toString(),
               isEmpty: false,
-              hasEntry,
-              isSelected,
-              isToday,
-              isPast,
               isOtherMonth: true,
             });
           }
@@ -1862,19 +2104,56 @@ export default recipe<Input, Output>(
       },
     );
 
-    // OPTIMIZATION v13: Combined currentDate parsing into single derivation
-    const currentDateInfo = derive(currentDate, (date: any) => {
-      const d = new Date(date + "T00:00:00");
-      return {
-        month: d.toLocaleDateString("en-US", { month: "long" }),
-        year: d.getFullYear(),
-        monthIndex: d.getMonth(),
-      };
-    });
+    // Step 2: Merge grid structure with dynamic state (selection, entries, today)
+    // OPTIMIZATION v508: Pre-compute className to avoid JSX ternary operations
+    const calendarDays = derive(
+      { calendarGridStructure, currentDate, datesWithEntries },
+      ({ calendarGridStructure, currentDate, datesWithEntries }: {
+        calendarGridStructure: Array<{
+          date: string;
+          day: string;
+          isEmpty: boolean;
+          isOtherMonth: boolean;
+        }>;
+        currentDate: string;
+        datesWithEntries: Record<string, true>;
+      }) => {
+        const today = getTodayISO();
 
-    // Access combined values
-    const currentMonth = derive(currentDateInfo, (info: any) => info.month);
-    const currentYear = derive(currentDateInfo, (info: any) => info.year);
+        return calendarGridStructure.map((dayObj) => {
+          const hasEntry = !!datesWithEntries[dayObj.date];
+          const isSelected = dayObj.date === currentDate;
+          const isToday = dayObj.date === today;
+          const isPast = dayObj.date < today;
+
+          // OPTIMIZATION v508: Pre-compute className
+          const classes = ["calendar-day"];
+          if (dayObj.isEmpty) classes.push("empty");
+          if (isSelected) classes.push("selected");
+          if (hasEntry) classes.push("has-entry");
+          if (isToday) classes.push("today");
+          if (isPast) classes.push("past");
+          if (dayObj.isOtherMonth) classes.push("other-month");
+
+          return {
+            ...dayObj,
+            hasEntry,
+            isSelected,
+            isToday,
+            isPast,
+            className: classes.join(" "),
+          };
+        });
+      },
+    );
+
+    // OPTIMIZATION v508: Use consolidated currentDateParsed instead of creating new Date objects
+    // These derivations provide backward compatibility with existing UI references
+    const currentMonth = derive(
+      currentDateParsed,
+      (parsed: any) => parsed.monthName,
+    );
+    const currentYear = derive(currentDateParsed, (parsed: any) => parsed.year);
 
     // Month items (0-11)
     const _monthItems = [
@@ -1927,22 +2206,17 @@ export default recipe<Input, Output>(
       { value: 30, label: "30 minutes" },
     ];
 
-    // Year items (current year +/- 10 years)
-    const _yearItems = derive(currentDate, (date: any) => {
-      const d = new Date(date + "T00:00:00");
-      const year = d.getFullYear();
-      const years = [];
-      for (let i = year - 10; i <= year + 10; i++) {
-        years.push({ value: i, label: i.toString() });
-      }
-      return years;
-    });
+    // OPTIMIZATION v508: Use pre-computed yearItems from currentDateParsed
+    const _yearItems = derive(
+      currentDateParsed,
+      (parsed: any) => parsed.yearItems,
+    );
 
-    // Current month index (0-11)
-    const _currentMonthIndex = derive(currentDate, (date: any) => {
-      const d = new Date(date + "T00:00:00");
-      return d.getMonth();
-    });
+    // OPTIMIZATION v508: Use pre-computed monthIndex from currentDateParsed
+    const _currentMonthIndex = derive(
+      currentDateParsed,
+      (parsed: any) => parsed.monthIndex,
+    );
 
     // Handler to change month
     const _changeMonth = handler<
@@ -2568,13 +2842,15 @@ export default recipe<Input, Output>(
     });
 
     // Handler to navigate to a specific date (exposed for external use)
+    // OPTIMIZATION v508: Also update viewedYearMonth
     const goToDateHandler = handler<
       { date: string },
-      { currentDate: Cell<string> }
-    >(({ date }, { currentDate }) => {
+      { currentDate: Cell<string>; viewedYearMonth: Cell<string> }
+    >(({ date }, { currentDate, viewedYearMonth }) => {
       // Validate date format (YYYY-MM-DD)
       if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
         currentDate.set(date);
+        viewedYearMonth.set(date.substring(0, 7));
       }
     });
 
@@ -6452,7 +6728,7 @@ export default recipe<Input, Output>(
                     →
                   </ct-button>
                   <ct-button
-                    onClick={goToToday({ currentDate })}
+                    onClick={goToToday({ currentDate, viewedYearMonth })}
                     size="sm"
                     variant="ghost"
                   >
@@ -6693,7 +6969,7 @@ export default recipe<Input, Output>(
             <div className="right-column">
               <div className="month-header">
                 <ct-button
-                  onClick={previousMonth({ currentDate })}
+                  onClick={previousMonth({ currentDate, viewedYearMonth })}
                   size="sm"
                   variant="ghost"
                 >
@@ -6708,7 +6984,7 @@ export default recipe<Input, Output>(
                   ),
                 )}
                 <ct-button
-                  onClick={nextMonth({ currentDate })}
+                  onClick={nextMonth({ currentDate, viewedYearMonth })}
                   size="sm"
                   variant="ghost"
                 >
@@ -6727,17 +7003,11 @@ export default recipe<Input, Output>(
 
                 {calendarDays.map((dayObj: any) => (
                   <div
-                    className={`calendar-day ${dayObj.isEmpty ? "empty" : ""} ${
-                      dayObj.isSelected ? "selected" : ""
-                    } ${dayObj.hasEntry ? "has-entry" : ""} ${
-                      dayObj.isToday ? "today" : ""
-                    } ${dayObj.isPast ? "past" : ""} ${
-                      dayObj.isOtherMonth ? "other-month" : ""
-                    }`}
-                    data-date={dayObj.date || ""}
+                    className={dayObj.className}
+                    data-date={dayObj.date}
                     onClick={selectDayHandler}
                   >
-                    {dayObj.isEmpty ? "" : dayObj.day}
+                    {dayObj.day}
                   </div>
                 ))}
               </div>
@@ -6751,7 +7021,7 @@ export default recipe<Input, Output>(
       customTimeLabels,
       addEntry: addEntryHandler({ entries, customTimeLabels, recurringSeries }),
       updateEntry: updateEntryHandler({ entries }),
-      goToDate: goToDateHandler({ currentDate }),
+      goToDate: goToDateHandler({ currentDate, viewedYearMonth }),
       rename: renameHandler({ name }),
 
       // Field setters
