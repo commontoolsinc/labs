@@ -6726,8 +6726,12 @@ export default recipe<Input, Output>(
             <div className="left-column">
               {ifElse(
                 showMonthView,
-                <div className="date-picker-container" style="display: none;"></div>,
-                <div className="date-picker-container" style="display: block; margin-bottom: 16px;">
+                <div className="date-picker-container" style="display: none;">
+                </div>,
+                <div
+                  className="date-picker-container"
+                  style="display: block; margin-bottom: 16px;"
+                >
                   <input
                     type="date"
                     value={currentDate}
