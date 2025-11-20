@@ -13,6 +13,7 @@ import {
 import { classMap } from "lit/directives/class-map.js";
 import "../ct-audio-visualizer/ct-audio-visualizer.ts";
 import type { CTAudioVisualizer } from "../ct-audio-visualizer/ct-audio-visualizer.ts";
+import { convertToWav } from "../../utils/audio-conversion.ts";
 
 /**
  * Timestamped segment of transcription
@@ -513,10 +514,17 @@ export class CTVoiceInput extends BaseElement {
   }
 
   private async _convertToWav(blob: Blob): Promise<Blob> {
-    // For now, return the blob as-is
-    // TODO: Implement WebM to WAV conversion using Web Audio API
-    // This will require decoding the audio and re-encoding as WAV
-    return blob;
+    try {
+      // Convert to WAV format at 16kHz (optimal for transcription)
+      return await convertToWav(blob, 16000);
+    } catch (error) {
+      console.warn(
+        "Failed to convert audio to WAV, using original format:",
+        error,
+      );
+      // Fallback to original blob if conversion fails
+      return blob;
+    }
   }
 
   private async _blobToBase64(blob: Blob): Promise<string> {
