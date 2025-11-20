@@ -98,6 +98,47 @@ export default recipe({
             }
         }
     }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        state: {
+            $ref: "#/$defs/NestedOptionalState",
+            asOpaque: true
+        },
+        increment: {
+            asStream: true
+        }
+    },
+    required: ["state", "increment"],
+    $defs: {
+        NestedOptionalState: {
+            type: "object",
+            properties: {
+                nested: {
+                    $ref: "#/$defs/OptionalNested"
+                }
+            }
+        },
+        OptionalNested: {
+            type: "object",
+            properties: {
+                branch: {
+                    $ref: "#/$defs/OptionalBranch"
+                }
+            }
+        },
+        OptionalBranch: {
+            type: "object",
+            properties: {
+                counter: {
+                    type: "number"
+                },
+                label: {
+                    type: "string"
+                }
+            }
+        }
+    }
 } as const satisfies __ctHelpers.JSONSchema, ({ state }) => {
     return {
         state,
