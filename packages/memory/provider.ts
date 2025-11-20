@@ -174,7 +174,10 @@ class MemoryProviderSession<
         try {
           return this.open(controller);
         } catch (error) {
-          logger.error(() => ["ReadableStream start error:", error]);
+          logger.error(
+            "stream-error",
+            () => ["ReadableStream start error:", error],
+          );
           throw error;
         }
       },
@@ -183,6 +186,7 @@ class MemoryProviderSession<
           return this.cancel();
         } catch (error) {
           logger.error(
+            "stream-error",
             () => ["ReadableStream cancel error:", error, "Reason:", reason],
           );
           throw error;
@@ -198,28 +202,41 @@ class MemoryProviderSession<
             command as UCAN<ConsumerCommandInvocation<Protocol>>,
           );
         } catch (error) {
-          logger.error(() => ["WritableStream write error:", error]);
-          logger.error(() => ["Failed command:", JSON.stringify(command)]);
+          logger.error(
+            "stream-error",
+            () => ["WritableStream write error:", error],
+          );
+          logger.error(
+            "stream-error",
+            () => ["Failed command:", JSON.stringify(command)],
+          );
           throw error;
         }
       },
       abort: async (reason) => {
         try {
           logger.debug(
+            "stream-abort",
             () => ["WritableStream abort called with reason:", reason],
           );
           await this.close();
         } catch (error) {
-          logger.error(() => ["WritableStream abort error:", error]);
+          logger.error(
+            "stream-error",
+            () => ["WritableStream abort error:", error],
+          );
           throw error;
         }
       },
       close: async () => {
         try {
-          logger.debug(() => ["WritableStream close called"]);
+          logger.debug("stream-close", () => ["WritableStream close called"]);
           await this.close();
         } catch (error) {
-          logger.error(() => ["WritableStream close error:", error]);
+          logger.error(
+            "stream-error",
+            () => ["WritableStream close error:", error],
+          );
           throw error;
         }
       },
@@ -269,6 +286,7 @@ class MemoryProviderSession<
 
     if (error) {
       logger.error(
+        "auth-error",
         () => [
           "Authorization error:",
           error,
@@ -549,6 +567,7 @@ class MemoryProviderSession<
 
       if (result.error) {
         logger.warn(
+          "acl-mount-error",
           () => ["Failed to mount space for ACL lookup:", result.error],
         );
         return undefined;
@@ -575,12 +594,13 @@ class MemoryProviderSession<
         return aclFact.is.value;
       } else {
         logger.warn(
+          "acl-format-error",
           () => ["Invalid ACL format in space", space, ":", aclFact.is],
         );
         return undefined;
       }
     } catch (error) {
-      logger.error(() => ["Error retrieving ACL:", error]);
+      logger.error("acl-error", () => ["Error retrieving ACL:", error]);
       return undefined;
     }
   }

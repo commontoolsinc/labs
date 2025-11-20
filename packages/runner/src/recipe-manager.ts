@@ -193,7 +193,7 @@ export class RecipeManager implements IRecipeManager {
     if (!providedTx) {
       tx.commit().then((result) => {
         if (result.error) {
-          logger.warn("Recipe already existed", recipeId);
+          logger.warn("recipe", "Recipe already existed", recipeId);
         }
       });
     }

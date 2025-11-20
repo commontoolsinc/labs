@@ -173,8 +173,9 @@ export class ObjectFormatter implements TypeFormatter {
             ? comment
             : "Conflicting docs across declarations; using first";
           // Warning only
-          logger.warn(() =>
-            `JSDoc conflict for property '${propName}'; using first doc`
+          logger.warn(
+            "schema-gen",
+            () => `JSDoc conflict for property '${propName}'; using first doc`,
           );
         }
       }
@@ -219,8 +220,9 @@ export class ObjectFormatter implements TypeFormatter {
           (apSchema as Record<string, unknown>).$comment = comment
             ? comment
             : "Conflicting docs for index signatures; using first";
-          logger.warn(() =>
-            "JSDoc conflict for index signatures; using first doc"
+          logger.warn(
+            "schema-gen",
+            () => "JSDoc conflict for index signatures; using first doc",
           );
         }
       }

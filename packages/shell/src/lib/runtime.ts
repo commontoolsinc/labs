@@ -92,8 +92,11 @@ export class RuntimeInternals extends EventTarget {
     const session = await createSession({ identity, spaceName });
 
     // Log user identity for debugging and sharing
-    identityLogger.log([`[Identity] User DID: ${session.as.did()}`]);
-    identityLogger.log([`[Identity] Space: ${spaceName} (${session.space})`]);
+    identityLogger.log("telemetry", `[Identity] User DID: ${session.as.did()}`);
+    identityLogger.log(
+      "telemetry",
+      `[Identity] Space: ${spaceName} (${session.space})`,
+    );
 
     // We're hoisting CharmManager so that
     // we can create it after the runtime, but still reference

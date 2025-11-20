@@ -698,7 +698,7 @@ export function validateAndTransform(
           );
           if (childSchema === undefined) {
             // This should never happen
-            logger.warn(() => [
+            logger.warn("schema", () => [
               "validateAndTransform: unexpected undefined schema for additional property",
               key,
               resolvedSchema,

@@ -787,7 +787,7 @@ function buildToolCatalog(
     let inputSchema = pattern?.argumentSchema ?? handler?.schema ??
       toolValue?.inputSchema;
     if (inputSchema === undefined) {
-      logger.warn(`No input schema found for tool ${entry.name}`);
+      logger.warn("llm", `No input schema found for tool ${entry.name}`);
       continue;
     }
     inputSchema = normalizeInputSchema(inputSchema);
@@ -889,13 +889,17 @@ function buildAvailableCellsDocumentation(
 
           entry += `- Current Value: \`\`\`json\n${valueJson}\n\`\`\`\n`;
         } catch (e) {
-          logger.warn(`Failed to serialize value for context cell ${name}:`, e);
+          logger.warn(
+            "llm",
+            `Failed to serialize value for context cell ${name}:`,
+            e,
+          );
           entry += `- Current Value: (unable to serialize)\n`;
         }
 
         entries.push(entry);
       } catch (e) {
-        logger.warn(`Failed to document context cell ${name}:`, e);
+        logger.warn("llm", `Failed to document context cell ${name}:`, e);
       }
     }
   }
@@ -911,6 +915,7 @@ function buildAvailableCellsDocumentation(
       const cell = runtime.getCellFromLink(link);
       if (!cell) {
         logger.warn(
+          "llm",
           `Could not resolve pinned cell ${pinnedCell.path} to a cell`,
         );
         continue;
@@ -950,13 +955,18 @@ function buildAvailableCellsDocumentation(
 
         entry += `- Current Value: \`\`\`json\n${valueJson}\n\`\`\`\n`;
       } catch (e) {
-        logger.warn(`Failed to serialize value for ${pinnedCell.name}:`, e);
+        logger.warn(
+          "llm",
+          `Failed to serialize value for ${pinnedCell.name}:`,
+          e,
+        );
         entry += `- Current Value: (unable to serialize)\n`;
       }
 
       entries.push(entry);
     } catch (e) {
       logger.warn(
+        "llm",
         `Failed to document pinned cell ${pinnedCell.name} (${pinnedCell.path}):`,
         e,
       );
@@ -2012,7 +2022,10 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
         // LLM returned empty or invalid content (e.g., stream aborted mid-flight,
         // or AI SDK bug with empty text blocks). Insert a proper error message
         // instead of storing invalid content.
-        logger.warn("LLM returned invalid/empty content, adding error message");
+        logger.warn(
+          "llm",
+          "LLM returned invalid/empty content, adding error message",
+        );
         const errorMessage = {
           [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
           role: "assistant",
@@ -2082,6 +2095,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
 
           if (mismatch) {
             logger.error(
+              "llm-error",
               `Tool execution mismatch: ${toolCallParts.length} calls [${
                 Array.from(toolCallIds)
               }] but ${toolResults.length} results [${Array.from(resultIds)}]`,
@@ -2130,7 +2144,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           );
 
           if (success) {
-            logger.info("Continuing conversation after tool calls...");
+            logger.info("llm", "Continuing conversation after tool calls...");
 
             const continueTx = runtime.edit();
             startRequest(
@@ -2147,7 +2161,10 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             );
             continueTx.commit();
           } else {
-            logger.info("Skipping write: pending=false or request changed");
+            logger.info(
+              "llm",
+              "Skipping write: pending=false or request changed",
+            );
           }
         } catch (error: unknown) {
           console.error(error);

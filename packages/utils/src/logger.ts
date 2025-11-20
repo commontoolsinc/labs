@@ -18,7 +18,7 @@
  * // Common pattern: create a debug logger that's disabled by default
  * // pass in function for lazy evaluation of parameters
  * const logger = getLogger("my-module", { enabled: false, level: "debug" });
- * logger.debug(() => ["Processing:", data]);
+ * logger.debug("processing-data", () => ["Processing:", data]);
  * ```
  *
  * @example Basic usage
@@ -26,8 +26,9 @@
  * import { log } from "@commontools/utils/logger";
  *
  * // Global logger instance - no module tag
- * log.info("Application started");
- * log.debug("Debug info"); // Won't show unless log.level = "debug"
+ * // First parameter is always a string key for tracking
+ * log.info("app-started", "Application started");
+ * log.debug("debug-info", "Debug info"); // Won't show unless log.level = "debug"
  *
  * // Change global log level
  * log.level = "debug";
@@ -40,12 +41,13 @@
  * // Explicitly specify module name - recommended approach
  * const logger = getLogger("user-service");
  *
- * // Logs will show: [INFO][user-service::HH:MM:SS.mmm] message
- * logger.log("Processing started");     // Same as logger.info()
- * logger.info("Processing user data");
- * logger.debug("Cache hit for user", userId);
- * logger.warn("API rate limit approaching");
- * logger.error("Failed to save user", error);
+ * // First parameter is the message key for metrics tracking
+ * // Logs will show: [INFO][user-service::HH:MM:SS.mmm] key message
+ * logger.log("processing-started", "Processing started");     // Same as logger.info()
+ * logger.info("processing-user", "Processing user data");
+ * logger.debug("cache-hit", "Cache hit for user", userId);
+ * logger.warn("rate-limit", "API rate limit approaching");
+ * logger.error("save-failed", "Failed to save user", error);
  * ```
  *
  * @example Lazy evaluation for expensive operations
@@ -53,10 +55,10 @@
  * const logger = getLogger("data-processor");
  *
  * // Function is only called if debug level is active
- * logger.debug(() => `Computed value: ${expensiveComputation()}`);
+ * logger.debug("computed-value", () => `Computed value: ${expensiveComputation()}`);
  *
  * // Works with arrays that get flattened
- * logger.info(() => ["Processing", count, "items"]);
+ * logger.info("processing-items", () => ["Processing", count, "items"]);
  * ```
  *
  * @example Per-logger configuration
@@ -72,20 +74,24 @@
  *
  * // Enable/disable at runtime
  * verboseLogger.disabled = false; // Now it will log
- * verboseLogger.info("This will show");
+ * verboseLogger.info("message-key", "This will show");
  * ```
  *
  * @example Call counting and metrics
  * ```typescript
  * const logger = getLogger("metrics-test");
  *
- * logger.info("Event 1");
- * logger.info("Event 2");
- * logger.warn("Warning");
+ * logger.info("event-1", "Event 1");
+ * logger.info("event-2", "Event 2");
+ * logger.warn("warning", "Warning");
  *
- * // Check counts (increments even when logger is disabled or filtered)
+ * // Check overall counts (increments even when logger is disabled or filtered)
  * console.log(logger.counts);
  * // { debug: 0, info: 2, warn: 1, error: 0, total: 3 }
+ *
+ * // Check counts by message key
+ * console.log(logger.countsByKey);
+ * // { "event-1": { debug: 0, info: 1, warn: 0, error: 0, total: 1 }, ... }
  *
  * // Reset individual logger counts
  * logger.resetCounts();
@@ -94,10 +100,17 @@
  * import { getTotalLoggerCounts } from "@commontools/utils/logger";
  * const total = getTotalLoggerCounts(); // Sum of all logger counts
  *
- * // Get breakdown by logger name with total (in TypeScript/Deno)
+ * // Get breakdown by logger and message key (in TypeScript/Deno)
  * import { getLoggerCountsBreakdown } from "@commontools/utils/logger";
  * const breakdown = getLoggerCountsBreakdown();
- * // { "module-1": 450, "module-2": 320, "module-3": 472, total: 1242 }
+ * // {
+ * //   "module-1": {
+ * //     "user-login": { debug: 5, info: 10, warn: 2, error: 0, total: 17 },
+ * //     "data-fetch": { debug: 2, info: 5, warn: 0, error: 1, total: 8 },
+ * //     total: 25
+ * //   },
+ * //   total: 25
+ * // }
  *
  * // Reset all logger counts (in TypeScript/Deno)
  * import { resetAllLoggerCounts } from "@commontools/utils/logger";
@@ -106,20 +119,30 @@
  *
  * @example Browser console usage for metrics
  * ```javascript
- * // Get breakdown of all logger counts by name
+ * // Get breakdown of all logger counts by name and message key
  * globalThis.commontools.getLoggerCountsBreakdown()
- * // Returns: { "module-1": 450, "module-2": 320, total: 770 }
+ * // Returns: {
+ * //   "module-1": {
+ * //     "user-login": { debug: 5, info: 10, warn: 2, error: 0, total: 17 },
+ * //     total: 17
+ * //   },
+ * //   total: 17
+ * // }
  *
  * // Get just the total count
  * globalThis.commontools.getTotalLoggerCounts()
- * // Returns: 770
+ * // Returns: 17
  *
  * // Reset all counts
  * globalThis.commontools.resetAllLoggerCounts()
  *
- * // Access individual loggers
+ * // Access individual logger counts
  * globalThis.commontools.logger["module-name"].counts
  * // Returns: { debug: 5, info: 10, warn: 2, error: 1, total: 18 }
+ *
+ * // Access individual logger counts by key
+ * globalThis.commontools.logger["module-name"].countsByKey
+ * // Returns: { "user-login": { debug: 5, info: 10, warn: 2, error: 0, total: 17 }, ... }
  *
  * // Reset specific logger
  * globalThis.commontools.logger["module-name"].resetCounts()
@@ -234,12 +257,25 @@ export interface LogCounts {
 }
 
 /**
+ * Breakdown of counts by message key for a single logger
+ */
+export type LoggerBreakdown = {
+  [messageKey: string]: LogCounts;
+} & {
+  total: number;
+};
+
+/**
  * Logger class that handles both basic and tagged logging
  */
 export class Logger {
   private _disabled: boolean;
   public level?: LogLevel;
   private _counts: { debug: number; info: number; warn: number; error: number };
+  private _countsByKey: Record<
+    string,
+    { debug: number; info: number; warn: number; error: number }
+  >;
   private _logCountEvery: number;
   private _lastLoggedAt: number;
 
@@ -255,6 +291,7 @@ export class Logger {
 
     // Initialize call counts
     this._counts = { debug: 0, info: 0, warn: 0, error: 0 };
+    this._countsByKey = {};
 
     // Set logCountEvery threshold (default to 100, 0 to disable)
     this._logCountEvery = options?.logCountEvery ?? 100;
@@ -292,14 +329,45 @@ export class Logger {
   }
 
   /**
-   * Reset all call counts to zero
+   * Get the call counts broken down by message key.
+   * Each key contains counts for debug, info, warn, error, and a computed total.
+   */
+  get countsByKey(): Record<string, LogCounts> {
+    const result: Record<string, LogCounts> = {};
+    for (const [key, counts] of Object.entries(this._countsByKey)) {
+      result[key] = {
+        debug: counts.debug,
+        info: counts.info,
+        warn: counts.warn,
+        error: counts.error,
+        get total(): number {
+          return this.debug + this.info + this.warn + this.error;
+        },
+      };
+    }
+    return result;
+  }
+
+  /**
+   * Reset all call counts to zero (both overall and by-key counts)
    */
   resetCounts(): void {
     this._counts.debug = 0;
     this._counts.info = 0;
     this._counts.warn = 0;
     this._counts.error = 0;
+    this._countsByKey = {};
     this._lastLoggedAt = 0;
+  }
+
+  /**
+   * Increment the count for a specific message key and log level
+   */
+  private incrementKeyCount(key: string, level: LogLevel): void {
+    if (!this._countsByKey[key]) {
+      this._countsByKey[key] = { debug: 0, info: 0, warn: 0, error: 0 };
+    }
+    this._countsByKey[key][level]++;
   }
 
   /**
@@ -353,59 +421,63 @@ export class Logger {
   /**
    * Log a debug message
    */
-  debug(...messages: LogMessage[]): void {
+  debug(key: string, ...messages: LogMessage[]): void {
     this._counts.debug++;
+    this.incrementKeyCount(key, "debug");
     if (this._disabled) return;
     this.maybeLogCountSummary();
     if (shouldLog("debug", this.level)) {
       const { prefix, color } = this.getLogFormat("debug");
-      console.debug(prefix, color, ...resolveMessages(messages));
+      console.debug(prefix, color, key, ...resolveMessages(messages));
     }
   }
 
   /**
    * Log a message at info level (default logging method)
    */
-  log(...messages: LogMessage[]): void {
-    this.info(...messages);
+  log(key: string, ...messages: LogMessage[]): void {
+    this.info(key, ...messages);
   }
 
   /**
    * Log an info message
    */
-  info(...messages: LogMessage[]): void {
+  info(key: string, ...messages: LogMessage[]): void {
     this._counts.info++;
+    this.incrementKeyCount(key, "info");
     if (this._disabled) return;
     this.maybeLogCountSummary();
     if (shouldLog("info", this.level)) {
       const { prefix, color } = this.getLogFormat("info");
-      console.log(prefix, color, ...resolveMessages(messages));
+      console.log(prefix, color, key, ...resolveMessages(messages));
     }
   }
 
   /**
    * Log a warning message
    */
-  warn(...messages: LogMessage[]): void {
+  warn(key: string, ...messages: LogMessage[]): void {
     this._counts.warn++;
+    this.incrementKeyCount(key, "warn");
     if (this._disabled) return;
     this.maybeLogCountSummary();
     if (shouldLog("warn", this.level)) {
       const { prefix, color } = this.getLogFormat("warn");
-      console.warn(prefix, color, ...resolveMessages(messages));
+      console.warn(prefix, color, key, ...resolveMessages(messages));
     }
   }
 
   /**
    * Log an error message
    */
-  error(...messages: LogMessage[]): void {
+  error(key: string, ...messages: LogMessage[]): void {
     this._counts.error++;
+    this.incrementKeyCount(key, "error");
     if (this._disabled) return;
     this.maybeLogCountSummary();
     if (shouldLog("error", this.level)) {
       const { prefix, color } = this.getLogFormat("error");
-      console.error(prefix, color, ...resolveMessages(messages));
+      console.error(prefix, color, key, ...resolveMessages(messages));
     }
   }
 }
@@ -497,28 +569,37 @@ export function getTotalLoggerCounts(): number {
 }
 
 /**
- * Get a breakdown of log counts by logger name, plus a total.
- * @returns Object with counts per logger and a total property
+ * Get a breakdown of log counts by logger name and message key, plus totals.
+ * @returns Object with nested counts per logger/key and a total property
  */
-export function getLoggerCountsBreakdown(): Record<string, number> & {
+export function getLoggerCountsBreakdown(): Record<string, LoggerBreakdown> & {
   total: number;
 } {
   const global = globalThis as unknown as {
     commontools?: { logger?: Record<string, Logger> };
   };
 
-  const breakdown: Record<string, number> = {};
+  const breakdown: Record<string, LoggerBreakdown> = {};
   let total = 0;
 
   if (global.commontools?.logger) {
     for (const [name, logger] of Object.entries(global.commontools.logger)) {
-      const count = logger.counts.total;
-      breakdown[name] = count;
-      total += count;
+      const loggerBreakdown = { total: 0 } as LoggerBreakdown;
+
+      // Add counts by key
+      for (const [key, counts] of Object.entries(logger.countsByKey)) {
+        loggerBreakdown[key] = counts;
+        loggerBreakdown.total += counts.total;
+      }
+
+      breakdown[name] = loggerBreakdown;
+      total += loggerBreakdown.total;
     }
   }
 
-  return { ...breakdown, total };
+  return { ...breakdown, total } as Record<string, LoggerBreakdown> & {
+    total: number;
+  };
 }
 
 // Make helper functions available globally for browser console access

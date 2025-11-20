@@ -129,13 +129,15 @@ export class IntersectionFormatter implements TypeFormatter {
                   : undefined;
                 (existing as Record<string, unknown>).$comment = priorComment ??
                   DOC_CONFLICT_COMMENT;
-                logger.warn(() =>
-                  `Intersection doc conflict for '${key}'; using first`
+                logger.warn(
+                  "schema-gen",
+                  () => `Intersection doc conflict for '${key}'; using first`,
                 );
               }
             }
-            logger.debug(() =>
-              `Intersection kept first definition for '${key}'`
+            logger.debug(
+              "schema-gen",
+              () => `Intersection kept first definition for '${key}'`,
             );
             continue;
           }

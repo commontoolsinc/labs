@@ -790,7 +790,10 @@ export class Replica {
       // the nursery/heap and sent out change information.
       const integratedPromise = query.promise.then(async (result) => {
         if (result.error) {
-          logger.error(() => ["query failure", queryArgs, result.error]);
+          logger.error(
+            "storage-error",
+            () => ["query failure", queryArgs, result.error],
+          );
           return Promise.resolve({ error: result.error });
         } else {
           const _integrated = await this.integrateResults(
@@ -814,7 +817,10 @@ export class Replica {
     // Check for errors
     for (const result of results) {
       if ((result as any).error) {
-        logger.error(() => ["query failure", queryArgs, (result as any).error]);
+        logger.error(
+          "storage-error",
+          () => ["query failure", queryArgs, (result as any).error],
+        );
         return { error: (result as any).error as PullError };
       }
     }
@@ -1030,9 +1036,12 @@ export class Replica {
         result.error.name === "ConflictError" &&
         result.error.conflict.existsInHistory
       ) {
-        logger.info(() => ["Transaction failed (aready exists)", result.error]);
+        logger.info(
+          "storage",
+          () => ["Transaction failed (aready exists)", result.error],
+        );
       } else {
-        logger.warn(() => ["Transaction failed", result.error]);
+        logger.warn("storage", () => ["Transaction failed", result.error]);
       }
 
       // Checkout current state of facts so we can compute
@@ -1462,7 +1471,10 @@ class ProviderConnection implements IStorageProvider {
       queueMicrotask(() => {
         this.provider.poll();
         this.provider.reestablishSubscriptions().catch((error) => {
-          logger.error(() => ["Failed to reestablish subscriptions:", error]);
+          logger.error(
+            "storage-error",
+            () => ["Failed to reestablish subscriptions:", error],
+          );
         });
       });
     }
@@ -1859,7 +1871,10 @@ export class Provider implements IStorageProvider {
     try {
       await this.workspace.pull(need);
     } catch (error) {
-      logger.error(() => ["Failed to re-establish subscriptions:", error]);
+      logger.error(
+        "storage-error",
+        () => ["Failed to re-establish subscriptions:", error],
+      );
     }
   }
 
