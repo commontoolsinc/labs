@@ -63,6 +63,9 @@ export function transformHandlerJsxAttribute(
   const builder = new RecipeBuilder(context);
   builder.setCaptureTree(captureTree);
 
+  // Register capture names as used to avoid collision with event parameter
+  builder.registerUsedNames(Array.from(captureTree.keys()));
+
   // Build the new callback using buildHandlerCallback
   const handlerCallback = builder.buildHandlerCallback(
     callback,

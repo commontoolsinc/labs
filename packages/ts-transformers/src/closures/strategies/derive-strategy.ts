@@ -5,8 +5,10 @@ import { detectCallKind, isFunctionLikeExpression } from "../../ast/mod.ts";
 import { registerDeriveCallType } from "../../ast/type-inference.ts";
 import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
-import { createPropertyName } from "../../utils/identifiers.ts";
-import { normalizeBindingName } from "../computed-aliases.ts";
+import {
+  createPropertyName,
+  normalizeBindingName,
+} from "../../utils/identifiers.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import { RecipeBuilder } from "../utils/recipe-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
@@ -301,8 +303,9 @@ export function transformDeriveCall(
   const hadZeroParameters = callback.parameters.length === 0;
 
   // Resolve capture name collisions with the original input parameter name
+  // Only check for collisions if we're actually adding the input parameter (not zero params)
   const captureNameMap = resolveDeriveCaptureNameCollisions(
-    originalInputParamName,
+    hadZeroParameters ? "" : originalInputParamName,
     captureTree,
   );
 
@@ -359,7 +362,7 @@ export function transformDeriveCall(
         resultType,
         context.sourceFile,
         ts.NodeBuilderFlags.NoTruncation |
-          ts.NodeBuilderFlags.UseStructuralFallback,
+        ts.NodeBuilderFlags.UseStructuralFallback,
       );
 
       // Register the result Type in typeRegistry for the synthetic TypeNode

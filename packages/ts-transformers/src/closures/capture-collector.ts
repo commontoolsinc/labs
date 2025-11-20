@@ -16,7 +16,7 @@ export interface CaptureAnalysis {
 export class CaptureCollector {
   constructor(
     private readonly checker: ts.TypeChecker,
-  ) {}
+  ) { }
 
   analyze(func: ts.FunctionLikeDeclaration): CaptureAnalysis {
     const captures = this.collectCaptures(func);
@@ -106,6 +106,14 @@ export class CaptureCollector {
 
       ts.forEachChild(node, visit);
     };
+
+    // Visit parameter initializers first
+    // Captures in default values (e.g. (a = captured) => ...) need to be detected
+    for (const param of func.parameters) {
+      if (param.initializer) {
+        visit(param.initializer);
+      }
+    }
 
     if (func.body) {
       visit(func.body);

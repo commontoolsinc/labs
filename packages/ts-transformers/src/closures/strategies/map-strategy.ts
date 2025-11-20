@@ -14,14 +14,11 @@ import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
   createPropertyName,
+  normalizeBindingName,
   reserveIdentifier,
 } from "../../utils/identifiers.ts";
-import {
-  analyzeElementBinding,
-  normalizeBindingName,
-  rewriteCallbackBody,
-} from "../computed-aliases.ts";
-import type { ComputedAliasInfo } from "../computed-aliases.ts";
+import { analyzeElementBinding, rewriteCallbackBody } from "./map-utils.ts";
+import type { ComputedAliasInfo } from "./map-utils.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import { RecipeBuilder } from "../utils/recipe-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
@@ -436,10 +433,22 @@ function createRecipeCallWithParams(
     factory.createIdentifier("mapWithPattern"),
   );
 
+  const args: ts.Expression[] = [recipeCall, paramsObject];
+  if (mapCall.arguments.length > 1) {
+    const thisArg = ts.visitNode(
+      mapCall.arguments[1],
+      visitor,
+      ts.isExpression,
+    );
+    if (thisArg) {
+      args.push(thisArg);
+    }
+  }
+
   return factory.createCallExpression(
     mapWithPatternAccess,
     mapCall.typeArguments,
-    [recipeCall, paramsObject],
+    args,
   );
 }
 

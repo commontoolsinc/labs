@@ -291,3 +291,45 @@ export function createPropertyParamNames(
 
   return { propertyName, paramName };
 }
+
+export function normalizeBindingName(
+  name: ts.BindingName,
+  factory: ts.NodeFactory,
+  used: Set<string>,
+): ts.BindingName {
+  if (ts.isIdentifier(name)) {
+    return maybeReuseIdentifier(name, used);
+  }
+
+  if (ts.isObjectBindingPattern(name)) {
+    const elements = name.elements.map((element) =>
+      factory.createBindingElement(
+        element.dotDotDotToken,
+        element.propertyName,
+        normalizeBindingName(element.name, factory, used),
+        element.initializer as ts.Expression | undefined,
+      )
+    );
+    return factory.createObjectBindingPattern(elements);
+  }
+
+  if (ts.isArrayBindingPattern(name)) {
+    const elements = name.elements.map((element) => {
+      if (ts.isOmittedExpression(element)) {
+        return element;
+      }
+      if (ts.isBindingElement(element)) {
+        return factory.createBindingElement(
+          element.dotDotDotToken,
+          element.propertyName,
+          normalizeBindingName(element.name, factory, used),
+          element.initializer as ts.Expression | undefined,
+        );
+      }
+      return element;
+    });
+    return factory.createArrayBindingPattern(elements);
+  }
+
+  return name;
+}

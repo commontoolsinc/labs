@@ -24,11 +24,11 @@ export function normalizeParameter(
   newName?: string | ts.BindingName,
 ): ts.ParameterDeclaration {
   return ts.factory.createParameterDeclaration(
-    undefined,
-    undefined,
+    param.modifiers,
+    param.dotDotDotToken,
     newName || param.name,
-    undefined,
-    undefined,
-    undefined,
+    param.questionToken,
+    param.type,
+    param.initializer,
   );
 }

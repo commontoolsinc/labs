@@ -4,9 +4,9 @@ import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
   createBindingElementsFromNames,
   createParameterFromBindings,
+  normalizeBindingName,
   reserveIdentifier,
 } from "../../utils/identifiers.ts";
-import { normalizeBindingName } from "../computed-aliases.ts";
 
 export interface RecipeParameter {
   name: string; // The property name in the destructured object (e.g. "element", "index")
