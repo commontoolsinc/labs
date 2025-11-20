@@ -641,7 +641,7 @@ export class Runner implements IRunner {
     }
 
     // Sync all the previously computed results.
-    if (recipe.resultSchema) {
+    if (recipe.resultSchema !== undefined) {
       cells.push(resultCell.asSchema(recipe.resultSchema));
     }
 

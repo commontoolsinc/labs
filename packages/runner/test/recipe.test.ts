@@ -444,4 +444,10 @@ describe("recipe", () => {
       "javascript",
     );
   });
+
+  it("supports never schemas", () => {
+    const neverRecipe = recipe(false, false, () => {
+    });
+    expect(isRecipe(neverRecipe)).toBe(true);
+  });
 });
