@@ -209,10 +209,6 @@ export default pattern<ChatInput, ChatOutput>(
 
     const title = TitleGenerator({ model, messages });
 
-    computed(() => {
-      console.log(pinnedCells);
-    });
-
     const promptInput = (
       <ct-prompt-input
         slot="footer"

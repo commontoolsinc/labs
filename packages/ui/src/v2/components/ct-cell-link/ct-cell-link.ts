@@ -187,3 +187,9 @@ export class CTCellLink extends BaseElement {
 }
 
 globalThis.customElements.define("ct-cell-link", CTCellLink);
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "ct-cell-link": CTCellLink;
+  }
+}
