@@ -595,10 +595,11 @@ export function validateAndTransform(
       return annotateWithBackToCellSymbols(merged, runtime, link, tx);
     } else {
       // For primitive types, try each option that matches the type
+      // Note: typeof null === "object" in JavaScript, so we need to handle null explicitly
+      const valueType = value === null ? "null" : typeof value;
       const candidates = objOptions
         .filter((option) =>
-          (option.type === "integer" ? "number" : option.type) ===
-            typeof value as string
+          (option.type === "integer" ? "number" : option.type) === valueType
         )
         .map((option) => {
           // Create a new seen array for each candidate to avoid false positives
