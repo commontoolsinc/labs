@@ -240,7 +240,10 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length > 0 && (<ul>
-            {people.map((person) => (<li key={person.id}>{person.name}</li>))}
+            {people.mapWithPattern(__ctHelpers.recipe<{
+                element: { id: string; name: string; };
+                params: {};
+            }>(({ element: person, params: {} }) => (<li key={person.id}>{person.name}</li>)), {})}
           </ul>))}
       </div>),
     };

@@ -6,7 +6,6 @@ import {
   isOpaqueRefType,
 } from "../../transformers/opaque-ref/opaque-ref.ts";
 import {
-  createDataFlowAnalyzer,
   detectCallKind,
   getTypeAtLocationWithFallback,
   isFunctionLikeExpression,
@@ -269,124 +268,6 @@ function isInsideDeriveWithOpaqueRef(
 }
 
 /**
- * Find the closest JSX expression ancestor of a node.
- */
-function findClosestJsxExpression(
-  node: ts.Node,
-): ts.JsxExpression | undefined {
-  let current = node;
-  while (current.parent) {
-    if (ts.isJsxExpression(current.parent)) {
-      return current.parent;
-    }
-    current = current.parent;
-  }
-  return undefined;
-}
-
-/**
- * Helper to check if a node is contained within a specific argument of a call expression.
- */
-function isWithinArgument(
-  node: ts.Node,
-  callExpr: ts.CallExpression,
-  argIndex: number,
-): boolean {
-  let current: ts.Node | undefined = node;
-  while (current && current !== callExpr) {
-    if (
-      ts.isCallExpression(current.parent) &&
-      current.parent === callExpr &&
-      current.parent.arguments[argIndex] === current
-    ) {
-      return true;
-    }
-    current = current.parent;
-  }
-  return false;
-}
-
-/**
- * Check if a map call will be wrapped in a derive by the JSX transformer.
- * Returns true if wrapping will occur (meaning we should NOT transform the map).
- */
-function willBeWrappedByJsx(
-  mapCall: ts.CallExpression,
-  closestJsxExpression: ts.JsxExpression,
-  context: TransformationContext,
-): boolean {
-  // JSX expression must have an expression to analyze
-  if (!closestJsxExpression.expression) {
-    return false;
-  }
-
-  const analyze = createDataFlowAnalyzer(context.checker);
-
-  // Case 1: Map is nested in a larger expression within the same JSX expression
-  // Example: {list.length > 0 && list.map(...)}
-  // Only check THIS expression for derive wrapping
-  if (closestJsxExpression.expression !== mapCall) {
-    const analysis = analyze(closestJsxExpression.expression);
-
-    // Special case: ifElse calls only wrap the predicate (first argument),
-    // not the branches (second and third arguments)
-    if (
-      analysis.rewriteHint?.kind === "call-if-else" &&
-      ts.isCallExpression(closestJsxExpression.expression)
-    ) {
-      // If map is in the predicate (arg 0), it will be wrapped
-      // If map is in the branches (args 1 or 2), it won't be wrapped
-      return isWithinArgument(
-        mapCall,
-        closestJsxExpression.expression,
-        0,
-      );
-    }
-
-    // Check if this will be wrapped in a derive (not just transformed in some other way)
-    // Array-map calls have skip-call-rewrite hint, so they won't be wrapped in derive
-    const willBeWrappedInDerive = analysis.requiresRewrite &&
-      !(analysis.rewriteHint?.kind === "skip-call-rewrite" &&
-        analysis.rewriteHint.reason === "array-map");
-    return willBeWrappedInDerive;
-  }
-
-  // Case 2: Map IS the direct content of the JSX expression
-  // Example: <div>{list.map(...)}</div>
-  // Check if an ANCESTOR JSX expression will wrap this in a derive
-  let node: ts.Node | undefined = closestJsxExpression.parent;
-  while (node) {
-    if (ts.isJsxExpression(node) && node.expression) {
-      const analysis = analyze(node.expression);
-
-      // Special case: ifElse calls only wrap the predicate
-      if (
-        analysis.rewriteHint?.kind === "call-if-else" &&
-        ts.isCallExpression(node.expression)
-      ) {
-        // If map is in the predicate, it will be wrapped
-        if (isWithinArgument(mapCall, node.expression, 0)) {
-          return true;
-        }
-        // If map is in the branches, continue checking ancestors
-      } else {
-        const willBeWrappedInDerive = analysis.requiresRewrite &&
-          !(analysis.rewriteHint?.kind === "skip-call-rewrite" &&
-            analysis.rewriteHint.reason === "array-map");
-        if (willBeWrappedInDerive) {
-          // An ancestor JSX expression will wrap this in a derive
-          return true;
-        }
-      }
-    }
-    node = node.parent;
-  }
-
-  // No ancestor will wrap in derive
-  return false;
-}
-
-/**
  * Check if a map call should be transformed to mapWithPattern.
  * Returns false if the map will end up inside a derive (where the array is unwrapped).
  *
@@ -406,23 +287,7 @@ function shouldTransformMap(
     return false;
   }
 
-  // Find the closest containing JSX expression
-  const closestJsxExpression = findClosestJsxExpression(mapCall);
-
-  // If we didn't find a JSX expression, default to transforming
-  // (this handles maps in regular statements like `const x = items.map(...)`)
-  if (!closestJsxExpression || !closestJsxExpression.expression) {
-    return true;
-  }
-
-  // Check if this expression or ancestors will be wrapped by JSX transformer
-  const willBeWrapped = willBeWrappedByJsx(
-    mapCall,
-    closestJsxExpression,
-    context,
-  );
-  const shouldTransform = !willBeWrapped;
-  return shouldTransform;
+  return true;
 }
 
 /**

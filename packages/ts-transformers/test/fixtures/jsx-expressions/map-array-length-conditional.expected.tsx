@@ -228,7 +228,10 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => list.get().length > 0 && (<div>
-            {list.map((name) => (<span>{name}</span>))}
+            {list.mapWithPattern(__ctHelpers.recipe<{
+                element: string;
+                params: {};
+            }>(({ element: name, params: {} }) => (<span>{name}</span>)), {})}
           </div>))}
       </div>),
     };
