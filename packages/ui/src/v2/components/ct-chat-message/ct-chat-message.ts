@@ -18,7 +18,6 @@ import {
   type CTTheme,
   themeContext,
 } from "../theme-context.ts";
-import type { IRuntime } from "@commontools/runner";
 import "../ct-cell-link/ct-cell-link.ts";
 
 /**
@@ -372,9 +371,6 @@ export class CTChatMessage extends BaseElement {
   @property({ type: Boolean, reflect: true })
   declare compact?: boolean;
 
-  @property({ attribute: false })
-  declare runtime?: IRuntime;
-
   @consume({ context: themeContext, subscribe: true })
   @property({ attribute: false })
   declare theme?: CTTheme;
@@ -566,14 +562,6 @@ export class CTChatMessage extends BaseElement {
     // Update CSS custom properties when theme changes
     if (changedProperties.has("theme") && this.theme) {
       this._updateThemeProperties();
-    }
-
-    // Hydrate ct-cell-link components with runtime
-    if (this.runtime) {
-      const cellLinks = this.shadowRoot?.querySelectorAll("ct-cell-link");
-      cellLinks?.forEach((link) => {
-        (link as any).runtime = this.runtime;
-      });
     }
   }
 

@@ -1,10 +1,12 @@
 import { css, html, PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
+import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import "../ct-chip/ct-chip.ts";
 import type { Cell, IRuntime, MemorySpace } from "@commontools/runner";
 import { NAME } from "@commontools/runner";
 import { parseLLMFriendlyLink } from "@commontools/runner";
+import { runtimeContext, spaceContext } from "../../runtime-context.ts";
 
 /**
  * CTCellLink - Renders a link or cell as a clickable pill
@@ -13,11 +15,9 @@ import { parseLLMFriendlyLink } from "@commontools/runner";
  *
  * @property {string} link - The serialized path to a cell (e.g. /of:bafy.../path)
  * @property {Cell} cell - The live Cell reference
- * @property {IRuntime} runtime - The runtime instance (required for resolving links and navigation)
- * @property {MemorySpace} space - The memory space (optional, used when resolving links)
  *
  * @example
- * <ct-cell-link .link=${"/of:bafy.../path"} .runtime=${runtime}></ct-cell-link>
+ * <ct-cell-link .link=${"/of:bafy.../path"}></ct-cell-link>
  * <ct-cell-link .cell=${myCell}></ct-cell-link>
  */
 export class CTCellLink extends BaseElement {
@@ -42,9 +42,11 @@ export class CTCellLink extends BaseElement {
   @property({ attribute: false })
   cell?: Cell;
 
+  @consume({ context: runtimeContext, subscribe: true })
   @property({ attribute: false })
   runtime?: IRuntime;
 
+  @consume({ context: spaceContext, subscribe: true })
   @property({ attribute: false })
   space?: MemorySpace;
 
@@ -141,7 +143,7 @@ export class CTCellLink extends BaseElement {
       const link = this._resolvedCell.getAsNormalizedFullLink();
       // Create a short handle from the ID
       const id = link.id;
-      const shortId = id.split(":").pop()?.slice(0, 6) ?? "???";
+      const shortId = id.split(":").pop()?.slice(-6) ?? "???";
       this._handle = `#${shortId}`;
     } else if (this.link) {
       // Fallback if we can't resolve the cell but have a link string

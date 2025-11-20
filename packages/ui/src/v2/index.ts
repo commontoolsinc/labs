@@ -7,6 +7,9 @@
 // Core exports
 export * from "./core/index.ts";
 
+// Context exports
+export * from "./runtime-context.ts";
+
 // Utility exports
 export * from "./utils/index.ts";
 

@@ -7,8 +7,11 @@ import { AppUpdateEvent } from "../lib/app/events.ts";
 import { clone } from "../lib/app/state.ts";
 import { KeyStore } from "@commontools/identity";
 import { property, state } from "lit/decorators.js";
+import { provide } from "@lit/context";
 import { Task } from "@lit/task";
+import { Runtime } from "@commontools/runner";
 import { RuntimeInternals } from "../lib/runtime.ts";
+import { runtimeContext, spaceContext } from "@commontools/ui";
 
 // The root element for the shell application.
 // Handles processing `Command`s from children elements,
@@ -42,6 +45,16 @@ export class XRootView extends BaseView {
   @property()
   keyStore?: KeyStore;
 
+  // The runtime instance provided to descendant components via context
+  @provide({ context: runtimeContext })
+  @state()
+  private runtime?: Runtime;
+
+  // The current space name provided to descendant components via context
+  @provide({ context: spaceContext })
+  @state()
+  private space?: MemorySpace;
+
   // The runtime task runs when AppState changes, and determines
   // if a new RuntimeInternals must be created, like when
   // identity or space change. This is manually run in `updated()`
@@ -63,6 +76,9 @@ export class XRootView extends BaseView {
         }
 
         if (!app || !app.spaceName || !app.identity) {
+          // Clear the runtime and space when no app state
+          this.runtime = undefined;
+          this.space = undefined;
           return undefined;
         }
 
@@ -74,8 +90,15 @@ export class XRootView extends BaseView {
 
         if (signal.aborted) {
           rt.dispose().catch(console.error);
+          this.runtime = undefined;
+          this.space = undefined;
           return;
         }
+
+        // Update the provided runtime and space values
+        this.runtime = rt.runtime();
+        this.space = rt.space(); // Use the DID from the session, not the human-readable name
+
         return rt;
       },
     },

@@ -32,10 +32,16 @@ export class RuntimeInternals extends EventTarget {
   #telemetryMarkers: RuntimeTelemetryMarkerResult[];
   #inspector: Inspector.Channel;
   #disposed = false;
+  #space: string; // The MemorySpace DID
 
-  private constructor(cc: CharmsController, telemetry: RuntimeTelemetry) {
+  private constructor(
+    cc: CharmsController,
+    telemetry: RuntimeTelemetry,
+    space: string,
+  ) {
     super();
     this.#cc = cc;
+    this.#space = space;
     const runtimeId = this.#cc.manager().runtime.id;
     this.#inspector = new Inspector.Channel(
       runtimeId,
@@ -52,6 +58,14 @@ export class RuntimeInternals extends EventTarget {
 
   cc(): CharmsController {
     return this.#cc;
+  }
+
+  runtime(): Runtime {
+    return this.#cc.manager().runtime;
+  }
+
+  space(): string {
+    return this.#space;
   }
 
   async dispose() {
@@ -191,6 +205,6 @@ export class RuntimeInternals extends EventTarget {
     charmManager = new CharmManager(session, runtime);
     await charmManager.synced();
     const cc = new CharmsController(charmManager);
-    return new RuntimeInternals(cc, telemetry);
+    return new RuntimeInternals(cc, telemetry, session.space);
   }
 }
