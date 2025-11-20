@@ -24,7 +24,7 @@ SHELL_URL=http://localhost:5173 deno task dev
 ### Terminal 2: Start Frontend (Shell)
 ```bash
 cd packages/shell
-deno task dev
+deno task dev-local
 ```
 
 **Expected output:**
@@ -93,7 +93,7 @@ cd packages/toolshed && SHELL_URL=http://localhost:5173 deno task dev &
 TOOLSHED_PID=$!
 
 # Start frontend in background
-cd packages/shell && deno task dev &
+cd packages/shell && deno task dev-local &
 SHELL_PID=$!
 
 # Wait for both to start
