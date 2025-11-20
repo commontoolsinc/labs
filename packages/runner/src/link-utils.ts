@@ -256,7 +256,7 @@ export function parseLink(
       ...(resolvedSpace && { space: resolvedSpace }),
       type: "application/json",
       ...(link.schema !== undefined && { schema: link.schema }),
-      ...(link.rootSchema && { rootSchema: link.rootSchema }),
+      ...(link.rootSchema !== undefined && { rootSchema: link.rootSchema }),
       ...(link.overwrite === "redirect" && { overwrite: "redirect" }),
     };
   }
@@ -305,7 +305,7 @@ export function parseLink(
       ...(base?.space && { space: base.space }),
       type: "application/json",
       ...(alias.schema !== undefined && { schema: alias.schema }),
-      ...(alias.rootSchema && { rootSchema: alias.rootSchema }),
+      ...(alias.rootSchema !== undefined && { rootSchema: alias.rootSchema }),
       overwrite: "redirect",
     };
   }

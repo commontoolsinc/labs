@@ -146,7 +146,7 @@ export function createJsonSchema(
       if (!cell) return {}; // TODO(seefeld): Should be `true`
 
       let schema = cell.schema;
-      if (!schema) {
+      if (schema === undefined) {
         // If we find pointing back here, assume an empty schema. This is
         // overwritten below. (TODO(seefeld): This should create `$ref: "#/.."`)
         seen.set(linkAsStr, {} as JSONSchemaMutable);
