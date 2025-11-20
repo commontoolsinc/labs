@@ -132,7 +132,7 @@ export class CycleTracker<K> {
   include(k: K, context?: unknown): Disposable | null {
     if (this.partial.has(k)) {
       if (!this.expectCycles) {
-        logger.warn(() => [
+        logger.warn("traverse", () => [
           "Cycle Detected!",
           k,
           context,
@@ -181,11 +181,12 @@ export class CompoundCycleTracker<PartialKey, ExtraKey> {
         const entries = this.partial.get(partialKey)!;
         const index = entries.indexOf(extraKey);
         if (index === -1) {
-          logger.error(() => [
+          logger.error("traverse-error", () => [
             "Failed to dispose of missing key",
             extraKey,
             context,
           ]);
+          return;
         }
         if (entries.length === 0) {
           this.partial.delete(partialKey);
@@ -348,7 +349,10 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
         ) as Immutable<JSONValue>;
       }
     } else {
-      logger.error(() => ["Encountered unexpected object: ", doc.value]);
+      logger.error(
+        "traverse-error",
+        () => ["Encountered unexpected object: ", doc.value],
+      );
       return null;
     }
   }
@@ -562,6 +566,7 @@ export function loadSource<S extends BaseMemoryAddress>(
     // undefined is strange, but acceptable
     if (source !== undefined) {
       logger.warn(
+        "traverse",
         () => ["Invalid source link", source, "in", valueEntry.address],
       );
     }
@@ -640,7 +645,10 @@ function narrowSchema(
   let pathIndex = 0;
   while (pathIndex < docPath.length && pathIndex < selector.path.length) {
     if (docPath[pathIndex] !== selector.path[pathIndex]) {
-      logger.warn(() => ["Mismatched paths", docPath, selector.path]);
+      logger.warn(
+        "traverse",
+        () => ["Mismatched paths", docPath, selector.path],
+      );
       return MinimalSchemaSelector;
     }
     pathIndex++;
@@ -774,6 +782,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
       return undefined;
     } else if (typeof schemaContext.schema !== "object") {
       logger.warn(
+        "traverse",
         () => ["Invalid schema is not an object", schemaContext.schema],
       );
       return undefined;
@@ -782,11 +791,13 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
       const schemaRef = schemaContext.schema["$ref"];
       if (!isObject(schemaContext.rootSchema)) {
         logger.warn(
+          "traverse",
           () => ["Unsupported $ref without root schema object: ", schemaRef],
         );
         return undefined;
       } else if (typeof schemaRef !== "string") {
         logger.warn(
+          "traverse",
           () => ["Invalid non-string $ref", schemaContext.schema, schemaRef],
         );
         return undefined;

@@ -63,12 +63,15 @@ class VirtualFs implements ModuleResolutionHost {
     if (typeof content !== "string") {
       throw new Error("content not string:" + typeof content);
     }
-    vfsLogger.debug(() => `writeFile - ${fileName} (${content.length} chars)`);
+    vfsLogger.debug(
+      "vfs",
+      () => `writeFile - ${fileName} (${content.length} chars)`,
+    );
     this.fsWrite[fileName] = content;
   }
 
   getCurrentDirectory(): string {
-    vfsLogger.debug(() => "getCurrentDirectory - returning /");
+    vfsLogger.debug("vfs", () => "getCurrentDirectory - returning /");
     return "/";
   }
 
@@ -78,16 +81,18 @@ class VirtualFs implements ModuleResolutionHost {
 
   fileExists(fileName: string): boolean {
     const exists = !!this.innerRead(fileName);
-    vfsLogger.debug(() => `fileExists - ${fileName}: ${exists}`);
+    vfsLogger.debug("vfs", () => `fileExists - ${fileName}: ${exists}`);
     return exists;
   }
 
   readFile(fileName: string): string | undefined {
     const content = this.innerRead(fileName);
-    vfsLogger.debug(() =>
-      `readFile - ${fileName}: ${
-        content ? content.length + " chars" : "not found"
-      }`
+    vfsLogger.debug(
+      "vfs",
+      () =>
+        `readFile - ${fileName}: ${
+          content ? content.length + " chars" : "not found"
+        }`,
     );
     return content;
   }
@@ -108,8 +113,9 @@ class VirtualFs implements ModuleResolutionHost {
       innerRecord = this.fsRead;
     }
     const content = innerRecord[fileName];
-    vfsLogger.debug(() =>
-      `innerRead - ${fileName}: ${content ? "found" : "not found"}`
+    vfsLogger.debug(
+      "vfs",
+      () => `innerRead - ${fileName}: ${content ? "found" : "not found"}`,
     );
     return content;
   }

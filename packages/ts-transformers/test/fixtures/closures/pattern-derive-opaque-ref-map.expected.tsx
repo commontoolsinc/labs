@@ -27,8 +27,7 @@ export default pattern((items) => {
     type: "array",
     items: {
         type: "number"
-    },
-    asOpaque: true
+    }
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "array",
     items: {

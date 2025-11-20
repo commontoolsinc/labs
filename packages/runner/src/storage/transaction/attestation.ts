@@ -295,11 +295,11 @@ export const load = (
   const cacheKey = `${address.id}::${address.type}`;
   const cached = dataURICache.get(cacheKey);
   if (cached) {
-    cacheHitLogger.debug("found cached result");
+    cacheHitLogger.debug("cache-hit", "found cached result");
     return cached;
   }
 
-  logger.debug(() => ["load: parsing"]);
+  logger.debug("storage", () => ["load: parsing"]);
 
   let result: Result<
     IAttestation,

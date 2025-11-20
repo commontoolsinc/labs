@@ -182,7 +182,7 @@ export class Runner implements IRunner {
       resultCell.withTx(tx).setSourceCell(processCell);
     }
 
-    logger.debug(() => [
+    logger.debug("cell-info", () => [
       `resultCell: ${resultCell.getAsNormalizedFullLink().id}`,
       `processCell: ${
         resultCell.withTx(tx).getSourceCell()?.getAsNormalizedFullLink().id
@@ -533,7 +533,7 @@ export class Runner implements IRunner {
         );
       });
       if (error) {
-        logger.error("Error setting up recipe", error);
+        logger.error("recipe-setup-error", "Error setting up recipe", error);
         setupRes = undefined;
       }
     }
@@ -551,7 +551,11 @@ export class Runner implements IRunner {
         // TODO(seefeld): Enforce this by adding a read-only flag for tx
         await tx.commit().then(({ error }) => {
           if (error) {
-            logger.error("Error committing transaction", error);
+            logger.error(
+              "tx-commit-error",
+              "Error committing transaction",
+              error,
+            );
           }
         });
       }
@@ -641,7 +645,7 @@ export class Runner implements IRunner {
     }
 
     // Sync all the previously computed results.
-    if (recipe.resultSchema) {
+    if (recipe.resultSchema !== undefined) {
       cells.push(resultCell.asSchema(recipe.resultSchema));
     }
 

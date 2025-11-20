@@ -5,6 +5,12 @@ export default recipe({
     items: {
         type: "number"
     }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "number"
+    },
+    asOpaque: true
 } as const satisfies __ctHelpers.JSONSchema, (items) => {
     // items is OpaqueRef<number[]> as a recipe parameter
     // Inside the computed callback (which becomes derive), items.map should NOT be transformed

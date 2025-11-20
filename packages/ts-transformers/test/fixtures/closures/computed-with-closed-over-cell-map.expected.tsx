@@ -32,12 +32,27 @@ export default function TestComputedWithClosedOverCellMap() {
     } as const satisfies __ctHelpers.JSONSchema, {
         numbers: numbers,
         multiplier: multiplier
-    }, ({ numbers, multiplier }) => numbers.mapWithPattern(__ctHelpers.recipe<{
-        element: number;
-        params: {
-            multiplier: __ctHelpers.Cell<number>;
-        };
-    }>(({ element: n, params: { multiplier } }) => n * multiplier.get()), {
+    }, ({ numbers, multiplier }) => numbers.mapWithPattern(__ctHelpers.recipe({
+        type: "object",
+        properties: {
+            element: {
+                type: "number"
+            },
+            params: {
+                type: "object",
+                properties: {
+                    multiplier: {
+                        type: "number",
+                        asCell: true
+                    }
+                },
+                required: ["multiplier"]
+            }
+        },
+        required: ["element", "params"]
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema, ({ element: n, params: { multiplier } }) => n * multiplier.get()), {
         multiplier: multiplier
     }));
     return doubled;

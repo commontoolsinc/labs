@@ -464,7 +464,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   get schema(): JSONSchema | undefined {
-    if (this._link.schema) return this._link.schema;
+    if (this._link.schema !== undefined) return this._link.schema;
 
     // If no schema is defined, resolve link and get schema from there (which is
     // what .get() would do).
@@ -481,7 +481,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   get rootSchema(): JSONSchema | undefined {
-    if (this._link.rootSchema) return this._link.rootSchema;
+    if (this._link.rootSchema !== undefined) return this._link.rootSchema;
 
     // If no root schema is defined, resolve link and get root schema from there
     // (which is what .get() would do).

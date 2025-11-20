@@ -61,7 +61,10 @@ export function diffAndUpdate(
     context,
     options,
   );
-  diffLogger.debug(() => `[diffAndUpdate] changes: ${JSON.stringify(changes)}`);
+  diffLogger.debug(
+    "diff",
+    () => `[diffAndUpdate] changes: ${JSON.stringify(changes)}`,
+  );
   applyChangeSet(tx, changes);
   return changes.length > 0;
 }
@@ -106,17 +109,21 @@ export function normalizeAndDiff(
   // Log entry with value type and symbol presence
   const valueType = Array.isArray(newValue) ? "array" : typeof newValue;
   const pathStr = link.path.join(".");
-  diffLogger.debug(() =>
-    `[DIFF_ENTER] path=${pathStr} type=${valueType} newValue=${
-      JSON.stringify(newValue as any)
-    }`
+  diffLogger.debug(
+    "diff",
+    () =>
+      `[DIFF_ENTER] path=${pathStr} type=${valueType} newValue=${
+        JSON.stringify(newValue as any)
+      }`,
   );
 
   // When detecting a circular reference on JS objects, turn it into a cell,
   // which below will be turned into a relative link.
   if (seen.has(newValue)) {
-    diffLogger.debug(() =>
-      `[SEEN_CHECK] Already seen object at path=${pathStr}, converting to cell`
+    diffLogger.debug(
+      "diff",
+      () =>
+        `[SEEN_CHECK] Already seen object at path=${pathStr}, converting to cell`,
     );
     newValue = new CellImpl(runtime, tx, seen.get(newValue)!);
   }
@@ -133,8 +140,9 @@ export function normalizeAndDiff(
     isRecord(newValue) &&
     newValue[ID_FIELD] !== undefined
   ) {
-    diffLogger.debug(() =>
-      `[BRANCH_ID_FIELD] Processing ID_FIELD redirect at path=${pathStr}`
+    diffLogger.debug(
+      "diff",
+      () => `[BRANCH_ID_FIELD] Processing ID_FIELD redirect at path=${pathStr}`,
     );
     const { [ID_FIELD]: fieldName, ...rest } = newValue as
       & { [ID_FIELD]: string }
@@ -191,8 +199,10 @@ export function normalizeAndDiff(
   if (isCellResultForDereferencing(newValue)) {
     const parsedLink = parseLink(newValue);
     const sigilLink = createSigilLinkFromParsedLink(parsedLink);
-    diffLogger.debug(() =>
-      `[BRANCH_QUERY_RESULT] Converted query result to sigil link at path=${pathStr} link=${sigilLink} parsedLink=${parsedLink}`
+    diffLogger.debug(
+      "diff",
+      () =>
+        `[BRANCH_QUERY_RESULT] Converted query result to sigil link at path=${pathStr} link=${sigilLink} parsedLink=${parsedLink}`,
     );
     newValue = sigilLink;
   }
@@ -204,8 +214,9 @@ export function normalizeAndDiff(
   // self-links.
   let linkOriginFromCell = false;
   if (isCell(newValue)) {
-    diffLogger.debug(() =>
-      `[BRANCH_CELL] Converting cell to link at path=${pathStr}`
+    diffLogger.debug(
+      "diff",
+      () => `[BRANCH_CELL] Converting cell to link at path=${pathStr}`,
     );
     linkOriginFromCell = true;
     newValue = newValue.getAsLink();
@@ -227,8 +238,10 @@ export function normalizeAndDiff(
 
   // If we're about to create a reference to ourselves, no-op
   if (areMaybeLinkAndNormalizedLinkSame(newValue, link)) {
-    diffLogger.debug(() =>
-      `[BRANCH_SELF_REF] Self-reference detected, no-op at path=${pathStr}`
+    diffLogger.debug(
+      "diff",
+      () =>
+        `[BRANCH_SELF_REF] Self-reference detected, no-op at path=${pathStr}`,
     );
     return [];
   }
@@ -242,13 +255,16 @@ export function normalizeAndDiff(
       isWriteRedirectLink(currentValue) &&
       areNormalizedLinksSame(parseLink(currentValue, link), link)
     ) {
-      diffLogger.debug(() =>
-        `[BRANCH_WRITE_REDIRECT] Same redirect, no-op at path=${pathStr}`
+      diffLogger.debug(
+        "diff",
+        () => `[BRANCH_WRITE_REDIRECT] Same redirect, no-op at path=${pathStr}`,
       );
       return [];
     } else {
-      diffLogger.debug(() =>
-        `[BRANCH_WRITE_REDIRECT] Different redirect, updating at path=${pathStr}`
+      diffLogger.debug(
+        "diff",
+        () =>
+          `[BRANCH_WRITE_REDIRECT] Different redirect, updating at path=${pathStr}`,
       );
       changes.push({ location: link, value: newValue as JSONValue });
       return changes;
@@ -257,8 +273,10 @@ export function normalizeAndDiff(
 
   // Handle alias in current value (at this point: if newValue is not an alias)
   if (isWriteRedirectLink(currentValue)) {
-    diffLogger.debug(() =>
-      `[BRANCH_CURRENT_ALIAS] Following current value alias at path=${pathStr}`
+    diffLogger.debug(
+      "diff",
+      () =>
+        `[BRANCH_CURRENT_ALIAS] Following current value alias at path=${pathStr}`,
     );
     // Log reads of the alias, so that changing aliases cause refreshes
     const redirectLink = resolveLink(
@@ -278,10 +296,12 @@ export function normalizeAndDiff(
   }
 
   if (isAnyCellLink(newValue)) {
-    diffLogger.debug(() =>
-      `[BRANCH_CELL_LINK] Processing cell link at path=${pathStr} link=${
-        JSON.stringify(newValue as any)
-      }`
+    diffLogger.debug(
+      "diff",
+      () =>
+        `[BRANCH_CELL_LINK] Processing cell link at path=${pathStr} link=${
+          JSON.stringify(newValue as any)
+        }`,
     );
     const parsedLink = parseLink(newValue, link);
 
@@ -292,10 +312,12 @@ export function normalizeAndDiff(
     // a seen cycle to a Cell, and only collapse when the target is the immediate
     // parent path.
     if (!linkOriginFromCell && isImmediateParent(parsedLink, link)) {
-      diffLogger.debug(() =>
-        `[CELL_LINK_COLLAPSE] Same-doc ancestor/self link detected at path=${pathStr} -> embedding snapshot from ${
-          parsedLink.path.join(".")
-        }`
+      diffLogger.debug(
+        "diff",
+        () =>
+          `[CELL_LINK_COLLAPSE] Same-doc ancestor/self link detected at path=${pathStr} -> embedding snapshot from ${
+            parsedLink.path.join(".")
+          }`,
       );
       const snapshot = tx.readValueOrThrow(
         parsedLink,
@@ -315,13 +337,16 @@ export function normalizeAndDiff(
       isAnyCellLink(currentValue) &&
       areLinksSame(newValue, currentValue, link)
     ) {
-      diffLogger.debug(() =>
-        `[BRANCH_CELL_LINK] Same cell link, no-op at path=${pathStr}`
+      diffLogger.debug(
+        "diff",
+        () => `[BRANCH_CELL_LINK] Same cell link, no-op at path=${pathStr}`,
       );
       return [];
     } else {
-      diffLogger.debug(() =>
-        `[BRANCH_CELL_LINK] Different cell link, updating at path=${pathStr}`
+      diffLogger.debug(
+        "diff",
+        () =>
+          `[BRANCH_CELL_LINK] Different cell link, updating at path=${pathStr}`,
       );
       return [
         // TODO(seefeld): Normalize the link to a sigil link?
@@ -332,8 +357,9 @@ export function normalizeAndDiff(
 
   // Handle ID-based object (convert to entity)
   if (isRecord(newValue) && newValue[ID] !== undefined) {
-    diffLogger.debug(() =>
-      `[BRANCH_ID_OBJECT] Processing ID-based object at path=${pathStr}`
+    diffLogger.debug(
+      "diff",
+      () => `[BRANCH_ID_OBJECT] Processing ID-based object at path=${pathStr}`,
     );
     const { [ID]: id, ...rest } = newValue as
       & { [ID]: string }
@@ -393,8 +419,10 @@ export function normalizeAndDiff(
 
   // Handle arrays
   if (Array.isArray(newValue)) {
-    diffLogger.debug(() =>
-      `[BRANCH_ARRAY] Processing array at path=${pathStr} length=${newValue.length}`
+    diffLogger.debug(
+      "diff",
+      () =>
+        `[BRANCH_ARRAY] Processing array at path=${pathStr} length=${newValue.length}`,
     );
     // If the current value is not an array, set it to an empty array
     if (!Array.isArray(currentValue)) {
@@ -452,14 +480,17 @@ export function normalizeAndDiff(
 
   // Handle objects
   if (isRecord(newValue)) {
-    diffLogger.debug(() =>
-      `[BRANCH_OBJECT] Processing object at path=${pathStr}`
+    diffLogger.debug(
+      "diff",
+      () => `[BRANCH_OBJECT] Processing object at path=${pathStr}`,
     );
     // If the current value is not a (regular) object, set it to an empty object
     // Note that the alias case is handled above
     if (!isRecord(currentValue) || isAnyCellLink(currentValue)) {
-      diffLogger.debug(() =>
-        `[BRANCH_OBJECT] Current value is not a record or cell link, setting to empty object at path=${pathStr}`
+      diffLogger.debug(
+        "diff",
+        () =>
+          `[BRANCH_OBJECT] Current value is not a record or cell link, setting to empty object at path=${pathStr}`,
       );
       changes.push({ location: link, value: {} });
       currentValue = {};
@@ -469,7 +500,7 @@ export function normalizeAndDiff(
     seen.set(newValue, link);
 
     for (const key in newValue) {
-      diffLogger.debug(() => {
+      diffLogger.debug("diff", () => {
         const childPath = [...link.path, key].join(".");
         return `[DIFF_RECURSE] Recursing into key='${key}' childPath=${childPath}`;
       });

@@ -120,6 +120,7 @@ export class ServerObjectManager extends BaseObjectManager<
         });
         if (!requiredClassifications.isSubsetOf(this.providedClassifications)) {
           logger.info(
+            "classification-skip",
             () => ["Skipping inclusion of", fact.of, "due to classification"],
           );
           this.restrictedValues.add(key);
@@ -243,7 +244,7 @@ export const selectSchema = <Space extends MemorySpace>(
   }
   const endTime = performance.timeOrigin + performance.now();
   if ((endTime - startTime) > 100) {
-    logger.info(() => ["Slow selectSchema:", selectSchema]);
+    logger.info("slow-select", () => ["Slow selectSchema:", selectSchema]);
   }
 
   return includedFacts;
