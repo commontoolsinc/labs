@@ -292,11 +292,16 @@ export class RecipeManager implements IRecipeManager {
    * If the metadata cell already exists, it updates it in-place.
    * Otherwise, it stores the fields to be applied on the next save.
    */
-  setRecipeMetaFields(recipeId: string, fields: Partial<RecipeMeta>): void {
+  async setRecipeMetaFields(
+    recipeId: string,
+    fields: Partial<RecipeMeta>,
+  ): Promise<void> {
     const cell = this.recipeMetaCellById.get(recipeId);
     if (cell) {
       const current = cell.get();
-      cell.set({ ...current, ...fields, id: recipeId });
+      await this.runtime.editWithRetry((tx) => {
+        cell.withTx(tx).set({ ...current, ...fields, id: recipeId });
+      });
     } else {
       const pending = this.pendingMetaById.get(recipeId) ?? {};
       this.pendingMetaById.set(recipeId, { ...pending, ...fields });
