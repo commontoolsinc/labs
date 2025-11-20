@@ -18,6 +18,8 @@ import {
   type CTTheme,
   themeContext,
 } from "../theme-context.ts";
+import type { IRuntime } from "@commontools/runner";
+import "../ct-cell-link/ct-cell-link.ts";
 
 /**
  * CTChatMessage - Chat message component with markdown support
@@ -370,6 +372,9 @@ export class CTChatMessage extends BaseElement {
   @property({ type: Boolean, reflect: true })
   declare compact?: boolean;
 
+  @property({ attribute: false })
+  declare runtime?: IRuntime;
+
   @consume({ context: themeContext, subscribe: true })
   @property({ attribute: false })
   declare theme?: CTTheme;
@@ -395,7 +400,24 @@ export class CTChatMessage extends BaseElement {
     // Wrap code blocks with copy buttons
     renderedHtml = this._wrapCodeBlocksWithCopyButtons(renderedHtml);
 
+    // Replace cell links with ct-cell-link
+    renderedHtml = this._replaceCellLinks(renderedHtml);
+
     return renderedHtml;
+  }
+
+  private _replaceCellLinks(html: string): string {
+    // Matches <a href="/of:...">Name</a>
+    // We look for hrefs starting with /of: (or other schemes if generalized, but LLM links are /of:)
+    // The regex for LLM friendly links is roughly /^[a-zA-Z0-9]+:/ but we know they start with /of: usually.
+    // Let's use a broader regex for the scheme part to be safe: \/[a-zA-Z0-9]+:
+    return html.replace(
+      /<a href="(\/[a-zA-Z0-9]+:[^"]+)">([^<]*)<\/a>/g,
+      (_match, link, _text) => {
+        // We ignore the text for now as ct-cell-link resolves its own name
+        return `<ct-cell-link link="${link}"></ct-cell-link>`;
+      },
+    );
   }
 
   private _wrapCodeBlocksWithCopyButtons(html: string): string {
@@ -544,6 +566,14 @@ export class CTChatMessage extends BaseElement {
     // Update CSS custom properties when theme changes
     if (changedProperties.has("theme") && this.theme) {
       this._updateThemeProperties();
+    }
+
+    // Hydrate ct-cell-link components with runtime
+    if (this.runtime) {
+      const cellLinks = this.shadowRoot?.querySelectorAll("ct-cell-link");
+      cellLinks?.forEach((link) => {
+        (link as any).runtime = this.runtime;
+      });
     }
   }
 
