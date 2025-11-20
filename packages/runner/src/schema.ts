@@ -719,7 +719,9 @@ export function validateAndTransform(
       }
     }
 
-    if (!isRecord(value) && value !== null && Object.keys(result).length === 0) {
+    if (
+      !isRecord(value) && value !== null && Object.keys(result).length === 0
+    ) {
       return undefined;
     }
     // If value is null, return null (not undefined)
