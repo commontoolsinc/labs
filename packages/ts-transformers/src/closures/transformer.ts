@@ -16,6 +16,7 @@ import {
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import {
+  getTypeFromTypeNodeWithFallback,
   inferArrayElementType,
   registerDeriveCallType,
   registerTypeForNode,
@@ -1292,6 +1293,71 @@ function unwrapArrowFunction(
 }
 
 /**
+ * Infer the result type from a map callback function and create a registered TypeNode.
+ * Similar to how derive transformation handles result types.
+ *
+ * This uses the ORIGINAL callback (before transformation) because it has type information
+ * from the source code, whereas synthetic callbacks lack type information.
+ *
+ * @param callback The original callback function (before transformation)
+ * @param context Transformation context
+ * @returns Object with typeNode and optional Type for the result
+ */
+function inferMapCallbackResultType(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  context: TransformationContext,
+): { typeNode: ts.TypeNode; type?: ts.Type } {
+  const { factory, checker } = context;
+  const typeRegistry = context.options.typeRegistry;
+
+  // Check for explicit return type annotation
+  if (callback.type) {
+    const type = getTypeFromTypeNodeWithFallback(
+      callback.type,
+      checker,
+      typeRegistry,
+    );
+    return { typeNode: callback.type, type };
+  }
+
+  // Infer from callback signature
+  const signature = checker.getSignatureFromDeclaration(callback);
+  if (signature) {
+    const resultType = signature.getReturnType();
+
+    // Check for uninstantiated type parameters (similar to derive transformation)
+    const isTypeParam = (resultType.flags & ts.TypeFlags.TypeParameter) !== 0;
+    if (isTypeParam) {
+      // For type parameters, fall back to unknown
+      // SchemaInjectionTransformer's expression-based inference might handle it better
+      return {
+        typeNode: factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+      };
+    }
+
+    const resultTypeNode = checker.typeToTypeNode(
+      resultType,
+      context.sourceFile,
+      ts.NodeBuilderFlags.NoTruncation |
+        ts.NodeBuilderFlags.UseStructuralFallback,
+    );
+
+    if (resultTypeNode) {
+      // Register the type in typeRegistry for the synthetic TypeNode
+      if (typeRegistry) {
+        typeRegistry.set(resultTypeNode, resultType);
+      }
+      return { typeNode: resultTypeNode, type: resultType };
+    }
+  }
+
+  // Fallback to unknown
+  return {
+    typeNode: factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+  };
+}
+
+/**
  * Create the final recipe call with params object.
  */
 function createRecipeCallWithParams(
@@ -1434,12 +1500,22 @@ function createRecipeCallWithParams(
     context,
   );
 
+  // Infer result type from the ORIGINAL callback (before transformation)
+  // The original callback has type information; the synthetic newCallback doesn't
+  const { typeNode: resultTypeNode, type: resultType } =
+    inferMapCallbackResultType(callback, context);
+
   const recipeExpr = context.ctHelpers.getHelperExpr("recipe");
   const recipeCall = factory.createCallExpression(
     recipeExpr,
-    [callbackParamTypeNode],
+    [callbackParamTypeNode, resultTypeNode], // Both input and result schemas
     [newCallback],
   );
+
+  // Register the result type on the recipe call for downstream transformers
+  if (context.options.typeRegistry && resultType) {
+    context.options.typeRegistry.set(recipeCall, resultType);
+  }
 
   const paramProperties = buildCapturePropertyAssignments(
     filteredCaptureTree,

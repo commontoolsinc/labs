@@ -71,8 +71,7 @@ export default pattern((state) => {
             "default": 0
         }
     },
-    required: ["value"],
-    asOpaque: true
+    required: ["value"]
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {

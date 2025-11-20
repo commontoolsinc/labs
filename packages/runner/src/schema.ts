@@ -124,7 +124,7 @@ export function processDefaultValue(
     // document when the value is changed. A classic example is
     // `currentlySelected` with a default of `null`.
     if (
-      !defaultValue && isObject(resolvedSchema) &&
+      defaultValue === undefined && isObject(resolvedSchema) &&
       resolvedSchema.default !== undefined
     ) {
       return runtime.getImmutableCell(
@@ -595,10 +595,11 @@ export function validateAndTransform(
       return annotateWithBackToCellSymbols(merged, runtime, link, tx);
     } else {
       // For primitive types, try each option that matches the type
+      // Note: typeof null === "object" in JavaScript, so we need to handle null explicitly
+      const valueType = value === null ? "null" : typeof value;
       const candidates = objOptions
         .filter((option) =>
-          (option.type === "integer" ? "number" : option.type) ===
-            typeof value as string
+          (option.type === "integer" ? "number" : option.type) === valueType
         )
         .map((option) => {
           // Create a new seen array for each candidate to avoid false positives
@@ -718,8 +719,14 @@ export function validateAndTransform(
       }
     }
 
-    if (!isRecord(value) && Object.keys(result).length === 0) {
+    if (
+      !isRecord(value) && value !== null && Object.keys(result).length === 0
+    ) {
       return undefined;
+    }
+    // If value is null, return null (not undefined)
+    if (value === null && Object.keys(result).length === 0) {
+      return null;
     }
     return annotateWithBackToCellSymbols(result, runtime, link, tx);
   }

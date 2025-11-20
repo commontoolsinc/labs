@@ -220,6 +220,35 @@ export function registerTypeForNode(
 }
 
 /**
+ * Get the Type from a TypeNode, checking typeRegistry first.
+ *
+ * Similar to getTypeAtLocationWithFallback but for TypeNodes specifically.
+ * This is useful when working with TypeNodes that may have been created by
+ * prior transformers and already have types registered.
+ *
+ * @param typeNode The TypeNode to get the Type for
+ * @param checker TypeChecker instance
+ * @param typeRegistry Optional registry of types for synthetic nodes
+ * @returns The Type corresponding to the TypeNode
+ */
+export function getTypeFromTypeNodeWithFallback(
+  typeNode: ts.TypeNode,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.Type {
+  // Check typeRegistry first (for synthetic TypeNodes)
+  if (typeRegistry) {
+    const registeredType = typeRegistry.get(typeNode);
+    if (registeredType) {
+      return registeredType;
+    }
+  }
+
+  // Fall back to TypeChecker
+  return checker.getTypeFromTypeNode(typeNode);
+}
+
+/**
  * Register the result type for a synthetic derive CallExpression.
  *
  * This is needed because synthetic nodes created by transformers don't have
@@ -243,13 +272,11 @@ export function registerDeriveCallType(
   let typeToRegister = resultType;
 
   if (!typeToRegister && resultTypeNode) {
-    // Check if resultTypeNode is already registered
-    typeToRegister = typeRegistry.get(resultTypeNode);
-
-    // If not in registry, try getting it from TypeChecker
-    if (!typeToRegister) {
-      typeToRegister = checker.getTypeFromTypeNode(resultTypeNode);
-    }
+    typeToRegister = getTypeFromTypeNodeWithFallback(
+      resultTypeNode,
+      checker,
+      typeRegistry,
+    );
   }
 
   if (typeToRegister) {
