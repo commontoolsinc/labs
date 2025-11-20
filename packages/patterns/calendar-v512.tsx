@@ -67,7 +67,7 @@ interface Input {
   entries: Default<DayEntry[], []>;
   recurringSeries: Default<RecurringSeries[], []>;
   seriesOverrides: Default<SeriesOverride[], []>;
-  name: Default<string, "Calendar">;
+  name: Default<string, "calendar-v512">;
   customTimeLabels: Default<
     TimeLabel[],
     [{ label: "Morning"; time: "09:00" }, { label: "Evening"; time: "18:00" }]
@@ -75,6 +75,7 @@ interface Input {
   startTime: Default<number, 7>; // Start hour in 24-hour format (7 = 7 AM)
   endTime: Default<number, 19>; // End hour in 24-hour format (19 = 7 PM)
   timeInterval: Default<30 | 60, 60>; // Time slot interval in minutes
+  showMonthView: Default<boolean, true>; // Show/hide month calendar view
 }
 
 interface Output {
@@ -1550,6 +1551,7 @@ export default recipe<Input, Output>(
       startTime,
       endTime,
       timeInterval,
+      showMonthView,
     },
   ) => {
     // OPTIMIZATION v508: Use cached today instead of new Date() in hot path
@@ -5861,6 +5863,18 @@ export default recipe<Input, Output>(
                   width: 100% !important;
                   max-width: 100% !important;
                 }
+
+                .time-slot {
+                  width: auto;
+                  padding: 8px 10px;
+                  font-size: 0.7rem;
+                }
+
+                .note-time {
+                  width: auto;
+                  padding: 6px 10px;
+                  font-size: 0.7rem;
+                }
               }
             `}
           </style>
@@ -5925,6 +5939,17 @@ export default recipe<Input, Output>(
                         style="width: 100%;"
                       />
                     </div>
+                  </ct-vstack>
+                  <ct-vstack gap="2">
+                    <label style="font-size: 0.875rem; font-weight: 500; color: #1d1d1f;">
+                      Display Options
+                    </label>
+                    <ct-hstack gap="2" style="align-items: center;">
+                      <ct-checkbox $checked={showMonthView} />
+                      <span style="font-size: 0.875rem; color: #1d1d1f;">
+                        Show month calendar
+                      </span>
+                    </ct-hstack>
                   </ct-vstack>
                   <ct-vstack gap="2">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -6699,14 +6724,22 @@ export default recipe<Input, Output>(
 
           <div className="main-layout">
             <div className="left-column">
-              <div className="date-picker-container">
-                <input
-                  type="date"
-                  value={currentDate}
-                  onChange={handleDateInputChange({ currentDate })}
-                  className="date-picker-input"
-                />
-              </div>
+              {ifElse(
+                showMonthView,
+                <div className="date-picker-container" style="display: none;">
+                </div>,
+                <div
+                  className="date-picker-container"
+                  style="display: block; margin-bottom: 16px;"
+                >
+                  <input
+                    type="date"
+                    value={currentDate}
+                    onChange={handleDateInputChange({ currentDate })}
+                    className="date-picker-input"
+                  />
+                </div>,
+              )}
 
               <div className="column-section">
                 <div className="date-nav">
@@ -6966,52 +6999,56 @@ export default recipe<Input, Output>(
               </div>
             </div>
 
-            <div className="right-column">
-              <div className="month-header">
-                <ct-button
-                  onClick={previousMonth({ currentDate, viewedYearMonth })}
-                  size="sm"
-                  variant="ghost"
-                >
-                  ←
-                </ct-button>
-                {derive(
-                  { currentMonth, currentYear },
-                  ({ currentMonth, currentYear }: any) => (
-                    <h3>
-                      {currentMonth} {currentYear}
-                    </h3>
-                  ),
-                )}
-                <ct-button
-                  onClick={nextMonth({ currentDate, viewedYearMonth })}
-                  size="sm"
-                  variant="ghost"
-                >
-                  →
-                </ct-button>
-              </div>
-
-              <div className="calendar-grid">
-                <div className="calendar-day-header">Sun</div>
-                <div className="calendar-day-header">Mon</div>
-                <div className="calendar-day-header">Tue</div>
-                <div className="calendar-day-header">Wed</div>
-                <div className="calendar-day-header">Thu</div>
-                <div className="calendar-day-header">Fri</div>
-                <div className="calendar-day-header">Sat</div>
-
-                {calendarDays.map((dayObj: any) => (
-                  <div
-                    className={dayObj.className}
-                    data-date={dayObj.date}
-                    onClick={selectDayHandler}
+            {ifElse(
+              showMonthView,
+              <div className="right-column">
+                <div className="month-header">
+                  <ct-button
+                    onClick={previousMonth({ currentDate, viewedYearMonth })}
+                    size="sm"
+                    variant="ghost"
                   >
-                    {dayObj.day}
-                  </div>
-                ))}
-              </div>
-            </div>
+                    ←
+                  </ct-button>
+                  {derive(
+                    { currentMonth, currentYear },
+                    ({ currentMonth, currentYear }: any) => (
+                      <h3>
+                        {currentMonth} {currentYear}
+                      </h3>
+                    ),
+                  )}
+                  <ct-button
+                    onClick={nextMonth({ currentDate, viewedYearMonth })}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    →
+                  </ct-button>
+                </div>
+
+                <div className="calendar-grid">
+                  <div className="calendar-day-header">Sun</div>
+                  <div className="calendar-day-header">Mon</div>
+                  <div className="calendar-day-header">Tue</div>
+                  <div className="calendar-day-header">Wed</div>
+                  <div className="calendar-day-header">Thu</div>
+                  <div className="calendar-day-header">Fri</div>
+                  <div className="calendar-day-header">Sat</div>
+
+                  {calendarDays.map((dayObj: any) => (
+                    <div
+                      className={dayObj.className}
+                      data-date={dayObj.date}
+                      onClick={selectDayHandler}
+                    >
+                      {dayObj.day}
+                    </div>
+                  ))}
+                </div>
+              </div>,
+              <div></div>,
+            )}
           </div>
         </ct-screen>
       ),
