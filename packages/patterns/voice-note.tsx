@@ -42,11 +42,11 @@ const handleTranscriptionComplete = handler<
 });
 
 const handleDeleteNote = handler<
-  { detail: { id: string } },
-  { notes: Cell<TranscriptionData[]> }
->(({ detail }, { notes }) => {
+  MouseEvent,
+  { noteId: string; notes: Cell<TranscriptionData[]> }
+>((_event, { noteId, notes }) => {
   const currentNotes = notes.get();
-  const filtered = currentNotes.filter((note) => note.id !== detail.id);
+  const filtered = currentNotes.filter((note) => note.id !== noteId);
   notes.set(filtered);
 });
 

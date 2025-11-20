@@ -10,7 +10,6 @@ import { BaseElement } from "../../core/base-element.ts";
  * @attr {number} bars - Number of frequency bars to display (default: 8)
  * @attr {string} color - Bar color (default: 'white')
  * @attr {number} height - Visualizer height in pixels (default: 40)
- * @attr {string} renderMode - Rendering approach: 'canvas' | 'svg' (default: 'svg')
  *
  * @example
  * <ct-audio-visualizer bars={12} color="#5865F2" height={48}></ct-audio-visualizer>
@@ -52,9 +51,6 @@ export class CTAudioVisualizer extends BaseElement {
   @property({ type: Number })
   height = 40;
 
-  @property({ type: String })
-  renderMode: "canvas" | "svg" = "svg";
-
   @property({ type: Array })
   private waveformData: number[] = [];
 
@@ -62,6 +58,7 @@ export class CTAudioVisualizer extends BaseElement {
   private analyser?: AnalyserNode;
   private animationFrameId?: number;
   private _stream?: MediaStream;
+  private sourceNode?: MediaStreamAudioSourceNode;
 
   /**
    * Start visualization with an audio stream
@@ -70,11 +67,15 @@ export class CTAudioVisualizer extends BaseElement {
     this.stopVisualization();
 
     this._stream = stream;
-    this.audioContext = new AudioContext();
-    this.analyser = this.audioContext.createAnalyser();
 
-    const microphone = this.audioContext.createMediaStreamSource(stream);
-    microphone.connect(this.analyser);
+    // Reuse AudioContext if it exists and is not closed
+    if (!this.audioContext || this.audioContext.state === "closed") {
+      this.audioContext = new AudioContext();
+    }
+
+    this.analyser = this.audioContext.createAnalyser();
+    this.sourceNode = this.audioContext.createMediaStreamSource(stream);
+    this.sourceNode.connect(this.analyser);
 
     this.analyser.fftSize = 256;
     this.analyser.smoothingTimeConstant = 0.8;
@@ -114,9 +115,10 @@ export class CTAudioVisualizer extends BaseElement {
       this.animationFrameId = undefined;
     }
 
-    if (this.audioContext) {
-      this.audioContext.close();
-      this.audioContext = undefined;
+    // Disconnect source node but keep AudioContext for reuse
+    if (this.sourceNode) {
+      this.sourceNode.disconnect();
+      this.sourceNode = undefined;
     }
 
     this.analyser = undefined;
@@ -127,6 +129,12 @@ export class CTAudioVisualizer extends BaseElement {
   override disconnectedCallback() {
     super.disconnectedCallback();
     this.stopVisualization();
+
+    // Close AudioContext when element is removed from DOM
+    if (this.audioContext) {
+      this.audioContext.close();
+      this.audioContext = undefined;
+    }
   }
 
   override render() {

@@ -474,7 +474,7 @@ export class CTVoiceInput extends BaseElement {
       const response = await fetch("/api/ai/voice/transcribe", {
         method: "POST",
         headers: {
-          "Content-Type": "audio/wav",
+          "Content-Type": wavBlob.type || "audio/wav",
         },
         body: wavBlob,
       });

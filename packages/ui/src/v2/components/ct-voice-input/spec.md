@@ -239,7 +239,7 @@ class CTVoiceInput extends BaseElement {
     this.emit("ct-recording-stop", { duration, audioData: audioBlob });
 
     if (this.autoTranscribe) {
-      await this.transcribeAudio(audioBlob);
+      await this.transcribeAudio(audioBlob, duration);
     }
   }
 }
@@ -248,7 +248,7 @@ class CTVoiceInput extends BaseElement {
 ### 2. Transcription Flow
 
 ```typescript
-async transcribeAudio(audioBlob: Blob) {
+async transcribeAudio(audioBlob: Blob, duration: number) {
   const id = this._generateId();
   this.emit("ct-transcription-start", { id });
 
@@ -276,7 +276,7 @@ async transcribeAudio(audioBlob: Blob) {
       id,
       text: result.transcription,
       chunks: result.chunks,
-      duration: this.recordingDuration,
+      duration,
       timestamp: Date.now(),
       // Optionally include audio data
       audioData: await this.blobToBase64(audioBlob),
