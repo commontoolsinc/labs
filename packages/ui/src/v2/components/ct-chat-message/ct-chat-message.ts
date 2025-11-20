@@ -409,9 +409,9 @@ export class CTChatMessage extends BaseElement {
     // Let's use a broader regex for the scheme part to be safe: \/[a-zA-Z0-9]+:
     return html.replace(
       /<a href="(\/[a-zA-Z0-9]+:[^"]+)">([^<]*)<\/a>/g,
-      (_match, link, _text) => {
-        // We ignore the text for now as ct-cell-link resolves its own name
-        return `<ct-cell-link link="${link}"></ct-cell-link>`;
+      (_match, link, text) => {
+        // Pass the original link text as label to preserve author's intent
+        return `<ct-cell-link link="${link}" label="${text}"></ct-cell-link>`;
       },
     );
   }

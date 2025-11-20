@@ -15,6 +15,8 @@ describe("ct-chat-message", () => {
     // Access private method
     const rendered = (el as any)._renderMarkdown(markdown);
 
-    expect(rendered).toContain(`<ct-cell-link link="${link}"></ct-cell-link>`);
+    expect(rendered).toContain(
+      `<ct-cell-link link="${link}" label="Link"></ct-cell-link>`,
+    );
   });
 });

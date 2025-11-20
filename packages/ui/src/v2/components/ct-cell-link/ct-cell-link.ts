@@ -39,6 +39,9 @@ export class CTCellLink extends BaseElement {
   @property({ type: String })
   link?: string;
 
+  @property({ type: String })
+  label?: string;
+
   @property({ attribute: false })
   cell?: Cell;
 
@@ -89,6 +92,13 @@ export class CTCellLink extends BaseElement {
 
     if (changedProperties.has("_resolvedCell")) {
       this._updateSubscription();
+      this._updateDisplayInfo();
+    }
+
+    // Also update display info when link changes without resolving to a new cell
+    if (
+      changedProperties.has("link") && !changedProperties.has("_resolvedCell")
+    ) {
       this._updateDisplayInfo();
     }
   }
@@ -170,7 +180,10 @@ export class CTCellLink extends BaseElement {
   }
 
   override render() {
-    const displayText = this._name
+    // Priority: label (from markdown) > [NAME] field > handle > "Unknown Link"
+    const displayText = this.label
+      ? this.label
+      : this._name
       ? `${this._name} ${this._handle}`
       : (this._handle || "Unknown Link");
 

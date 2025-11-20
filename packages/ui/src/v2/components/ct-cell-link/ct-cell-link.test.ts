@@ -8,7 +8,9 @@ describe("CTCellLink", () => {
   });
 
   it("should have customElement definition", () => {
-    expect(CTCellLink.name).toBe("CTCellLink");
+    const definition = customElements.get("ct-cell-link");
+    expect(definition).toBeDefined();
+    expect(definition).toBe(CTCellLink);
   });
 
   it("should create element instance", () => {
