@@ -455,12 +455,14 @@ jobs:
 
       - name: 📤 Upload shell assets to Staging GCS
         run: |
+          # Upload to SHA-specific directory for versioning
           gsutil -m rsync -r packages/shell/dist gs://staging-commontools-dev/builds/${{ github.sha }}/
-          gsutil -m rsync -r -d packages/shell/dist gs://staging-commontools-dev/builds/latest/
+
+          # Upload to bucket root as "latest" (-d removes orphaned files)
+          gsutil -m rsync -r -d packages/shell/dist gs://staging-commontools-dev/
 
           echo "📦 Staging Shell deployed"
-          echo "https://storage.googleapis.com/staging-commontools-dev/builds/${{ github.sha }}"
-          echo "https://storage.googleapis.com/staging-commontools-dev/builds/latest"
+          echo "https://staging.commontools.dev/"
 
   # Post-deployment patterns test (runs after deployment, so this will NOT block deployments.)
   post-deploy-patterns-test:

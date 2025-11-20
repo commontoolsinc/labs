@@ -40,12 +40,11 @@ jobs:
         run: |
           DEPLOY_SHA="${{ inputs.sha || github.sha }}"
 
-          # Upload to SHA-specific directory
+          # Upload to SHA-specific directory for versioning
           gsutil -m rsync -r packages/shell/dist gs://production-commontools-dev/builds/${DEPLOY_SHA}/
 
-          # Upload to latest directory (overwrites)
-          gsutil -m rsync -r -d packages/shell/dist gs://production-commontools-dev/builds/latest/
+          # Upload to bucket root as "latest" (-d removes orphaned files)
+          gsutil -m rsync -r -d packages/shell/dist gs://production-commontools-dev/
 
-          echo "📦 Production Shell Asset Links"
-          echo "SHA build: https://storage.googleapis.com/production-commontools-dev/builds/${DEPLOY_SHA}/index.html"
-          echo "Latest: https://storage.googleapis.com/production-commontools-dev/builds/latest/index.html"
+          echo "📦 Production Shell deployed"
+          echo "https://production.commontools.dev/"
