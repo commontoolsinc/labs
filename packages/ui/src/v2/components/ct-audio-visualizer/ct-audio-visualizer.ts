@@ -87,11 +87,14 @@ export class CTAudioVisualizer extends BaseElement {
       this.analyser.getByteFrequencyData(dataArray);
 
       // Sample data at regular intervals to match bar count
+      // Skip the first few bins (low frequencies that contain ambient noise)
       const barCount = this.bars;
-      const step = Math.floor(dataArray.length / barCount);
+      const skipBins = 2; // Skip first 2 frequency bins
+      const usableLength = dataArray.length - skipBins;
+      const step = Math.floor(usableLength / barCount);
 
       this.waveformData = Array.from({ length: barCount }, (_, i) => {
-        const index = Math.min(i * step, dataArray.length - 1);
+        const index = Math.min(skipBins + (i * step), dataArray.length - 1);
         return dataArray[index] / 255; // Normalize to 0-1
       });
 

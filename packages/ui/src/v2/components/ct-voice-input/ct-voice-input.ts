@@ -1,5 +1,6 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
+import { createRef, ref, type Ref } from "lit/directives/ref.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type Cell } from "@commontools/runner";
 import { createCellController } from "../../core/cell-controller.ts";
@@ -263,6 +264,7 @@ export class CTVoiceInput extends BaseElement {
   private stream?: MediaStream;
   private timerInterval?: number;
   private maxDurationTimeout?: number;
+  private visualizerRef: Ref<CTAudioVisualizer> = createRef();
 
   private _generateId(): string {
     return `voice-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
@@ -383,13 +385,14 @@ export class CTVoiceInput extends BaseElement {
       this.mediaRecorder.start(100); // Collect data every 100ms
       this.isRecording = true;
 
+      // Wait for Lit to render the visualizer element
+      await this.updateComplete;
+
       // Start visualizer
       if (this.showWaveform) {
-        const visualizer = this.shadowRoot?.querySelector(
-          "ct-audio-visualizer",
-        ) as CTAudioVisualizer;
+        const visualizer = this.visualizerRef.value;
         if (visualizer) {
-          visualizer.startVisualization(this.stream);
+          await visualizer.startVisualization(this.stream);
         }
       }
 
@@ -416,9 +419,7 @@ export class CTVoiceInput extends BaseElement {
 
   private _stopRecording() {
     // Stop visualizer first
-    const visualizer = this.shadowRoot?.querySelector(
-      "ct-audio-visualizer",
-    ) as CTAudioVisualizer;
+    const visualizer = this.visualizerRef.value;
     if (visualizer) {
       visualizer.stopVisualization();
     }
@@ -597,6 +598,7 @@ export class CTVoiceInput extends BaseElement {
               ? html`
                 <div class="waveform-container">
                   <ct-audio-visualizer
+                    ${ref(this.visualizerRef)}
                     bars="12"
                     color="var(--ct-theme-color-primary, #3b82f6)"
                     height="40"
