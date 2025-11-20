@@ -9,7 +9,7 @@ import { KeyStore } from "@commontools/identity";
 import { property, state } from "lit/decorators.js";
 import { provide } from "@lit/context";
 import { Task } from "@lit/task";
-import { Runtime } from "@commontools/runner";
+import { type MemorySpace, Runtime } from "@commontools/runner";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { runtimeContext, spaceContext } from "@commontools/ui";
 
@@ -97,7 +97,7 @@ export class XRootView extends BaseView {
 
         // Update the provided runtime and space values
         this.runtime = rt.runtime();
-        this.space = rt.space(); // Use the DID from the session, not the human-readable name
+        this.space = rt.space() as MemorySpace; // Use the DID from the session
 
         return rt;
       },
