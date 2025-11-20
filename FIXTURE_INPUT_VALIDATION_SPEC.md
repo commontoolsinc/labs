@@ -77,19 +77,13 @@ const suiteConfig = {
   // ... existing config ...
 
   async execute(fixture: { relativeInputPath: string }) {
-    const inputPath = `${config.directory}/${fixture.relativeInputPath}`;
-    const inputSource = await loadFixture(inputPath);
-
-    // NEW: Validate input type-checks
-    if (!Deno.env.get("SKIP_INPUT_CHECK")) {
-      await validateTypeScript(inputSource, {
-        "commontools.d.ts": commontools,
-      });
-    }
-
-    return await transformFixture(inputPath, {
-      types: { "commontools.d.ts": commontools },
-    });
+    return await transformFixture(
+      `${config.directory}/${fixture.relativeInputPath}`,
+      {
+        types: { "commontools.d.ts": commontools },
+        typeCheck: !!Deno.env.get("CHECK_INPUT"),
+      },
+    );
   },
 };
 ```
@@ -157,15 +151,15 @@ To fix:
 
 ## Rollout Strategy
 
-### Step 1: Implement Validation (Skipped by Default)
-1. Create `validateTypeScript` function in new `test/type-checker.ts`
-2. Add validation call in `execute()` with `SKIP_INPUT_CHECK` check
-3. All existing tests continue to pass
+### Step 1: Implement Validation (Opt-in by Default)
+1. Add `typeCheck` option to `transformFiles` in `test/utils.ts`
+2. Add validation call in `execute()` with `CHECK_INPUT` check
+3. All existing tests continue to pass (validation disabled by default)
 
 ### Step 2: Identify Failing Fixtures
 ```bash
 # Run all fixtures with validation enabled
-SKIP_INPUT_CHECK="" deno task test
+CHECK_INPUT=1 deno task test
 ```
 
 Document which fixtures fail and why.
@@ -188,13 +182,13 @@ For each failing fixture, decide:
 - Consolidate duplicates
 
 ### Step 4: Enable by Default
-1. Remove `SKIP_INPUT_CHECK` check (or invert to `ALLOW_INVALID_INPUT`)
-2. Update CI to fail on invalid inputs
+1. Change default from `!!Deno.env.get("CHECK_INPUT")` to `!Deno.env.get("SKIP_INPUT_CHECK")`
+2. Update CI to enable CHECK_INPUT=1
 3. Document the validation in test README
 
 ## Environment Variables
 
-- `SKIP_INPUT_CHECK=1`: Disable input validation (during rollout)
+- `CHECK_INPUT=1`: Enable input validation (opt-in during rollout)
 - `FIXTURE=name`: Run single fixture (already exists)
 - `FIXTURE_PATTERN=pattern`: Run matching fixtures (already exists)
 
