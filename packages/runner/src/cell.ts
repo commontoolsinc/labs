@@ -1417,6 +1417,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       // Convert schema to object form and merge default value if value is defined
       // BUT: Don't embed Cell objects in the schema's default property, as this
       // causes infinite recursion when the schema is serialized
+      // TODO(ubik2): Use Cell links for default here once that's supported
       const schema: JSONSchema | undefined =
         value !== undefined && !isCell(value)
           ? {
