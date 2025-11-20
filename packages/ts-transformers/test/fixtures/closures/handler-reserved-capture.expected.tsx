@@ -132,8 +132,8 @@ export default recipe({
         } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event_1, { __ct_handler_event }) => __ct_handler_event)({
             __ct_handler_event: __ct_handler_event
         })}>
-            Echo
-        </button>),
+        Echo
+      </button>),
     };
 });
 // @ts-ignore: Internals

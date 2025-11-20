@@ -16,7 +16,7 @@ export interface CaptureAnalysis {
 export class CaptureCollector {
   constructor(
     private readonly checker: ts.TypeChecker,
-  ) { }
+  ) {}
 
   analyze(func: ts.FunctionLikeDeclaration): CaptureAnalysis {
     const captures = this.collectCaptures(func);

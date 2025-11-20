@@ -362,7 +362,7 @@ export function transformDeriveCall(
         resultType,
         context.sourceFile,
         ts.NodeBuilderFlags.NoTruncation |
-        ts.NodeBuilderFlags.UseStructuralFallback,
+          ts.NodeBuilderFlags.UseStructuralFallback,
       );
 
       // Register the result Type in typeRegistry for the synthetic TypeNode

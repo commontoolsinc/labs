@@ -16,7 +16,7 @@ export class SchemaFactory {
   constructor(
     private context: TransformationContext,
     private factory: ts.NodeFactory = context.factory,
-  ) { }
+  ) {}
 
   /**
    * Build a TypeNode for a map callback parameter.
@@ -229,7 +229,7 @@ export class SchemaFactory {
       type,
       this.context.sourceFile,
       ts.NodeBuilderFlags.NoTruncation |
-      ts.NodeBuilderFlags.UseStructuralFallback,
+        ts.NodeBuilderFlags.UseStructuralFallback,
     ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
     return registerTypeForNode(typeNode, type, typeRegistry);
@@ -267,7 +267,8 @@ export class SchemaFactory {
 
     // Fallback: infer from the array expression itself
     // mapCall.expression is PropertyAccess (array.map), so .expression is the array
-    const arrayExpr = (mapCall.expression as ts.PropertyAccessExpression).expression;
+    const arrayExpr =
+      (mapCall.expression as ts.PropertyAccessExpression).expression;
     const arrayType = checker.getTypeAtLocation(arrayExpr);
 
     // Try to extract element type from array type
@@ -294,7 +295,7 @@ export class SchemaFactory {
       elementType,
       this.context.sourceFile,
       ts.NodeBuilderFlags.NoTruncation |
-      ts.NodeBuilderFlags.UseStructuralFallback,
+        ts.NodeBuilderFlags.UseStructuralFallback,
     ) ?? this.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
     return {

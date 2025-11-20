@@ -197,14 +197,27 @@ export class RecipeBuilder {
     const extraParams = originalCallback.parameters.slice(2);
 
     // 1. Create event parameter
+    // Ensure event parameter doesn't collide with captures
+    const conflicts = new Set(this.usedBindingNames);
+    for (const key of this.captureTree.keys()) {
+      const renamed = this.captureRenames.get(key) ?? key;
+      conflicts.add(renamed);
+    }
+
     let eventParameter: ts.ParameterDeclaration;
     if (eventParam) {
       // Use original parameter name if possible
       const bindingName = normalizeBindingName(
         eventParam.name,
         this.factory,
-        this.usedBindingNames,
+        conflicts,
       );
+
+      // Register the chosen name as used
+      if (ts.isIdentifier(bindingName)) {
+        this.usedBindingNames.add(bindingName.text);
+      }
+
       eventParameter = this.factory.createParameterDeclaration(
         undefined,
         undefined,
@@ -217,9 +230,11 @@ export class RecipeBuilder {
       // Generate unique name
       const name = reserveIdentifier(
         eventParamName,
-        this.usedBindingNames,
+        conflicts,
         this.factory,
       );
+      this.usedBindingNames.add(name.text);
+
       eventParameter = this.factory.createParameterDeclaration(
         undefined,
         undefined,
