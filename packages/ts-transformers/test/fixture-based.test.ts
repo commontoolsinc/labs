@@ -92,6 +92,7 @@ for (const config of configs) {
         `${config.directory}/${fixture.relativeInputPath}`,
         {
           types: { "commontools.d.ts": commontools },
+          typeCheck: !!Deno.env.get("CHECK_INPUT"),
         },
       );
     },
