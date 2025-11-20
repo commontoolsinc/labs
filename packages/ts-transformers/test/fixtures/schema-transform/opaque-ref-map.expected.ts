@@ -51,11 +51,11 @@ export default recipe({
                     done: {
                         anyOf: [{
                                 type: "boolean",
-                                enum: [false],
+                                "enum": [false],
                                 asOpaque: true
                             }, {
                                 type: "boolean",
-                                enum: [true],
+                                "enum": [true],
                                 asOpaque: true
                             }]
                     },
@@ -142,11 +142,11 @@ export default recipe({
             done: {
                 anyOf: [{
                         type: "boolean",
-                        enum: [false],
+                        "enum": [false],
                         asOpaque: true
                     }, {
                         type: "boolean",
-                        enum: [true],
+                        "enum": [true],
                         asOpaque: true
                     }]
             },

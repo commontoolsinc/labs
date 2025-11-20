@@ -47,7 +47,7 @@ export default recipe({
             properties: {
                 type: {
                     type: "string",
-                    enum: ["vnode"]
+                    "enum": ["vnode"]
                 },
                 name: {
                     type: "string"
@@ -69,7 +69,7 @@ export default recipe({
             properties: {
                 type: {
                     type: "string",
-                    enum: ["vnode"]
+                    "enum": ["vnode"]
                 },
                 name: {
                     type: "string"
@@ -93,10 +93,10 @@ export default recipe({
                     type: "number"
                 }, {
                     type: "boolean",
-                    enum: [false]
+                    "enum": [false]
                 }, {
                     type: "boolean",
-                    enum: [true]
+                    "enum": [true]
                 }, {
                     $ref: "#/$defs/VNode"
                 }, {
@@ -119,10 +119,10 @@ export default recipe({
                         type: "number"
                     }, {
                         type: "boolean",
-                        enum: [false]
+                        "enum": [false]
                     }, {
                         type: "boolean",
-                        enum: [true]
+                        "enum": [true]
                     }, {
                         type: "object",
                         additionalProperties: true
@@ -173,7 +173,7 @@ export default recipe({
                 properties: {
                     type: {
                         type: "string",
-                        enum: ["vnode"]
+                        "enum": ["vnode"]
                     },
                     name: {
                         type: "string"
@@ -195,7 +195,7 @@ export default recipe({
                         properties: {
                             type: {
                                 type: "string",
-                                enum: ["vnode"]
+                                "enum": ["vnode"]
                             },
                             name: {
                                 type: "string"
@@ -219,10 +219,10 @@ export default recipe({
                                 type: "number"
                             }, {
                                 type: "boolean",
-                                enum: [false]
+                                "enum": [false]
                             }, {
                                 type: "boolean",
-                                enum: [true]
+                                "enum": [true]
                             }, {
                                 $ref: "#/$defs/VNode"
                             }, {
@@ -245,10 +245,10 @@ export default recipe({
                                     type: "number"
                                 }, {
                                     type: "boolean",
-                                    enum: [false]
+                                    "enum": [false]
                                 }, {
                                     type: "boolean",
-                                    enum: [true]
+                                    "enum": [true]
                                 }, {
                                     type: "object",
                                     additionalProperties: true
