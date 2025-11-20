@@ -421,7 +421,7 @@ export class ContextualFlowControl {
   ): JSONSchema | undefined {
     // We only support schemaRefs that are URI fragments
     if (!schemaRef.startsWith("#")) {
-      logger.warn(() => ["Unsupported $ref in schema: ", schemaRef]);
+      logger.warn("cfc", () => ["Unsupported $ref in schema: ", schemaRef]);
       return undefined;
     }
     // URI fragment schemaRefs are JSONPointers, so split and unescape
@@ -430,7 +430,10 @@ export class ContextualFlowControl {
     );
     // We don't support anchors yet (e.g. `"$ref": "#address"`)
     if (pathToDef[0] !== "#") {
-      logger.warn(() => ["Unsupported anchor $ref in schema: ", schemaRef]);
+      logger.warn(
+        "cfc",
+        () => ["Unsupported anchor $ref in schema: ", schemaRef],
+      );
       return undefined;
     }
     let schemaCursor: unknown = rootSchema;
@@ -438,6 +441,7 @@ export class ContextualFlowControl {
     for (let i = 1; i < pathToDef.length; i++) {
       if (!isRecord(schemaCursor) || !(pathToDef[i] in schemaCursor)) {
         logger.warn(
+          "cfc",
           () => ["Unresolved $ref in schema: ", schemaRef, rootSchema],
         );
         return undefined;

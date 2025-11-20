@@ -35,9 +35,9 @@ const logResult = (
   ...args: unknown[]
 ) => {
   if (result.error) {
-    logger.error(`${kind} Error`, result.error, ...args);
+    logger.error("storage-error", `${kind} Error`, result.error, ...args);
   } else {
-    logger.info(`${kind} Success`, result.ok, ...args);
+    logger.info("storage", `${kind} Success`, result.ok, ...args);
   }
 };
 
@@ -192,7 +192,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         try {
           callback(this);
         } catch (error) {
-          logger.error("Error in commit callback:", error);
+          logger.error("storage-error", "Error in commit callback:", error);
         }
       }
     });

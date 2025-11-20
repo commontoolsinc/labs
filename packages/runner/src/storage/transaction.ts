@@ -233,7 +233,7 @@ export const read = (
       result.ok && address.path.length === 1 && address.path[0] === "source"
     ) {
       const value = result.ok.value;
-      logger.debug(() => [
+      logger.debug("storage", () => [
         `[SOURCE PATH] Read source path for ${address.id}`,
         `Value type: ${typeof value}`,
         `Value: ${JSON.stringify(value)}`,
@@ -248,13 +248,13 @@ export const read = (
             address: result.ok.address,
             value: parsedValue,
           };
-          logger.debug(() => [
+          logger.debug("storage", () => [
             `[SOURCE PATH] Parsed JSON string to object`,
             `Result: ${JSON.stringify(parsedValue)}`,
           ]);
         } catch (e) {
           // If parsing fails, leave it as is
-          logger.error(() => [
+          logger.error("storage-error", () => [
             `[SOURCE PATH] Failed to parse JSON string`,
             `Error: ${e}`,
           ]);

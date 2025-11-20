@@ -84,16 +84,16 @@ export const renderImpl = (
     return () => {};
   }
   if (!isVNode(view)) {
-    logger.debug("No valid vnode to render", view);
+    logger.debug("render", "No valid vnode to render", view);
     return () => {};
   }
   const [root, cancel] = renderNode(view, options);
   if (!root) {
-    logger.warn("Could not render view", view);
+    logger.warn("render", "Could not render view", view);
     return cancel;
   }
   parent.append(root);
-  logger.debug("Rendered root", root);
+  logger.debug("render", "Rendered root", root);
   return () => {
     root.remove();
     cancel();
@@ -243,7 +243,7 @@ const bindChildren = (
       }
     }
 
-    logger.debug("new element order", { newKeyOrder });
+    logger.debug("render", "new element order", { newKeyOrder });
 
     keyedChildren = newMapping;
   };
@@ -283,7 +283,7 @@ const bindProps = (
           });
           addCancel(cancel);
         } else {
-          logger.warn("Could not bind event", propKey, propValue);
+          logger.warn("render", "Could not bind event", propKey, propValue);
         }
       } else if (propKey.startsWith("$")) {
         // Properties starting with $ get passed in as raw values, useful for
@@ -292,7 +292,7 @@ const bindProps = (
         setProperty(element, key, propValue);
       } else {
         const cancel = effect(propValue, (replacement) => {
-          logger.debug("prop update", propKey, replacement);
+          logger.debug("render", "prop update", propKey, replacement);
           // Replacements are set as properties not attributes to avoid
           // string serialization of complex datatypes.
           setProperty(element, propKey, replacement);

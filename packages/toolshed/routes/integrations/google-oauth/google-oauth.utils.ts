@@ -195,7 +195,7 @@ export async function persistTokens(
 
     return tokenData;
   } catch (error) {
-    logger.error("Error persisting tokens", error);
+    logger.error("oauth-error", "Error persisting tokens", error);
     throw new Error(`Error persisting tokens: ${error}`);
   }
 }
@@ -310,7 +310,7 @@ export async function clearAuthData(authCellDocLink: string) {
 
     return emptyAuthData;
   } catch (error) {
-    logger.error("Error clearing auth data", error);
+    logger.error("oauth-error", "Error clearing auth data", error);
     throw new Error(`Error clearing auth data: ${error}`);
   }
 }

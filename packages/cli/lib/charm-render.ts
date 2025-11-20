@@ -63,7 +63,10 @@ export async function renderCharm(
         // Wait for all runtime computations to complete
         manager.runtime.idle().then(() => {
           const html = container.innerHTML;
-          logger.info(() => `[Update ${updateCount}] UI changed`);
+          logger.info(
+            "charm-render",
+            () => `[Update ${updateCount}] UI changed`,
+          );
           if (options.onUpdate) {
             options.onUpdate(html);
           }
