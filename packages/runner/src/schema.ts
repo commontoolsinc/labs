@@ -124,7 +124,7 @@ export function processDefaultValue(
     // document when the value is changed. A classic example is
     // `currentlySelected` with a default of `null`.
     if (
-      !defaultValue && isObject(resolvedSchema) &&
+      defaultValue === undefined && isObject(resolvedSchema) &&
       resolvedSchema.default !== undefined
     ) {
       return runtime.getImmutableCell(
@@ -718,8 +718,12 @@ export function validateAndTransform(
       }
     }
 
-    if (!isRecord(value) && Object.keys(result).length === 0) {
+    if (!isRecord(value) && value !== null && Object.keys(result).length === 0) {
       return undefined;
+    }
+    // If value is null, return null (not undefined)
+    if (value === null && Object.keys(result).length === 0) {
+      return null;
     }
     return annotateWithBackToCellSymbols(result, runtime, link, tx);
   }
