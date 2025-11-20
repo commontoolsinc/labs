@@ -186,6 +186,7 @@ export class CompoundCycleTracker<PartialKey, ExtraKey> {
             extraKey,
             context,
           ]);
+          return;
         }
         if (entries.length === 0) {
           this.partial.delete(partialKey);
