@@ -6,6 +6,7 @@ import {
 } from "../core/mod.ts";
 import { createSchemaTransformerV2 } from "@commontools/schema-generator";
 import { visitEachChildWithJsx } from "../ast/mod.ts";
+import { createPropertyName } from "../utils/identifiers.ts";
 
 let schemaTransformer: ReturnType<typeof createSchemaTransformerV2> | undefined;
 
@@ -117,12 +118,16 @@ function createSchemaAst(
   if (typeof schema === "object") {
     const properties = Object.entries(schema as Record<string, unknown>).map((
       [key, value],
-    ) =>
-      factory.createPropertyAssignment(
-        factory.createIdentifier(key),
+    ) => {
+      // Use createPropertyName which handles safe identifiers vs string literals
+      // This includes checking for reserved words using TypeScript's scanner
+      const propertyName = createPropertyName(key, factory);
+
+      return factory.createPropertyAssignment(
+        propertyName,
         createSchemaAst(value, factory),
-      )
-    );
+      );
+    });
     return factory.createObjectLiteralExpression(properties, true);
   }
   return factory.createIdentifier("undefined");
@@ -134,10 +139,20 @@ function evaluateObjectLiteral(
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const prop of node.properties) {
-    if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) {
-      const value = evaluateExpression(prop.initializer, checker);
-      if (value !== undefined) {
-        result[prop.name.text] = value;
+    if (ts.isPropertyAssignment(prop)) {
+      // Handle both identifier and string literal property names
+      let propName: string | undefined;
+      if (ts.isIdentifier(prop.name)) {
+        propName = prop.name.text;
+      } else if (ts.isStringLiteral(prop.name)) {
+        propName = prop.name.text;
+      }
+
+      if (propName !== undefined) {
+        const value = evaluateExpression(prop.initializer, checker);
+        if (value !== undefined) {
+          result[propName] = value;
+        }
       }
     }
   }

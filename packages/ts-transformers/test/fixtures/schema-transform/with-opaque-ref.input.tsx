@@ -6,7 +6,7 @@ interface State {
 }
 
 const model = toSchema<State>({
-  default: { value: 0 },
+  "default": { value: 0 },
 });
 
 export default recipe(model, model, (cell) => {

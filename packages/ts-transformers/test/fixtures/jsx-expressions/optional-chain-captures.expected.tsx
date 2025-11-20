@@ -101,7 +101,7 @@ export default recipe({
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         type: "number",
-                        enum: [0]
+                        "enum": [0]
                     }, {
                         type: "number",
                         asOpaque: true

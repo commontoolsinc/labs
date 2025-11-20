@@ -65,7 +65,7 @@ export default recipe({
     properties: {
         state: {
             $ref: "#/$defs/NestedOptionalState",
-            default: {}
+            "default": {}
         }
     },
     required: ["state"],

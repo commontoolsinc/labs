@@ -27,11 +27,11 @@ export default recipe({
                 showHistory: {
                     anyOf: [{
                             type: "boolean",
-                            enum: [false],
+                            "enum": [false],
                             asOpaque: true
                         }, {
                             type: "boolean",
-                            enum: [true],
+                            "enum": [true],
                             asOpaque: true
                         }]
                 },

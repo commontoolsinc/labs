@@ -13,7 +13,7 @@ export default recipe({
             items: {
                 type: "object",
                 properties: {
-                    0: {
+                    "0": {
                         type: "number"
                     }
                 },
@@ -31,7 +31,7 @@ export default recipe({
                     element: {
                         type: "object",
                         properties: {
-                            0: {
+                            "0": {
                                 type: "number"
                             }
                         },

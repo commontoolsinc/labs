@@ -11,7 +11,7 @@ const configSchema = {
         }
     },
     required: ["value"],
-    default: {
+    "default": {
         value: 42
     },
     description: "Configuration schema"

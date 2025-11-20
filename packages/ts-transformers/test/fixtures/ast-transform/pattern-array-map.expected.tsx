@@ -90,7 +90,7 @@ export default pattern(({ values }) => {
             properties: {
                 type: {
                     type: "string",
-                    enum: ["vnode"]
+                    "enum": ["vnode"]
                 },
                 name: {
                     type: "string"
@@ -112,7 +112,7 @@ export default pattern(({ values }) => {
             properties: {
                 type: {
                     type: "string",
-                    enum: ["vnode"]
+                    "enum": ["vnode"]
                 },
                 name: {
                     type: "string"
@@ -136,10 +136,10 @@ export default pattern(({ values }) => {
                     type: "number"
                 }, {
                     type: "boolean",
-                    enum: [false]
+                    "enum": [false]
                 }, {
                     type: "boolean",
-                    enum: [true]
+                    "enum": [true]
                 }, {
                     $ref: "#/$defs/VNode"
                 }, {
@@ -162,10 +162,10 @@ export default pattern(({ values }) => {
                         type: "number"
                     }, {
                         type: "boolean",
-                        enum: [false]
+                        "enum": [false]
                     }, {
                         type: "boolean",
-                        enum: [true]
+                        "enum": [true]
                     }, {
                         type: "object",
                         additionalProperties: true

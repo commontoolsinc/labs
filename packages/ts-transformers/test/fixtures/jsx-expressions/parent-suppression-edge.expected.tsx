@@ -243,7 +243,7 @@ export default recipe({
                         structure: {
                             type: "object",
                             properties: {
-                                with: {
+                                "with": {
                                     type: "object",
                                     properties: {
                                         many: {
@@ -647,22 +647,22 @@ export default recipe({
                                         darkMode: {
                                             anyOf: [{
                                                     type: "boolean",
-                                                    enum: [false],
+                                                    "enum": [false],
                                                     asOpaque: true
                                                 }, {
                                                     type: "boolean",
-                                                    enum: [true],
+                                                    "enum": [true],
                                                     asOpaque: true
                                                 }]
                                         },
                                         animations: {
                                             anyOf: [{
                                                     type: "boolean",
-                                                    enum: [false],
+                                                    "enum": [false],
                                                     asOpaque: true
                                                 }, {
                                                     type: "boolean",
-                                                    enum: [true],
+                                                    "enum": [true],
                                                     asOpaque: true
                                                 }]
                                         }
@@ -680,11 +680,11 @@ export default recipe({
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     type: "boolean",
-                    enum: [false],
+                    "enum": [false],
                     asOpaque: true
                 }, {
                     type: "boolean",
-                    enum: [true],
+                    "enum": [true],
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {

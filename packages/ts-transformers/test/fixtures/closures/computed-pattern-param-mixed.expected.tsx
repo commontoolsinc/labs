@@ -28,7 +28,7 @@ export default pattern((config: {
             },
             offset: {
                 type: "number",
-                enum: [5]
+                "enum": [5]
             },
             threshold: {
                 type: "number",

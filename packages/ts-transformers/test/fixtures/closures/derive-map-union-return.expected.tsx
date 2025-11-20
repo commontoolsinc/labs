@@ -28,7 +28,7 @@ export default recipe({
             type: "object",
             properties: {
                 role: {
-                    enum: ["user", "assistant"]
+                    "enum": ["user", "assistant"]
                 },
                 content: {
                     anyOf: [{
@@ -47,7 +47,7 @@ export default recipe({
             type: "object",
             properties: {
                 type: {
-                    enum: ["text", "image"]
+                    "enum": ["text", "image"]
                 },
                 text: {
                     type: "string"
@@ -74,7 +74,7 @@ export default recipe({
                 type: "object",
                 properties: {
                     role: {
-                        enum: ["user", "assistant"]
+                        "enum": ["user", "assistant"]
                     },
                     content: {
                         anyOf: [{
@@ -93,7 +93,7 @@ export default recipe({
                 type: "object",
                 properties: {
                     type: {
-                        enum: ["text", "image"]
+                        "enum": ["text", "image"]
                     },
                     text: {
                         type: "string"

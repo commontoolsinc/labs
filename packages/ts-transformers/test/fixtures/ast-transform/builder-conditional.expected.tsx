@@ -9,11 +9,11 @@ export default recipe({
     properties: {
         count: {
             type: "number",
-            default: 0
+            "default": 0
         },
         label: {
             type: "string",
-            default: ""
+            "default": ""
         }
     },
     required: ["count", "label"]
@@ -29,11 +29,11 @@ export default recipe({
                     properties: {
                         count: {
                             type: "number",
-                            default: 0
+                            "default": 0
                         },
                         label: {
                             type: "string",
-                            default: ""
+                            "default": ""
                         }
                     },
                     required: ["count", "label"],

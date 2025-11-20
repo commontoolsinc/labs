@@ -18,7 +18,7 @@ const SimpleRecipe = recipe(false as const satisfies __ctHelpers.JSONSchema, {
             properties: {
                 type: {
                     type: "string",
-                    enum: ["vnode"]
+                    "enum": ["vnode"]
                 },
                 name: {
                     type: "string"
@@ -40,7 +40,7 @@ const SimpleRecipe = recipe(false as const satisfies __ctHelpers.JSONSchema, {
             properties: {
                 type: {
                     type: "string",
-                    enum: ["vnode"]
+                    "enum": ["vnode"]
                 },
                 name: {
                     type: "string"
@@ -64,10 +64,10 @@ const SimpleRecipe = recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     type: "number"
                 }, {
                     type: "boolean",
-                    enum: [false]
+                    "enum": [false]
                 }, {
                     type: "boolean",
-                    enum: [true]
+                    "enum": [true]
                 }, {
                     $ref: "#/$defs/VNode"
                 }, {
@@ -90,10 +90,10 @@ const SimpleRecipe = recipe(false as const satisfies __ctHelpers.JSONSchema, {
                         type: "number"
                     }, {
                         type: "boolean",
-                        enum: [false]
+                        "enum": [false]
                     }, {
                         type: "boolean",
-                        enum: [true]
+                        "enum": [true]
                     }, {
                         type: "object",
                         additionalProperties: true
@@ -118,7 +118,7 @@ const SimpleRecipe = recipe(false as const satisfies __ctHelpers.JSONSchema, {
 const createCellRef = lift({
     type: "object",
     properties: {
-        isInitialized: { type: "boolean", default: false, asCell: true },
+        isInitialized: { type: "boolean", "default": false, asCell: true },
         storedCellRef: { type: "object", asCell: true },
     },
 }, undefined, ({ isInitialized, storedCellRef }) => {
@@ -214,7 +214,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             properties: {
                 type: {
                     type: "string",
-                    enum: ["vnode"]
+                    "enum": ["vnode"]
                 },
                 name: {
                     type: "string"
@@ -236,7 +236,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             properties: {
                 type: {
                     type: "string",
-                    enum: ["vnode"]
+                    "enum": ["vnode"]
                 },
                 name: {
                     type: "string"
@@ -260,10 +260,10 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     type: "number"
                 }, {
                     type: "boolean",
-                    enum: [false]
+                    "enum": [false]
                 }, {
                     type: "boolean",
-                    enum: [true]
+                    "enum": [true]
                 }, {
                     $ref: "#/$defs/VNode"
                 }, {
@@ -286,10 +286,10 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                         type: "number"
                     }, {
                         type: "boolean",
-                        enum: [false]
+                        "enum": [false]
                     }, {
                         type: "boolean",
-                        enum: [true]
+                        "enum": [true]
                     }, {
                         type: "object",
                         additionalProperties: true

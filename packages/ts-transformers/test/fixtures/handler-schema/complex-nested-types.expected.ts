@@ -38,7 +38,7 @@ const userHandler = handler({
             required: ["name", "email"]
         },
         action: {
-            enum: ["create", "update", "delete"]
+            "enum": ["create", "update", "delete"]
         }
     },
     required: ["user", "action"]

@@ -990,7 +990,7 @@ export type PatternFunction = {
   ): RecipeFactory<StripCell<T>, StripCell<R>>;
 
   <T>(
-    fn: (input: OpaqueRef<Required<T>>) => unknown,
+    fn: (input: OpaqueRef<Required<T>>) => any,
   ): RecipeFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
   <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
