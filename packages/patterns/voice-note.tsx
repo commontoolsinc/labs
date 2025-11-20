@@ -8,7 +8,21 @@ import {
   recipe,
   UI,
 } from "commontools";
-import type { TranscriptionData } from "@commontools/ui/v2";
+
+// Type definition for transcription data (from ct-voice-input component)
+interface TranscriptionChunk {
+  timestamp: [number, number];
+  text: string;
+}
+
+interface TranscriptionData {
+  id: string;
+  text: string;
+  chunks?: TranscriptionChunk[];
+  audioData?: string;
+  duration: number;
+  timestamp: number;
+}
 
 type Input = {
   title?: Cell<Default<string, "Voice Note">>;
@@ -28,11 +42,11 @@ const handleTranscriptionComplete = handler<
 });
 
 const handleDeleteNote = handler<
-  { noteId: string },
+  { detail: { id: string } },
   { notes: Cell<TranscriptionData[]> }
->(({ noteId }, { notes }) => {
+>(({ detail }, { notes }) => {
   const currentNotes = notes.get();
-  const filtered = currentNotes.filter((note) => note.id !== noteId);
+  const filtered = currentNotes.filter((note) => note.id !== detail.id);
   notes.set(filtered);
 });
 
@@ -54,7 +68,7 @@ const VoiceNote = recipe<Input, Output>(
             />
           </div>
 
-          <ct-vstack spacing="loose">
+          <ct-vstack gap="3">
             <ct-card>
               <div style={{ padding: "1rem" }}>
                 <h3 style={{ marginTop: 0 }}>Record a Voice Note</h3>
@@ -105,7 +119,7 @@ const VoiceNote = recipe<Input, Output>(
                     </p>
                   )
                   : (
-                    <ct-vstack spacing="normal">
+                    <ct-vstack gap="2">
                       {notes.map((note) => (
                         <div
                           style={{
