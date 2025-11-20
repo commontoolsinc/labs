@@ -11,6 +11,7 @@ import {
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import { createCell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -323,11 +324,11 @@ describe("createJsonSchema", () => {
     });
   });
   it("should preserve false schema in toJSONWithLegacyAliases", () => {
-    const cellWithFalseSchema = runtime.getImmutableCell(
+    const cellWithFalseSchema = createCell(runtime, {
       space,
-      "value",
-      false,
-    );
+      schema: false,
+      path: [],
+    });
 
     const paths = new Map();
     // Cast to any to bypass strict type checks for test purposes
@@ -339,14 +340,13 @@ describe("createJsonSchema", () => {
     );
 
     expect(result).toEqual({
-      "/": {
-        [LINK_V1_TAG]: {
-          id: expect.stringContaining("data:application/json"),
-          overwrite: "redirect",
-          path: [],
-          space: space,
-          schema: false,
-        },
+      "$alias": {
+        path: [
+          "path",
+          "to",
+          "cell",
+        ],
+        schema: false,
       },
     });
   });
