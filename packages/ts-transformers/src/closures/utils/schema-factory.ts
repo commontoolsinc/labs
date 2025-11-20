@@ -283,7 +283,7 @@ export class SchemaFactory {
       const typeRef = arrayType as ts.TypeReference;
       if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
         const inner = typeRef.typeArguments[0];
-        if (checker.isArrayType(inner)) {
+        if (inner && checker.isArrayType(inner)) {
           // @ts-ignore: Internal API
           elementType = (inner as any).typeArguments?.[0] ?? inner;
         }
