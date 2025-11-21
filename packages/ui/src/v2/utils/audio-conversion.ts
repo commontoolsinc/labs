@@ -46,21 +46,19 @@ function audioBufferToWav(
   const numberOfChannels = 1; // Force mono
   let channelData: Float32Array;
 
-  // If source is stereo, mix down to mono
+  // If source is stereo, mix down to mono with clipping protection
   if (audioBuffer.numberOfChannels === 2) {
-    const left = audioBuffer.getChannelData(0);
-    const right = audioBuffer.getChannelData(1);
-    channelData = new Float32Array(left.length);
-    for (let i = 0; i < left.length; i++) {
-      channelData[i] = (left[i] + right[i]) / 2;
-    }
+    channelData = mixStereoToMono(
+      audioBuffer.getChannelData(0),
+      audioBuffer.getChannelData(1),
+    );
   } else {
     channelData = audioBuffer.getChannelData(0);
   }
 
   // Resample if needed
   if (targetSampleRate && targetSampleRate !== audioBuffer.sampleRate) {
-    channelData = resample(
+    channelData = resampleWithAntiAliasing(
       channelData,
       audioBuffer.sampleRate,
       targetSampleRate,
@@ -74,6 +72,99 @@ function audioBufferToWav(
   const wavBuffer = createWavFile(pcmData, numberOfChannels, sampleRate);
 
   return new Blob([wavBuffer], { type: "audio/wav" });
+}
+
+/**
+ * Mix stereo channels to mono with clipping protection
+ * Uses peak detection and soft limiting to prevent distortion
+ * @internal Exported for testing
+ */
+export function mixStereoToMono(
+  left: Float32Array,
+  right: Float32Array,
+): Float32Array {
+  const result = new Float32Array(left.length);
+
+  // First pass: find the peak level after mixing
+  let peak = 0;
+  for (let i = 0; i < left.length; i++) {
+    const mixed = (left[i] + right[i]) * 0.5;
+    const abs = Math.abs(mixed);
+    if (abs > peak) peak = abs;
+  }
+
+  // Calculate gain reduction needed to prevent clipping
+  // Leave some headroom (0.95) to avoid edge cases
+  const gainReduction = peak > 0.95 ? 0.95 / peak : 1.0;
+
+  // Second pass: mix with gain reduction applied
+  for (let i = 0; i < left.length; i++) {
+    result[i] = (left[i] + right[i]) * 0.5 * gainReduction;
+  }
+
+  return result;
+}
+
+/**
+ * Resample audio data with anti-aliasing filter
+ * Applies a low-pass filter before downsampling to prevent aliasing artifacts
+ * @internal Exported for testing
+ */
+export function resampleWithAntiAliasing(
+  samples: Float32Array,
+  sourceSampleRate: number,
+  targetSampleRate: number,
+): Float32Array {
+  if (sourceSampleRate === targetSampleRate) {
+    return samples;
+  }
+
+  let filtered = samples;
+
+  // Apply low-pass filter when downsampling to prevent aliasing
+  if (targetSampleRate < sourceSampleRate) {
+    // Simple moving average filter - window size based on decimation ratio
+    // This acts as a crude low-pass filter
+    const ratio = sourceSampleRate / targetSampleRate;
+    const filterSize = Math.max(2, Math.ceil(ratio));
+    filtered = applyMovingAverageFilter(samples, filterSize);
+  }
+
+  // Now resample with linear interpolation
+  return resample(filtered, sourceSampleRate, targetSampleRate);
+}
+
+/**
+ * Apply a simple moving average low-pass filter
+ * @internal Exported for testing
+ */
+export function applyMovingAverageFilter(
+  samples: Float32Array,
+  windowSize: number,
+): Float32Array {
+  if (windowSize <= 1) return samples;
+
+  const result = new Float32Array(samples.length);
+  const halfWindow = Math.floor(windowSize / 2);
+
+  for (let i = 0; i < samples.length; i++) {
+    let sum = 0;
+    let count = 0;
+
+    // Average samples within the window
+    for (
+      let j = Math.max(0, i - halfWindow);
+      j <= Math.min(samples.length - 1, i + halfWindow);
+      j++
+    ) {
+      sum += samples[j];
+      count++;
+    }
+
+    result[i] = sum / count;
+  }
+
+  return result;
 }
 
 /**
