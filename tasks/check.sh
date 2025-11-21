@@ -22,14 +22,7 @@ deno check \
   packages/identity \
   packages/iframe-sandbox \
   packages/integration \
-  packages/js-runtime/mod.ts \
-  packages/js-runtime/interface.ts \
-  packages/js-runtime/program.ts \
-  packages/js-runtime/source-map.ts \
-  packages/js-runtime/utils.ts \
-  packages/js-runtime/runtime \
-  packages/js-runtime/typescript \
-  packages/js-runtime/test/*.ts \
+  packages/js-compiler \
   packages/llm \
   packages/memory \
   packages/patterns \

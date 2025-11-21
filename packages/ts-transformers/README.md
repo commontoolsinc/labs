@@ -5,7 +5,7 @@ transformation context, import management utilities, and modular rule
 implementations that can be reused by the runtime and tooling layers.
 
 The initial scaffold focuses on core infrastructure. Transformers from
-`@commontools/js-runtime` will migrate here incrementally alongside new
+`@commontools/js-compiler` will migrate here incrementally alongside new
 architecture work (e.g. OpaqueRef parity and closures support).
 
 ## Scripts

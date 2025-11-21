@@ -1,5 +1,25 @@
-import { JsIsolate, JsRuntime, JsScript, SourceMap } from "../interface.ts";
-import { SourceMapParser } from "../source-map.ts";
+import { JsScript, SourceMap, SourceMapParser } from "@commontools/js-compiler";
+
+// A reference to a runtime value from a `JsIsolate`.
+export interface JsValue {
+  invoke(...args: unknown[]): JsValue;
+  inner(): unknown;
+  asObject(): object;
+  isObject(): boolean;
+}
+
+// A JS runtime context.
+export interface JsIsolate {
+  // Execute `js` within this `JsIsolate`, returning the value.
+  execute(js: string | JsScript): JsValue;
+}
+
+// A `JsRuntime` can host several `JsIsolate`s, capable
+// of executing JavaScript.
+export interface JsRuntime extends EventTarget {
+  // Get `JsIsolate` by `key`.
+  getIsolate(key: string): JsIsolate;
+}
 
 export class UnsafeEvalJsValue {
   private internals: IsolateInternals;

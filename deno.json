@@ -11,7 +11,7 @@
     "./packages/identity",
     "./packages/iframe-sandbox",
     "./packages/integration",
-    "./packages/js-runtime",
+    "./packages/js-compiler",
     "./packages/js-sandbox",
     "./packages/ts-transformers",
     "./packages/test-support",

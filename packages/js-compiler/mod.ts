@@ -1,11 +1,10 @@
 export type {
   Compiler,
-  JsIsolate,
-  JsRuntime,
   JsScript,
   Program,
   ProgramResolver,
   Source,
+  SourceMap,
 } from "./interface.ts";
 export {
   CompilationError,
@@ -15,13 +14,9 @@ export {
   type TypeScriptCompilerOptions,
 } from "./typescript/mod.ts";
 export {
-  UnsafeEvalIsolate,
-  UnsafeEvalJsValue,
-  UnsafeEvalRuntime,
-} from "./runtime/mod.ts";
-export {
   FileSystemProgramResolver,
   HttpProgramResolver,
   InMemoryProgram,
 } from "./program.ts";
+export { isSourceMap, parseSourceMap, SourceMapParser } from "./source-map.ts";
 export { getTypeScriptEnvironmentTypes } from "./utils.ts";

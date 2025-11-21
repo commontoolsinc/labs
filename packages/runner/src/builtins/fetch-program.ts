@@ -3,8 +3,8 @@ import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { JSONSchema } from "../builder/types.ts";
-import { HttpProgramResolver } from "@commontools/js-runtime";
-import { resolveProgram, TARGET } from "@commontools/js-runtime/typescript";
+import { HttpProgramResolver } from "@commontools/js-compiler";
+import { resolveProgram, TARGET } from "@commontools/js-compiler/typescript";
 import { computeInputHash } from "./fetch-utils.ts";
 
 const PROGRAM_REQUEST_TIMEOUT = 1000 * 10; // 10 seconds for program resolution

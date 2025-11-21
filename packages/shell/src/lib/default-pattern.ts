@@ -1,5 +1,5 @@
 import { CharmController, CharmsController } from "@commontools/charm/ops";
-import { HttpProgramResolver } from "@commontools/js-runtime";
+import { HttpProgramResolver } from "@commontools/js-compiler";
 import { API_URL } from "./env.ts";
 
 const DEFAULT_CHARM_NAME = "DefaultCharmList";
