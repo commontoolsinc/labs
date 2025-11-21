@@ -44,6 +44,11 @@ const GenerateTextParamsSchema = {
   properties: {
     prompt: { type: "string" },
     messages: { type: "array", items: LLMMessageSchema },
+    context: {
+      type: "object",
+      additionalProperties: { asCell: true },
+      default: {},
+    },
     system: { type: "string" },
     model: { type: "string" },
     maxTokens: { type: "number" },
