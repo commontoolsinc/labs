@@ -4,8 +4,14 @@ import {
 } from "@commontools/test-support/fixture-runner";
 import { StaticCacheFS } from "@commontools/static";
 import { resolve } from "@std/path";
+import ts from "typescript";
 
-import { loadFixture, transformFixture } from "./utils.ts";
+import {
+  batchTypeCheckFixtures,
+  BatchTypeCheckResult,
+  loadFixture,
+  transformFixture,
+} from "./utils.ts";
 
 interface FixtureConfig {
   directory: string;
@@ -98,6 +104,61 @@ const FIXTURES_ROOT = "./test/fixtures";
 const fixtureFilter = Deno.env.get("FIXTURE");
 const fixturePattern = Deno.env.get("FIXTURE_PATTERN");
 
+/**
+ * Loads all fixture input files from a directory for batch type-checking
+ */
+async function loadAllFixturesInDirectory(
+  directory: string,
+): Promise<Record<string, string>> {
+  const fixtures: Record<string, string> = {};
+
+  // Find all .input.* files in the directory
+  for await (const entry of Deno.readDir(directory)) {
+    if (entry.isFile && entry.name.includes(".input.")) {
+      const fullPath = `${directory}/${entry.name}`;
+      const content = await Deno.readTextFile(fullPath);
+      fixtures[fullPath] = content;
+    }
+  }
+
+  return fixtures;
+}
+
+// Batch type-check all fixtures upfront when CHECK_INPUT is enabled
+const batchedDiagnosticsByConfig = new Map<
+  string,
+  Map<string, ts.Diagnostic[]>
+>();
+
+if (Deno.env.get("CHECK_INPUT")) {
+  const batchStart = performance.now();
+  for (const config of configs) {
+    const configStart = performance.now();
+    console.log(`Batch type-checking fixtures in ${config.describe}...`);
+
+    const allFixtures = await loadAllFixturesInDirectory(
+      `${FIXTURES_ROOT}/${config.directory}`,
+    );
+    const result = await batchTypeCheckFixtures(allFixtures, {
+      types: { "commontools.d.ts": commontools },
+    });
+
+    console.log(
+      `  -> ${Object.keys(allFixtures).length} fixtures in ${
+        (performance.now() - configStart).toFixed(0)
+      }ms`,
+    );
+
+    batchedDiagnosticsByConfig.set(config.describe, result.diagnosticsByFile);
+  }
+  console.log(
+    `Total batch type-checking time: ${
+      (performance.now() - batchStart).toFixed(0)
+    }ms`,
+  );
+}
+
+// Now run the tests
 for (const config of configs) {
   const suiteConfig = {
     suiteName: config.describe,
@@ -116,11 +177,19 @@ for (const config of configs) {
       return false;
     },
     async execute(fixture: { relativeInputPath: string }) {
+      const fullPath =
+        `${FIXTURES_ROOT}/${config.directory}/${fixture.relativeInputPath}`;
+
+      // Get precomputed diagnostics if available
+      const diagnosticsMap = batchedDiagnosticsByConfig.get(config.describe);
+      const precomputedDiagnostics = diagnosticsMap?.get(fullPath);
+
       return await transformFixture(
         `${config.directory}/${fixture.relativeInputPath}`,
         {
           types: { "commontools.d.ts": commontools },
           typeCheck: !!Deno.env.get("CHECK_INPUT"),
+          precomputedDiagnostics,
         },
       );
     },
