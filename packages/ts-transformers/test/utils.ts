@@ -18,6 +18,202 @@ export interface TransformOptions {
   types?: Record<string, string>;
   logger?: (message: string) => void;
   typeCheck?: boolean;
+  precomputedDiagnostics?: ts.Diagnostic[];
+}
+
+export interface BatchTypeCheckResult {
+  /** Diagnostics grouped by file path */
+  diagnosticsByFile: Map<string, ts.Diagnostic[]>;
+  /** The TypeScript program used for type-checking (for debugging) */
+  program: ts.Program;
+}
+
+/**
+ * Batch type-checks multiple fixture files in a single TypeScript program.
+ * This is much faster than creating separate programs for each fixture.
+ *
+ * @param files - Map of file paths to source code content
+ * @param options - Configuration including type definitions
+ * @returns Diagnostics grouped by input file
+ */
+export async function batchTypeCheckFixtures(
+  files: Record<string, string>,
+  options: { types?: Record<string, string> } = {},
+): Promise<BatchTypeCheckResult> {
+  const { types = {} } = options;
+
+  if (!envTypesCache) {
+    envTypesCache = await loadEnvironmentTypes();
+  }
+  if (!sourceFileCache) {
+    sourceFileCache = new Map();
+  }
+
+  // Apply transformCtDirective to all input files (like transformFiles does)
+  const transformedFiles = Object.entries(files).reduce((acc, [key, value]) => {
+    acc[key] = transformCtDirective(value);
+    return acc;
+  }, {} as Record<string, string>);
+
+  const compilerOptions: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ES2020,
+    module: ts.ModuleKind.CommonJS,
+    jsx: ts.JsxEmit.React,
+    jsxFactory: "h",
+    strict: true,
+  };
+
+  // Merge environment types and custom types
+  const allTypes: Record<string, string> = {
+    ...types,
+  };
+
+  // Add environment types with .d.ts extension
+  for (const [key, value] of Object.entries(envTypesCache)) {
+    allTypes[`${key}.d.ts`] = value;
+  }
+
+  const host: ts.CompilerHost = {
+    getSourceFile: (name) => {
+      // Check cache first for type definition files
+      const isTypeDefFile = !transformedFiles[name] && (
+        name === "lib.d.ts" ||
+        name.endsWith("/lib.d.ts") ||
+        allTypes[name] ||
+        (baseNameFromPath(name) && allTypes[baseNameFromPath(name)!])
+      );
+
+      if (isTypeDefFile && sourceFileCache!.has(name)) {
+        return sourceFileCache!.get(name);
+      }
+
+      // Determine source text
+      let sourceText: string | undefined;
+
+      if (transformedFiles[name] !== undefined) {
+        sourceText = transformedFiles[name];
+      } else if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
+        sourceText = allTypes["es2023.d.ts"] || "";
+      } else if (allTypes[name]) {
+        sourceText = allTypes[name];
+      } else {
+        const baseName = baseNameFromPath(name);
+        if (baseName && allTypes[baseName]) {
+          sourceText = allTypes[baseName];
+        }
+      }
+
+      if (sourceText === undefined) {
+        return undefined;
+      }
+
+      // Create SourceFile
+      const sourceFile = ts.createSourceFile(
+        name,
+        sourceText,
+        compilerOptions.target!,
+        true,
+      );
+
+      // Cache type definition files (not fixture input files)
+      if (isTypeDefFile) {
+        sourceFileCache!.set(name, sourceFile);
+      }
+
+      return sourceFile;
+    },
+    writeFile: () => {},
+    getCurrentDirectory: () => "/",
+    getDirectories: () => [],
+    fileExists: (name) => {
+      if (transformedFiles[name] !== undefined) return true;
+      if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) return true;
+      if (allTypes[name]) return true;
+      const baseName = baseNameFromPath(name);
+      if (baseName && allTypes[baseName]) return true;
+      return false;
+    },
+    readFile: (name) => {
+      if (transformedFiles[name]) return transformedFiles[name];
+      if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
+        return allTypes["es2023.d.ts"];
+      }
+      if (allTypes[name]) return allTypes[name];
+      const baseName = baseNameFromPath(name);
+      if (baseName && allTypes[baseName]) return allTypes[baseName];
+      return undefined;
+    },
+    getCanonicalFileName: (name) => name,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => "\n",
+    getDefaultLibFileName: () => "lib.d.ts",
+    resolveModuleNames: (moduleNames) => {
+      return moduleNames.map((name) => {
+        if (name === "commontools" && types["commontools.d.ts"]) {
+          return {
+            resolvedFileName: "commontools.d.ts",
+            extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          };
+        }
+        if (name === "@commontools/common" && types["commontools.d.ts"]) {
+          return {
+            resolvedFileName: "commontools.d.ts",
+            extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          };
+        }
+        return undefined;
+      });
+    },
+    resolveTypeReferenceDirectives: (typeDirectiveNames) =>
+      typeDirectiveNames.map((directive) => {
+        const name = typeof directive === "string"
+          ? directive
+          : directive.fileName;
+        if (allTypes[name]) {
+          return {
+            primary: true,
+            resolvedFileName: name,
+            extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          };
+        }
+        return undefined;
+      }),
+  };
+
+  // Include type definition files in the program
+  const typeDefFiles = Object.keys(allTypes).filter((name) =>
+    name.endsWith(".d.ts")
+  );
+  const rootFiles = [...Object.keys(transformedFiles), ...typeDefFiles];
+
+  const program = ts.createProgram(rootFiles, compilerOptions, host);
+
+  // Get all diagnostics
+  const diagnostics = ts.getPreEmitDiagnostics(program);
+
+  // Filter diagnostics to exclude type definition files
+  const filteredDiagnostics = diagnostics.filter((diagnostic) =>
+    diagnostic.file &&
+    !diagnostic.file.fileName.startsWith("$types/") &&
+    !diagnostic.file.fileName.endsWith(".d.ts")
+  );
+
+  // Group diagnostics by file name
+  const diagnosticsByFile = new Map<string, ts.Diagnostic[]>();
+  for (const diagnostic of filteredDiagnostics) {
+    if (diagnostic.file) {
+      const fileName = diagnostic.file.fileName;
+      if (!diagnosticsByFile.has(fileName)) {
+        diagnosticsByFile.set(fileName, []);
+      }
+      diagnosticsByFile.get(fileName)!.push(diagnostic);
+    }
+  }
+
+  return { diagnosticsByFile, program };
 }
 
 export async function transformSource(
@@ -195,7 +391,9 @@ export async function transformFiles(
 
   // Type checking - only run diagnostics if needed
   if (typeCheck || logger) {
-    const diagnostics = ts.getPreEmitDiagnostics(program);
+    // Use precomputed diagnostics if provided, otherwise compute them
+    const diagnostics = options.precomputedDiagnostics ??
+      ts.getPreEmitDiagnostics(program);
 
     if (logger && diagnostics.length > 0) {
       logger("=== TypeScript Diagnostics ===");
