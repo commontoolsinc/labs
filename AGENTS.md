@@ -28,6 +28,11 @@ If you are developing patterns, use Claude Skills (pattern-dev) to do the work.
   troubleshooting
 - `docs/common/LLM.md` - Using generateText and generateObject for LLM
   integration
+  
+**Task Management**
+
+- If available, use `bd` to manage subtasks and local todo lists (`bd quickstart` and `bd --help`)
+  - Read `task-management` skill for workflow
 
 **Reference:**
 
