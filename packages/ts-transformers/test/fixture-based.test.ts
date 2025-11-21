@@ -116,7 +116,11 @@ async function loadAllFixturesInDirectory(
     if (entry.isFile && entry.name.includes(".input.")) {
       const fullPath = `${directory}/${entry.name}`;
       const content = await Deno.readTextFile(fullPath);
-      fixtures[fullPath] = content;
+      // Normalize path: remove leading ./ if present
+      const normalizedPath = fullPath.startsWith("./")
+        ? fullPath.slice(2)
+        : fullPath;
+      fixtures[normalizedPath] = content;
     }
   }
 
@@ -194,8 +198,10 @@ for (const config of configs) {
       return false;
     },
     async execute(fixture: { relativeInputPath: string }) {
+      // Construct full path matching the keys in batchedDiagnostics (remove leading ./)
       const fullPath =
-        `${FIXTURES_ROOT}/${config.directory}/${fixture.relativeInputPath}`;
+        `${FIXTURES_ROOT}/${config.directory}/${fixture.relativeInputPath}`
+          .replace(/^\.\//, "");
 
       // Get precomputed diagnostics if available
       const diagnosticsMap = batchedDiagnosticsByConfig.get(config.describe);
