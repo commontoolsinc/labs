@@ -306,7 +306,11 @@ export class Scheduler implements IScheduler {
       } // Once nothing is running, see if more work is queued up. If not, then
       // resolve the idle promise, otherwise add it to the idle promises list
       // that will be resolved once all the work is done.
-      else if (this.pending.size === 0 && this.eventQueue.length === 0) {
+      // IMPORTANT: Also check !this.scheduled to wait for any queued macro task execution
+      else if (
+        this.pending.size === 0 && this.eventQueue.length === 0 &&
+        !this.scheduled
+      ) {
         resolve();
       } else {
         this.idlePromises.push(resolve);
@@ -437,7 +441,7 @@ export class Scheduler implements IScheduler {
 
   private queueExecution(): void {
     if (this.scheduled) return;
-    queueMicrotask(() => this.execute());
+    queueTask(() => this.execute());
     this.scheduled = true;
   }
 
@@ -577,7 +581,8 @@ export class Scheduler implements IScheduler {
       this.loopCounter = new WeakMap();
       this.scheduled = false;
     } else {
-      queueMicrotask(() => this.execute());
+      // Keep scheduled = true since we're queuing another execution
+      queueTask(() => this.execute());
     }
   }
 }
@@ -717,4 +722,8 @@ function getCharmMetadataFromFrame(frame?: Frame): {
     JSON.stringify(resultCell?.entityId ?? {}),
   )["/"];
   return result;
+}
+
+function queueTask(fn: () => void): void {
+  setTimeout(fn, 0);
 }

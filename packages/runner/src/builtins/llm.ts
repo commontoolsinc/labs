@@ -228,6 +228,8 @@ async function handleLLMError<T, P>(
   resultCell: Cell<T>,
   errorCell: Cell<unknown>,
   partialCell: Cell<P>,
+  requestHashCell: Cell<string | undefined>,
+  requestHash: string,
   getCurrentRun: () => number,
   thisRun: number,
   resetPreviousHash: () => void,
@@ -243,6 +245,7 @@ async function handleLLMError<T, P>(
     errorCell.withTx(tx).set(error);
     resultCell.withTx(tx).set(undefined as T);
     partialCell.withTx(tx).set(undefined as P);
+    requestHashCell.withTx(tx).set(requestHash);
   });
 
   resetPreviousHash();
@@ -447,6 +450,8 @@ export function llm(
         resultCell.key("result"),
         resultCell.key("error"),
         resultCell.key("partial"),
+        resultCell.key("requestHash"),
+        hash,
         () => currentRun,
         thisRun,
         () => {
@@ -551,10 +556,14 @@ export function generateText(
     const hash = refer(llmParams).toString();
     const currentRequestHash = requestHashWithLog.get();
     const currentResult = resultWithLog.get();
+    const currentError = errorWithLog.get();
 
     // Return if the same request is being made again
-    // Only skip if we have a result - otherwise we need to (re)make the request
-    if (currentResult !== undefined && hash === currentRequestHash) {
+    // Also return if there's an error for this request (don't retry automatically)
+    if (
+      (currentResult !== undefined || currentError !== undefined) &&
+      hash === currentRequestHash
+    ) {
       return;
     }
 
@@ -627,6 +636,8 @@ export function generateText(
         resultCell.key("result"),
         resultCell.key("error"),
         resultCell.key("partial"),
+        resultCell.key("requestHash"),
+        hash,
         () => currentRun,
         thisRun,
         () => {
@@ -746,9 +757,14 @@ export function generateObject<T extends Record<string, unknown>>(
       const hash = refer({ ...llmParams, schema }).toString();
       const currentRequestHash = requestHashWithLog.get();
       const currentResult = resultWithLog.get();
+      const currentError = errorWithLog.get();
 
       // Return if the same request is being made again
-      if (currentResult !== undefined && hash === currentRequestHash) {
+      // Also return if there's an error for this request (don't retry automatically)
+      if (
+        (currentResult !== undefined || currentError !== undefined) &&
+        hash === currentRequestHash
+      ) {
         return;
       }
 
@@ -900,6 +916,8 @@ export function generateObject<T extends Record<string, unknown>>(
             resultCell.key("result"),
             resultCell.key("error"),
             resultCell.key("partial"),
+            resultCell.key("requestHash"),
+            hash,
             () => currentRun,
             thisRun,
             () => {
@@ -927,10 +945,14 @@ export function generateObject<T extends Record<string, unknown>>(
       const hash = refer(generateObjectParams).toString();
       const currentRequestHash = requestHashWithLog.get();
       const currentResult = resultWithLog.get();
+      const currentError = errorWithLog.get();
 
       // Return if the same request is being made again
-      // Only skip if we have a result - otherwise we need to (re)make the request
-      if (currentResult !== undefined && hash === currentRequestHash) {
+      // Also return if there's an error for this request (don't retry automatically)
+      if (
+        (currentResult !== undefined || currentError !== undefined) &&
+        hash === currentRequestHash
+      ) {
         return;
       }
 
@@ -980,6 +1002,8 @@ export function generateObject<T extends Record<string, unknown>>(
             resultCell.key("result"),
             resultCell.key("error"),
             resultCell.key("partial"),
+            resultCell.key("requestHash"),
+            hash,
             () => currentRun,
             thisRun,
             () => {
