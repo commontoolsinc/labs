@@ -121,8 +121,8 @@ export interface SyncStore<Model, Address>
 }
 
 const logger = getLogger("storage.cache", {
-  enabled: false,
-  level: "debug",
+  enabled: true,
+  level: "error",
   logCountEvery: 0, // Disable auto-logging of counts
 });
 
