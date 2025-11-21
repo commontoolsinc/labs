@@ -43,9 +43,9 @@ const handleTranscriptionComplete = handler<
 });
 
 const handleDeleteNote = handler<
-  MouseEvent,
+  undefined,
   { noteId: string; notes: Cell<TranscriptionData[]> }
->((_event, { noteId, notes }) => {
+>((_, { noteId, notes }) => {
   const currentNotes = notes.get();
   const filtered = currentNotes.filter((note) => note.id !== noteId);
   notes.set(filtered);
