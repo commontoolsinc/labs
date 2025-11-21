@@ -7,7 +7,7 @@ import { assert } from "@std/assert";
 import "../src/globals.ts";
 import { Identity } from "@commontools/identity";
 import { CharmsController } from "@commontools/charm/ops";
-import { FileSystemProgramResolver } from "@commontools/js-runtime";
+import { FileSystemProgramResolver } from "@commontools/js-compiler";
 
 const { API_URL, SPACE_NAME, FRONTEND_URL } = env;
 

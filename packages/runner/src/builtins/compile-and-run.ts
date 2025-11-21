@@ -4,8 +4,8 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { Program } from "@commontools/js-runtime";
-import { CompilerError } from "@commontools/js-runtime/typescript";
+import type { Program } from "@commontools/js-compiler";
+import { CompilerError } from "@commontools/js-compiler/typescript";
 
 /**
  * Compile a recipe/module and run it.

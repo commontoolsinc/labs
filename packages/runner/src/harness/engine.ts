@@ -14,9 +14,8 @@ import {
   ProgramResolver,
   Source,
   TypeScriptCompiler,
-  UnsafeEvalIsolate,
-  UnsafeEvalRuntime,
-} from "@commontools/js-runtime";
+} from "@commontools/js-compiler";
+import { UnsafeEvalIsolate, UnsafeEvalRuntime } from "./eval-runtime.ts";
 import { CommonToolsTransformerPipeline } from "@commontools/ts-transformers";
 import * as RuntimeModules from "./runtime-modules.ts";
 import { IRuntime } from "../runtime.ts";

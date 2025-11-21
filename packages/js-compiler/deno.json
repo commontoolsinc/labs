@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/js-runtime",
+  "name": "@commontools/js-compiler",
   "tasks": {
     "test": "deno test --allow-read --allow-write --allow-run --allow-env=UPDATE_GOLDENS,API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV test/*.test.ts"
   },
@@ -9,7 +9,8 @@
   },
   "exports": {
     ".": "./mod.ts",
-    "./typescript": "./typescript/mod.ts"
+    "./typescript": "./typescript/mod.ts",
+    "./source-map": "./source-map.ts"
   },
   "fmt": {
     "exclude": ["test/fixtures/"]

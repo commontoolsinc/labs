@@ -24,7 +24,7 @@ declare interface WriteonlyCell<T> extends BrandedCell<T, "writeonly"> {}
 
 /**
  * Load TypeScript environment types (es2023, dom, jsx)
- * Same functionality as js-runtime but implemented independently
+ * Same functionality as js-compiler but implemented independently
  */
 async function getTypeScriptEnvironmentTypes(): Promise<
   Record<string, string>
@@ -69,7 +69,7 @@ export async function createTestProgram(
         return sourceFile;
       }
 
-      // Map lib.d.ts requests to es2023 definitions (same as js-runtime)
+      // Map lib.d.ts requests to es2023 definitions (same as js-compiler)
       if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
         return ts.createSourceFile(
           name,

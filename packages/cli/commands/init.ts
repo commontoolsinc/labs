@@ -1,7 +1,7 @@
 import { Command } from "@cliffy/command";
 import { Engine } from "@commontools/runner";
 import { join } from "@std/path/join";
-import { getCompilerOptions } from "@commontools/js-runtime/typescript";
+import { getCompilerOptions } from "@commontools/js-compiler/typescript";
 import { StaticCacheFS } from "@commontools/static";
 import { dirname } from "@std/path/dirname";
 
