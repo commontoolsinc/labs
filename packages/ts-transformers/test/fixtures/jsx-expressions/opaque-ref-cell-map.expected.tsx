@@ -124,7 +124,10 @@ const createCellRef = lift({
 }, undefined, ({ isInitialized, storedCellRef }) => {
     if (!isInitialized.get()) {
         console.log("Creating cellRef - first time");
-        const newCellRef = Cell.for<any[]>("charmsArray");
+        const newCellRef = Cell.for<any[]>("charmsArray").asSchema({
+            type: "array",
+            items: true
+        } as const satisfies __ctHelpers.JSONSchema);
         newCellRef.set([]);
         storedCellRef.set(newCellRef);
         isInitialized.set(true);
@@ -178,7 +181,9 @@ const createSimpleRecipe = handler(true as const satisfies __ctHelpers.JSONSchem
     required: ["cellRef"]
 } as const satisfies __ctHelpers.JSONSchema, (_, { cellRef }) => {
     // Create isInitialized cell for this charm addition
-    const isInitialized = cell(false);
+    const isInitialized = cell(false, {
+        type: "boolean"
+    } as const satisfies __ctHelpers.JSONSchema);
     // Create the charm
     const charm = SimpleRecipe({});
     // Store the charm in the array and navigate
@@ -309,7 +314,9 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
 } as const satisfies __ctHelpers.JSONSchema, () => {
     // cell to store array of charms we created
     const { cellRef } = createCellRef({
-        isInitialized: cell(false),
+        isInitialized: cell(false, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema),
         storedCellRef: cell(),
     });
     // Type assertion to help TypeScript understand cellRef is an OpaqueRef<any[]>

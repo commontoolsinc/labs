@@ -1,7 +1,15 @@
 import * as __ctHelpers from "commontools";
 import { cell, computed } from "commontools";
 export default function TestComputeNestedProperty() {
-    const counter = cell({ count: 0 });
+    const counter = cell({ count: 0 }, {
+        type: "object",
+        properties: {
+            count: {
+                type: "number"
+            }
+        },
+        required: ["count"]
+    } as const satisfies __ctHelpers.JSONSchema);
     const doubled = __ctHelpers.derive({
         type: "object",
         properties: {

@@ -1,9 +1,13 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive } from "commontools";
 export default function TestDerive() {
-    const value = cell(10);
+    const value = cell(10, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     // Reserved JavaScript keyword as variable name (valid in TS with quotes)
-    const __ct_reserved = cell(2);
+    const __ct_reserved = cell(2, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     const result = __ctHelpers.derive({
         type: "object",
         properties: {

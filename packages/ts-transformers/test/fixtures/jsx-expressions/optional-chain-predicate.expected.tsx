@@ -110,7 +110,12 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, () => {
-    const items = cell<string[]>([]);
+    const items = cell<string[]>([], {
+        type: "array",
+        items: {
+            type: "string"
+        }
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [NAME]: "Optional chain predicate",
         [UI]: (<div>

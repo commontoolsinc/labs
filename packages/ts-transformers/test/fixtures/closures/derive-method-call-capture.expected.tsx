@@ -6,7 +6,9 @@ interface State {
     };
 }
 export default function TestDerive(state: State) {
-    const value = cell(10);
+    const value = cell(10, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     // Capture property before method call
     const result = __ctHelpers.derive({
         type: "object",

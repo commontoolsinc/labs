@@ -1,10 +1,18 @@
 import * as __ctHelpers from "commontools";
 import { cell, computed } from "commontools";
 export default function TestComputeConditionalExpression() {
-    const value = cell(10);
-    const threshold = cell(5);
-    const a = cell(100);
-    const b = cell(200);
+    const value = cell(10, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const threshold = cell(5, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const a = cell(100, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const b = cell(200, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     const result = __ctHelpers.derive({
         type: "object",
         properties: {

@@ -1,9 +1,15 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive } from "commontools";
 export default function TestDeriveLocalVariable() {
-    const a = cell(10);
-    const b = cell(20);
-    const c = cell(30);
+    const a = cell(10, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const b = cell(20, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const c = cell(30, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     const result = __ctHelpers.derive({
         type: "object",
         properties: {

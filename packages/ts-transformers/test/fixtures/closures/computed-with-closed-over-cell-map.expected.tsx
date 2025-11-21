@@ -1,8 +1,15 @@
 import * as __ctHelpers from "commontools";
 import { cell, computed } from "commontools";
 export default function TestComputedWithClosedOverCellMap() {
-    const numbers = cell([1, 2, 3]);
-    const multiplier = cell(2);
+    const numbers = cell([1, 2, 3], {
+        type: "array",
+        items: {
+            type: "number"
+        }
+    } as const satisfies __ctHelpers.JSONSchema);
+    const multiplier = cell(2, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     // Inside computed, we close over numbers (a Cell)
     // The computed gets transformed to derive({}, () => numbers.map(...))
     // Inside a derive, .map on a closed-over Cell should STILL be transformed to mapWithPattern
