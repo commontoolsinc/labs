@@ -27,4 +27,5 @@ export {
   typeToSchemaTypeNode,
   typeToTypeNode,
   unwrapOpaqueLikeType,
+  widenLiteralType,
 } from "./type-inference.ts";

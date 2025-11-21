@@ -9,6 +9,7 @@ import {
   isFunctionLikeExpression,
   typeToSchemaTypeNode,
   unwrapOpaqueLikeType,
+  widenLiteralType,
 } from "../ast/mod.ts";
 import {
   TransformationContext,
@@ -1001,8 +1002,9 @@ export class SchemaInjectionTransformer extends Transformer {
           if (valueArg) {
             const valueType = checker.getTypeAtLocation(valueArg);
             if (valueType && !isAnyOrUnknownType(valueType)) {
-              type = valueType;
-              typeNode = typeToSchemaTypeNode(valueType, checker, sourceFile);
+              // Widen literal types (e.g., 10 → number) for more flexible schemas
+              type = widenLiteralType(valueType, checker);
+              typeNode = typeToSchemaTypeNode(type, checker, sourceFile);
             }
           }
         }
