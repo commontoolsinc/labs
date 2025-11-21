@@ -220,7 +220,7 @@ export class Scheduler implements IScheduler {
       action,
     });
 
-    logger.debug("schedule", () => [
+    logger.debug("schedule-run-start", () => [
       `[RUN] Starting action: ${action.name || "anonymous"}`,
     ]);
 
@@ -254,7 +254,11 @@ export class Scheduler implements IScheduler {
             // even after we run out of retries, this will be re-triggered when
             // input data changes.
             if (error) {
-              logger.info("schedule", "Error committing transaction", error);
+              logger.info(
+                "schedule-run-error",
+                "Error committing transaction",
+                error,
+              );
 
               this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
               if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
@@ -271,7 +275,7 @@ export class Scheduler implements IScheduler {
           });
           const log = txToReactivityLog(tx);
 
-          logger.debug("schedule", () => [
+          logger.debug("schedule-run-complete", () => [
             `[RUN] Action completed: ${action.name || "anonymous"}`,
             `Reads: ${log.reads.length}`,
             `Writes: ${log.writes.length}`,
@@ -283,9 +287,19 @@ export class Scheduler implements IScheduler {
       };
 
       try {
+        const actionStartTime = performance.now();
         Promise.resolve(action(tx))
           .then((actionResult) => {
             result = actionResult;
+            logger.debug("schedule-action-timing", () => {
+              const duration = ((performance.now() - actionStartTime) / 1000)
+                .toFixed(3);
+              return [
+                `Action ${
+                  action.name || "anonymous"
+                } completed in ${duration}s`,
+              ];
+            });
             finalizeAction();
           })
           .catch((error) => finalizeAction(error));
@@ -532,9 +546,19 @@ export class Scheduler implements IScheduler {
       const tx = this.runtime.edit();
 
       try {
+        const actionStartTime = performance.now();
         this.runningPromise = Promise.resolve(
           this.runtime.harness.invoke(() => action(tx)),
-        ).then(() => finalize()).catch((error) => finalize(error));
+        ).then(() => {
+          logger.debug("action-timing", () => {
+            const duration = ((performance.now() - actionStartTime) / 1000)
+              .toFixed(3);
+            return [
+              `Action ${action.name || "anonymous"} completed in ${duration}s`,
+            ];
+          });
+          finalize();
+        }).catch((error) => finalize(error));
         await this.runningPromise;
       } catch (error) {
         finalize(error);
