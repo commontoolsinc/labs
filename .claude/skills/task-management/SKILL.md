@@ -1,3 +1,8 @@
+---
+name: task-management
+description: Guide for managing tasks within a session using bd (beads) for subtasks and local todo lists. Use this skill when breaking down plans into issues, tracking progress, managing dependencies, or coordinating work across sessions and agents. Triggers include requests to "manage tasks", "track progress", "break down this work", or questions about bd workflow.
+---
+
 # Task Management
 
 At the user level, we use Linear to manage tasks. When the Linear MCP is available, you can consult this directly.
