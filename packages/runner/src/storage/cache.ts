@@ -799,16 +799,18 @@ export class Replica {
       // to use the data from the subscription instead.
 
       // Log schema paths being requested
-      for (const [docId, docSchema] of Object.entries(schemaSelector)) {
-        const contentTypePaths = (docSchema as any)["application/json"] || {};
-        const paths = Object.keys(contentTypePaths);
-        if (paths.length > 0) {
-          logger.debug(
-            "pull-schema",
-            () => [`doc: ${docId}, paths: ${paths.join(", ")}`],
-          );
+      logger.debug("pull-schema", () => {
+        const logs: string[] = [];
+        for (const [docId, docSchema] of Object.entries(schemaSelector)) {
+          const contentTypePaths = (docSchema as any)["application/json"] ||
+            {};
+          const paths = Object.keys(contentTypePaths);
+          if (paths.length > 0) {
+            logs.push(`doc: ${docId}, paths: ${paths.join(", ")}`);
+          }
         }
-      }
+        return logs;
+      });
 
       // Log query start
       logger.debug(
@@ -816,7 +818,7 @@ export class Replica {
         () => [`Starting query for ${newEntries.length} entries`],
       );
 
-      // Track performance timing
+      // Capture timing markers (cheap to do always)
       const queryStartTime = performance.now();
 
       const query = this.remote.query(queryArgs);
@@ -834,58 +836,54 @@ export class Replica {
           const integrateStart = performance.now();
 
           // Log document contents that were received
-          for (const [docId, facts] of Object.entries(result.ok.schemaFacts)) {
-            const factCount = Object.keys(facts).length;
-            const contentTypes = Object.keys(facts);
-            logger.debug(
-              "pull-data",
-              () => [
+          logger.debug("pull-data", () => {
+            const logs: string[] = [];
+            for (
+              const [docId, facts] of Object.entries(result.ok.schemaFacts)
+            ) {
+              const factCount = Object.keys(facts).length;
+              const contentTypes = Object.keys(facts);
+              logs.push(
                 `doc: ${docId}, content-types: ${
                   contentTypes.join(", ")
                 }, fact-count: ${factCount}`,
-              ],
-            );
+              );
 
-            // Log actual content for each document
-            for (const [contentType, data] of Object.entries(facts)) {
-              try {
-                const dataStr = JSON.stringify(data);
-                const preview = dataStr.length > 1000
-                  ? dataStr.substring(0, 1000) + "..."
-                  : dataStr;
-                logger.debug(
-                  "pull-content",
-                  () => [
-                    `doc: ${docId}, type: ${contentType}, data: ${preview}`,
-                  ],
-                );
-              } catch (_e) {
-                logger.debug(
-                  "pull-content",
-                  () => [
-                    `doc: ${docId}, type: ${contentType}, data: <unable to stringify>`,
-                  ],
-                );
+              // Log actual content for each document
+              for (const [contentType, data] of Object.entries(facts)) {
+                try {
+                  const dataStr = JSON.stringify(data);
+                  const preview = dataStr.length > 1000
+                    ? dataStr.substring(0, 1000) + "..."
+                    : dataStr;
+                  logs.push(
+                    `  └─ doc: ${docId}, type: ${contentType}, data: ${preview}`,
+                  );
+                } catch (_e) {
+                  logs.push(
+                    `  └─ doc: ${docId}, type: ${contentType}, data: <unable to stringify>`,
+                  );
+                }
               }
             }
-          }
+            return logs;
+          });
 
           const _integrated = await this.integrateResults(
             newEntries,
             result.ok.schemaFacts,
           );
 
-          // Log performance timing
-          const integrateTime = ((performance.now() - integrateStart) / 1000)
-            .toFixed(3);
-          const totalTime = ((performance.now() - queryStartTime) / 1000)
-            .toFixed(3);
-          logger.debug(
-            "pull-timing",
-            () => [
+          // Log performance timing (expensive calculations only happen if debug enabled)
+          logger.debug("pull-timing", () => {
+            const integrateTime = ((performance.now() - integrateStart) / 1000)
+              .toFixed(3);
+            const totalTime = ((performance.now() - queryStartTime) / 1000)
+              .toFixed(3);
+            return [
               `Query for ${newEntries.length} entries - integrate: ${integrateTime}s, total: ${totalTime}s`,
-            ],
-          );
+            ];
+          });
 
           return Promise.resolve({ ok: {} });
         }
@@ -1134,10 +1132,30 @@ export class Replica {
       ) {
         logger.info(
           "push-error",
-          () => ["Transaction failed (aready exists)", result.error],
+          () => [
+            "Transaction failed (aready exists)",
+            "\nError:",
+            JSON.stringify(result.error, null, 2),
+            "\nConflict details:",
+            JSON.stringify((result.error as any).conflict, null, 2),
+            "\nTransaction:",
+            JSON.stringify((result.error as any).transaction, null, 2),
+          ],
         );
       } else {
-        logger.warn("push-error", () => ["Transaction failed", result.error]);
+        logger.warn("push-error", () => [
+          "Transaction failed",
+          "\nError:",
+          JSON.stringify(result.error, null, 2),
+          result.error.name === "ConflictError"
+            ? [
+              "\nConflict details:",
+              JSON.stringify((result.error as any).conflict, null, 2),
+              "\nTransaction:",
+              JSON.stringify((result.error as any).transaction, null, 2),
+            ]
+            : [],
+        ]);
       }
 
       // Checkout current state of facts so we can compute
