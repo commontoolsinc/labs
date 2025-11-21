@@ -620,3 +620,91 @@ function recursiveStripAsCellAndStreamFromSchema(
 
   return result;
 }
+
+/**
+ * Encodes a JSON Pointer path according to RFC 6901.
+ * Each token has ~ replaced with ~0 and / replaced with ~1, then joined with /.
+ * @param path - Array of path tokens to encode
+ * @returns The encoded JSON Pointer string
+ */
+export function encodeJsonPointer(path: readonly string[]): string {
+  return path
+    .map((token) => token.replace(/~/g, "~0").replace(/\//g, "~1"))
+    .join("/");
+}
+
+/**
+ * Decodes a JSON Pointer string according to RFC 6901.
+ * Splits by / then replaces ~1 with / and ~0 with ~ in each token.
+ * @param pointer - The JSON Pointer string to decode
+ * @returns Array of decoded path tokens
+ */
+export function decodeJsonPointer(pointer: string): string[] {
+  return pointer
+    .split("/")
+    .map((token) => token.replace(/~1/g, "/").replace(/~0/g, "~"));
+}
+
+export const matchLLMFriendlyLink = new RegExp("^/[a-zA-Z0-9]+:");
+
+/**
+ * Parses a LLM friendly link from a target string.
+ *
+ * @param target - The target string to parse
+ * @param space - The space to use to get the cells
+ * @returns The parsed LLM friendly link
+ */
+export function parseLLMFriendlyLink(
+  target: string,
+  space: MemorySpace,
+): NormalizedFullLink;
+export function parseLLMFriendlyLink(
+  target: string,
+  space?: MemorySpace,
+): NormalizedLink;
+export function parseLLMFriendlyLink(
+  target: string,
+  space?: MemorySpace,
+): NormalizedLink {
+  target = target.trim();
+
+  if (!matchLLMFriendlyLink.test(target)) {
+    throw new Error(
+      'Target must include a charm handle, e.g. "/of:bafyabc123/path".',
+    );
+  }
+
+  const [empty, id, ...path] = decodeJsonPointer(target);
+
+  if (empty !== "") {
+    throw new Error("Target must start with a slash.");
+  }
+
+  // Check if first segment looks like a CID/handle by length
+  //
+  // CIDs are long encoded strings (typically 40+ chars), whereas human names
+  // are short. Use a conservative threshold to distinguish handles from
+  // human-readable names Handle format is "/of:..." (the internal storage
+  // format)
+  if (id === undefined || id.length < 20) {
+    throw new Error(
+      `Charm references must use handles (e.g., "/of:bafyabc123/path"), not human names (e.g., "${id}").`,
+    );
+  }
+
+  // Remove path element from trailing slash
+  if (path.length > 0 && path[path.length - 1] === "") {
+    path.pop();
+  }
+
+  return {
+    id: id as `${string}:${string}`,
+    path,
+    ...(space && { space }),
+    type: "application/json",
+  };
+}
+
+export function createLLMFriendlyLink(link: NormalizedFullLink): string {
+  return encodeJsonPointer(["", link.id, ...link.path]);
+}

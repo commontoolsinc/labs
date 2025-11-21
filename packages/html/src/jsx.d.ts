@@ -2859,6 +2859,7 @@ type CtListItem = {
 };
 
 interface CTOutlinerElement extends CTHTMLElement {}
+interface CTCellLinkElement extends CTHTMLElement {}
 interface CTListElement extends CTHTMLElement {}
 interface CTListItemElement extends CTHTMLElement {}
 interface CTInputElement extends CTHTMLElement {}
@@ -3056,6 +3057,11 @@ interface CTOutlinerAttributes<T> extends CTHTMLAttributes<T> {
   "$value": CellLike<{ root: OutlinerNode }>;
   "$mentionable"?: CellLike<Charm[]>;
   "oncharm-link-click"?: EventHandler<{ charm: Cell<Charm> }>;
+}
+
+interface CTCellLinkAttributes<T> extends CTHTMLAttributes<T> {
+  "link"?: string;
+  "$cell": CellLike<any>;
 }
 
 interface CTChatMessageAttributes<T> extends CTHTMLAttributes<T> {
@@ -3723,6 +3729,10 @@ declare global {
 
     interface IntrinsicElements extends DOMIntrinsicElements {
       //[elemName: string]: any;
+      "ct-cell-link": CTDOM.DetailedHTMLProps<
+        CTCellLinkAttributes<CTCellLinkElement>,
+        CTCellLinkElement
+      >;
       "ct-outliner": CTDOM.DetailedHTMLProps<
         CTOutlinerAttributes<CTOutlinerElement>,
         CTOutlinerElement

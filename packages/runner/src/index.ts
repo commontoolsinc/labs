@@ -4,6 +4,7 @@ export type {
   ConsoleHandler,
   ErrorHandler,
   ErrorWithContext as RuntimeErrorWithContext,
+  IRuntime,
   RuntimeOptions,
 } from "./runtime.ts";
 export { raw } from "./module.ts";
@@ -50,6 +51,7 @@ export {
   isWriteRedirectLink,
   parseLink,
   parseLinkOrThrow,
+  parseLLMFriendlyLink,
 } from "./link-utils.ts";
 export * from "./recipe-manager.ts";
 
