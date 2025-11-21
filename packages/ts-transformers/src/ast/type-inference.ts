@@ -453,3 +453,16 @@ export function inferArrayElementType(
     typeNode: factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
   };
 }
+/**
+ * Infers the expected type of an expression from its context (e.g., variable assignment).
+ */
+export function inferContextualType(
+  node: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  const contextualType = checker.getContextualType(node);
+  if (contextualType && !isAnyOrUnknownType(contextualType)) {
+    return contextualType;
+  }
+  return undefined;
+}
