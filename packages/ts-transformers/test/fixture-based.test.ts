@@ -8,7 +8,6 @@ import ts from "typescript";
 
 import {
   batchTypeCheckFixtures,
-  BatchTypeCheckResult,
   loadFixture,
   transformFixture,
 } from "./utils.ts";
