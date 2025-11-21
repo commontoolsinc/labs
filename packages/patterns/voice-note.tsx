@@ -79,9 +79,9 @@ const VoiceNote = recipe<Input, Output>(
                 <ct-voice-input
                   $transcription={transcription}
                   recordingMode="hold"
-                  autoTranscribe={true}
+                  autoTranscribe
                   maxDuration={120}
-                  showWaveform={true}
+                  showWaveform
                   onct-transcription-complete={handleTranscriptionComplete({
                     notes,
                   })}

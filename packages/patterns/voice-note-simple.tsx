@@ -4,7 +4,6 @@ import {
   cell,
   computed,
   type Default,
-  handler,
   NAME,
   recipe,
   UI,
@@ -68,9 +67,9 @@ const VoiceNoteSimple = recipe<Input, Output>(
                 <ct-voice-input
                   $transcription={transcription}
                   recordingMode="hold"
-                  autoTranscribe={true}
+                  autoTranscribe
                   maxDuration={60}
-                  showWaveform={true}
+                  showWaveform
                 />
               </div>
             </ct-card>

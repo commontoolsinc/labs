@@ -63,7 +63,7 @@ export class CTAudioVisualizer extends BaseElement {
   /**
    * Start visualization with an audio stream
    */
-  async startVisualization(stream: MediaStream) {
+  startVisualization(stream: MediaStream) {
     this.stopVisualization();
 
     this._stream = stream;

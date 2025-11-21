@@ -2,9 +2,14 @@
 
 ## Overview
 
-A trusted UI component that enables voice recording and real-time transcription in CommonTools patterns. Similar to `ct-image-input`, this component handles browser APIs that patterns cannot access directly (MediaRecorder, getUserMedia) and provides transcribed text via reactive cells.
+A trusted UI component that enables voice recording and real-time transcription
+in CommonTools patterns. Similar to `ct-image-input`, this component handles
+browser APIs that patterns cannot access directly (MediaRecorder, getUserMedia)
+and provides transcribed text via reactive cells.
 
-**Reference Implementation:** Based on the previous `common-audio-recorder` component ([source](https://github.com/commontoolsinc/labs/blob/56b4ef4351fec8616b3d8cce8c6d3ceda73ab7c8/packages/ui/src/v1/components/common-audio-recorder.ts))
+**Reference Implementation:** Based on the previous `common-audio-recorder`
+component
+([source](https://github.com/commontoolsinc/labs/blob/56b4ef4351fec8616b3d8cce8c6d3ceda73ab7c8/packages/ui/src/v1/components/common-audio-recorder.ts))
 
 ## Component Architecture
 
@@ -24,6 +29,7 @@ This design proposes splitting concerns into two components:
    - Reusable for other audio contexts
 
 This separation allows for:
+
 - Cleaner code organization
 - Reusable visualization component
 - Easier testing of each concern
@@ -31,18 +37,24 @@ This separation allows for:
 
 ## Visual Design
 
-**Design Reference:** Discord-style voice message interaction with sophisticated expansion animations.
+**Design Reference:** Discord-style voice message interaction with sophisticated
+expansion animations.
 
-**Note:** The detailed Discord-style design below represents the **long-term vision** for this component. The initial v1 implementation will focus on core functionality (recording, transcription, basic waveform). Visual polish and advanced animations can be added iteratively in future versions.
+**Note:** The detailed Discord-style design below represents the **long-term
+vision** for this component. The initial v1 implementation will focus on core
+functionality (recording, transcription, basic waveform). Visual polish and
+advanced animations can be added iteratively in future versions.
 
 ### Idle State
+
 ```
 ┌──────────┐
 │    🎤    │  Small circular button
 └──────────┘  Light gray (#EBEDEF)
 ```
 
-**Security Note:** Button always displays microphone icon - no custom text allowed to prevent misleading users about recording.
+**Security Note:** Button always displays microphone icon - no custom text
+allowed to prevent misleading users about recording.
 
 ### Recording State - Expanded Bar (Animated)
 
@@ -57,6 +69,7 @@ When user presses and holds the microphone button:
 ```
 
 **Animation Details:**
+
 - **Expansion**: Small button → Full-width bar (elastic morph)
 - **Color Transition**: Light gray → Vibrant indigo (#5865F2)
 - **Shape**: Top edge curves organically (wave-like, not flat rectangle)
@@ -71,6 +84,7 @@ When user presses and holds the microphone button:
 ### Send Transition
 
 On release:
+
 - Bar collapses back to standard input size
 - All recording controls disappear
 - Microphone button returns to original state
@@ -80,6 +94,7 @@ On release:
 After sending, message bubble transitions through states:
 
 **1. Uploading/Processing**
+
 ```
 ┌─────────────────────┐
 │ ✖  ▂▃▅▇▅▃▂  0:03   │  Gray waveform, X icon (cancellable)
@@ -87,6 +102,7 @@ After sending, message bubble transitions through states:
 ```
 
 **2. Upload Complete (Brief)**
+
 ```
 ┌─────────────────────┐
 │ ✓  ▂▃▅▇▅▃▂  0:03   │  Gray waveform, checkmark icon
@@ -94,6 +110,7 @@ After sending, message bubble transitions through states:
 ```
 
 **3. Ready to Play**
+
 ```
 ┌─────────────────────┐
 │ ▶  ▂▃▅▇▅▃▂  0:03   │  Black waveform, play triangle
@@ -101,6 +118,7 @@ After sending, message bubble transitions through states:
 ```
 
 **4. Playing**
+
 ```
 ┌─────────────────────┐
 │ ⏸  ▅▅▅▅▃▂▂  0:03   │  Filling indigo → black, pause icon
@@ -108,12 +126,14 @@ After sending, message bubble transitions through states:
 ```
 
 **Playback Animation:**
+
 - Play icon (▶) switches to Pause icon (⏸)
 - Waveform bars fill from left to right: Black → Indigo
 - Progress represents playback position
 - On completion: Returns to play icon, waveform resets
 
 ### Processing State (Transcription)
+
 ```
 ┌─────────────────────┐
 │  ⏳ Transcribing...  │
@@ -122,6 +142,7 @@ After sending, message bubble transitions through states:
 ```
 
 ### Completed State
+
 ```
 ┌─────────────────────┐
 │  ✓ Transcribed       │
@@ -132,6 +153,7 @@ After sending, message bubble transitions through states:
 ## Component API
 
 ### Element Definition
+
 ```typescript
 <ct-voice-input
   $transcription={transcription}
@@ -139,47 +161,47 @@ After sending, message bubble transitions through states:
   autoTranscribe={true}
   maxDuration={60}
   showWaveform={true}
-/>
+/>;
 ```
 
 ### Properties
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `transcription` | `Cell<TranscriptionData \| TranscriptionData>` | - | Cell for bidirectional transcription binding |
-| `recordingMode` | `"hold" \| "toggle"` | `"hold"` | Hold button to record, or click to start/stop |
-| `autoTranscribe` | `boolean` | `true` | Automatically transcribe when recording stops |
-| `maxDuration` | `number` | `60` | Max recording duration in seconds |
-| `showWaveform` | `boolean` | `true` | Show audio waveform visualization |
-| `disabled` | `boolean` | `false` | Disable recording |
+| Property         | Type                                           | Default  | Description                                   |
+| ---------------- | ---------------------------------------------- | -------- | --------------------------------------------- |
+| `transcription`  | `Cell<TranscriptionData \| TranscriptionData>` | -        | Cell for bidirectional transcription binding  |
+| `recordingMode`  | `"hold" \| "toggle"`                           | `"hold"` | Hold button to record, or click to start/stop |
+| `autoTranscribe` | `boolean`                                      | `true`   | Automatically transcribe when recording stops |
+| `maxDuration`    | `number`                                       | `60`     | Max recording duration in seconds             |
+| `showWaveform`   | `boolean`                                      | `true`   | Show audio waveform visualization             |
+| `disabled`       | `boolean`                                      | `false`  | Disable recording                             |
 
 ### Data Structures
 
 ```typescript
 interface TranscriptionChunk {
-  timestamp: [number, number];  // [start_seconds, end_seconds]
+  timestamp: [number, number]; // [start_seconds, end_seconds]
   text: string;
 }
 
 interface TranscriptionData {
-  id: string;                    // Unique ID for this recording
-  text: string;                  // Full transcription text
+  id: string; // Unique ID for this recording
+  text: string; // Full transcription text
   chunks?: TranscriptionChunk[]; // Timestamped segments
-  audioData?: string;            // Base64 audio data (optional)
-  duration: number;              // Recording duration in seconds
-  timestamp: number;             // Unix timestamp when recorded
+  audioData?: string; // Base64 audio data (optional)
+  duration: number; // Recording duration in seconds
+  timestamp: number; // Unix timestamp when recorded
 }
 ```
 
 ### Events
 
-| Event | Detail | Description |
-|-------|--------|-------------|
-| `ct-recording-start` | `{ timestamp: number }` | Recording started |
-| `ct-recording-stop` | `{ duration: number, audioData: Blob }` | Recording stopped |
-| `ct-transcription-start` | `{ id: string }` | Transcription request sent |
-| `ct-transcription-complete` | `{ transcription: TranscriptionData }` | Transcription received |
-| `ct-transcription-error` | `{ error: Error, message: string }` | Transcription failed |
+| Event                       | Detail                                  | Description                |
+| --------------------------- | --------------------------------------- | -------------------------- |
+| `ct-recording-start`        | `{ timestamp: number }`                 | Recording started          |
+| `ct-recording-stop`         | `{ duration: number, audioData: Blob }` | Recording stopped          |
+| `ct-transcription-start`    | `{ id: string }`                        | Transcription request sent |
+| `ct-transcription-complete` | `{ transcription: TranscriptionData }`  | Transcription received     |
+| `ct-transcription-error`    | `{ error: Error, message: string }`     | Transcription failed       |
 
 ## Technical Implementation
 
@@ -207,12 +229,12 @@ class CTVoiceInput extends BaseElement {
         sampleRate: 16000,
         echoCancellation: true,
         noiseSuppression: true,
-      }
+      },
     });
 
     // Create MediaRecorder with appropriate codec
     this.mediaRecorder = new MediaRecorder(stream, {
-      mimeType: 'audio/webm;codecs=opus'
+      mimeType: "audio/webm;codecs=opus",
     });
 
     this.audioChunks = [];
@@ -233,7 +255,7 @@ class CTVoiceInput extends BaseElement {
   }
 
   async processRecording() {
-    const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+    const audioBlob = new Blob(this.audioChunks, { type: "audio/webm" });
     const duration = (Date.now() - this.startTime!) / 1000;
 
     this.emit("ct-recording-stop", { duration, audioData: audioBlob });
@@ -300,15 +322,16 @@ async transcribeAudio(audioBlob: Blob, duration: number) {
 
 **Sub-component: `ct-audio-visualizer`**
 
-This component receives an audio stream from the parent and handles visualization independently.
+This component receives an audio stream from the parent and handles
+visualization independently.
 
 ```typescript
 interface AudioVisualizerProps {
-  stream: MediaStream;         // Audio stream from parent
-  bars?: number;               // Number of bars to display (default: 8)
-  color?: string;              // Bar color (default: 'white')
-  height?: number;             // Visualizer height (default: 40)
-  renderMode?: 'canvas' | 'svg'; // Rendering approach
+  stream: MediaStream; // Audio stream from parent
+  bars?: number; // Number of bars to display (default: 8)
+  color?: string; // Bar color (default: 'white')
+  height?: number; // Visualizer height (default: 40)
+  renderMode?: "canvas" | "svg"; // Rendering approach
 }
 ```
 
@@ -346,7 +369,7 @@ class CTAudioVisualizer extends BaseElement {
       const barCount = this.bars || 8;
       const barWidth = this.canvas!.width / barCount;
 
-      this.ctx!.strokeStyle = this.color || 'white';
+      this.ctx!.strokeStyle = this.color || "white";
       this.ctx!.lineWidth = 2;
       this.ctx!.beginPath();
 
@@ -410,7 +433,7 @@ class CTAudioVisualizer extends BaseElement {
       const barCount = this.bars || 8;
       this.waveformData = Array.from(dataArray)
         .slice(0, barCount)
-        .map(value => value / 255); // Normalize to 0-1
+        .map((value) => value / 255); // Normalize to 0-1
 
       this.requestUpdate();
       requestAnimationFrame(update);
@@ -437,7 +460,7 @@ class CTAudioVisualizer extends BaseElement {
               y="${y}"
               width="${barWidth * 0.8}%"
               height="${barHeight}"
-              fill="${this.color || 'white'}"
+              fill="${this.color || "white"}"
               rx="1"
             />
           `;
@@ -450,15 +473,16 @@ class CTAudioVisualizer extends BaseElement {
 
 **Comparison:**
 
-| Aspect | Canvas (Polyline) | SVG (Rectangles) |
-|--------|------------------|------------------|
-| Performance | Faster for frequent updates | Slightly slower |
-| Styling | Limited (stroke/fill) | Full CSS control |
-| Accessibility | Requires ARIA labels | Native SVG semantics |
-| Responsiveness | Manual resize handling | Automatic scaling |
-| Complexity | Simpler imperative code | More declarative |
+| Aspect         | Canvas (Polyline)           | SVG (Rectangles)     |
+| -------------- | --------------------------- | -------------------- |
+| Performance    | Faster for frequent updates | Slightly slower      |
+| Styling        | Limited (stroke/fill)       | Full CSS control     |
+| Accessibility  | Requires ARIA labels        | Native SVG semantics |
+| Responsiveness | Manual resize handling      | Automatic scaling    |
+| Complexity     | Simpler imperative code     | More declarative     |
 
-**Recommendation:** Start with SVG for flexibility, optimize to Canvas if performance becomes an issue.
+**Recommendation:** Start with SVG for flexibility, optimize to Canvas if
+performance becomes an issue.
 
 ### 4. Parent-Child Communication
 
@@ -477,18 +501,18 @@ class CTVoiceInput extends BaseElement {
         sampleRate: 16000,
         echoCancellation: true,
         noiseSuppression: true,
-      }
+      },
     });
 
     // Pass stream to visualizer
-    const visualizer = this.shadowRoot?.querySelector('ct-audio-visualizer');
+    const visualizer = this.shadowRoot?.querySelector("ct-audio-visualizer");
     if (visualizer && this.showWaveform) {
       visualizer.startVisualization(this.stream);
     }
 
     // Setup MediaRecorder
     this.mediaRecorder = new MediaRecorder(this.stream, {
-      mimeType: 'audio/webm;codecs=opus'
+      mimeType: "audio/webm;codecs=opus",
     });
 
     // ... rest of recording setup
@@ -496,7 +520,7 @@ class CTVoiceInput extends BaseElement {
 
   stopRecording() {
     // Stop visualizer
-    const visualizer = this.shadowRoot?.querySelector('ct-audio-visualizer');
+    const visualizer = this.shadowRoot?.querySelector("ct-audio-visualizer");
     if (visualizer) {
       visualizer.stopVisualization();
     }
@@ -508,7 +532,7 @@ class CTVoiceInput extends BaseElement {
 
     // Stop stream
     if (this.stream) {
-      this.stream.getTracks().forEach(track => track.stop());
+      this.stream.getTracks().forEach((track) => track.stop());
     }
   }
 }
@@ -520,7 +544,7 @@ class CTVoiceInput extends BaseElement {
 
 ```typescript
 /// <cts-enable />
-import { pattern, UI, NAME, Cell, Default } from "commontools";
+import { Cell, Default, NAME, pattern, UI } from "commontools";
 
 interface Input {
   transcription: Cell<Default<TranscriptionData, null>>;
@@ -570,7 +594,10 @@ export default pattern<Input>(({ notes }) => {
   // Handler to save recording to notes list
   const saveRecording = handler<
     { detail: { transcription: TranscriptionData } },
-    { notes: Cell<VoiceNote[]>, currentRecording: Cell<TranscriptionData | null> }
+    {
+      notes: Cell<VoiceNote[]>;
+      currentRecording: Cell<TranscriptionData | null>;
+    }
   >(
     (event, { notes, currentRecording }) => {
       const transcription = event.detail.transcription;
@@ -584,7 +611,7 @@ export default pattern<Input>(({ notes }) => {
 
       // Clear current recording
       currentRecording.set(null);
-    }
+    },
   );
 
   return {
@@ -593,18 +620,23 @@ export default pattern<Input>(({ notes }) => {
       <div>
         <ct-voice-input
           $transcription={currentRecording}
-          onct-transcription-complete={saveRecording({ notes, currentRecording })}
+          onct-transcription-complete={saveRecording({
+            notes,
+            currentRecording,
+          })}
         />
 
         <div style={{ marginTop: "2rem" }}>
           <h3>Saved Notes ({notes.length})</h3>
           {notes.map((note) => (
-            <div style={{
-              padding: "1rem",
-              marginBottom: "0.5rem",
-              border: "1px solid #ddd",
-              borderRadius: "4px"
-            }}>
+            <div
+              style={{
+                padding: "1rem",
+                marginBottom: "0.5rem",
+                border: "1px solid #ddd",
+                borderRadius: "4px",
+              }}
+            >
               <p>{note.text}</p>
               <small>
                 {new Date(note.timestamp).toLocaleString()}
@@ -624,7 +656,7 @@ export default pattern<Input>(({ notes }) => {
 
 ```typescript
 /// <cts-enable />
-import { pattern, UI, NAME, Cell, Default, generateText } from "commontools";
+import { Cell, Default, generateText, NAME, pattern, UI } from "commontools";
 
 interface Input {
   transcription: Cell<Default<TranscriptionData, null>>;
@@ -634,9 +666,10 @@ export default pattern<Input>(({ transcription }) => {
   // Generate AI response based on transcription
   const aiResponse = transcription?.text
     ? generateText({
-        prompt: transcription.text,
-        system: "You are a helpful assistant. Respond to the user's voice message.",
-      })
+      prompt: transcription.text,
+      system:
+        "You are a helpful assistant. Respond to the user's voice message.",
+    })
     : null;
 
   return {
@@ -649,30 +682,32 @@ export default pattern<Input>(({ transcription }) => {
 
         {transcription && (
           <div style={{ marginTop: "1rem" }}>
-            <div style={{
-              padding: "1rem",
-              backgroundColor: "#f0f9ff",
-              borderRadius: "8px"
-            }}>
+            <div
+              style={{
+                padding: "1rem",
+                backgroundColor: "#f0f9ff",
+                borderRadius: "8px",
+              }}
+            >
               <strong>You said:</strong>
               <p>{transcription.text}</p>
             </div>
 
             {aiResponse && (
-              <div style={{
-                padding: "1rem",
-                marginTop: "1rem",
-                backgroundColor: "#f0fdf4",
-                borderRadius: "8px"
-              }}>
+              <div
+                style={{
+                  padding: "1rem",
+                  marginTop: "1rem",
+                  backgroundColor: "#f0fdf4",
+                  borderRadius: "8px",
+                }}
+              >
                 <strong>AI Response:</strong>
-                {aiResponse.pending ? (
-                  <p>Thinking...</p>
-                ) : aiResponse.error ? (
-                  <p>Error: {aiResponse.error}</p>
-                ) : (
-                  <p>{aiResponse.result}</p>
-                )}
+                {aiResponse.pending
+                  ? <p>Thinking...</p>
+                  : aiResponse.error
+                  ? <p>Error: {aiResponse.error}</p>
+                  : <p>{aiResponse.result}</p>}
               </div>
             )}
           </div>
@@ -687,37 +722,40 @@ export default pattern<Input>(({ transcription }) => {
 ## Browser Compatibility
 
 ### Required APIs
+
 - **MediaDevices.getUserMedia()** - For microphone access
 - **MediaRecorder** - For audio recording
 - **AudioContext** - For waveform visualization (optional)
 - **Fetch API** - For transcription requests
 
 ### Supported Formats
+
 - **Preferred**: WAV (PCM) - Best compatibility with transcription API
 - **Fallback**: WebM (Opus) - Convert to WAV before sending
 
 ### Error Handling
+
 ```typescript
 try {
   await navigator.mediaDevices.getUserMedia({ audio: true });
 } catch (error) {
-  if (error.name === 'NotAllowedError') {
+  if (error.name === "NotAllowedError") {
     // User denied permission
     this.emit("ct-error", {
       error,
-      message: "Microphone permission denied"
+      message: "Microphone permission denied",
     });
-  } else if (error.name === 'NotFoundError') {
+  } else if (error.name === "NotFoundError") {
     // No microphone found
     this.emit("ct-error", {
       error,
-      message: "No microphone found"
+      message: "No microphone found",
     });
   } else {
     // Other error
     this.emit("ct-error", {
       error,
-      message: `Failed to access microphone: ${error.message}`
+      message: `Failed to access microphone: ${error.message}`,
     });
   }
 }
@@ -743,6 +781,7 @@ try {
 - [ ] Recording state indicator (recording/processing/complete)
 
 **What can wait for v2+:**
+
 - Sophisticated expansion animations
 - Organic wave shapes
 - Color morphing (gray → indigo)
@@ -791,8 +830,10 @@ try {
 
 ## Open Questions
 
-1. **Audio Format**: Should we always convert to WAV, or try WebM first and fallback?
-   - **Recommendation**: Always convert to WAV (16kHz, mono) for best compatibility
+1. **Audio Format**: Should we always convert to WAV, or try WebM first and
+   fallback?
+   - **Recommendation**: Always convert to WAV (16kHz, mono) for best
+     compatibility
 
 2. **Max Duration**: What's reasonable default? (Current: 60 seconds)
    - **Consideration**: API costs, storage, UX for long recordings
@@ -801,7 +842,8 @@ try {
    - **Options**: Bar chart, line graph, circular meter
 
 4. **Cell Binding**: Single transcription vs. array of recordings?
-   - **Recommendation**: Support both - `$transcription` for single, `$transcriptions` for array
+   - **Recommendation**: Support both - `$transcription` for single,
+     `$transcriptions` for array
 
 5. **Audio Storage**: Should we include raw audio data in the cell?
    - **Pro**: Allows playback, re-transcription
@@ -823,17 +865,20 @@ try {
 ## Testing Strategy
 
 ### Unit Tests
+
 - MediaRecorder mock
 - Audio format conversion
 - Cell binding
 - Event emission
 
 ### Integration Tests
+
 - Real microphone recording (requires user interaction)
 - Transcription API integration
 - Error scenarios (no mic, denied permission, API failure)
 
 ### Manual Testing
+
 - Test on Chrome, Firefox, Safari
 - Mobile browser testing (iOS Safari, Chrome Mobile)
 - Different microphone types

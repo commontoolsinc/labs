@@ -1,6 +1,6 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
-import { createRef, ref, type Ref } from "lit/directives/ref.js";
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type Cell } from "@commontools/runner";
 import { createCellController } from "../../core/cell-controller.ts";
@@ -397,14 +397,14 @@ export class CTVoiceInput extends BaseElement {
       }
 
       // Start timer
-      this.timerInterval = window.setInterval(() => {
+      this.timerInterval = setInterval(() => {
         if (this.startTime) {
           this.recordingDuration = (Date.now() - this.startTime) / 1000;
         }
       }, 100);
 
       // Set max duration timeout
-      this.maxDurationTimeout = window.setTimeout(() => {
+      this.maxDurationTimeout = setTimeout(() => {
         if (this.isRecording) {
           this._stopRecording();
         }
@@ -528,7 +528,7 @@ export class CTVoiceInput extends BaseElement {
     }
   }
 
-  private async _blobToBase64(blob: Blob): Promise<string> {
+  private _blobToBase64(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(reader.result as string);

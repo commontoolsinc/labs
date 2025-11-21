@@ -199,7 +199,7 @@ describe("audio-conversion", () => {
       const testStrings = ["RIFF", "WAVE", "fmt ", "data"];
 
       for (const str of testStrings) {
-        let offset = 0;
+        const offset = 0;
         for (let i = 0; i < str.length; i++) {
           view.setUint8(offset + i, str.charCodeAt(i));
         }
