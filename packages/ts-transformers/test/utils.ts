@@ -11,6 +11,7 @@ const ENV_TYPE_ENTRIES = ["es2023", "dom", "jsx"] as const;
 
 type EnvTypeKey = (typeof ENV_TYPE_ENTRIES)[number];
 let envTypesCache: Record<EnvTypeKey, string> | undefined;
+let sourceFileCache: Map<string, ts.SourceFile> | undefined;
 
 export interface TransformOptions {
   mode?: "transform" | "error";
@@ -44,6 +45,9 @@ export async function transformFiles(
   if (!envTypesCache) {
     envTypesCache = await loadEnvironmentTypes();
   }
+  if (!sourceFileCache) {
+    sourceFileCache = new Map();
+  }
 
   // Pretransform
   const files = Object.entries(inFiles).reduce((files, [key, value]) => {
@@ -72,40 +76,52 @@ export async function transformFiles(
 
   const host: ts.CompilerHost = {
     getSourceFile: (name) => {
+      // Check cache first for type definition files
+      const isTypeDefFile = !files[name] && (
+        name === "lib.d.ts" ||
+        name.endsWith("/lib.d.ts") ||
+        allTypes[name] ||
+        (baseNameFromPath(name) && allTypes[baseNameFromPath(name)!])
+      );
+
+      if (isTypeDefFile && sourceFileCache!.has(name)) {
+        return sourceFileCache!.get(name);
+      }
+
+      // Determine source text
+      let sourceText: string | undefined;
+
       if (files[name] !== undefined) {
-        return ts.createSourceFile(
-          name,
-          files[name],
-          compilerOptions.target!,
-          true,
-        );
+        sourceText = files[name];
+      } else if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
+        sourceText = allTypes["es2023.d.ts"] || "";
+      } else if (allTypes[name]) {
+        sourceText = allTypes[name];
+      } else {
+        const baseName = baseNameFromPath(name);
+        if (baseName && allTypes[baseName]) {
+          sourceText = allTypes[baseName];
+        }
       }
-      if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
-        return ts.createSourceFile(
-          name,
-          allTypes["es2023.d.ts"] || "",
-          compilerOptions.target!,
-          true,
-        );
+
+      if (sourceText === undefined) {
+        return undefined;
       }
-      if (allTypes[name]) {
-        return ts.createSourceFile(
-          name,
-          allTypes[name],
-          compilerOptions.target!,
-          true,
-        );
+
+      // Create SourceFile
+      const sourceFile = ts.createSourceFile(
+        name,
+        sourceText,
+        compilerOptions.target!,
+        true,
+      );
+
+      // Cache type definition files (not fixture input files)
+      if (isTypeDefFile) {
+        sourceFileCache!.set(name, sourceFile);
       }
-      const baseName = baseNameFromPath(name);
-      if (baseName && allTypes[baseName]) {
-        return ts.createSourceFile(
-          name,
-          allTypes[baseName],
-          compilerOptions.target!,
-          true,
-        );
-      }
-      return undefined;
+
+      return sourceFile;
     },
     writeFile: () => {},
     getCurrentDirectory: () => "/",
