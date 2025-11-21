@@ -195,14 +195,20 @@ export async function batchTypeCheckFixtures(
   const diagnostics = ts.getPreEmitDiagnostics(program);
 
   // Filter diagnostics to exclude type definition files
+  // Note: Some diagnostics might not have a file (global errors), we keep those as they may be relevant
   const filteredDiagnostics = diagnostics.filter((diagnostic) =>
-    diagnostic.file &&
-    !diagnostic.file.fileName.startsWith("$types/") &&
-    !diagnostic.file.fileName.endsWith(".d.ts")
+    !diagnostic.file || // Keep diagnostics without a file
+    (!diagnostic.file.fileName.startsWith("$types/") &&
+      !diagnostic.file.fileName.endsWith(".d.ts"))
   );
 
-  // Group diagnostics by file name
+  // Initialize map with empty arrays for all input files
   const diagnosticsByFile = new Map<string, ts.Diagnostic[]>();
+  for (const fileName of Object.keys(files)) {
+    diagnosticsByFile.set(fileName, []);
+  }
+
+  // Group diagnostics by file name
   for (const diagnostic of filteredDiagnostics) {
     if (diagnostic.file) {
       const fileName = diagnostic.file.fileName;
