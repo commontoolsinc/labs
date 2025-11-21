@@ -2,6 +2,7 @@
 import {
   Cell,
   cell,
+  computed,
   type Default,
   handler,
   NAME,
@@ -56,6 +57,15 @@ const VoiceNote = recipe<Input, Output>(
     const transcription = cell<TranscriptionData | null>(null);
     const notes = cell<TranscriptionData[]>([]);
 
+    // Computed values for type-safe JSX access
+    const hasTranscription = computed(() => transcription.get() !== null);
+    const transcriptionText = computed(() => transcription.get()?.text || "");
+    const transcriptionDuration = computed(
+      () => transcription.get()?.duration || 0,
+    );
+    const notesCount = computed(() => notes.get().length);
+    const hasNotes = computed(() => notes.get().length > 0);
+
     return {
       [NAME]: title,
       [UI]: (
@@ -87,7 +97,7 @@ const VoiceNote = recipe<Input, Output>(
                   })}
                 />
 
-                {transcription?.text && (
+                {hasTranscription && (
                   <div
                     style={{
                       marginTop: "1rem",
@@ -97,9 +107,9 @@ const VoiceNote = recipe<Input, Output>(
                     }}
                   >
                     <strong>Latest Transcription:</strong>
-                    <p>{transcription.text}</p>
+                    <p>{transcriptionText}</p>
                     <small style={{ color: "var(--ct-color-gray-600)" }}>
-                      Duration: {transcription.duration.toFixed(1)}s
+                      Duration: {transcriptionDuration.toFixed(1)}s
                     </small>
                   </div>
                 )}
@@ -109,10 +119,10 @@ const VoiceNote = recipe<Input, Output>(
             <ct-card>
               <div style={{ padding: "1rem" }}>
                 <h3 style={{ marginTop: 0 }}>
-                  Saved Notes ({notes.length})
+                  Saved Notes ({notesCount})
                 </h3>
 
-                {notes.length === 0
+                {!hasNotes
                   ? (
                     <p style={{ color: "var(--ct-color-gray-500)" }}>
                       No voice notes yet. Record one above!
