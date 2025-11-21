@@ -210,6 +210,22 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
       },
     },
   });
+
+  addModel({
+    provider: anthropicProvider,
+    name: "anthropic:claude-haiku-4-5",
+    aliases: ["haiku-4-5", "haiku-4.5"],
+    capabilities: {
+      contextWindow: 200_000,
+      maxOutputTokens: 8192,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: false,
+    },
+  });
 }
 
 if (env.CTTS_AI_LLM_GROQ_API_KEY) {

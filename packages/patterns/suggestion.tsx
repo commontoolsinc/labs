@@ -29,7 +29,7 @@ export const Suggestion = pattern(
         fetchAndRunPattern: patternTool(fetchAndRunPattern),
         listPatternIndex: patternTool(listPatternIndex),
       },
-      model: "anthropic:claude-sonnet-4-5",
+      model: "anthropic:claude-haiku-4-5",
       schema: toSchema<{ cell: Cell<any> }>(),
     });
 

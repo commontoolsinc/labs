@@ -18,7 +18,7 @@ interface Output {
 export default pattern<Input, Output>(({ items }) => {
   // AI suggestion based on current todos
   const suggestion = Suggestion({
-    situation: "Based on my todo list, suggest a helpful pattern or tool",
+    situation: "Based on my todo list, use a pattern to help me.",
     context: { items },
   });
 
@@ -42,12 +42,6 @@ export default pattern<Input, Output>(({ items }) => {
         {/* Todo items with per-item suggestions */}
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           {items.map((item) => {
-            const itemSuggestion = Suggestion({
-              situation:
-                "Suggest a helpful action or pattern for this specific todo item",
-              context: { item, allItems: items },
-            });
-
             return (
               <div
                 style={{
@@ -84,18 +78,6 @@ export default pattern<Input, Output>(({ items }) => {
                   >
                     ×
                   </ct-button>
-                </div>
-                <div
-                  style={{
-                    fontSize: "0.85em",
-                    color: "#666",
-                    paddingLeft: "24px",
-                  }}
-                >
-                  {derive(
-                    itemSuggestion,
-                    (s) => s?.cell ?? <span style={{ opacity: 0.5 }}>...</span>,
-                  )}
                 </div>
               </div>
             );
