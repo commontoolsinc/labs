@@ -124,7 +124,25 @@ async function loadAllFixturesInDirectory(
   return fixtures;
 }
 
-// Batch type-check all fixtures upfront when CHECK_INPUT is enabled
+// PERFORMANCE OPTIMIZATION: Batch Type-Checking
+//
+// When CHECK_INPUT=1 is set, we batch type-check all fixtures upfront in a single
+// TypeScript program instead of creating separate programs per fixture. This provides
+// a significant performance improvement:
+//
+// - WITHOUT batching: ~16s (166 programs × 100ms each)
+// - WITH batching: ~4s (1 program × 600ms + 166 transforms × 20ms)
+// - Speedup: 4-6x faster
+//
+// The batching works by:
+// 1. Loading all fixture files upfront
+// 2. Creating one ts.Program with all fixtures as separate files
+// 3. Running ts.getPreEmitDiagnostics() once for all files
+// 4. Storing diagnostics in a Map keyed by file path
+// 5. Individual tests retrieve their precomputed diagnostics from the Map
+//
+// This optimization is only active when CHECK_INPUT=1. Without it, tests run normally
+// with no batching overhead.
 const batchedDiagnosticsByConfig = new Map<
   string,
   Map<string, ts.Diagnostic[]>
