@@ -478,8 +478,8 @@ export class CTVoiceInput extends BaseElement {
       this.mediaRecorder.onstop = () => {
         // Capture chunks and mimeType before they could be cleared
         const chunks = [...this.audioChunks];
-        const recordedMimeType =
-          this.mediaRecorder?.mimeType || mimeType || "audio/webm";
+        const recordedMimeType = this.mediaRecorder?.mimeType || mimeType ||
+          "audio/webm";
         const duration = this.startTime
           ? (Date.now() - this.startTime) / 1000
           : this.recordingDuration;
@@ -601,8 +601,8 @@ export class CTVoiceInput extends BaseElement {
 
     try {
       // Try to convert to WAV for best compatibility with transcription APIs
-      const { blob: processedBlob, mimeType: finalMimeType } =
-        await this._convertToWav(audioBlob, originalMimeType);
+      const { blob: processedBlob, mimeType: finalMimeType } = await this
+        ._convertToWav(audioBlob, originalMimeType);
 
       // Send to transcription API
       const response = await fetch("/api/ai/voice/transcribe", {
