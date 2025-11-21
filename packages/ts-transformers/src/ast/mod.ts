@@ -20,6 +20,7 @@ export {
 } from "./utils.ts";
 export {
   getTypeReferenceArgument,
+  inferContextualType,
   inferParameterType,
   inferReturnType,
   isAnyOrUnknownType,

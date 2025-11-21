@@ -2,11 +2,13 @@ import ts from "typescript";
 
 import {
   detectCallKind,
+  inferContextualType,
   inferParameterType,
   inferReturnType,
   isAnyOrUnknownType,
   isFunctionLikeExpression,
   typeToSchemaTypeNode,
+  unwrapOpaqueLikeType,
 } from "../ast/mod.ts";
 import {
   TransformationContext,
@@ -971,6 +973,260 @@ export class SchemaInjectionTransformer extends Transformer {
             resNode,
             resType,
           );
+        }
+      }
+
+      if (callKind?.kind === "cell-factory") {
+        const factory = transformation.factory;
+        const typeArgs = node.typeArguments;
+        const args = node.arguments;
+
+        // If already has 2 arguments, assume schema is already present
+        if (args.length >= 2) {
+          return ts.visitEachChild(node, visit, transformation);
+        }
+
+        let typeNode: ts.TypeNode | undefined;
+        let type: ts.Type | undefined;
+
+        if (typeArgs && typeArgs.length > 0) {
+          // Use explicit type argument
+          typeNode = typeArgs[0];
+          if (typeNode && typeRegistry) {
+            type = typeRegistry.get(typeNode);
+          }
+        } else if (args.length > 0) {
+          // Infer from value argument
+          const valueArg = args[0];
+          if (valueArg) {
+            const valueType = checker.getTypeAtLocation(valueArg);
+            if (valueType && !isAnyOrUnknownType(valueType)) {
+              type = valueType;
+              typeNode = typeToSchemaTypeNode(valueType, checker, sourceFile);
+            }
+          }
+        }
+
+        if (typeNode) {
+          const schemaCall = createSchemaCallWithRegistryTransfer(
+            context,
+            typeNode,
+            typeRegistry,
+          );
+
+          // If we inferred the type (no explicit type arg), register it
+          if ((!typeArgs || typeArgs.length === 0) && type && typeRegistry) {
+            typeRegistry.set(schemaCall, type);
+          }
+
+          const updated = factory.createCallExpression(
+            node.expression,
+            node.typeArguments,
+            [...args, schemaCall],
+          );
+          return ts.visitEachChild(updated, visit, transformation);
+        }
+      }
+
+      if (callKind?.kind === "cell-for") {
+        const factory = transformation.factory;
+        const typeArgs = node.typeArguments;
+
+        // Check if already wrapped in asSchema
+        if (
+          ts.isPropertyAccessExpression(node.parent) &&
+          node.parent.name.text === "asSchema"
+        ) {
+          return ts.visitEachChild(node, visit, transformation);
+        }
+
+        let typeNode: ts.TypeNode | undefined;
+        let type: ts.Type | undefined;
+
+        if (typeArgs && typeArgs.length > 0) {
+          typeNode = typeArgs[0];
+          if (typeNode && typeRegistry) {
+            type = typeRegistry.get(typeNode);
+          }
+        } else {
+          // Infer from contextual type (variable assignment)
+          const contextualType = inferContextualType(node, checker);
+          if (contextualType) {
+            // We need to unwrap Cell<T> to get T
+            const unwrapped = unwrapOpaqueLikeType(contextualType, checker);
+            if (unwrapped) {
+              type = unwrapped;
+              typeNode = typeToSchemaTypeNode(unwrapped, checker, sourceFile);
+            }
+          }
+        }
+
+        if (typeNode) {
+          const schemaCall = createSchemaCallWithRegistryTransfer(
+            context,
+            typeNode,
+            typeRegistry,
+          );
+          if ((!typeArgs || typeArgs.length === 0) && type && typeRegistry) {
+            typeRegistry.set(schemaCall, type);
+          }
+
+          // Visit the original node's children first to ensure nested transformations happen
+          const visitedNode = ts.visitEachChild(node, visit, transformation);
+
+          const asSchema = factory.createPropertyAccessExpression(
+            visitedNode,
+            factory.createIdentifier("asSchema"),
+          );
+          const updated = factory.createCallExpression(
+            asSchema,
+            undefined,
+            [schemaCall],
+          );
+          // Return updated directly to avoid re-visiting the inner CallExpression which would trigger infinite recursion
+          return updated;
+        }
+      }
+
+      if (callKind?.kind === "wish") {
+        const factory = transformation.factory;
+        const typeArgs = node.typeArguments;
+        const args = node.arguments;
+
+        if (args.length >= 2) {
+          return ts.visitEachChild(node, visit, transformation);
+        }
+
+        let typeNode: ts.TypeNode | undefined;
+        let type: ts.Type | undefined;
+
+        if (typeArgs && typeArgs.length > 0) {
+          typeNode = typeArgs[0];
+          if (typeNode && typeRegistry) {
+            type = typeRegistry.get(typeNode);
+          }
+        } else {
+          // Infer from contextual type
+          const contextualType = inferContextualType(node, checker);
+          if (contextualType) {
+            type = contextualType;
+            typeNode = typeToSchemaTypeNode(
+              contextualType,
+              checker,
+              sourceFile,
+            );
+          }
+        }
+
+        if (typeNode) {
+          const schemaCall = createSchemaCallWithRegistryTransfer(
+            context,
+            typeNode,
+            typeRegistry,
+          );
+          if ((!typeArgs || typeArgs.length === 0) && type && typeRegistry) {
+            typeRegistry.set(schemaCall, type);
+          }
+
+          const updated = factory.createCallExpression(
+            node.expression,
+            node.typeArguments,
+            [...args, schemaCall],
+          );
+          return ts.visitEachChild(updated, visit, transformation);
+        }
+      }
+
+      if (callKind?.kind === "generate-object") {
+        const factory = transformation.factory;
+        const typeArgs = node.typeArguments;
+        const args = node.arguments;
+
+        // Check if schema is already present in options
+        if (args.length > 0 && ts.isObjectLiteralExpression(args[0]!)) {
+          const props = (args[0] as ts.ObjectLiteralExpression).properties;
+          if (
+            props.some((p: ts.ObjectLiteralElementLike) =>
+              p.name && ts.isIdentifier(p.name) && p.name.text === "schema"
+            )
+          ) {
+            return ts.visitEachChild(node, visit, transformation);
+          }
+        }
+
+        let typeNode: ts.TypeNode | undefined;
+        let type: ts.Type | undefined;
+
+        if (typeArgs && typeArgs.length > 0) {
+          typeNode = typeArgs[0];
+          if (typeNode && typeRegistry) {
+            type = typeRegistry.get(typeNode);
+          }
+        } else {
+          // Infer from contextual type
+          const contextualType = inferContextualType(node, checker);
+          if (contextualType) {
+            const objectProp = contextualType.getProperty("object");
+            if (objectProp) {
+              const objectType = checker.getTypeOfSymbolAtLocation(
+                objectProp,
+                node,
+              );
+              if (objectType) {
+                type = objectType;
+                typeNode = typeToSchemaTypeNode(
+                  objectType,
+                  checker,
+                  sourceFile,
+                );
+              }
+            }
+          }
+        }
+
+        if (typeNode) {
+          const schemaCall = createSchemaCallWithRegistryTransfer(
+            context,
+            typeNode,
+            typeRegistry,
+          );
+          if ((!typeArgs || typeArgs.length === 0) && type && typeRegistry) {
+            typeRegistry.set(schemaCall, type);
+          }
+
+          let newOptions: ts.Expression;
+          if (args.length > 0 && ts.isObjectLiteralExpression(args[0]!)) {
+            // Add schema property to existing object literal
+            newOptions = factory.createObjectLiteralExpression(
+              [
+                ...(args[0] as ts.ObjectLiteralExpression).properties,
+                factory.createPropertyAssignment("schema", schemaCall),
+              ],
+              true,
+            );
+          } else if (args.length > 0) {
+            // Options is an expression (not literal) -> { ...opts, schema: ... }
+            newOptions = factory.createObjectLiteralExpression(
+              [
+                factory.createSpreadAssignment(args[0]!),
+                factory.createPropertyAssignment("schema", schemaCall),
+              ],
+              true,
+            );
+          } else {
+            // No options -> { schema: ... }
+            newOptions = factory.createObjectLiteralExpression(
+              [factory.createPropertyAssignment("schema", schemaCall)],
+              true,
+            );
+          }
+
+          const updated = factory.createCallExpression(
+            node.expression,
+            node.typeArguments,
+            [newOptions, ...args.slice(1)],
+          );
+          return ts.visitEachChild(updated, visit, transformation);
         }
       }
 
