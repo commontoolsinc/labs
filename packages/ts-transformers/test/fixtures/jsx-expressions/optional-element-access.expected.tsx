@@ -239,4 +239,3 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-

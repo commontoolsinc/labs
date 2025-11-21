@@ -448,7 +448,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                         }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: charm, index: index, params: {} }) => (<li>
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: charm, index, params: {} }) => (<li>
                 <ct-button onClick={goToCharm({ charm })}>
                   Go to Charm {__ctHelpers.derive({
                 type: "object",

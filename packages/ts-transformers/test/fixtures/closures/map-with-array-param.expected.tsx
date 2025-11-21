@@ -228,7 +228,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                         }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, index: index, array: array, params: {} }) => (<div>
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, index, array, params: {} }) => (<div>
             Item {item} at index {index} of {array.length} total items
           </div>)), {})}
       </div>),

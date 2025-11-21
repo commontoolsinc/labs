@@ -284,7 +284,7 @@ export default recipe({
                         }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, index: index, params: { state } }) => (<div>
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, index, params: { state } }) => (<div>
             Item #{__ctHelpers.derive({
                 type: "object",
                 properties: {

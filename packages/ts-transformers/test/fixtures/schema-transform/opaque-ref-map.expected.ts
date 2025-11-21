@@ -156,7 +156,7 @@ export default recipe({
             }
         },
         required: ["title", "done", "position"]
-    } as const satisfies __ctHelpers.JSONSchema, ({ element: item, index: index, params: {} }) => ({
+    } as const satisfies __ctHelpers.JSONSchema, ({ element: item, index, params: {} }) => ({
         title: item.title,
         done: item.done,
         position: index,

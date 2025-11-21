@@ -1,12 +1,13 @@
 import ts from "typescript";
-import type { TransformationContext } from "../core/mod.ts";
-import { createCaptureAccessExpression } from "../utils/capture-tree.ts";
-import type { CaptureTreeNode } from "../utils/capture-tree.ts";
+import type { TransformationContext } from "../../core/mod.ts";
+import { createCaptureAccessExpression } from "../../utils/capture-tree.ts";
+import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
   getUniqueIdentifier,
   maybeReuseIdentifier,
-} from "../utils/identifiers.ts";
-import { createDeriveCall } from "../transformers/builtins/derive.ts";
+  normalizeBindingName,
+} from "../../utils/identifiers.ts";
+import { createDeriveCall } from "../../transformers/builtins/derive.ts";
 
 function isBindingPattern(name: ts.BindingName): name is ts.BindingPattern {
   return ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name);
@@ -31,48 +32,6 @@ export interface ElementBindingAnalysis {
 interface ElementBindingPlan {
   readonly aliases: ComputedAliasInfo[];
   readonly residualPattern?: ts.BindingName;
-}
-
-export function normalizeBindingName(
-  name: ts.BindingName,
-  factory: ts.NodeFactory,
-  used: Set<string>,
-): ts.BindingName {
-  if (ts.isIdentifier(name)) {
-    return maybeReuseIdentifier(name, used);
-  }
-
-  if (ts.isObjectBindingPattern(name)) {
-    const elements = name.elements.map((element) =>
-      factory.createBindingElement(
-        element.dotDotDotToken,
-        element.propertyName,
-        normalizeBindingName(element.name, factory, used),
-        element.initializer as ts.Expression | undefined,
-      )
-    );
-    return factory.createObjectBindingPattern(elements);
-  }
-
-  if (ts.isArrayBindingPattern(name)) {
-    const elements = name.elements.map((element) => {
-      if (ts.isOmittedExpression(element)) {
-        return element;
-      }
-      if (ts.isBindingElement(element)) {
-        return factory.createBindingElement(
-          element.dotDotDotToken,
-          element.propertyName,
-          normalizeBindingName(element.name, factory, used),
-          element.initializer as ts.Expression | undefined,
-        );
-      }
-      return element;
-    });
-    return factory.createArrayBindingPattern(elements);
-  }
-
-  return name;
 }
 
 function buildElementBindingPlan(
