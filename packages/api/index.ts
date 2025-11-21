@@ -919,6 +919,7 @@ export type BuiltInGenerateObjectParams =
     model?: string;
     prompt: BuiltInLLMContent;
     messages?: never;
+    context?: Record<string, any>;
     schema?: JSONSchema;
     system?: string;
     cache?: boolean;
@@ -930,6 +931,7 @@ export type BuiltInGenerateObjectParams =
     model?: string;
     prompt?: never;
     messages: BuiltInLLMMessage[];
+    context?: Record<string, any>;
     schema?: JSONSchema;
     system?: string;
     cache?: boolean;
@@ -942,6 +944,7 @@ export type BuiltInGenerateTextParams =
   | {
     prompt: string;
     messages?: never;
+    context?: Record<string, any>;
     system?: string;
     model?: string;
     maxTokens?: number;
@@ -950,6 +953,7 @@ export type BuiltInGenerateTextParams =
   | {
     prompt?: never;
     messages: BuiltInLLMMessage[];
+    context?: Record<string, any>;
     system?: string;
     model?: string;
     maxTokens?: number;

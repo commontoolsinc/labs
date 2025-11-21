@@ -1250,6 +1250,7 @@ export const llmToolExecutionHelpers = {
   buildAssistantMessage,
   createToolResultMessages,
   hasValidContent,
+  buildAvailableCellsDocumentation,
 };
 
 /**
