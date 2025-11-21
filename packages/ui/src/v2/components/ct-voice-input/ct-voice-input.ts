@@ -106,6 +106,8 @@ export class CTVoiceInput extends BaseElement {
         transition: all 0.2s ease;
         font-size: 1.5rem;
         user-select: none;
+        /* Prevent default touch behaviors for hold-to-record */
+        touch-action: none;
       }
 
       .recording-button:hover:not(:disabled) {
@@ -362,19 +364,47 @@ export class CTVoiceInput extends BaseElement {
     this._recordingState = "idle";
   }
 
-  private _handleButtonMouseDown() {
+  /** Track active pointer to prevent multi-touch issues */
+  private _activePointerId: number | null = null;
+
+  private _handlePointerDown(e: PointerEvent) {
+    // Only track one pointer at a time
+    if (this._activePointerId !== null) return;
+
+    // Capture pointer to receive events even if pointer leaves element
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    this._activePointerId = e.pointerId;
+
     if (this.recordingMode === "hold" && !this.disabled && !this.isRecording) {
       this._startRecording();
     }
   }
 
-  private _handleButtonMouseUp() {
+  private _handlePointerUp(e: PointerEvent) {
+    // Only respond to the pointer we're tracking
+    if (this._activePointerId !== e.pointerId) return;
+
+    this._activePointerId = null;
+    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+
+    if (this.recordingMode === "hold" && this.isRecording) {
+      this._stopRecording();
+    }
+  }
+
+  private _handlePointerCancel(e: PointerEvent) {
+    // Handle cancelled pointer (e.g., system gesture)
+    if (this._activePointerId !== e.pointerId) return;
+
+    this._activePointerId = null;
+
     if (this.recordingMode === "hold" && this.isRecording) {
       this._stopRecording();
     }
   }
 
   private _handleButtonClick() {
+    // Only handle click for toggle mode - hold mode uses pointer events
     if (this.recordingMode === "toggle" && !this.disabled) {
       if (this.isRecording) {
         this._stopRecording();
@@ -664,11 +694,9 @@ export class CTVoiceInput extends BaseElement {
         <button
           class="${classMap(buttonClasses)}"
           ?disabled="${this.disabled || this.isProcessing}"
-          @mousedown="${this._handleButtonMouseDown}"
-          @mouseup="${this._handleButtonMouseUp}"
-          @mouseleave="${this._handleButtonMouseUp}"
-          @touchstart="${this._handleButtonMouseDown}"
-          @touchend="${this._handleButtonMouseUp}"
+          @pointerdown="${this._handlePointerDown}"
+          @pointerup="${this._handlePointerUp}"
+          @pointercancel="${this._handlePointerCancel}"
           @click="${this._handleButtonClick}"
           aria-label="${this.isRecording
             ? "Stop recording"

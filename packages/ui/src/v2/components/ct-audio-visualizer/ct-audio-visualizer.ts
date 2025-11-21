@@ -60,6 +60,11 @@ export class CTAudioVisualizer extends BaseElement {
   private _stream?: MediaStream;
   private sourceNode?: MediaStreamAudioSourceNode;
 
+  /** Pre-allocated array for frequency data to avoid GC pressure */
+  private _frequencyData?: Uint8Array<ArrayBuffer>;
+  /** Pre-allocated array for normalized waveform values */
+  private _waveformBuffer: number[] = [];
+
   /**
    * Start visualization with an audio stream
    */
@@ -80,24 +85,38 @@ export class CTAudioVisualizer extends BaseElement {
     this.analyser.fftSize = 256;
     this.analyser.smoothingTimeConstant = 0.8;
 
-    const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+    // Pre-allocate frequency data buffer (reused every frame)
+    this._frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
+
+    // Pre-allocate waveform buffer for the bar count
+    const barCount = this.bars;
+    if (this._waveformBuffer.length !== barCount) {
+      this._waveformBuffer = new Array(barCount).fill(0);
+    }
 
     const update = () => {
-      if (!this._stream || !this.analyser) return;
+      if (!this._stream || !this.analyser || !this._frequencyData) return;
 
-      this.analyser.getByteFrequencyData(dataArray);
+      this.analyser.getByteFrequencyData(this._frequencyData);
 
       // Sample data at regular intervals to match bar count
       // Skip the first few bins (low frequencies that contain ambient noise)
-      const barCount = this.bars;
-      const skipBins = 2; // Skip first 2 frequency bins
-      const usableLength = dataArray.length - skipBins;
+      const skipBins = 2;
+      const usableLength = this._frequencyData.length - skipBins;
       const step = Math.floor(usableLength / barCount);
 
-      this.waveformData = Array.from({ length: barCount }, (_, i) => {
-        const index = Math.min(skipBins + (i * step), dataArray.length - 1);
-        return dataArray[index] / 255; // Normalize to 0-1
-      });
+      // Update buffer in place instead of creating new array
+      for (let i = 0; i < barCount; i++) {
+        const index = Math.min(
+          skipBins + i * step,
+          this._frequencyData.length - 1,
+        );
+        this._waveformBuffer[i] = this._frequencyData[index] / 255;
+      }
+
+      // Trigger update by assigning the same reference
+      // Lit will detect the change via the @property decorator
+      this.waveformData = this._waveformBuffer;
 
       this.requestUpdate();
       this.animationFrameId = requestAnimationFrame(update);
@@ -123,7 +142,9 @@ export class CTAudioVisualizer extends BaseElement {
 
     this.analyser = undefined;
     this._stream = undefined;
+    this._frequencyData = undefined;
     this.waveformData = [];
+    // Keep _waveformBuffer allocated for potential reuse
   }
 
   override disconnectedCallback() {
