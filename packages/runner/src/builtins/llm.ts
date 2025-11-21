@@ -56,6 +56,7 @@ const GenerateObjectParamsSchema = {
   properties: {
     prompt: { type: "string" },
     messages: { type: "array", items: LLMMessageSchema },
+    context: { type: "object", additionalProperties: { asCell: true }, default: {} },
     schema: { type: "object" },
     system: { type: "string" },
     model: { type: "string" },
@@ -239,6 +240,53 @@ async function handleLLMError<T, P>(
 }
 
 /**
+ * Helper function to build context documentation from context cells.
+ * Used by llm, generateText, and generateObject to provide consistent
+ * context handling across all LLM builtins.
+ *
+ * @param inputs - The inputs cell containing the context parameter
+ * @param runtime - The runtime instance
+ * @param space - The memory space
+ * @param tx - The current transaction
+ * @returns Context documentation string to append to system prompt
+ */
+function buildContextDocumentation(
+  inputs: Cell<any>,
+  runtime: IRuntime,
+  space: any,
+  tx: IExtendedStorageTransaction,
+): string {
+  const context = inputs.key("context").withTx(tx).get();
+  if (!context) return "";
+
+  // Create empty pinned cells array with proper schema
+  const pinnedCellsSchema = {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        name: { type: "string" },
+      },
+      required: ["path", "name"],
+    },
+  } as const;
+
+  return llmToolExecutionHelpers.buildAvailableCellsDocumentation(
+    runtime,
+    space,
+    context,
+    // LLM builtins don't have pinned cells (only llmDialog does)
+    runtime.getCell(
+      space,
+      { llm: { pinnedCells: [] } },
+      pinnedCellsSchema,
+      tx,
+    ),
+  );
+}
+
+/**
  * Generate data via an LLM.
  *
  * Returns the complete result as `result` and the incremental result as
@@ -295,8 +343,16 @@ export function llm(
     const { system, messages, stop, maxTokens, model } = inputs.withTx(tx)
       .get();
 
+    // Build context documentation from context cells and append to system prompt
+    const contextDocs = buildContextDocumentation(
+      inputs,
+      runtime,
+      parentCell.space,
+      tx,
+    );
+
     const llmParams: LLMRequest = {
-      system: system ?? "",
+      system: (system ?? "") + contextDocs,
       messages: (messages as unknown as BuiltInLLMMessage[]) ?? [],
       stop: stop ?? "",
       maxTokens: maxTokens ?? 4096,
@@ -461,8 +517,16 @@ export function generateText(
       (messages as unknown as BuiltInLLMMessage[]) ||
       [{ role: "user", content: prompt! }];
 
+    // Build context documentation from context cells and append to system prompt
+    const contextDocs = buildContextDocumentation(
+      inputs,
+      runtime,
+      parentCell.space,
+      tx,
+    );
+
     const llmParams: LLMRequest = {
-      system: system ?? "",
+      system: (system ?? "") + contextDocs,
       messages: requestMessages,
       stop: "",
       maxTokens: maxTokens ?? 4096,
@@ -643,13 +707,21 @@ export function generateObject<T extends Record<string, unknown>>(
       (messages as unknown as BuiltInLLMMessage[]) ||
       [{ role: "user", content: prompt! }];
 
+    // Build context documentation from context cells and append to system prompt
+    const contextDocs = buildContextDocumentation(
+      inputs,
+      runtime,
+      parentCell.space,
+      tx,
+    );
+
     // Determine whether to use the tool-calling path or the direct generateObject path
     const hasTools = isObject(tools) && Object.keys(tools).length > 0;
 
     if (hasTools) {
       // Use tool-calling path with finalResult builtin tool
       const llmParams: LLMRequest = {
-        system: system ?? "",
+        system: (system ?? "") + contextDocs,
         messages: requestMessages,
         stop: "",
         maxTokens: maxTokens ?? 8192,
@@ -840,9 +912,8 @@ export function generateObject<T extends Record<string, unknown>>(
         cache: cache ?? true,
       };
 
-      if (system) {
-        generateObjectParams.system = system;
-      }
+      // Always set system prompt with context documentation
+      generateObjectParams.system = (system ?? "") + contextDocs;
 
       const hash = refer(generateObjectParams).toString();
       const currentRequestHash = requestHashWithLog.get();

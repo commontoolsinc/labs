@@ -25,7 +25,7 @@ export const Suggestion = pattern(
     const suggestion = generateObject({
       system: "Find a useful pattern, run it, pass link to final result",
       prompt: situation,
-      // context,
+      context,
       tools: {
         fetchAndRunPattern: patternTool(fetchAndRunPattern),
         listPatternIndex: patternTool(listPatternIndex),
@@ -49,14 +49,27 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
       context: {},
     });
 
+    const suggestion2 = Suggestion({
+      situation: "gimme note with the attached content",
+      context: {
+        content: "This is the expected content",
+        value: Cell.of(0),
+      },
+    });
+
     return {
       [NAME]: title,
       [UI]: (
         <div>
           <h1>Suggestion Tester</h1>
+          <h2>Counter</h2>
           {derive(suggestion, (s) => {
-            debugger;
-            return s?.cell;
+            return s?.cell ?? "waiting...";
+          })}
+
+          <h2>Note</h2>
+          {derive(suggestion2, (s) => {
+            return s?.cell ?? "waiting..";
           })}
         </div>
       ),
