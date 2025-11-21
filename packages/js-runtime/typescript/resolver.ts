@@ -80,11 +80,28 @@ function isUnresolvedModuleOk(
 }
 
 function resolveSpecifier(specifier: string, from: Source): string {
-  if (
-    specifier.substring(0, 2) === "./" || specifier.substring(0, 3) === "../"
-  ) {
+  // Check if we're dealing with relative imports
+  const isRelative =
+    specifier.substring(0, 2) === "./" || specifier.substring(0, 3) === "../";
+
+  if (isRelative) {
+    // Check if the source is from a URL (HTTP/HTTPS)
+    if (from.name.startsWith("http://") || from.name.startsWith("https://")) {
+      // Use URL resolution for HTTP sources
+      try {
+        const resolved = new URL(specifier, from.name);
+        return resolved.href;
+      } catch (e) {
+        // Fall back to path resolution if URL resolution fails
+        console.warn(`URL resolution failed for ${specifier} from ${from.name}:`, e);
+        return join(dirname(from.name), specifier);
+      }
+    }
+
+    // Use path resolution for file system sources
     return join(dirname(from.name), specifier);
   }
+
   return specifier;
 }
 
