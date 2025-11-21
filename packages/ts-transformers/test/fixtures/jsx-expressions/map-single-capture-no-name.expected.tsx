@@ -240,10 +240,125 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, { people: people }, ({ people }) => people.length > 0 && (<ul>
-            {people.mapWithPattern(__ctHelpers.recipe<{
-                element: { id: string; name: string; };
-                params: {};
-            }>(({ element: person, params: {} }) => (<li key={person.id}>{person.name}</li>)), {})}
+            {people.mapWithPattern(__ctHelpers.recipe({
+                type: "object",
+                properties: {
+                    element: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "string"
+                            },
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "name"]
+                    },
+                    params: {
+                        type: "object",
+                        properties: {}
+                    }
+                },
+                required: ["element", "params"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "object",
+                properties: {
+                    type: {
+                        type: "string",
+                        "enum": ["vnode"]
+                    },
+                    name: {
+                        type: "string"
+                    },
+                    props: {
+                        $ref: "#/$defs/Props"
+                    },
+                    children: {
+                        $ref: "#/$defs/RenderNode"
+                    },
+                    $UI: {
+                        $ref: "#/$defs/VNode"
+                    }
+                },
+                required: ["type", "name", "props"],
+                $defs: {
+                    VNode: {
+                        type: "object",
+                        properties: {
+                            type: {
+                                type: "string",
+                                "enum": ["vnode"]
+                            },
+                            name: {
+                                type: "string"
+                            },
+                            props: {
+                                $ref: "#/$defs/Props"
+                            },
+                            children: {
+                                $ref: "#/$defs/RenderNode"
+                            },
+                            $UI: {
+                                $ref: "#/$defs/VNode"
+                            }
+                        },
+                        required: ["type", "name", "props"]
+                    },
+                    RenderNode: {
+                        anyOf: [{
+                                type: "string"
+                            }, {
+                                type: "number"
+                            }, {
+                                type: "boolean",
+                                "enum": [false]
+                            }, {
+                                type: "boolean",
+                                "enum": [true]
+                            }, {
+                                $ref: "#/$defs/VNode"
+                            }, {
+                                type: "object",
+                                properties: {}
+                            }, {
+                                type: "array",
+                                items: {
+                                    $ref: "#/$defs/RenderNode"
+                                }
+                            }]
+                    },
+                    Props: {
+                        type: "object",
+                        properties: {},
+                        additionalProperties: {
+                            anyOf: [{
+                                    type: "string"
+                                }, {
+                                    type: "number"
+                                }, {
+                                    type: "boolean",
+                                    "enum": [false]
+                                }, {
+                                    type: "boolean",
+                                    "enum": [true]
+                                }, {
+                                    type: "object",
+                                    additionalProperties: true
+                                }, {
+                                    type: "array",
+                                    items: true
+                                }, {
+                                    asCell: true
+                                }, {
+                                    asStream: true
+                                }, {
+                                    type: "null"
+                                }]
+                        }
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: person, params: {} }) => (<li key={person.id}>{person.name}</li>)), {})}
           </ul>))}
       </div>),
     };

@@ -303,7 +303,7 @@ export default recipe({
                         }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: _, index: index, params: { items } }) => (<li key={index}>
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: _, index, params: { items } }) => (<li key={index}>
               <ct-button onClick={removeItem({ items, index })}>
                 Remove
               </ct-button>

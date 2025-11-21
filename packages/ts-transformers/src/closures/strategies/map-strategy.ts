@@ -397,11 +397,57 @@ function createRecipeCallWithParams(
     filteredCaptureTree,
   );
 
+  // Infer result type
+  const { checker } = context;
+  const typeRegistry = context.options.typeRegistry;
+  let resultTypeNode: ts.TypeNode | undefined;
+
+  // Check for explicit return type annotation
+  if (callback.type) {
+    resultTypeNode = callback.type;
+    // Ensure type is registered if possible
+    if (typeRegistry) {
+      const type = getTypeAtLocationWithFallback(
+        callback.type,
+        checker,
+        typeRegistry,
+      );
+      if (type) {
+        typeRegistry.set(callback.type, type);
+      }
+    }
+  } else {
+    // Infer from callback signature
+    const signature = checker.getSignatureFromDeclaration(callback);
+    if (signature) {
+      const resultType = signature.getReturnType();
+      const isTypeParam = (resultType.flags & ts.TypeFlags.TypeParameter) !== 0;
+
+      if (!isTypeParam) {
+        resultTypeNode = checker.typeToTypeNode(
+          resultType,
+          context.sourceFile,
+          ts.NodeBuilderFlags.NoTruncation |
+          ts.NodeBuilderFlags.UseStructuralFallback,
+        );
+
+        if (resultTypeNode && typeRegistry) {
+          typeRegistry.set(resultTypeNode, resultType);
+        }
+      }
+    }
+  }
+
   // Create recipe call
   const recipeExpr = context.ctHelpers.getHelperExpr("recipe");
+  const typeArgs = [callbackParamTypeNode];
+  if (resultTypeNode) {
+    typeArgs.push(resultTypeNode);
+  }
+
   const recipeCall = factory.createCallExpression(
     recipeExpr,
-    [callbackParamTypeNode],
+    typeArgs,
     [newCallback],
   );
 

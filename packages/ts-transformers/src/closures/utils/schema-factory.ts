@@ -16,7 +16,7 @@ export class SchemaFactory {
   constructor(
     private context: TransformationContext,
     private factory: ts.NodeFactory = context.factory,
-  ) {}
+  ) { }
 
   /**
    * Build a TypeNode for a map callback parameter.
@@ -29,9 +29,30 @@ export class SchemaFactory {
     arrayParam: ts.ParameterDeclaration | undefined,
     captureTree: Map<string, CaptureTreeNode>,
   ): ts.TypeNode {
+    const { checker } = this.context;
+    const typeRegistry = this.context.options.typeRegistry;
+
     // 1. Determine element type
-    const elemTypeInfo = this.determineElementType(mapCall, elemParam);
-    const elemTypeNode = elemTypeInfo.typeNode;
+    let elemTypeNode: ts.TypeNode;
+
+    // Try explicit annotation
+    const explicit = tryExplicitParameterType(elemParam, checker, typeRegistry);
+    if (explicit) {
+      elemTypeNode = explicit.typeNode;
+    } else {
+      // Infer from map call
+      const inferred = inferArrayElementType(
+        (mapCall.expression as ts.PropertyAccessExpression).expression,
+        { ...this.context, typeRegistry },
+      );
+
+      elemTypeNode = inferred.typeNode;
+
+      // Register the inferred type if available
+      if (inferred.type) {
+        registerTypeForNode(elemTypeNode, inferred.type, typeRegistry);
+      }
+    }
 
     // 2. Build callback parameter properties
     const callbackParamProperties: ts.TypeElement[] = [
@@ -229,78 +250,9 @@ export class SchemaFactory {
       type,
       this.context.sourceFile,
       ts.NodeBuilderFlags.NoTruncation |
-        ts.NodeBuilderFlags.UseStructuralFallback,
+      ts.NodeBuilderFlags.UseStructuralFallback,
     ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
     return registerTypeForNode(typeNode, type, typeRegistry);
-  }
-
-  /**
-   * Helper to determine element type for map callback.
-   */
-  private determineElementType(
-    mapCall: ts.CallExpression,
-    elemParam: ts.ParameterDeclaration | undefined,
-  ): { typeNode: ts.TypeNode; type?: ts.Type } {
-    const { checker } = this.context;
-    const typeRegistry = this.context.options.typeRegistry;
-
-    // Try explicit annotation
-    const explicit = tryExplicitParameterType(elemParam, checker, typeRegistry);
-    if (explicit) return explicit;
-
-    // Try inference from map call
-    const inferred = inferArrayElementType(
-      (mapCall.expression as ts.PropertyAccessExpression).expression,
-      { ...this.context, typeRegistry },
-    );
-    if (inferred.type) {
-      return {
-        typeNode: registerTypeForNode(
-          inferred.typeNode,
-          inferred.type,
-          typeRegistry,
-        ),
-        type: inferred.type,
-      };
-    }
-
-    // Fallback: infer from the array expression itself
-    // mapCall.expression is PropertyAccess (array.map), so .expression is the array
-    const arrayExpr =
-      (mapCall.expression as ts.PropertyAccessExpression).expression;
-    const arrayType = checker.getTypeAtLocation(arrayExpr);
-
-    // Try to extract element type from array type
-    // This is a best-effort fallback if inferArrayElementType failed
-    let elementType = arrayType;
-    if (checker.isArrayType(arrayType)) {
-      // @ts-ignore: Internal API but standard way to get element type
-      elementType = (arrayType as any).typeArguments?.[0] ?? arrayType;
-    } else if (arrayType.flags & ts.TypeFlags.Object) {
-      // Handle OpaqueRef<T[]> or similar wrappers
-      // This is complex without internal APIs, so we might just fallback to 'any' or 'unknown'
-      // But let's try to see if it has a single type argument which is an array
-      const typeRef = arrayType as ts.TypeReference;
-      if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
-        const inner = typeRef.typeArguments[0];
-        if (inner && checker.isArrayType(inner)) {
-          // @ts-ignore: Internal API
-          elementType = (inner as any).typeArguments?.[0] ?? inner;
-        }
-      }
-    }
-
-    const typeNode = checker.typeToTypeNode(
-      elementType,
-      this.context.sourceFile,
-      ts.NodeBuilderFlags.NoTruncation |
-        ts.NodeBuilderFlags.UseStructuralFallback,
-    ) ?? this.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-
-    return {
-      typeNode: registerTypeForNode(typeNode, elementType, typeRegistry),
-      type: elementType,
-    };
   }
 }

@@ -143,7 +143,7 @@ export default pattern(({ values }) => {
                         }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: value, index: index, params: {} }) => (<div>
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: value, index, params: {} }) => (<div>
               {index}: {value}
             </div>)), {})}
         </div>

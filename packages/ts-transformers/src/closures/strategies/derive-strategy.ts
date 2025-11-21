@@ -240,7 +240,7 @@ export function transformDeriveCall(
   context: TransformationContext,
   visitor: ts.Visitor,
 ): ts.CallExpression | undefined {
-  const { factory } = context;
+  const { factory, checker, options } = context;
 
   // Extract callback
   const callback = extractDeriveCallback(deriveCall);
@@ -249,7 +249,7 @@ export function transformDeriveCall(
   }
 
   // Collect captures
-  const collector = new CaptureCollector(context.checker);
+  const collector = new CaptureCollector(checker);
   const { captures: captureExpressions, captureTree } = collector.analyze(
     callback,
   );
@@ -285,25 +285,18 @@ export function transformDeriveCall(
   }
 
   // Determine parameter name for the original input
-  // Extract the identifier name from the input expression (e.g., "value" from `value`)
-  // This becomes the property name in the merged object
   let originalInputParamName = "input"; // Fallback for complex expressions
 
   if (ts.isIdentifier(originalInput)) {
-    // Simple identifier input like `value` - use its name
     originalInputParamName = originalInput.text;
   } else if (ts.isPropertyAccessExpression(originalInput)) {
-    // Property access like `state.value` - use the property name
     originalInputParamName = originalInput.name.text;
   }
-  // For other expressions (object literals, etc.), use "input" fallback
 
   // Check if callback originally had zero parameters
-  // In this case, we don't need to preserve the input - just use captures
   const hadZeroParameters = callback.parameters.length === 0;
 
   // Resolve capture name collisions with the original input parameter name
-  // Only check for collisions if we're actually adding the input parameter (not zero params)
   const captureNameMap = resolveDeriveCaptureNameCollisions(
     hadZeroParameters ? "" : originalInputParamName,
     captureTree,
@@ -335,40 +328,35 @@ export function transformDeriveCall(
   builder.registerUsedNames([originalInputParamName]);
 
   // Infer result type from callback
-  // SchemaInjectionTransformer will use this to generate the result schema
-  const signature = context.checker.getSignatureFromDeclaration(callback);
+  const signature = checker.getSignatureFromDeclaration(callback);
   let resultTypeNode: ts.TypeNode | undefined;
   let resultType: ts.Type | undefined;
   let hasTypeParameter = false;
 
   if (callback.type) {
-    // Explicit return type annotation - use it directly (no need to register in typeRegistry)
+    // Explicit return type annotation
     resultTypeNode = callback.type;
   } else if (signature) {
     // Infer from callback signature
     resultType = signature.getReturnType();
 
     // Check if this is an uninstantiated type parameter
-    // When inside a generic function, the return type may be the generic parameter itself (e.g., "T")
     const resultFlags = resultType.flags;
     const isTypeParam = (resultFlags & ts.TypeFlags.TypeParameter) !== 0;
 
     if (isTypeParam) {
-      // Mark that we have a type parameter - we'll omit ALL type arguments
-      // This lets SchemaInjectionTransformer's expression-based inference handle it
       hasTypeParameter = true;
     } else {
-      resultTypeNode = context.checker.typeToTypeNode(
+      resultTypeNode = checker.typeToTypeNode(
         resultType,
         context.sourceFile,
         ts.NodeBuilderFlags.NoTruncation |
-          ts.NodeBuilderFlags.UseStructuralFallback,
+        ts.NodeBuilderFlags.UseStructuralFallback,
       );
 
-      // Register the result Type in typeRegistry for the synthetic TypeNode
-      // This fixes schema generation for shorthand properties referencing captured variables
-      if (resultTypeNode && context.options.typeRegistry) {
-        context.options.typeRegistry.set(resultTypeNode, resultType);
+      // Register the result Type in typeRegistry
+      if (resultTypeNode && options.typeRegistry) {
+        options.typeRegistry.set(resultTypeNode, resultType);
       }
     }
   }
@@ -387,8 +375,6 @@ export function transformDeriveCall(
   }
 
   // Build the new callback
-  // Pass null for paramsPropertyName to merge captures into top-level object
-  // Only pass resultTypeNode if it was explicit in the original callback (non-synthetic)
   const originalCallback = ts.getOriginalNode(callback) as
     | ts.ArrowFunction
     | ts.FunctionExpression;
@@ -401,6 +387,7 @@ export function transformDeriveCall(
     null, // derive merges captures into top-level object
     hasExplicitReturnType ? resultTypeNode : null,
   );
+
   // Build TypeNodes for schema generation
   const schemaFactory = new SchemaFactory(context);
   const inputTypeNode = schemaFactory.createDeriveInputSchema(
@@ -412,27 +399,24 @@ export function transformDeriveCall(
   );
 
   // Build the derive call expression
-  // If we have a type parameter, omit type arguments entirely to let SchemaInjectionTransformer infer from expressions
-  // Otherwise, use the 2-arg type argument form which SchemaInjectionTransformer will convert to 4-arg schema form
   const deriveExpr = context.ctHelpers.getHelperExpr("derive");
 
   const newDeriveCall = factory.createCallExpression(
     deriveExpr,
     hasTypeParameter
       ? undefined
-      : (resultTypeNode ? [inputTypeNode, resultTypeNode] : [inputTypeNode]), // Type arguments
-    [mergedInput, newCallback], // Runtime arguments
+      : (resultTypeNode ? [inputTypeNode, resultTypeNode] : [inputTypeNode]),
+    [mergedInput, newCallback],
   );
 
-  // Register the type of the derive call expression itself in the typeRegistry
-  // so that type inference works correctly for synthetic nodes
-  if (context.options.typeRegistry) {
+  // Register the type of the derive call expression itself
+  if (options.typeRegistry) {
     registerDeriveCallType(
       newDeriveCall,
       resultTypeNode,
       resultType,
-      context.checker,
-      context.options.typeRegistry,
+      checker,
+      options.typeRegistry,
     );
   }
 
