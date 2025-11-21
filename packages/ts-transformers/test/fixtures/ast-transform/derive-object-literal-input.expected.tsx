@@ -1,9 +1,17 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive, lift } from "commontools";
-const stage = cell<string>("initial");
-const attemptCount = cell<number>(0);
-const acceptedCount = cell<number>(0);
-const rejectedCount = cell<number>(0);
+const stage = cell<string>("initial", {
+    type: "string"
+} as const satisfies __ctHelpers.JSONSchema);
+const attemptCount = cell<number>(0, {
+    type: "number"
+} as const satisfies __ctHelpers.JSONSchema);
+const acceptedCount = cell<number>(0, {
+    type: "number"
+} as const satisfies __ctHelpers.JSONSchema);
+const rejectedCount = cell<number>(0, {
+    type: "number"
+} as const satisfies __ctHelpers.JSONSchema);
 const normalizedStage = lift({
     type: "string"
 } as const satisfies __ctHelpers.JSONSchema, {

@@ -40,7 +40,7 @@ Deno.test("Schema Injection - Cell.of", async () => {
   );
   assert(
     normalize(result).includes(
-      'Cell.of(123, { type: "number", "enum": [123] } as const satisfies __ctHelpers.JSONSchema)',
+      'Cell.of(123, { type: "number" } as const satisfies __ctHelpers.JSONSchema)',
     ),
   );
 });

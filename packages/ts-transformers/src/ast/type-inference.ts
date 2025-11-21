@@ -22,6 +22,51 @@ export function isAnyOrUnknownType(type: ts.Type | undefined): boolean {
 }
 
 /**
+ * Widen literal types to their base types for more flexible schemas.
+ * - NumberLiteral (e.g., 10) → number
+ * - StringLiteral (e.g., "hello") → string
+ * - BooleanLiteral (e.g., true) → boolean
+ * - BigIntLiteral (e.g., 10n) → bigint
+ * - Other types are returned unchanged
+ */
+export function widenLiteralType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): ts.Type {
+  // Number literal → number
+  if (type.flags & ts.TypeFlags.NumberLiteral) {
+    return checker.getNumberType();
+  }
+
+  // String literal → string
+  if (type.flags & ts.TypeFlags.StringLiteral) {
+    return checker.getStringType();
+  }
+
+  // Boolean literal (true/false) → boolean
+  if (type.flags & ts.TypeFlags.BooleanLiteral) {
+    // TypeChecker doesn't have getBooleanType(), so we need to create it
+    // by getting the union of true | false
+    const trueType = checker.getTrueType?.() ?? type;
+    const falseType = checker.getFalseType?.() ?? type;
+    if (trueType && falseType) {
+      return (checker as ts.TypeChecker & {
+        getUnionType?: (types: readonly ts.Type[]) => ts.Type;
+      }).getUnionType?.([trueType, falseType]) ?? type;
+    }
+    return type;
+  }
+
+  // BigInt literal → bigint
+  if (type.flags & ts.TypeFlags.BigIntLiteral) {
+    return checker.getBigIntType();
+  }
+
+  // All other types (including already-widened types) return unchanged
+  return type;
+}
+
+/**
  * Infer the type of a function parameter, with optional fallback
  * Returns undefined if the type cannot be inferred
  */
@@ -359,7 +404,7 @@ export function inferArrayElementType(
   // getTypeAtLocationWithFallback handles undefined typeRegistry gracefully
   const arrayType =
     getTypeAtLocationWithFallback(arrayExpr, checker, typeRegistry) ??
-      checker.getTypeAtLocation(arrayExpr);
+    checker.getTypeAtLocation(arrayExpr);
 
   // Try to unwrap OpaqueRef<T[]> → T[] → T
   let actualType = arrayType;
@@ -434,7 +479,7 @@ export function inferArrayElementType(
       // Convert Type to TypeNode
       const typeNode =
         typeToTypeNode(elementType, checker, context.sourceFile) ??
-          factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+        factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
       return { typeNode, type: elementType };
     }
