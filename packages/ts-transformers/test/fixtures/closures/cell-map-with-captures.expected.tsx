@@ -126,7 +126,13 @@ export default recipe({
     }
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     // Explicitly type as Cell to ensure closure transformation
-    const typedValues: Cell<number[]> = cell(state.values);
+    const typedValues: Cell<number[]> = cell(state.values, {
+        type: "array",
+        items: {
+            type: "number"
+        },
+        asOpaque: true
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [UI]: (<div>
         {typedValues.mapWithPattern(__ctHelpers.recipe({

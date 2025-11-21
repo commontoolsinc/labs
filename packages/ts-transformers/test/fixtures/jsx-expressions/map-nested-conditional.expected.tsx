@@ -107,8 +107,21 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, (_state) => {
-    const items = cell([{ name: "apple" }, { name: "banana" }]);
-    const showList = cell(true);
+    const items = cell([{ name: "apple" }, { name: "banana" }], {
+        type: "array",
+        items: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    } as const satisfies __ctHelpers.JSONSchema);
+    const showList = cell(true, {
+        type: "boolean"
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [UI]: (<div>
         {__ctHelpers.derive({

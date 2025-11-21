@@ -107,8 +107,12 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, (_state) => {
-    const count = cell(10);
-    const price = cell(10);
+    const count = cell(10, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const price = cell(10, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [UI]: (<div>
         <p>Count: {count}</p>

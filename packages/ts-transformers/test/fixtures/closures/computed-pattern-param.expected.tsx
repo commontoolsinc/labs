@@ -3,7 +3,9 @@ import { cell, computed, pattern } from "commontools";
 export default pattern((config: {
     multiplier: number;
 }) => {
-    const value = cell(10);
+    const value = cell(10, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     const result = __ctHelpers.derive({
         type: "object",
         properties: {

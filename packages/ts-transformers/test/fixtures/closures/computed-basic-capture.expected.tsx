@@ -1,8 +1,12 @@
 import * as __ctHelpers from "commontools";
 import { cell, computed } from "commontools";
 export default function TestCompute() {
-    const value = cell(10);
-    const multiplier = cell(2);
+    const value = cell(10, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const multiplier = cell(2, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     const result = __ctHelpers.derive({
         type: "object",
         properties: {

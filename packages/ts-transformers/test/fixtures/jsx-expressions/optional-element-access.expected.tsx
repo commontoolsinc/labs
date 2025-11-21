@@ -110,7 +110,12 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, () => {
-    const list = cell<string[] | undefined>(undefined);
+    const list = cell<string[] | undefined>(undefined, {
+        type: "array",
+        items: {
+            type: "string"
+        }
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [NAME]: "Optional element access",
         [UI]: (<div>

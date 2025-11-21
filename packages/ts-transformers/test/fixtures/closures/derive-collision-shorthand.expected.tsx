@@ -1,7 +1,9 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive } from "commontools";
 export default function TestDeriveCollisionShorthand() {
-    const multiplier = cell(2);
+    const multiplier = cell(2, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     // Input name 'multiplier' collides with captured variable 'multiplier'
     // The callback uses shorthand property { multiplier }
     // This should expand to { multiplier: multiplier_1 } after renaming
