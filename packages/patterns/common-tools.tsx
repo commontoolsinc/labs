@@ -221,11 +221,14 @@ export const fetchAndRunPattern = recipe<FetchAndRunPatternInput>(
     const { pending: _fetchPending, result: program, error: _fetchError } =
       fetchProgram({ url });
 
-    const { pending, result, error } = compileAndRun({
-      files: program.files,
-      main: program.main,
+    // Use derive to safely handle when program is undefined/pending
+    const compileParams = derive(program, (p) => ({
+      files: p?.files ?? [],
+      main: p?.main ?? "",
       input: args,
-    });
+    }));
+
+    const { pending, result, error } = compileAndRun(compileParams);
 
     return ifElse(
       computed(() => pending || (!result && !error)),

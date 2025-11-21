@@ -1,17 +1,12 @@
 /// <cts-enable />
 import {
   Cell,
-  compileAndRun,
   computed,
-  fetchData,
-  fetchProgram,
   handler,
   ifElse,
   NAME,
-  navigateTo,
   pattern,
   patternTool,
-  recipe,
   UI,
 } from "commontools";
 import Chatbot from "./chatbot.tsx";

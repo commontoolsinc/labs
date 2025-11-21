@@ -56,7 +56,11 @@ const GenerateObjectParamsSchema = {
   properties: {
     prompt: { type: "string" },
     messages: { type: "array", items: LLMMessageSchema },
-    context: { type: "object", additionalProperties: { asCell: true }, default: {} },
+    context: {
+      type: "object",
+      additionalProperties: { asCell: true },
+      default: {},
+    },
     schema: { type: "object" },
     system: { type: "string" },
     model: { type: "string" },

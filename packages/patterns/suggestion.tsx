@@ -12,7 +12,6 @@ import {
   toSchema,
   UI,
 } from "commontools";
-import Note from "./note.tsx";
 import { fetchAndRunPattern, listPatternIndex } from "./common-tools.tsx";
 
 export const Suggestion = pattern(
