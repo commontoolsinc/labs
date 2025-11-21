@@ -428,7 +428,7 @@ function createRecipeCallWithParams(
           resultType,
           context.sourceFile,
           ts.NodeBuilderFlags.NoTruncation |
-          ts.NodeBuilderFlags.UseStructuralFallback,
+            ts.NodeBuilderFlags.UseStructuralFallback,
         );
 
         if (resultTypeNode && typeRegistry) {

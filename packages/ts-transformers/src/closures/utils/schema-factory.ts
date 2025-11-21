@@ -16,7 +16,7 @@ export class SchemaFactory {
   constructor(
     private context: TransformationContext,
     private factory: ts.NodeFactory = context.factory,
-  ) { }
+  ) {}
 
   /**
    * Build a TypeNode for a map callback parameter.
@@ -250,7 +250,7 @@ export class SchemaFactory {
       type,
       this.context.sourceFile,
       ts.NodeBuilderFlags.NoTruncation |
-      ts.NodeBuilderFlags.UseStructuralFallback,
+        ts.NodeBuilderFlags.UseStructuralFallback,
     ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
     return registerTypeForNode(typeNode, type, typeRegistry);
