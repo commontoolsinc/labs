@@ -17,6 +17,16 @@ import type { CTAudioVisualizer } from "../ct-audio-visualizer/ct-audio-visualiz
 import { convertToWav } from "../../utils/audio-conversion.ts";
 
 /**
+ * Recording state machine to prevent race conditions
+ */
+type RecordingState =
+  | "idle"
+  | "requesting"
+  | "recording"
+  | "stopping"
+  | "processing";
+
+/**
  * Timestamped segment of transcription
  */
 export interface TranscriptionChunk {
@@ -232,11 +242,21 @@ export class CTVoiceInput extends BaseElement {
   @property({ type: Boolean })
   disabled = false;
 
-  @property({ type: Boolean })
-  private isRecording = false;
+  /**
+   * Internal recording state machine - prevents race conditions
+   */
+  @property({ type: String })
+  private _recordingState: RecordingState = "idle";
 
-  @property({ type: Boolean })
-  private isProcessing = false;
+  /** Derived property for template compatibility */
+  private get isRecording(): boolean {
+    return this._recordingState === "recording";
+  }
+
+  /** Derived property for template compatibility */
+  private get isProcessing(): boolean {
+    return this._recordingState === "processing";
+  }
 
   @property({ type: Number })
   private recordingDuration = 0;
@@ -306,6 +326,7 @@ export class CTVoiceInput extends BaseElement {
   }
 
   private _cleanup() {
+    // Clear timers
     if (this.timerInterval) {
       clearInterval(this.timerInterval);
       this.timerInterval = undefined;
@@ -314,13 +335,31 @@ export class CTVoiceInput extends BaseElement {
       clearTimeout(this.maxDurationTimeout);
       this.maxDurationTimeout = undefined;
     }
+
+    // Stop visualizer
+    const visualizer = this.visualizerRef.value;
+    if (visualizer) {
+      visualizer.stopVisualization();
+    }
+
+    // Stop media recorder (without triggering onstop processing)
+    if (this.mediaRecorder) {
+      this.mediaRecorder.onstop = null; // Prevent processing
+      if (this.mediaRecorder.state !== "inactive") {
+        this.mediaRecorder.stop();
+      }
+      this.mediaRecorder = undefined;
+    }
+
+    // Stop and release the stream
     if (this.stream) {
       this.stream.getTracks().forEach((track) => track.stop());
       this.stream = undefined;
     }
-    if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
-      this.mediaRecorder.stop();
-    }
+
+    // Reset state
+    this.audioChunks = [];
+    this._recordingState = "idle";
   }
 
   private _handleButtonMouseDown() {
@@ -345,26 +384,55 @@ export class CTVoiceInput extends BaseElement {
     }
   }
 
-  private async _startRecording() {
-    try {
-      this.errorMessage = "";
+  /**
+   * Get the best supported audio MIME type for this browser
+   */
+  private _getSupportedMimeType(): string {
+    // Prefer WebM with Opus (Chrome, Firefox, Edge)
+    if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+      return "audio/webm;codecs=opus";
+    }
+    // Fallback to plain WebM
+    if (MediaRecorder.isTypeSupported("audio/webm")) {
+      return "audio/webm";
+    }
+    // Safari support: MP4 with AAC
+    if (MediaRecorder.isTypeSupported("audio/mp4")) {
+      return "audio/mp4";
+    }
+    // Last resort fallback
+    return "";
+  }
 
+  private async _startRecording() {
+    // Guard: only allow starting from idle state
+    if (this._recordingState !== "idle") {
+      console.warn(
+        `Cannot start recording: current state is ${this._recordingState}`,
+      );
+      return;
+    }
+
+    this._recordingState = "requesting";
+    this.errorMessage = "";
+
+    try {
       // Request microphone permission
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
-          sampleRate: 16000,
+          // Note: sampleRate constraint is often ignored by browsers
+          // Actual resampling happens during WAV conversion
           echoCancellation: true,
           noiseSuppression: true,
         },
       });
 
-      // Create MediaRecorder
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/webm";
+      // Create MediaRecorder with cross-platform mime type
+      const mimeType = this._getSupportedMimeType();
+      const options: MediaRecorderOptions = mimeType ? { mimeType } : {};
 
-      this.mediaRecorder = new MediaRecorder(this.stream, { mimeType });
+      this.mediaRecorder = new MediaRecorder(this.stream, options);
       this.audioChunks = [];
       this.startTime = Date.now();
       this.recordingDuration = 0;
@@ -376,60 +444,71 @@ export class CTVoiceInput extends BaseElement {
         }
       };
 
-      // Handle recording completion
+      // Handle recording completion - capture state for async processing
       this.mediaRecorder.onstop = () => {
-        this._processRecording();
+        // Capture chunks and mimeType before they could be cleared
+        const chunks = [...this.audioChunks];
+        const recordedMimeType =
+          this.mediaRecorder?.mimeType || mimeType || "audio/webm";
+        const duration = this.startTime
+          ? (Date.now() - this.startTime) / 1000
+          : this.recordingDuration;
+
+        this._processRecording(chunks, recordedMimeType, duration);
       };
 
-      // Start recording
-      this.mediaRecorder.start(100); // Collect data every 100ms
-      this.isRecording = true;
+      // Start recording with larger timeslice to reduce blob count
+      this.mediaRecorder.start(250);
+      this._recordingState = "recording";
 
       // Wait for Lit to render the visualizer element
       await this.updateComplete;
 
-      // Start visualizer
-      if (this.showWaveform) {
+      // Start visualizer - guard against stream being cleared
+      if (this.showWaveform && this.stream) {
         const visualizer = this.visualizerRef.value;
         if (visualizer) {
-          await visualizer.startVisualization(this.stream);
+          visualizer.startVisualization(this.stream);
         }
       }
 
-      // Start timer
+      // Start timer with slightly lower frequency (250ms is enough for UI)
       this.timerInterval = setInterval(() => {
-        if (this.startTime) {
+        if (this.startTime && this._recordingState === "recording") {
           this.recordingDuration = (Date.now() - this.startTime) / 1000;
         }
-      }, 100);
+      }, 250);
 
       // Set max duration timeout
       this.maxDurationTimeout = setTimeout(() => {
-        if (this.isRecording) {
+        if (this._recordingState === "recording") {
           this._stopRecording();
         }
       }, this.maxDuration * 1000);
 
       this.emit("ct-recording-start", { timestamp: this.startTime });
     } catch (error) {
+      this._recordingState = "idle";
       const errorObj = error as Error;
       this._handleError(errorObj);
     }
   }
 
   private _stopRecording() {
+    // Guard: only allow stopping from recording state
+    if (this._recordingState !== "recording") {
+      return;
+    }
+
+    this._recordingState = "stopping";
+
     // Stop visualizer first
     const visualizer = this.visualizerRef.value;
     if (visualizer) {
       visualizer.stopVisualization();
     }
 
-    if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
-      this.mediaRecorder.stop();
-    }
-
-    this.isRecording = false;
-
+    // Clear timers before stopping recorder
     if (this.timerInterval) {
       clearInterval(this.timerInterval);
       this.timerInterval = undefined;
@@ -440,43 +519,68 @@ export class CTVoiceInput extends BaseElement {
       this.maxDurationTimeout = undefined;
     }
 
+    // Stop the media recorder - this triggers onstop which calls _processRecording
+    if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
+      this.mediaRecorder.stop();
+    }
+
+    // Stop and release the stream
     if (this.stream) {
       this.stream.getTracks().forEach((track) => track.stop());
       this.stream = undefined;
     }
   }
 
-  private async _processRecording() {
-    const audioBlob = new Blob(this.audioChunks, {
-      type: this.mediaRecorder?.mimeType || "audio/webm",
-    });
-    const duration = this.startTime
-      ? (Date.now() - this.startTime) / 1000
-      : this.recordingDuration;
+  private async _processRecording(
+    chunks: Blob[],
+    mimeType: string,
+    duration: number,
+  ) {
+    // Guard: should be in stopping state (set by _stopRecording or transitioning)
+    if (
+      this._recordingState !== "stopping" &&
+      this._recordingState !== "recording"
+    ) {
+      console.warn(
+        `Unexpected state in _processRecording: ${this._recordingState}`,
+      );
+      return;
+    }
+
+    this._recordingState = "processing";
+
+    const audioBlob = new Blob(chunks, { type: mimeType });
 
     this.emit("ct-recording-stop", { duration, audioData: audioBlob });
 
     if (this.autoTranscribe) {
-      await this._transcribeAudio(audioBlob, duration);
+      await this._transcribeAudio(audioBlob, mimeType, duration);
     }
+
+    // Return to idle state after processing
+    this._recordingState = "idle";
   }
 
-  private async _transcribeAudio(audioBlob: Blob, duration: number) {
+  private async _transcribeAudio(
+    audioBlob: Blob,
+    originalMimeType: string,
+    duration: number,
+  ) {
     const id = this._generateId();
-    this.isProcessing = true;
     this.emit("ct-transcription-start", { id });
 
     try {
-      // Convert to WAV if needed
-      const wavBlob = await this._convertToWav(audioBlob);
+      // Try to convert to WAV for best compatibility with transcription APIs
+      const { blob: processedBlob, mimeType: finalMimeType } =
+        await this._convertToWav(audioBlob, originalMimeType);
 
       // Send to transcription API
       const response = await fetch("/api/ai/voice/transcribe", {
         method: "POST",
         headers: {
-          "Content-Type": wavBlob.type || "audio/wav",
+          "Content-Type": finalMimeType,
         },
-        body: wavBlob,
+        body: processedBlob,
       });
 
       if (!response.ok) {
@@ -485,15 +589,13 @@ export class CTVoiceInput extends BaseElement {
 
       const result = await response.json();
 
-      // Create transcription data
+      // Create transcription data (without base64 audio by default to save memory)
       const transcriptionData: TranscriptionData = {
         id,
         text: result.transcription || result.text || "",
         chunks: result.chunks,
         duration,
         timestamp: Date.now(),
-        // Optionally include audio data
-        audioData: await this._blobToBase64(audioBlob),
       };
 
       // Update cell via controller
@@ -509,32 +611,25 @@ export class CTVoiceInput extends BaseElement {
         message: errorObj.message,
       });
       this.errorMessage = `Transcription failed: ${errorObj.message}`;
-    } finally {
-      this.isProcessing = false;
     }
   }
 
-  private async _convertToWav(blob: Blob): Promise<Blob> {
+  private async _convertToWav(
+    blob: Blob,
+    originalMimeType: string,
+  ): Promise<{ blob: Blob; mimeType: string }> {
     try {
       // Convert to WAV format at 16kHz (optimal for transcription)
-      return await convertToWav(blob, 16000);
+      const wavBlob = await convertToWav(blob, 16000);
+      return { blob: wavBlob, mimeType: "audio/wav" };
     } catch (error) {
       console.warn(
         "Failed to convert audio to WAV, using original format:",
         error,
       );
-      // Fallback to original blob if conversion fails
-      return blob;
+      // Fallback to original blob with correct mimeType
+      return { blob, mimeType: originalMimeType };
     }
-  }
-
-  private _blobToBase64(blob: Blob): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
   }
 
   private _handleError(error: Error) {
