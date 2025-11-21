@@ -404,7 +404,7 @@ export function inferArrayElementType(
   // getTypeAtLocationWithFallback handles undefined typeRegistry gracefully
   const arrayType =
     getTypeAtLocationWithFallback(arrayExpr, checker, typeRegistry) ??
-    checker.getTypeAtLocation(arrayExpr);
+      checker.getTypeAtLocation(arrayExpr);
 
   // Try to unwrap OpaqueRef<T[]> → T[] → T
   let actualType = arrayType;
@@ -479,7 +479,7 @@ export function inferArrayElementType(
       // Convert Type to TypeNode
       const typeNode =
         typeToTypeNode(elementType, checker, context.sourceFile) ??
-        factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+          factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
       return { typeNode, type: elementType };
     }
