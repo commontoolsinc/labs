@@ -1,22 +1,19 @@
 /// <cts-enable />
 import {
   Cell,
-  compileAndRun,
   computed,
   Default,
-  fetchData,
-  fetchProgram,
+  derive,
   generateObject,
-  handler,
   ifElse,
   NAME,
-  navigateTo,
   pattern,
   patternTool,
-  recipe,
+  toSchema,
   UI,
 } from "commontools";
 import Note from "./note.tsx";
+import { fetchAndRunPattern, listPatternIndex } from "./common-tools.tsx";
 
 export const Suggestion = pattern(
   (
@@ -25,11 +22,16 @@ export const Suggestion = pattern(
       context: { [id: string]: any };
     },
   ) => {
-    const suggestion = generateObject<{ cell: Cell<any> }>({
+    const suggestion = generateObject({
       system: "Find a useful pattern, run it, pass link to final result",
       prompt: situation,
       // context,
-      tools: {},
+      tools: {
+        fetchAndRunPattern: patternTool(fetchAndRunPattern),
+        listPatternIndex: patternTool(listPatternIndex),
+      },
+      model: "anthropic:claude-sonnet-4-5",
+      schema: toSchema<{ cell: Cell<any> }>(),
     });
 
     return ifElse(
@@ -42,16 +44,20 @@ export const Suggestion = pattern(
 
 export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
   ({ title }) => {
-    const suggestion = Suggestion({ situation: "counter plz", context: {} });
-    const note = Note({ title: "Demo", content: "hello" });
+    const suggestion = Suggestion({
+      situation: "gimme counter plz",
+      context: {},
+    });
 
     return {
       [NAME]: title,
       [UI]: (
         <div>
           <h1>Suggestion Tester</h1>
-          <ct-cell-link $cell={note} />
-          {suggestion}
+          {derive(suggestion, (s) => {
+            debugger;
+            return s?.cell;
+          })}
         </div>
       ),
       suggestion,
