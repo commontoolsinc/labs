@@ -3,13 +3,15 @@
  */
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
+import {
+  createWavFile,
+  floatTo16BitPCM,
+  resample,
+} from "./audio-conversion.ts";
 
-// Note: We're testing the internal helper functions by importing them
+// Note: We're testing the exported helper functions directly
 // The main convertToWav function requires browser AudioContext which isn't available in Deno tests
 // In a real browser environment, we would test the full conversion pipeline
-
-// Since the helper functions are not exported, we'll test the behavior through the WAV file structure
-// and verify the correctness of the WAV format
 
 describe("audio-conversion", () => {
   describe("WAV file format", () => {
@@ -22,57 +24,16 @@ describe("audio-conversion", () => {
 
       const numberOfChannels = 1;
       const sampleRate = 16000;
+
+      // Use the actual createWavFile function
+      const buffer = createWavFile(pcmData, numberOfChannels, sampleRate);
+
       const bytesPerSample = 2;
-      const blockAlign = numberOfChannels * bytesPerSample;
-      const byteRate = sampleRate * blockAlign;
       const dataSize = pcmData.length * bytesPerSample;
       const bufferSize = 44 + dataSize;
 
-      const buffer = new ArrayBuffer(bufferSize);
-      const view = new DataView(buffer);
-
-      // Write WAV header (replicating createWavFile logic for testing)
-      let offset = 0;
-
-      // RIFF chunk descriptor
-      view.setUint8(offset++, "R".charCodeAt(0));
-      view.setUint8(offset++, "I".charCodeAt(0));
-      view.setUint8(offset++, "F".charCodeAt(0));
-      view.setUint8(offset++, "F".charCodeAt(0));
-      view.setUint32(offset, bufferSize - 8, true);
-      offset += 4;
-      view.setUint8(offset++, "W".charCodeAt(0));
-      view.setUint8(offset++, "A".charCodeAt(0));
-      view.setUint8(offset++, "V".charCodeAt(0));
-      view.setUint8(offset++, "E".charCodeAt(0));
-
-      // fmt sub-chunk
-      view.setUint8(offset++, "f".charCodeAt(0));
-      view.setUint8(offset++, "m".charCodeAt(0));
-      view.setUint8(offset++, "t".charCodeAt(0));
-      view.setUint8(offset++, " ".charCodeAt(0));
-      view.setUint32(offset, 16, true); // Subchunk size
-      offset += 4;
-      view.setUint16(offset, 1, true); // Audio format (PCM)
-      offset += 2;
-      view.setUint16(offset, numberOfChannels, true);
-      offset += 2;
-      view.setUint32(offset, sampleRate, true);
-      offset += 4;
-      view.setUint32(offset, byteRate, true);
-      offset += 4;
-      view.setUint16(offset, blockAlign, true);
-      offset += 2;
-      view.setUint16(offset, bytesPerSample * 8, true); // Bits per sample
-      offset += 2;
-
-      // data sub-chunk
-      view.setUint8(offset++, "d".charCodeAt(0));
-      view.setUint8(offset++, "a".charCodeAt(0));
-      view.setUint8(offset++, "t".charCodeAt(0));
-      view.setUint8(offset++, "a".charCodeAt(0));
-      view.setUint32(offset, dataSize, true);
-      offset += 4;
+      // Verify buffer size
+      expect(buffer.byteLength).toBe(bufferSize);
 
       // Verify header structure
       const headerView = new DataView(buffer);
@@ -140,11 +101,8 @@ describe("audio-conversion", () => {
         -0.5, // Should map to ~-16384
       ]);
 
-      const pcm = new Int16Array(samples.length);
-      for (let i = 0; i < samples.length; i++) {
-        const s = Math.max(-1, Math.min(1, samples[i]));
-        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-      }
+      // Use the actual floatTo16BitPCM function
+      const pcm = floatTo16BitPCM(samples);
 
       expect(pcm[0]).toBe(-32768);
       expect(pcm[1]).toBe(0);
@@ -161,11 +119,8 @@ describe("audio-conversion", () => {
         1.5, // Should clamp to 1.0
       ]);
 
-      const pcm = new Int16Array(samples.length);
-      for (let i = 0; i < samples.length; i++) {
-        const s = Math.max(-1, Math.min(1, samples[i]));
-        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-      }
+      // Use the actual floatTo16BitPCM function
+      const pcm = floatTo16BitPCM(samples);
 
       expect(pcm[0]).toBe(-32768);
       expect(pcm[1]).toBe(32767);
@@ -185,40 +140,37 @@ describe("audio-conversion", () => {
         samples[i] = Math.sin(i / 10);
       }
 
-      // Resample
-      const ratio = sourceSampleRate / targetSampleRate;
-      const newLength = Math.round(samples.length / ratio);
-      const result = new Float32Array(newLength);
-
-      for (let i = 0; i < newLength; i++) {
-        const position = i * ratio;
-        const index = Math.floor(position);
-        const fraction = position - index;
-
-        if (index + 1 < samples.length) {
-          result[i] = samples[index] * (1 - fraction) +
-            samples[index + 1] * fraction;
-        } else {
-          result[i] = samples[index];
-        }
-      }
+      // Use the actual resample function
+      const result = resample(samples, sourceSampleRate, targetSampleRate);
 
       // Verify resampled length
-      expect(result.length).toBe(newLength);
+      const expectedLength = Math.round(
+        samples.length / (sourceSampleRate / targetSampleRate),
+      );
+      expect(result.length).toBe(expectedLength);
       expect(result.length).toBeCloseTo(36, 0); // ~100 / (44100/16000)
 
-      // Verify values are interpolated
+      // Verify values are interpolated (first value should be close to original)
       expect(result[0]).toBeCloseTo(samples[0], 2);
+
+      // Verify it's a new array, not the original
+      expect(result).not.toBe(samples);
     });
 
     it("should return original samples when sample rates match", () => {
       const sampleRate = 16000;
       const samples = new Float32Array([1, 2, 3, 4, 5]);
 
-      // Simulate no resampling needed
-      const ratio = sampleRate / sampleRate;
-      if (ratio === 1) {
-        expect(samples).toBe(samples);
+      // Use the actual resample function
+      const result = resample(samples, sampleRate, sampleRate);
+
+      // Should return the same array since no resampling is needed
+      expect(result).toBe(samples);
+      expect(result.length).toBe(samples.length);
+
+      // Values should be unchanged
+      for (let i = 0; i < samples.length; i++) {
+        expect(result[i]).toBe(samples[i]);
       }
     });
   });

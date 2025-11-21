@@ -79,8 +79,9 @@ function audioBufferToWav(
 /**
  * Resample audio data to a different sample rate
  * Uses linear interpolation for simplicity
+ * @internal Exported for testing
  */
-function resample(
+export function resample(
   samples: Float32Array,
   sourceSampleRate: number,
   targetSampleRate: number,
@@ -112,8 +113,9 @@ function resample(
 
 /**
  * Convert float samples (-1.0 to 1.0) to 16-bit PCM
+ * @internal Exported for testing
  */
-function floatTo16BitPCM(samples: Float32Array): Int16Array {
+export function floatTo16BitPCM(samples: Float32Array): Int16Array {
   const pcm = new Int16Array(samples.length);
   for (let i = 0; i < samples.length; i++) {
     // Clamp to -1.0 to 1.0 range
@@ -126,8 +128,9 @@ function floatTo16BitPCM(samples: Float32Array): Int16Array {
 
 /**
  * Create a WAV file from PCM data
+ * @internal Exported for testing
  */
-function createWavFile(
+export function createWavFile(
   pcmData: Int16Array,
   numberOfChannels: number,
   sampleRate: number,
