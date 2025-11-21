@@ -2906,6 +2906,8 @@ interface CTDraggableElement extends CTHTMLElement {}
 interface CTPlaidLinkElement extends CTHTMLElement {}
 interface CTCharmElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
+interface CTVoiceInputElement extends CTHTMLElement {}
+interface CTAudioVisualizerElement extends CTHTMLElement {}
 
 interface CTDraggableAttributes<T> extends CTHTMLAttributes<T> {
   "key"?: number;
@@ -2939,6 +2941,38 @@ interface CTUpdaterAttributes<T> extends CTHTMLAttributes<T> {
 interface CTCharmAttributes<T> extends CTHTMLAttributes<T> {
   "charm-id"?: string;
   "space-name"?: string;
+}
+
+interface CTVoiceInputAttributes<T> extends CTHTMLAttributes<T> {
+  "$transcription"?: CellLike<any>;
+  "recordingMode"?: "hold" | "toggle";
+  "autoTranscribe"?: boolean;
+  "maxDuration"?: number;
+  "showWaveform"?: boolean;
+  "disabled"?: boolean;
+  "barCount"?: number;
+  "barWidth"?: number;
+  "barGap"?: number;
+  "minHeight"?: number;
+  "maxHeight"?: number;
+  "visualizerColor"?: string;
+  "smoothing"?: number;
+  "onct-transcription-complete"?: EventHandler<any>;
+  "onct-transcription-error"?: EventHandler<any>;
+  "onct-recording-start"?: EventHandler<any>;
+  "onct-recording-stop"?: EventHandler<any>;
+  "onct-error"?: EventHandler<any>;
+  "onct-change"?: EventHandler<any>;
+}
+
+interface CTAudioVisualizerAttributes<T> extends CTHTMLAttributes<T> {
+  "barCount"?: number;
+  "barWidth"?: number;
+  "barGap"?: number;
+  "minHeight"?: number;
+  "maxHeight"?: number;
+  "color"?: string;
+  "smoothing"?: number;
 }
 
 interface CTChatAttributes<T> extends CTHTMLAttributes<T> {
@@ -3888,6 +3922,14 @@ declare global {
       "ct-charm": CTDOM.DetailedHTMLProps<
         CTCharmAttributes<CTCharmElement>,
         CTCharmElement
+      >;
+      "ct-voice-input": CTDOM.DetailedHTMLProps<
+        CTVoiceInputAttributes<CTVoiceInputElement>,
+        CTVoiceInputElement
+      >;
+      "ct-audio-visualizer": CTDOM.DetailedHTMLProps<
+        CTAudioVisualizerAttributes<CTAudioVisualizerElement>,
+        CTAudioVisualizerElement
       >;
       "ct-fragment": CTDOM.DetailedHTMLProps<
         CTHTMLAttributes<CTFragmentElement>,
