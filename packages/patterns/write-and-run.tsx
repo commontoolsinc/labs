@@ -16,10 +16,10 @@ import {
 
 // Template for the AI to reference
 const TEMPLATE = `/// <cts-enable />
-import { Cell, derive, handler, NAME, pattern, UI } from "commontools";
+import { Cell, derive, handler, Default, NAME, pattern, UI } from "commontools";
 
 interface Input {
-  value: Cell<number>;
+  value: Default<number, 0>;
 }
 
 const increment = handler<unknown, { value: Cell<number> }>(
@@ -44,7 +44,8 @@ export default pattern<Input>(({ value }) => {
   };
 });`;
 
-const SYSTEM_PROMPT = `You are a CommonTools pattern generator. Given a user request, generate a complete TypeScript pattern file.
+const SYSTEM_PROMPT =
+  `You are a CommonTools pattern generator. Given a user request, generate a complete TypeScript pattern file.
 
 IMPORTANT RULES:
 1. Start with: /// <cts-enable />
@@ -90,10 +91,18 @@ export default pattern<Input, Output>(({ prompt }) => {
     model: "anthropic:claude-sonnet-4-5",
   });
 
+  const processedResult = computed(() => {
+    const result = generated?.result ?? "";
+    // Remove wrapping ```typescript``` if it exists
+    return result.replace(/^```typescript\n?/, "").replace(/\n?```$/, "");
+  });
+
   // Step 2: Compile the generated code when ready
   const compileParams = derive(generated, (g) => ({
-    files: [{ name: "/main.tsx", contents: g?.result ?? "" }],
-    main: "/main.tsx",
+    files: processedResult
+      ? [{ name: "/main.tsx", contents: processedResult }]
+      : [],
+    main: processedResult ? "/main.tsx" : "",
   }));
 
   const compiled = compileAndRun(compileParams);
@@ -102,21 +111,38 @@ export default pattern<Input, Output>(({ prompt }) => {
   const isGenerating = generated.pending;
   const hasCode = computed(() => !!generated.result);
   const hasError = computed(() => !!compiled.error);
-  const isReady = computed(() => !compiled.pending && !!compiled.result && !compiled.error);
+  const isReady = computed(() =>
+    !compiled.pending && !!compiled.result && !compiled.error
+  );
 
   return {
     [NAME]: "Write and Run",
     [UI]: (
-      <div style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "16px" }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "16px",
+          padding: "16px",
+        }}
+      >
         <h2>Write and Run</h2>
-        <p style={{ color: "#666" }}>Describe a pattern and I'll generate, compile, and run it.</p>
+        <p style={{ color: "#666" }}>
+          Describe a pattern and I'll generate, compile, and run it.
+        </p>
 
         <ct-message-input
           placeholder="Describe the pattern you want..."
           onct-send={updatePrompt({ prompt })}
         />
 
-        <div style={{ padding: "12px", backgroundColor: "#f5f5f5", borderRadius: "8px" }}>
+        <div
+          style={{
+            padding: "12px",
+            backgroundColor: "#f5f5f5",
+            borderRadius: "8px",
+          }}
+        >
           {ifElse(
             isGenerating,
             <span>Generating code...</span>,
@@ -130,11 +156,31 @@ export default pattern<Input, Output>(({ prompt }) => {
                 <ct-button onClick={visit({ result: compiled.result })}>
                   Open Generated Pattern
                 </ct-button>,
-                <span style={{ opacity: 0.6 }}>Enter a prompt to generate a pattern</span>,
+                <span style={{ opacity: 0.6 }}>
+                  Enter a prompt to generate a pattern
+                </span>,
               ),
             ),
           )}
         </div>
+
+        {ifElse(
+          isReady,
+          <div>
+            <h3>Generated Pattern</h3>
+            <div
+              style={{
+                border: "1px solid #ccc",
+                borderRadius: "8px",
+                padding: "16px",
+                backgroundColor: "#fff",
+              }}
+            >
+              {compiled.result}
+            </div>
+          </div>,
+          <span />,
+        )}
 
         {ifElse(
           hasCode,
