@@ -1,7 +1,7 @@
 import * as __ctHelpers from "commontools";
 import { cell } from "commontools";
 export default function TestLiteralWidenNestedStructure() {
-    const nested = cell({
+    const _nested = cell({
         users: [
             { id: 1, name: "Alice", active: true },
             { id: 2, name: "Bob", active: false }

@@ -61,8 +61,30 @@ const configs: FixtureConfig[] = [
   {
     directory: "schema-injection",
     describe: "Schema Injection with Literal Widening",
-    formatTestName: (name) =>
-      `widens ${name.replace(/^literal-widen-/, "").replace(/-/g, " ")}`,
+    formatTestName: (name) => {
+      if (name.startsWith("literal-widen-")) {
+        return `widens ${
+          name.replace(/^literal-widen-/, "").replace(/-/g, " ")
+        }`;
+      }
+      if (name.startsWith("double-inject-")) {
+        return `prevents ${
+          name.replace(/^double-inject-/, "").replace(/-/g, " ")
+        }`;
+      }
+      if (name.startsWith("context-")) {
+        return name.replace(/-/g, " ");
+      }
+      if (name.startsWith("cell-like-")) {
+        return name.replace(/-/g, " ");
+      }
+      if (name.startsWith("collections-")) {
+        return `handles ${
+          name.replace(/^collections-/, "").replace(/-/g, " ")
+        }`;
+      }
+      return name.replace(/-/g, " ");
+    },
   },
 ];
 
