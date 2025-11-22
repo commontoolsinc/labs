@@ -58,6 +58,11 @@ const configs: FixtureConfig[] = [
       { pattern: /^lift-/, name: "Generic closures" },
     ],
   },
+  {
+    directory: "schema-injection",
+    describe: "Schema Injection with Literal Widening",
+    formatTestName: (name) => `widens ${name.replace(/^literal-widen-/, "").replace(/-/g, " ")}`,
+  },
 ];
 
 const staticCache = new StaticCacheFS();

@@ -1,0 +1,13 @@
+import * as __ctHelpers from "commontools";
+import { cell } from "commontools";
+export default function TestLiteralWidenNullUndefined() {
+    const c1 = cell(null, {
+        type: "null"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const c2 = cell(undefined, true as const satisfies __ctHelpers.JSONSchema);
+    return null;
+}
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

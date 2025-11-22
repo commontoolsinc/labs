@@ -40,6 +40,8 @@ export interface GenerationContext {
   typeNode?: ts.TypeNode;
   /** Optional type registry for synthetic nodes */
   typeRegistry?: WeakMap<ts.Node, ts.Type>;
+  /** Widen literal types to base types during schema generation */
+  widenLiterals?: boolean;
 }
 
 /**
@@ -68,6 +70,7 @@ export interface SchemaGenerator {
     type: ts.Type,
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
+    options?: { widenLiterals?: boolean },
   ): SchemaDefinition;
 
   /**
