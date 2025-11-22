@@ -46,7 +46,13 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode?: ts.TypeNode,
     options?: { widenLiterals?: boolean },
   ): SchemaDefinition {
-    return this.generateSchemaInternal(type, checker, typeNode, undefined, options);
+    return this.generateSchemaInternal(
+      type,
+      checker,
+      typeNode,
+      undefined,
+      options,
+    );
   }
 
   /**

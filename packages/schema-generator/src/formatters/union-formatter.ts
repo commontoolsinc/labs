@@ -177,7 +177,9 @@ export class UnionFormatter implements TypeFormatter {
     if ("properties" in schema && isRecord(schema.properties)) {
       const props: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(schema.properties)) {
-        props[key] = this.normalizeSchemaForComparison(value as SchemaDefinition);
+        props[key] = this.normalizeSchemaForComparison(
+          value as SchemaDefinition,
+        );
       }
       result.properties = props;
     }
@@ -231,7 +233,9 @@ export class UnionFormatter implements TypeFormatter {
       for (const key of Object.keys(first.properties)) {
         const propSchemas = schemas
           .map((s) =>
-            isRecord(s) && isRecord(s.properties) ? s.properties[key] : undefined
+            isRecord(s) && isRecord(s.properties)
+              ? s.properties[key]
+              : undefined
           )
           .filter((p): p is SchemaDefinition => p !== undefined);
 

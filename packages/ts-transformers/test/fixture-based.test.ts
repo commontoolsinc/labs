@@ -61,7 +61,8 @@ const configs: FixtureConfig[] = [
   {
     directory: "schema-injection",
     describe: "Schema Injection with Literal Widening",
-    formatTestName: (name) => `widens ${name.replace(/^literal-widen-/, "").replace(/-/g, " ")}`,
+    formatTestName: (name) =>
+      `widens ${name.replace(/^literal-widen-/, "").replace(/-/g, " ")}`,
   },
 ];
 
