@@ -108,8 +108,8 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     }
 } as const satisfies __ctHelpers.JSONSchema, (_state: any) => {
     const people = cell([
-        { id: 1, name: "Alice" },
-        { id: 2, name: "Bob" },
+        { id: "1", name: "Alice" },
+        { id: "2", name: "Bob" },
     ]);
     return {
         [UI]: (<div>
@@ -122,7 +122,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                         type: "object",
                         properties: {
                             id: {
-                                type: "number"
+                                type: "string"
                             },
                             name: {
                                 type: "string"
