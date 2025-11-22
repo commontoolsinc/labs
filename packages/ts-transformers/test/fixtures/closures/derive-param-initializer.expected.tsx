@@ -1,7 +1,7 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive } from "commontools";
 export default function TestDerive() {
-    const value = cell(5);
+    const value = 5;
     const multiplier = cell(2);
     // Test parameter with default value
     const result = __ctHelpers.derive({
@@ -9,7 +9,7 @@ export default function TestDerive() {
         properties: {
             value: {
                 type: "number",
-                asCell: true
+                "enum": [5]
             },
             multiplier: {
                 type: "number",

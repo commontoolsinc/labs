@@ -9,7 +9,7 @@ export default function TestDeriveCollisionProperty() {
   // Only the variable reference should be renamed, NOT the property name
   const result = derive(multiplier, (m) => ({
     multiplier: multiplier.get(),
-    value: m * 3,
+    value: m.get() * 3,
   }));
 
   return result;

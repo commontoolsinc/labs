@@ -35,7 +35,7 @@ export default function TestDerive() {
         value,
         config: config,
         key: key
-    }, ({ value: v, config, key }) => v * config[key]);
+    }, ({ value: v, config, key }) => v.get() * config[key]);
     return result;
 }
 // @ts-ignore: Internals
