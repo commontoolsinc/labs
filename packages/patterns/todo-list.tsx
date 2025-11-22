@@ -18,7 +18,8 @@ interface Output {
 export default pattern<Input, Output>(({ items }) => {
   // AI suggestion based on current todos
   const suggestion = Suggestion({
-    situation: "Based on my todo list, use a pattern to help me.",
+    situation:
+      "Based on my todo list, use a pattern to help me. For sub-tasks and additional tasks, use a todo list.",
     context: { items },
   });
 

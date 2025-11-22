@@ -25,32 +25,29 @@ interface CounterOutput {
 }
 ```
 
-## `chatbot.tsx`
+## `todo-list.tsx`
 
-A chatbot demo.
+A todo list with AI suggestions.
 
 ### Input Schema
 
 ```ts
-type ChatInput = {
-  /** The system prompt */
-  system: string;
-};
+interface TodoItem {
+  title: string;
+  done: Default<boolean, false>;
+}
+
+interface Input {
+  items: Cell<TodoItem[]>;
+}
 ```
 
 ### Result Schema
 
 ```ts
-type ChatOutput = {
-  messages: Array<BuiltInLLMMessage>;
-  pending: boolean | undefined;
-  addMessage: Stream<BuiltInLLMMessage>;
-  clearChat: Stream<void>;
-  cancelGeneration: Stream<void>;
-  title: string;
-  attachments: Array<PromptAttachment>;
-  tools: any;
-};
+interface Output {
+  items: Cell<TodoItem[]>;
+}
 ```
 
 ## `note.tsx`
