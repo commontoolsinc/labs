@@ -110,7 +110,21 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     const people = cell([
         { id: "1", name: "Alice" },
         { id: "2", name: "Bob" },
-    ]);
+    ], {
+        type: "array",
+        items: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "string"
+                },
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["id", "name"]
+        }
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [UI]: (<div>
         {__ctHelpers.derive({
