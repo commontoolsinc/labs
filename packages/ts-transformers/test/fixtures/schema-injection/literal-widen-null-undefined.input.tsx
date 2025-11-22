@@ -2,8 +2,8 @@
 import { cell } from "commontools";
 
 export default function TestLiteralWidenNullUndefined() {
-  const c1 = cell(null);
-  const c2 = cell(undefined);
+  const _c1 = cell(null);
+  const _c2 = cell(undefined);
 
   return null;
 }
