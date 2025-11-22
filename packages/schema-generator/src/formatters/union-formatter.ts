@@ -10,6 +10,7 @@ import {
   getNativeTypeSchema,
   TypeWithInternals,
 } from "../type-utils.ts";
+import { isRecord } from "@commontools/utils/types";
 
 export class UnionFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
@@ -95,14 +96,181 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     // Fallback: anyOf of member schemas (excluding null/undefined handled above)
-    const anyOf = nonNull.map((m) => generate(m));
+    let anyOf = nonNull.map((m) => generate(m));
     if (hasNull) anyOf.push({ type: "null" });
 
-    // If only one schema remains after filtering, return it directly without anyOf wrapper
+    // When widenLiterals is true, try to merge structurally identical schemas
+    // that only differ in literal enum values
+    if (context.widenLiterals && anyOf.length > 1) {
+      anyOf = this.mergeIdenticalSchemas(anyOf);
+    }
+
+    // If only one schema remains after filtering/merging, return it directly without anyOf wrapper
     if (anyOf.length === 1) {
       return anyOf[0]!;
     }
 
     return { anyOf };
+  }
+
+  /**
+   * Merge schemas that are structurally identical except for literal enum values.
+   * Used when widenLiterals is true to collapse unions like
+   * {x: {enum: [10]}} | {x: {enum: [20]}} into {x: {type: "number"}}
+   */
+  private mergeIdenticalSchemas(
+    schemas: SchemaDefinition[],
+  ): SchemaDefinition[] {
+    if (schemas.length <= 1) return schemas;
+
+    // Group schemas by their structure (ignoring enum values)
+    const groups = new Map<string, SchemaDefinition[]>();
+
+    for (const schema of schemas) {
+      const normalized = this.normalizeSchemaForComparison(schema);
+      const key = JSON.stringify(normalized);
+      const group = groups.get(key) ?? [];
+      group.push(schema);
+      groups.set(key, group);
+    }
+
+    // For each group with multiple schemas, try to merge them
+    const result: SchemaDefinition[] = [];
+    for (const group of groups.values()) {
+      if (group.length === 1) {
+        result.push(group[0]!);
+      } else {
+        // Multiple schemas with same structure - merge them
+        result.push(this.mergeSchemaGroup(group));
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Normalize a schema for structural comparison by removing enum values
+   * and converting them to base types
+   */
+  private normalizeSchemaForComparison(
+    schema: SchemaDefinition,
+  ): Record<string, unknown> {
+    if (typeof schema === "boolean") return { _bool: schema };
+
+    const result: Record<string, unknown> = {};
+
+    // Convert enum to base type for comparison
+    if ("enum" in schema && schema.enum) {
+      const firstValue = schema.enum[0];
+      if (typeof firstValue === "string") {
+        result.type = "string";
+      } else if (typeof firstValue === "number") {
+        result.type = "number";
+      } else if (typeof firstValue === "boolean") {
+        result.type = "boolean";
+      }
+    } else if ("type" in schema) {
+      result.type = schema.type;
+    }
+
+    // Recursively normalize properties
+    if ("properties" in schema && isRecord(schema.properties)) {
+      const props: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(schema.properties)) {
+        props[key] = this.normalizeSchemaForComparison(
+          value as SchemaDefinition,
+        );
+      }
+      result.properties = props;
+    }
+
+    // Recursively normalize items
+    if ("items" in schema && schema.items) {
+      result.items = this.normalizeSchemaForComparison(
+        schema.items as SchemaDefinition,
+      );
+    }
+
+    // Copy other structural fields
+    if ("required" in schema) result.required = schema.required;
+    if ("additionalProperties" in schema) {
+      result.additionalProperties = schema.additionalProperties;
+    }
+
+    return result;
+  }
+
+  /**
+   * Merge a group of structurally identical schemas by widening their enums
+   */
+  private mergeSchemaGroup(schemas: SchemaDefinition[]): SchemaDefinition {
+    if (schemas.length === 0) {
+      throw new Error("Cannot merge empty schema group");
+    }
+
+    const first = schemas[0]!;
+    if (typeof first === "boolean") return first;
+
+    const result: SchemaDefinition = {};
+
+    // Handle enum -> base type conversion
+    if ("enum" in first && first.enum) {
+      const firstValue = first.enum[0];
+      if (typeof firstValue === "string") {
+        result.type = "string";
+      } else if (typeof firstValue === "number") {
+        result.type = "number";
+      } else if (typeof firstValue === "boolean") {
+        result.type = "boolean";
+      }
+    } else if ("type" in first) {
+      result.type = first.type;
+    }
+
+    // Recursively merge properties
+    if ("properties" in first && isRecord(first.properties)) {
+      const props: Record<string, SchemaDefinition> = {};
+      for (const key of Object.keys(first.properties)) {
+        const propSchemas = schemas
+          .map((s) =>
+            isRecord(s) && isRecord(s.properties)
+              ? s.properties[key]
+              : undefined
+          )
+          .filter((p): p is Exclude<SchemaDefinition, undefined> =>
+            p !== undefined
+          );
+
+        if (propSchemas.length > 0) {
+          props[key] = this.mergeSchemaGroup(propSchemas);
+        }
+      }
+      result.properties = props;
+    }
+
+    // Recursively merge items
+    if ("items" in first && first.items !== undefined) {
+      const itemSchemas = schemas
+        .map((s) =>
+          isRecord(s) && "items" in s && s.items !== undefined
+            ? s.items
+            : undefined
+        )
+        .filter((i): i is Exclude<SchemaDefinition, undefined> =>
+          i !== undefined
+        );
+
+      if (itemSchemas.length > 0) {
+        result.items = this.mergeSchemaGroup(itemSchemas);
+      }
+    }
+
+    // Copy other structural fields from first schema
+    if ("required" in first) result.required = first.required;
+    if ("additionalProperties" in first) {
+      result.additionalProperties = first.additionalProperties;
+    }
+
+    return result;
   }
 }

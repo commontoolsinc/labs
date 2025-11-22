@@ -46,9 +46,20 @@ export class SchemaGeneratorTransformer extends Transformer {
 
         const arg0 = node.arguments[0];
         let optionsObj: Record<string, unknown> = {};
+        let widenLiterals: boolean | undefined;
         if (arg0 && ts.isObjectLiteralExpression(arg0)) {
           optionsObj = evaluateObjectLiteral(arg0, checker);
+          // Extract widenLiterals as a generation option (don't merge into schema)
+          if (typeof optionsObj.widenLiterals === "boolean") {
+            widenLiterals = optionsObj.widenLiterals;
+            delete optionsObj.widenLiterals;
+          }
         }
+
+        // Build options for schema generation
+        const generationOptions = widenLiterals !== undefined
+          ? { widenLiterals }
+          : undefined;
 
         // If Type resolved to 'any' and we have a synthetic TypeNode, use new method
         let schema: unknown;
@@ -65,7 +76,12 @@ export class SchemaGeneratorTransformer extends Transformer {
           );
         } else {
           // Normal Type path
-          schema = schemaTransformer!.generateSchema(type, checker, typeArg);
+          schema = schemaTransformer!.generateSchema(
+            type,
+            checker,
+            typeArg,
+            generationOptions,
+          );
         }
 
         // Handle boolean schemas (true/false) - can't spread them
