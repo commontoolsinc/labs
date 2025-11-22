@@ -42,7 +42,7 @@ export default function TestDerive(state: State) {
                 multiplier: state.config.multiplier
             }
         }
-    }, ({ value: v, state }) => v * state.config.multiplier);
+    }, ({ value: v, state }) => v.get() * state.config.multiplier);
     return result;
 }
 // @ts-ignore: Internals

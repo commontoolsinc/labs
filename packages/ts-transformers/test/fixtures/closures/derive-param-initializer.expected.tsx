@@ -1,19 +1,15 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive } from "commontools";
 export default function TestDerive() {
-    const value = cell(5, {
-        type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
-    const multiplier = cell(2, {
-        type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    const value = 5;
+    const multiplier = cell(2);
     // Test parameter with default value
     const result = __ctHelpers.derive({
         type: "object",
         properties: {
             value: {
                 type: "number",
-                asCell: true
+                "enum": [5]
             },
             multiplier: {
                 type: "number",
