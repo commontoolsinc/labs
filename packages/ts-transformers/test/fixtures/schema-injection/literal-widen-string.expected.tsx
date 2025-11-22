@@ -1,16 +1,16 @@
 import * as __ctHelpers from "commontools";
 import { cell } from "commontools";
 export default function TestLiteralWidenString() {
-    const s1 = cell("hello", {
+    const _s1 = cell("hello", {
         type: "string"
     } as const satisfies __ctHelpers.JSONSchema);
-    const s2 = cell("", {
+    const _s2 = cell("", {
         type: "string"
     } as const satisfies __ctHelpers.JSONSchema);
-    const s3 = cell("hello\nworld", {
+    const _s3 = cell("hello\nworld", {
         type: "string"
     } as const satisfies __ctHelpers.JSONSchema);
-    const s4 = cell("with spaces", {
+    const _s4 = cell("with spaces", {
         type: "string"
     } as const satisfies __ctHelpers.JSONSchema);
     return null;

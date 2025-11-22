@@ -1,7 +1,7 @@
 import * as __ctHelpers from "commontools";
 import { cell } from "commontools";
 export default function TestLiteralWidenObjectProperties() {
-    const obj = cell({ x: 10, y: 20, name: "point" }, {
+    const _obj = cell({ x: 10, y: 20, name: "point" }, {
         type: "object",
         properties: {
             x: {

@@ -2,13 +2,13 @@ import * as __ctHelpers from "commontools";
 import { cell } from "commontools";
 export default function TestLiteralWidenMixedValues() {
     const variable = 42;
-    const c1 = cell(10, {
+    const _c1 = cell(10, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
-    const c2 = cell(variable, {
+    const _c2 = cell(variable, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
-    const c3 = cell(10 + 20, {
+    const _c3 = cell(10 + 20, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
     return null;

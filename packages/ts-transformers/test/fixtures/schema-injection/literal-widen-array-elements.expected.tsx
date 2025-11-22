@@ -1,19 +1,19 @@
 import * as __ctHelpers from "commontools";
 import { cell } from "commontools";
 export default function TestLiteralWidenArrayElements() {
-    const arr1 = cell([1, 2, 3], {
+    const _arr1 = cell([1, 2, 3], {
         type: "array",
         items: {
             type: "number"
         }
     } as const satisfies __ctHelpers.JSONSchema);
-    const arr2 = cell(["a", "b", "c"], {
+    const _arr2 = cell(["a", "b", "c"], {
         type: "array",
         items: {
             type: "string"
         }
     } as const satisfies __ctHelpers.JSONSchema);
-    const arr3 = cell([true, false], {
+    const _arr3 = cell([true, false], {
         type: "array",
         items: {
             type: "boolean"

@@ -1,16 +1,20 @@
 import * as __ctHelpers from "commontools";
 import { cell } from "commontools";
-export default function TestLiteralWidenBigInt() {
-    const _bi1 = cell(123n, {
-        type: "integer"
+export default function TestCollectionsEmpty() {
+    // Empty array
+    const _emptyArray = cell([], {
+        type: "array",
+        items: false
     } as const satisfies __ctHelpers.JSONSchema);
-    const _bi2 = cell(0n, {
-        type: "integer"
+    // Empty object
+    const _emptyObject = cell({}, {
+        type: "object",
+        properties: {}
     } as const satisfies __ctHelpers.JSONSchema);
-    const _bi3 = cell(-456n, {
-        type: "integer"
-    } as const satisfies __ctHelpers.JSONSchema);
-    return null;
+    return {
+        emptyArray: _emptyArray,
+        emptyObject: _emptyObject,
+    };
 }
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

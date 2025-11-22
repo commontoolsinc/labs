@@ -237,7 +237,9 @@ export class UnionFormatter implements TypeFormatter {
               ? s.properties[key]
               : undefined
           )
-          .filter((p): p is SchemaDefinition => p !== undefined);
+          .filter((p): p is Exclude<SchemaDefinition, undefined> =>
+            p !== undefined
+          );
 
         if (propSchemas.length > 0) {
           props[key] = this.mergeSchemaGroup(propSchemas);
@@ -247,12 +249,16 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     // Recursively merge items
-    if ("items" in first && first.items) {
+    if ("items" in first && first.items !== undefined) {
       const itemSchemas = schemas
         .map((s) =>
-          isRecord(s) && "items" in s && s.items ? s.items : undefined
+          isRecord(s) && "items" in s && s.items !== undefined
+            ? s.items
+            : undefined
         )
-        .filter((i): i is SchemaDefinition => i !== undefined);
+        .filter((i): i is Exclude<SchemaDefinition, undefined> =>
+          i !== undefined
+        );
 
       if (itemSchemas.length > 0) {
         result.items = this.mergeSchemaGroup(itemSchemas);

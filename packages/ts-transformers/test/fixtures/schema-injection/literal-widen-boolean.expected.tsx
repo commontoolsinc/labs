@@ -1,10 +1,10 @@
 import * as __ctHelpers from "commontools";
 import { cell } from "commontools";
 export default function TestLiteralWidenBoolean() {
-    const b1 = cell(true, {
+    const _b1 = cell(true, {
         type: "boolean"
     } as const satisfies __ctHelpers.JSONSchema);
-    const b2 = cell(false, {
+    const _b2 = cell(false, {
         type: "boolean"
     } as const satisfies __ctHelpers.JSONSchema);
     return null;

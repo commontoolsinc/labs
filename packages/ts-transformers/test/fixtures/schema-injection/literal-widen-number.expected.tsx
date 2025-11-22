@@ -1,19 +1,19 @@
 import * as __ctHelpers from "commontools";
 import { cell } from "commontools";
 export default function TestLiteralWidenNumber() {
-    const n1 = cell(10, {
+    const _n1 = cell(10, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
-    const n2 = cell(-5, {
+    const _n2 = cell(-5, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
-    const n3 = cell(3.14, {
+    const _n3 = cell(3.14, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
-    const n4 = cell(1e10, {
+    const _n4 = cell(1e10, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
-    const n5 = cell(0, {
+    const _n5 = cell(0, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
     return null;
