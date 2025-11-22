@@ -44,8 +44,9 @@ export class SchemaGenerator implements ISchemaGenerator {
     type: ts.Type,
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
+    options?: { widenLiterals?: boolean },
   ): SchemaDefinition {
-    return this.generateSchemaInternal(type, checker, typeNode, undefined);
+    return this.generateSchemaInternal(type, checker, typeNode, undefined, options);
   }
 
   /**
@@ -79,6 +80,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
+    options?: { widenLiterals?: boolean },
   ): SchemaDefinition {
     // Create unified context with all state
     const cycles = this.getCycles(type, checker);
@@ -101,6 +103,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       // Optional context
       ...(typeNode && { typeNode }),
       ...(typeRegistry && { typeRegistry }),
+      ...(options?.widenLiterals && { widenLiterals: true }),
     };
 
     // Auto-detect: Should we use node-based or type-based analysis?

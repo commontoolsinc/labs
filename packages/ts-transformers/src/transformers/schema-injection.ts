@@ -161,12 +161,27 @@ function createToSchemaCall(
     "ctHelpers" | "factory"
   >,
   typeNode: ts.TypeNode,
+  options?: { widenLiterals?: boolean },
 ): ts.CallExpression {
   const expr = ctHelpers.getHelperExpr("toSchema");
+
+  // Build arguments array if options are provided
+  const args: ts.Expression[] = [];
+  if (options?.widenLiterals) {
+    args.push(
+      factory.createObjectLiteralExpression([
+        factory.createPropertyAssignment(
+          "widenLiterals",
+          factory.createTrue(),
+        ),
+      ]),
+    );
+  }
+
   return factory.createCallExpression(
     expr,
     [typeNode],
-    [],
+    args,
   );
 }
 
@@ -178,14 +193,16 @@ function createToSchemaCall(
  * @param context - Transformation context
  * @param typeNode - The TypeNode to create a schema for
  * @param typeRegistry - Optional TypeRegistry to check for existing types
+ * @param options - Optional schema generation options
  * @returns CallExpression for toSchema() with TypeRegistry entry transferred
  */
 function createSchemaCallWithRegistryTransfer(
   context: Pick<TransformationContext, "factory" | "ctHelpers" | "sourceFile">,
   typeNode: ts.TypeNode,
   typeRegistry?: TypeRegistry,
+  options?: { widenLiterals?: boolean },
 ): ts.CallExpression {
-  const schemaCall = createToSchemaCall(context, typeNode);
+  const schemaCall = createToSchemaCall(context, typeNode, options);
 
   // Transfer TypeRegistry entry from source typeNode to schema call
   // This preserves type information for closure-captured variables
@@ -990,14 +1007,17 @@ export class SchemaInjectionTransformer extends Transformer {
         let typeNode: ts.TypeNode | undefined;
         let type: ts.Type | undefined;
 
+        // Track whether we're using value inference (vs explicit type arg)
+        const isValueInference = !typeArgs || typeArgs.length === 0;
+
         if (typeArgs && typeArgs.length > 0) {
-          // Use explicit type argument
+          // Use explicit type argument - preserve literal types
           typeNode = typeArgs[0];
           if (typeNode && typeRegistry) {
             type = typeRegistry.get(typeNode);
           }
         } else if (args.length > 0) {
-          // Infer from value argument
+          // Infer from value argument - widen literal types
           const valueArg = args[0];
           if (valueArg) {
             const valueType = checker.getTypeAtLocation(valueArg);
@@ -1014,10 +1034,11 @@ export class SchemaInjectionTransformer extends Transformer {
             context,
             typeNode,
             typeRegistry,
+            isValueInference ? { widenLiterals: true } : undefined,
           );
 
           // If we inferred the type (no explicit type arg), register it
-          if ((!typeArgs || typeArgs.length === 0) && type && typeRegistry) {
+          if (isValueInference && type && typeRegistry) {
             typeRegistry.set(schemaCall, type);
           }
 
