@@ -191,7 +191,7 @@ export class CTImageInput extends CTFileInput {
         ?multiple="${this.multiple}"
         ?disabled="${this.disabled}"
         capture="${ifDefined(captureAttr)}"
-        @change="${this._handleFileChange}"
+        @change="${this._handleFileChangeInternal}"
       />
     `;
   }
@@ -209,37 +209,29 @@ export class CTImageInput extends CTFileInput {
     `;
   }
 
-  // Provide backward-compatible event handling
-  // The base class emits { files }, but image-input users expect { images }
-  private _handleFileChange: any;
+  // Internal handler that calls parent's protected handler
+  private _handleFileChangeInternal = (event: Event) => {
+    // Call parent's protected _handleFileChange method
+    super._handleFileChange(event);
+  };
 
-  override connectedCallback() {
-    super.connectedCallback();
-
-    // Intercept change events to provide backward-compatible event details
-    this._handleFileChange = (e: CustomEvent) => {
-      const detail = e.detail as { files: ImageData[] };
-      // Re-emit with 'images' property for backward compatibility
-      this.emit("ct-change", {
+  // Override emit to add backward-compatible event details
+  override emit(eventName: string, detail?: any) {
+    if (eventName === "ct-change" && detail?.files) {
+      // Add 'images' property for backward compatibility
+      super.emit(eventName, {
+        ...detail,
         images: detail.files,
-        files: detail.files, // Also include new property
       });
-      e.stopPropagation();
-    };
-
-    // Similar for remove events
-    const handleRemove = (e: CustomEvent) => {
-      const detail = e.detail as { id: string; files: ImageData[] };
-      this.emit("ct-remove", {
-        id: detail.id,
+    } else if (eventName === "ct-remove" && detail?.files) {
+      // Add 'images' property for backward compatibility
+      super.emit(eventName, {
+        ...detail,
         images: detail.files,
-        files: detail.files,
       });
-      e.stopPropagation();
-    };
-
-    this.addEventListener("ct-change", this._handleFileChange);
-    this.addEventListener("ct-remove", handleRemove);
+    } else {
+      super.emit(eventName, detail);
+    }
   }
 }
 

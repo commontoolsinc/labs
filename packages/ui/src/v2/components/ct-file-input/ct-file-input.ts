@@ -419,7 +419,7 @@ export class CTFileInput extends BaseElement {
     input?.click();
   }
 
-  private async _handleFileChange(event: Event) {
+  protected async _handleFileChange(event: Event) {
     const input = event.target as HTMLInputElement;
     const files = input.files;
 
@@ -427,8 +427,12 @@ export class CTFileInput extends BaseElement {
 
     const currentFiles = this.getFiles();
 
-    // Check max files limit
-    if (this.maxFiles && currentFiles.length + files.length > this.maxFiles) {
+    // Check max files limit (only for multiple mode)
+    if (
+      this.multiple &&
+      this.maxFiles &&
+      currentFiles.length + files.length > this.maxFiles
+    ) {
       this.emit("ct-error", {
         error: new Error("Max files exceeded"),
         message: `Maximum ${this.maxFiles} files allowed`,
@@ -443,6 +447,13 @@ export class CTFileInput extends BaseElement {
 
       for (const file of Array.from(files)) {
         try {
+          // Check file size if maxSizeBytes is set (emit warning but don't block)
+          if (this.maxSizeBytes && file.size > this.maxSizeBytes) {
+            console.warn(
+              `File ${file.name} (${formatFileSize(file.size)}) exceeds maxSizeBytes (${formatFileSize(this.maxSizeBytes)})`,
+            );
+          }
+
           // Check if should compress (subclass decides)
           let fileToProcess: Blob = file;
           if (this.shouldCompressFile(file)) {
