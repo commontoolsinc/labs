@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test ct-file-input and ct-image-input</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 1200px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+    .section {
+      margin: 2rem 0;
+      padding: 1rem;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+    h2 {
+      margin-top: 0;
+    }
+    .output {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: #f5f5f5;
+      border-radius: 4px;
+      font-family: monospace;
+      white-space: pre-wrap;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>File Input Component Tests</h1>
+
+  <div class="section">
+    <h2>ct-file-input (PDF support)</h2>
+    <p>Test uploading PDFs and other documents</p>
+    <ct-file-input
+      id="file-input"
+      accept="application/pdf,.pdf,.docx,.txt"
+      multiple
+      buttonText="📄 Upload Documents"
+    ></ct-file-input>
+    <div class="output" id="file-output">No files selected yet</div>
+  </div>
+
+  <div class="section">
+    <h2>ct-file-input (Mixed: Images + PDFs)</h2>
+    <p>Test uploading both images and PDFs</p>
+    <ct-file-input
+      id="mixed-input"
+      accept="image/*,application/pdf"
+      multiple
+      buttonText="📎 Upload Images or PDFs"
+    ></ct-file-input>
+    <div class="output" id="mixed-output">No files selected yet</div>
+  </div>
+
+  <div class="section">
+    <h2>ct-image-input (backward compatibility)</h2>
+    <p>Test that existing image input still works</p>
+    <ct-image-input
+      id="image-input"
+      multiple
+      maxSizeBytes="1000000"
+      buttonText="📷 Add Photos"
+    ></ct-image-input>
+    <div class="output" id="image-output">No images selected yet</div>
+  </div>
+
+  <div class="section">
+    <h2>ct-image-input with capture</h2>
+    <p>Test camera capture (mobile only)</p>
+    <ct-image-input
+      id="camera-input"
+      capture="environment"
+      buttonText="📸 Take Photo"
+    ></ct-image-input>
+    <div class="output" id="camera-output">No photos taken yet</div>
+  </div>
+
+  <script type="module">
+    // Import components
+    import './packages/ui/src/v2/components/ct-file-input/ct-file-input.ts';
+    import './packages/ui/src/v2/components/ct-image-input/ct-image-input.ts';
+
+    // Helper to display file/image data
+    function displayFiles(files, outputId) {
+      const output = document.getElementById(outputId);
+      const data = files.map(f => ({
+        name: f.name,
+        type: f.type,
+        size: `${(f.size / 1024).toFixed(1)} KB`,
+        width: f.width,
+        height: f.height,
+        hasUrl: !!f.url
+      }));
+      output.textContent = JSON.stringify(data, null, 2);
+    }
+
+    // ct-file-input (PDF)
+    const fileInput = document.getElementById('file-input');
+    fileInput.addEventListener('ct-change', (e) => {
+      console.log('file-input ct-change:', e.detail);
+      displayFiles(e.detail.files, 'file-output');
+    });
+    fileInput.addEventListener('ct-error', (e) => {
+      console.error('file-input error:', e.detail);
+      document.getElementById('file-output').textContent =
+        `Error: ${e.detail.message}`;
+    });
+
+    // ct-file-input (mixed)
+    const mixedInput = document.getElementById('mixed-input');
+    mixedInput.addEventListener('ct-change', (e) => {
+      console.log('mixed-input ct-change:', e.detail);
+      displayFiles(e.detail.files, 'mixed-output');
+    });
+
+    // ct-image-input (backward compat - using 'images' property)
+    const imageInput = document.getElementById('image-input');
+    imageInput.addEventListener('ct-change', (e) => {
+      console.log('image-input ct-change:', e.detail);
+      // Check both 'images' (old) and 'files' (new) are present
+      console.log('Has images property:', !!e.detail.images);
+      console.log('Has files property:', !!e.detail.files);
+      displayFiles(e.detail.images || e.detail.files, 'image-output');
+    });
+    imageInput.addEventListener('ct-error', (e) => {
+      console.error('image-input error:', e.detail);
+      document.getElementById('image-output').textContent =
+        `Error: ${e.detail.message}`;
+    });
+
+    // ct-image-input (camera)
+    const cameraInput = document.getElementById('camera-input');
+    cameraInput.addEventListener('ct-change', (e) => {
+      console.log('camera-input ct-change:', e.detail);
+      displayFiles(e.detail.images || e.detail.files, 'camera-output');
+    });
+  </script>
+</body>
+</html>
