@@ -2864,6 +2864,7 @@ interface CTListElement extends CTHTMLElement {}
 interface CTListItemElement extends CTHTMLElement {}
 interface CTLoaderElement extends CTHTMLElement {}
 interface CTInputElement extends CTHTMLElement {}
+interface CTFileInputElement extends CTHTMLElement {}
 interface CTImageInputElement extends CTHTMLElement {}
 interface CTInputLegacyElement extends CTHTMLElement {}
 interface CTCheckboxElement extends CTHTMLElement {}
@@ -3245,6 +3246,32 @@ interface CTInputLegacyAttributes<T> extends CTHTMLAttributes<T> {
   "placeholder"?: string;
   "appearance"?: string;
   "customStyle"?: string;
+}
+
+interface CTFileInputAttributes<T> extends CTHTMLAttributes<T> {
+  "multiple"?: boolean;
+  "maxFiles"?: number;
+  "accept"?: string;
+  "buttonText"?: string;
+  "variant"?:
+    | "default"
+    | "primary"
+    | "secondary"
+    | "outline"
+    | "ghost"
+    | "link"
+    | "destructive";
+  "size"?: "default" | "sm" | "lg" | "icon";
+  "showPreview"?: boolean;
+  "previewSize"?: "sm" | "md" | "lg";
+  "removable"?: boolean;
+  "disabled"?: boolean;
+  "maxSizeBytes"?: number;
+  "files"?: any[]; // FileData[]
+  "$files"?: any; // CellLike<FileData[]>
+  "onct-change"?: EventHandler<any>;
+  "onct-remove"?: EventHandler<any>;
+  "onct-error"?: EventHandler<any>;
 }
 
 interface CTImageInputAttributes<T> extends CTHTMLAttributes<T> {
@@ -3810,6 +3837,10 @@ declare global {
       "ct-input": CTDOM.DetailedHTMLProps<
         CTInputAttributes<CTInputElement>,
         CTInputElement
+      >;
+      "ct-file-input": CTDOM.DetailedHTMLProps<
+        CTFileInputAttributes<CTFileInputElement>,
+        CTFileInputElement
       >;
       "ct-image-input": CTDOM.DetailedHTMLProps<
         CTImageInputAttributes<CTImageInputElement>,
