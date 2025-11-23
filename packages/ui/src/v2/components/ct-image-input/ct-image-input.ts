@@ -1,25 +1,17 @@
-import { css, html } from "lit";
+import { html, type TemplateResult } from "lit";
 import { property } from "lit/decorators.js";
-import { BaseElement } from "../../core/base-element.ts";
 import { ifDefined } from "lit/directives/if-defined.js";
-import type { ButtonSize, ButtonVariant } from "../ct-button/ct-button.ts";
-import { type Cell } from "@commontools/runner";
-import { createArrayCellController } from "../../core/cell-controller.ts";
-import { consume } from "@lit/context";
 import {
-  applyThemeToElement,
-  type CTTheme,
-  defaultTheme,
-  themeContext,
-} from "../theme-context.ts";
+  CTFileInput,
+  type FileData,
+} from "../ct-file-input/ct-file-input.ts";
 import {
   compressImage,
   formatFileSize,
 } from "../../utils/image-compression.ts";
-import "../ct-button/ct-button.ts";
 
 /**
- * Image data structure
+ * Image-specific metadata (EXIF data)
  */
 export interface ExifData {
   // Core metadata
@@ -52,27 +44,26 @@ export interface ExifData {
   raw?: Record<string, any>;
 }
 
-export interface ImageData {
-  id: string;
-  name: string;
-  url: string;
-  data: string;
-  timestamp: number;
+/**
+ * Image data structure (extends FileData with image-specific fields)
+ */
+export interface ImageData extends FileData {
   width?: number;
   height?: number;
-  size: number;
-  type: string;
   exif?: ExifData;
 }
 
 /**
  * CTImageInput - Image capture and upload component with camera support
  *
+ * Extends CTFileInput with image-specific features like compression, EXIF extraction,
+ * and camera capture support.
+ *
  * @element ct-image-input
  *
  * @attr {boolean} multiple - Allow multiple images (default: false)
  * @attr {number} maxImages - Max number of images (default: unlimited)
- * @attr {number} maxSizeBytes - Max size in bytes before compression (default: no compression)
+ * @attr {number} maxSizeBytes - Max size in bytes before compression (default: 5MB)
  * @attr {string} capture - Capture mode: "user" | "environment" | false
  * @attr {string} buttonText - Custom button text (default: "📷 Add Photo")
  * @attr {string} variant - Button style variant
@@ -91,243 +82,52 @@ export interface ImageData {
  * @example
  * <ct-image-input maxSizeBytes={5000000} buttonText="📸 Upload"></ct-image-input>
  */
-export class CTImageInput extends BaseElement {
-  static override styles = [
-    BaseElement.baseStyles,
-    css`
-      :host {
-        display: block;
-        box-sizing: border-box;
-      }
+export class CTImageInput extends CTFileInput {
+  // Override default properties with image-specific defaults
+  @property({ type: String })
+  override buttonText = "📷 Add Photo";
 
-      *,
-      *::before,
-      *::after {
-        box-sizing: inherit;
-      }
-
-      .container {
-        display: flex;
-        flex-direction: column;
-        gap: var(--ct-theme-spacing-normal, 0.75rem);
-      }
-
-      input[type="file"] {
-        display: none;
-      }
-
-      .previews {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-        gap: var(--ct-theme-spacing-normal, 0.75rem);
-      }
-
-      .preview-item {
-        position: relative;
-        border-radius: var(
-          --ct-theme-border-radius,
-          var(--ct-border-radius-md, 0.375rem)
-        );
-        overflow: hidden;
-        border: 1px solid
-          var(--ct-theme-color-border, var(--ct-color-gray-200, #e5e7eb));
-        background: var(
-          --ct-theme-color-background,
-          var(--ct-color-gray-50, #f9fafb)
-        );
-      }
-
-      .preview-item img {
-        width: 100%;
-        height: 120px;
-        object-fit: cover;
-        display: block;
-      }
-
-      .preview-item.size-sm img {
-        height: 80px;
-      }
-
-      .preview-item.size-lg img {
-        height: 160px;
-      }
-
-      .remove-button {
-        position: absolute;
-        top: 4px;
-        right: 4px;
-        background: rgba(0, 0, 0, 0.6);
-        color: white;
-        border: none;
-        border-radius: 50%;
-        width: 24px;
-        height: 24px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        font-size: 16px;
-        line-height: 1;
-        padding: 0;
-        transition: background 0.2s ease;
-      }
-
-      .remove-button:hover {
-        background: rgba(0, 0, 0, 0.8);
-      }
-
-      .image-info {
-        padding: 6px 8px;
-        font-size: 0.75rem;
-        color: var(--ct-theme-color-text-muted, var(--ct-color-gray-600, #4b5563));
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      .loading {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 1rem;
-        color: var(--ct-theme-color-text-muted, var(--ct-color-gray-600, #4b5563));
-        font-size: 0.875rem;
-      }
-    `,
-  ];
-
-  @property({ type: Boolean })
-  multiple = false;
+  @property({ type: String })
+  override accept = "image/*";
 
   @property({ type: Number })
-  maxImages?: number;
+  override maxSizeBytes = 5 * 1024 * 1024; // Default to 5MB for images
 
+  // Image-specific properties
   @property({ type: String })
   capture?: "user" | "environment" | false;
 
-  @property({ type: String })
-  buttonText = "📷 Add Photo";
-
-  @property({ type: String })
-  variant: ButtonVariant = "outline";
-
-  @property({ type: String })
-  size: ButtonSize = "default";
-
   @property({ type: Boolean })
-  showPreview = true;
+  extractExif = false;
 
-  @property({ type: String })
-  previewSize: "sm" | "md" | "lg" = "md";
-
-  @property({ type: Boolean })
-  removable = true;
-
-  @property({ type: Boolean })
-  disabled = false;
-
-  @property({ type: Number })
-  maxSizeBytes?: number = 5 * 1024 * 1024; // Default to 5MB
-
-  @property({ type: Array })
-  images: Cell<ImageData[]> | ImageData[] = [];
-
-  @property({ type: Boolean })
-  private loading = false;
-
-  // Theme consumption
-  @consume({ context: themeContext, subscribe: true })
-  @property({ attribute: false })
-  declare theme?: CTTheme;
-
-  private _cellController = createArrayCellController<ImageData>(this, {
-    onChange: (_newImages: ImageData[], _oldImages: ImageData[]) => {
-      // Just request an update to re-render with the new cell value
-      // Don't emit ct-change here - that causes infinite loops when using handlers
-      this.requestUpdate();
-    },
-  });
-
-  private _generateId(): string {
-    return `img-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+  // Provide backward-compatible property alias
+  get images(): ImageData[] | any {
+    return this.files;
+  }
+  set images(value: ImageData[] | any) {
+    this.files = value;
   }
 
-  private getImages(): ImageData[] {
-    return [...this._cellController.getValue()];
+  // Alias maxImages to maxFiles for backward compatibility
+  get maxImages(): number | undefined {
+    return this.maxFiles;
+  }
+  set maxImages(value: number | undefined) {
+    this.maxFiles = value;
   }
 
-  private setImages(newImages: ImageData[]): void {
-    this._cellController.setValue(newImages);
+  // Override: Images should be compressed if maxSizeBytes is set and exceeded
+  protected override shouldCompressFile(file: File): boolean {
+    return !!(this.maxSizeBytes && file.size > this.maxSizeBytes);
   }
 
-  private _handleButtonClick() {
-    const input = this.shadowRoot?.querySelector(
-      'input[type="file"]',
-    ) as HTMLInputElement;
-    input?.click();
-  }
+  // Override: Use image compression utility
+  protected override async compressFile(file: File): Promise<Blob> {
+    if (!this.maxSizeBytes) return file;
 
-  private async _handleFileChange(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const files = input.files;
-
-    if (!files || files.length === 0) return;
-
-    const currentImages = this.getImages();
-
-    // Check max images limit
-    if (
-      this.maxImages &&
-      currentImages.length + files.length > this.maxImages
-    ) {
-      this.emit("ct-error", {
-        error: new Error("Max images exceeded"),
-        message: `Maximum ${this.maxImages} images allowed`,
-      });
-      return;
-    }
-
-    this.loading = true;
-
-    try {
-      const newImages: ImageData[] = [];
-
-      for (const file of Array.from(files)) {
-        try {
-          const imageData = await this._processFile(file);
-          newImages.push(imageData);
-        } catch (error) {
-          this.emit("ct-error", {
-            error: error as Error,
-            message: `Failed to process ${file.name}`,
-          });
-        }
-      }
-
-      // When multiple is false, replace existing images instead of appending
-      const updatedImages = this.multiple
-        ? [...currentImages, ...newImages]
-        : newImages;
-      this.setImages(updatedImages);
-      this.emit("ct-change", { images: updatedImages });
-    } finally {
-      this.loading = false;
-      // Reset input so same file can be selected again
-      input.value = "";
-    }
-  }
-
-  /**
-   * Compress an image file using the image compression utility
-   * @param file - The image file to compress
-   * @param maxSizeBytes - Target maximum size in bytes
-   * @returns Compressed blob
-   */
-  private async _compressImage(
-    file: File,
-    maxSizeBytes: number,
-  ): Promise<Blob> {
-    const result = await compressImage(file, { maxSizeBytes });
+    const result = await compressImage(file, {
+      maxSizeBytes: this.maxSizeBytes,
+    });
 
     // Log compression result
     if (result.compressedSize < result.originalSize) {
@@ -338,10 +138,10 @@ export class CTImageInput extends BaseElement {
       );
     }
 
-    if (result.compressedSize > maxSizeBytes) {
+    if (result.compressedSize > this.maxSizeBytes) {
       console.warn(
         `Could not compress ${file.name} below ${
-          formatFileSize(maxSizeBytes)
+          formatFileSize(this.maxSizeBytes)
         }. Final size: ${formatFileSize(result.compressedSize)}`,
       );
     }
@@ -349,163 +149,97 @@ export class CTImageInput extends BaseElement {
     return result.blob;
   }
 
-  private async _processFile(file: File): Promise<ImageData> {
-    const id = this._generateId();
+  // Override: Extract image dimensions and EXIF
+  protected override async processFile(file: File): Promise<ImageData> {
+    // Get base file data
+    const baseData = await super.processFile(file);
 
-    // Compress if maxSizeBytes is set and file exceeds it
-    let fileToProcess: Blob = file;
-    if (this.maxSizeBytes && file.size > this.maxSizeBytes) {
-      try {
-        fileToProcess = await this._compressImage(file, this.maxSizeBytes);
-      } catch (error) {
-        console.error("Compression failed, using original file:", error);
-        // Continue with original file if compression fails
-      }
-    }
-
+    // Load image to get dimensions
     return new Promise((resolve, reject) => {
-      const reader = new FileReader();
+      const img = new Image();
 
-      reader.onload = () => {
-        const dataUrl = reader.result as string;
-
-        // Get image dimensions from the data URL
-        const img = new Image();
-        img.onload = () => {
-          const imageData: ImageData = {
-            id,
-            name: file.name || `Photo-${Date.now()}.jpg`,
-            url: dataUrl,
-            data: dataUrl,
-            timestamp: Date.now(),
-            width: img.width,
-            height: img.height,
-            size: fileToProcess.size, // Use compressed size
-            type: fileToProcess.type || file.type,
-          };
-
-          resolve(imageData);
+      img.onload = () => {
+        const imageData: ImageData = {
+          ...baseData,
+          width: img.width,
+          height: img.height,
         };
 
-        img.onerror = () => {
-          reject(new Error("Failed to load image"));
-        };
+        // TODO: Add EXIF extraction if this.extractExif is true
 
-        img.src = dataUrl;
+        resolve(imageData);
       };
 
-      reader.onerror = () => {
-        reject(new Error("Failed to read file"));
-      };
-
-      reader.readAsDataURL(fileToProcess);
+      img.onerror = () => reject(new Error("Failed to load image"));
+      img.src = baseData.url;
     });
   }
 
-  private _handleRemove(id: string) {
-    const currentImages = this.getImages();
-    const updatedImages = currentImages.filter((img) => img.id !== id);
-    this.setImages(updatedImages);
-    this.emit("ct-remove", { id, images: updatedImages });
-    this.emit("ct-change", { images: updatedImages });
+  // Override: Always use <img> for images (we know they're images)
+  protected override renderPreview(file: ImageData): TemplateResult {
+    return html`<img src="${file.url}" alt="${file.name}" />`;
   }
+
+  // Override: Add capture attribute to file input
+  protected override renderFileInput(): TemplateResult {
+    const captureAttr = this.capture !== false ? this.capture : undefined;
+
+    return html`
+      <input
+        type="file"
+        accept="${this.accept}"
+        ?multiple="${this.multiple}"
+        ?disabled="${this.disabled}"
+        capture="${ifDefined(captureAttr)}"
+        @change="${this._handleFileChange}"
+      />
+    `;
+  }
+
+  // Override render to keep "Processing images..." text
+  override render() {
+    return html`
+      <div class="container">
+        ${this.renderFileInput()} ${this.renderButton()}
+        ${this.loading
+          ? html`<div class="loading">Processing images...</div>`
+          : ""}
+        ${this.renderPreviews()}
+      </div>
+    `;
+  }
+
+  // Provide backward-compatible event handling
+  // The base class emits { files }, but image-input users expect { images }
+  private _handleFileChange: any;
 
   override connectedCallback() {
     super.connectedCallback();
-    // CellController handles subscription automatically via ReactiveController
-  }
 
-  override disconnectedCallback() {
-    super.disconnectedCallback();
-    // CellController handles cleanup automatically via ReactiveController
-  }
+    // Intercept change events to provide backward-compatible event details
+    this._handleFileChange = (e: CustomEvent) => {
+      const detail = e.detail as { files: ImageData[] };
+      // Re-emit with 'images' property for backward compatibility
+      this.emit("ct-change", {
+        images: detail.files,
+        files: detail.files, // Also include new property
+      });
+      e.stopPropagation();
+    };
 
-  override willUpdate(changedProperties: Map<string, any>) {
-    super.willUpdate(changedProperties);
+    // Similar for remove events
+    const handleRemove = (e: CustomEvent) => {
+      const detail = e.detail as { id: string; files: ImageData[] };
+      this.emit("ct-remove", {
+        id: detail.id,
+        images: detail.files,
+        files: detail.files,
+      });
+      e.stopPropagation();
+    };
 
-    // If the images property itself changed (e.g., switched to a different cell)
-    if (changedProperties.has("images")) {
-      // Bind the new value (Cell or plain array) to the controller
-      this._cellController.bind(this.images);
-    }
-  }
-
-  override updated(changedProperties: Map<string, any>) {
-    super.updated(changedProperties);
-
-    if (changedProperties.has("theme")) {
-      applyThemeToElement(this, this.theme ?? defaultTheme);
-    }
-  }
-
-  override firstUpdated() {
-    // Bind the initial value to the cell controller
-    this._cellController.bind(this.images);
-
-    // Apply theme after first render
-    applyThemeToElement(this, this.theme ?? defaultTheme);
-  }
-
-  override render() {
-    // Only set capture attribute if explicitly specified (not false)
-    const captureAttr = this.capture !== false ? this.capture : undefined;
-    const currentImages = this.getImages();
-
-    return html`
-      <div class="container">
-        <input
-          type="file"
-          accept="image/*"
-          ?multiple="${this.multiple}"
-          ?disabled="${this.disabled}"
-          capture="${ifDefined(captureAttr)}"
-          @change="${this._handleFileChange}"
-        />
-
-        <ct-button
-          variant="${this.variant}"
-          size="${this.size}"
-          ?disabled="${this.disabled || this.loading}"
-          @click="${this._handleButtonClick}"
-        >
-          ${this.loading ? "Loading..." : this.buttonText}
-        </ct-button>
-
-        ${this.loading
-          ? html`
-            <div class="loading">Processing images...</div>
-          `
-          : ""} ${this.showPreview && currentImages.length > 0
-          ? html`
-            <div class="previews">
-              ${currentImages.map(
-                (image) =>
-                  html`
-                    <div class="preview-item size-${this.previewSize}">
-                      <img src="${image.url}" alt="${image.name}" />
-                      ${this.removable
-                        ? html`
-                          <button
-                            type="button"
-                            class="remove-button"
-                            @click="${() => this._handleRemove(image.id)}"
-                            aria-label="Remove image"
-                          >
-                            ×
-                          </button>
-                        `
-                        : ""}
-                      <div class="image-info" title="${image.name}">
-                        ${image.name} (${formatFileSize(image.size)})
-                      </div>
-                    </div>
-                  `,
-              )}
-            </div>
-          `
-          : ""}
-      </div>
-    `;
+    this.addEventListener("ct-change", this._handleFileChange);
+    this.addEventListener("ct-remove", handleRemove);
   }
 }
 
