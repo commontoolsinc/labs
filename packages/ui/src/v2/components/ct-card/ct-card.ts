@@ -113,6 +113,11 @@ export class CTCard extends BaseElement {
         padding-bottom: 0;
       }
 
+      /* When header is the only section, add bottom padding */
+      .card-header:not(.empty):has(+ .card-content.empty) {
+        padding-bottom: 1.5rem;
+      }
+
       /* Hide header if empty (controlled by JS via .empty class) */
       .card-header.empty {
         display: none;
@@ -203,8 +208,8 @@ export class CTCard extends BaseElement {
 
     override firstUpdated() {
       // Set up slot change listeners to detect empty slots
-      this.shadowRoot?.querySelectorAll('slot').forEach(slot => {
-        slot.addEventListener('slotchange', () => this._updateEmptyStates());
+      this.shadowRoot?.querySelectorAll("slot").forEach((slot) => {
+        slot.addEventListener("slotchange", () => this._updateEmptyStates());
       });
 
       // Initial check for empty states
@@ -263,45 +268,94 @@ export class CTCard extends BaseElement {
      * whether their slots have assigned content.
      */
     private _updateEmptyStates(): void {
-      const headerSlot = this.shadowRoot?.querySelector('slot[name="header"]') as HTMLSlotElement | null;
-      const contentNamedSlot = this.shadowRoot?.querySelector('slot[name="content"]') as HTMLSlotElement | null;
-      const contentDefaultSlot = contentNamedSlot?.querySelector('slot:not([name])') as HTMLSlotElement | null;
-      const footerSlot = this.shadowRoot?.querySelector('slot[name="footer"]') as HTMLSlotElement | null;
+      const headerSlot = this.shadowRoot?.querySelector(
+        'slot[name="header"]',
+      ) as HTMLSlotElement | null;
+      const contentNamedSlot = this.shadowRoot?.querySelector(
+        'slot[name="content"]',
+      ) as HTMLSlotElement | null;
+      const contentDefaultSlot = contentNamedSlot?.querySelector(
+        "slot:not([name])",
+      ) as HTMLSlotElement | null;
+      const footerSlot = this.shadowRoot?.querySelector(
+        'slot[name="footer"]',
+      ) as HTMLSlotElement | null;
 
       // Check nested slots for title/description/action pattern
-      const titleSlot = this.shadowRoot?.querySelector('slot[name="title"]') as HTMLSlotElement | null;
-      const actionSlot = this.shadowRoot?.querySelector('slot[name="action"]') as HTMLSlotElement | null;
-      const descriptionSlot = this.shadowRoot?.querySelector('slot[name="description"]') as HTMLSlotElement | null;
+      const titleSlot = this.shadowRoot?.querySelector('slot[name="title"]') as
+        | HTMLSlotElement
+        | null;
+      const actionSlot = this.shadowRoot?.querySelector(
+        'slot[name="action"]',
+      ) as HTMLSlotElement | null;
+      const descriptionSlot = this.shadowRoot?.querySelector(
+        'slot[name="description"]',
+      ) as HTMLSlotElement | null;
 
-      const header = this.shadowRoot?.querySelector('.card-header');
-      const content = this.shadowRoot?.querySelector('.card-content');
-      const footer = this.shadowRoot?.querySelector('.card-footer');
-      const titleWrapper = this.shadowRoot?.querySelector('.card-title-wrapper');
+      const header = this.shadowRoot?.querySelector(".card-header");
+      const content = this.shadowRoot?.querySelector(".card-content");
+      const footer = this.shadowRoot?.querySelector(".card-footer");
+      const titleWrapper = this.shadowRoot?.querySelector(
+        ".card-title-wrapper",
+      );
+
+      // Helper function to check if a node has meaningful content
+      const hasContent = (node: Node): boolean => {
+        // Whitespace-only text nodes are not content
+        if (node.nodeType === Node.TEXT_NODE) {
+          return (node.textContent?.trim() || "") !== "";
+        }
+        // Element nodes with no children or only whitespace are not content
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          const element = node as Element;
+          // If element has no children, it's empty
+          if (element.childNodes.length === 0) {
+            return false;
+          }
+          // If element only has whitespace text content, it's empty
+          if ((element.textContent?.trim() || "") === "") {
+            return false;
+          }
+        }
+        // Other nodes or non-empty elements are content
+        return true;
+      };
 
       // Check if slots have assigned content (actual slotted elements/nodes)
-      const hasHeaderContent = (headerSlot?.assignedNodes().length ?? 0) > 0;
+      // Filter out whitespace-only text nodes and empty elements
+      const hasHeaderContent = headerSlot?.assignedNodes().some(hasContent) ??
+        false;
 
       // Content has content if EITHER the named "content" slot OR the default slot has nodes
-      const hasContentNamedSlot = (contentNamedSlot?.assignedNodes().length ?? 0) > 0;
-      const hasContentDefaultSlot = (contentDefaultSlot?.assignedNodes().length ?? 0) > 0;
+      // Filter out whitespace-only text nodes and empty elements
+      const hasContentNamedSlot =
+        contentNamedSlot?.assignedNodes().some(hasContent) ?? false;
+      const hasContentDefaultSlot =
+        contentDefaultSlot?.assignedNodes().some(hasContent) ?? false;
       const hasContentContent = hasContentNamedSlot || hasContentDefaultSlot;
 
-      const hasFooterContent = (footerSlot?.assignedNodes().length ?? 0) > 0;
+      const hasFooterContent = footerSlot?.assignedNodes().some(hasContent) ??
+        false;
 
       // Check if title/action slots have content (for title-wrapper visibility)
-      const hasTitleContent = (titleSlot?.assignedNodes().length ?? 0) > 0;
-      const hasActionContent = (actionSlot?.assignedNodes().length ?? 0) > 0;
+      const hasTitleContent = titleSlot?.assignedNodes().some(hasContent) ??
+        false;
+      const hasActionContent = actionSlot?.assignedNodes().some(hasContent) ??
+        false;
       const hasTitleWrapperContent = hasTitleContent || hasActionContent;
 
       // If using title/description/action pattern, header should be visible even without explicit slot="header"
-      const hasNestedHeaderContent = hasTitleContent || hasActionContent || ((descriptionSlot?.assignedNodes().length ?? 0) > 0);
+      const hasDescriptionContent =
+        descriptionSlot?.assignedNodes().some(hasContent) ?? false;
+      const hasNestedHeaderContent = hasTitleContent || hasActionContent ||
+        hasDescriptionContent;
       const shouldShowHeader = hasHeaderContent || hasNestedHeaderContent;
 
       // Add/remove 'empty' class based on slot content
-      header?.classList.toggle('empty', !shouldShowHeader);
-      content?.classList.toggle('empty', !hasContentContent);
-      footer?.classList.toggle('empty', !hasFooterContent);
-      titleWrapper?.classList.toggle('empty', !hasTitleWrapperContent);
+      header?.classList.toggle("empty", !shouldShowHeader);
+      content?.classList.toggle("empty", !hasContentContent);
+      footer?.classList.toggle("empty", !hasFooterContent);
+      titleWrapper?.classList.toggle("empty", !hasTitleWrapperContent);
     }
 
     private _handleClick = (_event: Event): void => {
