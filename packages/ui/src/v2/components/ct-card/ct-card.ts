@@ -127,7 +127,8 @@ export class CTCard extends BaseElement {
         gap: 1rem;
       }
 
-      .card-title-wrapper:not(:has([slot])) {
+      /* Hide title wrapper if empty (controlled by JS via .empty class) */
+      .card-title-wrapper.empty {
         display: none;
       }
 
@@ -267,9 +268,15 @@ export class CTCard extends BaseElement {
       const contentDefaultSlot = contentNamedSlot?.querySelector('slot:not([name])') as HTMLSlotElement | null;
       const footerSlot = this.shadowRoot?.querySelector('slot[name="footer"]') as HTMLSlotElement | null;
 
+      // Check nested slots for title/description/action pattern
+      const titleSlot = this.shadowRoot?.querySelector('slot[name="title"]') as HTMLSlotElement | null;
+      const actionSlot = this.shadowRoot?.querySelector('slot[name="action"]') as HTMLSlotElement | null;
+      const descriptionSlot = this.shadowRoot?.querySelector('slot[name="description"]') as HTMLSlotElement | null;
+
       const header = this.shadowRoot?.querySelector('.card-header');
       const content = this.shadowRoot?.querySelector('.card-content');
       const footer = this.shadowRoot?.querySelector('.card-footer');
+      const titleWrapper = this.shadowRoot?.querySelector('.card-title-wrapper');
 
       // Check if slots have assigned content (actual slotted elements/nodes)
       const hasHeaderContent = (headerSlot?.assignedNodes().length ?? 0) > 0;
@@ -281,10 +288,20 @@ export class CTCard extends BaseElement {
 
       const hasFooterContent = (footerSlot?.assignedNodes().length ?? 0) > 0;
 
+      // Check if title/action slots have content (for title-wrapper visibility)
+      const hasTitleContent = (titleSlot?.assignedNodes().length ?? 0) > 0;
+      const hasActionContent = (actionSlot?.assignedNodes().length ?? 0) > 0;
+      const hasTitleWrapperContent = hasTitleContent || hasActionContent;
+
+      // If using title/description/action pattern, header should be visible even without explicit slot="header"
+      const hasNestedHeaderContent = hasTitleContent || hasActionContent || ((descriptionSlot?.assignedNodes().length ?? 0) > 0);
+      const shouldShowHeader = hasHeaderContent || hasNestedHeaderContent;
+
       // Add/remove 'empty' class based on slot content
-      header?.classList.toggle('empty', !hasHeaderContent);
+      header?.classList.toggle('empty', !shouldShowHeader);
       content?.classList.toggle('empty', !hasContentContent);
       footer?.classList.toggle('empty', !hasFooterContent);
+      titleWrapper?.classList.toggle('empty', !hasTitleWrapperContent);
     }
 
     private _handleClick = (_event: Event): void => {
