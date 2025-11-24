@@ -207,7 +207,7 @@ deno task ct charm link \
 ### Step 3: Access in Browser
 
 ```
-http://localhost:5173/myspace
+http://localhost:8000/myspace
 ```
 
 Both charms appear in the space. Changes to the source charm's data automatically update in the consumer charm.
@@ -394,7 +394,7 @@ deno task ct charm link \
   "$SOURCE_ID/gpaStats" \
   "$READER_ID/gpaStats"
 
-echo "Linked! Open: http://localhost:5173/$SPACE"
+echo "Linked! Open: http://localhost:8000/$SPACE"
 ```
 
 ---
