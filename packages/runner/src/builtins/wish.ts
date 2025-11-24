@@ -115,6 +115,17 @@ function resolveBase(
     case "#recent": {
       return { cell: getSpaceCell(ctx), pathPrefix: ["recentCharms"] };
     }
+    case "#favorites": {
+      // Favorites always come from the HOME space (user identity DID)
+      const userDID = ctx.runtime.storageManager.as.did();
+      const homeSpaceCell = ctx.runtime.getCell(
+        userDID,
+        userDID,
+        undefined,
+        ctx.tx,
+      );
+      return { cell: homeSpaceCell, pathPrefix: ["favorites"] };
+    }
     case "#now": {
       if (parsed.path.length > 0) {
         console.error(`Wish target "${wishTarget}" is not recognized.`);

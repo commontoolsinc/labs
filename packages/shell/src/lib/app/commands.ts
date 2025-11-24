@@ -8,7 +8,8 @@ export type Command =
   | { type: "set-show-charm-list-view"; show: boolean }
   | { type: "set-show-debugger-view"; show: boolean }
   | { type: "set-show-quick-jump-view"; show: boolean }
-  | { type: "set-show-sidebar"; show: boolean };
+  | { type: "set-show-sidebar"; show: boolean }
+  | { type: "toggle-favorite"; charmId: string };
 
 export function isCommand(value: unknown): value is Command {
   if (
@@ -43,6 +44,9 @@ export function isCommand(value: unknown): value is Command {
     }
     case "set-show-sidebar": {
       return "show" in value && typeof value.show === "boolean";
+    }
+    case "toggle-favorite": {
+      return "charmId" in value && typeof value.charmId === "string";
     }
   }
   return false;

@@ -196,6 +196,18 @@ export interface IRuntime {
     tx?: IExtendedStorageTransaction,
   ): Cell<T>;
 
+  // Home space helper (space where space DID = user identity DID)
+  getHomeCell<S extends JSONSchema = JSONSchema>(
+    cause: any,
+    schema: S,
+    tx?: IExtendedStorageTransaction,
+  ): Cell<Schema<S>>;
+  getHomeCell<T>(
+    cause: any,
+    schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
+  ): Cell<T>;
+
   // Convenience methods that delegate to the runner
   setup<T, R>(
     tx: IExtendedStorageTransaction,
@@ -571,6 +583,11 @@ export class Runtime implements IRuntime {
             items: { not: true, asCell: true },
           },
           defaultPattern: { not: true, asCell: true },
+          favorites: {
+            type: "array",
+            items: { not: true, asCell: true },
+            asCell: true
+          },
         },
       },
       tx,
@@ -663,6 +680,26 @@ export class Runtime implements IRuntime {
       type: "application/json",
       schema,
     }, tx);
+  }
+
+  // Home space helper (space where space DID = user identity DID)
+  getHomeCell<T>(
+    cause: any,
+    schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
+  ): Cell<T>;
+  getHomeCell<S extends JSONSchema = JSONSchema>(
+    cause: any,
+    schema: S,
+    tx?: IExtendedStorageTransaction,
+  ): Cell<Schema<S>>;
+  getHomeCell(
+    cause: any,
+    schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
+  ): Cell<any> {
+    const homeSpace = this.storageManager.as.did();
+    return this.getCell(homeSpace, cause, schema, tx);
   }
 
   // Convenience methods that delegate to the runner

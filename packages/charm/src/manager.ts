@@ -1097,6 +1097,90 @@ export class CharmManager {
     await this.runtime.idle();
     await this.synced();
   }
+
+  /**
+   * Get the favorites cell from the home space (singleton across all spaces)
+   * @private
+   */
+  private getHomeFavorites(): Cell<Cell<unknown>[]> {
+    const homeSpace = this.runtime.storageManager.as.did();
+    const homeSpaceCell = this.runtime.getCell(
+      homeSpace,
+      homeSpace,
+      spaceCellSchema,
+    );
+    return homeSpaceCell.key("favorites").asSchema(charmListSchema);
+  }
+
+  /**
+   * Add a charm to the user's favorites (in home space)
+   * @param charm - The charm to add to favorites
+   */
+  async addFavorite(charm: Cell<unknown>): Promise<void> {
+    const favorites = this.getHomeFavorites();
+    await favorites.sync();
+
+    const id = getEntityId(charm);
+    if (!id) return;
+
+    await this.runtime.editWithRetry((tx) => {
+      const favoritesWithTx = favorites.withTx(tx);
+      const current = favoritesWithTx.get() || [];
+
+      // Check if already favorited
+      if (current.some((c) => isSameEntity(c, id))) return;
+
+      favoritesWithTx.push(charm);
+    });
+
+    await this.runtime.idle();
+  }
+
+  /**
+   * Remove a charm from the user's favorites (in home space)
+   * @param charm - The charm or entity ID to remove from favorites
+   * @returns true if the charm was removed, false if it wasn't in favorites
+   */
+  async removeFavorite(charm: Cell<unknown> | EntityId): Promise<boolean> {
+    const id = getEntityId(charm);
+    if (!id) return false;
+
+    const favorites = this.getHomeFavorites();
+    await favorites.sync();
+
+    let removed = false;
+    await this.runtime.editWithRetry((tx) => {
+      const favoritesWithTx = favorites.withTx(tx);
+      const filtered = filterOutEntity(favoritesWithTx, id);
+      if (filtered.length !== favoritesWithTx.get().length) {
+        favoritesWithTx.set(filtered);
+        removed = true;
+      }
+    });
+
+    return removed;
+  }
+
+  /**
+   * Check if a charm is in the user's favorites (in home space)
+   * @param charm - The charm or entity ID to check
+   * @returns true if the charm is favorited, false otherwise
+   */
+  isFavorite(charm: Cell<unknown> | EntityId): boolean {
+    const id = getEntityId(charm);
+    if (!id) return false;
+
+    const favorites = this.getHomeFavorites();
+    return favorites.get()?.some((c) => isSameEntity(c, id)) ?? false;
+  }
+
+  /**
+   * Get the favorites cell from the home space
+   * @returns Cell containing the array of favorited charms
+   */
+  getFavorites(): Cell<Cell<unknown>[]> {
+    return this.getHomeFavorites();
+  }
 }
 
 export const getRecipeIdFromCharm = (charm: Cell<unknown>): string => {
