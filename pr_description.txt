@@ -1,0 +1,21 @@
+Refactor CharmManager to use runtime.getSpaceCell and SpaceCellContents
+
+This PR refactors `CharmManager` in `packages/charm` to utilize the new `SpaceCellContents` type and `getSpaceCell` method exposed by `IRuntime` in `packages/runner`.
+
+## Changes
+
+- **packages/runner**:
+    - Export `SpaceCellContents` type.
+    - Add `getSpaceCell` method to `IRuntime` and `Runtime` class.
+    - `getSpaceCell` provides a standardized way to access the space cell with a default schema matching `SpaceCellContents`.
+
+- **packages/charm**:
+    - Remove local `SpaceCell` type and `spaceCellSchema`.
+    - Update `CharmManager` to import `SpaceCellContents`.
+    - Update `CharmManager` to use `runtime.getSpaceCell(this.space)` for initialization.
+    - Update `linkSpaceCell` to align with `SpaceCellContents` structure (using `.get()` for array fields).
+
+## Verification
+
+- Ran `deno check packages/charm/src/manager.ts` to verify type correctness.
+- Ran `deno test packages/charm` to ensure no regressions (existing failures in `iterate.test.ts` and `workflow-classification.test.ts` are unrelated).
