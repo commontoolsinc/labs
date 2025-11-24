@@ -1796,11 +1796,6 @@
       "npm:turndown@^7.1.2",
       "npm:zod@^3.24.1"
     ],
-    "packageJson": {
-      "dependencies": [
-        "npm:playwright@^1.56.1"
-      ]
-    },
     "members": {
       "packages/cli": {
         "dependencies": [
