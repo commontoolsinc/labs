@@ -7,12 +7,13 @@
  *
  * This filters out:
  * - Whitespace-only text nodes
- * - Elements that only contain whitespace
+ * - Elements that only contain whitespace text nodes
  *
  * But considers as content:
  * - Non-whitespace text
  * - Self-contained elements (images, icons, custom elements with no children)
- * - Elements with non-whitespace content
+ * - Elements containing child elements (buttons, icons, etc.)
+ * - Elements with non-whitespace text content
  *
  * @param node - The DOM node to check
  * @returns true if the node has meaningful content, false otherwise
@@ -31,7 +32,11 @@ export function nodeHasContent(node: Node): boolean {
     if (element.childNodes.length === 0) {
       return true;
     }
-    // Elements with children: only empty if all children are whitespace
+    // If element has any child elements (not just text nodes), it has content
+    if (element.children.length > 0) {
+      return true;
+    }
+    // Only text children: check if any have non-whitespace content
     if ((element.textContent?.trim() || "") === "") {
       return false;
     }
