@@ -1,5 +1,12 @@
 {
   "version": "1.0",
-  "last_updated": null,
-  "questions": []
+  "last_updated": "2025-11-24",
+  "questions": [
+    {
+      "filename": "2025-11-24-from-a-built-in-like-wish-or-fetchdata-how-can-i-g.md",
+      "date": "2025-11-24",
+      "title": "From a built-in like wish() or fetchData() how can I get the public DID of the current user? We have IRuntime which contains IStorageManager which contains ISession... or something like that. But what is the magic line of code to give me the DID (or a storage instance pointing to the space)?",
+      "status": "open"
+    }
+  ]
 }
