@@ -1,5 +1,6 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
+import { slotHasContent } from "../../utils/slots.ts";
 
 /**
  * CTCard - Content container with support for header, content, and footer sections
@@ -299,55 +300,23 @@ export class CTCard extends BaseElement {
         ".card-title-wrapper",
       );
 
-      // Helper function to check if a node has meaningful content
-      const hasContent = (node: Node): boolean => {
-        // Whitespace-only text nodes are not content
-        if (node.nodeType === Node.TEXT_NODE) {
-          return (node.textContent?.trim() || "") !== "";
-        }
-        // Element nodes: check if they're truly empty
-        if (node.nodeType === Node.ELEMENT_NODE) {
-          const element = node as Element;
-          // Elements with no children are considered content
-          // (images, icons, custom elements, etc.)
-          if (element.childNodes.length === 0) {
-            return true;
-          }
-          // Elements with children: only empty if all children are whitespace
-          if ((element.textContent?.trim() || "") === "") {
-            return false;
-          }
-        }
-        // Other nodes or non-empty elements are content
-        return true;
-      };
-
-      // Check if slots have assigned content (actual slotted elements/nodes)
-      // Filter out whitespace-only text nodes and empty elements
-      const hasHeaderContent = headerSlot?.assignedNodes().some(hasContent) ??
-        false;
+      // Check if slots have assigned content (filters out whitespace and empty elements)
+      const hasHeaderContent = slotHasContent(headerSlot);
 
       // Content has content if EITHER the named "content" slot OR the default slot has nodes
-      // Filter out whitespace-only text nodes and empty elements
-      const hasContentNamedSlot =
-        contentNamedSlot?.assignedNodes().some(hasContent) ?? false;
-      const hasContentDefaultSlot =
-        contentDefaultSlot?.assignedNodes().some(hasContent) ?? false;
+      const hasContentNamedSlot = slotHasContent(contentNamedSlot);
+      const hasContentDefaultSlot = slotHasContent(contentDefaultSlot);
       const hasContentContent = hasContentNamedSlot || hasContentDefaultSlot;
 
-      const hasFooterContent = footerSlot?.assignedNodes().some(hasContent) ??
-        false;
+      const hasFooterContent = slotHasContent(footerSlot);
 
       // Check if title/action slots have content (for title-wrapper visibility)
-      const hasTitleContent = titleSlot?.assignedNodes().some(hasContent) ??
-        false;
-      const hasActionContent = actionSlot?.assignedNodes().some(hasContent) ??
-        false;
+      const hasTitleContent = slotHasContent(titleSlot);
+      const hasActionContent = slotHasContent(actionSlot);
       const hasTitleWrapperContent = hasTitleContent || hasActionContent;
 
       // If using title/description/action pattern, header should be visible even without explicit slot="header"
-      const hasDescriptionContent =
-        descriptionSlot?.assignedNodes().some(hasContent) ?? false;
+      const hasDescriptionContent = slotHasContent(descriptionSlot);
       const hasNestedHeaderContent = hasTitleContent || hasActionContent ||
         hasDescriptionContent;
       const shouldShowHeader = hasHeaderContent || hasNestedHeaderContent;
