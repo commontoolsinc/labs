@@ -20,7 +20,7 @@ A source charm exposes data for other charms to consume by including fields in i
 
 ```typescript
 /// <cts-enable />
-import { Cell, Default, NAME, recipe, UI, lift } from "commontools";
+import { Cell, Default, NAME, pattern, UI, lift } from "commontools";
 
 // Data structure to expose
 interface Stats {
@@ -32,7 +32,7 @@ interface Stats {
   count: number;
 }
 
-// Input: what this charm accepts
+/** Stats Calculator */
 interface Input {
   name: Default<string, "my-stats-v1">;
   rawData: Default<string, "">;
@@ -49,6 +49,14 @@ interface Output {
 ### Step 2: Compute and Return the Exposed Data
 
 ```typescript
+// Parse raw data into numbers
+const parseData = lift((raw: string): number[] => {
+  if (!raw.trim()) return [];
+  return raw.split("\n")
+    .map(line => parseFloat(line.trim()))
+    .filter(n => !isNaN(n));
+});
+
 const calculateStats = lift((values: number[]): Stats | null => {
   if (values.length === 0) return null;
 
@@ -57,33 +65,38 @@ const calculateStats = lift((values: number[]): Stats | null => {
   const sum = sorted.reduce((acc, val) => acc + val, 0);
   const average = sum / n;
 
-  // Quartile calculations...
-  const q1 = percentile(sorted, 25);
-  const median = percentile(sorted, 50);
-  const q3 = percentile(sorted, 75);
+  // Quartile calculation helper
+  const percentile = (p: number): number => {
+    const index = (p / 100) * (n - 1);
+    const lower = Math.floor(index);
+    const upper = Math.ceil(index);
+    if (lower === upper) return sorted[lower];
+    return sorted[lower] + (index - lower) * (sorted[upper] - sorted[lower]);
+  };
+
+  const q1 = percentile(25);
+  const median = percentile(50);
+  const q3 = percentile(75);
   const iqr = q3 - q1;
 
   return { average, q1, median, q3, iqr, count: n };
 });
 
-export default recipe<Input, Output>(
-  "Stats Calculator",
-  ({ name, rawData }) => {
-    // Compute derived values
-    const parsedValues = parseData(rawData);
-    const computedStats = calculateStats(parsedValues);
+export default pattern<Input, Output>(({ name, rawData }) => {
+  // Compute derived values
+  const parsedValues = parseData(rawData);
+  const computedStats = calculateStats(parsedValues);
 
-    return {
-      [NAME]: "Stats Calculator",
-      [UI]: (/* your UI here */),
+  return {
+    [NAME]: "Stats Calculator",
+    [UI]: (/* your UI here */),
 
-      // These fields are exposed for linking:
-      name,
-      rawData,
-      computedStats,  // <-- Other charms can link to this
-    };
-  }
-);
+    // These fields are exposed for linking:
+    name,
+    rawData,
+    computedStats,  // <-- Other charms can link to this
+  };
+});
 ```
 
 ### Key Rules for Source Charms
@@ -103,7 +116,7 @@ A consumer charm declares expected linked data using `Default<T, null>` in its I
 
 ```typescript
 /// <cts-enable />
-import { Default, NAME, recipe, UI, lift } from "commontools";
+import { Default, NAME, pattern, UI, lift } from "commontools";
 
 // Must match the source charm's exposed structure
 interface Stats {
@@ -115,7 +128,7 @@ interface Stats {
   count: number;
 }
 
-// Input declares optional linked fields with Default<T, null>
+/** Stats Reader */
 interface Input {
   name: Default<string, "stats-reader-v1">;
   linkedStats: Default<Stats | null, null>;  // null until linked
@@ -132,33 +145,30 @@ const formatNumber = lift((val: number | undefined) =>
   val !== undefined ? val.toFixed(2) : "—"
 );
 
-export default recipe<Input, Input>(
-  "Stats Reader",
-  ({ name, linkedStats }) => {
-    const dataPresent = hasData(linkedStats);
+export default pattern<Input, Input>(({ name, linkedStats }) => {
+  const dataPresent = hasData(linkedStats);
 
-    return {
-      [NAME]: "Stats Reader",
-      [UI]: (
+  return {
+    [NAME]: "Stats Reader",
+    [UI]: (
+      <div>
+        <h2>Stats Reader</h2>
+
+        {/* Always show something meaningful */}
         <div>
-          <h2>Stats Reader</h2>
-
-          {/* Always show something meaningful */}
-          <div>
-            <p><strong>Average:</strong> {formatNumber(getAverage(linkedStats))}</p>
-            <p><strong>Count:</strong> {linkedStats?.count ?? 0}</p>
-          </div>
-
-          <p style={{ fontSize: "12px", color: "#666" }}>
-            Link this charm to a stats source using ct charm link.
-          </p>
+          <p><strong>Average:</strong> {formatNumber(getAverage(linkedStats))}</p>
+          <p><strong>Count:</strong> {linkedStats?.count ?? 0}</p>
         </div>
-      ),
-      name,
-      linkedStats,
-    };
-  }
-);
+
+        <p style={{ fontSize: "12px", color: "#666" }}>
+          Link this charm to a stats source using ct charm link.
+        </p>
+      </div>
+    ),
+    name,
+    linkedStats,
+  };
+});
 ```
 
 ### Key Rules for Consumer Charms
@@ -220,7 +230,7 @@ Both charms appear in the space. Changes to the source charm's data automaticall
 
 ```typescript
 /// <cts-enable />
-import { Cell, Default, NAME, recipe, UI, lift, handler } from "commontools";
+import { Cell, Default, NAME, pattern, UI, lift, handler } from "commontools";
 
 interface Stats {
   average: number;
@@ -229,6 +239,7 @@ interface Stats {
   max: number;
 }
 
+/** GPA Stats Source */
 interface Input {
   name: Default<string, "gpa-source-v1">;
   rawData: Default<string, "">;
@@ -266,39 +277,36 @@ const updateData = handler<
   rawData.set(event.target.value);
 });
 
-export default recipe<Input, Output>(
-  "GPA Stats Source",
-  ({ name, rawData }) => {
-    const gpas = parseGpas(rawData);
-    const gpaStats = calculateStats(gpas);
+export default pattern<Input, Output>(({ name, rawData }) => {
+  const gpas = parseGpas(rawData);
+  const gpaStats = calculateStats(gpas);
 
-    return {
-      [NAME]: "GPA Source",
-      [UI]: (
-        <div style={{ padding: "16px" }}>
-          <h2>GPA Data Entry</h2>
-          <textarea
-            value={rawData}
-            onChange={updateData({ rawData })}
-            placeholder="Enter GPAs, one per line..."
-            rows={8}
-            style={{ width: "100%", fontFamily: "monospace" }}
-          />
-        </div>
-      ),
-      name,
-      rawData,
-      gpaStats,  // Exposed for linking
-    };
-  }
-);
+  return {
+    [NAME]: "GPA Source",
+    [UI]: (
+      <div style={{ padding: "16px" }}>
+        <h2>GPA Data Entry</h2>
+        <textarea
+          value={rawData}
+          onChange={updateData({ rawData })}
+          placeholder="Enter GPAs, one per line..."
+          rows={8}
+          style={{ width: "100%", fontFamily: "monospace" }}
+        />
+      </div>
+    ),
+    name,
+    rawData,
+    gpaStats,  // Exposed for linking
+  };
+});
 ```
 
 ### Consumer Charm: `gpa-stats-reader.tsx`
 
 ```typescript
 /// <cts-enable />
-import { Default, NAME, recipe, UI, lift } from "commontools";
+import { Default, NAME, pattern, UI, lift } from "commontools";
 
 interface Stats {
   average: number;
@@ -307,6 +315,7 @@ interface Stats {
   max: number;
 }
 
+/** GPA Stats Reader */
 interface Input {
   name: Default<string, "gpa-reader-v1">;
   gpaStats: Default<Stats | null, null>;
@@ -320,44 +329,41 @@ const getMin = lift((s: Stats | null) => s?.min);
 const getMax = lift((s: Stats | null) => s?.max);
 const getCount = lift((s: Stats | null) => s?.count ?? 0);
 
-export default recipe<Input, Input>(
-  "GPA Stats Reader",
-  ({ name, gpaStats }) => {
-    return {
-      [NAME]: "GPA Reader",
-      [UI]: (
-        <div style={{ padding: "16px", background: "#f0f8ff" }}>
-          <h2>GPA Statistics (Linked)</h2>
-          <table>
-            <tbody>
-              <tr>
-                <td><strong>Count:</strong></td>
-                <td>{getCount(gpaStats)}</td>
-              </tr>
-              <tr>
-                <td><strong>Average:</strong></td>
-                <td>{fmt(getAvg(gpaStats))}</td>
-              </tr>
-              <tr>
-                <td><strong>Min:</strong></td>
-                <td>{fmt(getMin(gpaStats))}</td>
-              </tr>
-              <tr>
-                <td><strong>Max:</strong></td>
-                <td>{fmt(getMax(gpaStats))}</td>
-              </tr>
-            </tbody>
-          </table>
-          <p style={{ fontSize: "12px", color: "#666", marginTop: "16px" }}>
-            Data updates automatically when source changes.
-          </p>
-        </div>
-      ),
-      name,
-      gpaStats,
-    };
-  }
-);
+export default pattern<Input, Input>(({ name, gpaStats }) => {
+  return {
+    [NAME]: "GPA Reader",
+    [UI]: (
+      <div style={{ padding: "16px", background: "#f0f8ff" }}>
+        <h2>GPA Statistics (Linked)</h2>
+        <table>
+          <tbody>
+            <tr>
+              <td><strong>Count:</strong></td>
+              <td>{getCount(gpaStats)}</td>
+            </tr>
+            <tr>
+              <td><strong>Average:</strong></td>
+              <td>{fmt(getAvg(gpaStats))}</td>
+            </tr>
+            <tr>
+              <td><strong>Min:</strong></td>
+              <td>{fmt(getMin(gpaStats))}</td>
+            </tr>
+            <tr>
+              <td><strong>Max:</strong></td>
+              <td>{fmt(getMax(gpaStats))}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style={{ fontSize: "12px", color: "#666", marginTop: "16px" }}>
+          Data updates automatically when source changes.
+        </p>
+      </div>
+    ),
+    name,
+    gpaStats,
+  };
+});
 ```
 
 ### Deployment Script
@@ -405,7 +411,8 @@ echo "Linked! Open: http://localhost:8000/$SPACE"
 - [ ] Define `Output` interface with fields to expose
 - [ ] Use `lift()` for all computed values
 - [ ] Include exposed fields in return object
-- [ ] Type recipe as `recipe<Input, Output>`
+- [ ] Type pattern as `pattern<Input, Output>`
+- [ ] Add JSDoc comment above Input for the charm title
 
 ### Consumer Charm Checklist
 - [ ] Use `Default<T, null>` for linked input fields
