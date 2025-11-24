@@ -428,16 +428,16 @@ export class CTFileInput extends BaseElement {
     const currentFiles = this.getFiles();
 
     // Check max files limit (only for multiple mode)
-    if (
-      this.multiple &&
-      this.maxFiles &&
-      currentFiles.length + files.length > this.maxFiles
-    ) {
-      this.emit("ct-error", {
-        error: new Error("Max files exceeded"),
-        message: `Maximum ${this.maxFiles} files allowed`,
-      });
-      return;
+    // Single-file mode replaces existing files, so no max check needed
+    if (this.multiple && this.maxFiles) {
+      const totalFiles = currentFiles.length + files.length;
+      if (totalFiles > this.maxFiles) {
+        this.emit("ct-error", {
+          error: new Error("Max files exceeded"),
+          message: `Maximum ${this.maxFiles} files allowed`,
+        });
+        return;
+      }
     }
 
     this.loading = true;
@@ -447,17 +447,17 @@ export class CTFileInput extends BaseElement {
 
       for (const file of Array.from(files)) {
         try {
-          // Check file size if maxSizeBytes is set (emit warning but don't block)
-          if (this.maxSizeBytes && file.size > this.maxSizeBytes) {
-            console.warn(
-              `File ${file.name} (${formatFileSize(file.size)}) exceeds maxSizeBytes (${formatFileSize(this.maxSizeBytes)})`,
-            );
-          }
-
           // Check if should compress (subclass decides)
           let fileToProcess: Blob = file;
           if (this.shouldCompressFile(file)) {
             fileToProcess = await this.compressFile(file);
+          }
+
+          // Check file size AFTER compression if maxSizeBytes is set
+          if (this.maxSizeBytes && fileToProcess.size > this.maxSizeBytes) {
+            console.warn(
+              `File ${file.name} (${formatFileSize(fileToProcess.size)}) exceeds maxSizeBytes (${formatFileSize(this.maxSizeBytes)}) even after compression`,
+            );
           }
 
           // Process file (subclass can override)
