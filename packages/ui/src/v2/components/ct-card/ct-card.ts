@@ -305,14 +305,15 @@ export class CTCard extends BaseElement {
         if (node.nodeType === Node.TEXT_NODE) {
           return (node.textContent?.trim() || "") !== "";
         }
-        // Element nodes with no children or only whitespace are not content
+        // Element nodes: check if they're truly empty
         if (node.nodeType === Node.ELEMENT_NODE) {
           const element = node as Element;
-          // If element has no children, it's empty
+          // Elements with no children are considered content
+          // (images, icons, custom elements, etc.)
           if (element.childNodes.length === 0) {
-            return false;
+            return true;
           }
-          // If element only has whitespace text content, it's empty
+          // Elements with children: only empty if all children are whitespace
           if ((element.textContent?.trim() || "") === "") {
             return false;
           }
