@@ -117,8 +117,10 @@ A consumer charm declares expected linked data using `Default<T, null>` in its I
 ```typescript
 /// <cts-enable />
 import { Default, NAME, pattern, UI, lift } from "commontools";
+// You can import the Stats type from the source charm:
+// import type { Stats } from "./stats-source.tsx";
 
-// Must match the source charm's exposed structure
+// Or define it locally (must match the source charm's structure)
 interface Stats {
   average: number;
   q1: number;
@@ -135,34 +137,23 @@ interface Input {
 }
 ```
 
-### Step 2: Handle Both Linked and Unlinked States
+### Step 2: Use Linked Data in Your Pattern
 
 ```typescript
-// Helper functions handle null gracefully
-const hasData = lift((s: Stats | null) => s !== null);
-const getAverage = lift((s: Stats | null) => s?.average);
 const formatNumber = lift((val: number | undefined) =>
   val !== undefined ? val.toFixed(2) : "—"
 );
 
 export default pattern<Input, Input>(({ name, linkedStats }) => {
-  const dataPresent = hasData(linkedStats);
-
   return {
     [NAME]: "Stats Reader",
     [UI]: (
       <div>
         <h2>Stats Reader</h2>
-
-        {/* Always show something meaningful */}
         <div>
-          <p><strong>Average:</strong> {formatNumber(getAverage(linkedStats))}</p>
+          <p><strong>Average:</strong> {formatNumber(linkedStats?.average)}</p>
           <p><strong>Count:</strong> {linkedStats?.count ?? 0}</p>
         </div>
-
-        <p style={{ fontSize: "12px", color: "#666" }}>
-          Link this charm to a stats source using ct charm link.
-        </p>
       </div>
     ),
     name,
@@ -175,8 +166,6 @@ export default pattern<Input, Input>(({ name, linkedStats }) => {
 
 1. **Use `Default<T, null>` for linked fields** - provides fallback when unlinked
 2. **Interface must match source** - the Stats interface must be identical
-3. **Use `lift()` for null-safe access** - `lift((s) => s?.field)` handles null gracefully
-4. **Show helpful UI when unlinked** - guide users on how to link
 
 ---
 
@@ -416,9 +405,7 @@ echo "Linked! Open: http://localhost:8000/$SPACE"
 
 ### Consumer Charm Checklist
 - [ ] Use `Default<T, null>` for linked input fields
-- [ ] Match the interface structure exactly
-- [ ] Use `lift()` helpers for null-safe access
-- [ ] Handle unlinked state gracefully in UI
+- [ ] Match the interface structure exactly (or import the type from the source)
 
 ### CLI Commands
 ```bash
