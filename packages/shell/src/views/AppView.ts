@@ -93,7 +93,7 @@ export class XAppView extends BaseView {
       this.keyboard.register(
         { code: "KeyW", alt: true, preventDefault: true },
         () => {
-          const spaceName = this.app?.spaceName ?? "common-knowledge";
+          const spaceName = this.app?.spaceName;
           navigate({ type: "space", spaceName });
         },
       ),

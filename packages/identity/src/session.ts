@@ -2,7 +2,7 @@ import { Identity } from "./identity.ts";
 import { type DID } from "./interface.ts";
 
 export type Session = {
-  spaceName: string;
+  spaceName?: string;
   spaceIdentity?: Identity;
   space: DID;
   as: Identity;
@@ -13,7 +13,7 @@ export const createSessionFromDid = (
   { identity, space, spaceName }: {
     identity: Identity;
     space: DID;
-    spaceName: string;
+    spaceName?: string;
   },
 ): Promise<Session> => {
   return Promise.resolve({

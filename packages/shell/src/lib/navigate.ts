@@ -13,10 +13,10 @@ export type NavigationCommandType = "charm" | "space";
 export type NavigationCommand = {
   type: "charm";
   charmId: string;
-  spaceName: string;
+  spaceName?: string;
 } | {
   type: "space";
-  spaceName: string;
+  spaceName?: string;
 };
 
 const NavigationEventName = "ct-navigate";
@@ -157,9 +157,8 @@ function generateCommandFromPageLoad(): NavigationCommand {
   const location = new URL(globalThis.location.href);
   const segments = location.pathname.split("/");
   segments.shift(); // shift off the pathnames' prefix "/";
-  const [first, charmId] = [segments[0], segments[1]];
+  const [spaceName, charmId] = [segments[0], segments[1]];
 
-  const spaceName = first || "common-knowledge";
   if (charmId) {
     return { type: "charm", spaceName, charmId };
   } else {

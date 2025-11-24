@@ -1,4 +1,8 @@
-import { createSession, Identity } from "@commontools/identity";
+import {
+  createSession,
+  createSessionFromDid,
+  Identity,
+} from "@commontools/identity";
 import {
   Runtime,
   RuntimeTelemetry,
@@ -12,6 +16,7 @@ import { navigate } from "./navigate.ts";
 import * as Inspector from "@commontools/runner/storage/inspector";
 import { setupIframe } from "./iframe-ctx.ts";
 import { getLogger } from "@commontools/utils/logger";
+import * as KnownPattern from "./known-patterns.ts";
 
 const logger = getLogger("shell.telemetry", {
   enabled: false,
@@ -99,11 +104,18 @@ export class RuntimeInternals extends EventTarget {
   static async create(
     { identity, spaceName, apiUrl }: {
       identity: Identity;
-      spaceName: string;
+      spaceName?: string;
       apiUrl: URL;
     },
   ): Promise<RuntimeInternals> {
-    const session = await createSession({ identity, spaceName });
+    let session;
+    if (spaceName) {
+      session = await createSession({ identity, spaceName });
+    } else {
+      // Connect to the profile space
+      const spaceDid = identity.did();
+      session = await createSessionFromDid({ identity, space: spaceDid });
+    }
 
     // Log user identity for debugging and sharing
     identityLogger.log("telemetry", `[Identity] User DID: ${session.as.did()}`);
@@ -208,6 +220,21 @@ export class RuntimeInternals extends EventTarget {
     charmManager = new CharmManager(session, runtime);
     await charmManager.synced();
     const cc = new CharmsController(charmManager);
+
+    // If loading the "profile" space, check to see
+    // if the profile charm needs to be created.
+    if (!spaceName) {
+      const charms = cc.getAllCharms();
+      if (
+        !KnownPattern.getPattern(charms, KnownPattern.KnownPatternType.Profile)
+      ) {
+        await KnownPattern.create(
+          cc,
+          KnownPattern.KnownPatternType.Default,
+        );
+      }
+    }
+
     return new RuntimeInternals(cc, telemetry, session.space);
   }
 }

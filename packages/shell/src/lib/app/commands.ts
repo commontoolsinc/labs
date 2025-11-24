@@ -3,7 +3,7 @@ import { Identity } from "@commontools/identity";
 export type Command =
   | { type: "set-active-charm-id"; charmId?: string }
   | { type: "set-identity"; identity: Identity }
-  | { type: "set-space"; spaceName: string }
+  | { type: "set-space"; spaceName?: string }
   | { type: "clear-authentication" }
   | { type: "set-show-charm-list-view"; show: boolean }
   | { type: "set-show-debugger-view"; show: boolean }
@@ -22,8 +22,9 @@ export function isCommand(value: unknown): value is Command {
       return "identity" in value && value.identity instanceof Identity;
     }
     case "set-space": {
-      return "spaceName" in value && !!value.spaceName &&
-        typeof value.spaceName === "string";
+      return "spaceName" in value && (value.spaceName === undefined || (
+        typeof value.spaceName === "string" && !!value.spaceName
+      ));
     }
     case "set-active-charm-id": {
       return "charmId" in value && !!value.charmId &&

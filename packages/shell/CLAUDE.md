@@ -69,7 +69,6 @@ RootView (authentication wrapper)
 4. **Routing**:
    - URL pattern: `/{spaceName}/{charmId}`
    - History API integration with back/forward support
-   - Default space: "common-knowledge"
 
 ### Important Patterns
 

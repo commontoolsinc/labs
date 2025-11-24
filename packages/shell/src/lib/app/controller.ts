@@ -35,7 +35,7 @@ export class App extends EventTarget {
     return serialize(this.state());
   }
 
-  async setSpace(spaceName: string) {
+  async setSpace(spaceName?: string) {
     await this.apply({ type: "set-space", spaceName });
   }
 
