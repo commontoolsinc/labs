@@ -121,7 +121,9 @@ export interface IRuntime {
   editWithRetry<T = void>(
     fn: (tx: IExtendedStorageTransaction) => T,
     maxRetries?: number,
-  ): Promise<{ ok: T; error: never } | { ok: never; error: CommitError }>;
+  ): Promise<
+    { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
+  >;
   readTx(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction;
 
   // Cell factory methods
@@ -477,7 +479,9 @@ export class Runtime implements IRuntime {
   editWithRetry<T = void>(
     fn: (tx: IExtendedStorageTransaction) => T,
     maxRetries: number = DEFAULT_MAX_RETRIES,
-  ): Promise<{ ok: T; error: never } | { ok: never; error: CommitError }> {
+  ): Promise<
+    { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
+  > {
     const tx = this.edit();
     const result = fn(tx);
     return tx.commit().then(({ error }) => {
@@ -485,10 +489,10 @@ export class Runtime implements IRuntime {
         if (maxRetries > 0) {
           return this.editWithRetry<T>(fn, maxRetries - 1);
         } else {
-          return { error } as { ok: never; error: CommitError };
+          return { error };
         }
       }
-      return { ok: result } as { ok: T; error: never };
+      return { ok: result };
     });
   }
 
