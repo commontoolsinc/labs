@@ -589,7 +589,7 @@ describe("wish built-in", () => {
       expect(nowValue).toBeLessThanOrEqual(after);
     });
 
-    it("returns empty object for unknown tag", async () => {
+    it("returns error for unknown tag", async () => {
       const errors: unknown[] = [];
       const originalError = console.error;
       console.error = (...args: unknown[]) => {
@@ -617,14 +617,15 @@ describe("wish built-in", () => {
 
         await runtime.idle();
 
-        expect(result.key("missing").get()).toEqual({});
+        const missingResult = result.key("missing").get();
+        expect(missingResult?.error).toMatch(/not recognized/);
         expect(errors.length).toBeGreaterThan(0);
       } finally {
         console.error = originalError;
       }
     });
 
-    it("returns empty object when tag is missing", async () => {
+    it("returns error when tag is missing", async () => {
       const errors: unknown[] = [];
       const originalError = console.error;
       console.error = (...args: unknown[]) => {
@@ -638,7 +639,7 @@ describe("wish built-in", () => {
         });
 
         const resultCell = runtime.getCell<{
-          missing?: { result?: unknown };
+          missing?: { error?: string };
         }>(
           space,
           "wish object syntax no tag result",
@@ -652,7 +653,8 @@ describe("wish built-in", () => {
 
         await runtime.idle();
 
-        expect(result.key("missing").get()).toEqual({});
+        const missingResult = result.key("missing").get();
+        expect(missingResult?.error).toMatch(/not recognized/);
         expect(errors.length).toBeGreaterThan(0);
       } finally {
         console.error = originalError;
