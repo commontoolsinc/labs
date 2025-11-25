@@ -246,7 +246,9 @@ export interface IRuntime {
     tx?: IExtendedStorageTransaction,
   ): Cell<T>;
 
-  getHomeSpaceCell(tx?: IExtendedStorageTransaction): Cell<HomeSpaceCellContents>;
+  getHomeSpaceCell(
+    tx?: IExtendedStorageTransaction,
+  ): Cell<HomeSpaceCellContents>;
 
   // Convenience methods that delegate to the runner
   setup<T, R>(
@@ -725,7 +727,9 @@ export class Runtime implements IRuntime {
     return this.getCell(this.userIdentityDID, cause, schema, tx);
   }
 
-  getHomeSpaceCell(tx?: IExtendedStorageTransaction): Cell<HomeSpaceCellContents> {
+  getHomeSpaceCell(
+    tx?: IExtendedStorageTransaction,
+  ): Cell<HomeSpaceCellContents> {
     return this.getCell(
       this.userIdentityDID,
       this.userIdentityDID,
