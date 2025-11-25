@@ -1613,6 +1613,100 @@ describe("determineTriggeredActions", () => {
     });
   });
 
+  describe("bug: action should trigger when intermediate path appears", () => {
+    it("triggers when intermediate path appears even if final value remains undefined", () => {
+      // Bug scenario:
+      // Action B watches ["a", "b", "c"]
+      // Before: { a: {} } - no 'b' key, so path a.b.c is "unreachable"
+      // After: { a: { b: { x: 1 } } } - 'b' exists but no 'c' key
+      //
+      // In both cases the final value at a.b.c is undefined, BUT:
+      // - Before: we couldn't traverse past 'a' because 'b' doesn't exist
+      // - After: we can traverse to 'b', but 'c' doesn't exist there
+      //
+      // This structural change should trigger the action, because the
+      // "reachability" of the path changed.
+      const actionB = createAction("actionB");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [actionB, [["a", "b", "c"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { a: {} },
+        { a: { b: { x: 1 } } },
+      );
+
+      // Action B should trigger because the path structure changed
+      expect(result).toContain(actionB);
+    });
+
+    it("real-world case: triggers when __#0 key appears in internal", () => {
+      // Simplified version of the real bug from production
+      // Action B watches a path through __#0.allCharms
+      // Before: internal doesn't have __#0
+      // After: internal has __#0 (but no allCharms inside)
+      const actionA = createAction("actionA");
+      const actionB = createAction("actionB");
+      const actionC = createAction("actionC");
+
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [actionA, [
+          ["value", "internal", "$NAME"],
+          ["value", "internal", "$alias", "path"],
+          ["value", "internal", "/", "link@1"],
+          ["value", "internal", "cell", "/"],
+        ]],
+        [actionB, [
+          ["value", "internal", "$alias", "path"],
+          ["value", "internal", "/", "link@1"],
+          ["value", "internal", "__#0", "allCharms"],
+          ["value", "internal", "cell", "/"],
+        ]],
+        [actionC, [
+          ["value", "internal", "$alias", "path"],
+          ["value", "internal", "/", "link@1"],
+          ["value", "internal", "__#0", "allCharms"],
+          ["value", "internal", "cell", "/"],
+        ]],
+      ]);
+
+      const before = {
+        value: {
+          internal: {
+            backlinksIndex: { "/": { "link@1": { path: [], id: "of:123" } } },
+            "__#2": { "/": { "link@1": { path: [], id: "of:456" } } },
+            // Note: NO __#0 key
+          },
+        },
+      };
+
+      const after = {
+        value: {
+          internal: {
+            backlinksIndex: { "/": { "link@1": { path: [], id: "of:123" } } },
+            "__#2": { "/": { "link@1": { path: [], id: "of:456" } } },
+            // __#0 now exists! (but doesn't have allCharms)
+            "__#0": { "/": { "link@1": { path: [], id: "of:789", space: "did:key:abc" } } },
+          },
+        },
+      };
+
+      const result = determineTriggeredActions(
+        dependencies,
+        before as JSONValue,
+        after as JSONValue,
+      );
+
+      // Action B and C should trigger because __#0 appeared,
+      // even though allCharms is still undefined in both cases
+      expect(result).toContain(actionB);
+      expect(result).toContain(actionC);
+      // Action A should NOT trigger (none of its paths changed)
+      expect(result).not.toContain(actionA);
+    });
+  });
+
   describe("complex scenarios", () => {
     it("handles multiple actions with different nested dependencies", () => {
       const action1 = createAction("action1");
