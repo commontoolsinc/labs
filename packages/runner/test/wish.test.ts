@@ -402,4 +402,261 @@ describe("wish built-in", () => {
       console.error = originalError;
     }
   });
+
+  describe("object-based wish syntax", () => {
+    it("resolves allCharms using tag parameter", async () => {
+      const allCharmsCell = runtime.getCellFromEntityId(
+        space,
+        { "/": ALL_CHARMS_ID },
+        [],
+        undefined,
+        tx,
+      );
+      const charmsData = [{ name: "Alpha", title: "Alpha" }];
+      allCharmsCell.withTx(tx).set(charmsData);
+
+      const spaceCell = runtime.getCell<{ allCharms?: unknown[] }>(space, space)
+        .withTx(tx);
+      spaceCell.key("allCharms").set(allCharmsCell.withTx(tx));
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishRecipe = recipe("wish object syntax allCharms", () => {
+        const allCharms = wish<unknown[]>({ tag: "#allCharms" });
+        return { allCharms };
+      });
+
+      const resultCell = runtime.getCell<{
+        allCharms?: { result?: unknown[] };
+      }>(
+        space,
+        "wish object syntax result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      await runtime.idle();
+
+      expect(result.key("allCharms").get()?.result).toEqual(charmsData);
+    });
+
+    it("resolves nested paths using tag and path parameters", async () => {
+      const allCharmsCell = runtime.getCellFromEntityId(
+        space,
+        { "/": ALL_CHARMS_ID },
+        [],
+        undefined,
+        tx,
+      );
+      const charmsData = [
+        { name: "Alpha", title: "First Title" },
+        { name: "Beta", title: "Second Title" },
+      ];
+      allCharmsCell.withTx(tx).set(charmsData);
+
+      const spaceCell = runtime.getCell<{ allCharms?: unknown[] }>(space, space)
+        .withTx(tx);
+      spaceCell.key("allCharms").set(allCharmsCell.withTx(tx));
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishRecipe = recipe("wish object syntax with path", () => {
+        const firstTitle = wish<string>({ tag: "#allCharms", path: ["0", "title"] });
+        return { firstTitle };
+      });
+
+      const resultCell = runtime.getCell<{
+        firstTitle?: { result?: string };
+      }>(
+        space,
+        "wish object syntax path result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      await runtime.idle();
+
+      expect(result.key("firstTitle").get()?.result).toEqual("First Title");
+    });
+
+    it("resolves space cell using / tag", async () => {
+      const spaceCell = runtime.getCell(space, space).withTx(tx);
+      const spaceData = { testField: "space cell value" };
+      spaceCell.set(spaceData);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishRecipe = recipe("wish object syntax space", () => {
+        const spaceResult = wish({ tag: "/" });
+        return { spaceResult };
+      });
+
+      const resultCell = runtime.getCell<{
+        spaceResult?: { result?: unknown };
+      }>(
+        space,
+        "wish object syntax space result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      await runtime.idle();
+
+      expect(result.key("spaceResult").get()?.result).toEqual(spaceData);
+    });
+
+    it("resolves space cell subpaths using / tag with path", async () => {
+      const spaceCell = runtime.getCell(space, space).withTx(tx);
+      spaceCell.set({
+        config: { setting: "value" },
+        nested: { deep: { data: ["Alpha"] } },
+      });
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishRecipe = recipe("wish object syntax space subpaths", () => {
+        return {
+          configLink: wish({ tag: "/", path: ["config"] }),
+          dataLink: wish({ tag: "/", path: ["nested", "deep", "data"] }),
+        };
+      });
+
+      const resultCell = runtime.getCell<{
+        configLink?: { result?: unknown };
+        dataLink?: { result?: unknown };
+      }>(
+        space,
+        "wish object syntax space subpaths result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      await runtime.idle();
+
+      expect(result.key("configLink").get()?.result).toEqual({ setting: "value" });
+      expect(result.key("dataLink").get()?.result).toEqual(["Alpha"]);
+    });
+
+    it("returns current timestamp via #now tag", async () => {
+      const wishRecipe = recipe("wish object syntax now", () => {
+        return { nowValue: wish({ tag: "#now" }) };
+      });
+
+      const resultCell = runtime.getCell<{
+        nowValue?: { result?: number };
+      }>(
+        space,
+        "wish object syntax now result",
+        undefined,
+        tx,
+      );
+      const before = Date.now();
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      await runtime.idle();
+
+      const after = Date.now();
+      const nowValue = result.key("nowValue").get()?.result;
+      expect(typeof nowValue).toBe("number");
+      expect(nowValue).toBeGreaterThanOrEqual(before);
+      expect(nowValue).toBeLessThanOrEqual(after);
+    });
+
+    it("returns empty object for unknown tag", async () => {
+      const errors: unknown[] = [];
+      const originalError = console.error;
+      console.error = (...args: unknown[]) => {
+        errors.push(args);
+      };
+
+      try {
+        const wishRecipe = recipe("wish object syntax unknown", () => {
+          const missing = wish({ tag: "#unknownTag" });
+          return { missing };
+        });
+
+        const resultCell = runtime.getCell<{
+          missing?: { result?: unknown };
+        }>(
+          space,
+          "wish object syntax unknown result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishRecipe, {}, resultCell);
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        await runtime.idle();
+
+        expect(result.key("missing").get()).toEqual({});
+        expect(errors.length).toBeGreaterThan(0);
+      } finally {
+        console.error = originalError;
+      }
+    });
+
+    it("returns empty object when tag is missing", async () => {
+      const errors: unknown[] = [];
+      const originalError = console.error;
+      console.error = (...args: unknown[]) => {
+        errors.push(args);
+      };
+
+      try {
+        const wishRecipe = recipe("wish object syntax no tag", () => {
+          const missing = wish({ path: ["some", "path"] });
+          return { missing };
+        });
+
+        const resultCell = runtime.getCell<{
+          missing?: { result?: unknown };
+        }>(
+          space,
+          "wish object syntax no tag result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishRecipe, {}, resultCell);
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        await runtime.idle();
+
+        expect(result.key("missing").get()).toEqual({});
+        expect(errors.length).toBeGreaterThan(0);
+      } finally {
+        console.error = originalError;
+      }
+    });
+  });
 });
