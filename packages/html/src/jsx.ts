@@ -9,6 +9,11 @@ export { type VNode };
  * @returns True if the value is a VNode
  */
 export const isVNode = (value: unknown): value is VNode => {
-  while (isObject(value) && UI in value) value = value[UI];
+  const visited = new Set<object>();
+  while (isObject(value) && UI in value) {
+    if (visited.has(value)) return false; // Cycle detected
+    visited.add(value);
+    value = value[UI];
+  }
   return (value as VNode)?.type === "vnode";
 };

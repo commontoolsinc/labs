@@ -888,3 +888,173 @@ describe("dataset attributes", () => {
     cancel2();
   });
 });
+
+describe("cycle detection", () => {
+  it("detects direct [UI] self-reference cycle and skips rendering", () => {
+    const { renderOptions, document } = mock;
+    // Create a VNode that references itself via [UI]
+    const selfRefNode: VNode = {
+      type: "vnode" as const,
+      name: "div",
+      props: { id: "self-ref" },
+      children: [],
+    };
+    // Create cycle: node[UI] points to itself
+    (selfRefNode as any)[UI] = selfRefNode;
+
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, selfRefNode, renderOptions);
+
+    // Cyclic [UI] references are detected by isVNode and nothing is rendered
+    assert.equal(parent.children.length, 0);
+    cancel();
+  });
+
+  it("detects indirect [UI] chain cycle (A -> B -> A) and skips rendering", () => {
+    const { renderOptions, document } = mock;
+    // Create two VNodes that reference each other via [UI]
+    const nodeA: VNode = {
+      type: "vnode" as const,
+      name: "div",
+      props: { id: "node-a" },
+      children: [],
+    };
+    const nodeB: VNode = {
+      type: "vnode" as const,
+      name: "span",
+      props: { id: "node-b" },
+      children: [],
+    };
+    // Create cycle: A[UI] -> B[UI] -> A
+    (nodeA as any)[UI] = nodeB;
+    (nodeB as any)[UI] = nodeA;
+
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, nodeA, renderOptions);
+
+    // Cyclic [UI] references are detected by isVNode and nothing is rendered
+    assert.equal(parent.children.length, 0);
+    cancel();
+  });
+
+  it("detects cycle when child VNode references parent", () => {
+    const { renderOptions, document } = mock;
+    // Create parent that has itself as a child
+    const parentNode: VNode = {
+      type: "vnode" as const,
+      name: "div",
+      props: { id: "parent" },
+      children: [], // will be set below
+    };
+    // Child references parent, creating a cycle
+    parentNode.children = [parentNode];
+
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, parentNode, renderOptions);
+
+    // Should render the parent div with cycle placeholder as child
+    const div = parent.getElementsByTagName("div")[0];
+    assert.equal(div?.getAttribute("id"), "parent");
+    const span = div?.getElementsByTagName("span")[0];
+    assert.equal(span?.textContent, "🔄");
+    cancel();
+  });
+
+  it("allows the same VNode object as siblings (not a cycle)", () => {
+    const { renderOptions, document } = mock;
+    // Create a VNode that appears twice as siblings
+    const sharedChild: VNode = {
+      type: "vnode" as const,
+      name: "span",
+      props: { className: "shared" },
+      children: ["shared content"],
+    };
+    const parentNode: VNode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {},
+      children: [sharedChild, sharedChild], // same object twice
+    };
+
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, parentNode, renderOptions);
+
+    // Should render both siblings without cycle detection
+    const spans = parent.getElementsByTagName("span");
+    assert.equal(spans.length, 2);
+    // Check via innerHTML that neither is a cycle placeholder
+    assert.equal(
+      parent.innerHTML.includes("🔄"),
+      false,
+      "Should not contain cycle placeholder",
+    );
+    cancel();
+  });
+
+  it("allows valid [UI] chain without cycle", () => {
+    const { renderOptions, document } = mock;
+    // Create a valid [UI] chain: A[UI] -> B[UI] -> C (no cycle)
+    const nodeC: VNode = {
+      type: "vnode" as const,
+      name: "span",
+      props: { id: "final" },
+      children: ["final content"],
+    };
+    const nodeB: VNode = {
+      type: "vnode" as const,
+      name: "div",
+      props: { id: "node-b" },
+      children: [],
+      [UI]: nodeC,
+    } as VNode;
+    const nodeA: VNode = {
+      type: "vnode" as const,
+      name: "div",
+      props: { id: "node-a" },
+      children: [],
+      [UI]: nodeB,
+    } as VNode;
+
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, nodeA, renderOptions);
+
+    // Should render nodeC (the final node in the [UI] chain)
+    const span = parent.getElementsByTagName("span")[0];
+    assert.equal(span?.getAttribute("id"), "final");
+    // Check via innerHTML since textContent doesn't work in MockDoc
+    assert.equal(parent.innerHTML.includes("final content"), true);
+    cancel();
+  });
+
+  it("detects deep nested cycle (grandchild references grandparent)", () => {
+    const { renderOptions, document } = mock;
+    // Create: grandparent -> parent -> child -> grandparent (cycle)
+    const grandparent: VNode = {
+      type: "vnode" as const,
+      name: "div",
+      props: { id: "grandparent" },
+      children: [],
+    };
+    const parentNode: VNode = {
+      type: "vnode" as const,
+      name: "div",
+      props: { id: "parent" },
+      children: [],
+    };
+    // Create cycle: grandparent -> parent -> grandparent
+    grandparent.children = [parentNode];
+    parentNode.children = [grandparent];
+
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, grandparent, renderOptions);
+
+    // Should render grandparent and parent, with cycle detected at the child level
+    const divs = parent.getElementsByTagName("div");
+    assert.equal(divs.length, 2);
+    // The innermost should have the cycle placeholder
+    const innerDiv = divs[1];
+    const span = innerDiv?.getElementsByTagName("span")[0];
+    assert.equal(span?.textContent, "🔄");
+    cancel();
+  });
+});
