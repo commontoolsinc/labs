@@ -171,12 +171,15 @@ export class XHeaderView extends BaseView {
 
   override connectedCallback() {
     super.connectedCallback();
-    window.addEventListener("favorite-changed", this.handleFavoriteChanged);
+    globalThis.addEventListener("favorite-changed", this.handleFavoriteChanged);
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    window.removeEventListener("favorite-changed", this.handleFavoriteChanged);
+    globalThis.removeEventListener(
+      "favorite-changed",
+      this.handleFavoriteChanged,
+    );
   }
 
   override async updated(changedProperties: Map<string, unknown>) {
@@ -186,9 +189,14 @@ export class XHeaderView extends BaseView {
       const manager = this.rt.cc().manager();
       // Ensure favorites are synced before checking
       try {
-        const favorites = manager.getFavorites();
-        await favorites.sync();
-        this.isFavorite = manager.isFavorite({ "/": this.charmId });
+        const charm = await manager.get(this.charmId, true);
+        if (charm) {
+          const favorites = manager.getFavorites();
+          await favorites.sync();
+          this.isFavorite = manager.isFavorite(charm);
+        } else {
+          this.isFavorite = false;
+        }
       } catch (_error) {
         // If sync fails (e.g., authorization error), assume not favorited
         this.isFavorite = false;
