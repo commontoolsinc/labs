@@ -188,7 +188,7 @@ export async function persistTokens(
     };
 
     // Set the new tokens to the auth cell
-    const error = await authCell.runtime.editWithRetry((tx) => {
+    const { error } = await authCell.runtime.editWithRetry((tx) => {
       authCell.withTx(tx).set(tokenData);
     });
     if (error) throw error;
@@ -303,7 +303,7 @@ export async function clearAuthData(authCellDocLink: string) {
     };
 
     // Set the empty data to the auth cell
-    const error = await authCell.runtime.editWithRetry((tx) => {
+    const { error } = await authCell.runtime.editWithRetry((tx) => {
       authCell.withTx(tx).set(emptyAuthData);
     });
     if (error) throw error;
