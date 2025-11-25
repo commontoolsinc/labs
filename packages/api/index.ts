@@ -1252,8 +1252,28 @@ export type CompileAndRunFunction = <T = any, S = any>(
   params: Opaque<BuiltInCompileAndRunParams<T>>,
 ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
 
+export type WishParams = {
+  tag?: string;
+  path?: string[];
+  context?: Record<string, any>;
+  scope?: Record<string, any>;
+};
+
+export type WishState<T> = {
+  result?: T;
+  error?: any;
+  [UI]?: VNode;
+};
+
 export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<boolean>;
 export type WishFunction = {
+  <T = unknown>(target: Opaque<WishParams>): OpaqueRef<WishState<T>>;
+  <S extends JSONSchema = JSONSchema>(
+    target: Opaque<string>,
+    schema: S,
+  ): OpaqueRef<WishState<Schema<S>>>;
+
+  // TODO(seefeld): Remove old interface mid December 2025
   <T = unknown>(target: Opaque<string>): OpaqueRef<T>;
   <S extends JSONSchema = JSONSchema>(
     target: Opaque<string>,

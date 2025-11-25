@@ -22,6 +22,8 @@ import type {
   BuiltInLLMState,
   FetchOptions,
   PatternToolFunction,
+  WishParams,
+  WishState,
 } from "commontools";
 
 export const compileAndRun = createNodeFactory({
@@ -118,6 +120,13 @@ export const navigateTo = createNodeFactory({
 }) as (cell: OpaqueRef<unknown>) => OpaqueRef<boolean>;
 
 export function wish<T = unknown>(
+  target: Opaque<WishParams>,
+): OpaqueRef<WishState<T>>;
+export function wish<T = unknown>(
+  target: Opaque<WishParams>,
+  schema: JSONSchema,
+): OpaqueRef<WishState<T>>;
+export function wish<T = unknown>(
   target: Opaque<string>,
 ): OpaqueRef<T | undefined>;
 export function wish<T = unknown>(
@@ -125,9 +134,9 @@ export function wish<T = unknown>(
   schema: JSONSchema,
 ): OpaqueRef<T>;
 export function wish<T = unknown>(
-  target: Opaque<string>,
+  target: Opaque<string> | Opaque<WishParams>,
   schema?: JSONSchema,
-): OpaqueRef<T | undefined> {
+): OpaqueRef<T | WishState<T>> {
   return createNodeFactory({
     type: "ref",
     implementation: "wish",
