@@ -1,5 +1,9 @@
 import { type Cell, getEntityId, type IRuntime } from "@commontools/runner";
-import { type FavoriteList, favoriteListSchema, isSameEntity } from "./manager.ts";
+import {
+  type FavoriteList,
+  favoriteListSchema,
+  isSameEntity,
+} from "./manager.ts";
 
 /**
  * Get cell description (schema as string) for tag-based search.
@@ -35,7 +39,9 @@ function filterOutEntity(
  * See docs/common/HOME_SPACE.md for more details.
  */
 export function getHomeFavorites(runtime: IRuntime): Cell<FavoriteList> {
-  return runtime.getHomeSpaceCell().key("favorites").asSchema(favoriteListSchema);
+  return runtime.getHomeSpaceCell().key("favorites").asSchema(
+    favoriteListSchema,
+  );
 }
 
 /**
