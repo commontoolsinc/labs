@@ -171,12 +171,12 @@ export class XHeaderView extends BaseView {
 
   override connectedCallback() {
     super.connectedCallback();
-    this.addEventListener("favorite-changed", this.handleFavoriteChanged);
+    window.addEventListener("favorite-changed", this.handleFavoriteChanged);
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    this.removeEventListener("favorite-changed", this.handleFavoriteChanged);
+    window.removeEventListener("favorite-changed", this.handleFavoriteChanged);
   }
 
   override async updated(changedProperties: Map<string, unknown>) {
