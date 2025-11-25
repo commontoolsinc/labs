@@ -331,7 +331,10 @@ async function prepareWorkspace(
   // Remove `compilerOptions.types`
   const manifest = config.manifest();
   delete manifest.compilerOptions.types;
-  await Deno.writeTextFile(denoJsonPath, JSON.stringify(manifest, null, 2));
+  await Deno.writeTextFile(
+    denoJsonPath,
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
   // Add a COMPILED file to toolshed. This could
   // contain buildargs/metadata in the future.
   await Deno.writeTextFile(config.toolshedEnvPath(), "");
@@ -354,7 +357,7 @@ async function revertWorkspace(config: BuildConfig): Promise<void> {
   // Restore the workspace manifest
   await Deno.writeTextFile(
     denoJsonPath,
-    JSON.stringify(config.manifest(), null, 2),
+    `${JSON.stringify(config.manifest(), null, 2)}\n`,
   );
 
   // Remove the COMPILED env file
