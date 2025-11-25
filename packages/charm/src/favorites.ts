@@ -59,9 +59,7 @@ export async function addFavorite(
 
     // Check if already favorited
     if (
-      current.some((entry) =>
-        entry.cell.resolveAsCell().equals(resolvedCharm)
-      )
+      current.some((entry) => entry.cell.resolveAsCell().equals(resolvedCharm))
     ) return;
 
     // Get the schema tag for this cell
