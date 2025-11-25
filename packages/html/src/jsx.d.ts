@@ -2888,6 +2888,7 @@ interface CTToolbarElement extends CTHTMLElement {}
 interface CTKbdElement extends CTHTMLElement {}
 interface CTKeybindElement extends CTHTMLElement {}
 interface CTRenderElement extends CTHTMLElement {}
+interface CTCellContextElement extends CTHTMLElement {}
 interface CTChatMessageElement extends CTHTMLElement {}
 interface CTVScrollElement extends CTHTMLElement {}
 interface CTSendMessageElement extends CTHTMLElement {}
@@ -3145,6 +3146,10 @@ interface CTIframeAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 interface CTRenderAttributes<T> extends CTHTMLAttributes<T> {
+  "$cell": CellLike<any>;
+}
+
+interface CTCellContextAttributes<T> extends CTHTMLAttributes<T> {
   "$cell": CellLike<any>;
 }
 
@@ -3866,6 +3871,10 @@ declare global {
       "ct-render": CTDOM.DetailedHTMLProps<
         CTRenderAttributes<CTRenderElement>,
         CTRenderElement
+      >;
+      "ct-cell-context": CTDOM.DetailedHTMLProps<
+        CTCellContextAttributes<CTCellContextElement>,
+        CTCellContextElement
       >;
       "ct-vscroll": CTDOM.DetailedHTMLProps<
         CTScrollAttributes<CTVScrollElement>,

@@ -96,6 +96,7 @@ export * from "./components/keyboard-router.ts";
 export * from "./components/ct-attachments-bar/ct-attachments-bar.ts";
 export * from "./components/ct-chip/ct-chip.ts";
 export * from "./components/ct-cell-link/index.ts";
+export * from "./components/ct-cell-context/index.ts";
 
 // Type exports
 export type * from "./utils/types.ts";
