@@ -142,11 +142,11 @@ export class XRootView extends BaseView {
     if (!isCommand(command)) {
       throw new Error(`Received a non-command: ${command}`);
     }
-    this.processCommand(command);
+    this.processCommand(command).catch(console.error);
   };
 
-  apply(command: Command): Promise<void> {
-    this.processCommand(command);
+  async apply(command: Command): Promise<void> {
+    await this.processCommand(command);
     this.requestUpdate();
     return this.updateComplete.then((_) => undefined);
   }

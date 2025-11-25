@@ -87,6 +87,7 @@ export interface SpaceCellContents {
   allCharms: Cell<never>[];
   recentCharms: Cell<never>[];
   defaultPattern: Cell<never>;
+  favorites: Cell<Cell<never>[]>;
 }
 
 export interface RuntimeOptions {
