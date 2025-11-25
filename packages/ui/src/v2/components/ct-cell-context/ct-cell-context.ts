@@ -30,6 +30,19 @@ export class CTCellContext extends BaseElement {
         position: relative;
       }
 
+      .container {
+        border: 1px dashed transparent;
+        transition: border-color 0.2s ease;
+      }
+
+      .container.alt-held {
+        border-color: rgba(128, 128, 128, 0.25);
+      }
+
+      .container.alt-held:hover {
+        border-color: rgba(128, 128, 128, 0.75);
+      }
+
       .toolbar {
         position: absolute;
         top: 0;
@@ -72,6 +85,16 @@ export class CTCellContext extends BaseElement {
         background: rgba(0, 0, 0, 0.1);
       }
 
+      .toolbar button.watching {
+        background: #000;
+        color: #fff;
+      }
+
+      .toolbar button.watching:hover {
+        background: #333;
+        color: #fff;
+      }
+
       .toolbar .label {
         padding: 0.25rem 0.5rem;
         border-right: 1px solid #000;
@@ -93,8 +116,15 @@ export class CTCellContext extends BaseElement {
   @state()
   private _isHovered: boolean = false;
 
+  @state()
+  private _isWatching: boolean = false;
+
+  @state()
+  private _updateCount: number = 0;
+
   private _boundHandleKeyDown = this._handleKeyDown.bind(this);
   private _boundHandleKeyUp = this._handleKeyUp.bind(this);
+  private _watchUnsubscribe?: () => void;
 
   override connectedCallback() {
     super.connectedCallback();
@@ -108,6 +138,11 @@ export class CTCellContext extends BaseElement {
     // Clean up document-level listeners
     document.removeEventListener("keydown", this._boundHandleKeyDown);
     document.removeEventListener("keyup", this._boundHandleKeyUp);
+    // Clean up watch subscription if active
+    if (this._watchUnsubscribe) {
+      this._watchUnsubscribe();
+      this._watchUnsubscribe = undefined;
+    }
   }
 
   private _handleKeyDown(e: KeyboardEvent) {
@@ -149,6 +184,48 @@ export class CTCellContext extends BaseElement {
     );
   }
 
+  private _handleWatchClick() {
+    if (!this.cell) {
+      console.log("[ct-cell-context] No cell available");
+      return;
+    }
+
+    if (this._isWatching) {
+      // Unwatch
+      if (this._watchUnsubscribe) {
+        this._watchUnsubscribe();
+        this._watchUnsubscribe = undefined;
+      }
+      this._isWatching = false;
+      this._updateCount = 0;
+      const identifier = this._getCellIdentifier();
+      console.log(`[ct-cell-context] Stopped watching: ${identifier}`);
+    } else {
+      // Watch
+      const identifier = this._getCellIdentifier();
+      this._updateCount = 0;
+      this._watchUnsubscribe = this.cell.sink((value) => {
+        this._updateCount++;
+        console.log(
+          `[ct-cell-context] Cell update #${this._updateCount}:`,
+          value,
+        );
+      });
+      this._isWatching = true;
+      console.log(`[ct-cell-context] Started watching: ${identifier}`);
+    }
+  }
+
+  private _getCellIdentifier(): string {
+    if (!this.cell) return "unknown";
+    if (this.label) return this.label;
+    // Create short ID like ct-cell-link does
+    const link = this.cell.getAsNormalizedFullLink();
+    const id = link.id;
+    const shortId = id.split(":").pop()?.slice(-6) ?? "???";
+    return `#${shortId}`;
+  }
+
   private get _shouldShowToolbar(): boolean {
     return this._modifierHeld && this._isHovered;
   }
@@ -156,16 +233,30 @@ export class CTCellContext extends BaseElement {
   override render() {
     return html`
       <div
-        @mouseenter=${this._handleMouseEnter}
-        @mouseleave=${this._handleMouseLeave}
+        class="container ${this._modifierHeld ? "alt-held" : ""}"
+        @mouseenter="${this._handleMouseEnter}"
+        @mouseleave="${this._handleMouseLeave}"
       >
         <div class="toolbar ${this._shouldShowToolbar ? "" : "hidden"}">
-          ${this.label ? html`<div class="label">${this.label}</div>` : ""}
-          <button @click=${this._handleValClick} title="Log cell value">
+          ${this.label
+            ? html`
+              <div class="label">${this.label}</div>
+            `
+            : ""}
+          <button @click="${this._handleValClick}" title="Log cell value">
             val
           </button>
-          <button @click=${this._handleIdClick} title="Log cell address">
+          <button @click="${this._handleIdClick}" title="Log cell address">
             id
+          </button>
+          <button
+            @click="${this._handleWatchClick}"
+            class="${this._isWatching ? "watching" : ""}"
+            title="${this._isWatching
+              ? "Stop watching cell changes"
+              : "Watch cell changes"}"
+          >
+            ${this._isWatching ? "unwatch" : "watch"}
           </button>
         </div>
         <slot></slot>
