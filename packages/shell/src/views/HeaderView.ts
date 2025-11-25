@@ -189,7 +189,7 @@ export class XHeaderView extends BaseView {
         const favorites = manager.getFavorites();
         await favorites.sync();
         this.isFavorite = manager.isFavorite({ "/": this.charmId });
-      } catch (error) {
+      } catch (_error) {
         // If sync fails (e.g., authorization error), assume not favorited
         this.isFavorite = false;
       }

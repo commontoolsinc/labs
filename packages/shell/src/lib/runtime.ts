@@ -1,5 +1,6 @@
 import { createSession, Identity } from "@commontools/identity";
 import {
+  type MemorySpace,
   Runtime,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,

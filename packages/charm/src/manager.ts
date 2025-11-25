@@ -1179,10 +1179,10 @@ export class CharmManager {
 
     try {
       const favorites = this.getHomeFavorites();
-      // Use cached value to avoid triggering sync/authorization errors
-      const cached = favorites.cachedValue();
-      return cached?.some((c) => isSameEntity(c, id)) ?? false;
-    } catch (error) {
+      // Use get() to access the current value
+      const cached = favorites.get();
+      return cached?.some((c: Cell<unknown>) => isSameEntity(c, id)) ?? false;
+    } catch (_error) {
       // If we can't access the home space (e.g., authorization error),
       // assume the charm is not favorited rather than throwing
       return false;
