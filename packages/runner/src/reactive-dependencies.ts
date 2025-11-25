@@ -106,7 +106,6 @@ export function determineTriggeredActions(
       action,
       paths: paths.toReversed(),
     }));
-  subscribers.sort((a, b) => comparePaths(a.paths[0], b.paths[0]));
 
   if (startPath.length > 0) {
     // If we're starting from a specific path, filter the subscribers to only
@@ -160,15 +159,32 @@ export function determineTriggeredActions(
     }
     currentPath = targetPath;
 
-    // Now get the value at the path, `undefined` if that path doesn't exist
-    const beforeValue = beforeLastObject + 1 >= targetPath.length
-      ? beforeValues[targetPath.length]
-      : undefined;
-    const afterValue = afterLastObject + 1 >= targetPath.length
-      ? afterValues[targetPath.length]
-      : undefined;
+    // Check if we could traverse far enough to reach the target path
+    const beforeCanReach = beforeLastObject + 1 >= targetPath.length;
+    const afterCanReach = afterLastObject + 1 >= targetPath.length;
 
-    if (!deepEqual(beforeValue, afterValue)) {
+    // Determine if there was a change. We need to trigger if:
+    // 1. Both paths are reachable and the values differ
+    // 2. Reachability changed (one can reach, the other can't)
+    // 3. Neither can reach, but the depth of reachability changed
+    //    (e.g., before we couldn't get past "a", now we can get to "a.b")
+    let hasChanged: boolean;
+    if (beforeCanReach && afterCanReach) {
+      // Both reachable - compare actual values
+      hasChanged = !deepEqual(
+        beforeValues[targetPath.length],
+        afterValues[targetPath.length],
+      );
+    } else if (beforeCanReach !== afterCanReach) {
+      // Reachability changed - definitely a structural change
+      hasChanged = true;
+    } else {
+      // Neither reachable - check if we can traverse to different depths
+      // This detects when intermediate path segments appear/disappear
+      hasChanged = beforeLastObject !== afterLastObject;
+    }
+
+    if (hasChanged) {
       // If the value changed, trigger the actions
       triggeredActions.push(...current.map(({ action }) => action));
     } else {
