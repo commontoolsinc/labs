@@ -112,28 +112,16 @@ export const processSchema = {
 } as const satisfies JSONSchema;
 
 /**
- * Helper to consistently compare entity IDs between cells
+ * Filters an array of charms by removing any that match the target cell
  */
-export function isSameEntity(
-  a: Cell<unknown> | string | EntityId,
-  b: Cell<unknown> | string | EntityId,
-): boolean {
-  const idA = getEntityId(a);
-  const idB = getEntityId(b);
-  return idA && idB ? idA["/"] === idB["/"] : false;
-}
-
-/**
- * Filters an array of charms by removing any that match the target entity
- */
-function filterOutEntity(
+function filterOutCell(
   list: Cell<Cell<unknown>[]>,
-  target: Cell<unknown> | string | EntityId,
+  target: Cell<unknown>,
 ): Cell<unknown>[] {
-  const targetId = getEntityId(target);
-  if (!targetId) return list.get() as Cell<unknown>[];
-
-  return list.get().filter((charm) => !isSameEntity(charm, targetId));
+  const resolvedTarget = target.resolveAsCell();
+  return list.get().filter((charm) =>
+    !charm.resolveAsCell().equals(resolvedTarget)
+  );
 }
 
 export class CharmManager {
@@ -241,21 +229,21 @@ export class CharmManager {
   async pin(charm: Cell<unknown>) {
     await this.syncCharms(this.pinnedCharms);
     // Check if already pinned
-    if (
-      !filterOutEntity(this.pinnedCharms, charm).some((c) =>
-        isSameEntity(c, charm)
-      )
-    ) {
+    const resolvedCharm = charm.resolveAsCell();
+    const alreadyPinned = this.pinnedCharms.get().some((c) =>
+      c.resolveAsCell().equals(resolvedCharm)
+    );
+    if (!alreadyPinned) {
       this.pinnedCharms.push(charm);
       await this.runtime.idle();
     }
   }
 
-  async unpinById(charmId: EntityId) {
+  async unpin(charm: Cell<unknown>) {
     await this.syncCharms(this.pinnedCharms);
     const { ok } = await this.runtime.editWithRetry((tx) => {
       const pinnedCharms = this.pinnedCharms.withTx(tx);
-      const newPinnedCharms = filterOutEntity(pinnedCharms, charmId);
+      const newPinnedCharms = filterOutCell(pinnedCharms, charm);
       if (newPinnedCharms.length !== pinnedCharms.get().length) {
         this.pinnedCharms.withTx(tx).set(newPinnedCharms);
         return true;
@@ -264,13 +252,6 @@ export class CharmManager {
       }
     });
     return !!ok;
-  }
-
-  async unpin(charm: Cell<unknown> | string | EntityId) {
-    const id = getEntityId(charm);
-    if (!id) return false;
-
-    return await this.unpinById(id);
   }
 
   getPinned(): Cell<Cell<unknown>[]> {
@@ -303,15 +284,16 @@ export class CharmManager {
    * @param charm - The charm to track
    */
   async trackRecentCharm(charm: Cell<unknown>): Promise<void> {
-    const id = getEntityId(charm);
-    if (!id) return;
+    const resolvedCharm = charm.resolveAsCell();
 
     await this.runtime.editWithRetry((tx) => {
       const recentCharmsWithTx = this.recentCharms.withTx(tx);
       const recentCharms = recentCharmsWithTx.get() || [];
 
       // Remove any existing instance of this charm to avoid duplicates
-      const filtered = recentCharms.filter((c) => !isSameEntity(c, id));
+      const filtered = recentCharms.filter((c) =>
+        !c.resolveAsCell().equals(resolvedCharm)
+      );
 
       // Add charm to the beginning of the list
       const updated = [charm, ...filtered];
@@ -483,6 +465,7 @@ export class CharmManager {
     const seenEntityIds = new Set<string>(); // Track entities we've already processed
     const maxDepth = 10; // Prevent infinite recursion
     const maxResults = 50; // Prevent too many results from overwhelming the UI
+    const resolvedCharm = charm.resolveAsCell();
 
     if (!charm) return result;
 
@@ -519,14 +502,15 @@ export class CharmManager {
           return cId && docId["/"] === cId["/"];
         });
 
-        if (
-          matchingCharm && !isSameEntity(matchingCharm, charm) &&
-          !result.some((c) => isSameEntity(c, matchingCharm))
-        ) {
-          // Check if we've already found too many references
-          if (result.length < maxResults) {
+        if (matchingCharm) {
+          const resolvedMatching = matchingCharm.resolveAsCell();
+          const isNotSelf = !resolvedMatching.equals(resolvedCharm);
+          const notAlreadyInResult = !result.some((c) =>
+            c.resolveAsCell().equals(resolvedMatching)
+          );
+
+          if (isNotSelf && notAlreadyInResult && result.length < maxResults) {
             result.push(matchingCharm);
-            // Reference added to result
           }
         }
       };
@@ -680,6 +664,8 @@ export class CharmManager {
     const charmId = getEntityId(charm);
     if (!charmId) return result;
 
+    const resolvedCharm = charm.resolveAsCell();
+
     // Helper function to add a matching charm to the result
     const addReadingCharm = (otherCharm: Cell<unknown>) => {
       const otherCharmId = getEntityId(otherCharm);
@@ -693,12 +679,13 @@ export class CharmManager {
       if (seenEntityIds.has(entityIdStr)) return;
       seenEntityIds.add(entityIdStr);
 
-      if (!result.some((c) => isSameEntity(c, otherCharm))) {
-        // Check if we've already found too many references
-        if (result.length < maxResults) {
-          result.push(otherCharm);
-          // Charm reading from target added to result
-        }
+      const resolvedOther = otherCharm.resolveAsCell();
+      const notAlreadyInResult = !result.some((c) =>
+        c.resolveAsCell().equals(resolvedOther)
+      );
+
+      if (notAlreadyInResult && result.length < maxResults) {
+        result.push(otherCharm);
       }
     };
 
@@ -817,7 +804,7 @@ export class CharmManager {
 
     // Check each charm to see if it references this charm
     for (const otherCharm of allCharms) {
-      if (isSameEntity(otherCharm, charm)) continue; // Skip self
+      if (otherCharm.resolveAsCell().equals(resolvedCharm)) continue; // Skip self
 
       if (checkRefersToTarget(otherCharm, otherCharm, new Set(), 0)) {
         addReadingCharm(otherCharm);
@@ -893,22 +880,19 @@ export class CharmManager {
   }
 
   // note: removing a charm doesn't clean up the charm's cells
-  async remove(idOrCharm: string | EntityId | Cell<unknown>) {
+  async remove(charm: Cell<unknown>) {
     await Promise.all([
       this.syncCharms(this.charms),
       this.syncCharms(this.pinnedCharms),
     ]);
 
-    const id = getEntityId(idOrCharm);
-    if (!id) return false;
-
-    await this.unpin(idOrCharm);
+    await this.unpin(charm);
 
     const { ok } = await this.runtime.editWithRetry((tx) => {
       const charms = this.charms.withTx(tx);
 
       // Remove from main list
-      const newCharms = filterOutEntity(charms, id);
+      const newCharms = filterOutCell(charms, charm);
       if (newCharms.length !== charms.get().length) {
         charms.set(newCharms);
         return true;
@@ -1050,9 +1034,14 @@ export class CharmManager {
 
   // Returns the charm from one of our active charm lists if it is present,
   // or undefined if it is not
-  getActiveCharm(charmId: Cell<unknown> | EntityId | string) {
-    return this.charms.get().find((charm) => isSameEntity(charm, charmId)) ??
-      this.pinnedCharms.get().find((charm) => isSameEntity(charm, charmId));
+  getActiveCharm(charmCell: Cell<unknown>) {
+    const resolved = charmCell.resolveAsCell();
+    return this.charms.get().find((charm) =>
+      charm.resolveAsCell().equals(resolved)
+    ) ??
+      this.pinnedCharms.get().find((charm) =>
+        charm.resolveAsCell().equals(resolved)
+      );
   }
 
   async link(
