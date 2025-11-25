@@ -3,9 +3,11 @@
 ## Step 1: Create shared utility `packages/runner/src/builtins/cell-schema.ts`
 
 Extract from `llm-dialog.ts` (lines 103-126):
+
 - `getCellSchema(cell)` - returns `{ schema, rootSchema }`
 - `buildMinimalSchemaFromValue(cell)` - fallback for cells without schema
-- Add new `getCellDescription(cell)` - returns `JSON.stringify(schema)` or empty string
+- Add new `getCellDescription(cell)` - returns `JSON.stringify(schema)` or empty
+  string
 
 ## Step 2: Update `packages/runner/src/builtins/llm-dialog.ts`
 
@@ -14,7 +16,8 @@ Extract from `llm-dialog.ts` (lines 103-126):
 
 ## Step 3: Update `packages/runner/src/runtime.ts`
 
-Update `HomeSpaceCellContents` interface (line 99) and `homeSpaceCellSchema` (lines 128-137):
+Update `HomeSpaceCellContents` interface (line 99) and `homeSpaceCellSchema`
+(lines 128-137):
 
 ```typescript
 export interface HomeSpaceCellContents {
