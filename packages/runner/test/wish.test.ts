@@ -6,6 +6,7 @@ import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { ALL_CHARMS_ID } from "../src/builtins/well-known.ts";
+import { UI } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
@@ -661,6 +662,97 @@ describe("wish built-in", () => {
         const missingResult = result.key("missing").get();
         expect(missingResult?.error).toMatch(/not recognized/);
         expect(errors.length).toBeGreaterThan(0);
+      } finally {
+        console.error = originalError;
+      }
+    });
+
+    it("returns UI with ct-cell-link on success", async () => {
+      const spaceCell = runtime.getCell(space, space).withTx(tx);
+      const spaceData = { testField: "space cell value" };
+      spaceCell.set(spaceData);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishRecipe = recipe("wish object syntax UI success", () => {
+        const spaceResult = wish({ tag: "/" });
+        return { spaceResult };
+      });
+
+      const resultCell = runtime.getCell<{
+        spaceResult?: { result?: unknown };
+      }>(
+        space,
+        "wish object syntax UI success result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      await runtime.idle();
+
+      const wishResult = result.key("spaceResult").get() as Record<
+        string | symbol,
+        unknown
+      >;
+      expect(wishResult?.result).toEqual(spaceData);
+
+      const ui = wishResult?.[UI] as { type: string; name: string; props: any };
+      expect(ui?.type).toEqual("vnode");
+      expect(ui?.name).toEqual("ct-cell-link");
+      expect(ui?.props?.$cell).toBeDefined();
+    });
+
+    it("returns UI with error message on failure", async () => {
+      const errors: unknown[] = [];
+      const originalError = console.error;
+      console.error = (...args: unknown[]) => {
+        errors.push(args);
+      };
+
+      try {
+        const wishRecipe = recipe("wish object syntax UI error", () => {
+          const missing = wish({ tag: "#unknownTag" });
+          return { missing };
+        });
+
+        const resultCell = runtime.getCell<{
+          missing?: { error?: string };
+        }>(
+          space,
+          "wish object syntax UI error result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishRecipe, {}, resultCell);
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        await runtime.idle();
+
+        const wishResult = result.key("missing").get() as Record<
+          string | symbol,
+          unknown
+        >;
+        expect(wishResult?.error).toMatch(/not recognized/);
+
+        const ui = wishResult?.[UI] as {
+          type: string;
+          name: string;
+          props: any;
+          children: string;
+        };
+        expect(ui?.type).toEqual("vnode");
+        expect(ui?.name).toEqual("span");
+        expect(ui?.props?.style).toEqual("color: red");
+        expect(ui?.children).toMatch(/⚠️/);
+        expect(ui?.children).toMatch(/not recognized/);
       } finally {
         console.error = originalError;
       }

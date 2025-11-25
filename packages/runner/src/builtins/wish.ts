@@ -1,4 +1,5 @@
-import { type WishKey } from "@commontools/api";
+import { type VNode, type WishKey } from "@commontools/api";
+import { h } from "@commontools/html";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
@@ -8,7 +9,15 @@ import type {
 } from "../storage/interface.ts";
 import type { EntityId } from "../create-ref.ts";
 import { ALL_CHARMS_ID } from "./well-known.ts";
-import type { JSONSchema } from "../builder/types.ts";
+import { type JSONSchema, UI } from "../builder/types.ts";
+
+function errorUI(message: string): VNode {
+  return h("span", { style: "color: red" }, `⚠️ ${message}`);
+}
+
+function cellLinkUI(cell: Cell<unknown>): VNode {
+  return h("ct-cell-link", { $cell: cell });
+}
 
 class WishError extends Error {
   constructor(message: string) {
@@ -236,7 +245,7 @@ export function wish(
           JSON.stringify(targetValue)
         }" is not recognized.`;
         console.error(errorMsg);
-        sendResult(tx, { error: errorMsg });
+        sendResult(tx, { error: errorMsg, [UI]: errorUI(errorMsg) });
         return;
       }
 
@@ -251,17 +260,20 @@ export function wish(
           ? [...baseResolution.pathPrefix, ...(path ?? [])]
           : path ?? [];
         const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
-        sendResult(tx, { result: resolvedCell });
+        sendResult(tx, {
+          result: resolvedCell,
+          [UI]: cellLinkUI(resolvedCell),
+        });
       } catch (e) {
         const errorMsg = e instanceof WishError ? e.message : String(e);
         console.error(errorMsg);
-        sendResult(tx, { error: errorMsg });
+        sendResult(tx, { error: errorMsg, [UI]: errorUI(errorMsg) });
       }
       return;
     } else {
       const errorMsg = `Wish target is not recognized: ${targetValue}`;
       console.error(errorMsg);
-      sendResult(tx, { error: errorMsg });
+      sendResult(tx, { error: errorMsg, [UI]: errorUI(errorMsg) });
       return;
     }
   };
