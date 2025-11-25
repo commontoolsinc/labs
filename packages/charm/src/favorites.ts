@@ -1,18 +1,19 @@
-import { type Cell, getEntityId, type IRuntime, type JSONSchema } from "@commontools/runner";
-import { type FavoriteEntry, type FavoriteList, favoriteListSchema, isSameEntity } from "./manager.ts";
+import { type Cell, getEntityId, type IRuntime } from "@commontools/runner";
+import { type FavoriteList, favoriteListSchema, isSameEntity } from "./manager.ts";
 
 /**
- * Temporary helper to get cell description (schema as string).
- * TODO: Replace with getCellDescription from @commontools/runner once available.
+ * Get cell description (schema as string) for tag-based search.
+ * Uses asSchemaFromLinks() to resolve schema through links and pattern resultSchema.
+ * Returns empty string if no schema available (won't match searches).
  */
 function getCellDescription(cell: Cell<unknown>): string {
   try {
-    const schema = cell.schema;
-    if (schema && typeof schema === "object" && Object.keys(schema).length > 0) {
+    const { schema } = cell.asSchemaFromLinks().getAsNormalizedFullLink();
+    if (schema !== undefined) {
       return JSON.stringify(schema);
     }
-  } catch (_error) {
-    // If we can't get the schema, return empty string
+  } catch (e) {
+    console.error("Failed to get cell schema for favorite tag:", e);
   }
   return "";
 }
