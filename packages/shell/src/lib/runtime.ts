@@ -1,6 +1,5 @@
 import { createSession, Identity } from "@commontools/identity";
 import {
-  type MemorySpace,
   Runtime,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
@@ -127,7 +126,6 @@ export class RuntimeInternals extends EventTarget {
         spaceIdentity: session.spaceIdentity,
         address: new URL("/api/storage/memory", apiUrl),
       }),
-      userIdentityDID: session.as.did() as MemorySpace, // Store user's actual identity
       errorHandlers: [(error) => {
         console.error(error);
         //Sentry.captureException(error);

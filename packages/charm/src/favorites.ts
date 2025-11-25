@@ -1,9 +1,4 @@
-import {
-  type Cell,
-  getEntityId,
-  type IRuntime,
-  spaceCellSchema,
-} from "@commontools/runner";
+import { type Cell, getEntityId, type IRuntime } from "@commontools/runner";
 import { charmListSchema, isSameEntity } from "./manager.ts";
 
 /**
@@ -23,18 +18,7 @@ function filterOutEntity(
  * See docs/common/HOME_SPACE.md for more details.
  */
 export function getHomeFavorites(runtime: IRuntime): Cell<Cell<unknown>[]> {
-  const homeSpace = runtime.userIdentityDID;
-  if (!homeSpace) {
-    throw new Error(
-      "User identity DID not available - cannot access favorites",
-    );
-  }
-  const homeSpaceCell = runtime.getCell(
-    homeSpace,
-    homeSpace,
-    spaceCellSchema,
-  );
-  return homeSpaceCell.key("favorites").asSchema(charmListSchema);
+  return runtime.getHomeSpaceCell().key("favorites").asSchema(charmListSchema);
 }
 
 /**
@@ -94,10 +78,7 @@ export async function removeFavorite(
 /**
  * Check if a charm is in the user's favorites (in home space)
  */
-export function isFavorite(
-  runtime: IRuntime,
-  charm: Cell<unknown>,
-): boolean {
+export function isFavorite(runtime: IRuntime, charm: Cell<unknown>): boolean {
   const id = getEntityId(charm);
   if (!id) return false;
 

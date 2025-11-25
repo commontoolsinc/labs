@@ -17,6 +17,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { setRecipeEnvironment } from "./builder/env.ts";
 import type {
   CommitError,
+  DID,
   IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
@@ -87,13 +88,20 @@ export interface SpaceCellContents {
   allCharms: Cell<never>[];
   recentCharms: Cell<never>[];
   defaultPattern: Cell<never>;
+}
+
+/**
+ * Contents of the home space cell (where space DID = user identity DID).
+ * Home space contains user-specific data like favorites that persists across all spaces.
+ * See docs/common/HOME_SPACE.md for more details.
+ */
+export interface HomeSpaceCellContents {
   favorites: Cell<Cell<never>[]>;
 }
 
 export interface RuntimeOptions {
   apiUrl: URL;
   storageManager: IStorageManager;
-  userIdentityDID?: MemorySpace; // The user's actual identity DID (not space DID)
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
   recipeEnvironment?: RecipeEnvironment;
@@ -114,6 +122,12 @@ export const spaceCellSchema: JSONSchema = {
       items: { not: true, asCell: true },
     },
     defaultPattern: { not: true, asCell: true },
+  },
+} as JSONSchema;
+
+export const homeSpaceCellSchema: JSONSchema = {
+  type: "object",
+  properties: {
     favorites: {
       type: "array",
       items: { not: true, asCell: true },
@@ -134,7 +148,8 @@ export interface IRuntime {
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   readonly telemetry: RuntimeTelemetry;
-  readonly userIdentityDID?: MemorySpace; // The user's actual identity DID
+  /** The user's identity DID, derived from storageManager.as.did() */
+  readonly userIdentityDID: DID;
 
   idle(): Promise<void>;
   dispose(): Promise<void>;
@@ -219,7 +234,7 @@ export interface IRuntime {
     tx?: IExtendedStorageTransaction,
   ): Cell<T>;
 
-  // Home space helper (space where space DID = user identity DID)
+  // Home space helpers (space where space DID = user identity DID)
   getHomeCell<S extends JSONSchema = JSONSchema>(
     cause: any,
     schema: S,
@@ -230,6 +245,8 @@ export interface IRuntime {
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<T>;
+
+  getHomeSpaceCell(tx?: IExtendedStorageTransaction): Cell<HomeSpaceCellContents>;
 
   // Convenience methods that delegate to the runner
   setup<T, R>(
@@ -396,7 +413,7 @@ export class Runtime implements IRuntime {
   readonly storageManager: IStorageManager;
   readonly telemetry: RuntimeTelemetry;
   readonly apiUrl: URL;
-  readonly userIdentityDID?: MemorySpace;
+  readonly userIdentityDID: DID;
   private defaultFrame?: Frame;
 
   constructor(options: RuntimeOptions) {
@@ -412,7 +429,7 @@ export class Runtime implements IRuntime {
     this.harness = new Engine(this);
 
     this.storageManager = options.storageManager;
-    this.userIdentityDID = options.userIdentityDID;
+    this.userIdentityDID = options.storageManager.as.did() as DID;
     this.moduleRegistry = new ModuleRegistry(this);
     this.recipeManager = new RecipeManager(this);
     this.runner = new Runner(this);
@@ -705,12 +722,16 @@ export class Runtime implements IRuntime {
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<any> {
-    if (!this.userIdentityDID) {
-      throw new Error(
-        "User identity DID not available - cannot access home space",
-      );
-    }
     return this.getCell(this.userIdentityDID, cause, schema, tx);
+  }
+
+  getHomeSpaceCell(tx?: IExtendedStorageTransaction): Cell<HomeSpaceCellContents> {
+    return this.getCell(
+      this.userIdentityDID,
+      this.userIdentityDID,
+      homeSpaceCellSchema,
+      tx,
+    ) as Cell<HomeSpaceCellContents>;
   }
 
   // Convenience methods that delegate to the runner
