@@ -1242,14 +1242,20 @@ export class Replica {
   // Session Identity. Skips if ACL already exists, or if
   // there is no user or space identity.
   private async requestACLInit() {
-    if (!this.spaceIdentity) {
-      return;
-    }
-    const aclKey = this.spaceIdentity.did();
     const userIdentity = (this.remote as any).as as Signer | undefined;
     if (!userIdentity) {
       return;
     }
+
+    // Request ACL in two cases:
+    // 1. When spaceIdentity exists (delegated space)
+    // 2. When user's identity equals the space DID (home space)
+    const isHomeSpace = userIdentity.did() === this.space;
+    if (!this.spaceIdentity && !isHomeSpace) {
+      return;
+    }
+
+    const aclKey = this.spaceIdentity?.did() ?? this.space;
 
     const initialACL: JSONValue = {
       value: {
@@ -1265,15 +1271,17 @@ export class Replica {
       cause: null,
     });
 
-    // Temporarily swap the signer to use spaceIdentity for this commit
+    // Temporarily swap the signer to use spaceIdentity (or userIdentity for home space) for this commit
     // We need to swap both the MemorySpaceSession and underlying MemoryConsumerSession
     const remoteSession = (this.remote as any).session;
     const originalSpaceSigner = this.remote.as;
     const originalConsumerSigner = remoteSession?.as;
 
-    this.remote.as = this.spaceIdentity;
+    // In home space case, use userIdentity since spaceIdentity is undefined
+    const signerForCommit = this.spaceIdentity ?? userIdentity;
+    this.remote.as = signerForCommit;
     if (remoteSession) {
-      remoteSession.as = this.spaceIdentity;
+      remoteSession.as = signerForCommit;
     }
 
     try {
@@ -1965,6 +1973,14 @@ export class StorageManager implements IStorageManager {
 
   protected connect(space: MemorySpace): IStorageProviderWithReplica {
     const { id, address, as, settings } = this;
+
+    // Determine the correct spaceIdentity for this space
+    // For the workspace space (where spaceIdentity.did() === space), use spaceIdentity
+    // For other spaces (like home space), pass undefined
+    const spaceIdentityForSpace = this.spaceIdentity?.did() === space
+      ? this.spaceIdentity
+      : undefined;
+
     return Provider.connect({
       id,
       space,
@@ -1972,7 +1988,7 @@ export class StorageManager implements IStorageManager {
       settings,
       subscription: this.#subscription,
       session: Consumer.create({ as }),
-      spaceIdentity: this.spaceIdentity,
+      spaceIdentity: spaceIdentityForSpace,
     });
   }
 
