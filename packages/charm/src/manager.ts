@@ -19,7 +19,7 @@ import {
   UI,
   URI,
 } from "@commontools/runner";
-import { Favorites } from "./favorites.ts";
+import * as favorites from "./favorites.ts";
 import { ALL_CHARMS_ID } from "../../runner/src/builtins/well-known.ts";
 import { vdomSchema } from "@commontools/html";
 import { type Session } from "@commontools/identity";
@@ -96,7 +96,7 @@ export const processSchema = {
 /**
  * Helper to consistently compare entity IDs between cells
  */
-function isSameEntity(
+export function isSameEntity(
   a: Cell<unknown> | string | EntityId,
   b: Cell<unknown> | string | EntityId,
 ): boolean {
@@ -125,19 +125,11 @@ export class CharmManager {
   private pinnedCharms: Cell<Cell<unknown>[]>;
   private recentCharms: Cell<Cell<unknown>[]>;
   private spaceCell: Cell<SpaceCellContents>;
-  private _favorites?: Favorites;
 
   /**
    * Promise resolved when the charm manager gets the charm list.
    */
   ready: Promise<void>;
-
-  private get favorites(): Favorites {
-    if (!this._favorites) {
-      this._favorites = new Favorites(this.runtime);
-    }
-    return this._favorites;
-  }
 
   constructor(
     private session: Session,
@@ -1112,7 +1104,7 @@ export class CharmManager {
    * @param charm - The charm to add to favorites
    */
   addFavorite(charm: Cell<unknown>): Promise<void> {
-    return this.favorites.addFavorite(charm);
+    return favorites.addFavorite(this.runtime, charm);
   }
 
   /**
@@ -1121,7 +1113,7 @@ export class CharmManager {
    * @returns true if the charm was removed, false if it wasn't in favorites
    */
   removeFavorite(charm: Cell<unknown> | EntityId): Promise<boolean> {
-    return this.favorites.removeFavorite(charm);
+    return favorites.removeFavorite(this.runtime, charm);
   }
 
   /**
@@ -1130,7 +1122,7 @@ export class CharmManager {
    * @returns true if the charm is favorited, false otherwise
    */
   isFavorite(charm: Cell<unknown> | EntityId): boolean {
-    return this.favorites.isFavorite(charm);
+    return favorites.isFavorite(this.runtime, charm);
   }
 
   /**
@@ -1138,7 +1130,7 @@ export class CharmManager {
    * @returns Cell containing the array of favorited charms
    */
   getFavorites(): Cell<Cell<unknown>[]> {
-    return this.favorites.getFavorites();
+    return favorites.getHomeFavorites(this.runtime);
   }
 }
 

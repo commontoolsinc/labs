@@ -42,11 +42,20 @@ const isFav = manager.isFavorite(charm);
 const favoritesCell = manager.getFavorites();
 ```
 
-Via the `Favorites` class directly:
+Via the favorites functions directly:
 
 ```typescript
-import { Favorites } from "@commontools/charm";
-const favorites = new Favorites(runtime);
+import {
+  addFavorite,
+  removeFavorite,
+  isFavorite,
+  getHomeFavorites,
+} from "@commontools/charm";
+
+await addFavorite(runtime, charm);
+await removeFavorite(runtime, charm);
+const isFav = isFavorite(runtime, charm);
+const favoritesCell = getHomeFavorites(runtime);
 ```
 
 ## Implementation Details
