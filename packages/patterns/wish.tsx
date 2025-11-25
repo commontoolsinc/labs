@@ -12,7 +12,7 @@ export default pattern<Record<string, never>>((_) => {
         <hr />
         {wishResult.result}
         <hr />
-        {wishResult}
+        {wishResult[UI]}
       </div>
     ),
   };

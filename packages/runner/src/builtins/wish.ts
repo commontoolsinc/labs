@@ -220,13 +220,7 @@ function resolveBase(
         );
       }
 
-      // TODO: replace with runtime.getHomeSpaceCell()
-      const homeSpaceCell = ctx.runtime.getCell(
-        userDID,
-        userDID,
-        undefined,
-        ctx.tx,
-      );
+      const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
       const favoritesCell = homeSpaceCell.key("favorites").asSchema(
         favoriteListSchema,
       );

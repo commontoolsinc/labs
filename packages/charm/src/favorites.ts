@@ -1,9 +1,5 @@
-import { type Cell, getEntityId, type IRuntime } from "@commontools/runner";
-import {
-  type FavoriteList,
-  favoriteListSchema,
-  isSameEntity,
-} from "./manager.ts";
+import { type Cell, type IRuntime } from "@commontools/runner";
+import { type FavoriteList, favoriteListSchema } from "./manager.ts";
 
 /**
  * Get cell description (schema as string) for tag-based search.
@@ -23,15 +19,16 @@ function getCellDescription(cell: Cell<unknown>): string {
 }
 
 /**
- * Filters an array of favorite entries by removing any that match the target entity
+ * Filters an array of favorite entries by removing any that match the target cell
  */
-function filterOutEntity(
+function filterOutCell(
   list: Cell<FavoriteList>,
   target: Cell<unknown>,
 ): FavoriteList {
-  const targetId = getEntityId(target);
-  if (!targetId) return list.get() as FavoriteList;
-  return list.get().filter((entry) => !isSameEntity(entry.cell, targetId));
+  const resolvedTarget = target.resolveAsCell();
+  return list.get().filter((entry) =>
+    !entry.cell.resolveAsCell().equals(resolvedTarget)
+  );
 }
 
 /**
@@ -54,15 +51,18 @@ export async function addFavorite(
   const favorites = getHomeFavorites(runtime);
   await favorites.sync();
 
-  const id = getEntityId(charm);
-  if (!id) return;
+  const resolvedCharm = charm.resolveAsCell();
 
   await runtime.editWithRetry((tx) => {
     const favoritesWithTx = favorites.withTx(tx);
     const current = favoritesWithTx.get() || [];
 
     // Check if already favorited
-    if (current.some((entry) => isSameEntity(entry.cell, id))) return;
+    if (
+      current.some((entry) =>
+        entry.cell.resolveAsCell().equals(resolvedCharm)
+      )
+    ) return;
 
     // Get the schema tag for this cell
     const tag = getCellDescription(charm);
@@ -81,16 +81,13 @@ export async function removeFavorite(
   runtime: IRuntime,
   charm: Cell<unknown>,
 ): Promise<boolean> {
-  const id = getEntityId(charm);
-  if (!id) return false;
-
   const favorites = getHomeFavorites(runtime);
   await favorites.sync();
 
   let removed = false;
   const result = await runtime.editWithRetry((tx) => {
     const favoritesWithTx = favorites.withTx(tx);
-    const filtered = filterOutEntity(favoritesWithTx, charm);
+    const filtered = filterOutCell(favoritesWithTx, charm);
     if (filtered.length !== favoritesWithTx.get().length) {
       favoritesWithTx.set(filtered);
       removed = true;
@@ -105,13 +102,13 @@ export async function removeFavorite(
  * Check if a charm is in the user's favorites (in home space)
  */
 export function isFavorite(runtime: IRuntime, charm: Cell<unknown>): boolean {
-  const id = getEntityId(charm);
-  if (!id) return false;
-
   try {
+    const resolvedCharm = charm.resolveAsCell();
     const favorites = getHomeFavorites(runtime);
     const cached = favorites.get();
-    return cached?.some((entry) => isSameEntity(entry.cell, id)) ?? false;
+    return cached?.some((entry) =>
+      entry.cell.resolveAsCell().equals(resolvedCharm)
+    ) ?? false;
   } catch (_error) {
     // If we can't access the home space (e.g., authorization error),
     // assume the charm is not favorited rather than throwing

@@ -123,14 +123,14 @@ export const navigateTo = createNodeFactory({
 
 export function wish<T = unknown>(
   target: Opaque<WishParams>,
-): OpaqueRef<WishState<T>>;
+): OpaqueRef<Required<WishState<T>>>;
 export function wish<T = unknown>(
   target: Opaque<WishParams>,
   schema: JSONSchema,
-): OpaqueRef<WishState<T>>;
+): OpaqueRef<Required<WishState<T>>>;
 export function wish<T = unknown>(
   target: Opaque<string>,
-): OpaqueRef<T | undefined>;
+): OpaqueRef<T>;
 export function wish<T = unknown>(
   target: Opaque<string>,
   schema: JSONSchema,
@@ -138,7 +138,7 @@ export function wish<T = unknown>(
 export function wish<T = unknown>(
   target: Opaque<string> | Opaque<WishParams>,
   schema?: JSONSchema,
-): OpaqueRef<T | WishState<T>> {
+): OpaqueRef<T | Required<WishState<T>>> {
   let param;
   let resultSchema;
 
