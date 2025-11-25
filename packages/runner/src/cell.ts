@@ -116,6 +116,7 @@ declare module "@commontools/api" {
       schema?: JSONSchema,
       rootSchema?: JSONSchema,
     ): Cell<T>;
+    asSchemaFromLinks<T = unknown>(): Cell<T>;
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
     sink(callback: (value: Readonly<T>) => Cancel | undefined | void): Cancel;
     sync(): Promise<Cell<T>> | Cell<T>;
@@ -752,6 +753,56 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       this._causeContainer, // Share the causeContainer with siblings
       this._kind,
     ) as unknown as Cell<any>;
+  }
+
+  /**
+   * Follow all links, even beyond write redirects to get final schema.
+   *
+   * If there is none look for resultSchema of associated pattern.
+   *
+   * Otherwise the link stays the same, i.e. it does not advance to resolved
+   * link.
+   *
+   * Note: That means that the schema might change if the link behind it change.
+   * The reads are logged though, so should trigger reactive flows.
+   *
+   * @returns Cell with schema from links
+   */
+  asSchemaFromLinks<T = unknown>(): Cell<T> {
+    let { schema, rootSchema } = resolveLink(
+      this.runtime.readTx(this.tx),
+      this.link,
+    );
+
+    if (!schema) {
+      const sourceCell = this.getSourceCell<{ resultRef: Cell<unknown> }>({
+        type: "object",
+        properties: { resultRef: { asCell: true } },
+      });
+      const sourceCellSchema = sourceCell?.key("resultRef").get()?.schema;
+      if (sourceCellSchema !== undefined) {
+        const cfc = new ContextualFlowControl();
+        schema = cfc.schemaAtPath(
+          sourceCellSchema,
+          this._link.path,
+          sourceCellSchema,
+        );
+        rootSchema = sourceCellSchema;
+      }
+    }
+
+    return new CellImpl(
+      this.runtime,
+      this.tx,
+      {
+        ...this._link,
+        ...(schema !== undefined && { schema }),
+        ...(rootSchema !== undefined && { rootSchema }),
+      },
+      false, // Reset synced flag, since schema is changing
+      this._causeContainer, // Share the causeContainer with siblings
+      this._kind,
+    ) as unknown as Cell<T>;
   }
 
   withTx(newTx?: IExtendedStorageTransaction): Cell<T> {
