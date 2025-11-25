@@ -175,8 +175,7 @@ function resolveBase(
       );
 
       if (!match) {
-        console.error(`No favorite found matching "${searchTerm}"`);
-        return undefined;
+        throw new WishError(`No favorite found matching "${searchTerm}"`);
       }
 
       return {
