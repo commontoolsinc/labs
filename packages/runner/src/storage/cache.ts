@@ -1241,21 +1241,17 @@ export class Replica {
   // ownership from the empty ACL (space identity only) to the
   // Session Identity. Skips if ACL already exists, or if
   // there is no user or space identity.
+  // Note: Home space (where user DID = space DID) does not need ACL init
+  // because ownership check treats space key as owner by default.
   private async requestACLInit() {
+    if (!this.spaceIdentity) {
+      return;
+    }
+    const aclKey = this.spaceIdentity.did();
     const userIdentity = (this.remote as any).as as Signer | undefined;
     if (!userIdentity) {
       return;
     }
-
-    // Request ACL in two cases:
-    // 1. When spaceIdentity exists (delegated space)
-    // 2. When user's identity equals the space DID (home space)
-    const isHomeSpace = userIdentity.did() === this.space;
-    if (!this.spaceIdentity && !isHomeSpace) {
-      return;
-    }
-
-    const aclKey = this.space;
 
     const initialACL: JSONValue = {
       value: {
@@ -1271,17 +1267,15 @@ export class Replica {
       cause: null,
     });
 
-    // Temporarily swap the signer to use spaceIdentity (or userIdentity for home space) for this commit
+    // Temporarily swap the signer to use spaceIdentity for this commit
     // We need to swap both the MemorySpaceSession and underlying MemoryConsumerSession
     const remoteSession = (this.remote as any).session;
     const originalSpaceSigner = this.remote.as;
     const originalConsumerSigner = remoteSession?.as;
 
-    // In home space case, use userIdentity since spaceIdentity is undefined
-    const signerForCommit = this.spaceIdentity ?? userIdentity;
-    this.remote.as = signerForCommit;
+    this.remote.as = this.spaceIdentity;
     if (remoteSession) {
-      remoteSession.as = signerForCommit;
+      remoteSession.as = this.spaceIdentity;
     }
 
     try {
