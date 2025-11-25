@@ -646,6 +646,71 @@ describe("link-resolution", () => {
       const resolved = resolveLink(tx, parsedLink);
       expect(resolved.schema).toEqual(schema2);
     });
+
+    it("should remove schema when remaining path field is not in schema", () => {
+      // This tests the corner case where:
+      // 1. An intermediate link has a schema
+      // 2. There's a remaining path to follow after the link
+      // 3. The field in the remaining path is NOT defined in the schema
+      // In this case, schema should become undefined (removed) rather than
+      // keeping the parent schema
+      //
+      // We use an array schema and access .length - the array schema defines
+      // items but not a "length" property, so getSchemaAtPath returns undefined.
+      const schema = {
+        type: "array",
+        items: { type: "number" },
+      } as const satisfies JSONSchema;
+
+      const targetCell = runtime.getCell<any>(
+        space,
+        "undefined-schema-field-target",
+        schema,
+        tx,
+      );
+      targetCell.set([1, 2, 3]);
+
+      const sourceCell = runtime.getCell<any>(
+        space,
+        "undefined-schema-field-source",
+        undefined,
+        tx,
+      );
+
+      // Create a link at "data" pointing to targetCell with schema included
+      sourceCell.setRaw({
+        data: targetCell.getAsLink({ includeSchema: true }),
+      });
+      tx.commit();
+      tx = runtime.edit();
+
+      // First verify the link to targetCell has the schema
+      const dataLink = parseLink(sourceCell.key("data"), sourceCell)!;
+      const dataResolved = resolveLink(tx, dataLink);
+      expect(dataResolved.schema).toEqual(schema);
+
+      // Now resolve a path that goes through the link to "length".
+      // The resolver will:
+      // 1. Try to resolve sourceCell/data/length
+      // 2. Find that "length" doesn't exist (NotFoundError)
+      // 3. Find the link at "data" (lastValid = ["data"])
+      // 4. Calculate remainingPath = ["length"]
+      // 5. Call getSchemaAtPath(schema, ["length"]) which returns undefined
+      //    because array schema has no "length" property defined
+      // 6. The fix ensures we DON'T spread the original schema back in
+      const linkThroughToLength = {
+        ...sourceCell.getAsNormalizedFullLink(),
+        path: ["data", "length"],
+        schema: undefined, // Start without schema to test inheritance
+      };
+      const resolved = resolveLink(tx, linkThroughToLength);
+
+      // The resolved link should NOT have a schema since "length" is not
+      // defined in the array schema
+      expect(resolved.schema).toBeUndefined();
+      // Verify we can still read the value
+      expect(tx.readValueOrThrow(resolved)).toBe(3);
+    });
   });
 
   describe("overwrite field removal", () => {

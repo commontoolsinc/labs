@@ -150,19 +150,19 @@ export function resolveLink(
 
         if (nextLink) {
           const remainingPath = link.path.slice(lastValid.length);
-          let linkSchema = nextLink.schema;
-          if (linkSchema !== undefined && remainingPath.length > 0) {
+          let { schema, ...restLink } = nextLink;
+          if (schema !== undefined && remainingPath.length > 0) {
             const cfc = new ContextualFlowControl();
-            linkSchema = cfc.getSchemaAtPath(
-              linkSchema,
+            schema = cfc.getSchemaAtPath(
+              schema,
               remainingPath,
               nextLink.rootSchema,
             );
           }
           nextLink = {
-            ...nextLink,
+            ...restLink,
             path: [...nextLink.path, ...remainingPath],
-            ...(linkSchema ? { schema: linkSchema } : {}),
+            ...(schema !== undefined && { schema }),
           };
         }
       }
