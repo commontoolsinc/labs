@@ -1254,11 +1254,13 @@ export type CompileAndRunFunction = <T = any, S = any>(
 
 export type WishTag = `/${string}` | `#${string}`;
 
+export type DID = `did:${string}:${string}`;
+
 export type WishParams = {
   tag?: WishTag;
   path?: string[];
   context?: Record<string, any>;
-  scope?: Record<string, any>;
+  scope?: (DID | "~" | ".")[];
 };
 
 export type WishState<T> = {
@@ -1271,7 +1273,7 @@ export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<boolean>;
 export type WishFunction = {
   <T = unknown>(target: Opaque<WishParams>): OpaqueRef<WishState<T>>;
   <S extends JSONSchema = JSONSchema>(
-    target: Opaque<string>,
+    target: Opaque<WishParams>,
     schema: S,
   ): OpaqueRef<WishState<Schema<S>>>;
 

@@ -149,8 +149,7 @@ function resolveBase(
       // Favorites always come from the HOME space (user identity DID)
       const userDID = ctx.runtime.userIdentityDID;
       if (!userDID) {
-        console.error("User identity DID not available for #favorites");
-        return undefined;
+        throw new WishError("User identity DID not available for #favorites");
       }
       const homeSpaceCell = ctx.runtime.getCell(
         userDID,
