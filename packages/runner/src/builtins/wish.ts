@@ -117,7 +117,11 @@ function resolveBase(
     }
     case "#favorites": {
       // Favorites always come from the HOME space (user identity DID)
-      const userDID = ctx.runtime.storageManager.as.did();
+      const userDID = ctx.runtime.userIdentityDID;
+      if (!userDID) {
+        console.error("User identity DID not available for #favorites");
+        return undefined;
+      }
       const homeSpaceCell = ctx.runtime.getCell(
         userDID,
         userDID,

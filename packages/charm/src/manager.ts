@@ -1103,7 +1103,13 @@ export class CharmManager {
    * @private
    */
   private getHomeFavorites(): Cell<Cell<unknown>[]> {
-    const homeSpace = this.runtime.storageManager.as.did();
+    // Use userIdentityDID which is the user's actual identity, not the space identity
+    const homeSpace = this.runtime.userIdentityDID;
+    if (!homeSpace) {
+      throw new Error(
+        "User identity DID not available - cannot access favorites",
+      );
+    }
     const homeSpaceCell = this.runtime.getCell(
       homeSpace,
       homeSpace,
@@ -1170,8 +1176,16 @@ export class CharmManager {
     const id = getEntityId(charm);
     if (!id) return false;
 
-    const favorites = this.getHomeFavorites();
-    return favorites.get()?.some((c) => isSameEntity(c, id)) ?? false;
+    try {
+      const favorites = this.getHomeFavorites();
+      // Use cached value to avoid triggering sync/authorization errors
+      const cached = favorites.cachedValue();
+      return cached?.some((c) => isSameEntity(c, id)) ?? false;
+    } catch (error) {
+      // If we can't access the home space (e.g., authorization error),
+      // assume the charm is not favorited rather than throwing
+      return false;
+    }
   }
 
   /**

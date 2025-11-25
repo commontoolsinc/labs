@@ -92,6 +92,7 @@ export interface SpaceCellContents {
 export interface RuntimeOptions {
   apiUrl: URL;
   storageManager: IStorageManager;
+  userIdentityDID?: MemorySpace; // The user's actual identity DID (not space DID)
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
   recipeEnvironment?: RecipeEnvironment;
@@ -112,6 +113,7 @@ export interface IRuntime {
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   readonly telemetry: RuntimeTelemetry;
+  readonly userIdentityDID?: MemorySpace; // The user's actual identity DID
 
   idle(): Promise<void>;
   dispose(): Promise<void>;
@@ -373,6 +375,7 @@ export class Runtime implements IRuntime {
   readonly storageManager: IStorageManager;
   readonly telemetry: RuntimeTelemetry;
   readonly apiUrl: URL;
+  readonly userIdentityDID?: MemorySpace;
   private defaultFrame?: Frame;
 
   constructor(options: RuntimeOptions) {
@@ -388,6 +391,7 @@ export class Runtime implements IRuntime {
     this.harness = new Engine(this);
 
     this.storageManager = options.storageManager;
+    this.userIdentityDID = options.userIdentityDID;
     this.moduleRegistry = new ModuleRegistry(this);
     this.recipeManager = new RecipeManager(this);
     this.runner = new Runner(this);
@@ -698,8 +702,12 @@ export class Runtime implements IRuntime {
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<any> {
-    const homeSpace = this.storageManager.as.did();
-    return this.getCell(homeSpace, cause, schema, tx);
+    if (!this.userIdentityDID) {
+      throw new Error(
+        "User identity DID not available - cannot access home space",
+      );
+    }
+    return this.getCell(this.userIdentityDID, cause, schema, tx);
   }
 
   // Convenience methods that delegate to the runner

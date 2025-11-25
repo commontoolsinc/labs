@@ -111,6 +111,9 @@ export class XHeaderView extends BaseView {
   @property({ type: Boolean })
   hasSidebarContent = false;
 
+  @property({ attribute: false })
+  isFavorite = false;
+
   private handleAuthClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
@@ -147,6 +150,50 @@ export class XHeaderView extends BaseView {
       type: "set-show-sidebar",
       show: !this.showSidebar,
     });
+  }
+
+  private handleFavoriteClick(e: Event) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!this.charmId) return;
+    this.command({
+      type: "toggle-favorite",
+      charmId: this.charmId,
+    });
+  }
+
+  private handleFavoriteChanged = (e: Event) => {
+    const event = e as CustomEvent<{ charmId: string; isFavorite: boolean }>;
+    if (event.detail.charmId === this.charmId) {
+      this.isFavorite = event.detail.isFavorite;
+    }
+  };
+
+  override connectedCallback() {
+    super.connectedCallback();
+    this.addEventListener("favorite-changed", this.handleFavoriteChanged);
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    this.removeEventListener("favorite-changed", this.handleFavoriteChanged);
+  }
+
+  override async updated(changedProperties: Map<string, unknown>) {
+    super.updated(changedProperties);
+    // Check favorite state when charm changes
+    if (changedProperties.has("charmId") && this.charmId && this.rt) {
+      const manager = this.rt.cc().manager();
+      // Ensure favorites are synced before checking
+      try {
+        const favorites = manager.getFavorites();
+        await favorites.sync();
+        this.isFavorite = manager.isFavorite({ "/": this.charmId });
+      } catch (error) {
+        // If sync fails (e.g., authorization error), assume not favorited
+        this.isFavorite = false;
+      }
+    }
   }
 
   private getConnectionStatus(): ConnectionStatus {
@@ -197,6 +244,20 @@ export class XHeaderView extends BaseView {
                       : "Show Sidebar"}"
                   >
                     ${this.showSidebar ? "⏵" : "⏴"}
+                  </x-button>
+                `
+                : null}
+              ${this.charmId
+                ? html`
+                  <x-button
+                    class="emoji-button"
+                    size="small"
+                    @click="${this.handleFavoriteClick}"
+                    title="${this.isFavorite
+                      ? "Remove from Favorites"
+                      : "Add to Favorites"}"
+                  >
+                    ${this.isFavorite ? "⭐" : "☆"}
                   </x-button>
                 `
                 : null}
