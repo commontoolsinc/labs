@@ -228,7 +228,9 @@ export class DebuggerController implements ReactiveController {
    */
   watchCell(cell: Cell, label?: string): string {
     // Generate unique watch ID
-    const watchId = `watch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const watchId = `watch-${Date.now()}-${
+      Math.random().toString(36).slice(2, 8)
+    }`;
 
     // Get the cell link for display/persistence
     const cellLink = cell.getAsNormalizedFullLink();
