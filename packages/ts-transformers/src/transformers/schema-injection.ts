@@ -1042,10 +1042,16 @@ export class SchemaInjectionTransformer extends Transformer {
             typeRegistry.set(schemaCall, type);
           }
 
+          // Schema must always be the second argument. If no value was provided,
+          // add undefined as the first argument.
+          const newArgs = args.length === 0
+            ? [factory.createIdentifier("undefined"), schemaCall]
+            : [...args, schemaCall];
+
           const updated = factory.createCallExpression(
             node.expression,
             node.typeArguments,
-            [...args, schemaCall],
+            newArgs,
           );
           return ts.visitEachChild(updated, visit, transformation);
         }
