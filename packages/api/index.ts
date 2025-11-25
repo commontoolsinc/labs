@@ -1252,8 +1252,10 @@ export type CompileAndRunFunction = <T = any, S = any>(
   params: Opaque<BuiltInCompileAndRunParams<T>>,
 ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
 
+export type WishTag = `/${string}` | `#${string}`;
+
 export type WishParams = {
-  tag?: string;
+  tag?: WishTag;
   path?: string[];
   context?: Record<string, any>;
   scope?: Record<string, any>;
@@ -1356,8 +1358,6 @@ export declare const toSchema: ToSchemaFunction;
 export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
   : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
   : T;
-
-export type WishKey = `/${string}` | `#${string}`;
 
 // ===== JSON Pointer Path Resolution Utilities =====
 

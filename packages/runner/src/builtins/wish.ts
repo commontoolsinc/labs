@@ -1,4 +1,9 @@
-import { type VNode, type WishKey } from "@commontools/api";
+import {
+  type VNode,
+  type WishParams,
+  type WishState,
+  type WishTag,
+} from "@commontools/api";
 import { h } from "@commontools/html";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
@@ -31,7 +36,7 @@ type WishResolution = {
   path?: readonly string[];
 };
 
-const WISH_TARGETS: Partial<Record<WishKey, WishResolution>> = {
+const WISH_TARGETS: Partial<Record<WishTag, WishResolution>> = {
   "#allCharms": { entityId: { "/": ALL_CHARMS_ID } },
 };
 
@@ -55,7 +60,7 @@ function resolveWishTarget(
 }
 
 type ParsedWishTarget = {
-  key: "/" | WishKey;
+  key: "/" | WishTag;
   path: string[];
 };
 
@@ -72,7 +77,7 @@ function parseWishTarget(target: string): ParsedWishTarget {
     if (segments.length === 0) {
       throw new WishError(`Wish target "${target}" is not recognized.`);
     }
-    const key = `#${segments[0]}` as WishKey;
+    const key = `#${segments[0]}` as WishTag;
     return { key, path: segments.slice(1) };
   }
 
@@ -238,22 +243,23 @@ export function wish(
       }
       return;
     } else if (typeof targetValue === "object") {
-      const { tag, path, context: _context, scope: _scope } = targetValue;
+      const { tag, path, context: _context, scope: _scope } =
+        targetValue as WishParams;
 
       if (!tag) {
         const errorMsg = `Wish target "${
           JSON.stringify(targetValue)
         }" is not recognized.`;
         console.error(errorMsg);
-        sendResult(tx, { error: errorMsg, [UI]: errorUI(errorMsg) });
+        sendResult(
+          tx,
+          { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
+        );
         return;
       }
 
       try {
-        const parsed: ParsedWishTarget = {
-          key: tag as WishKey,
-          path: path ?? [],
-        };
+        const parsed: ParsedWishTarget = { key: tag, path: path ?? [] };
         const ctx: WishContext = { runtime, tx, parentCell };
         const baseResolution = resolveBase(parsed, ctx);
         const combinedPath = baseResolution.pathPrefix
@@ -267,13 +273,19 @@ export function wish(
       } catch (e) {
         const errorMsg = e instanceof WishError ? e.message : String(e);
         console.error(errorMsg);
-        sendResult(tx, { error: errorMsg, [UI]: errorUI(errorMsg) });
+        sendResult(
+          tx,
+          { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
+        );
       }
       return;
     } else {
       const errorMsg = `Wish target is not recognized: ${targetValue}`;
       console.error(errorMsg);
-      sendResult(tx, { error: errorMsg, [UI]: errorUI(errorMsg) });
+      sendResult(
+        tx,
+        { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
+      );
       return;
     }
   };
