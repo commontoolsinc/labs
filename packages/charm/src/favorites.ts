@@ -1,24 +1,40 @@
-import { type Cell, getEntityId, type IRuntime } from "@commontools/runner";
-import { charmListSchema, isSameEntity } from "./manager.ts";
+import { type Cell, getEntityId, type IRuntime, type JSONSchema } from "@commontools/runner";
+import { type FavoriteEntry, type FavoriteList, favoriteListSchema, isSameEntity } from "./manager.ts";
 
 /**
- * Filters an array of charms by removing any that match the target entity
+ * Temporary helper to get cell description (schema as string).
+ * TODO: Replace with getCellDescription from @commontools/runner once available.
+ */
+function getCellDescription(cell: Cell<unknown>): string {
+  try {
+    const schema = cell.schema;
+    if (schema && typeof schema === "object" && Object.keys(schema).length > 0) {
+      return JSON.stringify(schema);
+    }
+  } catch (_error) {
+    // If we can't get the schema, return empty string
+  }
+  return "";
+}
+
+/**
+ * Filters an array of favorite entries by removing any that match the target entity
  */
 function filterOutEntity(
-  list: Cell<Cell<unknown>[]>,
+  list: Cell<FavoriteList>,
   target: Cell<unknown>,
-): Cell<unknown>[] {
+): FavoriteList {
   const targetId = getEntityId(target);
-  if (!targetId) return list.get() as Cell<unknown>[];
-  return list.get().filter((charm) => !isSameEntity(charm, targetId));
+  if (!targetId) return list.get() as FavoriteList;
+  return list.get().filter((entry) => !isSameEntity(entry.cell, targetId));
 }
 
 /**
  * Get the favorites cell from the home space (singleton across all spaces).
  * See docs/common/HOME_SPACE.md for more details.
  */
-export function getHomeFavorites(runtime: IRuntime): Cell<Cell<unknown>[]> {
-  return runtime.getHomeSpaceCell().key("favorites").asSchema(charmListSchema);
+export function getHomeFavorites(runtime: IRuntime): Cell<FavoriteList> {
+  return runtime.getHomeSpaceCell().key("favorites").asSchema(favoriteListSchema);
 }
 
 /**
@@ -39,9 +55,12 @@ export async function addFavorite(
     const current = favoritesWithTx.get() || [];
 
     // Check if already favorited
-    if (current.some((c) => isSameEntity(c, id))) return;
+    if (current.some((entry) => isSameEntity(entry.cell, id))) return;
 
-    favoritesWithTx.push(charm);
+    // Get the schema tag for this cell
+    const tag = getCellDescription(charm);
+
+    favoritesWithTx.push({ cell: charm, tag });
   });
 
   await runtime.idle();
@@ -85,7 +104,7 @@ export function isFavorite(runtime: IRuntime, charm: Cell<unknown>): boolean {
   try {
     const favorites = getHomeFavorites(runtime);
     const cached = favorites.get();
-    return cached?.some((c: Cell<unknown>) => isSameEntity(c, id)) ?? false;
+    return cached?.some((entry) => isSameEntity(entry.cell, id)) ?? false;
   } catch (_error) {
     // If we can't access the home space (e.g., authorization error),
     // assume the charm is not favorited rather than throwing

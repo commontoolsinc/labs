@@ -69,6 +69,24 @@ export const charmLineageSchema = {
 } as const satisfies JSONSchema;
 export type CharmLineage = Schema<typeof charmLineageSchema>;
 
+export const favoriteEntrySchema = {
+  type: "object",
+  properties: {
+    cell: { not: true, asCell: true },
+    tag: { type: "string", default: "" },
+  },
+  required: ["cell"],
+} as const satisfies JSONSchema;
+
+export type FavoriteEntry = Schema<typeof favoriteEntrySchema>;
+
+export const favoriteListSchema = {
+  type: "array",
+  items: favoriteEntrySchema,
+} as const satisfies JSONSchema;
+
+export type FavoriteList = Schema<typeof favoriteListSchema>;
+
 export const charmSourceCellSchema = {
   type: "object",
   properties: {
@@ -1127,9 +1145,9 @@ export class CharmManager {
 
   /**
    * Get the favorites cell from the home space
-   * @returns Cell containing the array of favorited charms
+   * @returns Cell containing the array of favorite entries with cell and tag
    */
-  getFavorites(): Cell<Cell<unknown>[]> {
+  getFavorites(): Cell<FavoriteList> {
     return favorites.getHomeFavorites(this.runtime);
   }
 }

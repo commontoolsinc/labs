@@ -15,6 +15,7 @@ import type {
 import type { EntityId } from "../create-ref.ts";
 import { ALL_CHARMS_ID } from "./well-known.ts";
 import { type JSONSchema, UI } from "../builder/types.ts";
+import { favoriteListSchema } from "@commontools/charm";
 
 function errorUI(message: string): VNode {
   return h("span", { style: "color: red" }, `⚠️ ${message}`);
@@ -157,7 +158,31 @@ function resolveBase(
         undefined,
         ctx.tx,
       );
-      return { cell: homeSpaceCell, pathPrefix: ["favorites"] };
+
+      // No path = return favorites list
+      if (parsed.path.length === 0) {
+        return { cell: homeSpaceCell, pathPrefix: ["favorites"] };
+      }
+
+      // Path provided = search by tag
+      const searchTerm = parsed.path[0].toLowerCase();
+      const favoritesCell = homeSpaceCell.key("favorites").asSchema(favoriteListSchema);
+      const favorites = favoritesCell.get() || [];
+
+      // Case-insensitive search in tag
+      const match = favorites.find((entry) =>
+        entry.tag?.toLowerCase().includes(searchTerm)
+      );
+
+      if (!match) {
+        console.error(`No favorite found matching "${searchTerm}"`);
+        return undefined;
+      }
+
+      return {
+        cell: match.cell,
+        pathPrefix: parsed.path.slice(1),  // remaining path after search term
+      };
     }
     case "#now": {
       if (parsed.path.length > 0) {
