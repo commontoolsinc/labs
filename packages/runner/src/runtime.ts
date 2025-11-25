@@ -234,18 +234,7 @@ export interface IRuntime {
     tx?: IExtendedStorageTransaction,
   ): Cell<T>;
 
-  // Home space helpers (space where space DID = user identity DID)
-  getHomeCell<S extends JSONSchema = JSONSchema>(
-    cause: any,
-    schema: S,
-    tx?: IExtendedStorageTransaction,
-  ): Cell<Schema<S>>;
-  getHomeCell<T>(
-    cause: any,
-    schema?: JSONSchema,
-    tx?: IExtendedStorageTransaction,
-  ): Cell<T>;
-
+  // Home space helper (space where space DID = user identity DID)
   getHomeSpaceCell(
     tx?: IExtendedStorageTransaction,
   ): Cell<HomeSpaceCellContents>;
@@ -706,25 +695,6 @@ export class Runtime implements IRuntime {
       type: "application/json",
       schema,
     }, tx);
-  }
-
-  // Home space helper (space where space DID = user identity DID)
-  getHomeCell<T>(
-    cause: any,
-    schema?: JSONSchema,
-    tx?: IExtendedStorageTransaction,
-  ): Cell<T>;
-  getHomeCell<S extends JSONSchema = JSONSchema>(
-    cause: any,
-    schema: S,
-    tx?: IExtendedStorageTransaction,
-  ): Cell<Schema<S>>;
-  getHomeCell(
-    cause: any,
-    schema?: JSONSchema,
-    tx?: IExtendedStorageTransaction,
-  ): Cell<any> {
-    return this.getCell(this.userIdentityDID, cause, schema, tx);
   }
 
   getHomeSpaceCell(
