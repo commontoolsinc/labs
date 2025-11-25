@@ -11,7 +11,9 @@ export default recipe({
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __ctHelpers.JSONSchema, ({ multiplier }) => {
-    const value = cell(10);
+    const value = cell(10, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     const result = __ctHelpers.derive({
         type: "object",
         properties: {

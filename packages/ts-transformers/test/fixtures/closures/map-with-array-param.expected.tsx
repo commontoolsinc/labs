@@ -107,7 +107,12 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, (_state) => {
-    const items = cell([1, 2, 3, 4, 5]);
+    const items = cell([1, 2, 3, 4, 5], {
+        type: "array",
+        items: {
+            type: "number"
+        }
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [UI]: (<div>
         {items.mapWithPattern(__ctHelpers.recipe({

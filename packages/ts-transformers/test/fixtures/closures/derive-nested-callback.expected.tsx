@@ -1,8 +1,15 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive } from "commontools";
 export default function TestDerive() {
-    const numbers = cell([1, 2, 3]);
-    const multiplier = cell(2);
+    const numbers = cell([1, 2, 3], {
+        type: "array",
+        items: {
+            type: "number"
+        }
+    } as const satisfies __ctHelpers.JSONSchema);
+    const multiplier = cell(2, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     // Nested callback - inner array map should not capture outer multiplier
     const result = __ctHelpers.derive({
         type: "object",

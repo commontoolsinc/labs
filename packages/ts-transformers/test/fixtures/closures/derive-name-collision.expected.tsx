@@ -1,7 +1,9 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive } from "commontools";
 export default function TestDerive() {
-    const multiplier = cell(2);
+    const multiplier = cell(2, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     // Input name collides with capture name
     // multiplier is both the input AND a captured variable (used via .get())
     const result = __ctHelpers.derive({

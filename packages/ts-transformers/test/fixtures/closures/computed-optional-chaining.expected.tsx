@@ -3,8 +3,21 @@ import { cell, computed } from "commontools";
 export default function TestComputeOptionalChaining() {
     const config = cell<{
         multiplier?: number;
-    } | null>({ multiplier: 2 });
-    const value = cell(10);
+    } | null>({ multiplier: 2 }, {
+        anyOf: [{
+                type: "object",
+                properties: {
+                    multiplier: {
+                        type: "number"
+                    }
+                }
+            }, {
+                type: "null"
+            }]
+    } as const satisfies __ctHelpers.JSONSchema);
+    const value = cell(10, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     const result = __ctHelpers.derive({
         type: "object",
         properties: {

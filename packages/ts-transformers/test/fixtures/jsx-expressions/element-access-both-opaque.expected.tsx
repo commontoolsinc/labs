@@ -107,8 +107,15 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, (_state) => {
-    const items = cell(["apple", "banana", "cherry"]);
-    const index = cell(1);
+    const items = cell(["apple", "banana", "cherry"], {
+        type: "array",
+        items: {
+            type: "string"
+        }
+    } as const satisfies __ctHelpers.JSONSchema);
+    const index = cell(1, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [UI]: (<div>
         <h3>Element Access with Both OpaqueRefs</h3>
