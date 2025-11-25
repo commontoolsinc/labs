@@ -9,6 +9,7 @@ export {
   type UISchema,
   uiSchema,
 } from "./manager.ts";
+export { Favorites } from "./favorites.ts";
 export { searchCharms } from "./search.ts";
 export {
   castNewRecipe,

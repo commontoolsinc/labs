@@ -15,11 +15,11 @@ import {
   Runtime,
   type Schema,
   type SpaceCellContents,
-  spaceCellSchema,
   TYPE,
   UI,
   URI,
 } from "@commontools/runner";
+import { Favorites } from "./favorites.ts";
 import { ALL_CHARMS_ID } from "../../runner/src/builtins/well-known.ts";
 import { vdomSchema } from "@commontools/html";
 import { type Session } from "@commontools/identity";
@@ -125,11 +125,19 @@ export class CharmManager {
   private pinnedCharms: Cell<Cell<unknown>[]>;
   private recentCharms: Cell<Cell<unknown>[]>;
   private spaceCell: Cell<SpaceCellContents>;
+  private _favorites?: Favorites;
 
   /**
    * Promise resolved when the charm manager gets the charm list.
    */
   ready: Promise<void>;
+
+  private get favorites(): Favorites {
+    if (!this._favorites) {
+      this._favorites = new Favorites(this.runtime);
+    }
+    return this._favorites;
+  }
 
   constructor(
     private session: Session,
@@ -1100,47 +1108,11 @@ export class CharmManager {
   }
 
   /**
-   * Get the favorites cell from the home space (singleton across all spaces)
-   * @private
-   */
-  private getHomeFavorites(): Cell<Cell<unknown>[]> {
-    // Use userIdentityDID which is the user's actual identity, not the space identity
-    const homeSpace = this.runtime.userIdentityDID;
-    if (!homeSpace) {
-      throw new Error(
-        "User identity DID not available - cannot access favorites",
-      );
-    }
-    const homeSpaceCell = this.runtime.getCell(
-      homeSpace,
-      homeSpace,
-      spaceCellSchema,
-    );
-    return homeSpaceCell.key("favorites").asSchema(charmListSchema);
-  }
-
-  /**
    * Add a charm to the user's favorites (in home space)
    * @param charm - The charm to add to favorites
    */
-  async addFavorite(charm: Cell<unknown>): Promise<void> {
-    const favorites = this.getHomeFavorites();
-    await favorites.sync();
-
-    const id = getEntityId(charm);
-    if (!id) return;
-
-    await this.runtime.editWithRetry((tx) => {
-      const favoritesWithTx = favorites.withTx(tx);
-      const current = favoritesWithTx.get() || [];
-
-      // Check if already favorited
-      if (current.some((c) => isSameEntity(c, id))) return;
-
-      favoritesWithTx.push(charm);
-    });
-
-    await this.runtime.idle();
+  addFavorite(charm: Cell<unknown>): Promise<void> {
+    return this.favorites.addFavorite(charm);
   }
 
   /**
@@ -1148,24 +1120,8 @@ export class CharmManager {
    * @param charm - The charm or entity ID to remove from favorites
    * @returns true if the charm was removed, false if it wasn't in favorites
    */
-  async removeFavorite(charm: Cell<unknown> | EntityId): Promise<boolean> {
-    const id = getEntityId(charm);
-    if (!id) return false;
-
-    const favorites = this.getHomeFavorites();
-    await favorites.sync();
-
-    let removed = false;
-    await this.runtime.editWithRetry((tx) => {
-      const favoritesWithTx = favorites.withTx(tx);
-      const filtered = filterOutEntity(favoritesWithTx, id);
-      if (filtered.length !== favoritesWithTx.get().length) {
-        favoritesWithTx.set(filtered);
-        removed = true;
-      }
-    });
-
-    return removed;
+  removeFavorite(charm: Cell<unknown> | EntityId): Promise<boolean> {
+    return this.favorites.removeFavorite(charm);
   }
 
   /**
@@ -1174,19 +1130,7 @@ export class CharmManager {
    * @returns true if the charm is favorited, false otherwise
    */
   isFavorite(charm: Cell<unknown> | EntityId): boolean {
-    const id = getEntityId(charm);
-    if (!id) return false;
-
-    try {
-      const favorites = this.getHomeFavorites();
-      // Use get() to access the current value
-      const cached = favorites.get();
-      return cached?.some((c: Cell<unknown>) => isSameEntity(c, id)) ?? false;
-    } catch (_error) {
-      // If we can't access the home space (e.g., authorization error),
-      // assume the charm is not favorited rather than throwing
-      return false;
-    }
+    return this.favorites.isFavorite(charm);
   }
 
   /**
@@ -1194,7 +1138,7 @@ export class CharmManager {
    * @returns Cell containing the array of favorited charms
    */
   getFavorites(): Cell<Cell<unknown>[]> {
-    return this.getHomeFavorites();
+    return this.favorites.getFavorites();
   }
 }
 
