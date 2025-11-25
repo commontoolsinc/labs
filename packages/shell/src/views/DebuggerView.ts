@@ -1053,7 +1053,9 @@ export class XDebuggerView extends LitElement {
     return json;
   }
 
-  private getCellLabel(watch: { label?: string; cellLink: { id: string } }): string {
+  private getCellLabel(
+    watch: { label?: string; cellLink: { id: string } },
+  ): string {
     if (watch.label) return watch.label;
 
     // Generate short ID from full ID
@@ -1097,21 +1099,25 @@ export class XDebuggerView extends LitElement {
 
     return html`
       <div class="watch-list">
-        ${watchedCells.map((watch) => html`
-          <div class="watch-item">
-            <div class="watch-label">${this.getCellLabel(watch)}</div>
-            <div class="watch-value">${this.formatValue(watch.lastValue)}</div>
-            <div class="watch-updates">${watch.updateCount} updates</div>
-            <button
-              type="button"
-              class="unwatch-button"
-              @click="${() => this.debuggerController?.unwatchCell(watch.id)}"
-              title="Stop watching this cell"
-            >
-              ×
-            </button>
-          </div>
-        `)}
+        ${watchedCells.map((watch) =>
+          html`
+            <div class="watch-item">
+              <div class="watch-label">${this.getCellLabel(watch)}</div>
+              <div class="watch-value">${this.formatValue(
+                watch.lastValue,
+              )}</div>
+              <div class="watch-updates">${watch.updateCount} updates</div>
+              <button
+                type="button"
+                class="unwatch-button"
+                @click="${() => this.debuggerController?.unwatchCell(watch.id)}"
+                title="Stop watching this cell"
+              >
+                ×
+              </button>
+            </div>
+          `
+        )}
       </div>
     `;
   }
@@ -1244,9 +1250,7 @@ export class XDebuggerView extends LitElement {
               </div>
             </div>
 
-            ${this.renderTabs()}
-
-            ${this._activeTab === "events"
+            ${this.renderTabs()} ${this._activeTab === "events"
               ? html`
                 <div class="toolbar-container">
                   <div class="topics-filter">
@@ -1271,7 +1275,9 @@ export class XDebuggerView extends LitElement {
                               ? html`
                                 <span style="font-size: 0.5rem; opacity: 0.7; margin-left: 0.25rem;">
                                   ${Object.keys(topic.subtopics).filter((sk) =>
-                                    this.activeSubtopics.has(`${topicKey}.${sk}`)
+                                    this.activeSubtopics.has(
+                                      `${topicKey}.${sk}`,
+                                    )
                                   ).length}/${subtopicKeys.length}
                                 </span>
                               `
@@ -1296,9 +1302,10 @@ export class XDebuggerView extends LitElement {
                                     ${Object.entries(topic.subtopics).map(
                                       ([subKey, subtopic]) => {
                                         const fullKey = `${topicKey}.${subKey}`;
-                                        const isChecked = this.activeSubtopics.has(
-                                          fullKey,
-                                        );
+                                        const isChecked = this.activeSubtopics
+                                          .has(
+                                            fullKey,
+                                          );
                                         return html`
                                           <label class="subtopic-item">
                                             <input
@@ -1335,10 +1342,13 @@ export class XDebuggerView extends LitElement {
                       <input
                         type="text"
                         placeholder="Search events..."
-                        class="search-input ${this.searchText ? "has-value" : ""}"
+                        class="search-input ${this.searchText
+                          ? "has-value"
+                          : ""}"
                         .value="${this.searchText}"
                         @input="${(e: Event) =>
-                          this.searchText = (e.target as HTMLInputElement).value}"
+                          this.searchText =
+                            (e.target as HTMLInputElement).value}"
                       />
                       ${this.searchText
                         ? html`
