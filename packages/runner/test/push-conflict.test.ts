@@ -23,6 +23,7 @@ describe.skip("Push conflict", () => {
   let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
   const storageManager: IStorageManager = {
     id: "some id",
+    as: signer,
     open: (space: Consumer.MemorySpace) =>
       Provider.open({
         space,

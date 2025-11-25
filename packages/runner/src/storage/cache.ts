@@ -1241,6 +1241,8 @@ export class Replica {
   // ownership from the empty ACL (space identity only) to the
   // Session Identity. Skips if ACL already exists, or if
   // there is no user or space identity.
+  // Note: Home space (where user DID = space DID) does not need ACL init
+  // because ownership check treats space key as owner by default.
   private async requestACLInit() {
     if (!this.spaceIdentity) {
       return;
@@ -1965,6 +1967,14 @@ export class StorageManager implements IStorageManager {
 
   protected connect(space: MemorySpace): IStorageProviderWithReplica {
     const { id, address, as, settings } = this;
+
+    // Determine the correct spaceIdentity for this space
+    // For the workspace space (where spaceIdentity.did() === space), use spaceIdentity
+    // For other spaces (like home space), pass undefined
+    const spaceIdentityForSpace = this.spaceIdentity?.did() === space
+      ? this.spaceIdentity
+      : undefined;
+
     return Provider.connect({
       id,
       space,
@@ -1972,7 +1982,7 @@ export class StorageManager implements IStorageManager {
       settings,
       subscription: this.#subscription,
       session: Consumer.create({ as }),
-      spaceIdentity: this.spaceIdentity,
+      spaceIdentity: spaceIdentityForSpace,
     });
   }
 

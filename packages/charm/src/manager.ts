@@ -19,6 +19,7 @@ import {
   UI,
   URI,
 } from "@commontools/runner";
+import * as favorites from "./favorites.ts";
 import { ALL_CHARMS_ID } from "../../runner/src/builtins/well-known.ts";
 import { vdomSchema } from "@commontools/html";
 import { type Session } from "@commontools/identity";
@@ -95,7 +96,7 @@ export const processSchema = {
 /**
  * Helper to consistently compare entity IDs between cells
  */
-function isSameEntity(
+export function isSameEntity(
   a: Cell<unknown> | string | EntityId,
   b: Cell<unknown> | string | EntityId,
 ): boolean {
@@ -1096,6 +1097,40 @@ export class CharmManager {
     });
     await this.runtime.idle();
     await this.synced();
+  }
+
+  /**
+   * Add a charm to the user's favorites (in home space)
+   * @param charm - The charm to add to favorites
+   */
+  addFavorite(charm: Cell<unknown>): Promise<void> {
+    return favorites.addFavorite(this.runtime, charm);
+  }
+
+  /**
+   * Remove a charm from the user's favorites (in home space)
+   * @param charm - The charm to remove from favorites
+   * @returns true if the charm was removed, false if it wasn't in favorites
+   */
+  removeFavorite(charm: Cell<unknown>): Promise<boolean> {
+    return favorites.removeFavorite(this.runtime, charm);
+  }
+
+  /**
+   * Check if a charm is in the user's favorites (in home space)
+   * @param charm - The charm to check
+   * @returns true if the charm is favorited, false otherwise
+   */
+  isFavorite(charm: Cell<unknown>): boolean {
+    return favorites.isFavorite(this.runtime, charm);
+  }
+
+  /**
+   * Get the favorites cell from the home space
+   * @returns Cell containing the array of favorited charms
+   */
+  getFavorites(): Cell<Cell<unknown>[]> {
+    return favorites.getHomeFavorites(this.runtime);
   }
 }
 

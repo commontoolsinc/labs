@@ -17,6 +17,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { setRecipeEnvironment } from "./builder/env.ts";
 import type {
   CommitError,
+  DID,
   IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
@@ -89,6 +90,15 @@ export interface SpaceCellContents {
   defaultPattern: Cell<never>;
 }
 
+/**
+ * Contents of the home space cell (where space DID = user identity DID).
+ * Home space contains user-specific data like favorites that persists across all spaces.
+ * See docs/common/HOME_SPACE.md for more details.
+ */
+export interface HomeSpaceCellContents {
+  favorites: Cell<Cell<never>[]>;
+}
+
 export interface RuntimeOptions {
   apiUrl: URL;
   storageManager: IStorageManager;
@@ -99,6 +109,32 @@ export interface RuntimeOptions {
   debug?: boolean;
   telemetry?: RuntimeTelemetry;
 }
+
+export const spaceCellSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    allCharms: {
+      type: "array",
+      items: { not: true, asCell: true },
+    },
+    recentCharms: {
+      type: "array",
+      items: { not: true, asCell: true },
+    },
+    defaultPattern: { not: true, asCell: true },
+  },
+} as JSONSchema;
+
+export const homeSpaceCellSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    favorites: {
+      type: "array",
+      items: { not: true, asCell: true },
+      asCell: true,
+    },
+  },
+} as JSONSchema;
 
 export interface IRuntime {
   readonly id: string;
@@ -112,6 +148,8 @@ export interface IRuntime {
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   readonly telemetry: RuntimeTelemetry;
+  /** The user's identity DID, derived from storageManager.as.did() */
+  readonly userIdentityDID: DID;
 
   idle(): Promise<void>;
   dispose(): Promise<void>;
@@ -195,6 +233,11 @@ export interface IRuntime {
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<T>;
+
+  // Home space helper (space where space DID = user identity DID)
+  getHomeSpaceCell(
+    tx?: IExtendedStorageTransaction,
+  ): Cell<HomeSpaceCellContents>;
 
   // Convenience methods that delegate to the runner
   setup<T, R>(
@@ -361,6 +404,7 @@ export class Runtime implements IRuntime {
   readonly storageManager: IStorageManager;
   readonly telemetry: RuntimeTelemetry;
   readonly apiUrl: URL;
+  readonly userIdentityDID: DID;
   private defaultFrame?: Frame;
 
   constructor(options: RuntimeOptions) {
@@ -376,6 +420,7 @@ export class Runtime implements IRuntime {
     this.harness = new Engine(this);
 
     this.storageManager = options.storageManager;
+    this.userIdentityDID = options.storageManager.as.did() as DID;
     this.moduleRegistry = new ModuleRegistry(this);
     this.recipeManager = new RecipeManager(this);
     this.runner = new Runner(this);
@@ -559,20 +604,7 @@ export class Runtime implements IRuntime {
     return this.getCell(
       space,
       space, // Use space DID as cause
-      schema ?? {
-        type: "object",
-        properties: {
-          allCharms: {
-            type: "array",
-            items: { not: true, asCell: true },
-          },
-          recentCharms: {
-            type: "array",
-            items: { not: true, asCell: true },
-          },
-          defaultPattern: { not: true, asCell: true },
-        },
-      },
+      schema ?? spaceCellSchema,
       tx,
     );
   }
@@ -663,6 +695,17 @@ export class Runtime implements IRuntime {
       type: "application/json",
       schema,
     }, tx);
+  }
+
+  getHomeSpaceCell(
+    tx?: IExtendedStorageTransaction,
+  ): Cell<HomeSpaceCellContents> {
+    return this.getCell(
+      this.userIdentityDID,
+      this.userIdentityDID,
+      homeSpaceCellSchema,
+      tx,
+    ) as Cell<HomeSpaceCellContents>;
   }
 
   // Convenience methods that delegate to the runner
