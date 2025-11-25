@@ -242,4 +242,50 @@ describe("recipes with HTML", () => {
       "<div><ul><li>test: 123</li><li>ok: false</li></ul><ul><li>test: 345</li><li>another: xxx</li></ul><ul><li>test: 456</li><li>ok: true</li></ul></div>",
     );
   });
+
+  it("detects cyclic cell references using .equals() not object identity", async () => {
+    const { document, renderOptions } = mock;
+
+    // Get a cell twice - this creates different Cell wrapper objects
+    // but they reference the same underlying cell data
+    const cellId = "cyclic-cell-test";
+    const cell1 = runtime.getCell<{ ui: VNode }>(space, cellId, undefined, tx);
+    const cell2 = runtime.getCell<{ ui: VNode }>(space, cellId, undefined, tx);
+
+    // Verify they are different objects but equal cells
+    assert.equal(cell1 === cell2, false, "Should be different wrapper objects");
+    assert.equal(cell1.equals(cell2), true, "Should be equal cells");
+    // Also verify that key projections are equal
+    assert.equal(
+      cell1.key("ui").equals(cell2.key("ui")),
+      true,
+      "Key projections should be equal",
+    );
+
+    // Create a cyclic structure: cell1.ui contains cell2 (which is the same cell)
+    // This simulates a cell whose UI references itself
+    cell1.set({
+      ui: {
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [cell2.key("ui")], // Using cell2 wrapper, but it's the same cell
+      },
+    });
+    tx.commit();
+
+    await runtime.idle();
+
+    const root = document.getElementById("root")!;
+    render(root, cell1.key("ui"), renderOptions);
+
+    // Should detect the cycle and render placeholder, not infinite loop
+    // MockDoc doesn't properly reflect textContent/title in innerHTML,
+    // but the span placeholder should be present
+    assert.equal(
+      root.innerHTML,
+      "<div><span></span></div>",
+      "Should render div with cycle placeholder span",
+    );
+  });
 });
