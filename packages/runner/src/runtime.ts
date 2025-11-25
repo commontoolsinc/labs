@@ -118,10 +118,12 @@ export interface IRuntime {
 
   // Storage transaction method
   edit(): IExtendedStorageTransaction;
-  editWithRetry(
-    fn: (tx: IExtendedStorageTransaction) => void,
+  editWithRetry<T = void>(
+    fn: (tx: IExtendedStorageTransaction) => T,
     maxRetries?: number,
-  ): Promise<CommitError | undefined>;
+  ): Promise<
+    { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
+  >;
   readTx(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction;
 
   // Cell factory methods
@@ -474,21 +476,23 @@ export class Runtime implements IRuntime {
    * @param maxRetries - Maximum number of retries.
    * @returns Promise<boolean> that resolves to true on success, or false after exhausting retries.
    */
-  editWithRetry(
-    fn: (tx: IExtendedStorageTransaction) => void,
+  editWithRetry<T = void>(
+    fn: (tx: IExtendedStorageTransaction) => T,
     maxRetries: number = DEFAULT_MAX_RETRIES,
-  ): Promise<CommitError | undefined> {
+  ): Promise<
+    { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
+  > {
     const tx = this.edit();
-    fn(tx);
+    const result = fn(tx);
     return tx.commit().then(({ error }) => {
       if (error) {
         if (maxRetries > 0) {
-          return this.editWithRetry(fn, maxRetries - 1);
+          return this.editWithRetry<T>(fn, maxRetries - 1);
         } else {
-          return error;
+          return { error };
         }
       }
-      return undefined;
+      return { ok: result };
     });
   }
 

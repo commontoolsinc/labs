@@ -233,19 +233,18 @@ export class CharmManager {
   }
 
   async unpinById(charmId: EntityId) {
-    let changed = false;
-
     await this.syncCharms(this.pinnedCharms);
-    return (!await this.runtime.editWithRetry((tx) => {
+    const { ok } = await this.runtime.editWithRetry((tx) => {
       const pinnedCharms = this.pinnedCharms.withTx(tx);
       const newPinnedCharms = filterOutEntity(pinnedCharms, charmId);
       if (newPinnedCharms.length !== pinnedCharms.get().length) {
         this.pinnedCharms.withTx(tx).set(newPinnedCharms);
-        changed = true;
+        return true;
       } else {
-        changed = false;
+        return false;
       }
-    })) && changed;
+    });
+    return !!ok;
   }
 
   async unpin(charm: Cell<unknown> | string | EntityId) {
@@ -876,8 +875,6 @@ export class CharmManager {
 
   // note: removing a charm doesn't clean up the charm's cells
   async remove(idOrCharm: string | EntityId | Cell<unknown>) {
-    let success = false;
-
     await Promise.all([
       this.syncCharms(this.charms),
       this.syncCharms(this.pinnedCharms),
@@ -888,18 +885,20 @@ export class CharmManager {
 
     await this.unpin(idOrCharm);
 
-    return (!await this.runtime.editWithRetry((tx) => {
+    const { ok } = await this.runtime.editWithRetry((tx) => {
       const charms = this.charms.withTx(tx);
 
       // Remove from main list
       const newCharms = filterOutEntity(charms, id);
       if (newCharms.length !== charms.get().length) {
         charms.set(newCharms);
-        success = true;
+        return true;
       } else {
-        success = false;
+        return false;
       }
-    })) && success;
+    });
+
+    return !!ok;
   }
 
   async runPersistent<T = unknown>(

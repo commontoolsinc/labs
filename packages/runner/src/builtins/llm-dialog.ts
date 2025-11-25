@@ -1272,24 +1272,23 @@ async function safelyPerformUpdate(
   requestId: string,
   action: (tx: IExtendedStorageTransaction) => void,
 ) {
-  let success = false;
-  const error = await runtime.editWithRetry((tx) => {
+  const { ok } = await runtime.editWithRetry((tx) => {
     if (
       pending.withTx(tx).get() &&
       internal.withTx(tx).key("requestId").get() === requestId
     ) {
       action(tx);
       internal.withTx(tx).key("lastActivity").set(Date.now());
-      success = true;
+      return true;
     } else {
       // We might have flagged success as true in a previous call, but if the
       // retry flow lands us here, it means it wasn't written and that now
       // the requestId has changed.
-      success = false;
+      return false;
     }
   });
 
-  return !error && success;
+  return !!ok;
 }
 
 /**

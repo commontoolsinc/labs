@@ -524,7 +524,7 @@ export class Runner implements IRunner {
         resultCell.withTx(givenTx),
       );
     } else {
-      const error = await this.runtime.editWithRetry((tx) => {
+      const { error } = await this.runtime.editWithRetry((tx) => {
         setupRes = this.setupInternal(
           tx,
           recipe,
