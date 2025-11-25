@@ -83,6 +83,12 @@ export interface CharmMetadata {
   [key: string]: any;
 }
 
+export interface SpaceCellContents {
+  allCharms: Cell<never>[];
+  recentCharms: Cell<never>[];
+  defaultPattern: Cell<never>;
+}
+
 export interface RuntimeOptions {
   apiUrl: URL;
   storageManager: IStorageManager;
@@ -128,6 +134,23 @@ export interface IRuntime {
   getCell<T>(
     space: MemorySpace,
     cause: any,
+    schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
+  ): Cell<T>;
+
+  // Cell factory methods
+  getSpaceCell<T = SpaceCellContents>(
+    space: MemorySpace,
+    schema?: undefined,
+    tx?: IExtendedStorageTransaction,
+  ): Cell<T>;
+  getSpaceCell<S extends JSONSchema = JSONSchema>(
+    space: MemorySpace,
+    schema: S,
+    tx?: IExtendedStorageTransaction,
+  ): Cell<Schema<S>>;
+  getSpaceCell<T>(
+    space: MemorySpace,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<T>;
@@ -507,6 +530,49 @@ export class Runtime implements IRuntime {
       tx,
     );
   }
+
+  // Cell factory methods
+  getSpaceCell<T = SpaceCellContents>(
+    space: MemorySpace,
+    schema?: undefined,
+    tx?: IExtendedStorageTransaction,
+  ): Cell<T>;
+  getSpaceCell<S extends JSONSchema = JSONSchema>(
+    space: MemorySpace,
+    schema: S,
+    tx?: IExtendedStorageTransaction,
+  ): Cell<Schema<S>>;
+  getSpaceCell<T>(
+    space: MemorySpace,
+    schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
+  ): Cell<T>;
+  getSpaceCell(
+    space: MemorySpace,
+    schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
+  ): Cell<any> {
+    return this.getCell(
+      space,
+      space, // Use space DID as cause
+      schema ?? {
+        type: "object",
+        properties: {
+          allCharms: {
+            type: "array",
+            items: { not: true, asCell: true },
+          },
+          recentCharms: {
+            type: "array",
+            items: { not: true, asCell: true },
+          },
+          defaultPattern: { not: true, asCell: true },
+        },
+      },
+      tx,
+    );
+  }
+
   getCellFromEntityId<T>(
     space: MemorySpace,
     entityId: EntityId | string,
@@ -539,6 +605,7 @@ export class Runtime implements IRuntime {
       tx,
     );
   }
+
   getCellFromLink<T>(
     cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema?: JSONSchema,

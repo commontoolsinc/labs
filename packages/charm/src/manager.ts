@@ -14,6 +14,7 @@ import {
   Recipe,
   Runtime,
   type Schema,
+  type SpaceCellContents,
   TYPE,
   UI,
   URI,
@@ -55,18 +56,6 @@ export const charmListSchema = {
   type: "array",
   items: { not: true, asCell: true },
 } as const satisfies JSONSchema;
-
-export const spaceCellSchema = {
-  type: "object",
-  properties: {
-    // Each field is a Cell<> reference to another cell
-    allCharms: { ...charmListSchema, asCell: true },
-    defaultPattern: { not: true, asCell: true },
-    recentCharms: { ...charmListSchema, asCell: true },
-  },
-} as const satisfies JSONSchema;
-
-export type SpaceCell = Schema<typeof spaceCellSchema>;
 
 export const charmLineageSchema = {
   type: "object",
@@ -134,7 +123,7 @@ export class CharmManager {
   private charms: Cell<Cell<unknown>[]>;
   private pinnedCharms: Cell<Cell<unknown>[]>;
   private recentCharms: Cell<Cell<unknown>[]>;
-  private spaceCell: Cell<SpaceCell>;
+  private spaceCell: Cell<SpaceCellContents>;
 
   /**
    * Promise resolved when the charm manager gets the charm list.
@@ -161,11 +150,7 @@ export class CharmManager {
     );
     // Use the space DID as the cause - it's derived from the space name
     // and consistently available everywhere
-    this.spaceCell = this.runtime.getCell(
-      this.space,
-      this.space, // Space DID is stable per space and available to all clients
-      spaceCellSchema,
-    );
+    this.spaceCell = this.runtime.getSpaceCell(this.space);
 
     const syncSpaceCell = Promise.resolve(this.spaceCell.sync());
 
@@ -174,7 +159,7 @@ export class CharmManager {
       this.runtime.editWithRetry((tx) => {
         const spaceCellWithTx = this.spaceCell.withTx(tx);
 
-        let existingSpace: Partial<SpaceCell> | undefined;
+        let existingSpace: Partial<SpaceCellContents> | undefined;
         try {
           existingSpace = spaceCellWithTx.get() ?? undefined;
         } catch {
@@ -196,13 +181,13 @@ export class CharmManager {
           recentCharmsField.set([]);
         }
 
-        const nextSpaceValue: Partial<SpaceCell> = {
+        const nextSpaceValue: Partial<SpaceCellContents> = {
           ...(existingSpace ?? {}),
-          allCharms: this.charms.withTx(tx),
-          recentCharms: recentCharmsField.withTx(tx),
+          allCharms: this.charms.withTx(tx).get() as Cell<never>[],
+          recentCharms: recentCharmsField.withTx(tx).get() as Cell<never>[],
         };
 
-        spaceCellWithTx.set(nextSpaceValue);
+        spaceCellWithTx.set(nextSpaceValue as SpaceCellContents);
 
         // defaultPattern will be linked later when the default pattern is found
       })
@@ -275,7 +260,7 @@ export class CharmManager {
     return this.pinnedCharms;
   }
 
-  getSpaceCell(): Cell<SpaceCell> {
+  getSpaceCell(): Cell<SpaceCellContents> {
     return this.spaceCell;
   }
 

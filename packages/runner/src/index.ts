@@ -6,6 +6,7 @@ export type {
   ErrorWithContext as RuntimeErrorWithContext,
   IRuntime,
   RuntimeOptions,
+  SpaceCellContents,
 } from "./runtime.ts";
 export { raw } from "./module.ts";
 export type { Cell, Stream } from "./cell.ts";
