@@ -469,7 +469,10 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       const wishRecipe = recipe("wish object syntax with path", () => {
-        const firstTitle = wish<string>({ tag: "#allCharms", path: ["0", "title"] });
+        const firstTitle = wish<string>({
+          tag: "#allCharms",
+          path: ["0", "title"],
+        });
         return { firstTitle };
       });
 
@@ -557,7 +560,9 @@ describe("wish built-in", () => {
 
       await runtime.idle();
 
-      expect(result.key("configLink").get()?.result).toEqual({ setting: "value" });
+      expect(result.key("configLink").get()?.result).toEqual({
+        setting: "value",
+      });
       expect(result.key("dataLink").get()?.result).toEqual(["Alpha"]);
     });
 
