@@ -14,6 +14,7 @@ import {
   Recipe,
   Runtime,
   type Schema,
+  spaceCellSchema,
   type SpaceCellContents,
   TYPE,
   UI,

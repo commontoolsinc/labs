@@ -1,4 +1,4 @@
-export { Runtime } from "./runtime.ts";
+export { Runtime, spaceCellSchema } from "./runtime.ts";
 export type {
   CharmMetadata,
   ConsoleHandler,

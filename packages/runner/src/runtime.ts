@@ -101,6 +101,26 @@ export interface RuntimeOptions {
   telemetry?: RuntimeTelemetry;
 }
 
+export const spaceCellSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    allCharms: {
+      type: "array",
+      items: { not: true, asCell: true },
+    },
+    recentCharms: {
+      type: "array",
+      items: { not: true, asCell: true },
+    },
+    defaultPattern: { not: true, asCell: true },
+    favorites: {
+      type: "array",
+      items: { not: true, asCell: true },
+      asCell: true
+    },
+  },
+} as JSONSchema;
+
 export interface IRuntime {
   readonly id: string;
   readonly scheduler: IScheduler;
@@ -575,25 +595,7 @@ export class Runtime implements IRuntime {
     return this.getCell(
       space,
       space, // Use space DID as cause
-      schema ?? {
-        type: "object",
-        properties: {
-          allCharms: {
-            type: "array",
-            items: { not: true, asCell: true },
-          },
-          recentCharms: {
-            type: "array",
-            items: { not: true, asCell: true },
-          },
-          defaultPattern: { not: true, asCell: true },
-          favorites: {
-            type: "array",
-            items: { not: true, asCell: true },
-            asCell: true
-          },
-        },
-      },
+      schema ?? spaceCellSchema,
       tx,
     );
   }
