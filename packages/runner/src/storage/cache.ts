@@ -1255,7 +1255,7 @@ export class Replica {
       return;
     }
 
-    const aclKey = this.spaceIdentity?.did() ?? this.space;
+    const aclKey = this.space;
 
     const initialACL: JSONValue = {
       value: {
