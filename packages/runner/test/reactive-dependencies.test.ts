@@ -1687,7 +1687,11 @@ describe("determineTriggeredActions", () => {
             backlinksIndex: { "/": { "link@1": { path: [], id: "of:123" } } },
             "__#2": { "/": { "link@1": { path: [], id: "of:456" } } },
             // __#0 now exists! (but doesn't have allCharms)
-            "__#0": { "/": { "link@1": { path: [], id: "of:789", space: "did:key:abc" } } },
+            "__#0": {
+              "/": {
+                "link@1": { path: [], id: "of:789", space: "did:key:abc" },
+              },
+            },
           },
         },
       };
