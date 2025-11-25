@@ -3916,4 +3916,68 @@ describe("Cell success callbacks", () => {
       expect(cell.equalLinks(cell)).toBe(true);
     });
   });
+
+  describe("asSchemaFromLinks", () => {
+    let runtime: Runtime;
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let tx: IExtendedStorageTransaction;
+
+    beforeEach(() => {
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      tx = runtime.edit();
+    });
+
+    afterEach(async () => {
+      await tx.commit();
+      await runtime?.dispose();
+      await storageManager?.close();
+    });
+
+    it("should return schema if present on the cell", () => {
+      const schema: JSONSchema = { type: "string" };
+      const c = runtime.getCell(space, "cell-with-schema", schema, tx);
+      const schemaCell = c.asSchemaFromLinks();
+      expect(schemaCell.schema).toEqual(schema);
+    });
+
+    it("should return schema from pattern resultRef if not present on cell", () => {
+      // 1. Create the target cell (no schema initially)
+      const targetCell = runtime.getCell(space, "target-cell", undefined, tx);
+
+      // 2. Create the pattern cell
+      const patternCell = runtime.getCell(space, "pattern-cell", undefined, tx);
+
+      // 3. Set patternCell as the source of targetCell
+      targetCell.setSourceCell(patternCell);
+
+      // 4. Create a link to targetCell that includes the desired schema
+      const schemaWeWant: JSONSchema = {
+        type: "object",
+        properties: {
+          output: { type: "number" },
+        },
+      };
+      const linkWithSchema = targetCell
+        .asSchema(schemaWeWant)
+        .getAsLink({ includeSchema: true });
+
+      // 5. Set patternCell's resultRef to point to targetCell using the link with schema
+      patternCell.set({ resultRef: linkWithSchema });
+
+      // 6. Verify asSchemaFromLinks picks up the schema from the resultRef link
+      const schemaCell = targetCell.asSchemaFromLinks();
+
+      expect(schemaCell.schema).toEqual(schemaWeWant);
+    });
+
+    it("should return undefined schema if neither present nor in pattern", () => {
+      const c = runtime.getCell(space, "no-schema", undefined, tx);
+      const schemaCell = c.asSchemaFromLinks();
+      expect(schemaCell.schema).toBeUndefined();
+    });
+  });
 });
