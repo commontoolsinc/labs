@@ -124,25 +124,29 @@ const Note = recipe<Input, Output>(
       [UI]: (
         <ct-screen>
           <div slot="header">
-            <ct-input
-              $value={title}
-              placeholder="Enter title..."
-            />
+            <ct-cell-context $cell={title}>
+              <ct-input
+                $value={title}
+                placeholder="Enter title..."
+              />
+            </ct-cell-context>
           </div>
 
-          <ct-code-editor
-            $value={content}
-            $mentionable={mentionable}
-            $mentioned={mentioned}
-            $pattern={pattern}
-            onbacklink-click={handleCharmLinkClick({})}
-            onbacklink-create={handleNewBacklink({ mentionable })}
-            language="text/markdown"
-            theme="light"
-            wordWrap
-            tabIndent
-            lineNumbers
-          />
+          <ct-cell-context $cell={content}>
+            <ct-code-editor
+              $value={content}
+              $mentionable={mentionable}
+              $mentioned={mentioned}
+              $pattern={pattern}
+              onbacklink-click={handleCharmLinkClick({})}
+              onbacklink-create={handleNewBacklink({ mentionable })}
+              language="text/markdown"
+              theme="light"
+              wordWrap
+              tabIndent
+              lineNumbers
+            />
+          </ct-cell-context>
 
           <ct-hstack slot="footer">
             {backlinks?.map((charm) => (

@@ -190,6 +190,8 @@ export class CTCellContext extends BaseElement {
       return;
     }
 
+    const identifier = this._getCellIdentifier();
+
     if (this._isWatching) {
       // Unwatch
       if (this._watchUnsubscribe) {
@@ -198,11 +200,11 @@ export class CTCellContext extends BaseElement {
       }
       this._isWatching = false;
       this._updateCount = 0;
-      const identifier = this._getCellIdentifier();
       console.log(`[ct-cell-context] Stopped watching: ${identifier}`);
+      // Emit event for debugger integration
+      this.emit("ct-cell-unwatch", { cell: this.cell, label: this.label });
     } else {
       // Watch
-      const identifier = this._getCellIdentifier();
       this._updateCount = 0;
       this._watchUnsubscribe = this.cell.sink((value) => {
         this._updateCount++;
@@ -213,6 +215,8 @@ export class CTCellContext extends BaseElement {
       });
       this._isWatching = true;
       console.log(`[ct-cell-context] Started watching: ${identifier}`);
+      // Emit event for debugger integration
+      this.emit("ct-cell-watch", { cell: this.cell, label: this.label });
     }
   }
 

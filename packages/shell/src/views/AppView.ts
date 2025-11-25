@@ -78,6 +78,9 @@ export class XAppView extends BaseView {
       "sidebar-content-change",
       this.handleSidebarContentChange,
     );
+    // Listen for cell watch/unwatch events from ct-cell-context
+    this.addEventListener("ct-cell-watch", this.handleCellWatch);
+    this.addEventListener("ct-cell-unwatch", this.handleCellUnwatch);
 
     // Register global shortcuts via keyboard router
     const isMac = navigator.platform.toLowerCase().includes("mac");
@@ -109,6 +112,8 @@ export class XAppView extends BaseView {
       "sidebar-content-change",
       this.handleSidebarContentChange,
     );
+    this.removeEventListener("ct-cell-watch", this.handleCellWatch);
+    this.removeEventListener("ct-cell-unwatch", this.handleCellUnwatch);
     for (const off of this._unsubShortcuts) off();
     this._unsubShortcuts = [];
     this.keyboard.dispose();
@@ -163,6 +168,28 @@ export class XAppView extends BaseView {
     },
     args: () => [this.app, this.rt],
   });
+  private handleCellWatch = (e: Event) => {
+    const event = e as CustomEvent<{ cell: unknown; label?: string }>;
+    const { cell, label } = event.detail;
+    // Cell type from @commontools/runner
+    if (cell && typeof (cell as any).sink === "function") {
+      this.debuggerController.watchCell(cell as any, label);
+    }
+  };
+
+  private handleCellUnwatch = (e: Event) => {
+    const event = e as CustomEvent<{ cell: unknown; label?: string }>;
+    const { cell } = event.detail;
+    // Find and remove the watch by matching the cell
+    if (cell && typeof (cell as any).getAsNormalizedFullLink === "function") {
+      const link = (cell as any).getAsNormalizedFullLink();
+      const watches = this.debuggerController.getWatchedCells();
+      const watch = watches.find((w) => w.cellLink.id === link.id);
+      if (watch) {
+        this.debuggerController.unwatchCell(watch.id);
+      }
+    }
+  };
 
   // Do not make private, integration tests access this directly.
   _activeCharm = new Task(this, {
@@ -289,6 +316,7 @@ export class XAppView extends BaseView {
           <x-debugger-view
             .visible="${this.debuggerController.isVisible()}"
             .telemetryMarkers="${this.debuggerController.getTelemetryMarkers()}"
+            .debuggerController="${this.debuggerController}"
           ></x-debugger-view>
           <x-quick-jump-view
             .visible="${this.app?.showQuickJumpView ?? false}"
