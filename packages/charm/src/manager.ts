@@ -211,7 +211,7 @@ export class CharmManager {
     return this.space;
   }
 
-  getSpaceName(): string {
+  getSpaceName(): string | undefined {
     return this.session.spaceName;
   }
 

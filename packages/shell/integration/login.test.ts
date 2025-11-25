@@ -19,12 +19,14 @@ describe("shell login tests", () => {
 
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      spaceName,
+      view: { spaceName },
     });
 
     const state = await shell.state();
     assert(state);
-    assert(state.spaceName === "common-knowledge");
+    assert(
+      (state.view as { spaceName: string }).spaceName === "common-knowledge",
+    );
 
     let handle = await page.waitForSelector(
       '[test-id="register-new-key"]',

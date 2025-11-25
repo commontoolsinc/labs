@@ -23,13 +23,11 @@ export class CharmLinkElement extends LitElement {
     }
     if (this.charmId) {
       navigate({
-        type: "charm",
         spaceName: this.spaceName,
         charmId: this.charmId,
       });
     } else {
       navigate({
-        type: "space",
         spaceName: this.spaceName,
       });
     }

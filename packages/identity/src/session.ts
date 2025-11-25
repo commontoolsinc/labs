@@ -2,39 +2,39 @@ import { Identity } from "./identity.ts";
 import { type DID } from "./interface.ts";
 
 export type Session = {
-  spaceName: string;
+  spaceName?: string;
   spaceIdentity?: Identity;
   space: DID;
   as: Identity;
 };
 
-// Create a session where `Identity` is used directly and not derived.
-export const createSessionFromDid = (
-  { identity, space, spaceName }: {
-    identity: Identity;
-    space: DID;
-    spaceName: string;
-  },
-): Promise<Session> => {
-  return Promise.resolve({
-    spaceName,
-    space,
-    as: identity,
-  });
+export type SessionCreateOptions = {
+  identity: Identity;
+  spaceName: string;
+} | {
+  identity: Identity;
+  spaceDid: DID;
 };
 
-// Create a session where `Identity` is used to derive a space key.
+// Create a session with DID and identity provided, or where
+// a key is reproducibly derived via the provided space name.
 export const createSession = async (
-  { identity, spaceName }: { identity: Identity; spaceName: string },
+  options: SessionCreateOptions,
 ): Promise<Session> => {
-  const spaceIdentity = await (await Identity.fromPassphrase("common user"))
-    .derive(
-      spaceName,
-    );
+  if ("spaceName" in options) {
+    const spaceIdentity = await (await Identity.fromPassphrase("common user"))
+      .derive(
+        options.spaceName,
+      );
+    return {
+      spaceName: options.spaceName,
+      spaceIdentity,
+      space: spaceIdentity.did(),
+      as: options.identity,
+    };
+  }
   return {
-    spaceName,
-    spaceIdentity,
-    space: spaceIdentity.did(),
-    as: identity,
+    as: options.identity,
+    space: options.spaceDid,
   };
 };

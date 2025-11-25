@@ -3,7 +3,7 @@ import { CharmManager, compileRecipe } from "@commontools/charm";
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type DID } from "@commontools/identity";
-import { createSessionFromDid } from "@commontools/identity";
+import { createSession } from "@commontools/identity";
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,
@@ -87,10 +87,9 @@ async function castRecipe() {
     console.log("Casting recipe...");
 
     // Create session and charm manager (matching main.ts pattern)
-    const session = await createSessionFromDid({
+    const session = await createSession({
       identity,
-      spaceName: "recipe-caster",
-      space: spaceId as DID,
+      spaceDid: spaceId as DID,
     });
 
     // Create charm manager for the specified space
