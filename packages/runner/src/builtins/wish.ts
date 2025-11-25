@@ -1,4 +1,10 @@
-import { type WishKey } from "@commontools/api";
+import {
+  type VNode,
+  type WishParams,
+  type WishState,
+  type WishTag,
+} from "@commontools/api";
+import { h } from "@commontools/html";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
@@ -8,14 +14,29 @@ import type {
 } from "../storage/interface.ts";
 import type { EntityId } from "../create-ref.ts";
 import { ALL_CHARMS_ID } from "./well-known.ts";
-import type { JSONSchema } from "../builder/types.ts";
+import { type JSONSchema, UI } from "../builder/types.ts";
+
+function errorUI(message: string): VNode {
+  return h("span", { style: "color: red" }, `⚠️ ${message}`);
+}
+
+function cellLinkUI(cell: Cell<unknown>): VNode {
+  return h("ct-cell-link", { $cell: cell });
+}
+
+class WishError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WishError";
+  }
+}
 
 type WishResolution = {
   entityId: EntityId;
   path?: readonly string[];
 };
 
-const WISH_TARGETS: Partial<Record<WishKey, WishResolution>> = {
+const WISH_TARGETS: Partial<Record<WishTag, WishResolution>> = {
   "#allCharms": { entityId: { "/": ALL_CHARMS_ID } },
 };
 
@@ -24,31 +45,39 @@ function resolveWishTarget(
   runtime: IRuntime,
   space: MemorySpace,
   tx: IExtendedStorageTransaction,
-): Cell<any> | undefined {
-  return runtime.getCellFromEntityId(
+): Cell<any> {
+  const cell = runtime.getCellFromEntityId(
     space,
     resolution.entityId,
     resolution.path,
     undefined,
     tx,
   );
+  if (!cell) {
+    throw new WishError("Failed to resolve wish target");
+  }
+  return cell;
 }
 
 type ParsedWishTarget = {
-  key: "/" | WishKey;
+  key: "/" | WishTag;
   path: string[];
 };
 
-function parseWishTarget(target: string): ParsedWishTarget | undefined {
+function parseWishTarget(target: string): ParsedWishTarget {
   const trimmed = target.trim();
-  if (trimmed === "") return undefined;
+  if (trimmed === "") {
+    throw new WishError(`Wish target "${target}" is empty.`);
+  }
 
   if (trimmed.startsWith("#")) {
     const segments = trimmed.slice(1).split("/").filter((segment) =>
       segment.length > 0
     );
-    if (segments.length === 0) return undefined;
-    const key = `#${segments[0]}` as WishKey;
+    if (segments.length === 0) {
+      throw new WishError(`Wish target "${target}" is not recognized.`);
+    }
+    const key = `#${segments[0]}` as WishTag;
     return { key, path: segments.slice(1) };
   }
 
@@ -57,7 +86,7 @@ function parseWishTarget(target: string): ParsedWishTarget | undefined {
     return { key: "/", path: segments };
   }
 
-  return undefined;
+  throw new WishError(`Wish target "${target}" is not recognized.`);
 }
 
 type WishContext = {
@@ -95,32 +124,32 @@ function resolvePath(
   return current.resolveAsCell();
 }
 
+function formatTarget(parsed: ParsedWishTarget): string {
+  return parsed.key +
+    (parsed.path.length > 0 ? "/" + parsed.path.join("/") : "");
+}
+
 function resolveBase(
   parsed: ParsedWishTarget,
   ctx: WishContext,
-  wishTarget: string,
-): BaseResolution | undefined {
+): BaseResolution {
   switch (parsed.key) {
     case "/":
       return { cell: getSpaceCell(ctx) };
-    case "#default": {
+    case "#default":
       return { cell: getSpaceCell(ctx), pathPrefix: ["defaultPattern"] };
-    }
-    case "#mentionable": {
+    case "#mentionable":
       return {
         cell: getSpaceCell(ctx),
         pathPrefix: ["defaultPattern", "backlinksIndex", "mentionable"],
       };
-    }
-    case "#recent": {
+    case "#recent":
       return { cell: getSpaceCell(ctx), pathPrefix: ["recentCharms"] };
-    }
     case "#favorites": {
       // Favorites always come from the HOME space (user identity DID)
       const userDID = ctx.runtime.userIdentityDID;
       if (!userDID) {
-        console.error("User identity DID not available for #favorites");
-        return undefined;
+        throw new WishError("User identity DID not available for #favorites");
       }
       const homeSpaceCell = ctx.runtime.getCell(
         userDID,
@@ -132,8 +161,9 @@ function resolveBase(
     }
     case "#now": {
       if (parsed.path.length > 0) {
-        console.error(`Wish target "${wishTarget}" is not recognized.`);
-        return undefined;
+        throw new WishError(
+          `Wish target "${formatTarget(parsed)}" is not recognized.`,
+        );
       }
       const nowCell = ctx.runtime.getImmutableCell(
         ctx.parentCell.space,
@@ -146,8 +176,9 @@ function resolveBase(
     default: {
       const resolution = WISH_TARGETS[parsed.key];
       if (!resolution) {
-        console.error(`Wish target "${wishTarget}" is not recognized.`);
-        return undefined;
+        throw new WishError(
+          `Wish target "${formatTarget(parsed)}" is not recognized.`,
+        );
       }
 
       const baseCell = resolveWishTarget(
@@ -157,19 +188,24 @@ function resolveBase(
         ctx.tx,
       );
 
-      if (!baseCell) {
-        console.error(`Wish target "${wishTarget}" is not recognized.`);
-        return undefined;
-      }
-
       return { cell: baseCell };
     }
   }
 }
 
 const TARGET_SCHEMA = {
-  type: "string",
-  default: "",
+  anyOf: [{
+    type: "string",
+    default: "",
+  }, {
+    type: "object",
+    properties: {
+      tag: { type: "string" },
+      path: { type: "array", items: { type: "string" } },
+      context: { type: "object", additionalProperties: { asCell: true } },
+      scope: { type: "array", items: { type: "string" } },
+    },
+  }],
 } as const satisfies JSONSchema;
 
 export function wish(
@@ -184,32 +220,75 @@ export function wish(
     const inputsWithTx = inputsCell.withTx(tx);
     const targetValue = inputsWithTx.asSchema(TARGET_SCHEMA).get();
 
-    const wishTarget = targetValue?.trim();
+    // TODO(seefeld): Remove legacy wish string support mid December 2025
+    if (typeof targetValue === "string") {
+      const wishTarget = targetValue.trim();
+      if (!wishTarget) {
+        sendResult(tx, undefined);
+        return;
+      }
+      try {
+        const parsed = parseWishTarget(wishTarget);
+        const ctx: WishContext = { runtime, tx, parentCell };
+        const baseResolution = resolveBase(parsed, ctx);
+        const combinedPath = baseResolution.pathPrefix
+          ? [...baseResolution.pathPrefix, ...parsed.path]
+          : parsed.path;
+        const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
+        sendResult(tx, resolvedCell);
+      } catch (e) {
+        console.error(e instanceof WishError ? e.message : e);
+        sendResult(tx, undefined);
+      }
+      return;
+    } else if (typeof targetValue === "object") {
+      const { tag, path, schema, context: _context, scope: _scope } =
+        targetValue as WishParams;
 
-    if (!wishTarget) {
-      sendResult(tx, undefined);
+      if (!tag) {
+        const errorMsg = `Wish target "${
+          JSON.stringify(targetValue)
+        }" is not recognized.`;
+        console.error(errorMsg);
+        sendResult(
+          tx,
+          { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
+        );
+        return;
+      }
+
+      try {
+        const parsed: ParsedWishTarget = { key: tag, path: path ?? [] };
+        const ctx: WishContext = { runtime, tx, parentCell };
+        const baseResolution = resolveBase(parsed, ctx);
+        const combinedPath = baseResolution.pathPrefix
+          ? [...baseResolution.pathPrefix, ...(path ?? [])]
+          : path ?? [];
+        const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
+        const resultCell = schema
+          ? resolvedCell.asSchema(schema)
+          : resolvedCell;
+        sendResult(tx, {
+          result: resultCell,
+          [UI]: cellLinkUI(resultCell),
+        });
+      } catch (e) {
+        const errorMsg = e instanceof WishError ? e.message : String(e);
+        console.error(errorMsg);
+        sendResult(
+          tx,
+          { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
+        );
+      }
+      return;
+    } else {
+      const errorMsg = `Wish target is not recognized: ${targetValue}`;
+      console.error(errorMsg);
+      sendResult(
+        tx,
+        { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
+      );
       return;
     }
-
-    const parsed = parseWishTarget(wishTarget);
-    if (!parsed) {
-      console.error(`Wish target "${wishTarget}" is not recognized.`);
-      sendResult(tx, undefined);
-      return;
-    }
-
-    const ctx: WishContext = { runtime, tx, parentCell };
-    const baseResolution = resolveBase(parsed, ctx, wishTarget);
-    if (!baseResolution) {
-      sendResult(tx, undefined);
-      return;
-    }
-
-    const combinedPath = baseResolution.pathPrefix
-      ? [...baseResolution.pathPrefix, ...parsed.path]
-      : parsed.path;
-    const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
-
-    sendResult(tx, resolvedCell);
   };
 }

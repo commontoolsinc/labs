@@ -22,7 +22,11 @@ import type {
   BuiltInLLMState,
   FetchOptions,
   PatternToolFunction,
+  WishParams,
+  WishState,
 } from "commontools";
+import { isRecord } from "@commontools/utils/types";
+import { isCell } from "../cell.ts";
 
 export const compileAndRun = createNodeFactory({
   type: "ref",
@@ -118,6 +122,13 @@ export const navigateTo = createNodeFactory({
 }) as (cell: OpaqueRef<unknown>) => OpaqueRef<boolean>;
 
 export function wish<T = unknown>(
+  target: Opaque<WishParams>,
+): OpaqueRef<WishState<T>>;
+export function wish<T = unknown>(
+  target: Opaque<WishParams>,
+  schema: JSONSchema,
+): OpaqueRef<WishState<T>>;
+export function wish<T = unknown>(
   target: Opaque<string>,
 ): OpaqueRef<T | undefined>;
 export function wish<T = unknown>(
@@ -125,9 +136,24 @@ export function wish<T = unknown>(
   schema: JSONSchema,
 ): OpaqueRef<T>;
 export function wish<T = unknown>(
-  target: Opaque<string>,
+  target: Opaque<string> | Opaque<WishParams>,
   schema?: JSONSchema,
-): OpaqueRef<T | undefined> {
+): OpaqueRef<T | WishState<T>> {
+  let param;
+  let resultSchema;
+
+  if (schema !== undefined && isRecord(target) && !isCell(target)) {
+    param = {
+      schema,
+      ...target, // Pass in after, so schema here overrides any schema in target
+    };
+    resultSchema = !isCell(param.schema)
+      ? param.schema as JSONSchema | undefined
+      : schema;
+  } else {
+    param = target;
+    resultSchema = schema;
+  }
   return createNodeFactory({
     type: "ref",
     implementation: "wish",
@@ -135,8 +161,8 @@ export function wish<T = unknown>(
       type: "string",
       default: "",
     } as const satisfies JSONSchema,
-    resultSchema: schema,
-  })(target);
+    resultSchema,
+  })(param);
 }
 
 // Example:
