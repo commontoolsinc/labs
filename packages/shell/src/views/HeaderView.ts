@@ -246,8 +246,7 @@ export class XHeaderView extends BaseView {
                     ${this.showSidebar ? "⏵" : "⏴"}
                   </x-button>
                 `
-                : null}
-              ${this.charmId
+                : null} ${this.charmId
                 ? html`
                   <x-button
                     class="emoji-button"

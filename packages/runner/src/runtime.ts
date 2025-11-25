@@ -116,7 +116,7 @@ export const spaceCellSchema: JSONSchema = {
     favorites: {
       type: "array",
       items: { not: true, asCell: true },
-      asCell: true
+      asCell: true,
     },
   },
 } as JSONSchema;
