@@ -1272,7 +1272,7 @@ async function safelyPerformUpdate(
   requestId: string,
   action: (tx: IExtendedStorageTransaction) => void,
 ) {
-  const { ok, error } = await runtime.editWithRetry((tx) => {
+  const { ok } = await runtime.editWithRetry((tx) => {
     if (
       pending.withTx(tx).get() &&
       internal.withTx(tx).key("requestId").get() === requestId
