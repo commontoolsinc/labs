@@ -242,7 +242,7 @@ export function wish(
       }
       return;
     } else if (typeof targetValue === "object") {
-      const { tag, path, context: _context, scope: _scope } =
+      const { tag, path, schema, context: _context, scope: _scope } =
         targetValue as WishParams;
 
       if (!tag) {
@@ -265,9 +265,12 @@ export function wish(
           ? [...baseResolution.pathPrefix, ...(path ?? [])]
           : path ?? [];
         const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
+        const resultCell = schema
+          ? resolvedCell.asSchema(schema)
+          : resolvedCell;
         sendResult(tx, {
-          result: resolvedCell,
-          [UI]: cellLinkUI(resolvedCell),
+          result: resultCell,
+          [UI]: cellLinkUI(resultCell),
         });
       } catch (e) {
         const errorMsg = e instanceof WishError ? e.message : String(e);

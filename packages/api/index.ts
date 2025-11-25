@@ -1260,6 +1260,7 @@ export type WishParams = {
   tag?: WishTag;
   path?: string[];
   context?: Record<string, any>;
+  schema?: JSONSchema;
   scope?: (DID | "~" | ".")[];
 };
 
