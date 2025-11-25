@@ -1109,19 +1109,19 @@ export class CharmManager {
 
   /**
    * Remove a charm from the user's favorites (in home space)
-   * @param charm - The charm or entity ID to remove from favorites
+   * @param charm - The charm to remove from favorites
    * @returns true if the charm was removed, false if it wasn't in favorites
    */
-  removeFavorite(charm: Cell<unknown> | EntityId): Promise<boolean> {
+  removeFavorite(charm: Cell<unknown>): Promise<boolean> {
     return favorites.removeFavorite(this.runtime, charm);
   }
 
   /**
    * Check if a charm is in the user's favorites (in home space)
-   * @param charm - The charm or entity ID to check
+   * @param charm - The charm to check
    * @returns true if the charm is favorited, false otherwise
    */
-  isFavorite(charm: Cell<unknown> | EntityId): boolean {
+  isFavorite(charm: Cell<unknown>): boolean {
     return favorites.isFavorite(this.runtime, charm);
   }
 

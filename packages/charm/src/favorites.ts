@@ -1,6 +1,5 @@
 import {
   type Cell,
-  EntityId,
   getEntityId,
   type IRuntime,
   spaceCellSchema,
@@ -12,7 +11,7 @@ import { charmListSchema, isSameEntity } from "./manager.ts";
  */
 function filterOutEntity(
   list: Cell<Cell<unknown>[]>,
-  target: Cell<unknown> | string | EntityId,
+  target: Cell<unknown>,
 ): Cell<unknown>[] {
   const targetId = getEntityId(target);
   if (!targetId) return list.get() as Cell<unknown>[];
@@ -66,11 +65,11 @@ export async function addFavorite(
 
 /**
  * Remove a charm from the user's favorites (in home space)
- * @returns true if the charm was removed, false if it wasn't in favorites
+ * @returns true if the charm was removed, false if it wasn't in favorites or tx failed
  */
 export async function removeFavorite(
   runtime: IRuntime,
-  charm: Cell<unknown> | EntityId,
+  charm: Cell<unknown>,
 ): Promise<boolean> {
   const id = getEntityId(charm);
   if (!id) return false;
@@ -79,16 +78,17 @@ export async function removeFavorite(
   await favorites.sync();
 
   let removed = false;
-  await runtime.editWithRetry((tx) => {
+  const result = await runtime.editWithRetry((tx) => {
     const favoritesWithTx = favorites.withTx(tx);
-    const filtered = filterOutEntity(favoritesWithTx, id);
+    const filtered = filterOutEntity(favoritesWithTx, charm);
     if (filtered.length !== favoritesWithTx.get().length) {
       favoritesWithTx.set(filtered);
       removed = true;
     }
   });
 
-  return removed;
+  // Only return true if tx succeeded and we actually removed something
+  return result.ok !== undefined && removed;
 }
 
 /**
@@ -96,7 +96,7 @@ export async function removeFavorite(
  */
 export function isFavorite(
   runtime: IRuntime,
-  charm: Cell<unknown> | EntityId,
+  charm: Cell<unknown>,
 ): boolean {
   const id = getEntityId(charm);
   if (!id) return false;
