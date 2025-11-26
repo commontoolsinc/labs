@@ -13,11 +13,7 @@ const onRemoveFavorite = handler<
 });
 
 export default pattern<Record<string, never>>((_) => {
-  const wishResult = wish<
-    Array<{ cell: Cell<{ [NAME]?: string }>; description: string }>
-  >({
-    tag: "#favorites",
-  });
+  const wishResult = wish<Array<Favorite>>({ tag: "#favorites" });
 
   return {
     [NAME]: "Favorites Manager",
