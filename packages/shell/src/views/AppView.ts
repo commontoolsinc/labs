@@ -93,8 +93,10 @@ export class XAppView extends BaseView {
       this.keyboard.register(
         { code: "KeyW", alt: true, preventDefault: true },
         () => {
-          const spaceName = this.app?.spaceName ?? "common-knowledge";
-          navigate({ type: "space", spaceName });
+          const spaceName = this.app && "spaceName" in this.app.view
+            ? this.app.view.spaceName
+            : "common-knowledge";
+          navigate({ spaceName });
         },
       ),
     );
@@ -121,31 +123,53 @@ export class XAppView extends BaseView {
     this.hasSidebarContent = event.detail.hasSidebarContent;
   };
 
+  // Maps the app level view to a specific charm to load
+  // as the primary, active charm.
+  _activeCharmId = new Task(this, {
+    task: ([app, rt]): string | undefined => {
+      if (!app || !rt) {
+        return;
+      }
+      if ("builtin" in app.view) {
+        console.warn("Unsupported view type");
+      } else if ("spaceDid" in app.view) {
+        console.warn("Unsupported view type");
+      } else if ("spaceName" in app.view) {
+        // eventually, this should load the default pattern
+        // for a space if needed, but for now is handled
+        // in BodyView, and only set the active charm ID
+        // for explicit charms set in the URL.
+        return app.view.charmId;
+      }
+    },
+    args: () => [this.app, this.rt],
+  });
+
   // Do not make private, integration tests access this directly.
   _activeCharm = new Task(this, {
-    task: async ([app, rt]): Promise<CharmController | undefined> => {
-      if (!app || !app.activeCharmId || !rt) {
+    task: async ([activeCharmId]): Promise<CharmController | undefined> => {
+      if (!this.rt || !this.app || !activeCharmId) {
         this.#setTitleSubscription();
         return;
       }
       const current: CharmController | undefined = this._activeCharm.value;
       if (
-        current && current.id === app.activeCharmId
+        current && current.id === activeCharmId
       ) {
         return current;
       }
-      const activeCharm = await rt.cc().get(
-        app.activeCharmId,
+      const activeCharm = await this.rt.cc().get(
+        activeCharmId,
         true,
         nameSchema,
       );
       // Record the charm as recently accessed so recents stay fresh.
-      await rt.cc().manager().trackRecentCharm(activeCharm.getCell());
+      await this.rt.cc().manager().trackRecentCharm(activeCharm.getCell());
       this.#setTitleSubscription(activeCharm);
 
       return activeCharm;
     },
-    args: () => [this.app, this.rt],
+    args: () => [this._activeCharmId.value],
   });
 
   #setTitleSubscription(activeCharm?: CharmController<NameSchema>) {
@@ -157,7 +181,9 @@ export class XAppView extends BaseView {
         );
       }
       this.titleSubscription = undefined;
-      this.charmTitle = this.app?.spaceName ?? "Common Tools";
+      this.charmTitle = this.app && "spaceName" in this.app.view
+        ? this.app.view.spaceName
+        : "Common Tools";
     } else {
       const cell = activeCharm.getCell();
       this.titleSubscription = new CellEventTarget(cell.key(NAME));
@@ -217,16 +243,19 @@ export class XAppView extends BaseView {
       ></x-body-view>
     `;
 
+    const spaceName = this.app && "spaceName" in this.app.view
+      ? this.app.view.spaceName
+      : undefined;
     const content = this.app?.identity ? authenticated : unauthenticated;
     return html`
       <div class="shell-container">
         <x-header-view
           .isLoggedIn="${!!app.identity}"
-          .spaceName="${app.spaceName}"
+          .spaceName="${spaceName}"
           .rt="${this.rt}"
           .keyStore="${this.keyStore}"
           .charmTitle="${this.charmTitle}"
-          .charmId="${this._activeCharm.value?.id}"
+          .charmId="${this._activeCharmId.value}"
           .showShellCharmListView="${app.showShellCharmListView ?? false}"
           .showDebuggerView="${app.showDebuggerView ?? false}"
           .showSidebar="${app.showSidebar ?? false}"

@@ -12,6 +12,7 @@ import { navigate } from "./navigate.ts";
 import * as Inspector from "@commontools/runner/storage/inspector";
 import { setupIframe } from "./iframe-ctx.ts";
 import { getLogger } from "@commontools/utils/logger";
+import { AppView } from "./app/view.ts";
 
 const logger = getLogger("shell.telemetry", {
   enabled: false,
@@ -97,19 +98,36 @@ export class RuntimeInternals extends EventTarget {
   }
 
   static async create(
-    { identity, spaceName, apiUrl }: {
+    { identity, view, apiUrl }: {
       identity: Identity;
-      spaceName: string;
+      view: AppView;
       apiUrl: URL;
     },
   ): Promise<RuntimeInternals> {
-    const session = await createSession({ identity, spaceName });
+    let session;
+    let spaceName;
+    if (typeof view === "string") {
+      switch (view) {
+        case "home":
+          session = await createSession({ identity, spaceDid: identity.did() });
+          spaceName = "<home>";
+          break;
+      }
+    } else if ("spaceName" in view) {
+      session = await createSession({ identity, spaceName: view.spaceName });
+      spaceName = view.spaceName;
+    } else if ("spaceDid" in view) {
+      session = await createSession({ identity, spaceDid: view.spaceDid });
+    }
+    if (!session) {
+      throw new Error("Unexpected view provided.");
+    }
 
     // Log user identity for debugging and sharing
     identityLogger.log("telemetry", `[Identity] User DID: ${session.as.did()}`);
     identityLogger.log(
       "telemetry",
-      `[Identity] Space: ${spaceName} (${session.space})`,
+      `[Identity] Space: ${spaceName ?? "<unknown>"} (${session.space})`,
     );
 
     // We're hoisting CharmManager so that
@@ -151,6 +169,10 @@ export class RuntimeInternals extends EventTarget {
         // some sort of address book / dns-style server, OR just navigate to the
         // DID.
 
+        // Get the space name for navigation until we support
+        // DID spaces from the shell.
+        const spaceName = charmManager.getSpaceName();
+
         // Await storage being synced, at least for now, as the page fully
         // reloads. Once we have in-page navigation with reloading, we don't
         // need this anymore
@@ -173,20 +195,25 @@ export class RuntimeInternals extends EventTarget {
             await charmManager.add([target]);
           }
 
+          if (!spaceName) {
+            throw new Error(
+              "Does not yet support navigating to a charm within a space loaded by DID.",
+            );
+          }
           // Use the human-readable space name from CharmManager instead of DID
           navigate({
-            type: "charm",
-            spaceName: charmManager.getSpaceName(),
+            spaceName,
             charmId: id,
           });
         }).catch((err) => {
           console.error("[navigateCallback] Error during storage sync:", err);
 
-          navigate({
-            type: "charm",
-            spaceName: charmManager.getSpaceName(),
-            charmId: id,
-          });
+          if (spaceName) {
+            navigate({
+              spaceName,
+              charmId: id,
+            });
+          }
         });
       },
     });

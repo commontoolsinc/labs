@@ -6,8 +6,4 @@ export {
 } from "./identity.ts";
 export { KeyStore } from "./key-store.ts";
 export * from "./interface.ts";
-export {
-  createSession,
-  createSessionFromDid,
-  type Session,
-} from "./session.ts";
+export { createSession, type Session } from "./session.ts";

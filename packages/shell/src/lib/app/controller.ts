@@ -8,6 +8,7 @@ import { XRootView } from "../../views/RootView.ts";
 import { Command } from "./commands.ts";
 import { AppState, AppUpdateEvent } from "./mod.ts";
 import { AppStateSerialized, serialize } from "./state.ts";
+import { AppView } from "./view.ts";
 
 // Key store key name for user's key
 export const ROOT_KEY = "$ROOT_KEY";
@@ -35,12 +36,8 @@ export class App extends EventTarget {
     return serialize(this.state());
   }
 
-  async setSpace(spaceName: string) {
-    await this.apply({ type: "set-space", spaceName });
-  }
-
-  async setActiveCharmId(charmId?: string) {
-    await this.apply({ type: "set-active-charm-id", charmId });
+  async setView(view: AppView) {
+    await this.apply({ type: "set-view", view });
   }
 
   async setIdentity(id: Identity | TransferrableInsecureCryptoKeyPair) {

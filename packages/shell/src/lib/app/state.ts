@@ -5,12 +5,12 @@ import {
   TransferrableInsecureCryptoKeyPair,
 } from "@commontools/identity";
 import { Command } from "./commands.ts";
+import { AppView } from "./view.ts";
 
 // Primary application state.
 export interface AppState {
   identity?: Identity;
-  spaceName?: string;
-  activeCharmId?: string;
+  view: AppView;
   apiUrl: URL;
   showShellCharmListView?: boolean;
   showDebuggerView?: boolean;
@@ -24,7 +24,12 @@ export type AppStateSerialized = Omit<AppState, "identity" | "apiUrl"> & {
 };
 
 export function clone(state: AppState): AppState {
-  return Object.assign({}, state);
+  const view = typeof state.view === "object"
+    ? Object.assign({}, state.view)
+    : state.view;
+  const cloned = Object.assign({}, state);
+  cloned.view = view;
+  return cloned;
 }
 
 export function applyCommand(
@@ -33,19 +38,15 @@ export function applyCommand(
 ): AppState {
   const next = clone(state);
   switch (command.type) {
-    case "set-active-charm-id": {
-      next.activeCharmId = command.charmId;
-      if (command.charmId) {
-        next.showShellCharmListView = false;
-      }
-      break;
-    }
     case "set-identity": {
       next.identity = command.identity;
       break;
     }
-    case "set-space": {
-      next.spaceName = command.spaceName;
+    case "set-view": {
+      next.view = command.view;
+      if ("charmId" in command.view && command.view.charmId) {
+        next.showShellCharmListView = false;
+      }
       break;
     }
     case "clear-authentication": {

@@ -43,8 +43,10 @@ describe("counter direct operations test", () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      spaceName: SPACE_NAME,
-      charmId: charm.id,
+      view: {
+        spaceName: SPACE_NAME,
+        charmId: charm.id,
+      },
       identity,
     });
 
@@ -95,8 +97,10 @@ describe("counter direct operations test", () => {
     console.log("Refreshing the page...");
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      spaceName: SPACE_NAME,
-      charmId: charm.id,
+      view: {
+        spaceName: SPACE_NAME,
+        charmId: charm.id,
+      },
       identity,
     });
 

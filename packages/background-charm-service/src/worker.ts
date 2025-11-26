@@ -12,7 +12,7 @@ import {
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 import {
-  createSessionFromDid,
+  createSession,
   type DID,
   Identity,
   Session,
@@ -93,10 +93,9 @@ async function initialize(
 
   // Initialize session
   spaceId = did as DID;
-  currentSession = await createSessionFromDid({
+  currentSession = await createSession({
     identity,
-    spaceName: "~background-service-worker",
-    space: spaceId,
+    spaceDid: spaceId,
   });
 
   // Initialize runtime and charm manager

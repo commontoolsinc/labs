@@ -16,12 +16,14 @@ describe("AppState", () => {
   it("serialize", async () => {
     const state: AppState = {
       apiUrl: new URL(API_URL),
-      spaceName: SPACE_NAME,
+      view: {
+        spaceName: SPACE_NAME,
+      },
     };
 
     let serialized = serialize(state);
     assert(serialized.apiUrl === API_URL);
-    assert(serialized.spaceName === SPACE_NAME);
+    assert((serialized.view as { spaceName: string }).spaceName === SPACE_NAME);
     assert(
       serialized.identity === undefined,
       "Identity not provided (undefined).",
@@ -30,7 +32,7 @@ describe("AppState", () => {
     state.identity = await Identity.generate({ implementation: "webcrypto" }),
       serialized = serialize(state);
     assert(serialized.apiUrl === API_URL);
-    assert(serialized.spaceName === SPACE_NAME);
+    assert((serialized.view as { spaceName: string }).spaceName === SPACE_NAME);
     assert(
       serialized.identity === null,
       "WebCrypto keys cannot be serialized (null).",
@@ -39,7 +41,7 @@ describe("AppState", () => {
     state.identity = await Identity.generate({ implementation: "noble" });
     serialized = serialize(state);
     assert(serialized.apiUrl === API_URL);
-    assert(serialized.spaceName === SPACE_NAME);
+    assert((serialized.view as { spaceName: string }).spaceName === SPACE_NAME);
     assert(serialized.identity);
     assert(
       (await Identity.fromRaw(Uint8Array.from(serialized.identity.privateKey)))
@@ -56,30 +58,34 @@ describe("AppState", () => {
 
     const serialized: AppStateSerialized = {
       apiUrl: API_URL,
-      spaceName: SPACE_NAME,
+      view: { spaceName: SPACE_NAME },
     };
 
     let state = await deserialize(serialized);
     assert(state.apiUrl.toString() === API_URL.toString());
-    assert(state.spaceName === SPACE_NAME);
+    assert((state.view as { spaceName: string }).spaceName === SPACE_NAME);
     assert(state.identity === undefined);
 
     serialized.identity = identityRaw;
     state = await deserialize(serialized);
     assert(state.apiUrl.toString() === API_URL.toString());
-    assert(state.spaceName === SPACE_NAME);
+    assert((state.view as { spaceName: string }).spaceName === SPACE_NAME);
     assert(state.identity?.did() === identity.did(), "deserializes identity.");
   });
 
   it("clears charm list view when activating a charm", () => {
     const initial: AppState = {
       apiUrl: new URL(API_URL),
+      view: { builtin: "home" },
       showShellCharmListView: true,
     };
 
     const next = applyCommand(initial, {
-      type: "set-active-charm-id",
-      charmId: "example",
+      type: "set-view",
+      view: {
+        spaceName: SPACE_NAME,
+        charmId: "example",
+      },
     });
 
     assert(next.showShellCharmListView === false);

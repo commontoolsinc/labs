@@ -12,7 +12,13 @@ import {
   TransferrableInsecureCryptoKeyPair,
 } from "@commontools/identity";
 import { afterAll, afterEach, beforeAll, beforeEach } from "@std/testing/bdd";
-import { AppState, deserialize } from "../shell/src/lib/app/mod.ts";
+import {
+  AppState,
+  AppView,
+  appViewToUrlPath,
+  deserialize,
+  isAppViewEqual,
+} from "../shell/src/lib/app/mod.ts";
 import { waitFor } from "./utils.ts";
 import { ConsoleEvent, PageErrorEvent } from "@astral/astral";
 
@@ -88,8 +94,7 @@ export class ShellIntegration {
   // has a matching `spaceName`, ignoring all other properties.
   async waitForState(
     params: {
-      spaceName?: string;
-      charmId?: string;
+      view: AppView;
       identity?: Identity;
     },
   ): Promise<AppState> {
@@ -99,8 +104,7 @@ export class ShellIntegration {
     ): boolean {
       return !!(
         state &&
-        (params.spaceName ? state.spaceName === params.spaceName : true) &&
-        (params.charmId ? state.activeCharmId === params.charmId : true) &&
+        isAppViewEqual(state.view, params.view) &&
         (params.identity
           ? state.identity?.did() === params.identity.did()
           : true)
@@ -128,22 +132,25 @@ export class ShellIntegration {
   // If `identity` provided, logs in with the identity
   // after navigation.
   async goto(
-    { frontendUrl, spaceName, charmId, identity }: {
+    { frontendUrl, view, identity }: {
       frontendUrl: string;
-      spaceName: string;
-      charmId?: string;
+      view: AppView;
       identity?: Identity;
     },
   ): Promise<void> {
     this.checkIsOk();
-    const url = `${frontendUrl}${spaceName}${charmId ? `/${charmId}` : ""}`;
+
+    // Strip the proceeding "/" in the url path
+    const path = appViewToUrlPath(view).substring(1);
+
+    const url = `${frontendUrl}${path}`;
     const page = this.page();
     await page.goto(url);
     await page.applyConsoleFormatter();
-    await this.waitForState({ spaceName, charmId });
+    await this.waitForState({ view });
     if (identity) {
       await this.login(identity);
-      await this.waitForState({ identity, spaceName, charmId });
+      await this.waitForState({ identity, view });
     }
   }
 

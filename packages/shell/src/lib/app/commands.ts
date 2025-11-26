@@ -1,9 +1,9 @@
 import { Identity } from "@commontools/identity";
+import { AppView, isAppView } from "./view.ts";
 
 export type Command =
-  | { type: "set-active-charm-id"; charmId?: string }
+  | { type: "set-view"; view: AppView }
   | { type: "set-identity"; identity: Identity }
-  | { type: "set-space"; spaceName: string }
   | { type: "clear-authentication" }
   | { type: "set-show-charm-list-view"; show: boolean }
   | { type: "set-show-debugger-view"; show: boolean }
@@ -22,13 +22,8 @@ export function isCommand(value: unknown): value is Command {
     case "set-identity": {
       return "identity" in value && value.identity instanceof Identity;
     }
-    case "set-space": {
-      return "spaceName" in value && !!value.spaceName &&
-        typeof value.spaceName === "string";
-    }
-    case "set-active-charm-id": {
-      return "charmId" in value && !!value.charmId &&
-        (typeof value.charmId === "string" || value.charmId === undefined);
+    case "set-view": {
+      return "view" in value && isAppView(value.view);
     }
     case "clear-authentication": {
       return true;

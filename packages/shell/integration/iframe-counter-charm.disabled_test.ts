@@ -119,8 +119,10 @@ describe("shell iframe counter tests", () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      spaceName: SPACE_NAME,
-      charmId: charm.id,
+      view: {
+        spaceName: SPACE_NAME,
+        charmId: charm.id,
+      },
       identity,
     });
 
@@ -170,8 +172,10 @@ describe("shell iframe counter tests", () => {
     console.log("\nReloading page to test persistence...");
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      spaceName: SPACE_NAME,
-      charmId: charm.id,
+      view: {
+        spaceName: SPACE_NAME,
+        charmId: charm.id,
+      },
       identity,
     });
 

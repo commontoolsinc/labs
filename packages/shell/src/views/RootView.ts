@@ -1,5 +1,5 @@
 import { css, html, PropertyValues } from "lit";
-import { applyCommand, AppState } from "../lib/app/mod.ts";
+import { applyCommand, AppState, isAppViewEqual } from "../lib/app/mod.ts";
 import { BaseView, SHELL_COMMAND } from "./BaseView.ts";
 import { Command, isCommand } from "../lib/app/commands.ts";
 import { API_URL } from "../lib/env.ts";
@@ -40,7 +40,10 @@ export class XRootView extends BaseView {
 
   @state()
   // Non-private for typing in `updated()` callback
-  _app = { apiUrl: API_URL } as AppState;
+  _app = {
+    apiUrl: API_URL,
+    view: { spaceName: "common-knowledge" },
+  } as AppState;
 
   @property()
   keyStore?: KeyStore;
@@ -75,7 +78,7 @@ export class XRootView extends BaseView {
           previous.dispose().catch(console.error);
         }
 
-        if (!app || !app.spaceName || !app.identity) {
+        if (!app || !app.identity) {
           // Clear the runtime and space when no app state
           this.runtime = undefined;
           this.space = undefined;
@@ -84,7 +87,7 @@ export class XRootView extends BaseView {
 
         const rt = await RuntimeInternals.create({
           identity: app.identity,
-          spaceName: app.spaceName,
+          view: app.view,
           apiUrl: app.apiUrl,
         });
 
@@ -125,12 +128,22 @@ export class XRootView extends BaseView {
     const flipState = (!previous && current) ||
       !current;
 
-    // If host, space, or identity changes, we'll
+    let spaceChanged = false;
+    if (previous && !isAppViewEqual(previous.view, current.view)) {
+      // Check that if the view has changed, we may still
+      // be in the same space
+      if ("spaceName" in previous.view && "spaceName" in current.view) {
+        spaceChanged = previous.view.spaceName !== current.view.spaceName;
+      } else {
+        spaceChanged = true;
+      }
+    }
+
+    // If host, view's space, or identity changes, we'll
     // need to recreate the runtime.
     const stateChanged = !!previous &&
       (previous.apiUrl !== current.apiUrl ||
-        previous.spaceName !== current.spaceName ||
-        previous.identity !== current.identity);
+        previous.identity !== current.identity || spaceChanged);
 
     if (flipState || stateChanged) {
       this._rt.run([current]);
