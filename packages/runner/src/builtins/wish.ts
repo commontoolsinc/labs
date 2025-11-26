@@ -308,6 +308,7 @@ export function wish(
       return;
     } else if (typeof targetValue === "object") {
       const { query, path, schema, context: _context, scope: _scope } =
+      const { query, path, schema, context: _context, scope: _scope } =
         targetValue as WishParams;
 
       if (query === undefined || query === null || query === "") {
