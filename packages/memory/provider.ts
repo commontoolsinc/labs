@@ -341,10 +341,29 @@ class MemoryProviderSession<
         });
       }
       case "/memory/transact": {
+        logger.info(
+          "server-transact",
+          () => [
+            "Received transaction:",
+            `space: ${invocation.sub}`,
+            `changes:`,
+            JSON.stringify(invocation.args.changes, null, 2),
+          ],
+        );
+        const result = await this.memory.transact(invocation);
+        if (result.error) {
+          logger.warn(
+            "server-transact-error",
+            () => [
+              "Transaction failed:",
+              JSON.stringify(result.error, null, 2),
+            ],
+          );
+        }
         return this.perform({
           the: "task/return",
           of,
-          is: await this.memory.transact(invocation),
+          is: result,
         });
       }
       case "/memory/query/subscribe": {
