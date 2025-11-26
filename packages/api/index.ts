@@ -1257,7 +1257,7 @@ export type WishTag = `/${string}` | `#${string}`;
 export type DID = `did:${string}:${string}`;
 
 export type WishParams = {
-  tag?: WishTag;
+  query: WishTag | string;
   path?: string[];
   context?: Record<string, any>;
   schema?: JSONSchema;

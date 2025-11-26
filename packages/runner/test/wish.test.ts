@@ -425,7 +425,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       const wishRecipe = recipe("wish object syntax allCharms", () => {
-        const allCharms = wish<unknown[]>({ tag: "#allCharms" });
+        const allCharms = wish<unknown[]>({ query: "#allCharms" });
         return { allCharms };
       });
 
@@ -471,7 +471,7 @@ describe("wish built-in", () => {
 
       const wishRecipe = recipe("wish object syntax with path", () => {
         const firstTitle = wish<string>({
-          tag: "#allCharms",
+          query: "#allCharms",
           path: ["0", "title"],
         });
         return { firstTitle };
@@ -505,7 +505,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       const wishRecipe = recipe("wish object syntax space", () => {
-        const spaceResult = wish({ tag: "/" });
+        const spaceResult = wish({ query: "/" });
         return { spaceResult };
       });
 
@@ -540,8 +540,8 @@ describe("wish built-in", () => {
 
       const wishRecipe = recipe("wish object syntax space subpaths", () => {
         return {
-          configLink: wish({ tag: "/", path: ["config"] }),
-          dataLink: wish({ tag: "/", path: ["nested", "deep", "data"] }),
+          configLink: wish({ query: "/", path: ["config"] }),
+          dataLink: wish({ query: "/", path: ["nested", "deep", "data"] }),
         };
       });
 
@@ -569,7 +569,7 @@ describe("wish built-in", () => {
 
     it("returns current timestamp via #now tag", async () => {
       const wishRecipe = recipe("wish object syntax now", () => {
-        return { nowValue: wish({ tag: "#now" }) };
+        return { nowValue: wish({ query: "#now" }) };
       });
 
       const resultCell = runtime.getCell<{
@@ -604,7 +604,7 @@ describe("wish built-in", () => {
 
       try {
         const wishRecipe = recipe("wish object syntax unknown", () => {
-          const missing = wish({ tag: "#unknownTag" });
+          const missing = wish({ query: "#unknownTag" });
           return { missing };
         });
 
@@ -641,7 +641,7 @@ describe("wish built-in", () => {
 
       try {
         const wishRecipe = recipe("wish object syntax no tag", () => {
-          const missing = wish({ path: ["some", "path"] });
+          const missing = wish({ query: "", path: ["some", "path"] });
           return { missing };
         });
 
@@ -661,7 +661,7 @@ describe("wish built-in", () => {
         await runtime.idle();
 
         const missingResult = result.key("missing").get();
-        expect(missingResult?.error).toMatch(/not recognized/);
+        expect(missingResult?.error).toMatch(/no query/);
         expect(errors.length).toBeGreaterThan(0);
       } finally {
         console.error = originalError;
@@ -678,7 +678,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       const wishRecipe = recipe("wish object syntax UI success", () => {
-        const spaceResult = wish({ tag: "/" });
+        const spaceResult = wish({ query: "/" });
         return { spaceResult };
       });
 
@@ -701,6 +701,7 @@ describe("wish built-in", () => {
         string | symbol,
         unknown
       >;
+      expect(wishResult?.error).toBeUndefined();
       expect(wishResult?.result).toEqual(spaceData);
 
       const ui = wishResult?.[UI] as { type: string; name: string; props: any };
@@ -718,7 +719,7 @@ describe("wish built-in", () => {
 
       try {
         const wishRecipe = recipe("wish object syntax UI error", () => {
-          const missing = wish({ tag: "#unknownTag" });
+          const missing = wish({ query: "#unknownTag" });
           return { missing };
         });
 
