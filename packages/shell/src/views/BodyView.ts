@@ -4,7 +4,7 @@ import { Task } from "@lit/task";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { CharmController } from "@commontools/charm/ops";
-import * as DefaultPattern from "../lib/default-pattern.ts";
+import * as PatternFactory from "../lib/pattern-factory.ts";
 import "../components/OmniLayout.ts";
 
 export class XBodyView extends BaseView {
@@ -79,7 +79,7 @@ export class XBodyView extends BaseView {
 
     this.creatingDefaultPattern = true;
     try {
-      await DefaultPattern.create(this.rt.cc());
+      await PatternFactory.create(this.rt.cc(), "space-default");
     } catch (error) {
       console.error("Could not create default pattern:", error);
       // Re-throw to expose errors instead of swallowing them
@@ -117,7 +117,7 @@ export class XBodyView extends BaseView {
     }
 
     const defaultPattern = charms
-      ? DefaultPattern.getDefaultPattern(charms)
+      ? PatternFactory.getPattern(charms, "space-default")
       : undefined;
     const activeCharm = this.activeCharm;
 

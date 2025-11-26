@@ -16,6 +16,7 @@ import { navigate, updatePageTitle } from "../lib/navigate.ts";
 import { provide } from "@lit/context";
 import { KeyboardRouter } from "../lib/keyboard-router.ts";
 import { keyboardRouterContext } from "@commontools/ui";
+import * as PatternFactory from "../lib/pattern-factory.ts";
 
 export class XAppView extends BaseView {
   static override styles = css`
@@ -126,12 +127,30 @@ export class XAppView extends BaseView {
   // Maps the app level view to a specific charm to load
   // as the primary, active charm.
   _activeCharmId = new Task(this, {
-    task: ([app, rt]): string | undefined => {
+    task: async ([app, rt]): Promise<string | undefined> => {
       if (!app || !rt) {
         return;
       }
       if ("builtin" in app.view) {
-        console.warn("Unsupported view type");
+        if (app.view.builtin !== "home") {
+          console.warn("Unsupported view type");
+          return;
+        }
+        {
+          await rt.cc().manager().synced();
+          const pattern = await PatternFactory.getPattern(
+            rt.cc().getAllCharms(),
+            "home",
+          );
+          if (pattern) {
+            return pattern.id;
+          }
+        }
+        const pattern = await PatternFactory.create(
+          rt.cc(),
+          "home",
+        );
+        return pattern.id;
       } else if ("spaceDid" in app.view) {
         console.warn("Unsupported view type");
       } else if ("spaceName" in app.view) {
