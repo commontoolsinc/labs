@@ -33,7 +33,7 @@ const favoriteListSchema = {
 } as const satisfies JSONSchema;
 import { getRecipeEnvironment } from "../env.ts";
 
-const WISH_TSX_PATH = getRecipeEnvironment().apiUrl + "/api/patterns/wish.tsx";
+const WISH_TSX_PATH = getRecipeEnvironment().apiUrl + "api/patterns/wish.tsx";
 
 class WishError extends Error {
   constructor(message: string) {
@@ -143,19 +143,19 @@ function formatTarget(parsed: ParsedWishTarget): string {
 function resolveBase(
   parsed: ParsedWishTarget,
   ctx: WishContext,
-): BaseResolution {
+): BaseResolution[] {
   switch (parsed.key) {
     case "/":
-      return { cell: getSpaceCell(ctx) };
+      return [{ cell: getSpaceCell(ctx) }];
     case "#default":
-      return { cell: getSpaceCell(ctx), pathPrefix: ["defaultPattern"] };
+      return [{ cell: getSpaceCell(ctx), pathPrefix: ["defaultPattern"] }];
     case "#mentionable":
-      return {
+      return [{
         cell: getSpaceCell(ctx),
         pathPrefix: ["defaultPattern", "backlinksIndex", "mentionable"],
-      };
+      }];
     case "#recent":
-      return { cell: getSpaceCell(ctx), pathPrefix: ["recentCharms"] };
+      return [{ cell: getSpaceCell(ctx), pathPrefix: ["recentCharms"] }];
     case "#favorites": {
       // Favorites always come from the HOME space (user identity DID)
       const userDID = ctx.runtime.userIdentityDID;
@@ -171,7 +171,7 @@ function resolveBase(
 
       // No path = return favorites list
       if (parsed.path.length === 0) {
-        return { cell: homeSpaceCell, pathPrefix: ["favorites"] };
+        return [{ cell: homeSpaceCell, pathPrefix: ["favorites"] }];
       }
 
       // Path provided = search by tag
@@ -190,10 +190,10 @@ function resolveBase(
         throw new WishError(`No favorite found matching "${searchTerm}"`);
       }
 
-      return {
+      return [{
         cell: match.cell,
         pathPrefix: parsed.path.slice(1), // remaining path after search term
-      };
+      }];
     }
     case "#now": {
       if (parsed.path.length > 0) {
@@ -207,7 +207,7 @@ function resolveBase(
         undefined,
         ctx.tx,
       );
-      return { cell: nowCell };
+      return [{ cell: nowCell }];
     }
     default: {
       // Check if it's a well-known target
@@ -219,40 +219,51 @@ function resolveBase(
           ctx.parentCell.space,
           ctx.tx,
         );
-        return { cell: baseCell };
+        return [{ cell: baseCell }];
       }
 
-      // Unknown tag = search favorites by tag
-      const userDID = ctx.runtime.userIdentityDID;
-      if (!userDID) {
-        throw new WishError(
-          "User identity DID not available for favorites search",
+      // Hash tag: Look for exact matches in favorites.
+      if (parsed.key.startsWith("#")) {
+        // Unknown tag = search favorites by tag
+        const userDID = ctx.runtime.userIdentityDID;
+        if (!userDID) {
+          throw new WishError(
+            "User identity DID not available for favorites search",
+          );
+        }
+
+        const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+        const favoritesCell = homeSpaceCell.key("favorites").asSchema(
+          favoriteListSchema,
         );
+        const favorites = favoritesCell.get() || [];
+
+        // Match hash tags in tag field (the schema), all lowercase.
+        const searchTerm = parsed.key.toLowerCase();
+        const matches = favorites.filter((entry) => {
+          const hashtags =
+            entry.tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
+          return [...hashtags].some((m) => m[0] === searchTerm);
+        });
+
+        if (matches.length === 0) {
+          throw new WishError(`No favorite found matching "${searchTerm}"`);
+        }
+
+        return matches.map((match) => ({
+          cell: match.cell,
+          pathPrefix: parsed.path,
+        }));
       }
 
-      const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
-      const favoritesCell = homeSpaceCell.key("favorites").asSchema(
-        favoriteListSchema,
-      );
-      const favorites = favoritesCell.get() || [];
-
-      // Search term is the tag without the # prefix
-      const searchTerm = parsed.key.slice(1).toLowerCase();
-      const match = favorites.find((entry) =>
-        entry.tag?.toLowerCase().includes(searchTerm)
-      );
-
-      if (!match) {
-        throw new WishError(`No favorite found matching "${searchTerm}"`);
-      }
-
-      return {
-        cell: match.cell,
-        pathPrefix: parsed.path,
-      };
+      throw new WishError(`Wish target "${parsed.key}" is not recognized.`);
     }
   }
 }
+
+// fetchWishPattern runs at runtime scope, shared across all wish invocations
+let wishPatternFetchPromise: Promise<Recipe | undefined> | undefined;
+let wishPattern: Recipe | undefined;
 
 async function fetchWishPattern(
   runtime: IRuntime,
@@ -276,13 +287,11 @@ async function fetchWishPattern(
   }
 }
 
-let wishPatternFetchPromise: Promise<Recipe | undefined> | undefined;
-let wishPattern: Recipe | undefined;
-
 function errorUI(message: string): VNode {
   return h("span", { style: "color: red" }, `⚠️ ${message}`);
 }
 
+// TODO(seefeld): Add button to replace this with wish.tsx getting more options
 function cellLinkUI(cell: Cell<unknown>): VNode {
   return h("ct-cell-link", { $cell: cell });
 }
@@ -312,12 +321,11 @@ export function wish(
   runtime: IRuntime,
 ): Action {
   // Per-instance wish pattern loading.
-
   let wishPatternInput: WishParams | undefined;
   let wishPatternResultCell: Cell<WishState<any>> | undefined;
 
   function launchWishPattern(
-    input?: WishParams,
+    input?: WishParams & { candidates?: Cell<unknown>[] },
     providedTx?: IExtendedStorageTransaction,
   ) {
     if (input) wishPatternInput = input;
@@ -356,6 +364,8 @@ export function wish(
     return wishPatternResultCell;
   }
 
+  // Wish action, reactive to changes in inputsCell and any cell we read during
+  // initial resolution
   return (tx: IExtendedStorageTransaction) => {
     const inputsWithTx = inputsCell.withTx(tx);
     const targetValue = inputsWithTx.asSchema(TARGET_SCHEMA).get();
@@ -370,11 +380,13 @@ export function wish(
       try {
         const parsed = parseWishTarget(wishTarget);
         const ctx: WishContext = { runtime, tx, parentCell };
-        const baseResolution = resolveBase(parsed, ctx);
-        const combinedPath = baseResolution.pathPrefix
-          ? [...baseResolution.pathPrefix, ...parsed.path]
+        const baseResolutions = resolveBase(parsed, ctx);
+
+        // Just use the first result (if there aren't any, the above throws)
+        const combinedPath = baseResolutions[0].pathPrefix
+          ? [...baseResolutions[0].pathPrefix, ...parsed.path]
           : parsed.path;
-        const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
+        const resolvedCell = resolvePath(baseResolutions[0].cell, combinedPath);
         sendResult(tx, resolvedCell);
       } catch (_e) {
         sendResult(tx, undefined);
@@ -403,18 +415,31 @@ export function wish(
             path: path ?? [],
           };
           const ctx: WishContext = { runtime, tx, parentCell };
-          const baseResolution = resolveBase(parsed, ctx);
-          const combinedPath = baseResolution.pathPrefix
-            ? [...baseResolution.pathPrefix, ...(path ?? [])]
-            : path ?? [];
-          const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
-          const resultCell = schema
-            ? resolvedCell.asSchema(schema)
-            : resolvedCell;
-          sendResult(tx, {
-            result: resultCell,
-            [UI]: cellLinkUI(resultCell),
+          const baseResolutions = resolveBase(parsed, ctx);
+          const resultCells = baseResolutions.map((baseResolution) => {
+            const combinedPath = baseResolution.pathPrefix
+              ? [...baseResolution.pathPrefix, ...(path ?? [])]
+              : path ?? [];
+            const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
+            return schema ? resolvedCell.asSchema(schema) : resolvedCell;
           });
+          if (resultCells.length === 1) {
+            // If it's one result, just return it directly
+            sendResult(tx, {
+              result: resultCells[0],
+              [UI]: cellLinkUI(resultCells[0]),
+            });
+          } else {
+            // If it's multiple result, launch the wish pattern, which will
+            // immediately return the first candidate as result
+            sendResult(
+              tx,
+              launchWishPattern({
+                ...targetValue as WishParams,
+                candidates: resultCells,
+              }, tx),
+            );
+          }
         } catch (e) {
           const errorMsg = e instanceof WishError ? e.message : String(e);
           sendResult(

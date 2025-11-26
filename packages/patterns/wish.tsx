@@ -1,19 +1,42 @@
 /// <cts-enable />
-import { NAME, pattern, UI, wish } from "commontools";
+import {
+  type Cell,
+  computed,
+  type Default,
+  pattern,
+  UI,
+  type WishState,
+} from "commontools";
 
-export default pattern<Record<string, never>>((_) => {
-  const wishResult = wish<{ content: string }>({ query: "#note" });
+// Copy of the original with less fancy types, since we ran into limits of the
+// schema translation here.
+export type WishParams = {
+  query: string;
+  path?: string[];
+  context?: Record<string, any>;
+  schema?: any;
+  scope?: string[];
+};
 
-  return {
-    [NAME]: "Wish tester",
-    [UI]: (
-      <div>
-        <pre>{wishResult.result.content}</pre>
-        <hr />
-        {wishResult.result}
-        <hr />
-        {wishResult[UI]}
-      </div>
-    ),
-  };
-});
+export default pattern<
+  WishParams & { candidates: Default<Cell<never>[], []> },
+  WishState<never>
+>(
+  ({ query: _query, context: _context, candidates }) => {
+    return {
+      result: computed(() => candidates.length > 0 ? candidates[0] : undefined),
+      [UI]: (
+        <div>
+          {candidates.map((candidate) => (
+            /* TODO(seefeld/ben): Implement picker that updates `result` */
+            <div>
+              <ct-cell-link
+                $cell={candidate}
+              />
+            </div>
+          ))}
+        </div>
+      ),
+    };
+  },
+);
