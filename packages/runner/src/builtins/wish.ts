@@ -376,7 +376,7 @@ export function wish(
           : parsed.path;
         const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
         sendResult(tx, resolvedCell);
-      } catch (e) {
+      } catch (_e) {
         sendResult(tx, undefined);
       }
       return;
