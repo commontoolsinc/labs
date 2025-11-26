@@ -13,7 +13,7 @@ const onRemoveFavorite = handler<
 });
 
 export default pattern<Record<string, never>>((_) => {
-  const wishResult = wish<Array<Favorite>>({ tag: "#favorites" });
+  const wishResult = wish<Array<Favorite>>({ query: "#favorites" });
 
   return {
     [NAME]: "Favorites Manager",

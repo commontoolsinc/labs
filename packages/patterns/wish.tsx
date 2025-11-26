@@ -2,7 +2,7 @@
 import { NAME, pattern, UI, wish } from "commontools";
 
 export default pattern<Record<string, never>>((_) => {
-  const wishResult = wish<{ content: string }>({ tag: "#note" });
+  const wishResult = wish<{ content: string }>({ query: "#note" });
 
   return {
     [NAME]: "Wish tester",

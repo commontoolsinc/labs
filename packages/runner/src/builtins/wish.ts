@@ -90,7 +90,7 @@ function parseWishTarget(target: string): ParsedWishTarget {
       segment.length > 0
     );
     if (segments.length === 0) {
-      throw new WishError(`Wish target "${target}" is not recognized.`);
+      throw new WishError(`Wish tag target "${target}" is not recognized.`);
     }
     const key = `#${segments[0]}` as WishTag;
     return { key, path: segments.slice(1) };
@@ -101,7 +101,7 @@ function parseWishTarget(target: string): ParsedWishTarget {
     return { key: "/", path: segments };
   }
 
-  throw new WishError(`Wish target "${target}" is not recognized.`);
+  throw new WishError(`Wish path target "${target}" is not recognized.`);
 }
 
 type WishContext = {
@@ -202,7 +202,7 @@ function resolveBase(
     case "#now": {
       if (parsed.path.length > 0) {
         throw new WishError(
-          `Wish target "${formatTarget(parsed)}" is not recognized.`,
+          `Wish now target "${formatTarget(parsed)}" is not recognized.`,
         );
       }
       const nowCell = ctx.runtime.getImmutableCell(
@@ -265,7 +265,7 @@ const TARGET_SCHEMA = {
   }, {
     type: "object",
     properties: {
-      tag: { type: "string" },
+      query: { type: "string" },
       path: { type: "array", items: { type: "string" } },
       context: { type: "object", additionalProperties: { asCell: true } },
       scope: { type: "array", items: { type: "string" } },
@@ -307,13 +307,13 @@ export function wish(
       }
       return;
     } else if (typeof targetValue === "object") {
-      const { tag, path, schema, context: _context, scope: _scope } =
+      const { query, path, schema, context: _context, scope: _scope } =
         targetValue as WishParams;
 
-      if (!tag) {
+      if (query === undefined || query === null || query === "") {
         const errorMsg = `Wish target "${
           JSON.stringify(targetValue)
-        }" is not recognized.`;
+        }" has no query.`;
         console.error(errorMsg);
         sendResult(
           tx,
@@ -322,23 +322,38 @@ export function wish(
         return;
       }
 
-      try {
-        const parsed: ParsedWishTarget = { key: tag, path: path ?? [] };
-        const ctx: WishContext = { runtime, tx, parentCell };
-        const baseResolution = resolveBase(parsed, ctx);
-        const combinedPath = baseResolution.pathPrefix
-          ? [...baseResolution.pathPrefix, ...(path ?? [])]
-          : path ?? [];
-        const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
-        const resultCell = schema !== undefined
-          ? resolvedCell.asSchema(schema)
-          : resolvedCell;
-        sendResult(tx, {
-          result: resultCell,
-          [UI]: cellLinkUI(resultCell),
-        });
-      } catch (e) {
-        const errorMsg = e instanceof WishError ? e.message : String(e);
+      // If the query is a path or a hash tag, resolve it directly
+      if (query.startsWith("/") || /^#[a-zA-Z0-9-]+$/.test(query)) {
+        try {
+          const parsed: ParsedWishTarget = {
+            key: query as WishTag,
+            path: path ?? [],
+          };
+          const ctx: WishContext = { runtime, tx, parentCell };
+          const baseResolution = resolveBase(parsed, ctx);
+          const combinedPath = baseResolution.pathPrefix
+            ? [...baseResolution.pathPrefix, ...(path ?? [])]
+            : path ?? [];
+          const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
+          const resultCell = schema
+            ? resolvedCell.asSchema(schema)
+            : resolvedCell;
+          sendResult(tx, {
+            result: resultCell,
+            [UI]: cellLinkUI(resultCell),
+          });
+        } catch (e) {
+          const errorMsg = e instanceof WishError ? e.message : String(e);
+          console.error(errorMsg);
+          sendResult(
+            tx,
+            { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<
+              any
+            >,
+          );
+        }
+      } else {
+        const errorMsg = "Non hash tag or path query not yet supported";
         console.error(errorMsg);
         sendResult(
           tx,
