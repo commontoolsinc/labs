@@ -2,7 +2,6 @@
 import {
   BuiltInLLMContent,
   Cell,
-  cell,
   Default,
   derive,
   generateText,

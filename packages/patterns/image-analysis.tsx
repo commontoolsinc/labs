@@ -102,7 +102,10 @@ export default recipe<ImageChatInput, ImageChatOutput>(
             </ct-cell-context>
 
             {/* Response */}
-            <ct-cell-context $cell={result} label="LLM Response">
+            <ct-cell-context
+              $cell={result as unknown as any}
+              label="LLM Response"
+            >
               {derive(
                 [result, pending, requestHash],
                 (

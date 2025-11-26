@@ -33,7 +33,7 @@ interface CharmsListOutput {
   fabUI: unknown;
 }
 
-const visit = handler<
+const _visit = handler<
   Record<string, never>,
   { charm: Cell<MinimalCharm> }
 >((_, state) => {
