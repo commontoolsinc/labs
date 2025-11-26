@@ -5,6 +5,7 @@ import {
   type WishTag,
 } from "@commontools/api";
 import { h } from "@commontools/html";
+import { HttpProgramResolver } from "@commontools/js-compiler";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
@@ -14,7 +15,7 @@ import type {
 } from "../storage/interface.ts";
 import type { EntityId } from "../create-ref.ts";
 import { ALL_CHARMS_ID } from "./well-known.ts";
-import { type JSONSchema, UI } from "../builder/types.ts";
+import { type JSONSchema, type Recipe, UI } from "../builder/types.ts";
 
 // Define locally to avoid circular dependency with @commontools/charm
 const favoriteEntrySchema = {
@@ -30,14 +31,9 @@ const favoriteListSchema = {
   type: "array",
   items: favoriteEntrySchema,
 } as const satisfies JSONSchema;
+import { getRecipeEnvironment } from "../env.ts";
 
-function errorUI(message: string): VNode {
-  return h("span", { style: "color: red" }, `⚠️ ${message}`);
-}
-
-function cellLinkUI(cell: Cell<unknown>): VNode {
-  return h("ct-cell-link", { $cell: cell });
-}
+const WISH_TSX_PATH = getRecipeEnvironment().apiUrl + "/api/patterns/wish.tsx";
 
 class WishError extends Error {
   constructor(message: string) {
@@ -258,6 +254,39 @@ function resolveBase(
   }
 }
 
+async function fetchWishPattern(
+  runtime: IRuntime,
+): Promise<Recipe | undefined> {
+  try {
+    const program = await runtime.harness.resolve(
+      new HttpProgramResolver(WISH_TSX_PATH),
+    );
+
+    if (!program) {
+      throw new WishError("Can't load wish.tsx");
+    }
+    const pattern = await runtime.recipeManager.compileRecipe(program);
+
+    if (!pattern) throw new WishError("Can't compile wish.tsx");
+
+    return pattern;
+  } catch (e) {
+    console.error("Can't load wish.tsx", e);
+    return undefined;
+  }
+}
+
+let wishPatternFetchPromise: Promise<Recipe | undefined> | undefined;
+let wishPattern: Recipe | undefined;
+
+function errorUI(message: string): VNode {
+  return h("span", { style: "color: red" }, `⚠️ ${message}`);
+}
+
+function cellLinkUI(cell: Cell<unknown>): VNode {
+  return h("ct-cell-link", { $cell: cell });
+}
+
 const TARGET_SCHEMA = {
   anyOf: [{
     type: "string",
@@ -270,17 +299,63 @@ const TARGET_SCHEMA = {
       context: { type: "object", additionalProperties: { asCell: true } },
       scope: { type: "array", items: { type: "string" } },
     },
+    required: ["query"],
   }],
 } as const satisfies JSONSchema;
 
 export function wish(
   inputsCell: Cell<[unknown, unknown]>,
   sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
-  _addCancel: (cancel: () => void) => void,
-  _cause: Cell<any>[],
+  addCancel: (cancel: () => void) => void,
+  cause: Cell<any>[],
   parentCell: Cell<any>,
   runtime: IRuntime,
 ): Action {
+  // Per-instance wish pattern loading.
+
+  let wishPatternInput: WishParams | undefined;
+  let wishPatternResultCell: Cell<WishState<any>> | undefined;
+
+  function launchWishPattern(
+    input?: WishParams,
+    providedTx?: IExtendedStorageTransaction,
+  ) {
+    if (input) wishPatternInput = input;
+
+    const tx = providedTx || runtime.edit();
+
+    if (!wishPatternResultCell) {
+      wishPatternResultCell = runtime.getCell(
+        parentCell.space,
+        { wish: { wishPattern: cause } },
+        undefined,
+        tx,
+      );
+
+      addCancel(() => runtime.runner.stop(wishPatternResultCell!));
+    }
+
+    if (!wishPattern) {
+      if (!wishPatternFetchPromise) {
+        wishPatternFetchPromise = fetchWishPattern(runtime).then((pattern) => {
+          wishPattern = pattern;
+          return pattern;
+        });
+      }
+      wishPatternFetchPromise.then((pattern) => {
+        if (pattern) {
+          launchWishPattern();
+        }
+      });
+    } else {
+      runtime.runSynced(wishPatternResultCell, wishPattern, wishPatternInput);
+    }
+
+    if (!providedTx) tx.commit();
+
+    return wishPatternResultCell;
+  }
+
   return (tx: IExtendedStorageTransaction) => {
     const inputsWithTx = inputsCell.withTx(tx);
     const targetValue = inputsWithTx.asSchema(TARGET_SCHEMA).get();
@@ -354,12 +429,8 @@ export function wish(
           );
         }
       } else {
-        const errorMsg = "Non hash tag or path query not yet supported";
-        console.error(errorMsg);
-        sendResult(
-          tx,
-          { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
-        );
+        // Otherwise it's a generic query and we need to launch the wish pattern
+        sendResult(tx, launchWishPattern(targetValue as WishParams, tx));
       }
       return;
     } else {
