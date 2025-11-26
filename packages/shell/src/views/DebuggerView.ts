@@ -3,6 +3,7 @@ import { property, state } from "lit/decorators.js";
 import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts";
 import type { RuntimeTelemetryMarkerResult } from "@commontools/runner";
 import { isRecord } from "@commontools/utils/types";
+import type { DebuggerController } from "../lib/debugger-controller.ts";
 
 /**
  * Hierarchical topic definitions for filtering telemetry events.
@@ -496,6 +497,108 @@ export class XDebuggerView extends LitElement {
         opacity: 0.7;
       }
     }
+
+    .tabs-container {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid #334155; /* slate-700 */
+      background-color: #1e293b; /* slate-800 */
+      padding: 0 1rem;
+    }
+
+    .tab-button {
+      padding: 0.5rem 1rem;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      font-family: monospace;
+      font-size: 0.75rem;
+      color: #94a3b8; /* slate-400 */
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .tab-button:hover {
+      color: #cbd5e1; /* slate-300 */
+      background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .tab-button.active {
+      color: #e2e8f0; /* slate-200 */
+      border-bottom-color: #3b82f6; /* blue-500 */
+    }
+
+    .watch-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.125rem;
+    }
+
+    .watch-item {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto;
+      gap: 0.75rem;
+      padding: 0.375rem 0.5rem;
+      background-color: #1e293b; /* slate-800 */
+      border-radius: 0.375rem;
+      border: 1px solid #334155; /* slate-700 */
+      align-items: center;
+      font-size: 0.6875rem;
+    }
+
+    .watch-item:hover {
+      background-color: #334155; /* slate-700 */
+    }
+
+    .watch-label {
+      color: #cbd5e1; /* slate-300 */
+      font-family: monospace;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .watch-value {
+      color: #94a3b8; /* slate-400 */
+      font-family: monospace;
+      max-width: 20rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .watch-updates {
+      color: #64748b; /* slate-500 */
+      font-family: monospace;
+      text-align: right;
+      min-width: 4rem;
+    }
+
+    .unwatch-button {
+      background-color: #334155; /* slate-700 */
+      color: #94a3b8; /* slate-400 */
+      border: none;
+      padding: 0.125rem 0.375rem;
+      border-radius: 0.25rem;
+      font-size: 0.625rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: monospace;
+    }
+
+    .unwatch-button:hover {
+      background-color: #dc2626; /* red-600 */
+      color: white;
+    }
+
+    .watch-empty {
+      color: #64748b; /* slate-500 */
+      font-style: italic;
+      text-align: center;
+      padding: 2rem;
+      font-size: 0.75rem;
+      line-height: 1.5;
+    }
   `;
 
   @property({ type: Boolean })
@@ -503,6 +606,12 @@ export class XDebuggerView extends LitElement {
 
   @property({ attribute: false })
   telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
+
+  @property({ attribute: false })
+  debuggerController?: DebuggerController;
+
+  @state()
+  private _activeTab: "events" | "watch" = "events";
 
   @state()
   private activeSubtopics = new Set<string>();
@@ -928,6 +1037,91 @@ export class XDebuggerView extends LitElement {
     return details;
   }
 
+  private formatValue(value: unknown): string {
+    if (value === null) return "null";
+    if (value === undefined) return "undefined";
+    if (typeof value === "string") return `"${value}"`;
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+
+    // For objects/arrays, truncate JSON representation
+    const json = JSON.stringify(value);
+    if (json.length > 60) {
+      return json.slice(0, 57) + "...";
+    }
+    return json;
+  }
+
+  private getCellLabel(
+    watch: { label?: string; cellLink: { id: string } },
+  ): string {
+    if (watch.label) return watch.label;
+
+    // Generate short ID from full ID
+    const id = watch.cellLink.id;
+    const shortId = id.split(":").pop()?.slice(-6) ?? "???";
+    return `#${shortId}`;
+  }
+
+  private renderTabs() {
+    return html`
+      <div class="tabs-container">
+        <button
+          type="button"
+          class="tab-button ${this._activeTab === "events" ? "active" : ""}"
+          @click="${() => this._activeTab = "events"}"
+        >
+          Events
+        </button>
+        <button
+          type="button"
+          class="tab-button ${this._activeTab === "watch" ? "active" : ""}"
+          @click="${() => this._activeTab = "watch"}"
+        >
+          Watch List
+        </button>
+      </div>
+    `;
+  }
+
+  private renderWatchList() {
+    const watchedCells = this.debuggerController?.getWatchedCells() ?? [];
+
+    if (watchedCells.length === 0) {
+      return html`
+        <div class="watch-empty">
+          No cells being watched.<br />
+          Hold Alt and hover over a ct-cell-context to access watch controls.
+        </div>
+      `;
+    }
+
+    return html`
+      <div class="watch-list">
+        ${watchedCells.map((watch) =>
+          html`
+            <div class="watch-item">
+              <div class="watch-label">${this.getCellLabel(watch)}</div>
+              <div class="watch-value">${this.formatValue(
+                watch.lastValue,
+              )}</div>
+              <div class="watch-updates">${watch.updateCount} updates</div>
+              <button
+                type="button"
+                class="unwatch-button"
+                @click="${() => this.debuggerController?.unwatchCell(watch.id)}"
+                title="Stop watching this cell"
+              >
+                ×
+              </button>
+            </div>
+          `
+        )}
+      </div>
+    `;
+  }
+
   private renderEvents() {
     const events = this.getFilteredEvents();
 
@@ -1056,145 +1250,161 @@ export class XDebuggerView extends LitElement {
               </div>
             </div>
 
-            <div class="toolbar-container">
-              <div class="topics-filter">
-                ${Object.entries(TOPIC_HIERARCHY).map(([key, topic]) => {
-                  const topicKey = key as TopicKey;
-                  const state = this.getTopicState(topicKey);
-                  const subtopicKeys = Object.keys(topic.subtopics);
-                  const hasDropdown = subtopicKeys.length > 0; // Show dropdown even for single subtopic
-                  const isDropdownOpen = this.openDropdowns.has(topicKey);
+            ${this.renderTabs()} ${this._activeTab === "events"
+              ? html`
+                <div class="toolbar-container">
+                  <div class="topics-filter">
+                    ${Object.entries(TOPIC_HIERARCHY).map(([key, topic]) => {
+                      const topicKey = key as TopicKey;
+                      const state = this.getTopicState(topicKey);
+                      const subtopicKeys = Object.keys(topic.subtopics);
+                      const hasDropdown = subtopicKeys.length > 0; // Show dropdown even for single subtopic
+                      const isDropdownOpen = this.openDropdowns.has(topicKey);
 
-                  return html`
-                    <div class="topic-button-group">
-                      <button
-                        type="button"
-                        class="topic-toggle ${state}"
-                        style="--topic-color: ${topic.color}"
-                        @click="${() => this.toggleTopic(topicKey)}"
-                        title="${topic.label}"
-                      >
-                        <span class="topic-icon">${topic.icon}</span>
-                        ${topic.label} ${state === "partial"
-                          ? html`
-                            <span style="font-size: 0.5rem; opacity: 0.7; margin-left: 0.25rem;">
-                              ${Object.keys(topic.subtopics).filter((sk) =>
-                                this.activeSubtopics.has(`${topicKey}.${sk}`)
-                              ).length}/${subtopicKeys.length}
-                            </span>
-                          `
-                          : ""}
-                      </button>
-                      ${hasDropdown
+                      return html`
+                        <div class="topic-button-group">
+                          <button
+                            type="button"
+                            class="topic-toggle ${state}"
+                            style="--topic-color: ${topic.color}"
+                            @click="${() => this.toggleTopic(topicKey)}"
+                            title="${topic.label}"
+                          >
+                            <span class="topic-icon">${topic.icon}</span>
+                            ${topic.label} ${state === "partial"
+                              ? html`
+                                <span style="font-size: 0.5rem; opacity: 0.7; margin-left: 0.25rem;">
+                                  ${Object.keys(topic.subtopics).filter((sk) =>
+                                    this.activeSubtopics.has(
+                                      `${topicKey}.${sk}`,
+                                    )
+                                  ).length}/${subtopicKeys.length}
+                                </span>
+                              `
+                              : ""}
+                          </button>
+                          ${hasDropdown
+                            ? html`
+                              <button
+                                type="button"
+                                class="dropdown-trigger"
+                                style="--topic-color: ${topic.color}"
+                                @click="${(e: Event) =>
+                                  this.toggleDropdown(topicKey, e)}"
+                                title="Filter subtopics"
+                              >
+                                ${isDropdownOpen ? "▲" : "▼"}
+                              </button>
+                              ${isDropdownOpen
+                                ? html`
+                                  <div class="subtopic-dropdown" style="--topic-color: ${topic
+                                    .color}">
+                                    ${Object.entries(topic.subtopics).map(
+                                      ([subKey, subtopic]) => {
+                                        const fullKey = `${topicKey}.${subKey}`;
+                                        const isChecked = this.activeSubtopics
+                                          .has(
+                                            fullKey,
+                                          );
+                                        return html`
+                                          <label class="subtopic-item">
+                                            <input
+                                              type="checkbox"
+                                              class="subtopic-checkbox"
+                                              .checked="${isChecked}"
+                                              @change="${(e: Event) => {
+                                                e.stopPropagation();
+                                                this.toggleSubtopic(
+                                                  topicKey,
+                                                  subKey,
+                                                );
+                                              }}"
+                                              @click="${(e: Event) =>
+                                                e.stopPropagation()}"
+                                            />
+                                            ${subtopic.label}
+                                          </label>
+                                        `;
+                                      },
+                                    )}
+                                  </div>
+                                `
+                                : ""}
+                            `
+                            : ""}
+                        </div>
+                      `;
+                    })}
+                  </div>
+
+                  <div class="controls">
+                    <div class="search-container">
+                      <input
+                        type="text"
+                        placeholder="Search events..."
+                        class="search-input ${this.searchText
+                          ? "has-value"
+                          : ""}"
+                        .value="${this.searchText}"
+                        @input="${(e: Event) =>
+                          this.searchText =
+                            (e.target as HTMLInputElement).value}"
+                      />
+                      ${this.searchText
                         ? html`
                           <button
                             type="button"
-                            class="dropdown-trigger"
-                            style="--topic-color: ${topic.color}"
-                            @click="${(e: Event) =>
-                              this.toggleDropdown(topicKey, e)}"
-                            title="Filter subtopics"
+                            class="clear-search"
+                            @click="${() => this.searchText = ""}"
                           >
-                            ${isDropdownOpen ? "▲" : "▼"}
+                            ×
                           </button>
-                          ${isDropdownOpen
-                            ? html`
-                              <div class="subtopic-dropdown" style="--topic-color: ${topic
-                                .color}">
-                                ${Object.entries(topic.subtopics).map(
-                                  ([subKey, subtopic]) => {
-                                    const fullKey = `${topicKey}.${subKey}`;
-                                    const isChecked = this.activeSubtopics.has(
-                                      fullKey,
-                                    );
-                                    return html`
-                                      <label class="subtopic-item">
-                                        <input
-                                          type="checkbox"
-                                          class="subtopic-checkbox"
-                                          .checked="${isChecked}"
-                                          @change="${(e: Event) => {
-                                            e.stopPropagation();
-                                            this.toggleSubtopic(
-                                              topicKey,
-                                              subKey,
-                                            );
-                                          }}"
-                                          @click="${(e: Event) =>
-                                            e.stopPropagation()}"
-                                        />
-                                        ${subtopic.label}
-                                      </label>
-                                    `;
-                                  },
-                                )}
-                              </div>
-                            `
-                            : ""}
                         `
                         : ""}
                     </div>
-                  `;
-                })}
-              </div>
 
-              <div class="controls">
-                <div class="search-container">
-                  <input
-                    type="text"
-                    placeholder="Search events..."
-                    class="search-input ${this.searchText ? "has-value" : ""}"
-                    .value="${this.searchText}"
-                    @input="${(e: Event) =>
-                      this.searchText = (e.target as HTMLInputElement).value}"
-                  />
-                  ${this.searchText
-                    ? html`
-                      <button
-                        type="button"
-                        class="clear-search"
-                        @click="${() => this.searchText = ""}"
-                      >
-                        ×
-                      </button>
-                    `
-                    : ""}
+                    <button
+                      type="button"
+                      class="action-button"
+                      @click="${this.toggleAllTopics}"
+                      title="Toggle all topics"
+                    >
+                      ${this.activeSubtopics.size > 0 ? "☐" : "☑"}
+                    </button>
+
+                    <button
+                      type="button"
+                      class="action-button"
+                      @click="${this.togglePause}"
+                      title="${this.isPaused ? "Resume" : "Pause"} (Space)"
+                    >
+                      ${this.isPaused ? "▶" : "⏸"}
+                    </button>
+
+                    <button
+                      type="button"
+                      class="action-button"
+                      @click="${this.clearEvents}"
+                      title="Clear events"
+                    >
+                      Clear
+                    </button>
+                  </div>
                 </div>
 
-                <button
-                  type="button"
-                  class="action-button"
-                  @click="${this.toggleAllTopics}"
-                  title="Toggle all topics"
-                >
-                  ${this.activeSubtopics.size > 0 ? "☐" : "☑"}
-                </button>
-
-                <button
-                  type="button"
-                  class="action-button"
-                  @click="${this.togglePause}"
-                  title="${this.isPaused ? "Resume" : "Pause"} (Space)"
-                >
-                  ${this.isPaused ? "▶" : "⏸"}
-                </button>
-
-                <button
-                  type="button"
-                  class="action-button"
-                  @click="${this.clearEvents}"
-                  title="Clear events"
-                >
-                  Clear
-                </button>
-              </div>
-            </div>
-
-            <div class="content-area ${this.resizeController.isResizing
-              ? "resizing"
-              : ""}">
-              ${this.renderEvents()}
-            </div>
+                <div class="content-area ${this.resizeController.isResizing
+                  ? "resizing"
+                  : ""}">
+                  ${this.renderEvents()}
+                </div>
+              `
+              : html`
+                <div class="content-area ${this.resizeController.isResizing
+                  ? "resizing"
+                  : ""}">
+                  ${this.renderWatchList()}
+                </div>
+              `}
           </div>
         `
         : ""}

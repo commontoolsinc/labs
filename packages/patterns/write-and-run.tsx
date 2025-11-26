@@ -164,32 +164,36 @@ export default pattern<Input, Output>(({ prompt }) => {
 
         {ifElse(
           isReady,
-          <div>
-            <h3>Generated Pattern</h3>
-            <div
-              style={{
-                border: "1px solid #ccc",
-                borderRadius: "8px",
-                padding: "16px",
-                backgroundColor: "#fff",
-              }}
-            >
-              {compiled.result}
+          <ct-cell-context $cell={compiled} label="Compiled Result">
+            <div>
+              <h3>Generated Pattern</h3>
+              <div
+                style={{
+                  border: "1px solid #ccc",
+                  borderRadius: "8px",
+                  padding: "16px",
+                  backgroundColor: "#fff",
+                }}
+              >
+                {compiled.result}
+              </div>
             </div>
-          </div>,
+          </ct-cell-context>,
           <span />,
         )}
 
         {ifElse(
           hasCode,
-          <div>
-            <h3>Generated Code</h3>
-            <ct-code-editor
-              value={generated.result}
-              language="text/x.typescript"
-              readonly
-            />
-          </div>,
+          <ct-cell-context $cell={generated} label="Generated Code">
+            <div>
+              <h3>Generated Code</h3>
+              <ct-code-editor
+                value={generated.result}
+                language="text/x.typescript"
+                readonly
+              />
+            </div>
+          </ct-cell-context>,
           <span />,
         )}
       </div>

@@ -62,14 +62,18 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
         <div>
           <h1>Suggestion Tester</h1>
           <h2>Counter</h2>
-          {derive(suggestion, (s) => {
-            return s?.cell ?? "waiting...";
-          })}
+          <ct-cell-context $cell={suggestion} label="Counter Suggestion">
+            {derive(suggestion, (s) => {
+              return s?.cell ?? "waiting...";
+            })}
+          </ct-cell-context>
 
           <h2>Note</h2>
-          {derive(suggestion2, (s) => {
-            return s?.cell ?? "waiting..";
-          })}
+          <ct-cell-context $cell={suggestion2} label="Note Suggestion">
+            {derive(suggestion2, (s) => {
+              return s?.cell ?? "waiting..";
+            })}
+          </ct-cell-context>
         </div>
       ),
       suggestion,

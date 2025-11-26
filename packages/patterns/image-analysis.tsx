@@ -72,63 +72,72 @@ export default recipe<ImageChatInput, ImageChatOutput>(
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="3" style="padding: 1rem;">
             {/* Image Upload */}
-            <ct-card>
-              <ct-vstack gap="2">
-                <ct-heading level={5}>Upload Images</ct-heading>
-                <ct-image-input
-                  multiple
-                  maxImages={5}
-                  showPreview
-                  previewSize="md"
-                  removable
-                  $images={images}
-                />
-              </ct-vstack>
-            </ct-card>
+            <ct-cell-context $cell={images} label="Uploaded Images">
+              <ct-card>
+                <ct-vstack gap="2">
+                  <ct-heading level={5}>Upload Images</ct-heading>
+                  <ct-image-input
+                    multiple
+                    maxImages={5}
+                    showPreview
+                    previewSize="md"
+                    removable
+                    $images={images}
+                  />
+                </ct-vstack>
+              </ct-card>
+            </ct-cell-context>
 
             {/* Prompt Input */}
-            <ct-card>
-              <ct-vstack gap="2">
-                <ct-heading level={5}>Your Question</ct-heading>
-                <ct-input
-                  $value={prompt}
-                  placeholder="Ask about the images..."
-                />
-              </ct-vstack>
-            </ct-card>
+            <ct-cell-context $cell={prompt} label="Image Prompt">
+              <ct-card>
+                <ct-vstack gap="2">
+                  <ct-heading level={5}>Your Question</ct-heading>
+                  <ct-input
+                    $value={prompt}
+                    placeholder="Ask about the images..."
+                  />
+                </ct-vstack>
+              </ct-card>
+            </ct-cell-context>
 
             {/* Response */}
-            {derive(
-              [result, pending, requestHash],
-              (
-                [res, pend, _hash]: [
-                  string | undefined,
-                  boolean | undefined,
-                  string | undefined,
-                ],
-              ) => {
-                if (pend) {
-                  return (
-                    <ct-card>
-                      <div>Analyzing...</div>
-                    </ct-card>
-                  );
-                }
+            <ct-cell-context
+              $cell={result as unknown as any}
+              label="LLM Response"
+            >
+              {derive(
+                [result, pending, requestHash],
+                (
+                  [res, pend, _hash]: [
+                    string | undefined,
+                    boolean | undefined,
+                    string | undefined,
+                  ],
+                ) => {
+                  if (pend) {
+                    return (
+                      <ct-card>
+                        <div>Analyzing...</div>
+                      </ct-card>
+                    );
+                  }
 
-                if (res) {
-                  return (
-                    <ct-card>
-                      <ct-vstack gap="2">
-                        <ct-heading level={5}>Response</ct-heading>
-                        <div style="white-space: pre-wrap;">{res}</div>
-                      </ct-vstack>
-                    </ct-card>
-                  );
-                }
+                  if (res) {
+                    return (
+                      <ct-card>
+                        <ct-vstack gap="2">
+                          <ct-heading level={5}>Response</ct-heading>
+                          <div style="white-space: pre-wrap;">{res}</div>
+                        </ct-vstack>
+                      </ct-card>
+                    );
+                  }
 
-                return null;
-              },
-            )}
+                  return null;
+                },
+              )}
+            </ct-cell-context>
           </ct-vstack>
         </ct-vscroll>
       </ct-screen>

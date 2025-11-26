@@ -241,7 +241,9 @@ export default pattern<ChatInput, ChatOutput>(
 
     const attachmentsAndTools = (
       <ct-hstack align="center" gap="1">
-        <ct-attachments-bar pinnedCells={pinnedCells} />
+        <ct-cell-context $cell={pinnedCells}>
+          <ct-attachments-bar pinnedCells={pinnedCells} />
+        </ct-cell-context>
         <ct-tools-chip tools={flattenedTools} />
         <ct-button
           variant="pill"
