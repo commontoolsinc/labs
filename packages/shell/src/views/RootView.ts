@@ -42,7 +42,7 @@ export class XRootView extends BaseView {
   // Non-private for typing in `updated()` callback
   _app = {
     apiUrl: API_URL,
-    view: { spaceName: "common-knowledge" },
+    view: { builtin: "home" },
   } as AppState;
 
   @property()

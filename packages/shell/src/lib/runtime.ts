@@ -106,8 +106,8 @@ export class RuntimeInternals extends EventTarget {
   ): Promise<RuntimeInternals> {
     let session;
     let spaceName;
-    if (typeof view === "string") {
-      switch (view) {
+    if ("builtin" in view) {
+      switch (view.builtin) {
         case "home":
           session = await createSession({ identity, spaceDid: identity.did() });
           spaceName = "<home>";
