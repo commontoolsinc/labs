@@ -5,6 +5,7 @@ import {
   type WishTag,
 } from "@commontools/api";
 import { h } from "@commontools/html";
+import { HttpProgramResolver } from "@commontools/js-compiler";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
@@ -14,7 +15,7 @@ import type {
 } from "../storage/interface.ts";
 import type { EntityId } from "../create-ref.ts";
 import { ALL_CHARMS_ID } from "./well-known.ts";
-import { type JSONSchema, UI } from "../builder/types.ts";
+import { type JSONSchema, type Recipe, UI } from "../builder/types.ts";
 
 // Define locally to avoid circular dependency with @commontools/charm
 const favoriteEntrySchema = {
@@ -30,14 +31,9 @@ const favoriteListSchema = {
   type: "array",
   items: favoriteEntrySchema,
 } as const satisfies JSONSchema;
+import { getRecipeEnvironment } from "../env.ts";
 
-function errorUI(message: string): VNode {
-  return h("span", { style: "color: red" }, `⚠️ ${message}`);
-}
-
-function cellLinkUI(cell: Cell<unknown>): VNode {
-  return h("ct-cell-link", { $cell: cell });
-}
+const WISH_TSX_PATH = getRecipeEnvironment().apiUrl + "api/patterns/wish.tsx";
 
 class WishError extends Error {
   constructor(message: string) {
@@ -147,19 +143,19 @@ function formatTarget(parsed: ParsedWishTarget): string {
 function resolveBase(
   parsed: ParsedWishTarget,
   ctx: WishContext,
-): BaseResolution {
+): BaseResolution[] {
   switch (parsed.key) {
     case "/":
-      return { cell: getSpaceCell(ctx) };
+      return [{ cell: getSpaceCell(ctx) }];
     case "#default":
-      return { cell: getSpaceCell(ctx), pathPrefix: ["defaultPattern"] };
+      return [{ cell: getSpaceCell(ctx), pathPrefix: ["defaultPattern"] }];
     case "#mentionable":
-      return {
+      return [{
         cell: getSpaceCell(ctx),
         pathPrefix: ["defaultPattern", "backlinksIndex", "mentionable"],
-      };
+      }];
     case "#recent":
-      return { cell: getSpaceCell(ctx), pathPrefix: ["recentCharms"] };
+      return [{ cell: getSpaceCell(ctx), pathPrefix: ["recentCharms"] }];
     case "#favorites": {
       // Favorites always come from the HOME space (user identity DID)
       const userDID = ctx.runtime.userIdentityDID;
@@ -175,7 +171,7 @@ function resolveBase(
 
       // No path = return favorites list
       if (parsed.path.length === 0) {
-        return { cell: homeSpaceCell, pathPrefix: ["favorites"] };
+        return [{ cell: homeSpaceCell, pathPrefix: ["favorites"] }];
       }
 
       // Path provided = search by tag
@@ -194,10 +190,10 @@ function resolveBase(
         throw new WishError(`No favorite found matching "${searchTerm}"`);
       }
 
-      return {
+      return [{
         cell: match.cell,
         pathPrefix: parsed.path.slice(1), // remaining path after search term
-      };
+      }];
     }
     case "#now": {
       if (parsed.path.length > 0) {
@@ -211,7 +207,7 @@ function resolveBase(
         undefined,
         ctx.tx,
       );
-      return { cell: nowCell };
+      return [{ cell: nowCell }];
     }
     default: {
       // Check if it's a well-known target
@@ -223,39 +219,81 @@ function resolveBase(
           ctx.parentCell.space,
           ctx.tx,
         );
-        return { cell: baseCell };
+        return [{ cell: baseCell }];
       }
 
-      // Unknown tag = search favorites by tag
-      const userDID = ctx.runtime.userIdentityDID;
-      if (!userDID) {
-        throw new WishError(
-          "User identity DID not available for favorites search",
+      // Hash tag: Look for exact matches in favorites.
+      if (parsed.key.startsWith("#")) {
+        // Unknown tag = search favorites by tag
+        const userDID = ctx.runtime.userIdentityDID;
+        if (!userDID) {
+          throw new WishError(
+            "User identity DID not available for favorites search",
+          );
+        }
+
+        const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+        const favoritesCell = homeSpaceCell.key("favorites").asSchema(
+          favoriteListSchema,
         );
+        const favorites = favoritesCell.get() || [];
+
+        // Match hash tags in tag field (the schema), all lowercase.
+        const searchTerm = parsed.key.toLowerCase();
+        const matches = favorites.filter((entry) => {
+          const hashtags =
+            entry.tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
+          return [...hashtags].some((m) => m[0] === searchTerm);
+        });
+
+        if (matches.length === 0) {
+          throw new WishError(`No favorite found matching "${searchTerm}"`);
+        }
+
+        return matches.map((match) => ({
+          cell: match.cell,
+          pathPrefix: parsed.path,
+        }));
       }
 
-      const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
-      const favoritesCell = homeSpaceCell.key("favorites").asSchema(
-        favoriteListSchema,
-      );
-      const favorites = favoritesCell.get() || [];
-
-      // Search term is the tag without the # prefix
-      const searchTerm = parsed.key.slice(1).toLowerCase();
-      const match = favorites.find((entry) =>
-        entry.tag?.toLowerCase().includes(searchTerm)
-      );
-
-      if (!match) {
-        throw new WishError(`No favorite found matching "${searchTerm}"`);
-      }
-
-      return {
-        cell: match.cell,
-        pathPrefix: parsed.path,
-      };
+      throw new WishError(`Wish target "${parsed.key}" is not recognized.`);
     }
   }
+}
+
+// fetchWishPattern runs at runtime scope, shared across all wish invocations
+let wishPatternFetchPromise: Promise<Recipe | undefined> | undefined;
+let wishPattern: Recipe | undefined;
+
+async function fetchWishPattern(
+  runtime: IRuntime,
+): Promise<Recipe | undefined> {
+  try {
+    const program = await runtime.harness.resolve(
+      new HttpProgramResolver(WISH_TSX_PATH),
+    );
+
+    if (!program) {
+      throw new WishError("Can't load wish.tsx");
+    }
+    const pattern = await runtime.recipeManager.compileRecipe(program);
+
+    if (!pattern) throw new WishError("Can't compile wish.tsx");
+
+    return pattern;
+  } catch (e) {
+    console.error("Can't load wish.tsx", e);
+    return undefined;
+  }
+}
+
+function errorUI(message: string): VNode {
+  return h("span", { style: "color: red" }, `⚠️ ${message}`);
+}
+
+// TODO(seefeld): Add button to replace this with wish.tsx getting more options
+function cellLinkUI(cell: Cell<unknown>): VNode {
+  return h("ct-cell-link", { $cell: cell });
 }
 
 const TARGET_SCHEMA = {
@@ -270,17 +308,64 @@ const TARGET_SCHEMA = {
       context: { type: "object", additionalProperties: { asCell: true } },
       scope: { type: "array", items: { type: "string" } },
     },
+    required: ["query"],
   }],
 } as const satisfies JSONSchema;
 
 export function wish(
   inputsCell: Cell<[unknown, unknown]>,
   sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
-  _addCancel: (cancel: () => void) => void,
-  _cause: Cell<any>[],
+  addCancel: (cancel: () => void) => void,
+  cause: Cell<any>[],
   parentCell: Cell<any>,
   runtime: IRuntime,
 ): Action {
+  // Per-instance wish pattern loading.
+  let wishPatternInput: WishParams | undefined;
+  let wishPatternResultCell: Cell<WishState<any>> | undefined;
+
+  function launchWishPattern(
+    input?: WishParams & { candidates?: Cell<unknown>[] },
+    providedTx?: IExtendedStorageTransaction,
+  ) {
+    if (input) wishPatternInput = input;
+
+    const tx = providedTx || runtime.edit();
+
+    if (!wishPatternResultCell) {
+      wishPatternResultCell = runtime.getCell(
+        parentCell.space,
+        { wish: { wishPattern: cause } },
+        undefined,
+        tx,
+      );
+
+      addCancel(() => runtime.runner.stop(wishPatternResultCell!));
+    }
+
+    if (!wishPattern) {
+      if (!wishPatternFetchPromise) {
+        wishPatternFetchPromise = fetchWishPattern(runtime).then((pattern) => {
+          wishPattern = pattern;
+          return pattern;
+        });
+      }
+      wishPatternFetchPromise.then((pattern) => {
+        if (pattern) {
+          launchWishPattern();
+        }
+      });
+    } else {
+      runtime.runSynced(wishPatternResultCell, wishPattern, wishPatternInput);
+    }
+
+    if (!providedTx) tx.commit();
+
+    return wishPatternResultCell;
+  }
+
+  // Wish action, reactive to changes in inputsCell and any cell we read during
+  // initial resolution
   return (tx: IExtendedStorageTransaction) => {
     const inputsWithTx = inputsCell.withTx(tx);
     const targetValue = inputsWithTx.asSchema(TARGET_SCHEMA).get();
@@ -295,14 +380,15 @@ export function wish(
       try {
         const parsed = parseWishTarget(wishTarget);
         const ctx: WishContext = { runtime, tx, parentCell };
-        const baseResolution = resolveBase(parsed, ctx);
-        const combinedPath = baseResolution.pathPrefix
-          ? [...baseResolution.pathPrefix, ...parsed.path]
+        const baseResolutions = resolveBase(parsed, ctx);
+
+        // Just use the first result (if there aren't any, the above throws)
+        const combinedPath = baseResolutions[0].pathPrefix
+          ? [...baseResolutions[0].pathPrefix, ...parsed.path]
           : parsed.path;
-        const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
+        const resolvedCell = resolvePath(baseResolutions[0].cell, combinedPath);
         sendResult(tx, resolvedCell);
-      } catch (e) {
-        console.error(e instanceof WishError ? e.message : e);
+      } catch (_e) {
         sendResult(tx, undefined);
       }
       return;
@@ -314,7 +400,6 @@ export function wish(
         const errorMsg = `Wish target "${
           JSON.stringify(targetValue)
         }" has no query.`;
-        console.error(errorMsg);
         sendResult(
           tx,
           { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
@@ -330,21 +415,33 @@ export function wish(
             path: path ?? [],
           };
           const ctx: WishContext = { runtime, tx, parentCell };
-          const baseResolution = resolveBase(parsed, ctx);
-          const combinedPath = baseResolution.pathPrefix
-            ? [...baseResolution.pathPrefix, ...(path ?? [])]
-            : path ?? [];
-          const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
-          const resultCell = schema
-            ? resolvedCell.asSchema(schema)
-            : resolvedCell;
-          sendResult(tx, {
-            result: resultCell,
-            [UI]: cellLinkUI(resultCell),
+          const baseResolutions = resolveBase(parsed, ctx);
+          const resultCells = baseResolutions.map((baseResolution) => {
+            const combinedPath = baseResolution.pathPrefix
+              ? [...baseResolution.pathPrefix, ...(path ?? [])]
+              : path ?? [];
+            const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
+            return schema ? resolvedCell.asSchema(schema) : resolvedCell;
           });
+          if (resultCells.length === 1) {
+            // If it's one result, just return it directly
+            sendResult(tx, {
+              result: resultCells[0],
+              [UI]: cellLinkUI(resultCells[0]),
+            });
+          } else {
+            // If it's multiple result, launch the wish pattern, which will
+            // immediately return the first candidate as result
+            sendResult(
+              tx,
+              launchWishPattern({
+                ...targetValue as WishParams,
+                candidates: resultCells,
+              }, tx),
+            );
+          }
         } catch (e) {
           const errorMsg = e instanceof WishError ? e.message : String(e);
-          console.error(errorMsg);
           sendResult(
             tx,
             { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<
@@ -353,17 +450,12 @@ export function wish(
           );
         }
       } else {
-        const errorMsg = "Non hash tag or path query not yet supported";
-        console.error(errorMsg);
-        sendResult(
-          tx,
-          { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
-        );
+        // Otherwise it's a generic query and we need to launch the wish pattern
+        sendResult(tx, launchWishPattern(targetValue as WishParams, tx));
       }
       return;
     } else {
       const errorMsg = `Wish target is not recognized: ${targetValue}`;
-      console.error(errorMsg);
       sendResult(
         tx,
         { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
