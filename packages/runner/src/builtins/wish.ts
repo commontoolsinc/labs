@@ -377,7 +377,6 @@ export function wish(
         const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
         sendResult(tx, resolvedCell);
       } catch (e) {
-        console.error(e instanceof WishError ? e.message : e);
         sendResult(tx, undefined);
       }
       return;
@@ -389,7 +388,6 @@ export function wish(
         const errorMsg = `Wish target "${
           JSON.stringify(targetValue)
         }" has no query.`;
-        console.error(errorMsg);
         sendResult(
           tx,
           { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
@@ -419,7 +417,6 @@ export function wish(
           });
         } catch (e) {
           const errorMsg = e instanceof WishError ? e.message : String(e);
-          console.error(errorMsg);
           sendResult(
             tx,
             { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<
@@ -434,7 +431,6 @@ export function wish(
       return;
     } else {
       const errorMsg = `Wish target is not recognized: ${targetValue}`;
-      console.error(errorMsg);
       sendResult(
         tx,
         { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
