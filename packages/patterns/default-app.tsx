@@ -177,12 +177,9 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                   {allCharms.map((charm) => (
                     <tr>
                       <td>
-                        <a
-                          className="pattern-link"
-                          onClick={visit({ charm })}
-                        >
-                          {charm?.[NAME] || "Untitled Charm"}
-                        </a>
+                        <ct-cell-context $cell={charm}>
+                          <ct-cell-link $cell={charm} />
+                        </ct-cell-context>
                       </td>
                       <td>
                         <ct-button

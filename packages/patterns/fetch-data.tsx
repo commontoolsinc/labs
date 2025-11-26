@@ -203,37 +203,39 @@ export default recipe<
             />
           </div>
 
-          <div>
-            <h3 id="github-title">
-              {validData.name}
-            </h3>
-            <p>
-              by {validData.owner.login}
-            </p>
-            <p>{validData.description}</p>
+          <ct-cell-context $cell={validData}>
             <div>
+              <h3 id="github-title">
+                {validData.name}
+              </h3>
+              <p>
+                by {validData.owner.login}
+              </p>
+              <p>{validData.description}</p>
               <div>
-                <span>⭐</span>
-                <strong>{validData.stargazers_count}</strong> stars
-              </div>
-              <div>
-                <span>🍴</span>
-                <strong>{validData.forks_count}</strong> forks
-              </div>
-              <div>
-                <span>🔤</span>
-                <strong>{validData.language}</strong>
-              </div>
-              <div>
-                <a
-                  href={validData.html_url}
-                  target="_blank"
-                >
-                  View on GitHub →
-                </a>
+                <div>
+                  <span>⭐</span>
+                  <strong>{validData.stargazers_count}</strong> stars
+                </div>
+                <div>
+                  <span>🍴</span>
+                  <strong>{validData.forks_count}</strong> forks
+                </div>
+                <div>
+                  <span>🔤</span>
+                  <strong>{validData.language}</strong>
+                </div>
+                <div>
+                  <a
+                    href={validData.html_url}
+                    target="_blank"
+                  >
+                    View on GitHub →
+                  </a>
+                </div>
               </div>
             </div>
-          </div>
+          </ct-cell-context>
         </div>
       ),
       repo: validData,

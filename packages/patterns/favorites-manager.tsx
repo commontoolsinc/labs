@@ -20,18 +20,20 @@ export default pattern<Record<string, never>>((_) => {
     [UI]: (
       <div>
         {wishResult.result.map((item) => (
-          <div>
-            <ct-cell-link $cell={item.cell} />
-            <ct-button
-              onClick={onRemoveFavorite({
-                favorites: wishResult.result,
-                item: item.cell,
-              })}
-            >
-              Remove
-            </ct-button>
-            <pre>{item.description}</pre>
-          </div>
+          <ct-cell-context $cell={item.cell}>
+            <div>
+              <ct-cell-link $cell={item.cell} />
+              <ct-button
+                onClick={onRemoveFavorite({
+                  favorites: wishResult.result,
+                  item: item.cell,
+                })}
+              >
+                Remove
+              </ct-button>
+              <pre>{item.description}</pre>
+            </div>
+          </ct-cell-context>
         ))}
       </div>
     ),

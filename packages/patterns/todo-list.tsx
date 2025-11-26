@@ -86,20 +86,22 @@ export default pattern<Input, Output>(({ items }) => {
         </div>
 
         {/* AI Suggestion */}
-        <div
-          style={{
-            marginTop: "16px",
-            padding: "12px",
-            backgroundColor: "#f5f5f5",
-            borderRadius: "8px",
-          }}
-        >
-          <h3>AI Suggestion</h3>
-          {derive(suggestion, (s) =>
-            s?.cell ?? (
-              <span style={{ opacity: 0.6 }}>Getting suggestion...</span>
-            ))}
-        </div>
+        <ct-cell-context $cell={suggestion} label="AI Suggestion">
+          <div
+            style={{
+              marginTop: "16px",
+              padding: "12px",
+              backgroundColor: "#f5f5f5",
+              borderRadius: "8px",
+            }}
+          >
+            <h3>AI Suggestion</h3>
+            {derive(suggestion, (s) =>
+              s?.cell ?? (
+                <span style={{ opacity: 0.6 }}>Getting suggestion...</span>
+              ))}
+          </div>
+        </ct-cell-context>
       </div>
     ),
     items,
