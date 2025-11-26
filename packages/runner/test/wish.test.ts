@@ -624,7 +624,8 @@ describe("wish built-in", () => {
         await runtime.idle();
 
         const missingResult = result.key("missing").get();
-        expect(missingResult?.error).toMatch(/not recognized/);
+        // Unknown tags now search favorites, returning "No favorite found" error
+        expect(missingResult?.error).toMatch(/No favorite found matching/);
         expect(errors.length).toBeGreaterThan(0);
       } finally {
         console.error = originalError;
@@ -740,7 +741,8 @@ describe("wish built-in", () => {
           string | symbol,
           unknown
         >;
-        expect(wishResult?.error).toMatch(/not recognized/);
+        // Unknown tags now search favorites, returning "No favorite found" error
+        expect(wishResult?.error).toMatch(/No favorite found matching/);
 
         const ui = wishResult?.[UI] as {
           type: string;
@@ -752,7 +754,7 @@ describe("wish built-in", () => {
         expect(ui?.name).toEqual("span");
         expect(ui?.props?.style).toEqual("color: red");
         expect(ui?.children).toMatch(/⚠️/);
-        expect(ui?.children).toMatch(/not recognized/);
+        expect(ui?.children).toMatch(/No favorite found matching/);
       } finally {
         console.error = originalError;
       }

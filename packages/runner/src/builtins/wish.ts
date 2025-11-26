@@ -15,7 +15,21 @@ import type {
 import type { EntityId } from "../create-ref.ts";
 import { ALL_CHARMS_ID } from "./well-known.ts";
 import { type JSONSchema, UI } from "../builder/types.ts";
-import { favoriteListSchema } from "@commontools/charm";
+
+// Define locally to avoid circular dependency with @commontools/charm
+const favoriteEntrySchema = {
+  type: "object",
+  properties: {
+    cell: { not: true, asCell: true },
+    tag: { type: "string", default: "" },
+  },
+  required: ["cell"],
+} as const satisfies JSONSchema;
+
+const favoriteListSchema = {
+  type: "array",
+  items: favoriteEntrySchema,
+} as const satisfies JSONSchema;
 
 function errorUI(message: string): VNode {
   return h("span", { style: "color: red" }, `⚠️ ${message}`);
