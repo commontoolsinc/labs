@@ -310,7 +310,7 @@ export function wish(
       const { query, path, schema, context: _context, scope: _scope } =
         targetValue as WishParams;
 
-      if (!query === undefined || query === null || query === "") {
+      if (query === undefined || query === null || query === "") {
         const errorMsg = `Wish target "${
           JSON.stringify(targetValue)
         }" has no query.`;
