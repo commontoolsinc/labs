@@ -19,7 +19,7 @@ export function navigateTo(
     // The main reason we might be called again after navigating is that the
     // transaction to update the result cell failed, so we'll just set it again.
     if (navigated) {
-      resultCell.set(true);
+      resultCell?.withTx(tx).set(true);
       return;
     }
 
@@ -40,7 +40,7 @@ export function navigateTo(
     }
 
     // If the result cell is already true, we've already navigated.
-    if (resultCell.get()) return;
+    if (resultCell.withTx(tx).get()) return;
 
     // Read with a schema that won't subscribe to the whole charm
     const inputsWithLog = inputsCell.asSchema({ not: true, asCell: true })

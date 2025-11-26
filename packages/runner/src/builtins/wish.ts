@@ -16,6 +16,21 @@ import type { EntityId } from "../create-ref.ts";
 import { ALL_CHARMS_ID } from "./well-known.ts";
 import { type JSONSchema, UI } from "../builder/types.ts";
 
+// Define locally to avoid circular dependency with @commontools/charm
+const favoriteEntrySchema = {
+  type: "object",
+  properties: {
+    cell: { not: true, asCell: true },
+    tag: { type: "string", default: "" },
+  },
+  required: ["cell"],
+} as const satisfies JSONSchema;
+
+const favoriteListSchema = {
+  type: "array",
+  items: favoriteEntrySchema,
+} as const satisfies JSONSchema;
+
 function errorUI(message: string): VNode {
   return h("span", { style: "color: red" }, `⚠️ ${message}`);
 }
@@ -157,7 +172,32 @@ function resolveBase(
         undefined,
         ctx.tx,
       );
-      return { cell: homeSpaceCell, pathPrefix: ["favorites"] };
+
+      // No path = return favorites list
+      if (parsed.path.length === 0) {
+        return { cell: homeSpaceCell, pathPrefix: ["favorites"] };
+      }
+
+      // Path provided = search by tag
+      const searchTerm = parsed.path[0].toLowerCase();
+      const favoritesCell = homeSpaceCell.key("favorites").asSchema(
+        favoriteListSchema,
+      );
+      const favorites = favoritesCell.get() || [];
+
+      // Case-insensitive search in tag
+      const match = favorites.find((entry) =>
+        entry.tag?.toLowerCase().includes(searchTerm)
+      );
+
+      if (!match) {
+        throw new WishError(`No favorite found matching "${searchTerm}"`);
+      }
+
+      return {
+        cell: match.cell,
+        pathPrefix: parsed.path.slice(1), // remaining path after search term
+      };
     }
     case "#now": {
       if (parsed.path.length > 0) {
@@ -174,21 +214,46 @@ function resolveBase(
       return { cell: nowCell };
     }
     default: {
+      // Check if it's a well-known target
       const resolution = WISH_TARGETS[parsed.key];
-      if (!resolution) {
+      if (resolution) {
+        const baseCell = resolveWishTarget(
+          resolution,
+          ctx.runtime,
+          ctx.parentCell.space,
+          ctx.tx,
+        );
+        return { cell: baseCell };
+      }
+
+      // Unknown tag = search favorites by tag
+      const userDID = ctx.runtime.userIdentityDID;
+      if (!userDID) {
         throw new WishError(
-          `Wish target "${formatTarget(parsed)}" is not recognized.`,
+          "User identity DID not available for favorites search",
         );
       }
 
-      const baseCell = resolveWishTarget(
-        resolution,
-        ctx.runtime,
-        ctx.parentCell.space,
-        ctx.tx,
+      const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+      const favoritesCell = homeSpaceCell.key("favorites").asSchema(
+        favoriteListSchema,
+      );
+      const favorites = favoritesCell.get() || [];
+
+      // Search term is the tag without the # prefix
+      const searchTerm = parsed.key.slice(1).toLowerCase();
+      const match = favorites.find((entry) =>
+        entry.tag?.toLowerCase().includes(searchTerm)
       );
 
-      return { cell: baseCell };
+      if (!match) {
+        throw new WishError(`No favorite found matching "${searchTerm}"`);
+      }
+
+      return {
+        cell: match.cell,
+        pathPrefix: parsed.path,
+      };
     }
   }
 }
@@ -265,7 +330,7 @@ export function wish(
           ? [...baseResolution.pathPrefix, ...(path ?? [])]
           : path ?? [];
         const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
-        const resultCell = schema
+        const resultCell = schema !== undefined
           ? resolvedCell.asSchema(schema)
           : resolvedCell;
         sendResult(tx, {

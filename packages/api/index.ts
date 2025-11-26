@@ -1272,11 +1272,11 @@ export type WishState<T> = {
 
 export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<boolean>;
 export type WishFunction = {
-  <T = unknown>(target: Opaque<WishParams>): OpaqueRef<WishState<T>>;
+  <T = unknown>(target: Opaque<WishParams>): OpaqueRef<Required<WishState<T>>>;
   <S extends JSONSchema = JSONSchema>(
     target: Opaque<WishParams>,
     schema: S,
-  ): OpaqueRef<WishState<Schema<S>>>;
+  ): OpaqueRef<Required<WishState<Schema<S>>>>;
 
   // TODO(seefeld): Remove old interface mid December 2025
   <T = unknown>(target: Opaque<string>): OpaqueRef<T>;

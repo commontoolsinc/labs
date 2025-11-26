@@ -2,6 +2,7 @@ export {
   charmId,
   charmListSchema,
   CharmManager,
+  favoriteListSchema,
   getRecipeIdFromCharm,
   type NameSchema,
   nameSchema,

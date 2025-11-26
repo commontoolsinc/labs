@@ -96,7 +96,7 @@ export interface SpaceCellContents {
  * See docs/common/HOME_SPACE.md for more details.
  */
 export interface HomeSpaceCellContents {
-  favorites: Cell<Cell<never>[]>;
+  favorites: Cell<{ cell: Cell<unknown>; tag: string }[]>;
 }
 
 export interface RuntimeOptions {
@@ -130,7 +130,14 @@ export const homeSpaceCellSchema: JSONSchema = {
   properties: {
     favorites: {
       type: "array",
-      items: { not: true, asCell: true },
+      items: {
+        type: "object",
+        properties: {
+          cell: { not: true, asCell: true },
+          tag: { type: "string", default: "" },
+        },
+        required: ["cell"],
+      },
       asCell: true,
     },
   },
