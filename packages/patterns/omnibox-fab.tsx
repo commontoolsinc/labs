@@ -134,7 +134,9 @@ export default pattern<OmniboxFABInput>(
                 {omnibot.ui.attachmentsAndTools}
               </div>
               <div style="flex: 1; overflow-y: auto; min-height: 0;">
-                {omnibot.ui.chatLog}
+                <ct-cell-context $cell={omnibot}>
+                  {omnibot.ui.chatLog}
+                </ct-cell-context>
               </div>
             </div>
 
@@ -162,12 +164,14 @@ export default pattern<OmniboxFABInput>(
                   onClick={toggle({ value: showHistory })}
                   style="cursor: pointer;"
                 >
-                  <ct-chat-message
-                    role="assistant"
-                    compact
-                    content={latestAssistantMessage}
-                    pending={omnibot.pending}
-                  />
+                  <ct-cell-context $cell={latestAssistantMessage}>
+                    <ct-chat-message
+                      role="assistant"
+                      compact
+                      content={latestAssistantMessage}
+                      pending={omnibot.pending}
+                    />
+                  </ct-cell-context>
                 </div>
               </div>,
               null,

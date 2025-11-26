@@ -58,21 +58,25 @@ export default recipe<Input>(
       [NAME]: "My First Compiler",
       [UI]: (
         <div>
-          <ct-code-editor
-            value={code}
-            language="text/x.typescript"
-            onChange={updateCode({ code })}
-            //errors={errors}
-          />
-          {ifElse(
-            error,
-            <b>fix the error: {error}</b>,
-            <ct-button
-              onClick={visit({ result })}
-            >
-              Navigate To Charm
-            </ct-button>,
-          )}
+          <ct-cell-context $cell={code} label="Source Code">
+            <ct-code-editor
+              value={code}
+              language="text/x.typescript"
+              onChange={updateCode({ code })}
+              //errors={errors}
+            />
+          </ct-cell-context>
+          <ct-cell-context $cell={result} label="Compile Result">
+            {ifElse(
+              error,
+              <b>fix the error: {error}</b>,
+              <ct-button
+                onClick={visit({ result })}
+              >
+                Navigate To Charm
+              </ct-button>,
+            )}
+          </ct-cell-context>
         </div>
       ),
       code,
