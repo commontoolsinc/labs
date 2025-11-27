@@ -444,7 +444,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     }
 
     // Create an entity ID from the cause, including the frame's
-    const id = toURI(createRef({ frame: cause }, cause));
+    const id = toURI(createRef({ frame: cause }, this._frame.cause));
 
     // Populate the id in the shared causeContainer
     // All siblings will see this update
@@ -1074,7 +1074,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
         : this._initialValue,
       name: this._causeContainer.cause as string | undefined,
       external: this._link.id
-        ? this.getAsWriteRedirectLink({
+        ? this.getAsLink({
           baseSpace: this._frame.space,
           includeSchema: true,
         })

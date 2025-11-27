@@ -4,11 +4,15 @@ import "@commontools/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { type Cell, type JSONSchema } from "../src/builder/types.ts";
+import {
+  type Cell,
+  type JSONSchema,
+  type Schema,
+} from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
-import { isCell } from "../src/cell.ts";
+import { isCell, isStream } from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { isAnyCellLink, parseLink } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -23,6 +27,7 @@ describe("Recipe Runner", () => {
   let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
   let derive: ReturnType<typeof createBuilder>["commontools"]["derive"];
   let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
   let Cell: ReturnType<typeof createBuilder>["commontools"]["Cell"];
   let handler: ReturnType<typeof createBuilder>["commontools"]["handler"];
   let byRef: ReturnType<typeof createBuilder>["commontools"]["byRef"];
@@ -45,6 +50,7 @@ describe("Recipe Runner", () => {
       lift,
       derive,
       recipe,
+      pattern,
       Cell,
       handler,
       byRef,
@@ -1339,5 +1345,102 @@ describe("Recipe Runner", () => {
     await runtime.idle();
 
     expect(charm.key("text").get()).toEqual("b");
+  });
+
+  it("should allow Cell<Array>.push of newly created charms", async () => {
+    const InnerSchema = {
+      type: "object",
+      properties: {
+        text: { type: "string" },
+      },
+      required: ["text"],
+    } as const satisfies JSONSchema;
+
+    const OuterSchema = {
+      type: "object",
+      properties: {
+        list: {
+          type: "array",
+          items: InnerSchema,
+          default: [],
+        },
+      },
+      required: ["list"],
+    } as const satisfies JSONSchema;
+
+    const HandlerState = {
+      type: "object",
+      properties: {
+        list: {
+          type: "array",
+          items: InnerSchema,
+          default: [],
+          asCell: true,
+        },
+      },
+      required: ["list"],
+    } as const satisfies JSONSchema;
+
+    const OutputWithHandler = {
+      type: "object",
+      properties: {
+        list: { type: "array", items: InnerSchema, asCell: true },
+        add: { ...InnerSchema, asStream: true },
+      },
+      required: ["add", "list"],
+    } as const satisfies JSONSchema;
+
+    const charmCell = runtime.getCell<Schema<typeof OutputWithHandler>>(
+      space,
+      "should allow Cell<Array>.push of newly created charms",
+      OutputWithHandler,
+      tx,
+    );
+
+    const innerPattern = pattern(
+      ({ text }) => {
+        return { text };
+      },
+      InnerSchema,
+      InnerSchema,
+    );
+
+    const add = handler(
+      InnerSchema,
+      HandlerState,
+      ({ text }, { list }) => {
+        const inner = innerPattern({ text });
+        list.push(inner);
+      },
+    );
+
+    const outerPattern = pattern(
+      ({ list }) => {
+        return { list, add: add({ list }) };
+      },
+      OuterSchema,
+      OutputWithHandler,
+    );
+
+    runtime.run(tx, outerPattern, {}, charmCell);
+    tx.commit();
+
+    await runtime.idle();
+
+    tx = runtime.edit();
+
+    const result = charmCell.withTx(tx).get();
+    expect(isCell(result.list)).toBe(true);
+    expect(result.list.get()).toEqual([]);
+    expect(isStream(result.add)).toBe(true);
+
+    result.add.withTx(tx).send({ text: "hello" });
+    tx.commit();
+
+    await runtime.idle();
+
+    tx = runtime.edit();
+    const result2 = charmCell.withTx(tx).get();
+    expect(result2.list.get()).toEqual([{ text: "hello" }]);
   });
 });

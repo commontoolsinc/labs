@@ -57,6 +57,8 @@ function opaqueRefWithCell<T>(
     cell.setInitialValue(value as T);
   }
 
+  frame.opaqueRefs.add(cell);
+
   // Use the cell's built-in method to get a proxied OpaqueRef
   return cell.getAsOpaqueRefProxy();
 }

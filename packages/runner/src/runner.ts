@@ -37,6 +37,7 @@ import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   isLink,
+  isSigilLink,
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
@@ -1003,7 +1004,7 @@ export class Runner implements IRunner {
           const result = fn(argument);
 
           const postRun = (result: any) => {
-            if (containsOpaqueRef(result)) {
+            if (containsOpaqueRef(result) || frame.opaqueRefs.size > 0) {
               const resultRecipe = recipeFromFrame(
                 "event handler result",
                 undefined,
@@ -1094,7 +1095,7 @@ export class Runner implements IRunner {
           const result = fn(argument);
 
           const postRun = (result: any) => {
-            if (containsOpaqueRef(result)) {
+            if (containsOpaqueRef(result) || frame.opaqueRefs.size > 0) {
               const resultRecipe = recipeFromFrame(
                 "action result",
                 undefined,
@@ -1276,24 +1277,44 @@ export class Runner implements IRunner {
       processCell,
     );
     const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
-    const resultCell = this.runtime.getCell(
-      processCell.space,
-      {
-        recipe: module.implementation,
-        parent: processCell.entityId,
-        inputBindings,
-        outputBindings,
-      },
-      undefined,
-      tx,
-    );
+
+    // If output bindings is a link to a non-redirect cell,
+    // use that instead of creating a new cell.
+    let resultCell;
+    let sendToBindings: boolean;
+    if (isSigilLink(outputBindings) && !isWriteRedirectLink(outputBindings)) {
+      resultCell = this.runtime.getCellFromLink(
+        parseLink(outputBindings, processCell),
+        recipeImpl.resultSchema,
+        tx,
+      );
+      sendToBindings = false;
+    } else {
+      resultCell = this.runtime.getCell(
+        processCell.space,
+        {
+          recipe: module.implementation,
+          parent: processCell.entityId,
+          inputBindings,
+          outputBindings,
+        },
+        recipeImpl.resultSchema,
+        tx,
+      );
+      sendToBindings = true;
+    }
+
     this.run(tx, recipeImpl, inputs, resultCell);
-    sendValueToBinding(
-      tx,
-      processCell,
-      outputBindings,
-      resultCell.getAsLink({ base: processCell }),
-    );
+
+    if (sendToBindings) {
+      sendValueToBinding(
+        tx,
+        processCell,
+        outputBindings,
+        resultCell.getAsLink({ base: processCell }),
+      );
+    }
+
     // TODO(seefeld): Make sure to not cancel after a recipe is elevated to a
     // charm, e.g. via navigateTo. Nothing is cancelling right now, so leaving
     // this as TODO.
