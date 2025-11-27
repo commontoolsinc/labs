@@ -158,8 +158,19 @@ export function wish<T = unknown>(
     type: "ref",
     implementation: "wish",
     argumentSchema: {
-      type: "string",
-      default: "",
+      anyOf: [{
+        type: "string",
+        default: "",
+      }, {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          path: { type: "array", items: { type: "string" } },
+          schema: { type: "object" },
+          context: { type: "object", additionalProperties: { asCell: true } },
+          scope: { type: "array", items: { type: "string" } },
+        },
+      }],
     } as const satisfies JSONSchema,
     resultSchema,
   })(param);
