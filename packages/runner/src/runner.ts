@@ -1004,7 +1004,7 @@ export class Runner implements IRunner {
           const result = fn(argument);
 
           const postRun = (result: any) => {
-            if (containsOpaqueRef(result)) {
+            if (containsOpaqueRef(result) || frame.opaqueRefs.size > 0) {
               const resultRecipe = recipeFromFrame(
                 "event handler result",
                 undefined,
@@ -1095,7 +1095,7 @@ export class Runner implements IRunner {
           const result = fn(argument);
 
           const postRun = (result: any) => {
-            if (containsOpaqueRef(result)) {
+            if (containsOpaqueRef(result) || frame.opaqueRefs.size > 0) {
               const resultRecipe = recipeFromFrame(
                 "action result",
                 undefined,

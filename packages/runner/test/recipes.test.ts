@@ -1411,7 +1411,6 @@ describe("Recipe Runner", () => {
       ({ text }, { list }) => {
         const inner = innerPattern({ text });
         list.push(inner);
-        return inner; // Necessary to trigger recipe run
       },
     );
 
