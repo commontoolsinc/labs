@@ -35,27 +35,35 @@ export async function create(
     new HttpProgramResolver(config.url.href),
   );
 
-  const charm = await cc.create(program, undefined, config.cause);
+  const charm = await cc.create(program, { start: true }, config.cause);
 
   // Wait for the link to be processed
   await runtime.idle();
   await manager.synced();
 
-  if (type === "space-default") {
-    // Link the default pattern to the space cell
-    await manager.linkDefaultPattern(charm.getCell());
-  }
+  // Link the default pattern to the space cell
+  await manager.linkDefaultPattern(charm.getCell());
 
   return charm;
 }
 
-export function getPattern(
-  charms: CharmController[],
+export async function get(
+  cc: CharmsController,
+): Promise<CharmController | undefined> {
+  const pattern = await cc.manager().getDefaultPattern();
+  if (!pattern) {
+    return undefined;
+  }
+  return new CharmController(cc.manager(), pattern);
+}
+
+export async function getOrCreate(
+  cc: CharmsController,
   type: BuiltinPatternType,
-): CharmController | undefined {
-  const config = Configs[type];
-  return charms.find((c) => {
-    const name = c.name();
-    return name && name.startsWith(config.name);
-  });
+): Promise<CharmController> {
+  const pattern = await get(cc);
+  if (pattern) {
+    return pattern;
+  }
+  return await create(cc, type);
 }

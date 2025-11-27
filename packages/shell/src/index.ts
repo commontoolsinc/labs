@@ -16,7 +16,6 @@ console.log(`ENVIRONMENT=${ENVIRONMENT}`);
 console.log(`API_URL=${API_URL}`);
 console.log(`COMMIT_SHA=${COMMIT_SHA}`);
 
-// Configure LLM client to use the correct API URL
 setLLMUrl(API_URL.toString());
 
 setRecipeEnvironment({ apiUrl: API_URL });

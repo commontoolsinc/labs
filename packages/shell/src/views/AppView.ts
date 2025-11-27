@@ -1,14 +1,14 @@
 import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 
-import { AppState } from "../lib/app/mod.ts";
+import { AppState, AppView } from "../lib/app/mod.ts";
 import { BaseView } from "./BaseView.ts";
 import { KeyStore } from "@commontools/identity";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { DebuggerController } from "../lib/debugger-controller.ts";
 import "./DebuggerView.ts";
 import { Task } from "@lit/task";
-import { CharmController } from "@commontools/charm/ops";
+import { CharmController, CharmsController } from "@commontools/charm/ops";
 import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
 import { NAME } from "@commontools/runner";
 import { type NameSchema, nameSchema } from "@commontools/charm";
@@ -129,45 +129,6 @@ export class XAppView extends BaseView {
     this.hasSidebarContent = event.detail.hasSidebarContent;
   };
 
-  // Maps the app level view to a specific charm to load
-  // as the primary, active charm.
-  _activeCharmId = new Task(this, {
-    task: async ([app, rt]): Promise<string | undefined> => {
-      if (!app || !rt) {
-        return;
-      }
-      if ("builtin" in app.view) {
-        if (app.view.builtin !== "home") {
-          console.warn("Unsupported view type");
-          return;
-        }
-        {
-          await rt.cc().manager().synced();
-          const pattern = await PatternFactory.getPattern(
-            rt.cc().getAllCharms(),
-            "home",
-          );
-          if (pattern) {
-            return pattern.id;
-          }
-        }
-        const pattern = await PatternFactory.create(
-          rt.cc(),
-          "home",
-        );
-        return pattern.id;
-      } else if ("spaceDid" in app.view) {
-        console.warn("Unsupported view type");
-      } else if ("spaceName" in app.view) {
-        // eventually, this should load the default pattern
-        // for a space if needed, but for now is handled
-        // in BodyView, and only set the active charm ID
-        // for explicit charms set in the URL.
-        return app.view.charmId;
-      }
-    },
-    args: () => [this.app, this.rt],
-  });
   private handleCellWatch = (e: Event) => {
     const event = e as CustomEvent<{ cell: unknown; label?: string }>;
     const { cell, label } = event.detail;
@@ -192,30 +153,42 @@ export class XAppView extends BaseView {
   };
 
   // Do not make private, integration tests access this directly.
-  _activeCharm = new Task(this, {
-    task: async ([activeCharmId]): Promise<CharmController | undefined> => {
-      if (!this.rt || !this.app || !activeCharmId) {
+  //
+  // This fetches the active pattern and space default pattern derived
+  // from the current view.
+  _activePatterns = new Task(this, {
+    task: async (
+      [app, rt],
+    ): Promise<
+      | { activePattern: CharmController; defaultPattern: CharmController }
+      | undefined
+    > => {
+      if (!app || !rt) {
         this.#setTitleSubscription();
         return;
       }
-      const current: CharmController | undefined = this._activeCharm.value;
-      if (
-        current && current.id === activeCharmId
-      ) {
-        return current;
-      }
-      const activeCharm = await this.rt.cc().get(
-        activeCharmId,
-        true,
-        nameSchema,
-      );
-      // Record the charm as recently accessed so recents stay fresh.
-      await this.rt.cc().manager().trackRecentCharm(activeCharm.getCell());
-      this.#setTitleSubscription(activeCharm);
 
-      return activeCharm;
+      const patterns = await viewToPatterns(
+        rt.cc(),
+        app.view,
+        this._activePatterns.value?.activePattern,
+      );
+      if (!patterns) {
+        this.#setTitleSubscription();
+        return;
+      }
+
+      // Record the charm as recently accessed so recents stay fresh.
+      await rt.cc().manager().trackRecentCharm(
+        patterns.activePattern.getCell(),
+      );
+      this.#setTitleSubscription(
+        patterns.activePattern as CharmController<NameSchema>,
+      );
+
+      return patterns;
     },
-    args: () => [this._activeCharmId.value],
+    args: () => [this.app, this.rt],
   });
 
   #setTitleSubscription(activeCharm?: CharmController<NameSchema>) {
@@ -280,10 +253,14 @@ export class XAppView extends BaseView {
     const unauthenticated = html`
       <x-login-view .keyStore="${this.keyStore}"></x-login-view>
     `;
+    const patterns = this._activePatterns.value;
+    const activePattern = patterns?.activePattern;
+    const defaultPattern = patterns?.defaultPattern;
     const authenticated = html`
       <x-body-view
         .rt="${this.rt}"
-        .activeCharm="${this._activeCharm.value}"
+        .activeCharm="${activePattern}"
+        .defaultCharm="${defaultPattern}"
         .showShellCharmListView="${app.showShellCharmListView ?? false}"
         .showSidebar="${app.showSidebar ?? false}"
       ></x-body-view>
@@ -301,7 +278,7 @@ export class XAppView extends BaseView {
           .rt="${this.rt}"
           .keyStore="${this.keyStore}"
           .charmTitle="${this.charmTitle}"
-          .charmId="${this._activeCharmId.value}"
+          .charmId="${activePattern?.id}"
           .showShellCharmListView="${app.showShellCharmListView ?? false}"
           .showDebuggerView="${app.showDebuggerView ?? false}"
           .showSidebar="${app.showSidebar ?? false}"
@@ -325,6 +302,51 @@ export class XAppView extends BaseView {
         `
         : ""}
     `;
+  }
+}
+
+async function viewToPatterns(
+  cc: CharmsController,
+  view: AppView,
+  currentActive?: CharmController<unknown>,
+): Promise<
+  {
+    activePattern: CharmController<unknown>;
+    defaultPattern: CharmController<unknown>;
+  } | undefined
+> {
+  if ("builtin" in view) {
+    if (view.builtin !== "home") {
+      console.warn("Unsupported view type");
+      return;
+    }
+    const pattern = await PatternFactory.getOrCreate(cc, "home");
+    return { activePattern: pattern, defaultPattern: pattern };
+  } else if ("spaceDid" in view) {
+    console.warn("Unsupported view type");
+    return;
+  } else if ("spaceName" in view) {
+    const defaultPattern = await PatternFactory.getOrCreate(
+      cc,
+      "space-default",
+    );
+
+    let activePattern: CharmController<unknown> | undefined;
+    // If viewing a specific charm, use it as active; otherwise use default
+    if (view.charmId) {
+      if (currentActive && currentActive.id === view.charmId) {
+        activePattern = currentActive;
+      } else {
+        activePattern = await cc.get(
+          view.charmId,
+          true,
+          nameSchema,
+        );
+      }
+    } else {
+      activePattern = defaultPattern;
+    }
+    return { activePattern, defaultPattern };
   }
 }
 

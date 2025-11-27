@@ -65,7 +65,7 @@ async function getCharmResult(page: Page): Promise<{ count: number }> {
   // Use the element handle to evaluate in its context
   return await appView.evaluate((element: XAppView) => {
     // Access the private _activeCharm property
-    const activeCharmTask = element._activeCharm;
+    const activeCharmTask = element._activePatterns;
 
     if (!activeCharmTask) {
       throw new Error("No _activeCharm property found on element");
@@ -76,7 +76,7 @@ async function getCharmResult(page: Page): Promise<{ count: number }> {
     }
 
     // Get the charm controller from the Task's value
-    const charmController = activeCharmTask.value;
+    const charmController = activeCharmTask.value.activePattern;
 
     // Get the result from the charm controller
     const result = charmController.result.get();

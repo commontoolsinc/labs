@@ -60,7 +60,7 @@ describe("shell charm tests", () => {
     });
 
     let handle = await page.waitForSelector(
-      "ct-button",
+      "#counter-decrement",
       { strategy: "pierce" },
     );
     handle.click();

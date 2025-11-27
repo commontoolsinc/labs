@@ -7,11 +7,10 @@ import { AppUpdateEvent } from "../lib/app/events.ts";
 import { clone } from "../lib/app/state.ts";
 import { KeyStore } from "@commontools/identity";
 import { property, state } from "lit/decorators.js";
-import { provide } from "@lit/context";
 import { Task } from "@lit/task";
 import { type MemorySpace, Runtime } from "@commontools/runner";
 import { RuntimeInternals } from "../lib/runtime.ts";
-import { runtimeContext, spaceContext } from "@commontools/ui";
+import { urlToAppView } from "../lib/app/view.ts";
 
 // The root element for the shell application.
 // Handles processing `Command`s from children elements,
@@ -42,19 +41,15 @@ export class XRootView extends BaseView {
   // Non-private for typing in `updated()` callback
   _app = {
     apiUrl: API_URL,
-    view: { builtin: "home" },
+    view: urlToAppView(new URL(globalThis.location.href)),
   } as AppState;
 
   @property()
   keyStore?: KeyStore;
 
-  // The runtime instance provided to descendant components via context
-  @provide({ context: runtimeContext })
   @state()
   private runtime?: Runtime;
 
-  // The current space name provided to descendant components via context
-  @provide({ context: spaceContext })
   @state()
   private space?: MemorySpace;
 
