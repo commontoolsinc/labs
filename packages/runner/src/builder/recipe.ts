@@ -229,7 +229,7 @@ function factoryFromRecipe<T, R>(
   });
 
   // First from results
-  if (isRecord(outputs)) {
+  if (isRecord(outputs) && !isCell(outputs)) {
     Object.entries(outputs).forEach(([key, value]: [string, unknown]) => {
       if (isCell(value)) {
         const exported = value.export();

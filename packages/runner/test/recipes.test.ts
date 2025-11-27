@@ -1347,7 +1347,7 @@ describe("Recipe Runner", () => {
     expect(charm.key("text").get()).toEqual("b");
   });
 
-  it.only("should allow Cell<Array>.push of newly created charms", async () => {
+  it("should allow Cell<Array>.push of newly created charms", async () => {
     const InnerSchema = {
       type: "object",
       properties: {
@@ -1384,10 +1384,10 @@ describe("Recipe Runner", () => {
     const OutputWithHandler = {
       type: "object",
       properties: {
-        list: { type: "array", items: InnerSchema },
+        list: { type: "array", items: InnerSchema, asCell: true },
         add: { ...InnerSchema, asStream: true },
       },
-      required: ["add"],
+      required: ["add", "list"],
     } as const satisfies JSONSchema;
 
     const charmCell = runtime.getCell<Schema<typeof OutputWithHandler>>(
@@ -1428,17 +1428,20 @@ describe("Recipe Runner", () => {
 
     await runtime.idle();
 
-    const result = charmCell.get();
-    expect(result.list).toEqual([]);
+    tx = runtime.edit();
+
+    const result = charmCell.withTx(tx).get();
+    expect(isCell(result.list)).toBe(true);
+    expect(result.list.get()).toEqual([]);
     expect(isStream(result.add)).toBe(true);
 
-    tx = runtime.edit();
     result.add.withTx(tx).send({ text: "hello" });
     tx.commit();
 
     await runtime.idle();
 
-    const result2 = charmCell.get();
-    expect(result2.list).toEqual([{ text: "hello" }]);
+    tx = runtime.edit();
+    const result2 = charmCell.withTx(tx).get();
+    expect(result2.list.get()).toEqual([{ text: "hello" }]);
   });
 });
