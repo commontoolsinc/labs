@@ -761,4 +761,113 @@ describe("wish built-in", () => {
       }
     });
   });
+
+  describe("compiled pattern with object-based wish syntax", () => {
+    it("preserves object syntax through compilation pipeline", async () => {
+      // This test ensures that wish({ query: "..." }) object syntax works
+      // when patterns are compiled and deployed (CT-1084)
+      const spaceCell = runtime.getCell(space, space).withTx(tx);
+      const spaceData = { testField: "compiled pattern value" };
+      spaceCell.set(spaceData);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Compile a pattern that uses object-based wish syntax
+      const program = {
+        main: "/main.tsx",
+        files: [
+          {
+            name: "/main.tsx",
+            contents: [
+              "import { recipe, wish } from 'commontools';",
+              "export default recipe<{}>('Compiled Wish Test', () => {",
+              "  const spaceResult = wish({ query: '/' });",
+              "  return { spaceResult };",
+              "});",
+            ].join("\n"),
+          },
+        ],
+      };
+
+      const compiled = await runtime.recipeManager.compileRecipe(program);
+      const recipeId = runtime.recipeManager.registerRecipe(compiled, program);
+      const loadedRecipe = await runtime.recipeManager.loadRecipe(
+        recipeId,
+        space,
+        tx,
+      );
+
+      const resultCell = runtime.getCell<{
+        spaceResult?: { result?: unknown };
+      }>(
+        space,
+        "compiled wish test result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, loadedRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      await runtime.idle();
+
+      // The wish should resolve to the space cell data, wrapped in { result: ... }
+      expect(result.key("spaceResult").get()?.result).toEqual(spaceData);
+    });
+
+    it("preserves object syntax with path through compilation", async () => {
+      const spaceCell = runtime.getCell(space, space).withTx(tx);
+      spaceCell.set({
+        nested: { deep: { value: "found it" } },
+      });
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const program = {
+        main: "/main.tsx",
+        files: [
+          {
+            name: "/main.tsx",
+            contents: [
+              "import { recipe, wish } from 'commontools';",
+              "export default recipe<{}>('Compiled Wish Path Test', () => {",
+              "  const deepValue = wish({ query: '/', path: ['nested', 'deep', 'value'] });",
+              "  return { deepValue };",
+              "});",
+            ].join("\n"),
+          },
+        ],
+      };
+
+      const compiled = await runtime.recipeManager.compileRecipe(program);
+      const recipeId = runtime.recipeManager.registerRecipe(compiled, program);
+      const loadedRecipe = await runtime.recipeManager.loadRecipe(
+        recipeId,
+        space,
+        tx,
+      );
+
+      const resultCell = runtime.getCell<{
+        deepValue?: { result?: string };
+      }>(
+        space,
+        "compiled wish path test result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, loadedRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      await runtime.idle();
+
+      expect(result.key("deepValue").get()?.result).toEqual("found it");
+    });
+  });
 });
