@@ -11,6 +11,7 @@ import {
 import { CaptureCollector } from "../capture-collector.ts";
 import { RecipeBuilder } from "../utils/recipe-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
+import { wrapTemplateLiteralsInDerive } from "./map-utils.ts";
 
 export class ReduceStrategy implements ClosureTransformationStrategy {
   canTransform(
@@ -259,10 +260,23 @@ export function transformReduceCall(
   }
 
   // Recursively transform the callback body first
-  const transformedBody = ts.visitNode(
+  let transformedBody = ts.visitNode(
     callback.body,
     visitor,
   ) as ts.ConciseBody;
+
+  // Wrap template literals that use opaque refs (captures)
+  // This must happen BEFORE rewriteCaptureReferences
+  if (captureTree.size > 0) {
+    transformedBody = wrapTemplateLiteralsInDerive(
+      transformedBody,
+      {
+        captureRoots: new Set(captureTree.keys()),
+        elementName: "", // No element in reduce - just captures
+      },
+      context,
+    );
+  }
 
   // Determine list and initial expressions
   const args = reduceCall.arguments;

@@ -8,6 +8,7 @@ import {
   normalizeBindingName,
 } from "../../utils/identifiers.ts";
 import { createDeriveCall } from "../../transformers/builtins/derive.ts";
+import { visitEachChildWithJsx } from "../../ast/mod.ts";
 
 function isBindingPattern(name: ts.BindingName): name is ts.BindingPattern {
   return ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name);
@@ -363,4 +364,283 @@ export function rewriteCallbackBody(
   }
 
   return factory.createBlock(statements, true);
+}
+
+/**
+ * Configuration for wrapping template literals in derive calls.
+ */
+export interface TemplateLiteralWrapConfig {
+  /** Names of opaque identifiers from captures (e.g., "state", "config") */
+  readonly captureRoots: ReadonlySet<string>;
+  /** Name of the element parameter (e.g., "item", "element") */
+  readonly elementName: string;
+}
+
+/**
+ * Walk a body and wrap template literals that use opaque refs with the `str` tag.
+ *
+ * Transforms: `Hello, ${state.prefix}-${item.name}!`
+ * To: str`Hello, ${state.prefix}-${item.name}!`
+ *
+ * The `str` template tag uses lift() internally, which properly unwraps
+ * opaque refs. This avoids the Symbol.toPrimitive error that occurs when
+ * template literals try to coerce opaque refs to primitives.
+ */
+export function wrapTemplateLiteralsInDerive(
+  body: ts.ConciseBody,
+  config: TemplateLiteralWrapConfig,
+  context: TransformationContext,
+): ts.ConciseBody {
+  const { factory } = context;
+
+  // If no opaque roots configured, nothing to transform
+  if (config.captureRoots.size === 0 && !config.elementName) {
+    return body;
+  }
+
+  /**
+   * Visitor that transforms template literals containing opaque refs.
+   */
+  const transformTemplateLiterals = (node: ts.Node): ts.Node => {
+    // Handle TemplateExpression (template with interpolations)
+    if (ts.isTemplateExpression(node)) {
+      // Check if this template contains any opaque refs
+      const opaqueRoots = collectOpaqueRootsInTemplate(node, config);
+
+      if (opaqueRoots.size > 0) {
+        // This template uses opaque refs - wrap with str tag
+        const strExpr = context.ctHelpers.getHelperExpr("str");
+
+        // First, recursively transform any nested templates in the spans
+        const transformedSpans = node.templateSpans.map((span) => {
+          const transformedExpr = ts.visitNode(
+            span.expression,
+            transformTemplateLiterals,
+          ) as ts.Expression;
+          return factory.createTemplateSpan(
+            transformedExpr,
+            span.literal,
+          );
+        });
+
+        const transformedTemplate = factory.createTemplateExpression(
+          node.head,
+          transformedSpans,
+        );
+
+        return factory.createTaggedTemplateExpression(
+          strExpr,
+          undefined, // type arguments
+          transformedTemplate,
+        );
+      }
+    }
+
+    // Handle TaggedTemplateExpression - don't double-tag
+    if (ts.isTaggedTemplateExpression(node)) {
+      // Already tagged, just recurse into the template if needed
+      if (ts.isTemplateExpression(node.template)) {
+        const transformedSpans = node.template.templateSpans.map((span) => {
+          const transformedExpr = ts.visitNode(
+            span.expression,
+            transformTemplateLiterals,
+          ) as ts.Expression;
+          return factory.createTemplateSpan(
+            transformedExpr,
+            span.literal,
+          );
+        });
+
+        const transformedTemplate = factory.createTemplateExpression(
+          node.template.head,
+          transformedSpans,
+        );
+
+        return factory.createTaggedTemplateExpression(
+          node.tag,
+          node.typeArguments,
+          transformedTemplate,
+        );
+      }
+      return node;
+    }
+
+    // Recurse into children
+    return ts.visitEachChild(node, transformTemplateLiterals, context.tsContext);
+  };
+
+  // Transform the body
+  if (ts.isBlock(body)) {
+    const transformedStatements = body.statements.map((stmt) =>
+      ts.visitNode(stmt, transformTemplateLiterals) as ts.Statement
+    );
+    return factory.createBlock(transformedStatements, true);
+  } else {
+    // Concise body (expression)
+    return ts.visitNode(body, transformTemplateLiterals) as ts.Expression;
+  }
+}
+
+/**
+ * Information about an opaque expression found in a template.
+ */
+interface OpaqueExpressionInfo {
+  /** The original expression (e.g., state.greeting, item.name) */
+  readonly expression: ts.Expression;
+  /** Generated unique binding name for this expression */
+  readonly bindingName: string;
+  /** String representation of the expression for comparison */
+  readonly key: string;
+}
+
+/**
+ * Convert an expression to a string key for deduplication.
+ */
+function expressionToKey(expr: ts.Expression): string {
+  if (ts.isIdentifier(expr)) {
+    return expr.text;
+  }
+  if (ts.isPropertyAccessExpression(expr)) {
+    return `${expressionToKey(expr.expression)}.${expr.name.text}`;
+  }
+  if (ts.isElementAccessExpression(expr)) {
+    if (ts.isStringLiteral(expr.argumentExpression)) {
+      return `${expressionToKey(expr.expression)}[${expr.argumentExpression.text}]`;
+    }
+    // For dynamic element access, use a placeholder
+    return `${expressionToKey(expr.expression)}[?]`;
+  }
+  return "?";
+}
+
+/**
+ * Generate a safe binding name from an expression.
+ * E.g., state.greeting -> state_greeting, item.name -> item_name
+ */
+function generateBindingName(expr: ts.Expression, usedNames: Set<string>): string {
+  const key = expressionToKey(expr);
+  // Replace dots and brackets with underscores
+  let baseName = key.replace(/\./g, "_").replace(/\[/g, "_").replace(/\]/g, "").replace(/\?/g, "x");
+
+  // Ensure it's a valid identifier
+  if (!/^[a-zA-Z_$]/.test(baseName)) {
+    baseName = "_" + baseName;
+  }
+
+  // Make unique if needed
+  let name = baseName;
+  let counter = 1;
+  while (usedNames.has(name)) {
+    name = `${baseName}_${counter}`;
+    counter++;
+  }
+  usedNames.add(name);
+  return name;
+}
+
+/**
+ * Collect ROOT opaque identifiers used in a template expression.
+ * For property accesses like `state.prefix` or `item.name`, we collect the ROOT
+ * identifier (`state` or `item`), not the full path.
+ *
+ * This is because captures are stored in hierarchical params objects, and we need
+ * to pass the root object to derive and access properties inside the callback.
+ */
+function collectOpaqueRootsInTemplate(
+  template: ts.TemplateExpression,
+  config: TemplateLiteralWrapConfig,
+): Set<string> {
+  const roots = new Set<string>();
+
+  const collectFromExpression = (expr: ts.Expression): void => {
+    // For property accesses, check if the root is opaque
+    if (
+      ts.isPropertyAccessExpression(expr) || ts.isElementAccessExpression(expr)
+    ) {
+      const rootName = getRootIdentifierName(expr);
+      if (rootName && isOpaqueRoot(rootName, config)) {
+        // Collect just the ROOT name
+        roots.add(rootName);
+        return;
+      }
+      // Not an opaque root, recurse
+      if (ts.isPropertyAccessExpression(expr)) {
+        collectFromExpression(expr.expression);
+      } else {
+        collectFromExpression(expr.expression);
+        collectFromExpression(expr.argumentExpression);
+      }
+      return;
+    }
+
+    // For standalone identifiers that are opaque roots
+    if (ts.isIdentifier(expr)) {
+      if (isOpaqueRoot(expr.text, config)) {
+        roots.add(expr.text);
+      }
+      return;
+    }
+
+    // For call expressions, check arguments
+    if (ts.isCallExpression(expr)) {
+      collectFromExpression(expr.expression);
+      expr.arguments.forEach(collectFromExpression);
+      return;
+    }
+
+    // For binary expressions
+    if (ts.isBinaryExpression(expr)) {
+      collectFromExpression(expr.left);
+      collectFromExpression(expr.right);
+      return;
+    }
+
+    // For conditional expressions
+    if (ts.isConditionalExpression(expr)) {
+      collectFromExpression(expr.condition);
+      collectFromExpression(expr.whenTrue);
+      collectFromExpression(expr.whenFalse);
+      return;
+    }
+
+    // For parenthesized expressions
+    if (ts.isParenthesizedExpression(expr)) {
+      collectFromExpression(expr.expression);
+      return;
+    }
+  };
+
+  // Collect from each template span
+  for (const span of template.templateSpans) {
+    collectFromExpression(span.expression);
+  }
+
+  return roots;
+}
+
+/**
+ * Get the root identifier name of a property/element access chain.
+ * E.g., for `state.config.value`, returns "state"
+ */
+function getRootIdentifierName(expr: ts.Expression): string | undefined {
+  if (ts.isIdentifier(expr)) {
+    return expr.text;
+  }
+  if (ts.isPropertyAccessExpression(expr)) {
+    return getRootIdentifierName(expr.expression);
+  }
+  if (ts.isElementAccessExpression(expr)) {
+    return getRootIdentifierName(expr.expression);
+  }
+  return undefined;
+}
+
+/**
+ * Check if an identifier name is an opaque root (from captures or element).
+ */
+function isOpaqueRoot(
+  name: string,
+  config: TemplateLiteralWrapConfig,
+): boolean {
+  return config.captureRoots.has(name) || name === config.elementName;
 }
