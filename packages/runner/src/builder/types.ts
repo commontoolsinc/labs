@@ -38,6 +38,7 @@ import type {
   PatternToolFunction,
   Recipe,
   RecipeFunction,
+  ReduceFunction,
   Schema,
   schema as schemaFunction,
   StreamDataFunction,
@@ -234,6 +235,7 @@ export interface BuilderFunctionsAndConstants {
   handler: HandlerFunction;
   derive: DeriveFunction;
   computed: ComputedFunction;
+  reduce: ReduceFunction;
 
   // Built-in modules
   str: StrFunction;

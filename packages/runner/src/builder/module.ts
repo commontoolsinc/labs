@@ -225,3 +225,79 @@ export function derive<In, Out>(...args: any[]): OpaqueRef<any> {
 // unsafe closures: like derive, but doesn't need any arguments
 export const computed: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>
   lift<any, T>(fn)(undefined);
+
+/**
+ * Reactive reduce over an array.
+ *
+ * Unlike derive(), reduce() takes a reducer function that aggregates array
+ * elements. The reducer receives UNWRAPPED values - not Cell proxies.
+ *
+ * Re-runs whenever any item in the list changes (streaming behavior).
+ *
+ * @example
+ * ```typescript
+ * const items = cell([1, 2, 3, 4, 5]);
+ * const sum = reduce(items, 0, (acc, item) => acc + item);
+ * // sum is now OpaqueRef<number> with value 15
+ *
+ * // With external state (closures captured by ts-transformers):
+ * const multiplier = cell(2);
+ * const doubled = reduce(items, 0, (acc, item) => acc + item * multiplier);
+ * ```
+ *
+ * @param list - The array to reduce over (as Opaque)
+ * @param initial - Initial accumulator value
+ * @param reducer - Function that takes (accumulator, item, index) and returns new accumulator
+ * @returns OpaqueRef containing the reduced result
+ */
+export function reduce<
+  ListSchema extends JSONSchema = JSONSchema,
+  ResultSchema extends JSONSchema = JSONSchema,
+>(
+  argumentSchema: ListSchema,
+  resultSchema: ResultSchema,
+  list: Opaque<SchemaWithoutCell<ListSchema>>,
+  initial: Schema<ResultSchema>,
+  reducer: (
+    acc: Schema<ResultSchema>,
+    item: Schema<ListSchema> extends (infer U)[] ? U : never,
+    index: number,
+  ) => Schema<ResultSchema>,
+): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
+export function reduce<T, R>(
+  list: Opaque<T[]>,
+  initial: R,
+  reducer: (acc: R, item: T, index: number) => R,
+): OpaqueRef<R>;
+export function reduce<T, R>(...args: any[]): OpaqueRef<any> {
+  // Schema-based overload (5 args)
+  if (args.length === 5) {
+    const [argumentSchema, resultSchema, list, initial, reducer] = args as [
+      JSONSchema,
+      JSONSchema,
+      Opaque<SchemaWithoutCell<any>>,
+      any,
+      (acc: any, item: any, index: number) => any,
+    ];
+    return lift(
+      { type: "object", properties: { list: argumentSchema, initial: resultSchema } } as JSONSchema,
+      resultSchema,
+      (inputs: { list: any[]; initial: any }) => {
+        if (!inputs.list || !Array.isArray(inputs.list)) return inputs.initial;
+        return inputs.list.reduce(reducer, inputs.initial);
+      },
+    )({ list, initial });
+  }
+
+  // Simple overload (3 args)
+  const [list, initial, reducer] = args as [
+    Opaque<T[]>,
+    R,
+    (acc: R, item: T, index: number) => R,
+  ];
+
+  return lift((inputs: { list: T[]; initial: R }) => {
+    if (!inputs.list || !Array.isArray(inputs.list)) return inputs.initial;
+    return inputs.list.reduce(reducer, inputs.initial);
+  })({ list, initial });
+}

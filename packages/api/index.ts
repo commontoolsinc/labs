@@ -1179,6 +1179,49 @@ export type DeriveFunction = {
 
 export type ComputedFunction = <T>(fn: () => T) => OpaqueRef<T>;
 
+/**
+ * ReduceFunction creates a reactive reduction over an array.
+ *
+ * Similar to Array.prototype.reduce(), but reactive - the result updates
+ * when any element in the input array changes.
+ *
+ * Special overload ordering is critical for correct type inference:
+ *
+ * 1. Schema-based overload: For explicit schema definitions
+ * 2. Generic overload: Handles all other cases
+ *
+ * @example
+ * ```typescript
+ * const items = cell([1, 2, 3, 4, 5]);
+ * const sum = reduce(items, 0, (acc, item) => acc + item);
+ * // sum is now OpaqueRef<number> with value 15
+ * ```
+ */
+export type ReduceFunction = {
+  // Overload 1: Schema-based reduce with explicit input/output schemas
+  <
+    ListSchema extends JSONSchema = JSONSchema,
+    ResultSchema extends JSONSchema = JSONSchema,
+  >(
+    argumentSchema: ListSchema,
+    resultSchema: ResultSchema,
+    list: Opaque<SchemaWithoutCell<ListSchema>>,
+    initial: Schema<ResultSchema>,
+    reducer: (
+      acc: Schema<ResultSchema>,
+      item: Schema<ListSchema> extends (infer U)[] ? U : never,
+      index: number,
+    ) => Schema<ResultSchema>,
+  ): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
+
+  // Overload 2: Generic reduce with type inference
+  <T, R>(
+    list: Opaque<T[]>,
+    initial: R,
+    reducer: (acc: R, item: T, index: number) => R,
+  ): OpaqueRef<R>;
+};
+
 export type StrFunction = (
   strings: TemplateStringsArray,
   ...values: any[]
@@ -1331,6 +1374,7 @@ export declare const handler: HandlerFunction;
 /** @deprecated Use compute() instead */
 export declare const derive: DeriveFunction;
 export declare const computed: ComputedFunction;
+export declare const reduce: ReduceFunction;
 export declare const str: StrFunction;
 export declare const ifElse: IfElseFunction;
 /** @deprecated Use generateText() or generateObject() instead */
