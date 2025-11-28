@@ -39,6 +39,7 @@ export type CallKind =
   | { kind: "builder"; symbol?: ts.Symbol; builderName: string }
   | { kind: "array-map"; symbol?: ts.Symbol }
   | { kind: "derive"; symbol?: ts.Symbol }
+  | { kind: "reduce"; symbol?: ts.Symbol }
   | { kind: "cell-factory"; symbol?: ts.Symbol; factoryName: string }
   | { kind: "cell-for"; symbol?: ts.Symbol }
   | { kind: "wish"; symbol?: ts.Symbol }
@@ -63,6 +64,9 @@ function resolveExpressionKind(
     const name = target.text;
     if (name === "derive") {
       return { kind: "derive" };
+    }
+    if (name === "reduce") {
+      return { kind: "reduce" };
     }
     if (name === "ifElse") {
       return { kind: "ifElse" };
@@ -111,6 +115,9 @@ function resolveExpressionKind(
     }
     if (name === "derive") {
       return { kind: "derive" };
+    }
+    if (name === "reduce") {
+      return { kind: "reduce" };
     }
     if (name === "ifElse") {
       return { kind: "ifElse" };
@@ -208,6 +215,10 @@ function resolveSymbolKind(
     return { kind: "derive", symbol: resolved };
   }
 
+  if (name === "reduce" && isCommonToolsSymbol(resolved)) {
+    return { kind: "reduce", symbol: resolved };
+  }
+
   if (name === "cell" && isCommonToolsSymbol(resolved)) {
     return { kind: "cell-factory", symbol: resolved, factoryName: "cell" };
   }
@@ -231,6 +242,10 @@ function resolveSymbolKind(
 
   if (name === "derive") {
     return { kind: "derive", symbol: resolved };
+  }
+
+  if (name === "reduce") {
+    return { kind: "reduce", symbol: resolved };
   }
 
   if (name === "cell") {

@@ -3,6 +3,7 @@ import { TransformationContext, Transformer } from "../core/mod.ts";
 import { visitEachChildWithJsx } from "../ast/mod.ts";
 import { MapStrategy } from "./strategies/map-strategy.ts";
 import { DeriveStrategy } from "./strategies/derive-strategy.ts";
+import { ReduceStrategy } from "./strategies/reduce-strategy.ts";
 import { HandlerStrategy } from "./strategies/handler-strategy.ts";
 import type { ClosureTransformationStrategy } from "./strategies/strategy.ts";
 
@@ -23,6 +24,7 @@ function createClosureTransformVisitor(
     new HandlerStrategy(),
     new MapStrategy(),
     new DeriveStrategy(),
+    new ReduceStrategy(),
   ];
 
   const visit: ts.Visitor = (node: ts.Node) => {
