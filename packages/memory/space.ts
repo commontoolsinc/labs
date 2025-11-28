@@ -1,6 +1,7 @@
 import {
   Database,
   SqliteError,
+  Statement,
   Transaction as DBTransaction,
 } from "@db/sqlite";
 
@@ -195,6 +196,65 @@ JOIN
 WHERE
   fact.this = :fact;
 `;
+
+/**
+ * Cache for prepared statements associated with each database connection.
+ * Using WeakMap ensures statements are cleaned up when database is closed.
+ */
+type PreparedStatements = {
+  export?: Statement;
+  causeChain?: Statement;
+  getFact?: Statement;
+  importDatum?: Statement;
+  importFact?: Statement;
+  importMemory?: Statement;
+  swap?: Statement;
+};
+
+const preparedStatementsCache = new WeakMap<Database, PreparedStatements>();
+
+/**
+ * Get or create a prepared statement for a database connection.
+ * Prepared statements are cached and reused for better performance.
+ */
+const getPreparedStatement = (
+  db: Database,
+  key: keyof PreparedStatements,
+  sql: string,
+): Statement => {
+  let cache = preparedStatementsCache.get(db);
+  if (!cache) {
+    cache = {};
+    preparedStatementsCache.set(db, cache);
+  }
+
+  if (!cache[key]) {
+    cache[key] = db.prepare(sql);
+  }
+
+  return cache[key]!;
+};
+
+/**
+ * Finalize all prepared statements for a database connection.
+ * Called when closing the database to clean up resources.
+ */
+const finalizePreparedStatements = (db: Database): void => {
+  const cache = preparedStatementsCache.get(db);
+  if (cache) {
+    for (const stmt of Object.values(cache)) {
+      if (stmt) {
+        try {
+          stmt.finalize();
+        } catch (error) {
+          // Ignore errors during finalization
+          console.error("Error finalizing prepared statement:", error);
+        }
+      }
+    }
+    preparedStatementsCache.delete(db);
+  }
+};
 
 export type Options = {
   url: URL;
@@ -393,6 +453,7 @@ export const close = <Space extends MemorySpace>({
     addMemoryAttributes(span, { operation: "close" });
 
     try {
+      finalizePreparedStatements(store);
       store.close();
       return { ok: {} };
     } catch (cause) {
@@ -414,29 +475,25 @@ const recall = <Space extends MemorySpace>(
   { store }: Session<Space>,
   { the, of }: { the: MIME; of: URI },
 ): Revision<Fact> | null => {
-  const stmt = store.prepare(EXPORT);
-  try {
-    const row = stmt.get({ the, of }) as StateRow | undefined;
-    if (row) {
-      const revision: Revision<Fact> = {
-        the,
-        of,
-        cause: row.cause
-          ? (fromString(row.cause) as Reference<Assertion>)
-          : refer(unclaimed({ the, of })),
-        since: row.since,
-      };
+  const stmt = getPreparedStatement(store, "export", EXPORT);
+  const row = stmt.get({ the, of }) as StateRow | undefined;
+  if (row) {
+    const revision: Revision<Fact> = {
+      the,
+      of,
+      cause: row.cause
+        ? (fromString(row.cause) as Reference<Assertion>)
+        : refer(unclaimed({ the, of })),
+      since: row.since,
+    };
 
-      if (row.is) {
-        revision.is = JSON.parse(row.is);
-      }
-
-      return revision;
-    } else {
-      return null;
+    if (row.is) {
+      revision.is = JSON.parse(row.is);
     }
-  } finally {
-    stmt.finalize();
+
+    return revision;
+  } else {
+    return null;
   }
 };
 
@@ -462,25 +519,21 @@ const _causeChain = <Space extends MemorySpace>(
   excludeFact: string | undefined,
 ): Revision<Fact>[] => {
   const { store } = session;
-  const stmt = store.prepare(CAUSE_CHAIN);
-  try {
-    const rows = stmt.all({ of, the }) as CauseRow[];
-    const revisions = [];
-    if (rows && rows.length) {
-      for (const result of rows) {
-        if (result.fact === excludeFact) {
-          continue;
-        }
-        const revision = getFact(session, { fact: result.fact });
-        if (revision) {
-          revisions.push(revision);
-        }
+  const stmt = getPreparedStatement(store, "causeChain", CAUSE_CHAIN);
+  const rows = stmt.all({ of, the }) as CauseRow[];
+  const revisions = [];
+  if (rows && rows.length) {
+    for (const result of rows) {
+      if (result.fact === excludeFact) {
+        continue;
+      }
+      const revision = getFact(session, { fact: result.fact });
+      if (revision) {
+        revisions.push(revision);
       }
     }
-    return revisions;
-  } finally {
-    stmt.finalize();
   }
+  return revisions;
 };
 
 /**
@@ -495,31 +548,27 @@ const getFact = <Space extends MemorySpace>(
   { store }: Session<Space>,
   { fact }: { fact: string },
 ): Revision<Fact> | undefined => {
-  const stmt = store.prepare(GET_FACT);
-  try {
-    const row = stmt.get({ fact }) as StateRow | undefined;
-    if (row === undefined) {
-      return undefined;
-    }
-    // It's possible to have more than one matching fact, but since the fact's id
-    // incorporates its cause chain, we would have to have issued a retraction,
-    // followed by the same chain of facts. At that point, it really is the same.
-    // Since `the` and `of` are part of the fact reference, they are also unique.
-    const revision: Revision<Fact> = {
-      the: row.the as MIME,
-      of: row.of as URI,
-      cause: row.cause
-        ? (fromString(row.cause) as Reference<Assertion>)
-        : refer(unclaimed(row as FactAddress)),
-      since: row.since,
-    };
-    if (row.is) {
-      revision.is = JSON.parse(row.is);
-    }
-    return revision;
-  } finally {
-    stmt.finalize();
+  const stmt = getPreparedStatement(store, "getFact", GET_FACT);
+  const row = stmt.get({ fact }) as StateRow | undefined;
+  if (row === undefined) {
+    return undefined;
   }
+  // It's possible to have more than one matching fact, but since the fact's id
+  // incorporates its cause chain, we would have to have issued a retraction,
+  // followed by the same chain of facts. At that point, it really is the same.
+  // Since `the` and `of` are part of the fact reference, they are also unique.
+  const revision: Revision<Fact> = {
+    the: row.the as MIME,
+    of: row.of as URI,
+    cause: row.cause
+      ? (fromString(row.cause) as Reference<Assertion>)
+      : refer(unclaimed(row as FactAddress)),
+    since: row.since,
+  };
+  if (row.is) {
+    revision.is = JSON.parse(row.is);
+  }
+  return revision;
 };
 
 const select = <Space extends MemorySpace>(
@@ -585,47 +634,39 @@ export const selectFacts = function <Space extends MemorySpace>(
   { store }: Session<Space>,
   { the, of, cause, is, since }: FactSelector,
 ): SelectedFact[] {
-  const stmt = store.prepare(EXPORT);
-  try {
-    const results = [];
-    for (
-      const row of stmt.iter({
-        the: the === SelectAllString ? null : the,
-        of: of === SelectAllString ? null : of,
-        cause: cause === SelectAllString ? null : cause,
-        is: is === undefined ? null : {},
-        since: since ?? null,
-      }) as Iterable<StateRow>
-    ) {
-      results.push(toFact(row));
-    }
-    return results;
-  } finally {
-    stmt.finalize();
+  const stmt = getPreparedStatement(store, "export", EXPORT);
+  const results = [];
+  for (
+    const row of stmt.iter({
+      the: the === SelectAllString ? null : the,
+      of: of === SelectAllString ? null : of,
+      cause: cause === SelectAllString ? null : cause,
+      is: is === undefined ? null : {},
+      since: since ?? null,
+    }) as Iterable<StateRow>
+  ) {
+    results.push(toFact(row));
   }
+  return results;
 };
 
 export const selectFact = function <Space extends MemorySpace>(
   { store }: Session<Space>,
   { the, of, since }: { the: MIME; of: URI; since?: number },
 ): SelectedFact | undefined {
-  const stmt = store.prepare(EXPORT);
-  try {
-    for (
-      const row of stmt.iter({
-        the: the,
-        of: of,
-        cause: null,
-        is: null,
-        since: since ?? null,
-      }) as Iterable<StateRow>
-    ) {
-      return toFact(row);
-    }
-    return undefined;
-  } finally {
-    stmt.finalize();
+  const stmt = getPreparedStatement(store, "export", EXPORT);
+  for (
+    const row of stmt.iter({
+      the: the,
+      of: of,
+      cause: null,
+      is: null,
+      since: since ?? null,
+    }) as Iterable<StateRow>
+  ) {
+    return toFact(row);
   }
+  return undefined;
 };
 
 /**
@@ -643,7 +684,8 @@ const importDatum = <Space extends MemorySpace>(
     return "undefined";
   } else {
     const is = refer(datum).toString();
-    session.store.run(IMPORT_DATUM, {
+    const stmt = getPreparedStatement(session.store, "importDatum", IMPORT_DATUM);
+    stmt.run({
       this: is,
       source: JSON.stringify(datum),
     });
@@ -709,7 +751,8 @@ const swap = <Space extends MemorySpace>(
   if (source.assert || source.retract) {
     // First we import datum and and then use its primary key as `is` field
     // in the `fact` table upholding foreign key constraint.
-    imported = session.store.run(IMPORT_FACT, {
+    const importFactStmt = getPreparedStatement(session.store, "importFact", IMPORT_FACT);
+    imported = importFactStmt.run({
       this: fact,
       the,
       of,
@@ -731,14 +774,16 @@ const swap = <Space extends MemorySpace>(
   // therefore we insert or ignore here to ensure fact record exists and then
   // use update afterwards to update to desired state from expected `cause` state.
   if (expected == null) {
-    session.store.run(IMPORT_MEMORY, { the, of, fact });
+    const importMemoryStmt = getPreparedStatement(session.store, "importMemory", IMPORT_MEMORY);
+    importMemoryStmt.run({ the, of, fact });
   }
 
   // Finally we perform a memory swap, using conditional update so it only
   // updates memory if the `cause` references expected state. We use return
   // value to figure out whether update took place, if it is `0` no records
   // were updated indicating potential conflict which we handle below.
-  const updated = session.store.run(SWAP, { fact, cause, the, of });
+  const swapStmt = getPreparedStatement(session.store, "swap", SWAP);
+  const updated = swapStmt.run({ fact, cause, the, of });
 
   // If no records were updated it implies that there was no record with
   // matching `cause`. It may be because `cause` referenced implicit fact
@@ -781,13 +826,8 @@ const commit = <Space extends MemorySpace>(
 ): Commit<Space> => {
   const the = COMMIT_LOG_TYPE;
   const of = transaction.sub;
-  const stmt = session.store.prepare(EXPORT);
-  let row;
-  try {
-    row = stmt.get({ the, of }) as StateRow | undefined;
-  } finally {
-    stmt.finalize();
-  }
+  const stmt = getPreparedStatement(session.store, "export", EXPORT);
+  const row = stmt.get({ the, of }) as StateRow | undefined;
   const [since, cause] = row
     ? [
       (JSON.parse(row.is as string) as CommitData).since + 1,
