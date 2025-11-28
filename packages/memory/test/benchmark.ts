@@ -921,3 +921,45 @@ Deno.bench({
     b.end();
   },
 });
+
+// Test memoization benefit: same content referenced multiple times
+import { refer as memoizedRefer } from "../reference.ts";
+
+Deno.bench({
+  name: "memoized: 3x refer() same payload (cache hits)",
+  group: "isolation",
+  fn(b) {
+    const doc = createDoc();
+    const payload = createTypicalPayload();
+
+    // First call populates cache
+    memoizedRefer(payload);
+    memoizedRefer({ the: "application/json", of: doc });
+
+    b.start();
+    // These should be cache hits
+    memoizedRefer(payload);
+    memoizedRefer({ the: "application/json", of: doc });
+    memoizedRefer(payload);
+    b.end();
+  },
+});
+
+Deno.bench({
+  name: "memoized: repeated unclaimed refs (common pattern)",
+  group: "isolation",
+  fn(b) {
+    const doc = createDoc();
+    const unclaimed = { the: "application/json", of: doc };
+
+    // Warm cache
+    memoizedRefer(unclaimed);
+
+    b.start();
+    // Simulates multiple unclaimed refs in transaction flow
+    for (let i = 0; i < 10; i++) {
+      memoizedRefer({ the: "application/json", of: doc });
+    }
+    b.end();
+  },
+});

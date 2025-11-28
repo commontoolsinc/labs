@@ -16,7 +16,7 @@ import {
   fromString,
   is as isReference,
   refer,
-} from "merkle-reference";
+} from "./reference.ts";
 
 /**
  * Creates an unclaimed fact.
