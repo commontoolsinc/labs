@@ -381,14 +381,38 @@ export function transformReduceCall(
     undefined,
   );
 
-  // Build the wrapper body: list.reduce(reducer, initial)
-  const reduceMethodCall = factory.createCallExpression(
-    factory.createPropertyAccessExpression(
-      factory.createIdentifier("list"),
-      "reduce",
+  // Build the wrapper body with null check:
+  // (!list || !Array.isArray(list)) ? initial : list.reduce(reducer, initial)
+  const reduceMethodCall = factory.createConditionalExpression(
+    factory.createBinaryExpression(
+      factory.createPrefixUnaryExpression(
+        ts.SyntaxKind.ExclamationToken,
+        factory.createIdentifier("list"),
+      ),
+      ts.SyntaxKind.BarBarToken,
+      factory.createPrefixUnaryExpression(
+        ts.SyntaxKind.ExclamationToken,
+        factory.createCallExpression(
+          factory.createPropertyAccessExpression(
+            factory.createIdentifier("Array"),
+            "isArray",
+          ),
+          undefined,
+          [factory.createIdentifier("list")],
+        ),
+      ),
     ),
-    undefined,
-    [newReducer, factory.createIdentifier("initial")],
+    factory.createToken(ts.SyntaxKind.QuestionToken),
+    factory.createIdentifier("initial"),
+    factory.createToken(ts.SyntaxKind.ColonToken),
+    factory.createCallExpression(
+      factory.createPropertyAccessExpression(
+        factory.createIdentifier("list"),
+        "reduce",
+      ),
+      undefined,
+      [newReducer, factory.createIdentifier("initial")],
+    ),
   );
 
   // Build the full wrapper arrow function
