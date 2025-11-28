@@ -736,6 +736,15 @@ const swap = <Space extends MemorySpace>(
   const base = refer(unclaimed({ the, of })).toString();
   const expected = cause === base ? null : (expect as Reference<Fact>);
 
+  // IMPORTANT: Import datum BEFORE computing fact reference. The fact hash
+  // includes the datum as a sub-object, and merkle-reference caches sub-objects
+  // by identity during traversal. By hashing the datum first, we ensure the
+  // subsequent refer(assertion) call hits the cache for the payload (~2-4x faster).
+  let datumRef: string | undefined;
+  if (source.assert || source.retract) {
+    datumRef = importDatum(session, is);
+  }
+
   // Derive the merkle reference to the fact that memory will have after
   // successful update. If we have an assertion or retraction we derive fact
   // from it, but if it is a confirmation `cause` is the fact itself.
@@ -745,18 +754,15 @@ const swap = <Space extends MemorySpace>(
     ? refer(source.retract).toString()
     : source.claim.fact.toString();
 
-  // If this is an assertion we need to import asserted datum and then insert
-  // fact referencing it.
+  // If this is an assertion we need to insert fact referencing the datum.
   let imported = 0;
   if (source.assert || source.retract) {
-    // First we import datum and and then use its primary key as `is` field
-    // in the `fact` table upholding foreign key constraint.
     const importFactStmt = getPreparedStatement(session.store, "importFact", IMPORT_FACT);
     imported = importFactStmt.run({
       this: fact,
       the,
       of,
-      is: importDatum(session, is),
+      is: datumRef!,
       cause,
       since,
     });
