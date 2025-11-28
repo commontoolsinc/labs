@@ -651,6 +651,6 @@ const activeItems = computed(() => items.filter(item => !item.done));
 
 ## See Also
 
-- [ARRAY_PRIMITIVES.md](ARRAY_PRIMITIVES.md) - `reduce()` and `mapByKey()` for advanced array operations
+- [ARRAY_PRIMITIVES.md](ARRAY_PRIMITIVES.md) - `Cell.reduce()` and keyed `map()` for advanced array operations
 - [PATTERNS.md](PATTERNS.md) - Common pattern examples
 - [TYPES_AND_SCHEMAS.md](TYPES_AND_SCHEMAS.md) - Type system details

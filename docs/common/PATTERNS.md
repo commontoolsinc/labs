@@ -1157,6 +1157,6 @@ const activeItems = computed(() => items.filter(item => !item.done));
 
 ## See Also
 
-- [ARRAY_PRIMITIVES.md](ARRAY_PRIMITIVES.md) - `reduce()` and `mapByKey()` for streaming pipelines
+- [ARRAY_PRIMITIVES.md](ARRAY_PRIMITIVES.md) - `Cell.reduce()` and keyed `map()` for streaming pipelines
 - [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) - Core reactivity concepts
 - [COMPONENTS.md](COMPONENTS.md) - UI component reference
