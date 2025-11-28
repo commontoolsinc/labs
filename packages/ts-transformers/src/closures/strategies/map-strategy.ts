@@ -10,7 +10,10 @@ import {
   getTypeAtLocationWithFallback,
   isFunctionLikeExpression,
 } from "../../ast/mod.ts";
-import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
+import {
+  buildHierarchicalParamsValue,
+  parseCaptureExpression,
+} from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
   createPropertyName,
@@ -29,10 +32,17 @@ import { SchemaFactory } from "../utils/schema-factory.ts";
 
 /**
  * Extract key option from map's second argument if it's an options object.
- * Handles: .map(fn, { key: "id" }) or .map(fn, { key: ["a", "b"] })
+ *
+ * Handles:
+ * - Property path: .map(fn, { key: "id" }) or .map(fn, { key: ["a", "b"] })
+ * - Key function: .map(fn, { key: item => item.id }) - extracts property path at compile time
+ *
+ * Key functions are analyzed and converted to property paths. Only simple
+ * property access is supported (e.g., `item => item.id` or `item => item.nested.id`).
  */
 function extractKeyOption(
   mapCall: ts.CallExpression,
+  context: TransformationContext,
 ): ts.Expression | undefined {
   const optionsArg = mapCall.arguments[1];
   if (!optionsArg || !ts.isObjectLiteralExpression(optionsArg)) {
@@ -45,11 +55,91 @@ function extractKeyOption(
       ts.isIdentifier(prop.name) &&
       prop.name.text === "key"
     ) {
-      return prop.initializer;
+      const keyValue = prop.initializer;
+
+      // Handle key function: { key: item => item.id }
+      if (ts.isArrowFunction(keyValue) || ts.isFunctionExpression(keyValue)) {
+        return extractKeyPathFromFunction(keyValue, context);
+      }
+
+      // Property path string or array - return as-is
+      return keyValue;
     }
   }
 
   return undefined;
+}
+
+/**
+ * Extract a property path from a key function.
+ *
+ * Analyzes arrow functions like `item => item.id` or `item => item.nested.id`
+ * and extracts the property path as a string literal or array literal.
+ *
+ * Uses the same `parseCaptureExpression` infrastructure that the capture
+ * collector uses, ensuring consistent handling of property access patterns.
+ *
+ * @returns A string literal (for single property) or array literal (for nested path),
+ *          or undefined if the function is too complex.
+ */
+function extractKeyPathFromFunction(
+  keyFn: ts.ArrowFunction | ts.FunctionExpression,
+  context: TransformationContext,
+): ts.Expression | undefined {
+  const { factory } = context;
+
+  // Get the function body - must be an expression (not a block)
+  const body = ts.isArrowFunction(keyFn) ? keyFn.body : undefined;
+  if (!body || !ts.isExpression(body)) {
+    context.options.logger?.warn(
+      "Key function must be an arrow function with expression body (e.g., item => item.id)",
+    );
+    return undefined;
+  }
+
+  // Get the parameter name
+  const param = keyFn.parameters[0];
+  if (!param || !ts.isIdentifier(param.name)) {
+    context.options.logger?.warn(
+      "Key function parameter must be a simple identifier",
+    );
+    return undefined;
+  }
+  const paramName = param.name.text;
+
+  // Use parseCaptureExpression to extract the property path
+  const pathInfo = parseCaptureExpression(body);
+  if (!pathInfo) {
+    context.options.logger?.warn(
+      `Key function must be a simple property access (e.g., ${paramName} => ${paramName}.id)`,
+    );
+    return undefined;
+  }
+
+  // Verify the root matches the parameter name
+  if (pathInfo.root !== paramName) {
+    context.options.logger?.warn(
+      `Key function must access properties on the parameter '${paramName}', not '${pathInfo.root}'`,
+    );
+    return undefined;
+  }
+
+  // Must have at least one property in the path
+  if (pathInfo.path.length === 0) {
+    context.options.logger?.warn(
+      `Key function must access a property (e.g., ${paramName} => ${paramName}.id), not just return the parameter`,
+    );
+    return undefined;
+  }
+
+  // Convert to string literal (single property) or array literal (nested path)
+  if (pathInfo.path.length === 1) {
+    return factory.createStringLiteral(pathInfo.path[0]);
+  }
+
+  return factory.createArrayLiteralExpression(
+    pathInfo.path.map((p) => factory.createStringLiteral(p)),
+  );
 }
 
 export class MapStrategy implements ClosureTransformationStrategy {
@@ -76,7 +166,7 @@ export class MapStrategy implements ClosureTransformationStrategy {
     if (callback && isFunctionLikeExpression(callback)) {
       if (shouldTransformMap(node, context)) {
         // Check if this is a keyed map: .map(fn, { key: ... })
-        const keyOption = extractKeyOption(node);
+        const keyOption = extractKeyOption(node, context);
         if (keyOption) {
           return transformKeyedMapCallback(node, callback, keyOption, context, visitor);
         }

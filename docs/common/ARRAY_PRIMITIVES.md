@@ -184,6 +184,46 @@ export default recipe<State>("Item Processor", ({ items }) => {
 });
 ```
 
+### Key Functions (Type-Checked)
+
+For type-safe key extraction, use a key function instead of a string path:
+
+```typescript
+interface Item {
+  id: number;
+  category: { name: string };
+  content: string;
+}
+
+interface State {
+  items: Cell<Item[]>;
+}
+
+export default recipe<State>("Item Processor", ({ items }) => {
+  // Key function - TypeScript validates the property exists
+  const processed = items.map(
+    (item) => process(item.content),
+    { key: (item) => item.id }  // Compiles to { key: "id" }
+  );
+
+  // Nested property access works too
+  const byCategory = items.map(
+    (item) => process(item.content),
+    { key: (item) => item.category.name }  // Compiles to { key: ["category", "name"] }
+  );
+
+  return { processed, byCategory };
+});
+```
+
+**Benefits of key functions:**
+- TypeScript checks that the property path is valid
+- IDE autocomplete works
+- Refactoring-safe (renaming properties updates the key)
+
+**Note:** Only simple property access is supported. Complex expressions like
+`item => item.type + ":" + item.id` will fail at compile time with a helpful error.
+
 ### Closure Capture
 
 Keyed map callbacks can capture outer scope values:
@@ -259,6 +299,8 @@ cell.map(callback)
 // Keyed map (stable key-based identity)
 cell.map(callback, { key: "propertyName" })         // Property as key
 cell.map(callback, { key: ["nested", "prop"] })     // Nested property as key
+cell.map(callback, { key: (item) => item.id })      // Key function (type-checked)
+cell.map(callback, { key: (item) => item.a.b })     // Nested key function
 ```
 
 ### Gotchas
@@ -337,8 +379,10 @@ cell.reduce(initialValue, (acc, item) => newAcc)
 cell.reduce(initialValue, (acc, item, index) => newAcc)  // with index
 
 // Keyed map() - map with stable key-based identity
-cell.map(callback, { key: "propertyName" })      // property as key
-cell.map(callback, { key: ["nested", "prop"] })  // nested property as key
+cell.map(callback, { key: "propertyName" })           // property as key
+cell.map(callback, { key: ["nested", "prop"] })       // nested property as key
+cell.map(callback, { key: (item) => item.id })        // key function (type-checked)
+cell.map(callback, { key: (item) => item.nested.id }) // nested key function
 ```
 
 ---

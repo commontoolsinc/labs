@@ -236,19 +236,26 @@ export interface IEquatable {
 /**
  * Options for the map() method.
  */
-export interface MapOptions {
+export interface MapOptions<T = unknown> {
   /**
-   * Property path to use as stable identity key.
+   * Stable identity key for tracking elements across reorders.
    * When provided, elements are tracked by key instead of index,
    * preventing re-processing when the array is reordered.
+   *
+   * Can be:
+   * - A property name: `{ key: "id" }`
+   * - A property path: `{ key: ["nested", "id"] }`
+   * - A key function: `{ key: item => item.id }` (type-checked!)
+   *
+   * Key functions are analyzed at compile time and must be simple
+   * property accesses (e.g., `item => item.id` or `item => item.nested.id`).
    *
    * @example
    * items.map(item => process(item), { key: "id" })
    * items.map(item => process(item), { key: ["nested", "id"] })
-   *
-   * Future: Will support key functions like { key: item => item.id }
+   * items.map(item => process(item), { key: item => item.id })
    */
-  key?: string | string[];
+  key?: string | string[] | ((item: T) => unknown);
 }
 
 /**
@@ -261,14 +268,17 @@ export interface IDerivable<T> {
    *
    * @param fn - Callback to apply to each element
    * @param options - Optional configuration
-   * @param options.key - Property path for stable identity (prevents re-processing on reorder)
+   * @param options.key - Stable identity key (property path or key function)
    *
    * @example
    * // Index-based (default)
    * items.map(item => ({ doubled: item.value * 2 }))
    *
-   * // Key-based (stable identity)
+   * // Key-based (stable identity) - property path
    * items.map(item => process(item), { key: "id" })
+   *
+   * // Key-based (stable identity) - type-checked key function
+   * items.map(item => process(item), { key: item => item.id })
    */
   map<S>(
     this: IsThisObject,
@@ -277,7 +287,7 @@ export interface IDerivable<T> {
       index: OpaqueRef<number>,
       array: OpaqueRef<T>,
     ) => Opaque<S>,
-    options?: MapOptions,
+    options?: MapOptions<T extends Array<infer U> ? U : T>,
   ): OpaqueRef<S[]>;
 
   mapWithPattern<S>(
