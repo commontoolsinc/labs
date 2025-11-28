@@ -197,6 +197,24 @@ WHERE
   fact.this = :fact;
 `;
 
+// Batch query for labels using json_each() to handle array of 'of' values
+// This replaces N individual queries with a single query
+const GET_LABELS_BATCH = `SELECT
+  state.the as the,
+  state.of as of,
+  state.'is' as 'is',
+  state.cause as cause,
+  state.since as since,
+  state.fact as fact
+FROM
+  state
+WHERE
+  state.the = :the
+  AND state.of IN (SELECT value FROM json_each(:ofs))
+ORDER BY
+  since ASC
+`;
+
 /**
  * Cache for prepared statements associated with each database connection.
  * Using WeakMap ensures statements are cleaned up when database is closed.
@@ -205,6 +223,7 @@ type PreparedStatements = {
   export?: Statement;
   causeChain?: Statement;
   getFact?: Statement;
+  getLabelsBatch?: Statement;
   importDatum?: Statement;
   importFact?: Statement;
   importMemory?: Statement;
@@ -1007,6 +1026,7 @@ export type FactSelectionValue = { is?: JSONValue; since: number };
 // Get the labels associated with a set of commits.
 // It's possible to get more than one label for a single doc because our
 // includedFacts may include more than one cause for a single doc.
+// Uses a batched query (SELECT...IN) instead of N individual queries for performance.
 export function getLabels<
   Space extends MemorySpace,
   T,
@@ -1015,25 +1035,42 @@ export function getLabels<
   includedFacts: OfTheCause<Revision<T>>,
 ): OfTheCause<FactSelectionValue> {
   const labels: OfTheCause<FactSelectionValue> = {};
+
+  // Collect unique 'of' values, excluding labels themselves
+  const ofs: URI[] = [];
   for (const fact of iterate(includedFacts)) {
-    // We don't restrict acccess to labels
-    if (fact.the === LABEL_TYPE) {
-      continue;
-    }
-    const labelFact = getLabel(session, fact.of);
-    if (labelFact !== undefined) {
-      set<FactSelectionValue, OfTheCause<FactSelectionValue>>(
-        labels,
-        labelFact.of,
-        labelFact.the,
-        labelFact.cause,
-        {
-          since: labelFact.since,
-          ...(labelFact.is ? { is: labelFact.is } : {}),
-        },
-      );
+    // We don't restrict access to labels
+    if (fact.the !== LABEL_TYPE) {
+      ofs.push(fact.of);
     }
   }
+
+  // No facts to look up labels for
+  if (ofs.length === 0) {
+    return labels;
+  }
+
+  // Batch query for all labels in a single SELECT...IN query
+  const stmt = getPreparedStatement(session.store, "getLabelsBatch", GET_LABELS_BATCH);
+  for (
+    const row of stmt.iter({
+      the: LABEL_TYPE,
+      ofs: JSON.stringify(ofs),
+    }) as Iterable<StateRow>
+  ) {
+    const labelFact = toFact(row);
+    set<FactSelectionValue, OfTheCause<FactSelectionValue>>(
+      labels,
+      labelFact.of,
+      labelFact.the,
+      labelFact.cause,
+      {
+        since: labelFact.since,
+        ...(labelFact.is ? { is: labelFact.is } : {}),
+      },
+    );
+  }
+
   return labels;
 }
 
