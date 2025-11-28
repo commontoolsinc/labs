@@ -1,4 +1,4 @@
-import { BuiltInLLMDialogState } from "@commontools/api";
+import { BuiltInLLMDialogState, MapByKeyFunction } from "@commontools/api";
 import { createNodeFactory, lift } from "./module.ts";
 import { recipe } from "./recipe.ts";
 import { isRecipe } from "./types.ts";
@@ -270,3 +270,71 @@ export const patternTool = (<
     extraParams: extraParams ?? {},
   } as any as OpaqueRef<Omit<T, keyof E>>;
 }) as PatternToolFunction;
+
+/**
+ * Map over an array with stable key-based identity.
+ *
+ * Unlike map() which tracks by index, mapByKey() uses a key to establish
+ * stable identity. This means:
+ * - Reordering the input array doesn't cause re-processing
+ * - Same key = same result cell, regardless of position
+ * - Automatic deduplication (duplicate keys use first occurrence)
+ *
+ * @example
+ * ```ts
+ * const urls = Cell.of(["a", "b", "c"]);
+ * const fetches = mapByKey(urls, url => fetchData({ url }));
+ * // Reordering urls won't re-fetch - same keys!
+ *
+ * const articles = Cell.of([{id: 1}, {id: 2}]);
+ * const analyses = mapByKey(articles, "id", a => analyze(a));
+ * // Keyed by id - stable across reordering
+ * ```
+ */
+let mapByKeyFactory:
+  | NodeFactory<{
+      list: unknown[];
+      keyPath?: string | string[];
+      op: RecipeFactory<any, any>;
+      params?: Record<string, any>;
+    }, any[]>
+  | undefined;
+
+export const mapByKey: MapByKeyFunction = ((...args: any[]) => {
+  mapByKeyFactory ||= createNodeFactory({
+    type: "ref",
+    implementation: "mapByKey",
+  });
+
+  // Handle different overloads:
+  // 1. mapByKey(list, fn) - identity key
+  // 2. mapByKey(list, keyPath, fn) - property path key
+
+  let list: unknown;
+  let keyPath: string | string[] | undefined;
+  let op: RecipeFactory<any, any> | ((input: any) => any);
+  let params: Record<string, any> | undefined;
+
+  if (args.length === 2) {
+    // Identity key: mapByKey(list, fn)
+    [list, op] = args;
+    keyPath = undefined;
+  } else if (args.length === 3 || args.length === 4) {
+    // Property path key: mapByKey(list, keyPath, fn, params?)
+    [list, keyPath, op, params] = args;
+  } else {
+    throw new Error(
+      `mapByKey expects 2-4 arguments, got ${args.length}`,
+    );
+  }
+
+  // Convert function to recipe if needed
+  const opRecipe = isRecipe(op) ? op : recipe(op);
+
+  return mapByKeyFactory({
+    list: list as unknown[],
+    keyPath,
+    op: opRecipe,
+    params,
+  });
+}) as MapByKeyFunction;

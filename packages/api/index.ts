@@ -1245,6 +1245,68 @@ export type ReduceFunction = {
   ): OpaqueRef<R>;
 };
 
+/**
+ * MapByKeyFunction creates a reactive map over an array with stable key-based identity.
+ *
+ * Unlike map() which tracks by index, mapByKey() tracks by key.
+ * This means:
+ * - Reordering the input array doesn't cause re-processing
+ * - Same key = same result cell, regardless of position
+ * - Automatic deduplication (duplicate keys use first occurrence)
+ *
+ * Key extraction via keyPath:
+ * - undefined: use item value as key (identity)
+ * - "id": use item.id as key
+ * - ["nested", "id"]: use item.nested.id as key
+ *
+ * @example
+ * ```typescript
+ * const urls = Cell.of(["a", "b", "c"]);
+ * const fetches = mapByKey(urls, url => fetchData({ url }));
+ * // Reordering urls won't re-fetch - same keys!
+ *
+ * const articles = Cell.of([{id: 1, text: "..."}, {id: 2, text: "..."}]);
+ * const analyses = mapByKey(articles, "id", a => analyze(a));
+ * // Keyed by id - stable across reordering
+ * ```
+ */
+export type MapByKeyFunction = {
+  // Overload 1: Identity key (item value is key)
+  <T, S>(
+    list: Opaque<T[]>,
+    fn: (
+      element: OpaqueRef<T>,
+      key: OpaqueRef<T>,
+      index: OpaqueRef<number>,
+      array: OpaqueRef<T[]>,
+    ) => Opaque<S>,
+  ): OpaqueRef<S[]>;
+
+  // Overload 2: Property path key (string)
+  <T, S>(
+    list: Opaque<T[]>,
+    keyPath: string,
+    fn: (
+      element: OpaqueRef<T>,
+      key: OpaqueRef<any>,
+      index: OpaqueRef<number>,
+      array: OpaqueRef<T[]>,
+    ) => Opaque<S>,
+  ): OpaqueRef<S[]>;
+
+  // Overload 3: Nested property path key (string[])
+  <T, S>(
+    list: Opaque<T[]>,
+    keyPath: string[],
+    fn: (
+      element: OpaqueRef<T>,
+      key: OpaqueRef<any>,
+      index: OpaqueRef<number>,
+      array: OpaqueRef<T[]>,
+    ) => Opaque<S>,
+  ): OpaqueRef<S[]>;
+};
+
 export type StrFunction = (
   strings: TemplateStringsArray,
   ...values: any[]
@@ -1398,6 +1460,7 @@ export declare const handler: HandlerFunction;
 export declare const derive: DeriveFunction;
 export declare const computed: ComputedFunction;
 export declare const reduce: ReduceFunction;
+export declare const mapByKey: MapByKeyFunction;
 export declare const str: StrFunction;
 export declare const ifElse: IfElseFunction;
 /** @deprecated Use generateText() or generateObject() instead */

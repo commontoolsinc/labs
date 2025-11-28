@@ -30,6 +30,7 @@ import type {
   LiftFunction,
   LLMDialogFunction,
   LLMFunction,
+  MapByKeyFunction,
   Module,
   NavigateToFunction,
   Opaque,
@@ -250,6 +251,7 @@ export interface BuilderFunctionsAndConstants {
   compileAndRun: CompileAndRunFunction;
   navigateTo: NavigateToFunction;
   wish: WishFunction;
+  mapByKey: MapByKeyFunction;
 
   // Cell creation
   cell: CellTypeConstructor<AsCell>["of"];

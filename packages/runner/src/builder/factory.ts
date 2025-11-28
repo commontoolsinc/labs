@@ -33,6 +33,7 @@ import {
   ifElse,
   llm,
   llmDialog,
+  mapByKey,
   navigateTo,
   patternTool,
   str,
@@ -100,6 +101,7 @@ export const createBuilder = (): {
       navigateTo,
       wish,
       pattern,
+      mapByKey,
 
       // Cell creation
       cell: cellConstructorFactory<AsCell>("cell").of,

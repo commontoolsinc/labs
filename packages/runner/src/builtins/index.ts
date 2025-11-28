@@ -1,5 +1,6 @@
 import { raw } from "../module.ts";
 import { map } from "./map.ts";
+import { mapByKey } from "./map-by-key.ts";
 import { fetchData } from "./fetch-data.ts";
 import { fetchProgram } from "./fetch-program.ts";
 import { streamData } from "./stream-data.ts";
@@ -23,6 +24,7 @@ export function registerBuiltins(runtime: IRuntime) {
   const moduleRegistry = runtime.moduleRegistry;
 
   moduleRegistry.addModuleByRef("map", raw(map));
+  moduleRegistry.addModuleByRef("mapByKey", raw(mapByKey));
   moduleRegistry.addModuleByRef("fetchData", raw(fetchData));
   moduleRegistry.addModuleByRef("fetchProgram", raw(fetchProgram));
   moduleRegistry.addModuleByRef("streamData", raw(streamData));
