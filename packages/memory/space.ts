@@ -490,20 +490,24 @@ type StateRow = {
   since: number;
 };
 
+// Extended revision type that includes the stored fact hash
+type RevisionWithFact<T> = Revision<T> & { fact: string };
+
 const recall = <Space extends MemorySpace>(
   { store }: Session<Space>,
   { the, of }: { the: MIME; of: URI },
-): Revision<Fact> | null => {
+): RevisionWithFact<Fact> | null => {
   const stmt = getPreparedStatement(store, "export", EXPORT);
   const row = stmt.get({ the, of }) as StateRow | undefined;
   if (row) {
-    const revision: Revision<Fact> = {
+    const revision: RevisionWithFact<Fact> = {
       the,
       of,
       cause: row.cause
         ? (fromString(row.cause) as Reference<Assertion>)
         : refer(unclaimed({ the, of })),
       since: row.since,
+      fact: row.fact,  // Include stored hash to avoid recomputing with refer()
     };
 
     if (row.is) {
@@ -818,12 +822,12 @@ const swap = <Space extends MemorySpace>(
   // the record and comparing it to desired state.
   if (updated === 0) {
     const revision = recall(session, { the, of });
-    const { since: _, ...actual } = revision ? revision : { actual: null };
 
     // If actual state matches desired state it either was inserted by the
     // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
     // it as a conflict as current state is the asserted one.
-    if (refer(actual).toString() !== fact) {
+    // Use stored fact hash directly instead of recomputing with refer().
+    if (revision?.fact !== fact) {
       // Disable including history tracking for performance.
       // Re-enable this if you need to debug cause chains.
       const revisions: Revision<Fact>[] = [];
@@ -832,12 +836,18 @@ const swap = <Space extends MemorySpace>(
       //   { the, of },
       //   (imported !== 0) ? fact : undefined,
       // );
+      // Strip internal 'fact' field from revision for error reporting
+      let actual: Revision<Fact> | null = null;
+      if (revision) {
+        const { fact: _, ...rest } = revision;
+        actual = rest as Revision<Fact>;
+      }
       throw Error.conflict(transaction, {
         space: transaction.sub,
         the,
         of,
         expected,
-        actual: revision as Revision<Fact>,
+        actual,
         existsInHistory: imported === 0,
         history: revisions,
       });
