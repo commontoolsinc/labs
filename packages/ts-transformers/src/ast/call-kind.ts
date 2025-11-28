@@ -40,6 +40,7 @@ export type CallKind =
   | { kind: "array-map"; symbol?: ts.Symbol }
   | { kind: "derive"; symbol?: ts.Symbol }
   | { kind: "reduce"; symbol?: ts.Symbol }
+  | { kind: "mapByKey"; symbol?: ts.Symbol }
   | { kind: "cell-factory"; symbol?: ts.Symbol; factoryName: string }
   | { kind: "cell-for"; symbol?: ts.Symbol }
   | { kind: "wish"; symbol?: ts.Symbol }
@@ -67,6 +68,9 @@ function resolveExpressionKind(
     }
     if (name === "reduce") {
       return { kind: "reduce" };
+    }
+    if (name === "mapByKey") {
+      return { kind: "mapByKey" };
     }
     if (name === "ifElse") {
       return { kind: "ifElse" };
@@ -118,6 +122,9 @@ function resolveExpressionKind(
     }
     if (name === "reduce") {
       return { kind: "reduce" };
+    }
+    if (name === "mapByKey") {
+      return { kind: "mapByKey" };
     }
     if (name === "ifElse") {
       return { kind: "ifElse" };
@@ -219,6 +226,10 @@ function resolveSymbolKind(
     return { kind: "reduce", symbol: resolved };
   }
 
+  if (name === "mapByKey" && isCommonToolsSymbol(resolved)) {
+    return { kind: "mapByKey", symbol: resolved };
+  }
+
   if (name === "cell" && isCommonToolsSymbol(resolved)) {
     return { kind: "cell-factory", symbol: resolved, factoryName: "cell" };
   }
@@ -246,6 +257,10 @@ function resolveSymbolKind(
 
   if (name === "reduce") {
     return { kind: "reduce", symbol: resolved };
+  }
+
+  if (name === "mapByKey") {
+    return { kind: "mapByKey", symbol: resolved };
   }
 
   if (name === "cell") {

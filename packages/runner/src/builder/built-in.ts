@@ -307,20 +307,40 @@ export const mapByKey: MapByKeyFunction = ((...args: any[]) => {
   });
 
   // Handle different overloads:
+  // Original API:
   // 1. mapByKey(list, fn) - identity key
   // 2. mapByKey(list, keyPath, fn) - property path key
+  //
+  // Transformed (with params from ts-transformer):
+  // 3. mapByKey(list, recipe, params) - identity key, transformed
+  // 4. mapByKey(list, keyPath, recipe, params) - property path key, transformed
 
   let list: unknown;
   let keyPath: string | string[] | undefined;
   let op: RecipeFactory<any, any> | ((input: any) => any);
   let params: Record<string, any> | undefined;
 
+  // Helper to check if arg is a keyPath (string or string[])
+  const isKeyPath = (arg: unknown): arg is string | string[] =>
+    typeof arg === "string" || (Array.isArray(arg) && arg.every((x) => typeof x === "string"));
+
   if (args.length === 2) {
     // Identity key: mapByKey(list, fn)
     [list, op] = args;
     keyPath = undefined;
-  } else if (args.length === 3 || args.length === 4) {
-    // Property path key: mapByKey(list, keyPath, fn, params?)
+  } else if (args.length === 3) {
+    // Either: mapByKey(list, keyPath, fn) OR mapByKey(list, recipe, params)
+    // Distinguish by checking if arg[1] is a keyPath
+    if (isKeyPath(args[1])) {
+      // mapByKey(list, keyPath, fn)
+      [list, keyPath, op] = args;
+    } else {
+      // mapByKey(list, recipe, params) - from transformer
+      [list, op, params] = args;
+      keyPath = undefined;
+    }
+  } else if (args.length === 4) {
+    // Property path key with params: mapByKey(list, keyPath, recipe, params)
     [list, keyPath, op, params] = args;
   } else {
     throw new Error(

@@ -109,6 +109,117 @@ export class SchemaFactory {
   }
 
   /**
+   * Build a TypeNode for a mapByKey callback parameter.
+   * Returns: { element: T, key?: K, index?: number, array?: T[], params: {...} }
+   */
+  createMapByKeyCallbackSchema(
+    mapByKeyCall: ts.CallExpression,
+    elemParam: ts.ParameterDeclaration | undefined,
+    keyParam: ts.ParameterDeclaration | undefined,
+    indexParam: ts.ParameterDeclaration | undefined,
+    arrayParam: ts.ParameterDeclaration | undefined,
+    captureTree: Map<string, CaptureTreeNode>,
+  ): ts.TypeNode {
+    const { checker } = this.context;
+    const typeRegistry = this.context.options.typeRegistry;
+
+    // 1. Determine element type from list argument
+    let elemTypeNode: ts.TypeNode;
+
+    // Try explicit annotation
+    const explicit = tryExplicitParameterType(elemParam, checker, typeRegistry);
+    if (explicit) {
+      elemTypeNode = explicit.typeNode;
+    } else {
+      // Infer from mapByKey's first argument (the list)
+      const listArg = mapByKeyCall.arguments[0];
+      if (!listArg) {
+        elemTypeNode = this.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+      } else {
+        const inferred = inferArrayElementType(
+          listArg,
+          { ...this.context, typeRegistry },
+        );
+
+        elemTypeNode = inferred.typeNode;
+
+        // Register the inferred type if available
+        if (inferred.type) {
+          registerTypeForNode(elemTypeNode, inferred.type, typeRegistry);
+        }
+      }
+    }
+
+    // 2. Build callback parameter properties
+    const callbackParamProperties: ts.TypeElement[] = [
+      this.factory.createPropertySignature(
+        undefined,
+        this.factory.createIdentifier("element"),
+        undefined,
+        elemTypeNode,
+      ),
+    ];
+
+    // 3. Add optional key property if present
+    if (keyParam) {
+      // Key type defaults to element type or any
+      const keyTypeNode = tryExplicitParameterType(keyParam, checker, typeRegistry)?.typeNode ??
+        this.factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword);
+      callbackParamProperties.push(
+        this.factory.createPropertySignature(
+          undefined,
+          this.factory.createIdentifier("key"),
+          this.factory.createToken(ts.SyntaxKind.QuestionToken),
+          keyTypeNode,
+        ),
+      );
+    }
+
+    // 4. Add optional index property if present
+    if (indexParam) {
+      callbackParamProperties.push(
+        this.factory.createPropertySignature(
+          undefined,
+          this.factory.createIdentifier("index"),
+          this.factory.createToken(ts.SyntaxKind.QuestionToken),
+          this.factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
+        ),
+      );
+    }
+
+    // 5. Add optional array property if present
+    if (arrayParam) {
+      const arrayTypeNode = this.factory.createArrayTypeNode(elemTypeNode);
+      callbackParamProperties.push(
+        this.factory.createPropertySignature(
+          undefined,
+          this.factory.createIdentifier("array"),
+          this.factory.createToken(ts.SyntaxKind.QuestionToken),
+          arrayTypeNode,
+        ),
+      );
+    }
+
+    // 6. Build params object type with hierarchical captures
+    const paramsProperties = buildTypeElementsFromCaptureTree(
+      captureTree,
+      this.context,
+    );
+
+    // 7. Add params property
+    callbackParamProperties.push(
+      this.factory.createPropertySignature(
+        undefined,
+        this.factory.createIdentifier("params"),
+        undefined,
+        this.factory.createTypeLiteralNode(paramsProperties),
+      ),
+    );
+
+    return this.factory.createTypeLiteralNode(callbackParamProperties);
+  }
+
+  /**
    * Build a TypeNode for a handler state parameter.
    * Returns: { ...captures }
    */
