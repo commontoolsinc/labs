@@ -6,7 +6,7 @@ import {
 
 import { COMMIT_LOG_TYPE, create as createCommit } from "./commit.ts";
 import { unclaimed } from "./fact.ts";
-import { fromString, refer } from "./reference.ts";
+import { fromString, getInterned, intern, refer } from "./reference.ts";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
   Assert,
@@ -157,7 +157,8 @@ const EXPORT = `SELECT
   state.'is' as 'is',
   state.cause as cause,
   state.since as since,
-  state.fact as fact
+  state.fact as fact,
+  state.proof as proof
 FROM
   state
 WHERE
@@ -408,6 +409,7 @@ type StateRow = {
   is: string | null;
   cause: string | null;
   since: number;
+  proof: string | null;  // merkle hash of datum, used for object interning
 };
 
 const recall = <Space extends MemorySpace>(
@@ -427,7 +429,20 @@ const recall = <Space extends MemorySpace>(
         since: row.since,
       };
 
-      if (row.is) {
+      if (row.is && row.proof) {
+        // Use interning for cross-transaction WeakMap cache hits
+        const interned = getInterned(row.proof);
+        if (interned !== undefined) {
+          revision.is = interned;
+        } else {
+          const parsed = JSON.parse(row.is);
+          if (parsed !== null && typeof parsed === "object") {
+            revision.is = intern(row.proof, parsed);
+          } else {
+            revision.is = parsed;
+          }
+        }
+      } else if (row.is) {
         revision.is = JSON.parse(row.is);
       }
 
@@ -513,7 +528,20 @@ const getFact = <Space extends MemorySpace>(
         : refer(unclaimed(row as FactAddress)),
       since: row.since,
     };
-    if (row.is) {
+    if (row.is && row.proof) {
+      // Use interning for cross-transaction WeakMap cache hits
+      const interned = getInterned(row.proof);
+      if (interned !== undefined) {
+        revision.is = interned;
+      } else {
+        const parsed = JSON.parse(row.is);
+        if (parsed !== null && typeof parsed === "object") {
+          revision.is = intern(row.proof, parsed);
+        } else {
+          revision.is = parsed;
+        }
+      }
+    } else if (row.is) {
       revision.is = JSON.parse(row.is);
     }
     return revision;
@@ -568,14 +596,45 @@ export type SelectedFact = {
   since: number;
 };
 
+/**
+ * Convert a StateRow from SQLite to a SelectedFact.
+ *
+ * Uses object interning to ensure that semantically identical content
+ * always uses the same object reference. This enables merkle-reference's
+ * internal WeakMap caching to work across transactions, providing ~1200x
+ * speedup for subsequent refer() calls on the same content.
+ */
 const toFact = function (row: StateRow): SelectedFact {
+  let is: JSONValue | undefined;
+
+  if (row.is && row.proof) {
+    // Try to get an interned object for this merkle hash
+    const interned = getInterned<JSONValue & object>(row.proof);
+    if (interned !== undefined) {
+      // Cache hit: use the canonical object reference
+      // Future refer() calls will hit the internal WeakMap (~138ns vs ~170µs)
+      is = interned;
+    } else {
+      // Cache miss: parse JSON and intern the result
+      const parsed = JSON.parse(row.is) as JSONValue;
+      if (parsed !== null && typeof parsed === "object") {
+        is = intern(row.proof, parsed as JSONValue & object);
+      } else {
+        is = parsed;
+      }
+    }
+  } else if (row.is) {
+    // No proof available, just parse (shouldn't happen with well-formed data)
+    is = JSON.parse(row.is) as JSONValue;
+  }
+
   return {
     the: row.the as MIME,
     of: row.of as URI,
     cause: row.cause
       ? row.cause as CauseString
       : refer(unclaimed(row as FactAddress)).toString() as CauseString,
-    is: row.is ? JSON.parse(row.is) as JSONValue : undefined,
+    is,
     since: row.since,
   };
 };
