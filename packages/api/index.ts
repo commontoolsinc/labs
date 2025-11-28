@@ -1188,11 +1188,13 @@ export type ComputedFunction = <T>(fn: () => T) => OpaqueRef<T>;
  * Special overload ordering is critical for correct type inference:
  *
  * 1. Schema-based overload: For explicit schema definitions
- * 2. Generic overload: Handles all other cases
+ * 2. OpaqueRef array overload: For OpaqueRef<T[]> inputs
+ * 3. OpaqueCell array overload: For OpaqueCell<T[]> inputs
+ * 4. Generic overload: Handles all other cases
  *
  * @example
  * ```typescript
- * const items = cell([1, 2, 3, 4, 5]);
+ * const items = Cell.of([1, 2, 3, 4, 5]);
  * const sum = reduce(items, 0, (acc, item) => acc + item);
  * // sum is now OpaqueRef<number> with value 15
  * ```
@@ -1214,9 +1216,30 @@ export type ReduceFunction = {
     ) => Schema<ResultSchema>,
   ): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
 
-  // Overload 2: Generic reduce with type inference
+  // Overload 2: OpaqueRef array - unwrap OpaqueRef<T[]> to get T
   <T, R>(
-    list: Opaque<T[]>,
+    list: OpaqueRef<T[]>,
+    initial: R,
+    reducer: (acc: R, item: T, index: number) => R,
+  ): OpaqueRef<R>;
+
+  // Overload 3: OpaqueCell array
+  <T, R>(
+    list: OpaqueCell<T[]>,
+    initial: R,
+    reducer: (acc: R, item: T, index: number) => R,
+  ): OpaqueRef<R>;
+
+  // Overload 4: Cell array
+  <T, R>(
+    list: Cell<T[]>,
+    initial: R,
+    reducer: (acc: R, item: T, index: number) => R,
+  ): OpaqueRef<R>;
+
+  // Overload 5: Plain array (for compile-time testing)
+  <T, R>(
+    list: T[],
     initial: R,
     reducer: (acc: R, item: T, index: number) => R,
   ): OpaqueRef<R>;
