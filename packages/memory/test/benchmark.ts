@@ -4,6 +4,7 @@
  * Run with: deno bench test/benchmark.ts
  */
 
+import { Database } from "@db/sqlite";
 import { refer } from "merkle-reference";
 import * as Space from "../space.ts";
 import * as Fact from "../fact.ts";
@@ -730,6 +731,193 @@ Deno.bench({
         changes: Changes.from([assertion]),
       })
     );
+    b.end();
+  },
+});
+
+// ==========================================================================
+// ISOLATION BENCHMARKS: Identify where time is spent
+// ==========================================================================
+
+// --------------------------------------------------------------------------
+// Baseline: Raw SQLite performance
+// --------------------------------------------------------------------------
+
+const RAW_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS test_datum (
+    id TEXT PRIMARY KEY,
+    data TEXT
+  );
+`;
+
+let rawDb: Database | null = null;
+let rawInsertStmt: ReturnType<Database["prepare"]> | null = null;
+
+function getRawDb() {
+  if (!rawDb) {
+    rawDb = new Database(":memory:");
+    rawDb.exec(RAW_SCHEMA);
+    // Warm up with one insert
+    rawDb.run("INSERT INTO test_datum (id, data) VALUES (?, ?)", ["warmup", "{}"]);
+    rawInsertStmt = rawDb.prepare("INSERT INTO test_datum (id, data) VALUES (?, ?)");
+  }
+  return { db: rawDb, stmt: rawInsertStmt! };
+}
+
+Deno.bench({
+  name: "raw SQLite INSERT (16KB, prepared stmt)",
+  group: "isolation",
+  baseline: true,
+  fn(b) {
+    const { stmt } = getRawDb();
+    const id = `id-${docCounter++}`;
+    const payload = createTypicalPayload();
+    const json = JSON.stringify(payload);
+
+    b.start();
+    stmt.run([id, json]);
+    b.end();
+  },
+});
+
+Deno.bench({
+  name: "raw SQLite INSERT (16KB, new stmt each time)",
+  group: "isolation",
+  fn(b) {
+    const { db } = getRawDb();
+    const id = `id-${docCounter++}`;
+    const payload = createTypicalPayload();
+    const json = JSON.stringify(payload);
+
+    b.start();
+    db.run("INSERT INTO test_datum (id, data) VALUES (?, ?)", [id, json]);
+    b.end();
+  },
+});
+
+// --------------------------------------------------------------------------
+// Isolation: JSON.stringify cost
+// --------------------------------------------------------------------------
+
+Deno.bench({
+  name: "JSON.stringify (16KB payload)",
+  group: "isolation",
+  fn(b) {
+    const payload = createTypicalPayload();
+
+    b.start();
+    JSON.stringify(payload);
+    b.end();
+  },
+});
+
+// --------------------------------------------------------------------------
+// Isolation: Merkle reference (refer) cost
+// --------------------------------------------------------------------------
+
+Deno.bench({
+  name: "refer() on 16KB payload",
+  group: "isolation",
+  fn(b) {
+    const payload = createTypicalPayload();
+
+    b.start();
+    refer(payload);
+    b.end();
+  },
+});
+
+Deno.bench({
+  name: "refer() on small object {the, of}",
+  group: "isolation",
+  fn(b) {
+    const doc = createDoc();
+
+    b.start();
+    refer({ the: "application/json", of: doc });
+    b.end();
+  },
+});
+
+Deno.bench({
+  name: "refer() on assertion (16KB is + metadata)",
+  group: "isolation",
+  fn(b) {
+    const doc = createDoc();
+    const payload = createTypicalPayload();
+
+    b.start();
+    refer({ the: "application/json", of: doc, is: payload });
+    b.end();
+  },
+});
+
+// --------------------------------------------------------------------------
+// Isolation: Fact.assert cost (creates merkle refs internally)
+// --------------------------------------------------------------------------
+
+Deno.bench({
+  name: "Fact.assert() call only",
+  group: "isolation",
+  fn(b) {
+    const doc = createDoc();
+    const payload = createTypicalPayload();
+
+    b.start();
+    Fact.assert({
+      the: "application/json",
+      of: doc,
+      is: payload,
+    });
+    b.end();
+  },
+});
+
+// --------------------------------------------------------------------------
+// Isolation: Transaction.create cost
+// --------------------------------------------------------------------------
+
+Deno.bench({
+  name: "Transaction.create() + Changes.from()",
+  group: "isolation",
+  fn(b) {
+    const doc = createDoc();
+    const payload = createTypicalPayload();
+    const assertion = Fact.assert({
+      the: "application/json",
+      of: doc,
+      is: payload,
+    });
+
+    b.start();
+    Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([assertion]),
+    });
+    b.end();
+  },
+});
+
+// --------------------------------------------------------------------------
+// Combined: Multiple refer() calls as done in a real transaction
+// --------------------------------------------------------------------------
+
+Deno.bench({
+  name: "3x refer() calls (simulating transaction)",
+  group: "isolation",
+  fn(b) {
+    const doc = createDoc();
+    const payload = createTypicalPayload();
+
+    b.start();
+    // Simulates what happens in a transaction:
+    // 1. refer(datum) for the payload
+    refer(payload);
+    // 2. refer(unclaimed) for the base
+    refer({ the: "application/json", of: doc });
+    // 3. refer(assertion) for the fact
+    refer({ the: "application/json", of: doc, is: payload });
     b.end();
   },
 });
