@@ -648,3 +648,9 @@ const activeItems = computed(() => items.filter(item => !item.done));
 4. **Direct Property Access** - Works fine on computed objects
 5. **Get/Set in Handlers** - Use `.get()` to read, `.set()` to write inside handlers
 6. **ifElse for Conditionals** - Use instead of ternaries for conditional rendering/data transforms
+
+## See Also
+
+- [ARRAY_PRIMITIVES.md](ARRAY_PRIMITIVES.md) - `reduce()` and `mapByKey()` for advanced array operations
+- [PATTERNS.md](PATTERNS.md) - Common pattern examples
+- [TYPES_AND_SCHEMAS.md](TYPES_AND_SCHEMAS.md) - Type system details

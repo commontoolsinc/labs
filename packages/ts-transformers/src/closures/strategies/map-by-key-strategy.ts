@@ -16,6 +16,7 @@ import {
 import { CaptureCollector } from "../capture-collector.ts";
 import { RecipeBuilder } from "../utils/recipe-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
+import { wrapTemplateLiteralsInDerive } from "./map-utils.ts";
 
 export class MapByKeyStrategy implements ClosureTransformationStrategy {
   canTransform(
@@ -134,10 +135,29 @@ export function transformMapByKeyCall(
   const arrayParam = originalParams[3]; // May be undefined
 
   // Recursively transform any nested callbacks first
-  const transformedBody = ts.visitNode(
+  let transformedBody = ts.visitNode(
     callback.body,
     visitor,
   ) as ts.ConciseBody;
+
+  // Get the element parameter name for template literal wrapping
+  // The element name in the body is the original parameter name (not "element")
+  const elemParamName = elemParam && ts.isIdentifier(elemParam.name)
+    ? elemParam.name.text
+    : "element";
+
+  // Wrap template literals that use opaque refs (captures or element)
+  // This must happen BEFORE buildCallback so the derive calls are in the body
+  if (captureTree.size > 0 || elemParam) {
+    transformedBody = wrapTemplateLiteralsInDerive(
+      transformedBody,
+      {
+        captureRoots: new Set(captureTree.keys()),
+        elementName: elemParamName,
+      },
+      context,
+    );
+  }
 
   // Create the recipe callback using RecipeBuilder
   const usedBindingNames = new Set<string>();

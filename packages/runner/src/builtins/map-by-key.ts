@@ -159,9 +159,12 @@ export function mapByKey(
       if (!resultCell) {
         // Create NEW result cell with KEY-based identity
         // This is the critical difference from map.ts!
+        // NOTE: Use keyString (serialized key) for entity ID because
+        // runtime.getCell() doesn't correctly hash complex objects.
+        // Using the raw key object causes all items to get the same entityId.
         resultCell = runtime.getCell(
           parentCell.space,
-          { result, key }, // ← KEY instead of index
+          { result, keyString }, // ← Use serialized key for correct hashing
           undefined,
           tx,
         );

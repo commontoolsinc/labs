@@ -1154,3 +1154,9 @@ const activeItems = computed(() => items.filter(item => !item.done));
 4. Use handlers for side effects and structural changes
 5. Keep it simple - don't over-engineer
 6. Test incrementally with `deno task ct dev` and `deno task ct charm setsrc`
+
+## See Also
+
+- [ARRAY_PRIMITIVES.md](ARRAY_PRIMITIVES.md) - `reduce()` and `mapByKey()` for streaming pipelines
+- [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) - Core reactivity concepts
+- [COMPONENTS.md](COMPONENTS.md) - UI component reference
