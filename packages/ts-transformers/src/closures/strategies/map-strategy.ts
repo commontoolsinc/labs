@@ -17,11 +17,40 @@ import {
   normalizeBindingName,
   reserveIdentifier,
 } from "../../utils/identifiers.ts";
-import { analyzeElementBinding, rewriteCallbackBody } from "./map-utils.ts";
+import {
+  analyzeElementBinding,
+  rewriteCallbackBody,
+  wrapTemplateLiteralsInDerive,
+} from "./map-utils.ts";
 import type { ComputedAliasInfo } from "./map-utils.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import { RecipeBuilder } from "../utils/recipe-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
+
+/**
+ * Extract key option from map's second argument if it's an options object.
+ * Handles: .map(fn, { key: "id" }) or .map(fn, { key: ["a", "b"] })
+ */
+function extractKeyOption(
+  mapCall: ts.CallExpression,
+): ts.Expression | undefined {
+  const optionsArg = mapCall.arguments[1];
+  if (!optionsArg || !ts.isObjectLiteralExpression(optionsArg)) {
+    return undefined;
+  }
+
+  for (const prop of optionsArg.properties) {
+    if (
+      ts.isPropertyAssignment(prop) &&
+      ts.isIdentifier(prop.name) &&
+      prop.name.text === "key"
+    ) {
+      return prop.initializer;
+    }
+  }
+
+  return undefined;
+}
 
 export class MapStrategy implements ClosureTransformationStrategy {
   canTransform(
@@ -46,6 +75,11 @@ export class MapStrategy implements ClosureTransformationStrategy {
     const callback = node.arguments[0];
     if (callback && isFunctionLikeExpression(callback)) {
       if (shouldTransformMap(node, context)) {
+        // Check if this is a keyed map: .map(fn, { key: ... })
+        const keyOption = extractKeyOption(node);
+        if (keyOption) {
+          return transformKeyedMapCallback(node, callback, keyOption, context, visitor);
+        }
         return transformMapCallback(node, callback, context, visitor);
       }
     }
@@ -540,5 +574,209 @@ export function transformMapCallback(
     captureTree,
     context,
     visitor,
+  );
+}
+
+/**
+ * Transform a keyed map callback: .map(fn, { key: ... })
+ * Converts to mapByKey(list, keyPath, recipe(...), params)
+ *
+ * This is similar to MapByKeyStrategy but handles the .map() method syntax
+ * instead of the standalone mapByKey() function call.
+ */
+export function transformKeyedMapCallback(
+  mapCall: ts.CallExpression,
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  keyOption: ts.Expression,
+  context: TransformationContext,
+  visitor: ts.Visitor,
+): ts.CallExpression {
+  const { factory, checker } = context;
+
+  // Collect captured variables from the callback
+  const collector = new CaptureCollector(checker);
+  const { captureTree } = collector.analyze(callback);
+
+  // Get callback parameters - for keyed map, callback receives (element, key, index, array)
+  const originalParams = callback.parameters;
+  const elemParam = originalParams[0];
+  const indexParam = originalParams[1]; // Actually "index" in .map(), becomes "key" position
+  const arrayParam = originalParams[2]; // "array" position
+
+  // Note: The .map() callback signature is (element, index, array)
+  // but mapByKey callback is (element, key, index, array)
+  // For .map({ key }), we preserve the .map() callback signature
+
+  // Recursively transform any nested callbacks first
+  let transformedBody = ts.visitNode(
+    callback.body,
+    visitor,
+  ) as ts.ConciseBody;
+
+  // Get the element parameter name for template literal wrapping
+  const elemParamName = elemParam && ts.isIdentifier(elemParam.name)
+    ? elemParam.name.text
+    : "element";
+
+  // Wrap template literals that use opaque refs (captures or element)
+  if (captureTree.size > 0 || elemParam) {
+    transformedBody = wrapTemplateLiteralsInDerive(
+      transformedBody,
+      {
+        captureRoots: new Set(captureTree.keys()),
+        elementName: elemParamName,
+      },
+      context,
+    );
+  }
+
+  // Create the recipe callback using RecipeBuilder
+  const usedBindingNames = new Set<string>();
+  const createBindingIdentifier = (name: string): ts.Identifier => {
+    return reserveIdentifier(name, usedBindingNames, factory);
+  };
+
+  // Initialize RecipeBuilder
+  const builder = new RecipeBuilder(context);
+  builder.registerUsedNames(usedBindingNames);
+  builder.setCaptureTree(captureTree);
+
+  // Get element binding name
+  let elementBindingName: ts.BindingName;
+  if (elemParam) {
+    elementBindingName = normalizeBindingName(elemParam.name, factory, usedBindingNames);
+  } else {
+    elementBindingName = createBindingIdentifier("element");
+  }
+
+  // Add element parameter
+  builder.addParameter(
+    "element",
+    elementBindingName,
+    ts.isIdentifier(elementBindingName) && elementBindingName.text === "element"
+      ? undefined
+      : "element",
+  );
+
+  // For keyed map, mapByKey builtin provides (element, key, index, array)
+  // But .map() callback expects (element, index, array)
+  // We need to add a "key" parameter that won't be used by the callback
+  // but is required by mapByKey's callback signature
+  builder.addParameter(
+    "key",
+    createBindingIdentifier("_key"), // Unused, prefix with underscore
+  );
+
+  // Add index parameter if present (maps to mapByKey's index position)
+  if (indexParam) {
+    builder.addParameter(
+      "index",
+      normalizeBindingName(indexParam.name, factory, usedBindingNames),
+    );
+  }
+
+  // Add array parameter if present
+  if (arrayParam) {
+    builder.addParameter(
+      "array",
+      normalizeBindingName(arrayParam.name, factory, usedBindingNames),
+    );
+  }
+
+  // Build the new callback
+  const newCallback = builder.buildCallback(callback, transformedBody, "params");
+  context.markAsMapCallback(newCallback);
+
+  // Build schema using SchemaFactory
+  const schemaFactory = new SchemaFactory(context);
+  const callbackParamTypeNode = schemaFactory.createMapByKeyCallbackSchema(
+    mapCall,
+    elemParam,
+    undefined, // No explicit key param in .map() callback
+    indexParam,
+    arrayParam,
+    captureTree,
+  );
+
+  // Infer result type from callback
+  const typeRegistry = context.options.typeRegistry;
+  let resultTypeNode: ts.TypeNode | undefined;
+
+  if (callback.type) {
+    resultTypeNode = callback.type;
+    if (typeRegistry) {
+      const type = getTypeAtLocationWithFallback(
+        callback.type,
+        checker,
+        typeRegistry,
+      );
+      if (type) {
+        typeRegistry.set(callback.type, type);
+      }
+    }
+  } else {
+    const signature = checker.getSignatureFromDeclaration(callback);
+    if (signature) {
+      const resultType = signature.getReturnType();
+      const isTypeParam = (resultType.flags & ts.TypeFlags.TypeParameter) !== 0;
+
+      if (!isTypeParam) {
+        resultTypeNode = checker.typeToTypeNode(
+          resultType,
+          context.sourceFile,
+          ts.NodeBuilderFlags.NoTruncation |
+            ts.NodeBuilderFlags.UseStructuralFallback,
+        );
+
+        if (resultTypeNode && typeRegistry) {
+          typeRegistry.set(resultTypeNode, resultType);
+        }
+      }
+    }
+  }
+
+  // Create recipe call
+  const recipeExpr = context.ctHelpers.getHelperExpr("recipe");
+  const typeArgs = [callbackParamTypeNode];
+  if (resultTypeNode) {
+    typeArgs.push(resultTypeNode);
+  }
+
+  const recipeCall = factory.createCallExpression(
+    recipeExpr,
+    typeArgs,
+    [newCallback],
+  );
+
+  // Create params object
+  const paramProperties = buildCapturePropertyAssignments(captureTree, factory);
+  const paramsObject = factory.createObjectLiteralExpression(
+    paramProperties,
+    paramProperties.length > 0,
+  );
+
+  // Get the array expression (what .map() was called on)
+  if (!ts.isPropertyAccessExpression(mapCall.expression)) {
+    throw new Error(
+      "Expected mapCall.expression to be a PropertyAccessExpression",
+    );
+  }
+
+  const visitedArrayExpr = ts.visitNode(
+    mapCall.expression.expression,
+    visitor,
+    ts.isExpression,
+  ) ?? mapCall.expression.expression;
+
+  // Visit the key option
+  const visitedKeyOption = ts.visitNode(keyOption, visitor, ts.isExpression) ?? keyOption;
+
+  // Build mapByKey call: mapByKey(list, keyPath, recipe, params)
+  const mapByKeyExpr = context.ctHelpers.getHelperExpr("mapByKey");
+
+  return factory.createCallExpression(
+    mapByKeyExpr,
+    mapCall.typeArguments,
+    [visitedArrayExpr, visitedKeyOption, recipeCall, paramsObject],
   );
 }

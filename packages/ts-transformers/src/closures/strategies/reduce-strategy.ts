@@ -1,7 +1,11 @@
 import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
-import { detectCallKind, isFunctionLikeExpression } from "../../ast/mod.ts";
+import {
+  detectCallKind,
+  getTypeAtLocationWithFallback,
+  isFunctionLikeExpression,
+} from "../../ast/mod.ts";
 import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
@@ -12,13 +16,19 @@ import { CaptureCollector } from "../capture-collector.ts";
 import { RecipeBuilder } from "../utils/recipe-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
 import { wrapTemplateLiteralsInDerive } from "./map-utils.ts";
+import { isOpaqueRefType } from "../../transformers/opaque-ref/opaque-ref.ts";
 
 export class ReduceStrategy implements ClosureTransformationStrategy {
   canTransform(
     node: ts.Node,
     context: TransformationContext,
   ): boolean {
-    return ts.isCallExpression(node) && isReduceCall(node, context);
+    if (!ts.isCallExpression(node)) return false;
+    // Check for standalone reduce() call
+    if (isReduceCall(node, context)) return true;
+    // Check for Cell.reduce() method call
+    if (isCellReduceMethodCall(node, context)) return true;
+    return false;
   }
 
   transform(
@@ -27,8 +37,46 @@ export class ReduceStrategy implements ClosureTransformationStrategy {
     visitor: ts.Visitor,
   ): ts.Node | undefined {
     if (!ts.isCallExpression(node)) return undefined;
+
+    // Check for Cell.reduce() method call first
+    if (isCellReduceMethodCall(node, context)) {
+      return transformCellReduceCall(node, context, visitor);
+    }
+
+    // Fall back to standalone reduce() function
     return transformReduceCall(node, context, visitor);
   }
+}
+
+/**
+ * Check if this is a Cell.reduce() method call: cell.reduce(initial, reducer)
+ */
+function isCellReduceMethodCall(
+  node: ts.CallExpression,
+  context: TransformationContext,
+): boolean {
+  // Check if this is a property access with name "reduce"
+  if (!ts.isPropertyAccessExpression(node.expression)) return false;
+  if (node.expression.name.text !== "reduce") return false;
+
+  // Check that it has exactly 2 arguments (initial, reducer)
+  if (node.arguments.length !== 2) return false;
+
+  // Check that the second argument is a function
+  const reducer = node.arguments[1];
+  if (!reducer || !isFunctionLikeExpression(reducer)) return false;
+
+  // Check that the target (what we're calling .reduce on) is an OpaqueRef/Cell
+  const target = node.expression.expression;
+  const targetType = getTypeAtLocationWithFallback(
+    target,
+    context.checker,
+    context.options.typeRegistry,
+    context.options.logger,
+  );
+
+  if (!targetType) return false;
+  return isOpaqueRefType(targetType, context.checker);
 }
 
 /**
@@ -455,4 +503,213 @@ export function transformReduceCall(
   );
 
   return newReduceCall;
+}
+
+/**
+ * Transform a Cell.reduce() method call that has closures in its reducer.
+ *
+ * Converts: cell.reduce(0, (acc, item) => acc + item * multiplier)
+ * To: lift(({list, initial, multiplier}) =>
+ *       (!list || !Array.isArray(list)) ? initial :
+ *       list.reduce((acc, item) => acc + item * multiplier, initial)
+ *     )({list: cell, initial: 0, multiplier})
+ */
+export function transformCellReduceCall(
+  reduceCall: ts.CallExpression,
+  context: TransformationContext,
+  visitor: ts.Visitor,
+): ts.CallExpression | undefined {
+  const { factory, checker } = context;
+
+  // Extract the cell and arguments
+  if (!ts.isPropertyAccessExpression(reduceCall.expression)) {
+    return undefined;
+  }
+
+  const cellExpr = reduceCall.expression.expression;
+  const initialExpr = reduceCall.arguments[0];
+  const callback = reduceCall.arguments[1];
+
+  if (!initialExpr || !callback || !isFunctionLikeExpression(callback)) {
+    return undefined;
+  }
+
+  // Collect captures from the reducer
+  const collector = new CaptureCollector(checker);
+  const { captures: captureExpressions, captureTree } = collector.analyze(
+    callback,
+  );
+
+  // Even without captures, we still transform to ensure proper reactivity
+  // when the cell changes
+
+  // Recursively transform the callback body first
+  let transformedBody = ts.visitNode(
+    callback.body,
+    visitor,
+  ) as ts.ConciseBody;
+
+  // Wrap template literals that use opaque refs (captures)
+  if (captureTree.size > 0) {
+    transformedBody = wrapTemplateLiteralsInDerive(
+      transformedBody,
+      {
+        captureRoots: new Set(captureTree.keys()),
+        elementName: "", // No element in reduce - just captures
+      },
+      context,
+    );
+  }
+
+  // Collect parameter names from the reducer callback
+  const usedNames = new Set<string>(["list", "initial"]);
+  for (const param of callback.parameters) {
+    if (ts.isIdentifier(param.name)) {
+      usedNames.add(param.name.text);
+    }
+  }
+
+  // Resolve capture name collisions
+  const captureNameMap = resolveReduceCaptureNameCollisions(
+    usedNames,
+    captureTree,
+  );
+
+  // Rewrite the body to use renamed capture identifiers
+  const rewrittenBody = rewriteCaptureReferences(
+    transformedBody,
+    captureNameMap,
+    factory,
+  );
+
+  // Visit the cell expression
+  const visitedCellExpr = ts.visitNode(cellExpr, visitor, ts.isExpression) ?? cellExpr;
+
+  // Visit the initial expression
+  const visitedInitialExpr = ts.visitNode(initialExpr, visitor, ts.isExpression) ?? initialExpr;
+
+  // Build merged input object: {list: cell, initial: 0, ...captures}
+  const mergedInput = buildReduceInputObject(
+    visitedCellExpr,
+    visitedInitialExpr,
+    captureTree,
+    captureNameMap,
+    factory,
+  );
+
+  // Build the new reducer with renamed captures
+  const newReducerParams: ts.ParameterDeclaration[] = [];
+  for (const param of callback.parameters) {
+    newReducerParams.push(param);
+  }
+
+  const equalsGreaterThanToken = ts.isArrowFunction(callback)
+    ? callback.equalsGreaterThanToken
+    : factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken);
+
+  const newReducer = factory.createArrowFunction(
+    callback.modifiers,
+    callback.typeParameters,
+    newReducerParams,
+    callback.type,
+    equalsGreaterThanToken,
+    rewrittenBody,
+  );
+
+  // Build the wrapper function parameter bindings
+  const wrapperParamBindings: ts.BindingElement[] = [];
+
+  wrapperParamBindings.push(
+    factory.createBindingElement(undefined, undefined, factory.createIdentifier("list"), undefined),
+  );
+  wrapperParamBindings.push(
+    factory.createBindingElement(undefined, undefined, factory.createIdentifier("initial"), undefined),
+  );
+
+  // Add capture bindings
+  for (const [originalName] of captureTree) {
+    const renamedName = captureNameMap.get(originalName) ?? originalName;
+    if (originalName !== renamedName) {
+      wrapperParamBindings.push(
+        factory.createBindingElement(
+          undefined,
+          factory.createIdentifier(originalName),
+          factory.createIdentifier(renamedName),
+          undefined,
+        ),
+      );
+    } else {
+      wrapperParamBindings.push(
+        factory.createBindingElement(undefined, undefined, factory.createIdentifier(originalName), undefined),
+      );
+    }
+  }
+
+  const wrapperParam = factory.createParameterDeclaration(
+    undefined,
+    undefined,
+    factory.createObjectBindingPattern(wrapperParamBindings),
+    undefined,
+    undefined,
+    undefined,
+  );
+
+  // Build the wrapper body with null check:
+  // (!list || !Array.isArray(list)) ? initial : list.reduce(reducer, initial)
+  const reduceMethodCall = factory.createConditionalExpression(
+    factory.createBinaryExpression(
+      factory.createPrefixUnaryExpression(
+        ts.SyntaxKind.ExclamationToken,
+        factory.createIdentifier("list"),
+      ),
+      ts.SyntaxKind.BarBarToken,
+      factory.createPrefixUnaryExpression(
+        ts.SyntaxKind.ExclamationToken,
+        factory.createCallExpression(
+          factory.createPropertyAccessExpression(
+            factory.createIdentifier("Array"),
+            "isArray",
+          ),
+          undefined,
+          [factory.createIdentifier("list")],
+        ),
+      ),
+    ),
+    factory.createToken(ts.SyntaxKind.QuestionToken),
+    factory.createIdentifier("initial"),
+    factory.createToken(ts.SyntaxKind.ColonToken),
+    factory.createCallExpression(
+      factory.createPropertyAccessExpression(
+        factory.createIdentifier("list"),
+        "reduce",
+      ),
+      undefined,
+      [newReducer, factory.createIdentifier("initial")],
+    ),
+  );
+
+  // Build the full wrapper arrow function
+  const wrapperFn = factory.createArrowFunction(
+    undefined,
+    undefined,
+    [wrapperParam],
+    undefined,
+    factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+    reduceMethodCall,
+  );
+
+  // Build the lift call: lift(wrapperFn)(mergedInput)
+  const liftExpr = context.ctHelpers.getHelperExpr("lift");
+
+  const liftCall = factory.createCallExpression(
+    liftExpr,
+    undefined,
+    [wrapperFn],
+  );
+
+  return factory.createCallExpression(
+    liftCall,
+    undefined,
+    [mergedInput],
+  );
 }

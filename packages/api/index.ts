@@ -234,11 +234,42 @@ export interface IEquatable {
 }
 
 /**
- * Cells that allow deriving new cells from existing cells. Currently just
- * .map(), but this will eventually include all Array, String and Number
- * methods.
+ * Options for the map() method.
+ */
+export interface MapOptions {
+  /**
+   * Property path to use as stable identity key.
+   * When provided, elements are tracked by key instead of index,
+   * preventing re-processing when the array is reordered.
+   *
+   * @example
+   * items.map(item => process(item), { key: "id" })
+   * items.map(item => process(item), { key: ["nested", "id"] })
+   *
+   * Future: Will support key functions like { key: item => item.id }
+   */
+  key?: string | string[];
+}
+
+/**
+ * Cells that allow deriving new cells from existing cells.
+ * Includes .map() and .reduce() for array operations.
  */
 export interface IDerivable<T> {
+  /**
+   * Map over an array cell, creating a new cell for each element.
+   *
+   * @param fn - Callback to apply to each element
+   * @param options - Optional configuration
+   * @param options.key - Property path for stable identity (prevents re-processing on reorder)
+   *
+   * @example
+   * // Index-based (default)
+   * items.map(item => ({ doubled: item.value * 2 }))
+   *
+   * // Key-based (stable identity)
+   * items.map(item => process(item), { key: "id" })
+   */
   map<S>(
     this: IsThisObject,
     fn: (
@@ -246,12 +277,35 @@ export interface IDerivable<T> {
       index: OpaqueRef<number>,
       array: OpaqueRef<T>,
     ) => Opaque<S>,
+    options?: MapOptions,
   ): OpaqueRef<S[]>;
+
   mapWithPattern<S>(
     this: IsThisObject,
     op: RecipeFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
   ): OpaqueRef<S[]>;
+
+  /**
+   * Reduce an array cell to a single value.
+   * Re-computes when any element changes.
+   *
+   * @param initial - Initial accumulator value
+   * @param reducer - Function to combine accumulator with each element
+   *
+   * @example
+   * const sum = numbers.reduce(0, (acc, n) => acc + n);
+   * const count = items.reduce(0, (acc, _) => acc + 1);
+   */
+  reduce<R>(
+    this: IsThisObject,
+    initial: R,
+    reducer: (
+      acc: R,
+      element: T extends Array<infer U> ? U : T,
+      index: number,
+    ) => R,
+  ): OpaqueRef<R>;
 }
 
 export interface IOpaquable<T> {
@@ -1179,133 +1233,8 @@ export type DeriveFunction = {
 
 export type ComputedFunction = <T>(fn: () => T) => OpaqueRef<T>;
 
-/**
- * ReduceFunction creates a reactive reduction over an array.
- *
- * Similar to Array.prototype.reduce(), but reactive - the result updates
- * when any element in the input array changes.
- *
- * Special overload ordering is critical for correct type inference:
- *
- * 1. Schema-based overload: For explicit schema definitions
- * 2. OpaqueRef array overload: For OpaqueRef<T[]> inputs
- * 3. OpaqueCell array overload: For OpaqueCell<T[]> inputs
- * 4. Generic overload: Handles all other cases
- *
- * @example
- * ```typescript
- * const items = Cell.of([1, 2, 3, 4, 5]);
- * const sum = reduce(items, 0, (acc, item) => acc + item);
- * // sum is now OpaqueRef<number> with value 15
- * ```
- */
-export type ReduceFunction = {
-  // Overload 1: Schema-based reduce with explicit input/output schemas
-  <
-    ListSchema extends JSONSchema = JSONSchema,
-    ResultSchema extends JSONSchema = JSONSchema,
-  >(
-    argumentSchema: ListSchema,
-    resultSchema: ResultSchema,
-    list: Opaque<SchemaWithoutCell<ListSchema>>,
-    initial: Schema<ResultSchema>,
-    reducer: (
-      acc: Schema<ResultSchema>,
-      item: Schema<ListSchema> extends (infer U)[] ? U : never,
-      index: number,
-    ) => Schema<ResultSchema>,
-  ): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
-
-  // Overload 2: OpaqueRef array - unwrap OpaqueRef<T[]> to get T
-  <T, R>(
-    list: OpaqueRef<T[]>,
-    initial: R,
-    reducer: (acc: R, item: T, index: number) => R,
-  ): OpaqueRef<R>;
-
-  // Overload 3: OpaqueCell array
-  <T, R>(
-    list: OpaqueCell<T[]>,
-    initial: R,
-    reducer: (acc: R, item: T, index: number) => R,
-  ): OpaqueRef<R>;
-
-  // Overload 4: Cell array
-  <T, R>(
-    list: Cell<T[]>,
-    initial: R,
-    reducer: (acc: R, item: T, index: number) => R,
-  ): OpaqueRef<R>;
-
-  // Overload 5: Plain array (for compile-time testing)
-  <T, R>(
-    list: T[],
-    initial: R,
-    reducer: (acc: R, item: T, index: number) => R,
-  ): OpaqueRef<R>;
-};
-
-/**
- * MapByKeyFunction creates a reactive map over an array with stable key-based identity.
- *
- * Unlike map() which tracks by index, mapByKey() tracks by key.
- * This means:
- * - Reordering the input array doesn't cause re-processing
- * - Same key = same result cell, regardless of position
- * - Automatic deduplication (duplicate keys use first occurrence)
- *
- * Key extraction via keyPath:
- * - undefined: use item value as key (identity)
- * - "id": use item.id as key
- * - ["nested", "id"]: use item.nested.id as key
- *
- * @example
- * ```typescript
- * const urls = Cell.of(["a", "b", "c"]);
- * const fetches = mapByKey(urls, url => fetchData({ url }));
- * // Reordering urls won't re-fetch - same keys!
- *
- * const articles = Cell.of([{id: 1, text: "..."}, {id: 2, text: "..."}]);
- * const analyses = mapByKey(articles, "id", a => analyze(a));
- * // Keyed by id - stable across reordering
- * ```
- */
-export type MapByKeyFunction = {
-  // Overload 1: Identity key (item value is key)
-  <T, S>(
-    list: Opaque<T[]>,
-    fn: (
-      element: OpaqueRef<T>,
-      key: OpaqueRef<T>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T[]>,
-    ) => Opaque<S>,
-  ): OpaqueRef<S[]>;
-
-  // Overload 2: Property path key (string)
-  <T, S>(
-    list: Opaque<T[]>,
-    keyPath: string,
-    fn: (
-      element: OpaqueRef<T>,
-      key: OpaqueRef<any>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T[]>,
-    ) => Opaque<S>,
-  ): OpaqueRef<S[]>;
-
-  // Overload 3: Nested property path key (string[])
-  <T, S>(
-    list: Opaque<T[]>,
-    keyPath: string[],
-    fn: (
-      element: OpaqueRef<T>,
-      key: OpaqueRef<any>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T[]>,
-    ) => Opaque<S>,
-  ): OpaqueRef<S[]>;
-};
+// NOTE: ReduceFunction and MapByKeyFunction removed.
+// Use Cell.reduce() and Cell.map(fn, { key }) instead.
 
 export type StrFunction = (
   strings: TemplateStringsArray,
@@ -1459,8 +1388,7 @@ export declare const handler: HandlerFunction;
 /** @deprecated Use compute() instead */
 export declare const derive: DeriveFunction;
 export declare const computed: ComputedFunction;
-export declare const reduce: ReduceFunction;
-export declare const mapByKey: MapByKeyFunction;
+// NOTE: reduce and mapByKey removed - use Cell.reduce() and Cell.map(fn, { key }) instead
 export declare const str: StrFunction;
 export declare const ifElse: IfElseFunction;
 /** @deprecated Use generateText() or generateObject() instead */

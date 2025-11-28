@@ -1,49 +1,60 @@
-# Array Primitives: reduce() and mapByKey()
+# Array Primitives: Cell.reduce() and Keyed map()
 
-Two primitives for working with reactive arrays beyond `Cell.map()`.
+Two extensions to standard Cell array operations for advanced reactive scenarios.
 
-| Primitive | Purpose | When to Use |
-|-----------|---------|-------------|
-| `reduce()` | Aggregate array values | Counting, summing, collecting completed results |
-| `mapByKey()` | Map with stable identity | Processing where array order may change |
+| Method | Purpose | When to Use |
+|--------|---------|-------------|
+| `cell.reduce()` | Aggregate array values | Counting, summing, collecting completed results |
+| `cell.map(fn, { key })` | Map with stable identity | Processing where array order may change |
 
 ---
 
-## reduce() - Reactive Array Reduction
+## Cell.reduce() - Reactive Array Reduction
 
-Aggregates an array into a single value, re-computing when any element changes.
+Aggregates an array cell into a single value, re-computing when any element changes.
 
 ### Basic Usage
 
 ```typescript
-import { reduce, cell } from "commontools";
+import { Cell, recipe } from "commontools";
 
-const numbers = cell([1, 2, 3, 4, 5]);
+interface State {
+  numbers: Cell<number[]>;
+}
 
-// Sum all numbers
-const sum = reduce(numbers, 0, (acc, n) => acc + n);
-// Result: 15
+export default recipe<State>("Sum Example", ({ numbers }) => {
+  // Sum all numbers
+  const sum = numbers.reduce(0, (acc, n) => acc + n);
+  // Result: 15 for [1, 2, 3, 4, 5]
 
-// Count items
-const count = reduce(numbers, 0, (acc, _) => acc + 1);
-// Result: 5
+  // Count items
+  const count = numbers.reduce(0, (acc, _) => acc + 1);
+  // Result: 5
+
+  return { sum, count };
+});
 ```
 
 ### Closure Capture
 
-reduce() supports capturing values from outer scope:
+`reduce()` supports capturing values from outer scope:
 
 ```typescript
-const items = cell([10, 20, 30]);
-const multiplier = cell(2);
+interface State {
+  items: Cell<number[]>;
+  multiplier: number;
+}
 
-// multiplier is captured - updates when either changes
-const scaledSum = reduce(
-  items,
-  0,
-  (acc, item) => acc + item * multiplier
-);
-// Result: 120 (10*2 + 20*2 + 30*2)
+export default recipe<State>("Scaled Sum", ({ items, multiplier }) => {
+  // multiplier is captured - updates when either changes
+  const scaledSum = items.reduce(
+    0,
+    (acc, item) => acc + item * multiplier
+  );
+  // Result: 120 for [10, 20, 30] with multiplier=2
+
+  return { scaledSum };
+});
 ```
 
 ### Real-World Example: Counting Unread Reports
@@ -55,17 +66,25 @@ interface Report {
   isRead: boolean;
 }
 
-const reports = cell<Report[]>([...]);
+interface State {
+  reports: Cell<Report[]>;
+}
 
-// Reactively counts unread reports
-const unreadCount = reduce(
-  reports,
-  0,
-  (acc: number, report: Report) => acc + (report.isRead ? 0 : 1)
-);
+export default recipe<State>("Unread Counter", ({ reports }) => {
+  // Reactively counts unread reports
+  const unreadCount = reports.reduce(
+    0,
+    (acc: number, report: Report) => acc + (report.isRead ? 0 : 1)
+  );
 
-// In UI:
-{unreadCount > 0 ? <Badge>{unreadCount} UNREAD</Badge> : null}
+  return {
+    [UI]: (
+      <div>
+        {unreadCount > 0 ? <span class="badge">{unreadCount} UNREAD</span> : null}
+      </div>
+    ),
+  };
+});
 ```
 
 ### When to Use reduce() vs computed()
@@ -78,7 +97,7 @@ const unreadCount = reduce(
 
 ```typescript
 // ✅ reduce() - iterating over array
-const total = reduce(items, 0, (acc, item) => acc + item.price);
+const total = items.reduce(0, (acc, item) => acc + item.price);
 
 // ✅ computed() - simple derivation
 const hasItems = computed(() => items.length > 0);
@@ -92,28 +111,29 @@ const hasItems = computed(() => items.length > 0);
 
 ---
 
-## mapByKey() - Key-Based Array Mapping
+## Keyed map() - Key-Based Array Mapping
 
 Maps over an array using stable keys instead of indices. Essential when array order may change.
 
-### The Problem with Cell.map()
+### The Problem with Standard Cell.map()
 
 ```typescript
-const urls = cell(["a.com", "b.com"]);
+const urls = Cell.of(["a.com", "b.com"]);
 const fetches = urls.map(url => fetchData({ url }));
 
 // Later, array reorders:
 urls.set(["b.com", "a.com"]);
-// Cell.map() thinks index 0 changed, re-fetches "b.com"!
+// Standard map() thinks index 0 changed, re-fetches "b.com"!
 ```
 
-### Solution: mapByKey()
+### Solution: map() with { key } Option
 
 ```typescript
-import { mapByKey } from "commontools";
-
 // Identity key (item value IS the key)
-const fetches = mapByKey(urls, url => fetchData({ url }));
+const fetches = urls.map(
+  url => fetchData({ url }),
+  { key: "." }  // Use item itself as key
+);
 
 urls.set(["b.com", "a.com"]);
 // Same keys, no re-fetch. Just reorders results.
@@ -126,14 +146,19 @@ For objects, use a property path to extract the key:
 ```typescript
 interface Article { id: number; title: string; }
 
-const articles = cell<Article[]>([...]);
+interface State {
+  articles: Cell<Article[]>;
+}
 
-// Key by "id" property
-const analyses = mapByKey(
-  articles,
-  "id",  // Property path
-  (article) => generateObject({ prompt: article.title })
-);
+export default recipe<State>("Article Analyzer", ({ articles }) => {
+  // Key by "id" property
+  const analyses = articles.map(
+    (article) => generateObject({ prompt: article.title }),
+    { key: "id" }  // Use article.id as stable key
+  );
+
+  return { analyses };
+});
 ```
 
 ### Nested Property Paths
@@ -144,30 +169,44 @@ interface Item {
   content: string;
 }
 
-// Key by nested property
-const processed = mapByKey(
-  items,
-  ["meta", "id"],  // Array path for nested access
-  (item) => process(item.content)
-);
+interface State {
+  items: Cell<Item[]>;
+}
+
+export default recipe<State>("Item Processor", ({ items }) => {
+  // Key by nested property
+  const processed = items.map(
+    (item) => process(item.content),
+    { key: ["meta", "id"] }  // Array path for nested access
+  );
+
+  return { processed };
+});
 ```
 
 ### Closure Capture
 
-mapByKey() callbacks can capture outer scope values:
+Keyed map callbacks can capture outer scope values:
 
 ```typescript
-const items = cell([{ id: 1, price: 10 }, { id: 2, price: 20 }]);
-const discount = cell(0.9);
+interface Item { id: number; price: number; }
 
-const discounted = mapByKey(
-  items,
-  "id",
-  (item) => ({
-    id: item.id,
-    finalPrice: item.price * discount  // discount captured!
-  })
-);
+interface State {
+  items: Cell<Item[]>;
+  discount: number;
+}
+
+export default recipe<State>("Discounted Items", ({ items, discount }) => {
+  const discounted = items.map(
+    (item) => ({
+      id: item.id,
+      finalPrice: item.price * discount  // discount captured!
+    }),
+    { key: "id" }
+  );
+
+  return { discounted };
+});
 ```
 
 ### Real-World Example: Report Cards with Stable Identity
@@ -175,24 +214,37 @@ const discounted = mapByKey(
 ```typescript
 interface Report { id: string; title: string; isRead: boolean; }
 
-const reports = cell<Report[]>([...]);
+interface State {
+  reports: Cell<Report[]>;
+}
 
-// Each report gets stable identity by ID
-// Reordering reports won't cause re-renders of unchanged cards
-{mapByKey(reports, "id", (report) => (
-  <ct-card style={{ background: report.isRead ? "white" : "lightblue" }}>
-    <h3>{report.title}</h3>
-    <ct-button onClick={() => toggleRead(report.id)}>
-      {report.isRead ? "Mark Unread" : "Mark Read"}
-    </ct-button>
-  </ct-card>
-))}
+export default recipe<State>("Report List", ({ reports }) => {
+  return {
+    [UI]: (
+      <div>
+        {/* Each report gets stable identity by ID */}
+        {/* Reordering reports won't cause re-renders of unchanged cards */}
+        {reports.map(
+          (report) => (
+            <div style={{ background: report.isRead ? "white" : "lightblue" }}>
+              <h3>{report.title}</h3>
+              <ct-button onClick={() => toggleRead(report.id)}>
+                {report.isRead ? "Mark Unread" : "Mark Read"}
+              </ct-button>
+            </div>
+          ),
+          { key: "id" }
+        )}
+      </div>
+    ),
+  };
+});
 ```
 
-### When to Use mapByKey() vs Cell.map()
+### When to Use Keyed map() vs Standard map()
 
-| Use `mapByKey()` | Use `Cell.map()` |
-|------------------|------------------|
+| Use `map(fn, { key })` | Use `map(fn)` |
+|------------------------|---------------|
 | Array may reorder | Append-only arrays |
 | Items have stable IDs | Index-based identity OK |
 | Expensive processing (LLM, API calls) | Simple transforms |
@@ -201,12 +253,12 @@ const reports = cell<Report[]>([...]);
 ### API Summary
 
 ```typescript
-// Identity key (item value is key)
-mapByKey(list, callback)
+// Standard map (index-based identity)
+cell.map(callback)
 
-// Property path key
-mapByKey(list, "id", callback)
-mapByKey(list, ["nested", "id"], callback)
+// Keyed map (stable key-based identity)
+cell.map(callback, { key: "propertyName" })         // Property as key
+cell.map(callback, { key: ["nested", "prop"] })     // Nested property as key
 ```
 
 ### Gotchas
@@ -217,54 +269,61 @@ mapByKey(list, ["nested", "id"], callback)
 
 ```typescript
 // Template literal with captured value can cause issues
-mapByKey(items, "id", (item) => `${prefix}-${item.name}`);
+items.map((item) => `${prefix}-${item.name}`, { key: "id" });
 
 // Safer: use object property or string concatenation
-mapByKey(items, "id", (item) => ({
-  formatted: prefix + "-" + item.name
-}));
+items.map(
+  (item) => ({ formatted: prefix + "-" + item.name }),
+  { key: "id" }
+);
 ```
 
 ---
 
-## Combining reduce() and mapByKey()
+## Combining reduce() and Keyed map()
 
 For streaming pipelines, combine both primitives:
 
 ```typescript
-// Step 1: Process each article (keyed by URL - no duplicates, stable identity)
-const analyses = mapByKey(
-  articleURLs,
-  (url) => generateObject({ prompt: fetchContent(url) })
-);
+interface State {
+  articleURLs: Cell<string[]>;
+}
 
-// Step 2: Count completed analyses
-const completedCount = reduce(
-  analyses,
-  0,
-  (acc, analysis) => acc + (analysis.pending ? 0 : 1)
-);
+export default recipe<State>("Article Pipeline", ({ articleURLs }) => {
+  // Step 1: Process each article (keyed by URL - no duplicates, stable identity)
+  const analyses = articleURLs.map(
+    (url) => generateObject({ prompt: fetchContent(url) }),
+    { key: "." }  // URL itself is the key
+  );
 
-// Step 3: Collect all links from completed analyses
-const allLinks = reduce(
-  analyses,
-  [] as string[],
-  (acc, analysis) => {
-    if (analysis.pending) return acc;
-    return [...acc, ...analysis.result.links];
-  }
-);
+  // Step 2: Count completed analyses
+  const completedCount = analyses.reduce(
+    0,
+    (acc, analysis) => acc + (analysis.pending ? 0 : 1)
+  );
 
-// Step 4: Process novel links (keyed - same URL won't be re-fetched)
-const linkedContent = mapByKey(
-  allLinks,
-  (link) => fetchContent(link)
-);
+  // Step 3: Collect all links from completed analyses
+  const allLinks = analyses.reduce(
+    [] as string[],
+    (acc, analysis) => {
+      if (analysis.pending) return acc;
+      return [...acc, ...analysis.result.links];
+    }
+  );
+
+  // Step 4: Process novel links (keyed - same URL won't be re-fetched)
+  const linkedContent = allLinks.map(
+    (link) => fetchContent(link),
+    { key: "." }
+  );
+
+  return { analyses, completedCount, allLinks, linkedContent };
+});
 ```
 
 ### Why This Works
 
-1. **mapByKey provides stable identity** - reordering doesn't cause re-processing
+1. **Keyed map provides stable identity** - reordering doesn't cause re-processing
 2. **reduce aggregates incrementally** - each completion updates the aggregate
 3. **Keys flow through** - same URL = same cached result at every stage
 
@@ -273,14 +332,30 @@ const linkedContent = mapByKey(
 ## Quick Reference
 
 ```typescript
-// reduce() - aggregate array into single value
-reduce(array, initialValue, (acc, item) => newAcc)
-reduce(array, initialValue, (acc, item, index) => newAcc)  // with index
+// reduce() - aggregate array cell into single value
+cell.reduce(initialValue, (acc, item) => newAcc)
+cell.reduce(initialValue, (acc, item, index) => newAcc)  // with index
 
-// mapByKey() - map with stable key-based identity
-mapByKey(array, callback)                     // item value as key
-mapByKey(array, "propertyName", callback)     // property as key
-mapByKey(array, ["nested", "prop"], callback) // nested property as key
+// Keyed map() - map with stable key-based identity
+cell.map(callback, { key: "propertyName" })      // property as key
+cell.map(callback, { key: ["nested", "prop"] })  // nested property as key
+```
+
+---
+
+## Migration from Standalone Functions
+
+If you were using the older standalone `reduce()` and `mapByKey()` functions:
+
+```typescript
+// Old API (deprecated)
+import { reduce, mapByKey } from "commontools";
+const sum = reduce(items, 0, (acc, n) => acc + n);
+const mapped = mapByKey(items, "id", fn);
+
+// New API (recommended)
+const sum = items.reduce(0, (acc, n) => acc + n);
+const mapped = items.map(fn, { key: "id" });
 ```
 
 ---
