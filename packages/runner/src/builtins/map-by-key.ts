@@ -42,11 +42,13 @@ export function mapByKey(
 ): Action {
   let result: Cell<any[]> | undefined;
 
-  // Track key → result cell mapping across invocations
+  // Track key → {cell, index} mapping across invocations
   // This persists between scheduler runs to reuse existing result cells
-  const keyToResultCell = new Map<string, Cell<any>>();
+  // We also track the index to detect when items move and need re-binding
+  const keyToResultCell = new Map<string, { cell: Cell<any>; index: number }>();
 
   return (tx: IExtendedStorageTransaction) => {
+
     // Create result array cell once
     if (!result) {
       result = runtime.getCell<any[]>(
@@ -154,9 +156,33 @@ export function mapByKey(
       seenKeys.add(keyString);
 
       // Check if we already have a result cell for this key
-      let resultCell = keyToResultCell.get(keyString);
+      const existing = keyToResultCell.get(keyString);
+      let resultCell: Cell<any>;
 
-      if (!resultCell) {
+      // Helper to create recipe inputs with current index
+      // IMPORTANT: Use itemCell directly instead of path-based reference
+      // Path-based (inputsCell.key("list").key(i)) creates a reference that
+      // follows the index, which breaks when items move. Using itemCell
+      // directly gives us the actual cell for this item.
+      const createRecipeInputs = () =>
+        params !== undefined
+          ? {
+              // Closure mode: include params
+              element: itemCell,
+              key,
+              index: i,
+              array: inputsCell.key("list"),
+              params: inputsCell.key("params"),
+            }
+          : {
+              // Legacy mode: no params
+              element: itemCell,
+              key,
+              index: i,
+              array: inputsCell.key("list"),
+            };
+
+      if (!existing) {
         // Create NEW result cell with KEY-based identity
         // This is the critical difference from map.ts!
         // NOTE: Use keyString (serialized key) for entity ID because
@@ -169,38 +195,27 @@ export function mapByKey(
           tx,
         );
 
-        // Determine recipe inputs based on presence of params
-        const recipeInputs = params !== undefined
-          ? {
-              // Closure mode: include params
-              element: inputsCell.key("list").key(i),
-              key,
-              index: i,
-              array: inputsCell.key("list"),
-              params: inputsCell.key("params"),
-            }
-          : {
-              // Legacy mode: no params
-              element: inputsCell.key("list").key(i),
-              key,
-              index: i,
-              array: inputsCell.key("list"),
-            };
-
         // Run the recipe for this item
-        runtime.runner.run(
-          tx,
-          opRecipe,
-          recipeInputs,
-          resultCell,
-        );
+        runtime.runner.run(tx, opRecipe, createRecipeInputs(), resultCell);
 
         resultCell.getSourceCell()?.setSourceCell(parentCell);
 
         // Add cancel callback
         addCancel(() => runtime.runner.stop(resultCell!));
 
-        keyToResultCell.set(keyString, resultCell);
+        keyToResultCell.set(keyString, { cell: resultCell, index: i });
+      } else if (existing.index !== i) {
+        // Item moved to a different index - need to re-bind the element
+        // Stop the old recipe and re-run with updated inputs
+        resultCell = existing.cell;
+        runtime.runner.stop(resultCell);
+        runtime.runner.run(tx, opRecipe, createRecipeInputs(), resultCell);
+
+        // Update tracked index
+        existing.index = i;
+      } else {
+        // Same key, same index - reuse existing cell
+        resultCell = existing.cell;
       }
 
       resultArray.push(resultCell);
@@ -210,7 +225,7 @@ export function mapByKey(
     resultWithTx.set(resultArray);
 
     // Cleanup: stop and remove result cells for keys no longer in list
-    for (const [keyString, cell] of keyToResultCell) {
+    for (const [keyString, { cell }] of keyToResultCell) {
       if (!seenKeys.has(keyString)) {
         runtime.runner.stop(cell);
         keyToResultCell.delete(keyString);
