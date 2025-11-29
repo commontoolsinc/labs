@@ -63,13 +63,14 @@ function warmUp(session: Space.View) {
     of: warmupDoc,
     is: { warmup: true },
   });
-  session.transact(
+  const result = session.transact(
     Transaction.create({
       issuer: alice.did(),
       subject: space.did(),
       changes: Changes.from([warmupAssertion]),
     })
   );
+  if (result.error) throw result.error;
 }
 
 Deno.bench({
@@ -225,16 +226,20 @@ Deno.bench({
 
     b.start();
     // Query each doc individually
+    const results = [];
     for (const doc of docs) {
       const query = Query.create({
         issuer: alice.did(),
         subject: space.did(),
         select: { [doc]: { [the]: {} } },
       });
-      session.query(query);
+      results.push(session.query(query));
     }
     b.end();
 
+    for (const result of results) {
+      if (result.error) throw result.error;
+    }
     session.close();
   },
 });
@@ -437,7 +442,7 @@ Deno.bench({
     b.start();
     // Create
     const v1 = Fact.assert({ the, of: doc, is: payload1 });
-    session.transact(
+    const createResult = session.transact(
       Transaction.create({
         issuer: alice.did(),
         subject: space.did(),
@@ -446,7 +451,7 @@ Deno.bench({
     );
 
     // Read
-    session.query(
+    const readResult1 = session.query(
       Query.create({
         issuer: alice.did(),
         subject: space.did(),
@@ -456,7 +461,7 @@ Deno.bench({
 
     // Update
     const v2 = Fact.assert({ the, of: doc, is: payload2, cause: v1 });
-    session.transact(
+    const updateResult = session.transact(
       Transaction.create({
         issuer: alice.did(),
         subject: space.did(),
@@ -465,7 +470,7 @@ Deno.bench({
     );
 
     // Read again
-    session.query(
+    const readResult2 = session.query(
       Query.create({
         issuer: alice.did(),
         subject: space.did(),
@@ -475,7 +480,7 @@ Deno.bench({
 
     // Retract
     const r = Fact.retract(v2);
-    session.transact(
+    const retractResult = session.transact(
       Transaction.create({
         issuer: alice.did(),
         subject: space.did(),
@@ -483,6 +488,12 @@ Deno.bench({
       })
     );
     b.end();
+
+    if (createResult.error) throw createResult.error;
+    if (readResult1.error) throw readResult1.error;
+    if (updateResult.error) throw updateResult.error;
+    if (readResult2.error) throw readResult2.error;
+    if (retractResult.error) throw retractResult.error;
 
     session.close();
   },
