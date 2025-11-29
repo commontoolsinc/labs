@@ -91,7 +91,7 @@ function extractKeyPathFromFunction(
   // Get the function body - must be an expression (not a block)
   const body = ts.isArrowFunction(keyFn) ? keyFn.body : undefined;
   if (!body || !ts.isExpression(body)) {
-    context.options.logger?.warn(
+    context.options.logger?.(
       "Key function must be an arrow function with expression body (e.g., item => item.id)",
     );
     return undefined;
@@ -100,7 +100,7 @@ function extractKeyPathFromFunction(
   // Get the parameter name
   const param = keyFn.parameters[0];
   if (!param || !ts.isIdentifier(param.name)) {
-    context.options.logger?.warn(
+    context.options.logger?.(
       "Key function parameter must be a simple identifier",
     );
     return undefined;
@@ -110,7 +110,7 @@ function extractKeyPathFromFunction(
   // Use parseCaptureExpression to extract the property path
   const pathInfo = parseCaptureExpression(body);
   if (!pathInfo) {
-    context.options.logger?.warn(
+    context.options.logger?.(
       `Key function must be a simple property access (e.g., ${paramName} => ${paramName}.id)`,
     );
     return undefined;
@@ -118,7 +118,7 @@ function extractKeyPathFromFunction(
 
   // Verify the root matches the parameter name
   if (pathInfo.root !== paramName) {
-    context.options.logger?.warn(
+    context.options.logger?.(
       `Key function must access properties on the parameter '${paramName}', not '${pathInfo.root}'`,
     );
     return undefined;
@@ -126,15 +126,16 @@ function extractKeyPathFromFunction(
 
   // Must have at least one property in the path
   if (pathInfo.path.length === 0) {
-    context.options.logger?.warn(
+    context.options.logger?.(
       `Key function must access a property (e.g., ${paramName} => ${paramName}.id), not just return the parameter`,
     );
     return undefined;
   }
 
   // Convert to string literal (single property) or array literal (nested path)
-  if (pathInfo.path.length === 1) {
-    return factory.createStringLiteral(pathInfo.path[0]);
+  const firstPath = pathInfo.path[0];
+  if (pathInfo.path.length === 1 && firstPath !== undefined) {
+    return factory.createStringLiteral(firstPath);
   }
 
   return factory.createArrayLiteralExpression(
