@@ -922,5 +922,9 @@ export interface IAttestation {
   readonly value?: JSONValue;
 }
 
-// Re-export NonReactiveTransaction from implementation
-export { NonReactiveTransaction } from "./extended-storage-transaction.ts";
+// Re-export transaction wrapper utilities from implementation
+export {
+  createChildCellTransaction,
+  createNonReactiveTransaction,
+  TransactionWrapper,
+} from "./extended-storage-transaction.ts";

@@ -69,7 +69,10 @@ import type {
   IExtendedStorageTransaction,
   IReadOptions,
 } from "./storage/interface.ts";
-import { NonReactiveTransaction } from "./storage/extended-storage-transaction.ts";
+import {
+  createChildCellTransaction,
+  createNonReactiveTransaction,
+} from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 
@@ -532,11 +535,11 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   sample(): Readonly<T> {
     if (!this.synced) this.sync(); // No await, just kicking this off
 
-    // Wrap the transaction with NonReactiveTransaction to make all reads
-    // non-reactive. Child cells created during validateAndTransform will
-    // use the original transaction (via getTransactionForChildCells).
+    // Wrap the transaction to make all reads non-reactive. Child cells created
+    // during validateAndTransform will use the original transaction (via
+    // getTransactionForChildCells).
     const readTx = this.runtime.readTx(this.tx);
-    const nonReactiveTx = new NonReactiveTransaction(readTx);
+    const nonReactiveTx = createNonReactiveTransaction(readTx);
 
     return validateAndTransform(
       this.runtime,
@@ -1287,17 +1290,14 @@ function subscribeToReferencedDocs<T>(
   const cancel = runtime.scheduler.subscribe((tx) => {
     if (isCancel(cleanup)) cleanup();
 
-    // Run once with tx to capture _this_ cell's read dependencies.
-    validateAndTransform(runtime, tx, link, true);
-
-    // Using a new transaction for the callback, as we're only interested in
+    // Using a new transaction for child cells, as we're only interested in
     // dependencies for the initial get, not further cells the callback might
     // read. The callback is responsible for calling sink on those cells if it
     // wants to stay updated.
-
     const extraTx = runtime.edit();
+    const wrappedTx = createChildCellTransaction(tx, extraTx);
 
-    const newValue = validateAndTransform(runtime, extraTx, link, true);
+    const newValue = validateAndTransform(runtime, wrappedTx, link, true);
     cleanup = callback(newValue);
 
     // no async await here, but that also means no retry. TODO(seefeld): Should
