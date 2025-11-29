@@ -69,6 +69,7 @@ import type {
   IExtendedStorageTransaction,
   IReadOptions,
 } from "./storage/interface.ts";
+import { NonReactiveTransaction } from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 
@@ -206,6 +207,7 @@ export type { MemorySpace } from "@commontools/memory/interface";
 
 const cellMethods = new Set<keyof ICell<unknown>>([
   "get",
+  "sample",
   "set",
   "send",
   "update",
@@ -517,6 +519,31 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   get(): Readonly<T> {
     if (!this.synced) this.sync(); // No await, just kicking this off
     return validateAndTransform(this.runtime, this.tx, this.link, this.synced);
+  }
+
+  /**
+   * Read the cell's current value without creating a reactive dependency.
+   * Unlike `get()`, calling `sample()` inside a handler won't cause the handler
+   * to re-run when this cell's value changes.
+   *
+   * Use this when you need to read a value but don't want changes to that value
+   * to trigger re-execution of the current reactive context.
+   */
+  sample(): Readonly<T> {
+    if (!this.synced) this.sync(); // No await, just kicking this off
+
+    // Wrap the transaction with NonReactiveTransaction to make all reads
+    // non-reactive. Child cells created during validateAndTransform will
+    // use the original transaction (via getTransactionForChildCells).
+    const readTx = this.runtime.readTx(this.tx);
+    const nonReactiveTx = new NonReactiveTransaction(readTx);
+
+    return validateAndTransform(
+      this.runtime,
+      nonReactiveTx,
+      this.link,
+      this.synced,
+    );
   }
 
   set(

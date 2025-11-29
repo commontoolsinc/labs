@@ -7,6 +7,7 @@ import { type JSONSchema, type JSONValue } from "./builder/types.ts";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
+import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type IRuntime } from "./runtime.ts";
 import {
   createDataCellURI,
@@ -141,7 +142,7 @@ export function processDefaultValue(
           schema: mergeDefaults(resolvedSchema, defaultValue),
           rootSchema,
         },
-        tx,
+        getTransactionForChildCells(tx),
       );
     }
   }
@@ -314,7 +315,9 @@ function annotateWithBackToCellSymbols(
   ) {
     // Non-enumerable, so that {...obj} won't copy these symbols
     Object.defineProperty(value, toCell, {
-      value: () => createCell(runtime, link, tx),
+      // Use getTransactionForChildCells so that if this was called from sample(),
+      // the resulting cell is still reactive
+      value: () => createCell(runtime, link, getTransactionForChildCells(tx)),
       enumerable: false,
     });
     Object.freeze(value);
@@ -438,11 +441,11 @@ export function validateAndTransform(
             schema: newSchema,
             rootSchema,
           },
-          tx,
+          getTransactionForChildCells(tx),
         );
       }
     }
-    return createCell(runtime, link, tx);
+    return createCell(runtime, link, getTransactionForChildCells(tx));
   }
 
   // If there is no schema, return as raw data via query result proxy
@@ -847,12 +850,7 @@ export function validateAndTransform(
       ? { ...(value as Record<string, unknown>) }
       : [...(value as unknown[])];
     seen.push([seenKey, cloned]);
-    return annotateWithBackToCellSymbols(
-      cloned,
-      runtime,
-      link,
-      tx,
-    );
+    return annotateWithBackToCellSymbols(cloned, runtime, link, tx);
   } else {
     seen.push([seenKey, value]);
     return value;

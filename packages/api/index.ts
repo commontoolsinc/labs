@@ -76,6 +76,12 @@ export interface IAnyCell<T> {
  */
 export interface IReadable<T> {
   get(): Readonly<T>;
+  /**
+   * Read the cell's current value without creating a reactive dependency.
+   * Unlike `get()`, calling `sample()` inside a lift won't cause the lift
+   * to re-run when this cell's value changes.
+   */
+  sample(): Readonly<T>;
 }
 
 /**
