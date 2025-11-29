@@ -6,6 +6,7 @@
 
 import { Database } from "@db/sqlite";
 import { refer } from "merkle-reference";
+import type { JSONValue } from "@commontools/runner";
 import * as Space from "../space.ts";
 import * as Fact from "../fact.ts";
 import * as Transaction from "../transaction.ts";
@@ -20,7 +21,7 @@ let docCounter = 0;
 const createDoc = () => `of:${refer({ id: docCounter++ })}` as const;
 
 // Helper to create realistic ~16KB payload (typical fact size)
-function createTypicalPayload(): Record<string, unknown> {
+function createTypicalPayload(): JSONValue {
   const basePayload = {
     id: crypto.randomUUID(),
     createdAt: Date.now(),
@@ -492,7 +493,7 @@ Deno.bench({
 // --------------------------------------------------------------------------
 
 // Helper to create payloads of approximate sizes
-function createPayload(targetBytes: number): Record<string, unknown> {
+function createPayload(targetBytes: number): JSONValue {
   // JSON overhead means we need to account for keys and structure
   const basePayload = {
     id: crypto.randomUUID(),
@@ -642,7 +643,7 @@ Deno.bench({
 
 // Create a session with 1000 ~16KB facts pre-populated
 let prepopulatedSession: Space.View | null = null;
-let prepopulatedDocs: string[] = [];
+let prepopulatedDocs: `of:${string}`[] = [];
 
 async function getOrCreatePrepopulatedSession() {
   if (!prepopulatedSession) {
