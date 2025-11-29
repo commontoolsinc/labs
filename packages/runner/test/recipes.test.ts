@@ -1443,4 +1443,104 @@ describe("Recipe Runner", () => {
     const result2 = charmCell.withTx(tx).get();
     expect(result2.list.get()).toEqual([{ text: "hello" }]);
   });
+
+  it("should support non-reactive reads with sample()", async () => {
+    let liftRunCount = 0;
+
+    // A lift that takes two parameters:
+    // - first: a regular number (reactive)
+    // - second: a Cell that we'll read with sample() (non-reactive)
+    const computeWithSample = lift(
+      // Input schema: first is reactive, second is asCell
+      {
+        type: "object",
+        properties: {
+          first: { type: "number" },
+          second: { type: "number", asCell: true },
+        },
+        required: ["first", "second"],
+      } as const satisfies JSONSchema,
+      // Output schema
+      { type: "number" },
+      // The lift function
+      ({ first, second }) => {
+        liftRunCount++;
+        // Use sample() to read the second cell non-reactively
+        const secondValue = second.sample();
+        return first + secondValue;
+      },
+    );
+
+    const sampleRecipe = recipe<{ first: number; second: number }>(
+      "Sample Recipe",
+      ({ first, second }) => {
+        return { result: computeWithSample({ first, second }) };
+      },
+    );
+
+    // Create input cells
+    const firstCell = runtime.getCell<number>(
+      space,
+      "sample test first cell",
+      undefined,
+      tx,
+    );
+    firstCell.set(10);
+
+    const secondCell = runtime.getCell<number>(
+      space,
+      "sample test second cell",
+      undefined,
+      tx,
+    );
+    secondCell.set(5);
+
+    const resultCell = runtime.getCell<{ result: number }>(
+      space,
+      "should support non-reactive reads with sample()",
+      {
+        type: "object",
+        properties: { result: { type: "number" } },
+      } as const satisfies JSONSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, sampleRecipe, {
+      first: firstCell,
+      second: secondCell,
+    }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    await runtime.idle();
+
+    // Verify initial result: 10 + 5 = 15
+    expect(result.get()).toMatchObject({ result: 15 });
+    expect(liftRunCount).toBe(1);
+
+    // Update the second cell (read with sample(), so non-reactive)
+    secondCell.withTx(tx).send(20);
+    tx.commit();
+    tx = runtime.edit();
+
+    await runtime.idle();
+
+    // The lift should NOT have re-run because sample() is non-reactive
+    expect(liftRunCount).toBe(1);
+    // Result should still be 15 (not updated)
+    expect(result.get()).toMatchObject({ result: 15 });
+
+    // Now update the first cell (read reactively via the normal get())
+    firstCell.withTx(tx).send(100);
+    tx.commit();
+    tx = runtime.edit();
+
+    await runtime.idle();
+
+    // The lift should have re-run now
+    expect(liftRunCount).toBe(2);
+    // Result should reflect both new values: 100 + 20 = 120
+    // (the second cell's new value is picked up because the lift re-ran)
+    expect(result.get()).toMatchObject({ result: 120 });
+  });
 });

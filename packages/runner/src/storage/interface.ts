@@ -921,3 +921,6 @@ export interface IAttestation {
   readonly address: IMemoryAddress;
   readonly value?: JSONValue;
 }
+
+// Re-export NonReactiveTransaction from implementation
+export { NonReactiveTransaction } from "./extended-storage-transaction.ts";

@@ -214,3 +214,123 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.commitCallbacks.add(callback);
   }
 }
+
+/**
+ * A wrapper around an IExtendedStorageTransaction that adds ignoreReadForScheduling
+ * meta to all read operations. This makes reads non-reactive - they won't trigger
+ * re-execution of handlers when the read values change.
+ *
+ * Used by Cell.sample() to read values without subscribing to changes.
+ */
+export class NonReactiveTransaction implements IExtendedStorageTransaction {
+  constructor(private wrapped: IExtendedStorageTransaction) {}
+
+  /**
+   * Get the transaction to use for creating child cells.
+   * Child cells should be reactive, so this returns the unwrapped transaction.
+   */
+  getTransactionForChildCells(): IExtendedStorageTransaction {
+    return this.wrapped;
+  }
+
+  get tx(): IStorageTransaction {
+    return this.wrapped.tx;
+  }
+
+  get journal(): ITransactionJournal {
+    return this.wrapped.journal;
+  }
+
+  status(): StorageTransactionStatus {
+    return this.wrapped.status();
+  }
+
+  reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
+    return this.wrapped.reader(space);
+  }
+
+  private addNonReactiveMeta(options?: IReadOptions): IReadOptions {
+    return {
+      ...options,
+      meta: { ...options?.meta, ...ignoreReadForScheduling },
+    };
+  }
+
+  read(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): Result<IAttestation, ReadError> {
+    return this.wrapped.read(address, this.addNonReactiveMeta(options));
+  }
+
+  readOrThrow(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): JSONValue | undefined {
+    return this.wrapped.readOrThrow(address, this.addNonReactiveMeta(options));
+  }
+
+  readValueOrThrow(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): JSONValue | undefined {
+    return this.wrapped.readValueOrThrow(
+      address,
+      this.addNonReactiveMeta(options),
+    );
+  }
+
+  writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
+    return this.wrapped.writer(space);
+  }
+
+  write(
+    address: IMemorySpaceAddress,
+    value: JSONValue | undefined,
+  ): Result<IAttestation, WriteError | WriterError> {
+    return this.wrapped.write(address, value);
+  }
+
+  writeOrThrow(
+    address: IMemorySpaceAddress,
+    value: JSONValue | undefined,
+  ): void {
+    return this.wrapped.writeOrThrow(address, value);
+  }
+
+  writeValueOrThrow(
+    address: IMemorySpaceAddress,
+    value: JSONValue | undefined,
+  ): void {
+    return this.wrapped.writeValueOrThrow(address, value);
+  }
+
+  abort(reason?: unknown): Result<Unit, InactiveTransactionError> {
+    return this.wrapped.abort(reason);
+  }
+
+  commit(): Promise<Result<Unit, CommitError>> {
+    return this.wrapped.commit();
+  }
+
+  addCommitCallback(callback: (tx: IExtendedStorageTransaction) => void): void {
+    return this.wrapped.addCommitCallback(callback);
+  }
+}
+
+/**
+ * Helper function to get the transaction to use for creating child cells from a
+ * potentially wrapped NonReactiveTransaction. If the transaction is not wrapped,
+ * returns it as-is.
+ *
+ * Used when creating child cells that should be reactive even when the parent
+ * read was non-reactive (e.g., in Cell.sample()).
+ */
+export function getTransactionForChildCells(
+  tx: IExtendedStorageTransaction | undefined,
+): IExtendedStorageTransaction | undefined {
+  if (tx instanceof NonReactiveTransaction) {
+    return tx.getTransactionForChildCells();
+  }
+  return tx;
+}
