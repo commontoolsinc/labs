@@ -496,6 +496,70 @@ Problem: Loses per-item reactivity, but DOES work in browser.
 
 ---
 
+## Question for Framework Author
+
+We understand your guidance about detecting `index` usage and using item-based identity when index isn't read. Before implementing, we need clarification on the **mechanism**.
+
+### The Core Problem
+
+Element bindings in map are currently index-based paths:
+```typescript
+element: inputsCell.key("list").key(i)  // Creates path ["list", "0"]
+```
+
+When items move, this path still points to the same index, not the same item.
+
+### Implementation Options We're Considering
+
+**Option A: Add `.byId()` method to Cell**
+
+Add a new path type that references items by ID:
+```typescript
+element: inputsCell.key("list").byId(itemId)  // Creates path ["list", "byId", "task-1"]
+```
+
+This requires:
+1. Adding `.byId()` method to Cell class
+2. Teaching path resolution to understand `byId` segments
+3. Updating map to use `.byId()` when key option is provided
+
+**Option B: Lift wrapper for array assembly**
+
+Keep mapByKey for creating keyed result cells, add lift() for ordering:
+```typescript
+// mapByKey stores results in keyedResultsCell (Record<string, Result>)
+// lift() assembles array in correct order (runs in browser)
+lift(({ list, keyedResults }) =>
+  list.map(item => keyedResults[item.id])
+)({ list, keyedResults: keyedResultsCell })
+```
+
+This requires:
+1. Changing mapByKey to output keyed object instead of array
+2. Adding lift wrapper at transform time
+
+**Option C: Direct item cell reference**
+
+Pass the actual item cell instead of a path:
+```typescript
+element: itemCell  // Direct reference, not a path
+```
+
+Problem: itemCell appears to be ephemeral (created fresh each map invocation).
+
+### Our Question
+
+**Which mechanism did you have in mind for making element bindings item-based?**
+
+- Is there existing infrastructure we should use?
+- Should we modify the Cell/path system (Option A)?
+- Should we use lift for orchestration (Option B)?
+- Is there a simpler approach we're missing?
+
+Any guidance on the implementation direction would help us proceed efficiently.
+
+---
+
 ## Files Changed
 
 ### New Files
