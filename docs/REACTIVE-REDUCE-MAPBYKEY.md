@@ -37,7 +37,7 @@ const allLinks = analyses.reduce([], (acc, item) =>
 2. [What We Built](#what-we-built)
 3. [How It's Implemented](#how-its-implemented)
 4. [The Blocking Bug](#the-blocking-bug)
-5. [Questions for Framework Author](#questions-for-framework-author)
+5. [Framework Author Feedback & Next Steps](#framework-author-feedback--next-steps)
 6. [Files Changed](#files-changed)
 7. [Reproduction Steps](#reproduction-steps)
 
@@ -269,35 +269,230 @@ Added logging to `runner.ts:instantiateRawNode`:
 
 ---
 
-## Questions for Framework Author
+## Framework Author Feedback & Next Steps
 
-### Primary Question
+### Prior Discussion
 
-**Why doesn't the browser instantiate reactive nodes, and can we make it do so for mapByKey?**
+The index-based identity problem was filed as `community-patterns/patterns/jkomoros/issues/map-identity-tracking-issue.md`. The framework author responded:
 
-The browser loads persisted cell data but doesn't run `instantiateRawNode` for builtin modules. This means stateful builtins like mapByKey never get their actions scheduled.
+> "The final solution will have to look at the schema of the mapper pattern (i.e. the pattern passed in) and use the current behavior if index is read and the proposed one if it isn't.
+>
+> Or alternatively we could use the proposed behavior everywhere - at least if the array being mapped over has ids itself - and let the system recompute all values when index is read.
+>
+> (if the array being mapped over has no ids for some reason, then it's a bit trickier to come up with good IDs. possibly we could just hash the values)"
 
-### Alternative Approaches
+### Interpretation: Fix at the Map Level, Not Separate Builtin
 
-1. **Run mapByKey in browser**: Make browser instantiate builtin modules like CLI does
+The framework author's guidance suggests a **more fundamental fix** to `map()` itself rather than a separate `mapByKey` builtin:
 
-2. **Persist mapByKey state**: Save `keyToResultCell` mapping, restore in browser
-   - But: How to handle new items that need recipe execution?
+1. **Detect index usage at transform time** - Check if the mapper callback reads the `index` parameter
+2. **If index is NOT used** → Use item-based identity (ID or hash)
+3. **If index IS used** → Use current index-based behavior (or recompute)
 
-3. **Transform mapByKey to lift()**: Like reduce, but...
-   - Loses caching (lift re-runs all items on any change)
-   - Or needs to pass recipe through lift (serialization issues?)
+### Why This Solves the Browser Problem
 
-4. **Hybrid**: Use lift for orchestration, builtins for computation
-   - Key lookup via lift, but existing items use cached cells
-   - New items: compute on-the-fly (uncached) or show placeholder
+The current bug exists because:
+- Result cells have bindings like `list[0]`, `list[1]` (index-based)
+- When items move, bindings point to wrong data
+- Browser can't fix this because mapByKey action doesn't run
 
-### Key Constraint
+With item-based identity:
+- Result cells would bind to items by ID, not position
+- "task-1" stays "task-1" regardless of array position
+- No action needs to run in browser - bindings are inherently stable
 
-User requirements:
-- **Caching MUST be preserved** - This is the whole point
+### Implementation Plan
+
+**Phase 1: Detect index usage in mapper callbacks**
+
+In the ts-transformer, analyze the callback to determine if `index` parameter is used:
+
+```typescript
+// index NOT used - can use item-based identity
+items.map(item => process(item))
+items.map((item, _index) => process(item))  // Unused param
+
+// index IS used - must use index-based identity (or recompute)
+items.map((item, index) => ({ ...process(item), position: index }))
+```
+
+**Files to modify**: `packages/ts-transformers/src/closures/strategies/map-strategy.ts`
+
+**Phase 2: Determine item identity source**
+
+When index is not used, determine how to identify items:
+
+1. **Explicit key option** (already implemented): `{ key: "id" }` or `{ key: item => item.id }`
+2. **Auto-detect ID property**: If items have `id`, `[ID]`, or `_id` property, use it
+3. **Hash fallback**: For items without IDs, hash the value with `JSON.stringify()`
+
+**Phase 3: Change result cell identity**
+
+Current (index-based):
+```typescript
+const resultCell = runtime.getCell(space, { result, index: i }, ...);
+```
+
+Proposed (item-based):
+```typescript
+const itemId = extractItemId(itemValue);  // From key option, auto-detect, or hash
+const resultCell = runtime.getCell(space, { result, itemId }, ...);
+```
+
+**Phase 4: Change input bindings**
+
+This is the tricky part. Current bindings are path-based:
+```typescript
+element: inputsCell.key("list").key(i)  // Resolves to list[i]
+```
+
+Options to explore:
+1. **Bind to item cell directly** - Pass the actual item cell, not a path
+2. **ID-based cell lookup** - Framework support for "cell with id X in array Y"
+3. **Lift-based orchestration** - Use lift() to handle array→results mapping, with cached item processing
+
+### Deep Dive: Why This Approach Solves the Browser Problem
+
+**The core insight**: The browser problem exists because we're trying to fix stale bindings at runtime. But if bindings are **inherently stable** (based on item identity, not position), there's nothing to fix.
+
+**Current broken flow**:
+```
+Deploy:
+  - map() creates result cell for list[0] (happens to be task-1)
+  - Binding: element → list[0]
+  - Result stored with identity { result, index: 0 }
+
+Browser (task-1 removed, task-2 now at index 0):
+  - Result cell still has binding element → list[0]
+  - list[0] now contains task-2's data
+  - Result cell shows WRONG DATA
+  - mapByKey action doesn't run to fix this
+```
+
+**Proposed fixed flow**:
+```
+Deploy:
+  - map() creates result cell for task-1 (detected via id property)
+  - Binding: element → [item with id "task-1"]  ← KEY CHANGE
+  - Result stored with identity { result, itemId: "task-1" }
+
+Browser (task-1 removed, task-2 now at index 0):
+  - Result cell for task-1 no longer in output (task-1 doesn't exist)
+  - Result cell for task-2 still has binding to [item with id "task-2"]
+  - task-2 moved from index 1 to index 0, but binding follows the ITEM not the INDEX
+  - Result cell shows CORRECT DATA
+  - No action needed - bindings are inherently correct
+```
+
+**The magic**: By binding to item identity instead of array position, the bindings remain valid even when items move. The browser doesn't need to run any code to "fix" things.
+
+### Implementation Details for Future Sessions
+
+**Step 1: Detect if callback uses index parameter**
+
+Location: `packages/ts-transformers/src/closures/strategies/map-strategy.ts`
+
+```typescript
+function callbackUsesIndex(callback: ts.ArrowFunction | ts.FunctionExpression): boolean {
+  // Check if callback has >= 2 parameters and the second one is used
+  if (callback.parameters.length < 2) return false;
+
+  const indexParam = callback.parameters[1];
+  if (!ts.isIdentifier(indexParam.name)) return false;
+
+  // Check if the parameter name appears in the callback body
+  // (excluding the parameter declaration itself)
+  const indexName = indexParam.name.text;
+  if (indexName.startsWith('_')) return false;  // Convention: _index means unused
+
+  return isIdentifierUsedInBody(callback.body, indexName);
+}
+```
+
+**Step 2: Extract item identity**
+
+For items with explicit key option:
+```typescript
+// User wrote: items.map(fn, { key: "id" })
+const itemId = item.id;
+```
+
+For items with auto-detected ID:
+```typescript
+// Check for common ID properties
+const itemId = item.id ?? item[ID] ?? item._id ?? JSON.stringify(item);
+```
+
+**Step 3: Create ID-based result cells**
+
+In `map.ts` (or enhanced version):
+```typescript
+// OLD: Index-based
+const resultCell = runtime.getCell(space, { result, index: i }, ...);
+
+// NEW: ID-based (when index not used)
+const itemId = extractItemId(itemValue, keyOption);
+const resultCell = runtime.getCell(space, { result, itemId }, ...);
+```
+
+**Step 4: The Hard Part - ID-based input bindings**
+
+This is where we need framework guidance. Current bindings are paths:
+```typescript
+element: inputsCell.key("list").key(i)  // Path: list[0], list[1], etc.
+```
+
+Options:
+
+**Option A: Direct cell reference**
+```typescript
+// Instead of path, pass the actual item cell
+element: itemCell  // Direct reference to the cell containing this item
+```
+Problem: itemCell is ephemeral - created fresh each map() invocation.
+
+**Option B: ID-based path (requires framework change)**
+```typescript
+// New path syntax that references by ID
+element: inputsCell.key("list").byId("task-1")
+```
+Problem: Framework doesn't support this path type.
+
+**Option C: Lift for orchestration (fallback)**
+```typescript
+// Transform map with key to lift that looks up cached results
+lift(({ list, cachedResults }) => {
+  return list.map(item => {
+    const id = item.id;
+    return cachedResults[id] ?? computeNew(item);
+  });
+})({ list, cachedResults: keyedResultsCell })
+```
+Problem: Loses per-item reactivity, but DOES work in browser.
+
+### Notes for Future Sessions
+
+**The separate `mapByKey` builtin may not be the right approach.** The framework author's feedback suggests enhancing `map()` itself. Consider:
+
+1. Keep the `{ key }` option syntax - it's explicit and clear
+2. But implement it by modifying how `map()` works, not as a separate builtin
+3. The key insight is making **input bindings** item-based, not just result cell identity
+
+**Key question to resolve**: How can cell paths reference items by identity rather than position? This may require framework-level changes to the cell/path system. Specifically, we need something like `inputsCell.key("list").byId(itemId)` that returns the cell for the item with that ID regardless of its current array position.
+
+**Fallback if path changes are too deep**: Transform keyed maps to `lift()` for orchestration (Option C above). This loses some per-item reactivity but works in browser. This is similar to what we did for `reduce()`.
+
+**What we have working that can be reused**:
+- `{ key }` option detection in ts-transformer
+- Key extraction logic (property path, function, auto-detect)
+- Result cell identity by key (this part works)
+- The problem is ONLY the input bindings
+
+### Requirements (Non-Negotiable)
+
+- **Caching MUST be preserved** - Per-item results cached by key
 - **Adding items at runtime MUST work** - No "refresh required"
-- **No limitations acceptable** - Should work like React's key prop
+- **Should work like React's key prop** - Stable identity, correct updates
 
 ---
 
