@@ -6,6 +6,7 @@
 
 import { Database } from "@db/sqlite";
 import { refer } from "merkle-reference";
+import type { JSONValue } from "@commontools/runner";
 import * as Space from "../space.ts";
 import * as Fact from "../fact.ts";
 import * as Transaction from "../transaction.ts";
@@ -20,7 +21,7 @@ let docCounter = 0;
 const createDoc = () => `of:${refer({ id: docCounter++ })}` as const;
 
 // Helper to create realistic ~16KB payload (typical fact size)
-function createTypicalPayload(): Record<string, unknown> {
+function createTypicalPayload(): JSONValue {
   const basePayload = {
     id: crypto.randomUUID(),
     createdAt: Date.now(),
@@ -62,13 +63,14 @@ function warmUp(session: Space.View) {
     of: warmupDoc,
     is: { warmup: true },
   });
-  session.transact(
+  const result = session.transact(
     Transaction.create({
       issuer: alice.did(),
       subject: space.did(),
       changes: Changes.from([warmupAssertion]),
-    })
+    }),
   );
+  if (result.error) throw result.error;
 }
 
 Deno.bench({
@@ -224,16 +226,20 @@ Deno.bench({
 
     b.start();
     // Query each doc individually
+    const results = [];
     for (const doc of docs) {
       const query = Query.create({
         issuer: alice.did(),
         subject: space.did(),
         select: { [doc]: { [the]: {} } },
       });
-      session.query(query);
+      results.push(session.query(query));
     }
     b.end();
 
+    for (const result of results) {
+      if (result.error) throw result.error;
+    }
     session.close();
   },
 });
@@ -250,8 +256,7 @@ Deno.bench({
         the,
         of: createDoc(),
         is: createTypicalPayload(),
-      })
-    );
+      }));
     const transaction = Transaction.create({
       issuer: alice.did(),
       subject: space.did(),
@@ -321,8 +326,7 @@ Deno.bench({
         the,
         of: createDoc(),
         is: createTypicalPayload(),
-      })
-    );
+      }));
     const createTx = Transaction.create({
       issuer: alice.did(),
       subject: space.did(),
@@ -402,7 +406,12 @@ Deno.bench({
 
     b.start();
     for (let i = 1; i <= 10; i++) {
-      const next = Fact.assert({ the, of: doc, is: payloads[i], cause: current });
+      const next = Fact.assert({
+        the,
+        of: doc,
+        is: payloads[i],
+        cause: current,
+      });
       const updateTx = Transaction.create({
         issuer: alice.did(),
         subject: space.did(),
@@ -436,52 +445,58 @@ Deno.bench({
     b.start();
     // Create
     const v1 = Fact.assert({ the, of: doc, is: payload1 });
-    session.transact(
+    const createResult = session.transact(
       Transaction.create({
         issuer: alice.did(),
         subject: space.did(),
         changes: Changes.from([v1]),
-      })
+      }),
     );
 
     // Read
-    session.query(
+    const readResult1 = session.query(
       Query.create({
         issuer: alice.did(),
         subject: space.did(),
         select: { [doc]: { [the]: {} } },
-      })
+      }),
     );
 
     // Update
     const v2 = Fact.assert({ the, of: doc, is: payload2, cause: v1 });
-    session.transact(
+    const updateResult = session.transact(
       Transaction.create({
         issuer: alice.did(),
         subject: space.did(),
         changes: Changes.from([v2]),
-      })
+      }),
     );
 
     // Read again
-    session.query(
+    const readResult2 = session.query(
       Query.create({
         issuer: alice.did(),
         subject: space.did(),
         select: { [doc]: { [the]: {} } },
-      })
+      }),
     );
 
     // Retract
     const r = Fact.retract(v2);
-    session.transact(
+    const retractResult = session.transact(
       Transaction.create({
         issuer: alice.did(),
         subject: space.did(),
         changes: Changes.from([r]),
-      })
+      }),
     );
     b.end();
+
+    if (createResult.error) throw createResult.error;
+    if (readResult1.error) throw readResult1.error;
+    if (updateResult.error) throw updateResult.error;
+    if (readResult2.error) throw readResult2.error;
+    if (retractResult.error) throw retractResult.error;
 
     session.close();
   },
@@ -492,7 +507,7 @@ Deno.bench({
 // --------------------------------------------------------------------------
 
 // Helper to create payloads of approximate sizes
-function createPayload(targetBytes: number): Record<string, unknown> {
+function createPayload(targetBytes: number): JSONValue {
   // JSON overhead means we need to account for keys and structure
   const basePayload = {
     id: crypto.randomUUID(),
@@ -642,7 +657,7 @@ Deno.bench({
 
 // Create a session with 1000 ~16KB facts pre-populated
 let prepopulatedSession: Space.View | null = null;
-let prepopulatedDocs: string[] = [];
+let prepopulatedDocs: `of:${string}`[] = [];
 
 async function getOrCreatePrepopulatedSession() {
   if (!prepopulatedSession) {
@@ -666,7 +681,7 @@ async function getOrCreatePrepopulatedSession() {
           issuer: alice.did(),
           subject: space.did(),
           changes: Changes.from(batch),
-        })
+        }),
       );
     }
   }
@@ -729,7 +744,7 @@ Deno.bench({
         issuer: alice.did(),
         subject: space.did(),
         changes: Changes.from([assertion]),
-      })
+      }),
     );
     b.end();
   },
@@ -758,8 +773,13 @@ function getRawDb() {
     rawDb = new Database(":memory:");
     rawDb.exec(RAW_SCHEMA);
     // Warm up with one insert
-    rawDb.run("INSERT INTO test_datum (id, data) VALUES (?, ?)", ["warmup", "{}"]);
-    rawInsertStmt = rawDb.prepare("INSERT INTO test_datum (id, data) VALUES (?, ?)");
+    rawDb.run("INSERT INTO test_datum (id, data) VALUES (?, ?)", [
+      "warmup",
+      "{}",
+    ]);
+    rawInsertStmt = rawDb.prepare(
+      "INSERT INTO test_datum (id, data) VALUES (?, ?)",
+    );
   }
   return { db: rawDb, stmt: rawInsertStmt! };
 }

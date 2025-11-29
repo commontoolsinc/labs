@@ -507,7 +507,7 @@ const recall = <Space extends MemorySpace>(
         ? (fromString(row.cause) as Reference<Assertion>)
         : refer(unclaimed({ the, of })),
       since: row.since,
-      fact: row.fact,  // Include stored hash to avoid recomputing with refer()
+      fact: row.fact, // Include stored hash to avoid recomputing with refer()
     };
 
     if (row.is) {
@@ -707,7 +707,11 @@ const importDatum = <Space extends MemorySpace>(
     return "undefined";
   } else {
     const is = refer(datum).toString();
-    const stmt = getPreparedStatement(session.store, "importDatum", IMPORT_DATUM);
+    const stmt = getPreparedStatement(
+      session.store,
+      "importDatum",
+      IMPORT_DATUM,
+    );
     stmt.run({
       this: is,
       source: JSON.stringify(datum),
@@ -780,7 +784,11 @@ const swap = <Space extends MemorySpace>(
   // If this is an assertion we need to insert fact referencing the datum.
   let imported = 0;
   if (source.assert || source.retract) {
-    const importFactStmt = getPreparedStatement(session.store, "importFact", IMPORT_FACT);
+    const importFactStmt = getPreparedStatement(
+      session.store,
+      "importFact",
+      IMPORT_FACT,
+    );
     imported = importFactStmt.run({
       this: fact,
       the,
@@ -803,7 +811,11 @@ const swap = <Space extends MemorySpace>(
   // therefore we insert or ignore here to ensure fact record exists and then
   // use update afterwards to update to desired state from expected `cause` state.
   if (expected == null) {
-    const importMemoryStmt = getPreparedStatement(session.store, "importMemory", IMPORT_MEMORY);
+    const importMemoryStmt = getPreparedStatement(
+      session.store,
+      "importMemory",
+      IMPORT_MEMORY,
+    );
     importMemoryStmt.run({ the, of, fact });
   }
 
@@ -1061,7 +1073,11 @@ export function getLabels<
   }
 
   // Batch query for all labels in a single SELECT...IN query
-  const stmt = getPreparedStatement(session.store, "getLabelsBatch", GET_LABELS_BATCH);
+  const stmt = getPreparedStatement(
+    session.store,
+    "getLabelsBatch",
+    GET_LABELS_BATCH,
+  );
   for (
     const row of stmt.iter({
       the: LABEL_TYPE,
