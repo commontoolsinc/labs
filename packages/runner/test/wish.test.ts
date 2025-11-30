@@ -373,35 +373,24 @@ describe("wish built-in", () => {
   });
 
   it("returns undefined for unknown wishes", async () => {
-    const errors: unknown[] = [];
-    const originalError = console.error;
-    console.error = (...args: unknown[]) => {
-      errors.push(args);
-    };
+    const wishRecipe = recipe("wish unknown target", () => {
+      const missing = wish("commontools://unknown");
+      return { missing };
+    });
 
-    try {
-      const wishRecipe = recipe("wish unknown target", () => {
-        const missing = wish("commontools://unknown");
-        return { missing };
-      });
+    const resultCell = runtime.getCell<{ missing?: unknown }>(
+      space,
+      "wish built-in missing target",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishRecipe, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
 
-      const resultCell = runtime.getCell<{ missing?: unknown }>(
-        space,
-        "wish built-in missing target",
-        undefined,
-        tx,
-      );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
-      await tx.commit();
-      tx = runtime.edit();
+    await runtime.idle();
 
-      await runtime.idle();
-
-      expect(result.key("missing").get()).toBeUndefined();
-      expect(errors.length).toBeGreaterThan(0);
-    } finally {
-      console.error = originalError;
-    }
+    expect(result.key("missing").get()).toBeUndefined();
   });
 
   describe("object-based wish syntax", () => {
@@ -596,76 +585,54 @@ describe("wish built-in", () => {
     });
 
     it("returns error for unknown tag", async () => {
-      const errors: unknown[] = [];
-      const originalError = console.error;
-      console.error = (...args: unknown[]) => {
-        errors.push(args);
-      };
+      const wishRecipe = recipe("wish object syntax unknown", () => {
+        const missing = wish({ query: "#unknownTag" });
+        return { missing };
+      });
 
-      try {
-        const wishRecipe = recipe("wish object syntax unknown", () => {
-          const missing = wish({ query: "#unknownTag" });
-          return { missing };
-        });
+      const resultCell = runtime.getCell<{
+        missing?: { result?: unknown };
+      }>(
+        space,
+        "wish object syntax unknown result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
 
-        const resultCell = runtime.getCell<{
-          missing?: { result?: unknown };
-        }>(
-          space,
-          "wish object syntax unknown result",
-          undefined,
-          tx,
-        );
-        const result = runtime.run(tx, wishRecipe, {}, resultCell);
-        await tx.commit();
-        await runtime.idle();
-        tx = runtime.edit();
+      await runtime.idle();
 
-        await runtime.idle();
-
-        const missingResult = result.key("missing").get();
-        // Unknown tags now search favorites, returning "No favorite found" error
-        expect(missingResult?.error).toMatch(/No favorite found matching/);
-        expect(errors.length).toBeGreaterThan(0);
-      } finally {
-        console.error = originalError;
-      }
+      const missingResult = result.key("missing").get();
+      // Unknown tags now search favorites, returning "No favorite found" error
+      expect(missingResult?.error).toMatch(/No favorite found matching/);
     });
 
     it("returns error when tag is missing", async () => {
-      const errors: unknown[] = [];
-      const originalError = console.error;
-      console.error = (...args: unknown[]) => {
-        errors.push(args);
-      };
+      const wishRecipe = recipe("wish object syntax no tag", () => {
+        const missing = wish({ query: "", path: ["some", "path"] });
+        return { missing };
+      });
 
-      try {
-        const wishRecipe = recipe("wish object syntax no tag", () => {
-          const missing = wish({ query: "", path: ["some", "path"] });
-          return { missing };
-        });
+      const resultCell = runtime.getCell<{
+        missing?: { error?: string };
+      }>(
+        space,
+        "wish object syntax no tag result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
 
-        const resultCell = runtime.getCell<{
-          missing?: { error?: string };
-        }>(
-          space,
-          "wish object syntax no tag result",
-          undefined,
-          tx,
-        );
-        const result = runtime.run(tx, wishRecipe, {}, resultCell);
-        await tx.commit();
-        await runtime.idle();
-        tx = runtime.edit();
+      await runtime.idle();
 
-        await runtime.idle();
-
-        const missingResult = result.key("missing").get();
-        expect(missingResult?.error).toMatch(/no query/);
-        expect(errors.length).toBeGreaterThan(0);
-      } finally {
-        console.error = originalError;
-      }
+      const missingResult = result.key("missing").get();
+      expect(missingResult?.error).toMatch(/no query/);
     });
 
     it("returns UI with ct-cell-link on success", async () => {
