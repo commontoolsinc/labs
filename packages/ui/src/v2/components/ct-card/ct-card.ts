@@ -1,5 +1,6 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
+import { slotHasContent } from "../../utils/slots.ts";
 
 /**
  * CTCard - Content container with support for header, content, and footer sections
@@ -19,6 +20,49 @@ import { BaseElement } from "../../core/base-element.ts";
  *   <p slot="content">Card content goes here</p>
  *   <ct-button slot="footer">Action</ct-button>
  * </ct-card>
+ *
+ * ## Empty Section Handling
+ *
+ * This component automatically hides header/footer sections when they have no
+ * slotted content to avoid unnecessary whitespace.
+ *
+ * ### Implementation Approach
+ *
+ * We use JavaScript to detect empty slots because CSS cannot reliably detect
+ * whether a slot has assigned content vs fallback content.
+ *
+ * The component listens to `slotchange` events and checks `assignedNodes()` to
+ * determine if each slot has actual slotted content. It then adds/removes an
+ * `.empty` class which CSS uses to hide the section.
+ *
+ * ### Why Not Pure CSS?
+ *
+ * We explored several CSS-only approaches but all had fundamental limitations:
+ *
+ * 1. **:not(:has(*))** - Doesn't work because slots with fallback content always
+ *    have children (the fallback elements), even when showing no slotted content.
+ *    This was the previous approach (commit 7696b91) which appeared to work in
+ *    testing but failed in practice.
+ *
+ * 2. **:empty** - Doesn't work because the slot element itself exists, making
+ *    parent divs non-empty.
+ *
+ * 3. **::slotted() selectors** - Cannot be used inside :has() or other complex
+ *    selectors to detect presence/absence of content.
+ *
+ * 4. **Checking for non-fallback elements** - No CSS selector can distinguish
+ *    between "slot showing fallback" vs "slot showing slotted content" because
+ *    both render as the slot element with children in the DOM.
+ *
+ * 5. **Removing fallback content** - Would break the useful title/action/description
+ *    slot pattern that provides structured header content.
+ *
+ * ### Performance
+ *
+ * The JS approach is very performant:
+ * - `slotchange` only fires when content actually changes, not on every render
+ * - `assignedNodes()` is a fast native DOM API call
+ * - This is a standard pattern in professional web component libraries
  */
 
 export class CTCard extends BaseElement {
@@ -70,8 +114,13 @@ export class CTCard extends BaseElement {
         padding-bottom: 0;
       }
 
-      /* Hide header if it has no slotted content */
-      .card-header:not(:has(*)) {
+      /* When header is the only section, add bottom padding */
+      .card-header:not(.empty):has(+ .card-content.empty) {
+        padding-bottom: 1.5rem;
+      }
+
+      /* Hide header if empty (controlled by JS via .empty class) */
+      .card-header.empty {
         display: none;
         padding: 0;
       }
@@ -84,7 +133,8 @@ export class CTCard extends BaseElement {
         gap: 1rem;
       }
 
-      .card-title-wrapper:not(:has([slot])) {
+      /* Hide title wrapper if empty (controlled by JS via .empty class) */
+      .card-title-wrapper.empty {
         display: none;
       }
 
@@ -110,8 +160,8 @@ export class CTCard extends BaseElement {
         padding: 1.5rem;
       }
 
-      /* Hide content if it has no slotted content */
-      .card-content:not(:has(*)) {
+      /* Hide content if empty (controlled by JS via .empty class) */
+      .card-content.empty {
         display: none;
         padding: 0;
       }
@@ -122,8 +172,8 @@ export class CTCard extends BaseElement {
         padding-top: 0;
       }
 
-      /* Hide footer if it has no slotted content */
-      .card-footer:not(:has(*)) {
+      /* Hide footer if empty (controlled by JS via .empty class) */
+      .card-footer.empty {
         display: none;
         padding: 0;
       }
@@ -155,6 +205,16 @@ export class CTCard extends BaseElement {
         this.addEventListener("click", this._handleClick);
         this.addEventListener("keydown", this._handleKeydown);
       }
+    }
+
+    override firstUpdated() {
+      // Set up slot change listeners to detect empty slots
+      this.shadowRoot?.querySelectorAll("slot").forEach((slot) => {
+        slot.addEventListener("slotchange", () => this._updateEmptyStates());
+      });
+
+      // Initial check for empty states
+      this._updateEmptyStates();
     }
 
     override disconnectedCallback() {
@@ -202,6 +262,70 @@ export class CTCard extends BaseElement {
           </div>
         </div>
       `;
+    }
+
+    /**
+     * Update empty state classes on header/content/footer sections based on
+     * whether their slots have assigned content.
+     */
+    private _updateEmptyStates(): void {
+      const headerSlot = this.shadowRoot?.querySelector(
+        'slot[name="header"]',
+      ) as HTMLSlotElement | null;
+      const contentNamedSlot = this.shadowRoot?.querySelector(
+        'slot[name="content"]',
+      ) as HTMLSlotElement | null;
+      const contentDefaultSlot = contentNamedSlot?.querySelector(
+        "slot:not([name])",
+      ) as HTMLSlotElement | null;
+      const footerSlot = this.shadowRoot?.querySelector(
+        'slot[name="footer"]',
+      ) as HTMLSlotElement | null;
+
+      // Check nested slots for title/description/action pattern
+      const titleSlot = this.shadowRoot?.querySelector('slot[name="title"]') as
+        | HTMLSlotElement
+        | null;
+      const actionSlot = this.shadowRoot?.querySelector(
+        'slot[name="action"]',
+      ) as HTMLSlotElement | null;
+      const descriptionSlot = this.shadowRoot?.querySelector(
+        'slot[name="description"]',
+      ) as HTMLSlotElement | null;
+
+      const header = this.shadowRoot?.querySelector(".card-header");
+      const content = this.shadowRoot?.querySelector(".card-content");
+      const footer = this.shadowRoot?.querySelector(".card-footer");
+      const titleWrapper = this.shadowRoot?.querySelector(
+        ".card-title-wrapper",
+      );
+
+      // Check if slots have assigned content (filters out whitespace and empty elements)
+      const hasHeaderContent = slotHasContent(headerSlot);
+
+      // Content has content if EITHER the named "content" slot OR the default slot has nodes
+      const hasContentNamedSlot = slotHasContent(contentNamedSlot);
+      const hasContentDefaultSlot = slotHasContent(contentDefaultSlot);
+      const hasContentContent = hasContentNamedSlot || hasContentDefaultSlot;
+
+      const hasFooterContent = slotHasContent(footerSlot);
+
+      // Check if title/action slots have content (for title-wrapper visibility)
+      const hasTitleContent = slotHasContent(titleSlot);
+      const hasActionContent = slotHasContent(actionSlot);
+      const hasTitleWrapperContent = hasTitleContent || hasActionContent;
+
+      // If using title/description/action pattern, header should be visible even without explicit slot="header"
+      const hasDescriptionContent = slotHasContent(descriptionSlot);
+      const hasNestedHeaderContent = hasTitleContent || hasActionContent ||
+        hasDescriptionContent;
+      const shouldShowHeader = hasHeaderContent || hasNestedHeaderContent;
+
+      // Add/remove 'empty' class based on slot content
+      header?.classList.toggle("empty", !shouldShowHeader);
+      content?.classList.toggle("empty", !hasContentContent);
+      footer?.classList.toggle("empty", !hasFooterContent);
+      titleWrapper?.classList.toggle("empty", !hasTitleWrapperContent);
     }
 
     private _handleClick = (_event: Event): void => {
