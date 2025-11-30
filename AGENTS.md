@@ -35,6 +35,12 @@ If you are developing patterns, use Claude Skills (pattern-dev) to do the work.
   (`bd quickstart` and `bd --help`)
   - Read `task-management` skill for workflow
 
+**Question Management**
+
+- Use the `questions` skill to search for, record, and manage research questions
+  and "how do I?" questions
+- See `docs/questions/README.md` for the complete workflow guide
+
 **Reference:**
 
 - `packages/patterns/INDEX.md` - Catalog of all pattern examples with summaries,
