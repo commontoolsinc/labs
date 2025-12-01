@@ -390,6 +390,7 @@ export class CTChatMessage extends BaseElement {
               .content="${textContent}"
               .variant="${variant}"
               ?streaming="${this.streaming}"
+              ?compact="${this.compact}"
             ></ct-markdown>
           </div>
           ${this._renderToolAttachments()} ${this._renderMessageActions()}

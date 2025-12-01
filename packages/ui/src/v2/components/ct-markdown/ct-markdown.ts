@@ -24,6 +24,7 @@ export type MarkdownVariant = "default" | "inverse";
  * @attr {string} content - The markdown content to render (string or Cell<string>)
  * @attr {string} variant - Visual variant: "default" or "inverse" (for light text on dark bg)
  * @attr {boolean} streaming - Shows a blinking cursor at the end (for streaming content)
+ * @attr {boolean} compact - Reduces paragraph spacing for more compact display
  *
  * @csspart content - The markdown content wrapper
  *
@@ -40,6 +41,9 @@ export type MarkdownVariant = "default" | "inverse";
  *
  * @example
  * <ct-markdown .content=${myCell} streaming></ct-markdown>
+ *
+ * @example
+ * <ct-markdown .content=${myCell} compact></ct-markdown>
  */
 export class CTMarkdown extends BaseElement {
   static override styles = [
@@ -159,6 +163,14 @@ export class CTMarkdown extends BaseElement {
 
       .markdown-content p:not(:last-child) {
         margin-bottom: var(--ct-theme-spacing, var(--ct-spacing-3, 0.75rem));
+      }
+
+      /* Compact mode paragraph spacing */
+      .markdown-content.compact p:not(:last-child) {
+        margin-bottom: var(
+          --ct-theme-spacing-compact,
+          var(--ct-spacing-1, 0.25rem)
+        );
       }
 
       /* Links */
@@ -366,6 +378,9 @@ export class CTMarkdown extends BaseElement {
   @property({ type: Boolean, reflect: true })
   declare streaming: boolean;
 
+  @property({ type: Boolean, reflect: true })
+  declare compact: boolean;
+
   @consume({ context: themeContext, subscribe: true })
   @property({ attribute: false })
   declare theme?: CTTheme;
@@ -377,6 +392,7 @@ export class CTMarkdown extends BaseElement {
     this.content = "";
     this.variant = "default";
     this.streaming = false;
+    this.compact = false;
   }
 
   private _getContentValue(): string {
@@ -528,6 +544,7 @@ export class CTMarkdown extends BaseElement {
       "markdown-content": true,
       inverse: this.variant === "inverse",
       streaming: this.streaming,
+      compact: this.compact,
     };
 
     return html`
