@@ -17,6 +17,16 @@ describe("ct-markdown", () => {
     expect(element.content).toBe("");
   });
 
+  it("should have default variant", () => {
+    const element = new CTMarkdown();
+    expect(element.variant).toBe("default");
+  });
+
+  it("should have streaming disabled by default", () => {
+    const element = new CTMarkdown();
+    expect(element.streaming).toBe(false);
+  });
+
   it("should render basic markdown", () => {
     const el = new CTMarkdown();
     const markdown = "Hello **world**";
@@ -46,5 +56,23 @@ describe("ct-markdown", () => {
 
     expect(rendered).toContain("code-block-container");
     expect(rendered).toContain("ct-copy-button");
+  });
+
+  it("should get content value from string", () => {
+    const el = new CTMarkdown();
+    el.content = "test content";
+
+    const value = (el as any)._getContentValue();
+
+    expect(value).toBe("test content");
+  });
+
+  it("should handle null/undefined content gracefully", () => {
+    const el = new CTMarkdown();
+    el.content = null as any;
+
+    const value = (el as any)._getContentValue();
+
+    expect(value).toBe("");
   });
 });

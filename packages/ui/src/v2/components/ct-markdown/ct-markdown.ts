@@ -2,6 +2,7 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { classMap } from "lit/directives/class-map.js";
 import { marked } from "marked";
 import { BaseElement } from "../../core/base-element.ts";
 import "../ct-copy-button/ct-copy-button.ts";
@@ -11,19 +12,29 @@ import {
   type CTTheme,
   themeContext,
 } from "../theme-context.ts";
+import { type Cell, isCell } from "@commontools/runner";
+
+export type MarkdownVariant = "default" | "inverse";
 
 /**
  * CTMarkdown - Renders markdown content with syntax highlighting and copy buttons
  *
  * @element ct-markdown
  *
- * @attr {string} content - The markdown content to render
+ * @attr {string} content - The markdown content to render (string or Cell<string>)
+ * @attr {string} variant - Visual variant: "default" or "inverse" (for light text on dark bg)
+ * @attr {boolean} streaming - Shows a blinking cursor at the end (for streaming content)
+ *
+ * @csspart content - The markdown content wrapper
  *
  * @example
  * <ct-markdown content="# Hello World\n\nThis is **bold** text."></ct-markdown>
  *
  * @example
  * <ct-markdown content="```js\nconsole.log('hello');\n```"></ct-markdown>
+ *
+ * @example
+ * <ct-markdown .content=${myCell} streaming></ct-markdown>
  */
 export class CTMarkdown extends BaseElement {
   static override styles = [
@@ -50,6 +61,25 @@ export class CTMarkdown extends BaseElement {
 
       .markdown-content {
         word-wrap: break-word;
+      }
+
+      /* Streaming cursor */
+      .markdown-content.streaming::after {
+        content: "▊";
+        animation: blink 1s infinite;
+        margin-left: 2px;
+        color: currentColor;
+      }
+
+      @keyframes blink {
+        0%,
+        50% {
+          opacity: 1;
+        }
+        51%,
+        100% {
+          opacity: 0;
+        }
       }
 
       /* Headings */
@@ -103,6 +133,17 @@ export class CTMarkdown extends BaseElement {
         color: var(--ct-theme-color-text-muted, #6b7280);
       }
 
+      /* Inverse variant heading adjustments */
+      .markdown-content.inverse h1,
+      .markdown-content.inverse h2 {
+        border-bottom-color: rgba(255, 255, 255, 0.3);
+      }
+
+      .markdown-content.inverse h6 {
+        color: inherit;
+        opacity: 0.8;
+      }
+
       /* Paragraphs */
       .markdown-content p {
         margin: 0;
@@ -123,6 +164,13 @@ export class CTMarkdown extends BaseElement {
 
       .markdown-content a:hover {
         text-decoration: underline;
+      }
+
+      /* Inverse variant links */
+      .markdown-content.inverse a {
+        color: inherit;
+        text-decoration: underline;
+        opacity: 0.9;
       }
 
       /* Lists */
@@ -150,6 +198,12 @@ export class CTMarkdown extends BaseElement {
         font-size: 0.875em;
       }
 
+      /* Inverse variant inline code */
+      .markdown-content.inverse code {
+        background-color: rgba(255, 255, 255, 0.2);
+        color: inherit;
+      }
+
       /* Code blocks */
       .markdown-content pre {
         background-color: var(--ct-theme-color-surface, #f9fafb);
@@ -164,6 +218,16 @@ export class CTMarkdown extends BaseElement {
         background-color: transparent;
         padding: 0;
         font-size: 0.875em;
+      }
+
+      /* Inverse variant code blocks */
+      .markdown-content.inverse pre {
+        background-color: rgba(255, 255, 255, 0.2);
+        border: none;
+      }
+
+      .markdown-content.inverse pre code {
+        color: inherit;
       }
 
       /* Code block container with copy button */
@@ -197,11 +261,22 @@ export class CTMarkdown extends BaseElement {
         margin-bottom: 0;
       }
 
+      /* Inverse variant blockquotes */
+      .markdown-content.inverse blockquote {
+        border-left-color: rgba(255, 255, 255, 0.6);
+        color: inherit;
+        opacity: 0.9;
+      }
+
       /* Horizontal rules */
       .markdown-content hr {
         border: none;
         border-top: 1px solid var(--ct-theme-color-border, #e5e7eb);
         margin: 1.5em 0;
+      }
+
+      .markdown-content.inverse hr {
+        border-top-color: rgba(255, 255, 255, 0.3);
       }
 
       /* Tables */
@@ -221,6 +296,16 @@ export class CTMarkdown extends BaseElement {
       .markdown-content th {
         background-color: var(--ct-theme-color-surface, #f9fafb);
         font-weight: 600;
+      }
+
+      /* Inverse variant tables */
+      .markdown-content.inverse th,
+      .markdown-content.inverse td {
+        border-color: rgba(255, 255, 255, 0.3);
+      }
+
+      .markdown-content.inverse th {
+        background-color: rgba(255, 255, 255, 0.1);
       }
 
       /* Images */
@@ -246,16 +331,33 @@ export class CTMarkdown extends BaseElement {
     `,
   ];
 
-  @property({ type: String })
-  declare content: string;
+  @property({ attribute: false })
+  declare content: Cell<string> | string;
+
+  @property({ type: String, reflect: true })
+  declare variant: MarkdownVariant;
+
+  @property({ type: Boolean, reflect: true })
+  declare streaming: boolean;
 
   @consume({ context: themeContext, subscribe: true })
   @property({ attribute: false })
   declare theme?: CTTheme;
 
+  private _unsubscribe: (() => void) | null = null;
+
   constructor() {
     super();
     this.content = "";
+    this.variant = "default";
+    this.streaming = false;
+  }
+
+  private _getContentValue(): string {
+    if (isCell(this.content)) {
+      return this.content.get() ?? "";
+    }
+    return this.content ?? "";
   }
 
   private _renderMarkdown(content: string): string {
@@ -342,8 +444,33 @@ export class CTMarkdown extends BaseElement {
 
   override updated(changedProperties: Map<string | number | symbol, unknown>) {
     super.updated(changedProperties);
+
     if (changedProperties.has("theme") && this.theme) {
       this._updateThemeProperties();
+    }
+
+    // Handle Cell subscription
+    if (changedProperties.has("content")) {
+      // Clean up previous subscription
+      if (this._unsubscribe) {
+        this._unsubscribe();
+        this._unsubscribe = null;
+      }
+
+      // Subscribe to new Cell if it's a Cell
+      if (this.content && isCell(this.content)) {
+        this._unsubscribe = this.content.sink(() => {
+          this.requestUpdate();
+        });
+      }
+    }
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this._unsubscribe) {
+      this._unsubscribe();
+      this._unsubscribe = null;
     }
   }
 
@@ -353,10 +480,17 @@ export class CTMarkdown extends BaseElement {
   }
 
   override render() {
-    const renderedContent = this._renderMarkdown(this.content);
+    const contentValue = this._getContentValue();
+    const renderedContent = this._renderMarkdown(contentValue);
+
+    const classes = {
+      "markdown-content": true,
+      inverse: this.variant === "inverse",
+      streaming: this.streaming,
+    };
 
     return html`
-      <div class="markdown-content" part="content">
+      <div class="${classMap(classes)}" part="content">
         ${unsafeHTML(renderedContent)}
       </div>
     `;

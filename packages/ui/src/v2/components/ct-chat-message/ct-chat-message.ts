@@ -1,12 +1,11 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
-import { unsafeHTML } from "lit/directives/unsafe-html.js";
-import { marked } from "marked";
 import { BaseElement } from "../../core/base-element.ts";
 import "../ct-tool-call/ct-tool-call.ts";
 import "../ct-button/ct-button.ts";
 import "../ct-copy-button/ct-copy-button.ts";
+import "../ct-markdown/ct-markdown.ts";
 import type {
   BuiltInLLMContent,
   BuiltInLLMTextPart,
@@ -18,7 +17,6 @@ import {
   type CTTheme,
   themeContext,
 } from "../theme-context.ts";
-import "../ct-cell-link/ct-cell-link.ts";
 
 /**
  * CTChatMessage - Chat message component with markdown support
@@ -114,28 +112,6 @@ export class CTChatMessage extends BaseElement {
         }
       }
 
-      /* Streaming text effect - can be triggered by adding 'streaming' class */
-      .message.streaming .message-content {
-        animation: none;
-        opacity: 1;
-      }
-
-      .message.streaming .message-content::after {
-        content: "▊";
-        animation: blink 1s infinite;
-        margin-left: 2px;
-        color: currentColor;
-      }
-
-      @keyframes blink {
-        0%, 50% {
-          opacity: 1;
-        }
-        51%, 100% {
-          opacity: 0;
-        }
-      }
-
       .message-user {
         background-color: var(--ct-theme-color-primary, #3b82f6);
         color: var(--ct-theme-color-primary-foreground, #ffffff);
@@ -145,9 +121,10 @@ export class CTChatMessage extends BaseElement {
         color: var(--ct-theme-color-text, #111827);
       }
 
-      .message-content {
+      /* ct-markdown inherits color from parent */
+      ct-markdown {
+        color: inherit;
         line-height: 1.5;
-        animation: textFadeIn 0.4s ease-out 0.1s both;
       }
 
       /* Avatar styling */
@@ -215,81 +192,6 @@ export class CTChatMessage extends BaseElement {
         max-width: 500px;
       }
 
-      /* Markdown styling */
-      .message-content p {
-        margin: 0;
-      }
-
-      .message-content p:not(:last-child) {
-        margin-bottom: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
-      }
-
-      .message-content code {
-        background-color: var(--ct-theme-color-surface, #f9fafb);
-        padding: var(--ct-theme-padding-code, var(--ct-spacing-1, 0.25rem));
-        border-radius: var(--ct-theme-border-radius, 0.5rem);
-        font-family: var(--ct-theme-mono-font-family, ui-monospace, monospace);
-        font-size: 0.875em;
-      }
-
-      .message-content pre {
-        background-color: var(--ct-theme-color-surface, #f9fafb);
-        padding: var(--ct-theme-padding-block, var(--ct-spacing-3, 0.75rem));
-        border-radius: var(--ct-theme-border-radius, 0.5rem);
-        border: 1px solid var(--ct-theme-color-border, #e5e7eb);
-        overflow-x: auto;
-        margin: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem)) 0;
-      }
-
-      .message-content pre code {
-        background-color: transparent;
-        padding: 0;
-      }
-
-      .message-content ul,
-      .message-content ol {
-        margin: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem)) 0;
-        padding-left: var(--ct-theme-padding, var(--ct-spacing-3, 0.75rem));
-      }
-
-      .message-content blockquote {
-        border-left: 4px solid var(--ct-theme-color-border, #e5e7eb);
-        margin: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem)) 0;
-        padding-left: var(--ct-theme-padding, var(--ct-spacing-3, 0.75rem));
-        font-style: italic;
-        color: var(--ct-theme-color-text-muted, #6b7280);
-      }
-
-      /* Adjust colors for user messages */
-      :host([role="user"]) .message-content code {
-        background-color: rgba(255, 255, 255, 0.2);
-        color: var(
-          --ct-theme-color-accent-foreground,
-          var(--ct-color-white, #ffffff)
-        );
-      }
-
-      :host([role="user"]) .message-content pre {
-        background-color: rgba(255, 255, 255, 0.2);
-        border: none;
-      }
-
-      :host([role="user"]) .message-content pre code {
-        background-color: transparent;
-        color: var(
-          --ct-theme-color-accent-foreground,
-          var(--ct-color-white, #ffffff)
-        );
-      }
-
-      :host([role="user"]) .message-content blockquote {
-        border-left-color: rgba(255, 255, 255, 0.6);
-        color: var(
-          --ct-theme-color-accent-foreground,
-          var(--ct-color-white, #ffffff)
-        );
-      }
-
       /* Message actions */
       .message-actions {
         display: flex;
@@ -300,24 +202,6 @@ export class CTChatMessage extends BaseElement {
       }
 
       .message-bubble:hover .message-actions {
-        opacity: 1;
-      }
-
-      /* Code block copy button styles */
-      .code-block-container {
-        position: relative;
-      }
-
-      .code-copy-button {
-        position: absolute;
-        top: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
-        right: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
-        opacity: 0;
-        transition: opacity var(--ct-theme-animation-duration, 0.2s) ease;
-        z-index: 1;
-      }
-
-      .code-block-container:hover .code-copy-button {
         opacity: 1;
       }
 
@@ -342,13 +226,6 @@ export class CTChatMessage extends BaseElement {
       :host([compact]) .tool-attachments {
         margin-top: var(--ct-theme-spacing-compact, var(--ct-spacing-1, 0.25rem));
         gap: var(--ct-theme-spacing-compact, var(--ct-spacing-1, 0.25rem));
-      }
-
-      :host([compact]) .message-content p:not(:last-child) {
-        margin-bottom: var(
-          --ct-theme-spacing-compact,
-          var(--ct-spacing-1, 0.25rem)
-        );
       }
     `,
   ];
@@ -380,77 +257,6 @@ export class CTChatMessage extends BaseElement {
     this.role = "user";
     this.content = "";
     this.streaming = false;
-  }
-
-  private _renderMarkdown(content: string): string {
-    if (!content) return "";
-
-    // Configure marked for safer rendering
-    marked.setOptions({
-      breaks: true,
-      gfm: true,
-    });
-
-    let renderedHtml = marked(content) as string;
-
-    // Wrap code blocks with copy buttons
-    renderedHtml = this._wrapCodeBlocksWithCopyButtons(renderedHtml);
-
-    // Replace cell links with ct-cell-link
-    renderedHtml = this._replaceCellLinks(renderedHtml);
-
-    return renderedHtml;
-  }
-
-  private _replaceCellLinks(html: string): string {
-    // Matches <a href="/of:...">Name</a>
-    // We look for hrefs starting with /of: (or other schemes if generalized, but LLM links are /of:)
-    // The regex for LLM friendly links is roughly /^[a-zA-Z0-9]+:/ but we know they start with /of: usually.
-    // Let's use a broader regex for the scheme part to be safe: \/[a-zA-Z0-9]+:
-    return html.replace(
-      /<a href="(\/[a-zA-Z0-9]+:[^"]+)">([^<]*)<\/a>/g,
-      (_match, link, text) => {
-        // Pass the original link text as label to preserve author's intent
-        return `<ct-cell-link link="${link}" label="${text}"></ct-cell-link>`;
-      },
-    );
-  }
-
-  private _wrapCodeBlocksWithCopyButtons(html: string): string {
-    // Use a regex to find <pre><code>...</code></pre> blocks and wrap them
-    return html.replace(
-      /<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g,
-      (_match, codeAttrs, codeContent) => {
-        // Decode HTML entities for the copy content
-        const decodedContent = this._decodeHtmlEntities(codeContent);
-
-        return `<div class="code-block-container">
-          <pre><code${codeAttrs}>${codeContent}</code></pre>
-          <ct-copy-button
-            class="code-copy-button"
-            text="${this._escapeForAttribute(decodedContent)}"
-            variant="ghost"
-            size="sm"
-            icon-only
-          ></ct-copy-button>
-        </div>`;
-      },
-    );
-  }
-
-  private _decodeHtmlEntities(text: string): string {
-    const textarea = document.createElement("textarea");
-    textarea.innerHTML = text;
-    return textarea.value;
-  }
-
-  private _escapeForAttribute(text: string): string {
-    return text
-      .replace(/&/g, "&amp;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
   }
 
   private _renderToolAttachments() {
@@ -571,21 +377,20 @@ export class CTChatMessage extends BaseElement {
   }
 
   override render() {
-    const messageClass = `message message-${this.role}${
-      this.streaming ? " streaming" : ""
-    }`;
-
+    const messageClass = `message message-${this.role}`;
     const textContent = this._extractTextContent();
-    const renderedContent = this._renderMarkdown(textContent);
+    const variant = this.role === "user" ? "inverse" : "default";
 
     return html`
       <div class="message-wrapper">
         ${this._renderAvatar()}
         <div class="message-bubble">
           <div class="${messageClass}">
-            <div class="message-content">
-              ${unsafeHTML(renderedContent)}
-            </div>
+            <ct-markdown
+              content="${textContent}"
+              variant="${variant}"
+              ?streaming="${this.streaming}"
+            ></ct-markdown>
           </div>
           ${this._renderToolAttachments()} ${this._renderMessageActions()}
         </div>
