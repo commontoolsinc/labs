@@ -21,6 +21,8 @@ export type SetPropHandler = <T>(
 export interface RenderOptions {
   setProp?: SetPropHandler;
   document?: Document;
+  /** The root cell for auto-wrapping with ct-cell-context on [UI] traversal */
+  rootCell?: Cell;
 }
 
 export const vdomSchema: JSONSchema = {
@@ -63,13 +65,20 @@ export const render = (
 ): Cancel => {
   // Initialize visited set with the original cell for cycle detection
   const visited = new Set<object>();
+  let rootCell: Cell | undefined;
+
   if (isCell(view)) {
     visited.add(view);
+    rootCell = view; // Capture the original cell for ct-cell-context wrapping
     view = view.asSchema(vdomSchema);
   }
+
+  // Pass rootCell through options if we have one
+  const optionsWithCell = rootCell ? { ...options, rootCell } : options;
+
   return effect(
     view,
-    (view: VNode) => renderImpl(parent, view, options, visited),
+    (view: VNode) => renderImpl(parent, view, optionsWithCell, visited),
   );
 };
 
@@ -141,6 +150,10 @@ const renderNode = (
 
   const document = options.document ?? globalThis.document;
 
+  // Check if we should wrap with ct-cell-context (when traversing [UI] with a rootCell)
+  const shouldWrapWithContext = node[UI] && options.rootCell;
+  const cellForContext = shouldWrapWithContext ? options.rootCell : undefined;
+
   // Follow `[UI]` to actual vdom. Do this before otherwise parsing the vnode,
   // so that if there are both, the `[UI]` annotation takes precedence (avoids
   // accidental collision with the otherwise quite generic property names)
@@ -188,6 +201,16 @@ const renderNode = (
       visited,
     );
     addCancel(cancelChildren);
+  }
+
+  // Wrap with ct-cell-context if we traversed [UI] with a rootCell
+  if (cellForContext && element) {
+    const wrapper = document.createElement(
+      "ct-cell-context",
+    ) as HTMLElement & { cell?: Cell };
+    wrapper.cell = cellForContext;
+    wrapper.appendChild(element);
+    return [wrapper, cancel];
   }
 
   return [element, cancel];

@@ -77,6 +77,8 @@ export class CTRender extends BaseElement {
   }
 
   protected override render() {
+    // Note: ct-cell-context is now auto-injected by the renderer when
+    // traversing [UI] with a Cell, so we don't need to wrap here
     return html`
       ${!this._hasRendered
         ? html`

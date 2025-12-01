@@ -20,9 +20,11 @@ export default recipe<RecipeState, RecipeOutput>((state) => {
         <ct-button onClick={decrement(state)}>
           dec to {previous(state.value)}
         </ct-button>
-        <span id="counter-result">
-          Counter is the {nth(state.value)} number
-        </span>
+        <ct-cell-context $cell={state.value} inline>
+          <span id="counter-result">
+            Counter is the {nth(state.value)} number
+          </span>
+        </ct-cell-context>
         <ct-button onClick={increment({ value: state.value })}>
           inc to {(state.value ?? 0) + 1}
         </ct-button>
