@@ -387,8 +387,8 @@ export class CTChatMessage extends BaseElement {
         <div class="message-bubble">
           <div class="${messageClass}">
             <ct-markdown
-              content="${textContent}"
-              variant="${variant}"
+              .content="${textContent}"
+              .variant="${variant}"
               ?streaming="${this.streaming}"
             ></ct-markdown>
           </div>

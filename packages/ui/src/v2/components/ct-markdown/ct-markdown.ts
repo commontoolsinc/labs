@@ -27,6 +27,11 @@ export type MarkdownVariant = "default" | "inverse";
  *
  * @csspart content - The markdown content wrapper
  *
+ * @cssprop [--ct-markdown-inverse-border=rgba(255,255,255,0.3)] - Border color for inverse variant
+ * @cssprop [--ct-markdown-inverse-surface=rgba(255,255,255,0.2)] - Surface color for inverse variant (code blocks)
+ * @cssprop [--ct-markdown-inverse-surface-subtle=rgba(255,255,255,0.1)] - Subtle surface for inverse (table headers)
+ * @cssprop [--ct-markdown-inverse-accent=rgba(255,255,255,0.6)] - Accent color for inverse (blockquote border)
+ *
  * @example
  * <ct-markdown content="# Hello World\n\nThis is **bold** text."></ct-markdown>
  *
@@ -136,7 +141,10 @@ export class CTMarkdown extends BaseElement {
       /* Inverse variant heading adjustments */
       .markdown-content.inverse h1,
       .markdown-content.inverse h2 {
-        border-bottom-color: rgba(255, 255, 255, 0.3);
+        border-bottom-color: var(
+          --ct-markdown-inverse-border,
+          rgba(255, 255, 255, 0.3)
+        );
       }
 
       .markdown-content.inverse h6 {
@@ -200,7 +208,10 @@ export class CTMarkdown extends BaseElement {
 
       /* Inverse variant inline code */
       .markdown-content.inverse code {
-        background-color: rgba(255, 255, 255, 0.2);
+        background-color: var(
+          --ct-markdown-inverse-surface,
+          rgba(255, 255, 255, 0.2)
+        );
         color: inherit;
       }
 
@@ -222,7 +233,10 @@ export class CTMarkdown extends BaseElement {
 
       /* Inverse variant code blocks */
       .markdown-content.inverse pre {
-        background-color: rgba(255, 255, 255, 0.2);
+        background-color: var(
+          --ct-markdown-inverse-surface,
+          rgba(255, 255, 255, 0.2)
+        );
         border: none;
       }
 
@@ -263,7 +277,10 @@ export class CTMarkdown extends BaseElement {
 
       /* Inverse variant blockquotes */
       .markdown-content.inverse blockquote {
-        border-left-color: rgba(255, 255, 255, 0.6);
+        border-left-color: var(
+          --ct-markdown-inverse-accent,
+          rgba(255, 255, 255, 0.6)
+        );
         color: inherit;
         opacity: 0.9;
       }
@@ -276,7 +293,10 @@ export class CTMarkdown extends BaseElement {
       }
 
       .markdown-content.inverse hr {
-        border-top-color: rgba(255, 255, 255, 0.3);
+        border-top-color: var(
+          --ct-markdown-inverse-border,
+          rgba(255, 255, 255, 0.3)
+        );
       }
 
       /* Tables */
@@ -301,11 +321,17 @@ export class CTMarkdown extends BaseElement {
       /* Inverse variant tables */
       .markdown-content.inverse th,
       .markdown-content.inverse td {
-        border-color: rgba(255, 255, 255, 0.3);
+        border-color: var(
+          --ct-markdown-inverse-border,
+          rgba(255, 255, 255, 0.3)
+        );
       }
 
       .markdown-content.inverse th {
-        background-color: rgba(255, 255, 255, 0.1);
+        background-color: var(
+          --ct-markdown-inverse-surface-subtle,
+          rgba(255, 255, 255, 0.1)
+        );
       }
 
       /* Images */
@@ -363,13 +389,11 @@ export class CTMarkdown extends BaseElement {
   private _renderMarkdown(content: string): string {
     if (!content) return "";
 
-    // Configure marked for safer rendering
-    marked.setOptions({
+    // Use marked.parse with options to avoid mutating global state
+    let renderedHtml = marked.parse(content, {
       breaks: true,
       gfm: true,
-    });
-
-    let renderedHtml = marked(content) as string;
+    }) as string;
 
     // Wrap code blocks with copy buttons
     renderedHtml = this._wrapCodeBlocksWithCopyButtons(renderedHtml);
@@ -412,7 +436,14 @@ export class CTMarkdown extends BaseElement {
   }
 
   private _decodeHtmlEntities(text: string): string {
-    // Decode common HTML entities without requiring DOM
+    // Use browser API when available for complete entity decoding
+    if (typeof document !== "undefined") {
+      const textarea = document.createElement("textarea");
+      textarea.innerHTML = text;
+      return textarea.value;
+    }
+
+    // Fallback for SSR/test environments - decode common entities
     return text
       .replace(/&amp;/g, "&")
       .replace(/&lt;/g, "<")
@@ -421,7 +452,11 @@ export class CTMarkdown extends BaseElement {
       .replace(/&#39;/g, "'")
       .replace(/&#x27;/g, "'")
       .replace(/&#x2F;/g, "/")
-      .replace(/&nbsp;/g, " ");
+      .replace(/&nbsp;/g, " ")
+      .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)))
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) =>
+        String.fromCharCode(parseInt(hex, 16))
+      );
   }
 
   private _escapeForAttribute(text: string): string {
@@ -431,6 +466,28 @@ export class CTMarkdown extends BaseElement {
       .replace(/'/g, "&#39;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
+  }
+
+  override willUpdate(
+    changedProperties: Map<string | number | symbol, unknown>,
+  ) {
+    super.willUpdate(changedProperties);
+
+    // Handle Cell subscription before render so first render has correct value
+    if (changedProperties.has("content")) {
+      // Clean up previous subscription
+      if (this._unsubscribe) {
+        this._unsubscribe();
+        this._unsubscribe = null;
+      }
+
+      // Subscribe to new Cell if it's a Cell
+      if (this.content && isCell(this.content)) {
+        this._unsubscribe = this.content.sink(() => {
+          this.requestUpdate();
+        });
+      }
+    }
   }
 
   override firstUpdated(
@@ -447,22 +504,6 @@ export class CTMarkdown extends BaseElement {
 
     if (changedProperties.has("theme") && this.theme) {
       this._updateThemeProperties();
-    }
-
-    // Handle Cell subscription
-    if (changedProperties.has("content")) {
-      // Clean up previous subscription
-      if (this._unsubscribe) {
-        this._unsubscribe();
-        this._unsubscribe = null;
-      }
-
-      // Subscribe to new Cell if it's a Cell
-      if (this.content && isCell(this.content)) {
-        this._unsubscribe = this.content.sink(() => {
-          this.requestUpdate();
-        });
-      }
     }
   }
 
