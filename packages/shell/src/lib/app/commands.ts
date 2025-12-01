@@ -5,8 +5,7 @@ import { AppStateConfigKey } from "./state.ts";
 export type Command =
   | { type: "set-view"; view: AppView }
   | { type: "set-identity"; identity: Identity | undefined }
-  | { type: "set-config"; key: AppStateConfigKey; value: boolean }
-  | { type: "toggle-favorite"; charmId: string };
+  | { type: "set-config"; key: AppStateConfigKey; value: boolean };
 
 export function isCommand(value: unknown): value is Command {
   if (
@@ -26,9 +25,6 @@ export function isCommand(value: unknown): value is Command {
     case "set-config": {
       return "key" in value && typeof value.key === "string" &&
         "value" in value && typeof value.value === "boolean";
-    }
-    case "toggle-favorite": {
-      return "charmId" in value && typeof value.charmId === "string";
     }
   }
   return false;
