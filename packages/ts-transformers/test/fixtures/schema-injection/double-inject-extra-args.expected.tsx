@@ -5,7 +5,9 @@ const extra = "extra";
 export default function TestDoubleInjectExtraArgs() {
     // Should NOT transform - already has more than 2 arguments
     // This is malformed code, but we shouldn't touch it
+    // @ts-expect-error Testing transformer handles extra arguments gracefully
     const _c1 = cell(10, schema, extra);
+    // @ts-expect-error Testing transformer handles extra arguments gracefully
     const _c2 = cell(20, schema, extra, "another");
     return null;
 }

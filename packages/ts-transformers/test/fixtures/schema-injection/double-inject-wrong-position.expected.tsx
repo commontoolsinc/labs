@@ -4,6 +4,7 @@ const schema = { type: "number" } as const;
 export default function TestDoubleInjectWrongPosition() {
     // Should NOT transform - already has 2 arguments (even if in wrong order)
     // This is malformed code, but we shouldn't make it worse by adding a third arg
+    // @ts-expect-error Testing transformer handles invalid argument order gracefully
     const _c1 = cell(schema, 10);
     return null;
 }
