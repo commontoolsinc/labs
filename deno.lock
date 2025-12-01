@@ -1923,6 +1923,7 @@
           "npm:@codemirror/view@^6.26.0",
           "npm:@lit/context@^1.1.2",
           "npm:codemirror@^6.0.1",
+          "npm:isomorphic-dompurify@^2.16.0",
           "npm:marked@4"
         ]
       },

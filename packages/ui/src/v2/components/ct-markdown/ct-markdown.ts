@@ -4,7 +4,6 @@ import { consume } from "@lit/context";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { classMap } from "lit/directives/class-map.js";
 import { marked } from "marked";
-import DOMPurify from "isomorphic-dompurify";
 import { BaseElement } from "../../core/base-element.ts";
 import "../ct-copy-button/ct-copy-button.ts";
 import "../ct-cell-link/ct-cell-link.ts";
@@ -418,12 +417,20 @@ export class CTMarkdown extends BaseElement {
     // Replace cell links with ct-cell-link
     renderedHtml = this._replaceCellLinks(renderedHtml);
 
-    // Sanitize HTML to prevent XSS attacks
-    // Add custom elements to the allowed tags list
-    renderedHtml = DOMPurify.sanitize(renderedHtml, {
-      ADD_TAGS: ["ct-cell-link", "ct-copy-button"],
-      ADD_ATTR: ["link", "label", "text", "variant", "size", "icon-only"],
-    });
+    // TODO: XSS VULNERABILITY - This component uses unsafeHTML without sanitization!
+    //
+    // We need to sanitize the HTML to prevent XSS attacks. Originally we used DOMPurify
+    // but it added a dependency (isomorphic-dompurify) that caused lockfile issues.
+    //
+    // Options to fix this:
+    // 1. Add DOMPurify back with proper lockfile management
+    // 2. Implement our own sanitizer that allows our custom elements (ct-cell-link, ct-copy-button)
+    // 3. Find an alternative sanitization library
+    //
+    // For now, only use this component with trusted markdown content!
+    //
+    // Security note: The _escapeForAttribute() method helps prevent attribute injection,
+    // but this doesn't protect against <script> tags or other HTML-based XSS vectors.
 
     return renderedHtml;
   }
