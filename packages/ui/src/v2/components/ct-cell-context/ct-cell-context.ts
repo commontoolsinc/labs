@@ -170,7 +170,9 @@ export class CTCellContext extends BaseElement {
       console.log("[ct-cell-context] No cell available");
       return;
     }
-    console.log("[ct-cell-context] Cell value:", this.cell.get());
+    // Set window.$cell for easy console access (like Chrome's $0 for elements)
+    (globalThis as unknown as { $cell: Cell }).$cell = this.cell;
+    console.log("$cell =", this.cell, "→", this.cell.get());
   }
 
   private _handleIdClick() {
