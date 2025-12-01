@@ -4,6 +4,7 @@ import { consume } from "@lit/context";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { classMap } from "lit/directives/class-map.js";
 import { marked } from "marked";
+import DOMPurify from "isomorphic-dompurify";
 import { BaseElement } from "../../core/base-element.ts";
 import "../ct-copy-button/ct-copy-button.ts";
 import "../ct-cell-link/ct-cell-link.ts";
@@ -416,6 +417,13 @@ export class CTMarkdown extends BaseElement {
 
     // Replace cell links with ct-cell-link
     renderedHtml = this._replaceCellLinks(renderedHtml);
+
+    // Sanitize HTML to prevent XSS attacks
+    // Add custom elements to the allowed tags list
+    renderedHtml = DOMPurify.sanitize(renderedHtml, {
+      ADD_TAGS: ["ct-cell-link", "ct-copy-button"],
+      ADD_ATTR: ["link", "label", "text", "variant", "size", "icon-only"],
+    });
 
     return renderedHtml;
   }
