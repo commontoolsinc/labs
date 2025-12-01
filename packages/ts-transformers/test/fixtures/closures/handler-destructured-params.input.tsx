@@ -16,7 +16,9 @@ export default recipe<State>("Destructure", (state) => {
     [UI]: (
       <button
         type="button"
-        onClick={({ currentTarget }, { state: { nested } }) => {
+        // Convenience pattern: transformer handles destructured handler params
+        // @ts-expect-error Testing convenience pattern: handler with destructured event and state params
+        onClick={({ currentTarget }: { currentTarget: EventTarget }, { state: { nested } }: { state: { nested: Cell<string> } }) => {
           currentTarget.setAttribute("data-nested", nested.get());
           console.log(state.nested === nested);
         }}

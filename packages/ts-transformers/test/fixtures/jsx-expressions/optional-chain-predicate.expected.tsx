@@ -116,9 +116,11 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         }
     } as const satisfies __ctHelpers.JSONSchema);
+    // Convenience pattern: transformer wraps Cell optional chain in derive()
     return {
         [NAME]: "Optional chain predicate",
         [UI]: (<div>
+        {/* @ts-expect-error Testing convenience pattern: Cell optional chain transformed to derive */}
         {__ctHelpers.derive({
             type: "object",
             properties: {

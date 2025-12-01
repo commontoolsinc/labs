@@ -2,18 +2,61 @@ import * as __ctHelpers from "commontools";
 import { derive } from "commontools";
 // Test case: User-written derive calls should not be double-wrapped
 // This tests that derive(index, (i) => i + 1) doesn't become derive(index, index => derive(index, (i) => i + 1))
-export default function TestComponent({ items, cellRef }) {
+export default function TestComponent({ items, cellRef }: {
+    items: {
+        id: number;
+        title: string;
+    }[];
+    cellRef: {
+        name?: string;
+        value: string;
+    };
+}) {
     return (<div>
       {/* User-written derive with simple parameter transformation - should NOT be double-wrapped */}
-      <span>Count: {derive(true as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, items.length, (n) => n + 1)}</span>
+      <span>Count: {derive({
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema, items.length, (n) => n + 1)}</span>
 
       {/* User-written derive accessing opaque ref property - should NOT be double-wrapped */}
-      <span>Name: {derive(true as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, cellRef, (ref) => ref.name || "Unknown")}</span>
+      <span>Name: {derive({
+        type: "object",
+        properties: {
+            name: {
+                type: "string"
+            },
+            value: {
+                type: "string"
+            }
+        },
+        required: ["value"]
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __ctHelpers.JSONSchema, cellRef, (ref) => ref.name || "Unknown")}</span>
 
       {/* Nested in map with user-written derive - derives should NOT be double-wrapped */}
       {items.map((item, index) => (<li key={item.id}>
           {/* These user-written derives should remain as-is, not wrapped in another derive */}
-          Item {derive(true as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, index, (i) => i + 1)}: {derive(true as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, item, (it) => it.title)}
+          Item {derive({
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, index, (i) => i + 1)}: {derive({
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                title: {
+                    type: "string"
+                }
+            },
+            required: ["id", "title"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, item, (it) => it.title)}
         </li>))}
 
       {/* Simple property access - should NOT be transformed */}

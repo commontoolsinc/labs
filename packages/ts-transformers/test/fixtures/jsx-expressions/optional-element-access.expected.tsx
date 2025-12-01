@@ -116,9 +116,11 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         }
     } as const satisfies __ctHelpers.JSONSchema);
+    // Convenience pattern: transformer wraps Cell optional element access in derive()
     return {
         [NAME]: "Optional element access",
         [UI]: (<div>
+        {/* @ts-expect-error Testing convenience pattern: Cell element access transformed to derive */}
         {__ctHelpers.derive({
             type: "object",
             properties: {

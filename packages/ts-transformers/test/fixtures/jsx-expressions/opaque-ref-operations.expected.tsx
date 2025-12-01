@@ -113,9 +113,11 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     const price = cell(10, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
+    // Convenience pattern: transformer wraps Cell arithmetic in derive()
     return {
         [UI]: (<div>
         <p>Count: {count}</p>
+        {/* @ts-expect-error Testing convenience pattern: Cell arithmetic transformed to derive */}
         <p>Next: {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -126,6 +128,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             },
             required: ["count"]
         } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count + 1)}</p>
+        {/* @ts-expect-error Testing convenience pattern: Cell arithmetic transformed to derive */}
         <p>Double: {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -138,6 +141,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count * 2)}</p>
+        {/* @ts-expect-error Testing convenience pattern: Cell arithmetic transformed to derive */}
         <p>Total: {__ctHelpers.derive({
             type: "object",
             properties: {

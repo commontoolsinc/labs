@@ -138,10 +138,15 @@ export default recipe({
     }
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
-        [UI]: (<button type="button" onClick={__ctHelpers.handler({
+        [UI]: (
+        // Convenience pattern: handler with event param doesn't match EventHandler<unknown> signature
+        // @ts-expect-error Testing convenience pattern: handler takes event param
+        <button type="button" onClick={__ctHelpers.handler({
             type: "object",
             properties: {
-                detail: true
+                detail: {
+                    type: "number"
+                }
             },
             required: ["detail"]
         } as const satisfies __ctHelpers.JSONSchema, {

@@ -17,7 +17,9 @@ interface State {
 export default recipe<State>("Analytics", (state) => {
   return {
     [UI]: (
-      <button type="button" onClick={(event) => state.user?.clicks.set(event.detail + state.metrics.get())}>
+      // Convenience pattern: handler with event param doesn't match EventHandler<unknown> signature
+      // @ts-expect-error Testing convenience pattern: handler takes event param
+      <button type="button" onClick={(event: MouseEvent) => state.user?.clicks.set(event.detail + state.metrics.get())}>
         Track
       </button>
     ),

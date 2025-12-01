@@ -20,7 +20,8 @@ export default function TestDerive() {
     const multiplier = cell(2, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
-    // Destructured parameter
+    // Convenience pattern: transformer unwraps Cell<Point> so callback receives Point
+    // @ts-expect-error Testing convenience pattern: destructured param from Cell value
     const result = __ctHelpers.derive({
         type: "object",
         properties: {

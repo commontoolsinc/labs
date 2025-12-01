@@ -125,12 +125,23 @@ export default recipe({
     }
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
-        [UI]: (<button type="button" onClick={__ctHelpers.handler({
+        [UI]: (<button type="button" 
+        // Convenience pattern: transformer handles destructured handler params
+        // @ts-expect-error Testing convenience pattern: handler with destructured event and state params
+        onClick={__ctHelpers.handler({
             type: "object",
             properties: {
-                currentTarget: true
+                currentTarget: {
+                    $ref: "#/$defs/EventTarget"
+                }
             },
-            required: ["currentTarget"]
+            required: ["currentTarget"],
+            $defs: {
+                EventTarget: {
+                    type: "object",
+                    properties: {}
+                }
+            }
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "object",
             properties: {
