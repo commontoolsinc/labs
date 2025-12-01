@@ -129,9 +129,10 @@ async function loadAllFixturesInDirectory(
 
 // PERFORMANCE OPTIMIZATION: Batch Type-Checking
 //
-// When CHECK_INPUT=1 is set, we batch type-check all fixtures upfront in a single
-// TypeScript program instead of creating separate programs per fixture. This provides
-// a significant performance improvement:
+// Input fixture type-checking is ENABLED BY DEFAULT. Set SKIP_INPUT_CHECK=1 to disable.
+//
+// We batch type-check all fixtures upfront in a single TypeScript program instead of
+// creating separate programs per fixture. This provides a significant performance improvement:
 //
 // - WITHOUT batching: ~16s (166 programs × 100ms each)
 // - WITH batching: ~4s (1 program × 600ms + 166 transforms × 20ms)
@@ -144,14 +145,13 @@ async function loadAllFixturesInDirectory(
 // 4. Storing diagnostics in a Map keyed by file path
 // 5. Individual tests retrieve their precomputed diagnostics from the Map
 //
-// This optimization is only active when CHECK_INPUT=1. Without it, tests run normally
-// with no batching overhead.
+// To skip input validation temporarily, run with SKIP_INPUT_CHECK=1.
 const batchedDiagnosticsByConfig = new Map<
   string,
   Map<string, ts.Diagnostic[]>
 >();
 
-if (Deno.env.get("CHECK_INPUT")) {
+if (!Deno.env.get("SKIP_INPUT_CHECK")) {
   const batchStart = performance.now();
   for (const config of configs) {
     const configStart = performance.now();
@@ -211,7 +211,7 @@ for (const config of configs) {
         `${config.directory}/${fixture.relativeInputPath}`,
         {
           types: { "commontools.d.ts": commontools },
-          typeCheck: !!Deno.env.get("CHECK_INPUT"),
+          typeCheck: !Deno.env.get("SKIP_INPUT_CHECK"),
           precomputedDiagnostics,
         },
       );

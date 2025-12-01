@@ -464,7 +464,7 @@ export async function transformFiles(
           "   (e.g., use Cell<T> for mutable state, OpaqueRef<T> for references)",
         );
         errors.push(
-          "2. Run without CHECK_INPUT=1 to skip validation temporarily",
+          "2. Run with SKIP_INPUT_CHECK=1 to skip validation temporarily",
         );
 
         throw new Error(errors.join("\n"));
