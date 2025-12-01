@@ -417,7 +417,7 @@ export class CTMarkdown extends BaseElement {
     // Replace cell links with ct-cell-link
     renderedHtml = this._replaceCellLinks(renderedHtml);
 
-    // TODO: XSS VULNERABILITY - This component uses unsafeHTML without sanitization!
+    // TODO(#2177): XSS VULNERABILITY - This component uses unsafeHTML without sanitization!
     //
     // We need to sanitize the HTML to prevent XSS attacks. Originally we used DOMPurify
     // but it added a dependency (isomorphic-dompurify) that caused lockfile issues.
