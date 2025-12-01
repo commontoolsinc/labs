@@ -42,14 +42,14 @@ export interface WatchedCell {
  * - Watched cell subscriptions with console logging
  */
 export class DebuggerController implements ReactiveController {
-  private host: ReactiveControllerHost;
+  private host: ReactiveControllerHost & HTMLElement;
   private runtime?: RuntimeInternals;
   private visible = false;
   private telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
   private updateVersion = 0;
   private watchedCells = new Map<string, WatchedCell>();
 
-  constructor(host: ReactiveControllerHost) {
+  constructor(host: ReactiveControllerHost & HTMLElement) {
     this.host = host;
     this.host.addController(this);
   }
@@ -61,12 +61,17 @@ export class DebuggerController implements ReactiveController {
       this.visible = savedVisible === "true";
     }
 
-    // Listen for storage events (cross-tab sync)
     globalThis.addEventListener("storage", this.handleStorageChange);
+    this.host.addEventListener("ct-cell-watch", this.handleCellWatch);
+    this.host.addEventListener("ct-cell-unwatch", this.handleCellUnwatch);
+    this.host.addEventListener("clear-telemetry", this.handleClearTelemetry);
   }
 
   hostDisconnected() {
     globalThis.removeEventListener("storage", this.handleStorageChange);
+    this.host.removeEventListener("ct-cell-watch", this.handleCellWatch);
+    this.host.removeEventListener("ct-cell-unwatch", this.handleCellUnwatch);
+    this.host.removeEventListener("clear-telemetry", this.handleClearTelemetry);
     // Clean up all watched cell subscriptions to prevent memory leaks
     this.unwatchAll();
   }
@@ -340,4 +345,31 @@ export class DebuggerController implements ReactiveController {
     const shortId = id.split(":").pop()?.slice(-6) ?? "???";
     return `#${shortId}`;
   }
+
+  private handleCellWatch = (e: Event) => {
+    const event = e as CustomEvent<{ cell: unknown; label?: string }>;
+    const { cell, label } = event.detail;
+    // Cell type from @commontools/runner
+    if (cell && typeof (cell as any).sink === "function") {
+      this.watchCell(cell as any, label);
+    }
+  };
+
+  private handleCellUnwatch = (e: Event) => {
+    const event = e as CustomEvent<{ cell: unknown; label?: string }>;
+    const { cell } = event.detail;
+    // Find and remove the watch by matching the cell
+    if (cell && typeof (cell as any).getAsNormalizedFullLink === "function") {
+      const link = (cell as any).getAsNormalizedFullLink();
+      const watches = this.getWatchedCells();
+      const watch = watches.find((w) => w.cellLink.id === link.id);
+      if (watch) {
+        this.unwatchCell(watch.id);
+      }
+    }
+  };
+
+  private handleClearTelemetry = () => {
+    this.clearTelemetry();
+  };
 }

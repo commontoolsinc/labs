@@ -3,7 +3,6 @@ import { property } from "lit/decorators.js";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { CharmController } from "@commontools/charm/ops";
-import "./ACLView.ts";
 
 export class XCharmListView extends BaseView {
   static override styles = css`

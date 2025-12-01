@@ -1,16 +1,20 @@
 import { css, html, PropertyValues } from "lit";
-import { applyCommand, AppState, isAppViewEqual } from "../lib/app/mod.ts";
-import { BaseView, SHELL_COMMAND } from "./BaseView.ts";
+import {
+  applyCommand,
+  AppState,
+  clone,
+  isAppViewEqual,
+} from "../lib/app/mod.ts";
+import { BaseView, createDefaultAppState, SHELL_COMMAND } from "./BaseView.ts";
 import { Command, isCommand } from "../lib/app/commands.ts";
-import { API_URL } from "../lib/env.ts";
 import { AppUpdateEvent } from "../lib/app/events.ts";
-import { clone } from "../lib/app/state.ts";
 import { KeyStore } from "@commontools/identity";
 import { property, state } from "lit/decorators.js";
 import { Task } from "@lit/task";
 import { type MemorySpace, Runtime } from "@commontools/runner";
 import { RuntimeInternals } from "../lib/runtime.ts";
-import { urlToAppView } from "../lib/app/view.ts";
+import { runtimeContext, spaceContext } from "@commontools/ui";
+import { provide } from "@lit/context";
 
 // The root element for the shell application.
 // Handles processing `Command`s from children elements,
@@ -38,18 +42,16 @@ export class XRootView extends BaseView {
   `;
 
   @state()
-  // Non-private for typing in `updated()` callback
-  _app = {
-    apiUrl: API_URL,
-    view: urlToAppView(new URL(globalThis.location.href)),
-  } as AppState;
+  app = createDefaultAppState();
 
   @property()
   keyStore?: KeyStore;
 
+  @provide({ context: runtimeContext })
   @state()
   private runtime?: Runtime;
 
+  @provide({ context: spaceContext })
   @state()
   private space?: MemorySpace;
 
@@ -113,11 +115,11 @@ export class XRootView extends BaseView {
   }
 
   protected override updated(changedProperties: PropertyValues<this>): void {
-    if (!changedProperties.has("_app")) {
+    if (!changedProperties.has("app")) {
       return;
     }
-    const previous = changedProperties.get("_app");
-    const current = this._app;
+    const previous = changedProperties.get("app");
+    const current = this.app;
 
     // If the first set, or if removed, run
     const flipState = (!previous && current) ||
@@ -160,7 +162,7 @@ export class XRootView extends BaseView {
   }
 
   state(): AppState {
-    return clone(this._app);
+    return clone(this.app);
   }
 
   private async processCommand(command: Command) {
@@ -192,8 +194,8 @@ export class XRootView extends BaseView {
       }
 
       // Apply command synchronously for state changes
-      const state = applyCommand(this._app, command);
-      this._app = state;
+      const state = applyCommand(this.app, command);
+      this.app = state;
       this.dispatchEvent(new AppUpdateEvent(command, { state }));
     } catch (e) {
       const error = e as Error;
@@ -207,7 +209,7 @@ export class XRootView extends BaseView {
   override render() {
     return html`
       <x-app-view
-        .app="${this._app}"
+        .app="${this.app}"
         .keyStore="${this.keyStore}"
         .rt="${this._rt.value}"
       ></x-app-view>
