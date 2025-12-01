@@ -2889,6 +2889,7 @@ interface CTKbdElement extends CTHTMLElement {}
 interface CTKeybindElement extends CTHTMLElement {}
 interface CTRenderElement extends CTHTMLElement {}
 interface CTChatMessageElement extends CTHTMLElement {}
+interface CTMarkdownElement extends CTHTMLElement {}
 interface CTVScrollElement extends CTHTMLElement {}
 interface CTSendMessageElement extends CTHTMLElement {}
 interface CTTextElement extends CTHTMLElement {}
@@ -3105,6 +3106,13 @@ interface CTChatMessageAttributes<T> extends CTHTMLAttributes<T> {
   "name"?: string;
   "compact"?: boolean;
   "pending"?: boolean;
+}
+
+interface CTMarkdownAttributes<T> extends CTHTMLAttributes<T> {
+  "content"?: string;
+  "$content"?: CellLike<string>;
+  "variant"?: "default" | "inverse";
+  "streaming"?: boolean;
 }
 
 interface CTButtonAttributes<T> extends CTHTMLAttributes<T> {
@@ -3846,6 +3854,10 @@ declare global {
       "ct-chat-message": CTDOM.DetailedHTMLProps<
         CTChatMessageAttributes<CTChatMessageElement>,
         CTChatMessageElement
+      >;
+      "ct-markdown": CTDOM.DetailedHTMLProps<
+        CTMarkdownAttributes<CTMarkdownElement>,
+        CTMarkdownElement
       >;
       "ct-card": CTDOM.DetailedHTMLProps<
         CTHTMLAttributes<CTCardElement>,
