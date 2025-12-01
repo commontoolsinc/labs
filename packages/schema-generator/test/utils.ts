@@ -284,7 +284,10 @@ export async function batchTypeCheckFixtures(
 
   // Assign diagnostics to their respective files
   for (const diagnostic of allDiagnostics) {
-    if (diagnostic.file && fixturesWithPrelude[diagnostic.file.fileName] !== undefined) {
+    if (
+      diagnostic.file &&
+      fixturesWithPrelude[diagnostic.file.fileName] !== undefined
+    ) {
       const existing = diagnosticsByFile.get(diagnostic.file.fileName) || [];
       existing.push(diagnostic);
       diagnosticsByFile.set(diagnostic.file.fileName, existing);

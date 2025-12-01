@@ -8,7 +8,11 @@ import {
   defineFixtureSuite,
 } from "@commontools/test-support/fixture-runner";
 import { createSchemaTransformerV2 } from "../src/plugin.ts";
-import { batchTypeCheckFixtures, getTypeFromCode, normalizeSchema } from "./utils.ts";
+import {
+  batchTypeCheckFixtures,
+  getTypeFromCode,
+  normalizeSchema,
+} from "./utils.ts";
 
 interface SchemaResult {
   normalized: unknown;
@@ -48,14 +52,18 @@ if (!Deno.env.get("SKIP_INPUT_CHECK")) {
   // Check for errors
   let hasErrors = false;
   for (const [filePath, diagnostics] of batchedDiagnostics) {
-    const errors = diagnostics.filter(d => d.category === ts.DiagnosticCategory.Error);
+    const errors = diagnostics.filter((d) =>
+      d.category === ts.DiagnosticCategory.Error
+    );
     if (errors.length > 0) {
       hasErrors = true;
       console.error(`\nType errors in ${filePath}:`);
       for (const diag of errors) {
         const message = ts.flattenDiagnosticMessageText(diag.messageText, "\n");
         if (diag.file && diag.start !== undefined) {
-          const { line, character } = diag.file.getLineAndCharacterOfPosition(diag.start);
+          const { line, character } = diag.file.getLineAndCharacterOfPosition(
+            diag.start,
+          );
           console.error(`  Line ${line + 1}, Col ${character + 1}: ${message}`);
         } else {
           console.error(`  ${message}`);
@@ -67,12 +75,18 @@ if (!Deno.env.get("SKIP_INPUT_CHECK")) {
   if (hasErrors) {
     console.error("\n" + "=".repeat(60));
     console.error("INPUT VALIDATION FAILED");
-    console.error("Fix the type errors above, or run with SKIP_INPUT_CHECK=1 to skip.");
+    console.error(
+      "Fix the type errors above, or run with SKIP_INPUT_CHECK=1 to skip.",
+    );
     console.error("=".repeat(60) + "\n");
     Deno.exit(1);
   }
 
-  console.log(`  -> ${Object.keys(fixtures).length} fixtures in ${(performance.now() - start).toFixed(0)}ms`);
+  console.log(
+    `  -> ${Object.keys(fixtures).length} fixtures in ${
+      (performance.now() - start).toFixed(0)
+    }ms`,
+  );
 }
 
 defineFixtureSuite<SchemaResult, string>({
