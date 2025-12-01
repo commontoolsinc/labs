@@ -1666,71 +1666,27 @@ export class SchemaObjectTraverser<V extends JSONValue>
         isRecord(curDoc.value) &&
         !SchemaObjectTraverser.asCellOrStream(curSelector.schemaContext!.schema)
       ) {
-        // FIXME: Integrate this chunk that was added in schema
-        // This is complicated, because while traversing, we can end up with other links pointing inside
-        // this data cell uri.
-        // https://github.com/commontoolsinc/labs/pull/1920/files#diff-6ec557db2c78d81957b1b502d0b9db23a0c462301c08cfe0d7afd756c4b580e5R794
-        //   elementLink = {
-        //     id: createDataCellURI(value[i], link),
-        //     path: [],
-        //     schema: elementSchema,
-        //     rootSchema: elementLink.rootSchema,
-        //     space: link.space,
-        //     type: "application/json",
-        //   } satisfies NormalizedFullLink;
-        // This breaks more than it fixes
         const elementLink = getNormalizedLink(
           curDoc.address,
           this.space,
           curSelector.schemaContext!.schema,
           curSelector.schemaContext!.rootSchema,
         );
+        // Replace doc with a DataCellURI style doc
         curDoc = {
           ...curDoc,
           address: {
             ...curDoc.address,
             id: createDataCellURI(curDoc.value, elementLink),
+            path: ["value"],
           },
         };
-        //createdDataURI = true;
+        // Our selector's path needs to be updated to match the new doc
+        curSelector.path = curDoc.address.path;
       }
       // We want those links to point directly at the linked cells, instead of
       // using our path (e.g. ["items", "0"]), so don't pass in a modified link.
       const val = this.traverseWithSelector(curDoc, curSelector);
-      // if (createdDataURI) {
-      //   console.log("item", curDoc.value);
-      //   console.log(
-      //     "Traversed elementLink",
-      //     getNormalizedLink(
-      //       curDoc.address,
-      //       this.space,
-      //       curSelector.schemaContext!.schema,
-      //       curSelector.schemaContext!.rootSchema,
-      //     ),
-      //     val,
-      //     itemSchema,
-      //   );
-      // } else if (
-      //   JSON.stringify(curDoc.value) === JSON.stringify({ name: "updated" })
-      // ) {
-      //   console.log("isRecord(item)", isRecord(item));
-      //   console.log(
-      //     "asCellOrStream(itemSchema)",
-      //     SchemaObjectTraverser.asCellOrStream(itemSchema),
-      //     itemSchema,
-      //   );
-      //   console.log(
-      //     "value is the updated one",
-      //     getNormalizedLink(
-      //       curDoc.address,
-      //       this.space,
-      //       curSelector.schemaContext!.schema,
-      //       curSelector.schemaContext!.rootSchema,
-      //     ),
-      //     val,
-      //     itemSchema,
-      //   );
-      // }
       if (val === undefined) {
         // this array is invalid, since one or more items do not match the schema
         return undefined;
