@@ -116,20 +116,18 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         }
     } as const satisfies __ctHelpers.JSONSchema);
-    // Convenience pattern: transformer wraps Cell optional chain in derive()
     return {
         [NAME]: "Optional chain predicate",
         [UI]: (<div>
-        {/* @ts-expect-error Testing convenience pattern: Cell optional chain transformed to derive */}
         {__ctHelpers.derive({
             type: "object",
             properties: {
                 items: {
-                    type: "object",
-                    properties: {
-                        length: true
+                    type: "array",
+                    items: {
+                        type: "string"
                     },
-                    required: ["length"]
+                    asCell: true
                 }
             },
             required: ["items"]
@@ -238,9 +236,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     }
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, { items: {
-                length: items?.length
-            } }, ({ items }) => !items?.length && <span>No items</span>)}
+        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => !items.get().length && <span>No items</span>)}
       </div>),
     };
 });

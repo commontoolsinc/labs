@@ -125,10 +125,8 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             required: ["id", "name"]
         }
     } as const satisfies __ctHelpers.JSONSchema);
-    // Convenience pattern: transformer wraps Cell access in derive() where value is unwrapped
     return {
         [UI]: (<div>
-        {/* @ts-expect-error Testing convenience pattern: people is Cell, transformer wraps in derive */}
         {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -255,7 +253,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     }
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, { people: people }, ({ people }) => people.length > 0 && (<ul>
+        } as const satisfies __ctHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length > 0 && (<ul>
             {people.mapWithPattern(__ctHelpers.recipe({
                 type: "object",
                 properties: {

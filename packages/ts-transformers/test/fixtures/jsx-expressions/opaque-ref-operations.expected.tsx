@@ -113,11 +113,9 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     const price = cell(10, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
-    // Convenience pattern: transformer wraps Cell arithmetic in derive()
     return {
         [UI]: (<div>
         <p>Count: {count}</p>
-        {/* @ts-expect-error Testing convenience pattern: Cell arithmetic transformed to derive */}
         <p>Next: {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -127,8 +125,9 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                 }
             },
             required: ["count"]
-        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count + 1)}</p>
-        {/* @ts-expect-error Testing convenience pattern: Cell arithmetic transformed to derive */}
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count.get() + 1)}</p>
         <p>Double: {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -140,8 +139,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             required: ["count"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count * 2)}</p>
-        {/* @ts-expect-error Testing convenience pattern: Cell arithmetic transformed to derive */}
+        } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count.get() * 2)}</p>
         <p>Total: {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -153,7 +151,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             required: ["price"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { price: price }, ({ price }) => price * 1.1)}</p>
+        } as const satisfies __ctHelpers.JSONSchema, { price: price }, ({ price }) => price.get() * 1.1)}</p>
       </div>),
     };
 });
