@@ -3152,6 +3152,7 @@ interface CTRenderAttributes<T> extends CTHTMLAttributes<T> {
 interface CTCellContextAttributes<T> extends CTHTMLAttributes<T> {
   "$cell": CellLike<any>;
   "label"?: string;
+  "inline"?: boolean;
 }
 
 interface CTListAttributes<T> extends CTHTMLAttributes<T> {
