@@ -3,7 +3,6 @@ import {
   Classification,
   EntityId,
   getEntityId,
-  homeSpaceCellSchema,
   type IExtendedStorageTransaction,
   isCell,
   isLink,
@@ -158,8 +157,8 @@ export class CharmManager {
     );
     // Use the space DID as the cause - it's derived from the space name
     // and consistently available everywhere
-    // For home space (where space DID = user identity DID), use homeSpaceCellSchema
-    // which includes favorites. This ensures proper sync/query behavior.
+    // For home space (where space DID = user identity DID), getHomeSpaceCell()
+    // uses homeSpaceCellSchema which includes favorites for proper sync/query behavior.
     const isHomeSpace = this.space === this.runtime.userIdentityDID;
     this.spaceCell = isHomeSpace
       ? this.runtime.getHomeSpaceCell()
