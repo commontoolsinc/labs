@@ -78,14 +78,16 @@ export class CTRender extends BaseElement {
 
   protected override render() {
     return html`
-      ${!this._hasRendered
-        ? html`
-          <div class="loading-spinner">
-            <div class="spinner"></div>
-          </div>
-        `
-        : null}
-      <div class="render-container"></div>
+      <ct-cell-context .cell=${this.cell}>
+        ${!this._hasRendered
+            ? html`
+            <div class="loading-spinner">
+                <div class="spinner"></div>
+            </div>
+            `
+            : null}
+        <div class="render-container"></div>
+      </ct-cell-context>
     `;
   }
 
