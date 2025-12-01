@@ -441,7 +441,9 @@ export class CTMarkdown extends BaseElement {
     return html.replace(
       /<a href="(\/[a-zA-Z0-9]+:[^"]+)">([^<]*)<\/a>/g,
       (_match, link, text) => {
-        return `<ct-cell-link link="${link}" label="${this._escapeForAttribute(text)}"></ct-cell-link>`;
+        return `<ct-cell-link link="${link}" label="${
+          this._escapeForAttribute(text)
+        }"></ct-cell-link>`;
       },
     );
   }
@@ -485,8 +487,9 @@ export class CTMarkdown extends BaseElement {
       .replace(/&#x2F;/g, "/")
       .replace(/&nbsp;/g, " ")
       .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)))
-      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) =>
-        String.fromCharCode(parseInt(hex, 16))
+      .replace(
+        /&#x([0-9a-fA-F]+);/g,
+        (_, hex) => String.fromCharCode(parseInt(hex, 16)),
       );
   }
 
