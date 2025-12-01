@@ -95,7 +95,7 @@ export interface SpaceCellContents {
  * Home space contains user-specific data like favorites that persists across all spaces.
  * See docs/common/HOME_SPACE.md for more details.
  */
-export interface HomeSpaceCellContents {
+export interface HomeSpaceCellContents extends SpaceCellContents {
   favorites: Cell<{ cell: Cell<unknown>; tag: string }[]>;
 }
 
@@ -128,6 +128,17 @@ export const spaceCellSchema: JSONSchema = {
 export const homeSpaceCellSchema: JSONSchema = {
   type: "object",
   properties: {
+    // Include all space cell properties
+    allCharms: {
+      type: "array",
+      items: { not: true, asCell: true },
+    },
+    recentCharms: {
+      type: "array",
+      items: { not: true, asCell: true },
+    },
+    defaultPattern: { not: true, asCell: true },
+    // Plus home-space-specific properties
     favorites: {
       type: "array",
       items: {
