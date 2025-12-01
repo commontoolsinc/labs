@@ -1,13 +1,14 @@
 import { expect } from "@std/expect";
 import { ensureDir } from "@std/fs/ensure-dir";
 import { dirname, resolve } from "@std/path";
+import ts from "typescript";
 
 import {
   createUnifiedDiff,
   defineFixtureSuite,
 } from "@commontools/test-support/fixture-runner";
 import { createSchemaTransformerV2 } from "../src/plugin.ts";
-import { getTypeFromCode, normalizeSchema } from "./utils.ts";
+import { batchTypeCheckFixtures, getTypeFromCode, normalizeSchema } from "./utils.ts";
 
 interface SchemaResult {
   normalized: unknown;
@@ -15,11 +16,75 @@ interface SchemaResult {
 }
 
 const TYPE_NAME = "SchemaRoot";
+const FIXTURES_ROOT = "./test/fixtures/schema";
+
+// Environment variable filtering for faster iteration
+const fixtureFilter = Deno.env.get("FIXTURE");
+
+// PERFORMANCE OPTIMIZATION: Batch Type-Checking
+//
+// Input fixture type-checking is ENABLED BY DEFAULT. Set SKIP_INPUT_CHECK=1 to disable.
+//
+// We batch type-check all fixtures upfront in a single TypeScript program instead of
+// creating separate programs per fixture for significant performance improvement.
+let batchedDiagnostics: Map<string, ts.Diagnostic[]> | undefined;
+
+if (!Deno.env.get("SKIP_INPUT_CHECK")) {
+  console.log("Batch type-checking schema fixtures...");
+  const start = performance.now();
+
+  // Load all fixture input files
+  const fixtures: Record<string, string> = {};
+  for await (const entry of Deno.readDir(FIXTURES_ROOT)) {
+    if (entry.isFile && entry.name.endsWith(".input.ts")) {
+      const fullPath = `${FIXTURES_ROOT}/${entry.name}`;
+      const content = await Deno.readTextFile(fullPath);
+      fixtures[fullPath] = content;
+    }
+  }
+
+  batchedDiagnostics = await batchTypeCheckFixtures(fixtures);
+
+  // Check for errors
+  let hasErrors = false;
+  for (const [filePath, diagnostics] of batchedDiagnostics) {
+    const errors = diagnostics.filter(d => d.category === ts.DiagnosticCategory.Error);
+    if (errors.length > 0) {
+      hasErrors = true;
+      console.error(`\nType errors in ${filePath}:`);
+      for (const diag of errors) {
+        const message = ts.flattenDiagnosticMessageText(diag.messageText, "\n");
+        if (diag.file && diag.start !== undefined) {
+          const { line, character } = diag.file.getLineAndCharacterOfPosition(diag.start);
+          console.error(`  Line ${line + 1}, Col ${character + 1}: ${message}`);
+        } else {
+          console.error(`  ${message}`);
+        }
+      }
+    }
+  }
+
+  if (hasErrors) {
+    console.error("\n" + "=".repeat(60));
+    console.error("INPUT VALIDATION FAILED");
+    console.error("Fix the type errors above, or run with SKIP_INPUT_CHECK=1 to skip.");
+    console.error("=".repeat(60) + "\n");
+    Deno.exit(1);
+  }
+
+  console.log(`  -> ${Object.keys(fixtures).length} fixtures in ${(performance.now() - start).toFixed(0)}ms`);
+}
 
 defineFixtureSuite<SchemaResult, string>({
   suiteName: "Schema fixtures",
-  rootDir: "./test/fixtures/schema",
+  rootDir: FIXTURES_ROOT,
   expectedPath: ({ stem }) => `${stem}.expected.json`,
+  skip: (fixture) => {
+    if (fixtureFilter && fixture.baseName !== fixtureFilter) {
+      return true;
+    }
+    return false;
+  },
   async execute(fixture) {
     return await runSchemaTransform(fixture.inputPath);
   },
