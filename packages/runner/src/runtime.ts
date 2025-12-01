@@ -95,7 +95,7 @@ export interface SpaceCellContents {
  * Home space contains user-specific data like favorites that persists across all spaces.
  * See docs/common/HOME_SPACE.md for more details.
  */
-export interface HomeSpaceCellContents {
+export interface HomeSpaceCellContents extends SpaceCellContents {
   favorites: Cell<{ cell: Cell<unknown>; tag: string }[]>;
 }
 
