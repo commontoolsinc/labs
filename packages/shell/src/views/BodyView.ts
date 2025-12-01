@@ -4,7 +4,6 @@ import { Task } from "@lit/task";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { CharmController } from "@commontools/charm/ops";
-import * as PatternFactory from "../lib/pattern-factory.ts";
 import "../components/OmniLayout.ts";
 
 export class XBodyView extends BaseView {
@@ -48,14 +47,14 @@ export class XBodyView extends BaseView {
   @property({ attribute: false })
   activeCharm?: CharmController;
 
+  @property({ attribute: false })
+  defaultCharm?: CharmController;
+
   @property()
   showShellCharmListView = false;
 
   @property({ type: Boolean })
   showSidebar = false;
-
-  @state()
-  private creatingDefaultPattern = false;
 
   @state()
   private hasSidebarContent = false;
@@ -70,25 +69,6 @@ export class XBodyView extends BaseView {
     },
     args: () => [this.rt],
   });
-
-  async onRequestDefaultPattern(e: Event) {
-    e.preventDefault();
-    if (this.creatingDefaultPattern || !this.rt) {
-      return;
-    }
-
-    this.creatingDefaultPattern = true;
-    try {
-      await PatternFactory.create(this.rt.cc(), "space-default");
-    } catch (error) {
-      console.error("Could not create default pattern:", error);
-      // Re-throw to expose errors instead of swallowing them
-      throw error;
-    } finally {
-      this.creatingDefaultPattern = false;
-      this._charms.run();
-    }
-  }
 
   override render() {
     const charms = this._charms.value;
@@ -116,55 +96,16 @@ export class XBodyView extends BaseView {
       `;
     }
 
-    const defaultPattern = charms
-      ? PatternFactory.getPattern(charms, "space-default")
-      : undefined;
-    const activeCharm = this.activeCharm;
-
-    if (!defaultPattern && !activeCharm) {
-      return this.creatingDefaultPattern
-        ? html`
-          <div class="content">
-            <v-box center="${true}">
-              <div>Creating default pattern...</div>
-              <x-spinner></x-spinner>
-            </v-box>
-          </div>
-        `
-        : html`
-          <div class="content">
-            <v-box center="${true}">
-              <div>Create default pattern?</div>
-              <x-button
-                variant="primary"
-                @click="${this.onRequestDefaultPattern}"
-              >
-                Go!
-              </x-button>
-            </v-box>
-          </div>
-        `;
-    }
-
-    const defaultCell = defaultPattern?.getCell();
-
-    const mainContent = activeCharm
+    const mainContent = this.activeCharm
       ? html`
-        <ct-charm slot="main" .charmId="${activeCharm.id}">
-          <ct-render .cell="${activeCharm.getCell()}"></ct-render>
+        <ct-charm slot="main" .charmId="${this.activeCharm.id}">
+          <ct-render .cell="${this.activeCharm.getCell()}"></ct-render>
         </ct-charm>
-      `
-      : defaultCell
-      ? html`
-        <ct-render slot="main" .cell="${defaultCell}"></ct-render>
       `
       : null;
 
-    // Get sidebar UI from current charm
-    const sidebarCell = activeCharm?.getCell().key("sidebarUI");
-
-    // Get fab UI from default charm
-    const fabCell = defaultCell?.key("fabUI");
+    const sidebarCell = this.activeCharm?.getCell().key("sidebarUI");
+    const fabCell = this.defaultCharm?.getCell().key("fabUI");
 
     // Update sidebar content detection
     // TODO(seefeld): Fix possible race here where charm is already set, but

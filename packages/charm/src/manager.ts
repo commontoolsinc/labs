@@ -284,6 +284,22 @@ export class CharmManager {
   }
 
   /**
+   * Get the default pattern cell from the space cell.
+   * @returns The default pattern cell, or undefined if not set
+   */
+  async getDefaultPattern(): Promise<Cell<NameSchema> | undefined> {
+    const cell = await this.spaceCell.key("defaultPattern").sync();
+    if (!cell.get().get()) {
+      return undefined;
+    }
+    return this.get(
+      cell.get(),
+      true,
+      nameSchema,
+    );
+  }
+
+  /**
    * Track a charm as recently viewed/interacted with.
    * Maintains a list of up to 10 most recent charms.
    * @param charm - The charm to track
