@@ -128,6 +128,17 @@ export const spaceCellSchema: JSONSchema = {
 export const homeSpaceCellSchema: JSONSchema = {
   type: "object",
   properties: {
+    // Include all space cell properties
+    allCharms: {
+      type: "array",
+      items: { not: true, asCell: true },
+    },
+    recentCharms: {
+      type: "array",
+      items: { not: true, asCell: true },
+    },
+    defaultPattern: { not: true, asCell: true },
+    // Plus home-space-specific properties
     favorites: {
       type: "array",
       items: {
