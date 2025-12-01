@@ -679,7 +679,9 @@ export class ContextualFlowControl {
       return true;
     }
     return isObject(schema) &&
-      Object.keys(schema).every((k) => this.isInternalSchemaKey(k));
+      Object.keys(schema).every((k) =>
+        this.isInternalSchemaKey(k) || k === "default"
+      );
   }
 
   // We don't need to check ID and ID_FIELD, since they won't be included

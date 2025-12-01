@@ -180,6 +180,10 @@ describe("Schema Support", () => {
 
       // Find the currently selected cell and update it
       const first = cell.key("current").get();
+      expect(first.getAsNormalizedFullLink().id).toEqual(
+        innerCell.getAsNormalizedFullLink().id,
+      );
+      expect(first.getAsNormalizedFullLink().path).toEqual([]);
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqualIgnoringSymbols({ label: "first" });
       first.withTx(tx).set({ label: "first - update" });
@@ -358,6 +362,11 @@ describe("Schema Support", () => {
 
       // Find the currently selected cell and read it
       const first = root.key("current").withTx(tx).get();
+      // current is pointing to linkCell, which is pointing to initial
+      expect(first.getAsNormalizedFullLink().id).toEqual(
+        initial.getAsNormalizedFullLink().id,
+      );
+      expect(first.getAsNormalizedFullLink().path).toEqual(["foo"]);
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqualIgnoringSymbols({ label: "first" });
       const { asCell: _ignore, ...omitSchema } = schema.properties.current;
@@ -415,11 +424,13 @@ describe("Schema Support", () => {
 
       await runtime.idle();
 
-      expect(rootValues).toEqual([
-        "root",
-        "cancelled",
-        "root",
-      ]);
+      // We used to mark root as read, but we no longer do that.
+      // expect(rootValues).toEqual([
+      //   "root",
+      //   "cancelled",
+      //   "root",
+      // ]);
+      expect(rootValues).toEqual(["root"]);
 
       // Change unrelated value should update root, but not the other cells
       root.withTx(tx).key("value").set("root - updated");
@@ -429,8 +440,6 @@ describe("Schema Support", () => {
       await runtime.idle();
 
       expect(rootValues).toEqual([
-        "root",
-        "cancelled",
         "root",
         "cancelled",
         "root - updated",
@@ -451,8 +460,6 @@ describe("Schema Support", () => {
       await runtime.idle();
 
       expect(rootValues).toEqualIgnoringSymbols([
-        "root",
-        "cancelled",
         "root",
         "cancelled",
         "root - updated",
@@ -507,8 +514,6 @@ describe("Schema Support", () => {
         "third - updated",
       ]);
       expect(rootValues).toEqualIgnoringSymbols([
-        "root",
-        "cancelled",
         "root",
         "cancelled",
         "root - updated",
@@ -2517,8 +2522,25 @@ describe("Schema Support", () => {
         ],
       });
 
+      const itemValue = listCell.key("items").key(0).get();
+      const linkedCell = (itemValue as any)[toCell]();
+
+      const itemCell = listCell.key("items").key(0);
+
+      // Direct links from cells should have the full path
+      expect(itemCell.getAsNormalizedFullLink().path).toEqual(["items", "0"]);
+      expect(linkedCell.getAsNormalizedFullLink().path).toEqual(["items", "0"]);
+
       // Get the array result
       const result = listCell.get();
+
+      // Both the cell key version and the toCell version of items should have the same path
+      // since there is no link
+      const itemsCell = (result.items as any)[toCell]();
+      expect(listCell.key("items").getAsNormalizedFullLink().path).toEqual([
+        "items",
+      ]);
+      expect(itemsCell.getAsNormalizedFullLink().path).toEqual(["items"]);
 
       // Convert items back to cells and check their links
       const itemCells = result.items.map((item: any) => item[toCell]());

@@ -58,9 +58,11 @@ export function resolveSchema(
   filterAsCell = false,
 ): JSONSchema | undefined {
   // Treat undefined/null/{} or any other non-object as no schema
+  // We don't use ContextualFlowControl.isTrueSchema here, since we want to
+  // handle flags like default or ifc
   if (
     typeof schema !== "object" || schema === null ||
-    ContextualFlowControl.isTrueSchema(schema)
+    Object.keys(schema).length === 0
   ) {
     return undefined;
   }
@@ -96,13 +98,23 @@ export function resolveSchema(
   // Return no schema if all it said is that this was a reference or an
   // object without properties.
   if (
-    resolvedSchema === undefined ||
-    ContextualFlowControl.isTrueSchema(resolvedSchema)
+    resolvedSchema === undefined || Object.keys(resolvedSchema).length === 0
   ) {
     return undefined;
   }
 
   return resolvedSchema;
+}
+
+function filterAsCell(schema: JSONSchema | undefined): JSONSchema | undefined {
+  if (typeof schema !== "object") {
+    return schema;
+  }
+  const { asCell: _asCell, asStream: _asStream, ...restSchema } = schema;
+  if (restSchema === undefined || Object.keys(restSchema).length === 0) {
+    return undefined;
+  }
+  return restSchema;
 }
 
 /**
@@ -345,7 +357,10 @@ export function validateAndTransform(
   // Reconstruct doc, path, schema, rootSchema from link and runtime
   const schema = link.schema;
   let rootSchema = link.rootSchema ?? schema;
-  let resolvedSchema = resolveSchema(schema, rootSchema, true);
+  let resolvedSchema = resolveSchema(schema, rootSchema);
+  let filteredSchema = filterAsCell(resolvedSchema);
+
+  console.log("Running VAT on link", link);
 
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that
@@ -354,44 +369,59 @@ export function validateAndTransform(
   const resolvedLink = resolveLink(tx, link, "writeRedirect");
 
   // Use schema from alias if provided and no explicit schema was set
-  if (resolvedSchema === undefined && resolvedLink.schema) {
-    // Call resolveSchema to strip asCell/asStream here as well. It's still the
-    // initial `schema` that says whether this should be a cell, not the
-    // resolved schema.
+  if (filteredSchema === undefined && resolvedLink.schema) {
     resolvedSchema = resolveSchema(
       resolvedLink.schema,
       resolvedLink.rootSchema,
-      true,
     );
+    // Call resolveSchema to strip asCell/asStream here as well. It's still the
+    // initial `schema` that says whether this should be a cell, not the
+    // resolved schema.
+    filteredSchema = filterAsCell(resolvedSchema);
     rootSchema = resolvedLink.rootSchema || resolvedLink.schema;
   }
 
+  // Unlike the original, we have kept the asCell markers in the schema
   link = {
     ...resolvedLink,
     schema: resolvedSchema,
     rootSchema,
   };
 
+  console.log("link", link, "schema", schema, "resolvedSchema", resolvedSchema);
+  //console.log("data", tx.readValueOrThrow({ ...link, path: [] }));
   // If we don't have a schema, and we aren't asCell/asStream, use a proxy
   if (
     (schema === undefined || !SchemaObjectTraverser.asCellOrStream(schema)) &&
-    resolvedSchema === undefined
+    filteredSchema === undefined
   ) {
     return createQueryResultProxy(runtime, tx, link);
   }
 
-  const objectCreator = new TransformObjectCreator(runtime, tx!);
-  // Link paths don't include value, but doc address should
-  const { id, type, path } = link;
-  const address = { id, type, path: ["value", ...path] };
-  const doc = { address, value: tx!.readValueOrThrow(link) };
-  const combinedSchema = resolvedSchema !== undefined
-    ? combineSchema(schema!, resolvedSchema)
+  // Update our link to match the potentially merged schema
+  link.schema = filteredSchema !== undefined
+    ? combineSchema(schema!, filteredSchema)
     : schema;
+
+  // Now resolve further links until we get the actual value.
+  const ref = resolveLink(tx ?? runtime.edit(), link);
+
+  const objectCreator = new TransformObjectCreator(runtime, tx!);
+
+  // If our link is asCell/asStream, and we don't have any path portions, we
+  // can just create the cell and skip reading the value and traversal.
+  if (SchemaObjectTraverser.asCellOrStream(schema)) {
+    return objectCreator.createObject(ref, undefined);
+  }
+
+  // Link paths don't include value, but doc address should
+  const { id, type, path } = ref;
+  const address = { id, type, path: ["value", ...path] };
+  const doc = { address, value: tx!.readValueOrThrow(ref) };
   // We need the asCell that's in the original schema to be passed into the traverser so it knows the top level obj is a cell
   const selector = {
     path: doc.address.path,
-    schemaContext: { schema: combinedSchema!, rootSchema: rootSchema! },
+    schemaContext: { schema: link.schema!, rootSchema: rootSchema! },
   };
   // TODO(@ubik2): these constructor parameters are complex enough that we should
   // use an options struct
@@ -405,7 +435,8 @@ export function validateAndTransform(
     false,
     false,
   );
-  const result = traverser.traverse(doc);
+  const result = traverser.traverse(doc, link);
+  console.log("Result", result);
   return result;
 }
 
@@ -437,8 +468,9 @@ class TransformObjectCreator
   // If not, we will actually resolve our links to get to our values.
   createObject(
     link: NormalizedFullLink,
-    value: AnyCellWrapping<JSONValue>,
+    value: AnyCellWrapping<JSONValue> | undefined,
   ): AnyCellWrapping<JSONValue> {
+    console.log("Called CO with link", link);
     // If we have a schema with an asCell or asStream (or if our anyOf values
     // do), we should create a cell here.
     // If we don't have a schema, or a true schema, we should create a query result proxy.
@@ -464,9 +496,7 @@ class TransformObjectCreator
       if (ContextualFlowControl.isTrueSchema(link.schema)) {
         return createQueryResultProxy(this.runtime, this.tx, link);
       }
-    }
-    // link.schema is not true, and not asCell/asStream
-    if (isObject(link.schema)) {
+      // link.schema is not true, and not asCell/asStream
       // If we're undefined, check for a default and apply that
       if (link.schema.default !== undefined && value === undefined) {
         // processDefaultValue already annotates with back to cell

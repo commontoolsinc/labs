@@ -2881,6 +2881,46 @@ describe("toCell and toOpaqueRef hooks", () => {
       const updatedItems = c.get().items;
       expect(updatedItems[0].name).toBe("updated");
     });
+
+    it("should maintain the same link with array elements", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+              },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const c = runtime.getCell<{ items: { name: string }[] }>(
+        space,
+        "hook-getcelllink-array",
+        schema,
+        tx,
+      );
+      c.set({ items: [{ name: "first" }, { name: "second" }] });
+
+      const itemValue = c.key("items").key(0).get();
+      const itemCell = c.key("items").key(0);
+      const linkedCell = (itemValue as any)[toCell]();
+      expect(linkedCell.getAsNormalizedFullLink()).toEqual(
+        itemCell.getAsNormalizedFullLink(),
+      );
+
+      expect(isCell(linkedCell)).toBe(true);
+      const linkedResult = linkedCell.get();
+      expect(linkedResult.name).toBe("first");
+
+      linkedCell.set({ name: "updated" });
+      const updatedItems = c.get().items;
+      expect(updatedItems[0].name).toBe("updated");
+    });
   });
 
   describe("Recipe integration", () => {
