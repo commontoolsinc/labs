@@ -30,6 +30,10 @@ export class CTCellContext extends BaseElement {
         position: relative;
       }
 
+      :host([inline]) {
+        display: inline;
+      }
+
       .container {
         border: 1px dashed transparent;
         transition: border-color 0.2s ease;
@@ -109,6 +113,9 @@ export class CTCellContext extends BaseElement {
 
   @property({ type: String })
   label?: string;
+
+  @property({ type: Boolean, reflect: true })
+  inline?: boolean;
 
   @state()
   private _modifierHeld: boolean = false;

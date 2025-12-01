@@ -67,6 +67,8 @@ export class DebuggerController implements ReactiveController {
 
   hostDisconnected() {
     globalThis.removeEventListener("storage", this.handleStorageChange);
+    // Clean up all watched cell subscriptions to prevent memory leaks
+    this.unwatchAll();
   }
 
   /**
