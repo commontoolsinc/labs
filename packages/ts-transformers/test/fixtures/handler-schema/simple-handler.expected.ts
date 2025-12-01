@@ -1,10 +1,10 @@
 import * as __ctHelpers from "commontools";
-import { handler } from "commontools";
+import { handler, Cell } from "commontools";
 interface CounterEvent {
     increment: number;
 }
 interface CounterState {
-    value: number;
+    value: Cell<number>;
 }
 const myHandler = handler({
     type: "object",
@@ -18,12 +18,13 @@ const myHandler = handler({
     type: "object",
     properties: {
         value: {
-            type: "number"
+            type: "number",
+            asCell: true
         }
     },
     required: ["value"]
 } as const satisfies __ctHelpers.JSONSchema, (event, state) => {
-    state.value = state.value + event.increment;
+    state.value.set(state.value.get() + event.increment);
 });
 export { myHandler };
 // @ts-ignore: Internals

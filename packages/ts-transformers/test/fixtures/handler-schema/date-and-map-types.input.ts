@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler } from "commontools";
+import { handler, Cell } from "commontools";
 
 interface TimedEvent {
   timestamp: Date;
@@ -7,14 +7,14 @@ interface TimedEvent {
 }
 
 interface TimedState {
-  lastUpdate: Date;
-  history: Map<string, Date>;
+  lastUpdate: Cell<Date>;
+  history: Cell<Map<string, Date>>;
 }
 
 const timedHandler = handler<TimedEvent, TimedState>((event, state) => {
-  state.lastUpdate = event.timestamp;
+  state.lastUpdate.set(event.timestamp);
   event.data.forEach((_value, key) => {
-    state.history.set(key, new Date());
+    state.history.get().set(key, new Date());
   });
 });
 
