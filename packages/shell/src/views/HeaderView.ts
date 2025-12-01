@@ -122,15 +122,16 @@ export class XHeaderView extends BaseView {
     } else {
       this.keyStore.clear().catch(console.error);
     }
-    this.command({ type: "clear-authentication" });
+    this.command({ type: "set-identity", identity: undefined });
   }
 
   private handleToggleClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
     this.command({
-      type: "set-show-charm-list-view",
-      show: !this.showShellCharmListView,
+      type: "set-config",
+      key: "showShellCharmListView",
+      value: !this.showShellCharmListView,
     });
   }
 
@@ -138,8 +139,9 @@ export class XHeaderView extends BaseView {
     e.preventDefault();
     e.stopPropagation();
     this.command({
-      type: "set-show-debugger-view",
-      show: !this.showDebuggerView,
+      type: "set-config",
+      key: "showDebuggerView",
+      value: !this.showDebuggerView,
     });
   }
 
@@ -147,8 +149,9 @@ export class XHeaderView extends BaseView {
     e.preventDefault();
     e.stopPropagation();
     this.command({
-      type: "set-show-sidebar",
-      show: !this.showSidebar,
+      type: "set-config",
+      key: "showSidebar",
+      value: !this.showSidebar,
     });
   }
 

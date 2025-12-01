@@ -19,6 +19,7 @@ describe("AppState", () => {
       view: {
         spaceName: SPACE_NAME,
       },
+      config: {},
     };
 
     let serialized = serialize(state);
@@ -59,6 +60,7 @@ describe("AppState", () => {
     const serialized: AppStateSerialized = {
       apiUrl: API_URL,
       view: { spaceName: SPACE_NAME },
+      config: {},
     };
 
     let state = await deserialize(serialized);
@@ -77,7 +79,9 @@ describe("AppState", () => {
     const initial: AppState = {
       apiUrl: new URL(API_URL),
       view: { builtin: "home" },
-      showShellCharmListView: true,
+      config: {
+        showShellCharmListView: true,
+      },
     };
 
     const next = applyCommand(initial, {
@@ -88,6 +92,6 @@ describe("AppState", () => {
       },
     });
 
-    assert(next.showShellCharmListView === false);
+    assert(next.config.showShellCharmListView === false);
   });
 });

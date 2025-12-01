@@ -12,16 +12,30 @@ export interface AppState {
   identity?: Identity;
   view: AppView;
   apiUrl: URL;
+  config: AppStateConfig;
+}
+
+export interface AppStateConfig {
   showShellCharmListView?: boolean;
   showDebuggerView?: boolean;
   showQuickJumpView?: boolean;
   showSidebar?: boolean;
 }
 
+export type AppStateConfigKey = keyof AppStateConfig;
+
 export type AppStateSerialized = Omit<AppState, "identity" | "apiUrl"> & {
   identity?: TransferrableInsecureCryptoKeyPair | null;
   apiUrl: string;
 };
+
+export function createAppState(
+  initial: Pick<AppState, "view" | "apiUrl" | "identity"> & {
+    config?: AppStateConfig;
+  },
+): AppState {
+  return Object.assign({}, initial, { config: initial.config ?? {} });
+}
 
 export function clone(state: AppState): AppState {
   const view = typeof state.view === "object"
@@ -45,28 +59,12 @@ export function applyCommand(
     case "set-view": {
       next.view = command.view;
       if ("charmId" in command.view && command.view.charmId) {
-        next.showShellCharmListView = false;
+        next.config.showShellCharmListView = false;
       }
       break;
     }
-    case "clear-authentication": {
-      next.identity = undefined;
-      break;
-    }
-    case "set-show-charm-list-view": {
-      next.showShellCharmListView = command.show;
-      break;
-    }
-    case "set-show-debugger-view": {
-      next.showDebuggerView = command.show;
-      break;
-    }
-    case "set-show-quick-jump-view": {
-      next.showQuickJumpView = command.show;
-      break;
-    }
-    case "set-show-sidebar": {
-      next.showSidebar = command.show;
+    case "set-config": {
+      next.config[command.key] = command.value;
       break;
     }
   }

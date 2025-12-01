@@ -1,3 +1,12 @@
+import { ReactiveController, ReactiveControllerHost } from "lit";
+import { BaseView } from "../views/BaseView.ts";
+import { navigate } from "./navigate.ts";
+import { AppState } from "./app/mod.ts";
+
+// Reactive controller host is XAppView, define some interfaces
+// to avoid a recursive dependency.
+type ReactiveAppHost = ReactiveControllerHost & BaseView & { app: AppState };
+
 export type ShortcutSpec = {
   name?: string;
   code?: string;
@@ -45,12 +54,61 @@ type RegisteredShortcut = {
  *
  * Not (yet): scopes, modality, capture-phase arbitration. Can be extended.
  */
-export class KeyboardRouter {
+export class KeyboardController implements ReactiveController {
+  private host: ReactiveAppHost;
+
+  #unsubShortcuts: Array<() => void> = [];
   #shortcuts: RegisteredShortcut[] = [];
   #alt = false;
   #ctrl = false;
   #meta = false;
   #shift = false;
+
+  constructor(host: ReactiveAppHost) {
+    this.host = host;
+    this.host.addController(this);
+  }
+
+  hostConnected() {
+    document.addEventListener("keydown", this.#onKeyDown);
+    document.addEventListener("keyup", this.#onKeyUp);
+
+    // Register global shortcuts via keyboard router
+    const isMac = navigator.platform.toLowerCase().includes("mac");
+    const mod = isMac ? { meta: true } : { ctrl: true };
+    this.#unsubShortcuts.push(
+      this.register(
+        { code: "KeyO", ...mod, shift: true, preventDefault: true },
+        () => {
+          this.host.command({
+            type: "set-config",
+            key: "showQuickJumpView",
+            value: true,
+          });
+        },
+      ),
+    );
+    this.#unsubShortcuts.push(
+      this.register(
+        { code: "KeyW", alt: true, preventDefault: true },
+        () => {
+          const app = this.host.app;
+          const spaceName = app && "spaceName" in app.view
+            ? app.view.spaceName
+            : "common-knowledge";
+          navigate({ spaceName });
+        },
+      ),
+    );
+  }
+
+  hostDisconnected() {
+    document.removeEventListener("keydown", this.#onKeyDown);
+    document.removeEventListener("keyup", this.#onKeyUp);
+    for (const off of this.#unsubShortcuts) off();
+    this.#unsubShortcuts.length = 0;
+  }
+
   #onKeyDown = (e: KeyboardEvent) => {
     this.#updateMods(e, true);
 
@@ -85,20 +143,10 @@ export class KeyboardRouter {
     if (s.stopPropagation) e.stopPropagation();
     best.handler(e);
   };
+
   #onKeyUp = (e: KeyboardEvent) => {
     this.#updateMods(e, false);
   };
-
-  constructor() {
-    document.addEventListener("keydown", this.#onKeyDown);
-    document.addEventListener("keyup", this.#onKeyUp);
-  }
-
-  dispose() {
-    document.removeEventListener("keydown", this.#onKeyDown);
-    document.removeEventListener("keyup", this.#onKeyUp);
-    this.#shortcuts = [];
-  }
 
   register(spec: ShortcutSpec, handler: ShortcutHandler): () => void {
     const normalized: RegisteredShortcut = {

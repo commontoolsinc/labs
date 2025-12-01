@@ -1,6 +1,8 @@
 import { LitElement } from "lit";
 import { Command } from "../lib/app/commands.ts";
 import { DebugController } from "@commontools/ui";
+import { createAppState, urlToAppView } from "../lib/app/mod.ts";
+import { API_URL } from "../lib/env.ts";
 
 // Set to `true` to render outlines everytime a
 // LitElement renders.
@@ -19,4 +21,11 @@ export class BaseView extends LitElement {
       }),
     );
   }
+}
+
+export function createDefaultAppState() {
+  return createAppState({
+    apiUrl: API_URL,
+    view: urlToAppView(new URL(globalThis.location.href)),
+  });
 }
