@@ -81,12 +81,12 @@ export class CTRender extends BaseElement {
     // traversing [UI] with a Cell, so we don't need to wrap here
     return html`
       ${!this._hasRendered
-          ? html`
+        ? html`
           <div class="loading-spinner">
-              <div class="spinner"></div>
+            <div class="spinner"></div>
           </div>
-          `
-          : null}
+        `
+        : null}
       <div class="render-container"></div>
     `;
   }
