@@ -554,8 +554,19 @@ export class Runner implements IRunner {
           if (error) {
             logger.error(
               "tx-commit-error",
-              "Error committing transaction",
-              error,
+              () => [
+                "Error committing transaction",
+                "\nError:",
+                JSON.stringify(error, null, 2),
+                error.name === "ConflictError"
+                  ? [
+                    "\nConflict details:",
+                    JSON.stringify(error.conflict, null, 2),
+                    "\nTransaction:",
+                    JSON.stringify(error.transaction, null, 2),
+                  ]
+                  : [],
+              ],
             );
           }
         });

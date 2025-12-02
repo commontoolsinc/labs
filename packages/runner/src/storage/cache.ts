@@ -120,7 +120,11 @@ export interface SyncStore<Model, Address>
   extends SyncPull<Model, Address>, SyncPush<Model> {
 }
 
-const logger = getLogger("storage.cache");
+const logger = getLogger("storage.cache", {
+  enabled: true,
+  level: "error",
+  logCountEvery: 0, // Disable auto-logging of counts
+});
 
 interface NotFoundError extends Error {
   name: "NotFound";
@@ -719,6 +723,12 @@ export class Replica {
       return { ok: new Map() };
     }
 
+    // Log pull operation start
+    logger.debug(
+      "pull-start",
+      () => [`Starting pull for ${entries.length} entries`],
+    );
+
     // Otherwise we build a query selector to fetch requested entries from the
     // remote.
     // this is the object with the of/the/cause nesting, then a SchemaPathSelector inside
@@ -756,6 +766,9 @@ export class Replica {
     }
 
     for (const [address, selector] of newEntries) {
+      // Log each document being pulled (counts total docs across all pulls)
+      logger.debug("pull-doc", () => [`Pulling doc: ${address.id}`]);
+
       // If we don't have a schema, use SchemaNone, which will only fetch the specified object
       setSelector(schemaSelector, address.id, address.type, "_", selector);
       // Since we're accessing the entire document, we should base our
@@ -784,6 +797,30 @@ export class Replica {
       // subscription properly. We get the data through the commit changes,
       // because the server knows we're watching, but we should be able
       // to use the data from the subscription instead.
+
+      // Log schema paths being requested
+      logger.debug("pull-schema", () => {
+        const logs: string[] = [];
+        for (const [docId, docSchema] of Object.entries(schemaSelector)) {
+          const contentTypePaths = (docSchema as any)["application/json"] ||
+            {};
+          const paths = Object.keys(contentTypePaths);
+          if (paths.length > 0) {
+            logs.push(`doc: ${docId}, paths: ${paths.join(", ")}`);
+          }
+        }
+        return logs;
+      });
+
+      // Log query start
+      logger.debug(
+        "query-start",
+        () => [`Starting query for ${newEntries.length} entries`],
+      );
+
+      // Capture timing markers (cheap to do always)
+      const queryStartTime = performance.now();
+
       const query = this.remote.query(queryArgs);
       // What we store in the selector tracker is the promise for when we've
       // not only gotten the server results back, but also integrated them into
@@ -791,15 +828,63 @@ export class Replica {
       const integratedPromise = query.promise.then(async (result) => {
         if (result.error) {
           logger.error(
-            "storage-error",
+            "query-error",
             () => ["query failure", queryArgs, result.error],
           );
           return Promise.resolve({ error: result.error });
         } else {
+          const integrateStart = performance.now();
+
+          // Log document contents that were received
+          logger.debug("pull-data", () => {
+            const logs: string[] = [];
+            for (
+              const [docId, facts] of Object.entries(result.ok.schemaFacts)
+            ) {
+              const factCount = Object.keys(facts).length;
+              const contentTypes = Object.keys(facts);
+              logs.push(
+                `doc: ${docId}, content-types: ${
+                  contentTypes.join(", ")
+                }, fact-count: ${factCount}`,
+              );
+
+              // Log actual content for each document
+              for (const [contentType, data] of Object.entries(facts)) {
+                try {
+                  const dataStr = JSON.stringify(data);
+                  const preview = dataStr.length > 1000
+                    ? dataStr.substring(0, 1000) + "..."
+                    : dataStr;
+                  logs.push(
+                    `  └─ doc: ${docId}, type: ${contentType}, data: ${preview}`,
+                  );
+                } catch (_e) {
+                  logs.push(
+                    `  └─ doc: ${docId}, type: ${contentType}, data: <unable to stringify>`,
+                  );
+                }
+              }
+            }
+            return logs;
+          });
+
           const _integrated = await this.integrateResults(
             newEntries,
             result.ok.schemaFacts,
           );
+
+          // Log performance timing (expensive calculations only happen if debug enabled)
+          logger.debug("pull-timing", () => {
+            const integrateTime = ((performance.now() - integrateStart) / 1000)
+              .toFixed(3);
+            const totalTime = ((performance.now() - queryStartTime) / 1000)
+              .toFixed(3);
+            return [
+              `Query for ${newEntries.length} entries - integrate: ${integrateTime}s, total: ${totalTime}s`,
+            ];
+          });
+
           return Promise.resolve({ ok: {} });
         }
       });
@@ -818,12 +903,15 @@ export class Replica {
     for (const result of results) {
       if ((result as any).error) {
         logger.error(
-          "storage-error",
+          "pull-error",
           () => ["query failure", queryArgs, (result as any).error],
         );
         return { error: (result as any).error as PullError };
       }
     }
+
+    // Log successful pull completion
+    logger.debug("pull-success", () => ["Pull completed successfully"]);
     return { ok: {} };
   }
 
@@ -975,6 +1063,12 @@ export class Replica {
 
   async commit(transaction: ITransaction, source?: IStorageTransaction) {
     const { facts, claims } = transaction;
+
+    // Log push operation start
+    logger.debug("push-start", () => [
+      `Starting push with ${facts.length} facts and ${claims.length} claims`,
+    ]);
+
     const changes = Differential.create().update(this, facts);
     // Some facts may be redundant, so only include the changed ones.
     // This will also exclude facts that match the nursery version, but these
@@ -1037,11 +1131,31 @@ export class Replica {
         result.error.conflict.existsInHistory
       ) {
         logger.info(
-          "storage",
-          () => ["Transaction failed (aready exists)", result.error],
+          "push-error",
+          () => [
+            "Transaction failed (aready exists)",
+            "\nError:",
+            JSON.stringify(result.error, null, 2),
+            "\nConflict details:",
+            JSON.stringify((result.error as any).conflict, null, 2),
+            "\nTransaction:",
+            JSON.stringify((result.error as any).transaction, null, 2),
+          ],
         );
       } else {
-        logger.warn("storage", () => ["Transaction failed", result.error]);
+        logger.warn("push-error", () => [
+          "Transaction failed",
+          "\nError:",
+          JSON.stringify(result.error, null, 2),
+          result.error.name === "ConflictError"
+            ? [
+              "\nConflict details:",
+              JSON.stringify((result.error as any).conflict, null, 2),
+              "\nTransaction:",
+              JSON.stringify((result.error as any).transaction, null, 2),
+            ]
+            : [],
+        ]);
       }
 
       // Checkout current state of facts so we can compute
@@ -1102,6 +1216,9 @@ export class Replica {
         const address = { id: fact.of, type: fact.the };
         this.pendingNurseryChanges.delete(toKey(address));
       }
+
+      // Log successful push completion
+      logger.debug("push-success", () => ["Push completed successfully"]);
     }
 
     return result;
@@ -1474,7 +1591,7 @@ class ProviderConnection implements IStorageProvider {
         this.provider.poll();
         this.provider.reestablishSubscriptions().catch((error) => {
           logger.error(
-            "storage-error",
+            "subscription-error",
             () => ["Failed to reestablish subscriptions:", error],
           );
         });
@@ -1874,7 +1991,7 @@ export class Provider implements IStorageProvider {
       await this.workspace.pull(need);
     } catch (error) {
       logger.error(
-        "storage-error",
+        "subscription-error",
         () => ["Failed to re-establish subscriptions:", error],
       );
     }
