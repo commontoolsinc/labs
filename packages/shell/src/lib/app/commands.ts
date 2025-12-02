@@ -1,6 +1,6 @@
 import { Identity } from "@commontools/identity";
 import { AppView, isAppView } from "./view.ts";
-import { AppStateConfigKey } from "./state.ts";
+import { AppStateConfigKey, isAppStateConfigKey } from "./state.ts";
 
 export type Command =
   | { type: "set-view"; view: AppView }
@@ -23,7 +23,7 @@ export function isCommand(value: unknown): value is Command {
       return "view" in value && isAppView(value.view);
     }
     case "set-config": {
-      return "key" in value && typeof value.key === "string" &&
+      return "key" in value && isAppStateConfigKey(value.key) &&
         "value" in value && typeof value.value === "boolean";
     }
   }

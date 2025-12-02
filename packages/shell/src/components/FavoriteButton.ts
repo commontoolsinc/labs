@@ -43,14 +43,16 @@ export class XFavoriteButtonElement extends LitElement {
     // syncing state, or another click.
     this.isFavorite = !isFavorite;
 
-    const charmCell = (await this.rt.cc().get(this.charmId, true)).getCell();
-    if (isFavorite) {
-      await manager.removeFavorite(charmCell);
-    } else {
-      await manager.addFavorite(charmCell);
+    try {
+      const charmCell = (await this.rt.cc().get(this.charmId, true)).getCell();
+      if (isFavorite) {
+        await manager.removeFavorite(charmCell);
+      } else {
+        await manager.addFavorite(charmCell);
+      }
+    } finally {
+      this.isFavoriteSync.run();
     }
-
-    this.isFavoriteSync.run();
   }
 
   protected override willUpdate(changedProperties: PropertyValues): void {
