@@ -3170,15 +3170,14 @@ interface CTDragSourceAttributes<T> extends CTHTMLAttributes<T> {
   "type"?: string;
   "disabled"?: boolean;
   "onct-drag-start"?: EventHandler<{ cell: any }>;
-  "onct-drag-end"?: EventHandler<{ cell: any; dropped: boolean }>;
+  "onct-drag-end"?: EventHandler<{ cell: any }>;
 }
 
 interface CTDropZoneAttributes<T> extends CTHTMLAttributes<T> {
-  "$cell"?: CellLike<any>;
   "accept"?: string;
-  "onct-drag-enter"?: EventHandler<{ cell: any; type?: string }>;
-  "onct-drag-leave"?: EventHandler<{ cell: any }>;
-  "onct-drop"?: EventHandler<{ sourceCell: any; targetCell?: any; type?: string }>;
+  "onct-drag-enter"?: EventHandler<{ sourceCell: any; type?: string }>;
+  "onct-drag-leave"?: EventHandler<{}>;
+  "onct-drop"?: EventHandler<{ sourceCell: any; type?: string }>;
 }
 
 interface CTListAttributes<T> extends CTHTMLAttributes<T> {

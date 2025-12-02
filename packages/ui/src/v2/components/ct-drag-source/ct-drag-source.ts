@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { startDrag, endDrag } from "../../core/drag-state.ts";
+import { startDrag, endDrag, updateDragPointer } from "../../core/drag-state.ts";
 import { render } from "@commontools/html";
 import { UI } from "@commontools/runner";
 import type { Cell } from "@commontools/runner";
@@ -51,18 +51,6 @@ export class CTDragSource extends BaseElement {
         cursor: grabbing;
         opacity: 0.5;
       }
-
-      .preview {
-        position: fixed;
-        pointer-events: none;
-        z-index: 10000;
-        opacity: 0.9;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        background: white;
-        border: 1px solid #000;
-        padding: 0.5rem;
-        border-radius: 4px;
-      }
     `,
   ];
 
@@ -76,8 +64,10 @@ export class CTDragSource extends BaseElement {
   disabled?: boolean;
 
   private _isDragging = false;
+  private _isTracking = false;
   private _startX = 0;
   private _startY = 0;
+  private _pointerId?: number;
   private _preview?: HTMLElement;
   private _boundPointerMove = this._handlePointerMove.bind(this);
   private _boundPointerUp = this._handlePointerUp.bind(this);
@@ -94,20 +84,12 @@ export class CTDragSource extends BaseElement {
       return;
     }
 
-    // Prevent default to avoid text selection during drag
-    e.preventDefault();
-
-    // Store initial position
+    // Don't prevent default or capture yet - just track the start position
+    // This allows clicks to work normally
     this._startX = e.clientX;
     this._startY = e.clientY;
-
-    // Capture pointer events
-    const cellContext = this.shadowRoot?.querySelector(
-      "ct-cell-context",
-    ) as HTMLElement;
-    if (cellContext) {
-      cellContext.setPointerCapture(e.pointerId);
-    }
+    this._pointerId = e.pointerId;
+    this._isTracking = true;
 
     // Add document-level listeners for move and up
     document.addEventListener("pointermove", this._boundPointerMove);
@@ -115,7 +97,7 @@ export class CTDragSource extends BaseElement {
   }
 
   private _handlePointerMove(e: PointerEvent) {
-    if (!this.cell) {
+    if (!this.cell || !this._isTracking) {
       return;
     }
 
@@ -126,46 +108,33 @@ export class CTDragSource extends BaseElement {
     // Start drag after threshold (~5px)
     if (!this._isDragging && distance > 5) {
       this._isDragging = true;
+      // NOW we prevent default and capture - drag has started
+      e.preventDefault();
       this._startDrag(e);
     }
 
-    // Update preview position if dragging
+    // Update preview position and notify drop zones if dragging
     if (this._isDragging && this._preview) {
       this._preview.style.left = `${e.clientX + 10}px`;
       this._preview.style.top = `${e.clientY + 10}px`;
+      // Update drag state so drop zones can check intersection
+      updateDragPointer(e.clientX, e.clientY);
     }
   }
 
-  private _handlePointerUp(e: PointerEvent) {
+  private _handlePointerUp(_e: PointerEvent) {
     // Clean up listeners
     document.removeEventListener("pointermove", this._boundPointerMove);
     document.removeEventListener("pointerup", this._boundPointerUp);
 
     if (this._isDragging) {
-      const dropped = this._tryDrop(e);
-      this._endDrag(dropped);
+      // Drop detection is now handled by drop-zones polling the drag state
+      this._endDrag();
     }
 
     this._isDragging = false;
-  }
-
-  private _tryDrop(e: PointerEvent): boolean {
-    if (!this.cell) {
-      return false;
-    }
-
-    // Find drop zones under the pointer
-    const elements = document.elementsFromPoint(e.clientX, e.clientY);
-    const dropZone = elements.find(
-      (el) => el.tagName === "CT-DROP-ZONE",
-    ) as (HTMLElement & { handleDrop?: (cell: Cell, type?: string) => void }) | undefined;
-
-    if (dropZone && dropZone.handleDrop) {
-      dropZone.handleDrop(this.cell, this.type);
-      return true;
-    }
-
-    return false;
+    this._isTracking = false;
+    this._pointerId = undefined;
   }
 
   private _isInteractiveElement(element: HTMLElement): boolean {
@@ -199,6 +168,8 @@ export class CTDragSource extends BaseElement {
       type: this.type,
       sourceElement: this,
       preview: this._preview,
+      pointerX: e.clientX,
+      pointerY: e.clientY,
     });
 
     // Emit drag start event
@@ -211,7 +182,22 @@ export class CTDragSource extends BaseElement {
     }
 
     const preview = document.createElement("div");
-    preview.className = "preview";
+    // Apply inline styles since this element is appended to document.body
+    // (outside our shadow DOM where .preview class would apply)
+    preview.style.cssText = `
+      position: fixed;
+      pointer-events: none;
+      z-index: 10000;
+      opacity: 0.9;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      background: white;
+      border: 1px solid #ccc;
+      padding: 0.5rem;
+      border-radius: 4px;
+      max-width: 300px;
+      max-height: 200px;
+      overflow: hidden;
+    `;
 
     // Check if cell value has [UI] property
     const cellValue = this.cell.get();
@@ -242,7 +228,7 @@ export class CTDragSource extends BaseElement {
     container.appendChild(link);
   }
 
-  private _endDrag(dropped: boolean = false) {
+  private _endDrag() {
     if (!this.cell) {
       return;
     }
@@ -254,10 +240,11 @@ export class CTDragSource extends BaseElement {
     }
 
     // End drag in drag state (this will clean up preview)
+    // Drop zones handle their own detection and emit ct-drop events
     endDrag();
 
     // Emit drag end event
-    this.emit("ct-drag-end", { cell: this.cell, dropped });
+    this.emit("ct-drag-end", { cell: this.cell });
 
     this._preview = undefined;
   }

@@ -14,6 +14,10 @@ export interface DragState {
   preview: HTMLElement;
   /** Optional cleanup function to call when drag ends */
   previewCleanup?: () => void;
+  /** Current pointer X position (updated during drag) */
+  pointerX: number;
+  /** Current pointer Y position (updated during drag) */
+  pointerY: number;
 }
 
 /**
@@ -39,21 +43,29 @@ export function startDrag(state: DragState): void {
 
 /**
  * End the current drag operation.
- * Cleans up the preview element and notifies all subscribers.
+ * First notifies listeners with the final state (so drop zones can emit drop events),
+ * then cleans up the preview element and notifies with null.
  */
 export function endDrag(): void {
   if (!currentDrag) {
     return;
   }
 
+  // Store reference before clearing
+  const finalState = currentDrag;
+
+  // Notify listeners that drag is ending (with isEnding flag)
+  // Drop zones use this to emit ct-drop if pointer is over them
+  notifyListenersOfEnd(finalState);
+
   // Call cleanup function if provided
-  if (currentDrag.previewCleanup) {
-    currentDrag.previewCleanup();
+  if (finalState.previewCleanup) {
+    finalState.previewCleanup();
   }
 
   // Remove preview element from DOM
-  if (currentDrag.preview.parentNode) {
-    currentDrag.preview.parentNode.removeChild(currentDrag.preview);
+  if (finalState.preview.parentNode) {
+    finalState.preview.parentNode.removeChild(finalState.preview);
   }
 
   // Clear state
@@ -61,6 +73,41 @@ export function endDrag(): void {
 
   // Notify all subscribers that drag has ended
   notifyListeners(null);
+}
+
+/**
+ * Callbacks for when drag is ending (before cleanup).
+ * Used by drop zones to emit drop events.
+ */
+type DragEndListener = (state: DragState) => void;
+let endListeners: Set<DragEndListener> = new Set();
+
+/**
+ * Subscribe to drag end events.
+ * Called with the final drag state BEFORE it's cleared.
+ * Use this to emit drop events if the pointer is over your drop zone.
+ *
+ * @param listener - Callback invoked when drag ends
+ * @returns Unsubscribe function
+ */
+export function subscribeToEndDrag(listener: DragEndListener): () => void {
+  endListeners.add(listener);
+  return () => {
+    endListeners.delete(listener);
+  };
+}
+
+/**
+ * Internal helper to notify end listeners.
+ */
+function notifyListenersOfEnd(state: DragState): void {
+  endListeners.forEach((listener) => {
+    try {
+      listener(state);
+    } catch (error) {
+      console.error("[drag-state] Error in drag end listener:", error);
+    }
+  });
 }
 
 /**
@@ -79,6 +126,25 @@ export function getCurrentDrag(): DragState | null {
  */
 export function isDragging(): boolean {
   return currentDrag !== null;
+}
+
+/**
+ * Update the current pointer position during drag.
+ * This is called by drag-source on pointermove to keep drop zones informed.
+ *
+ * @param x - Current pointer X position
+ * @param y - Current pointer Y position
+ */
+export function updateDragPointer(x: number, y: number): void {
+  if (!currentDrag) {
+    return;
+  }
+
+  currentDrag.pointerX = x;
+  currentDrag.pointerY = y;
+
+  // Notify listeners of position update
+  notifyListeners(currentDrag);
 }
 
 /**
