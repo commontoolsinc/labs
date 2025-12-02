@@ -152,11 +152,11 @@ export class XRootView extends BaseView {
     if (!isCommand(command)) {
       throw new Error(`Received a non-command: ${command}`);
     }
-    this.processCommand(command).catch(console.error);
+    this.processCommand(command);
   };
 
-  async apply(command: Command): Promise<void> {
-    await this.processCommand(command);
+  apply(command: Command): Promise<void> {
+    this.processCommand(command);
     this.requestUpdate();
     return this.updateComplete.then((_) => undefined);
   }
@@ -165,34 +165,8 @@ export class XRootView extends BaseView {
     return clone(this.app);
   }
 
-  private async processCommand(command: Command) {
+  private processCommand(command: Command) {
     try {
-      // Handle async commands that don't affect state
-      if (command.type === "toggle-favorite") {
-        const rt = this._rt.value;
-        if (!rt) return;
-
-        const manager = rt.cc().manager();
-        const charm = await rt.cc().get(command.charmId, true);
-        const isFavorite = manager.isFavorite(charm.getCell());
-
-        if (isFavorite) {
-          await manager.removeFavorite(charm.getCell());
-        } else {
-          await manager.addFavorite(charm.getCell());
-        }
-
-        // Trigger HeaderView to update its favorite state
-        this.dispatchEvent(
-          new CustomEvent("favorite-changed", {
-            detail: { charmId: command.charmId, isFavorite: !isFavorite },
-            bubbles: true,
-            composed: true,
-          }),
-        );
-        return;
-      }
-
       // Apply command synchronously for state changes
       const state = applyCommand(this.app, command);
       this.app = state;
