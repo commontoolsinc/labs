@@ -28,7 +28,7 @@ export type DragListener = (state: DragState | null) => void;
 
 // Module-level singleton state
 let currentDrag: DragState | null = null;
-let listeners: Set<DragListener> = new Set();
+const listeners: Set<DragListener> = new Set();
 
 /**
  * Begin a drag operation with the given state.
@@ -80,7 +80,7 @@ export function endDrag(): void {
  * Used by drop zones to emit drop events.
  */
 type DragEndListener = (state: DragState) => void;
-let endListeners: Set<DragEndListener> = new Set();
+const endListeners: Set<DragEndListener> = new Set();
 
 /**
  * Subscribe to drag end events.

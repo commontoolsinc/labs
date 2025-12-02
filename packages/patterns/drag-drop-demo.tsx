@@ -1,5 +1,14 @@
 /// <cts-enable />
-import { Cell, computed, handler, str, Default, ifElse, NAME, pattern, UI } from "commontools";
+import {
+  Cell,
+  computed,
+  Default,
+  handler,
+  ifElse,
+  NAME,
+  pattern,
+  UI,
+} from "commontools";
 import Counter from "./counter.tsx";
 
 interface Item {
@@ -18,20 +27,22 @@ interface DragDropDemoOutput {
 }
 
 // Handler to remove an item from the dropped list
-const removeItem = handler<unknown, { droppedItems: Cell<Item[]>; item: Cell<Item> }>(
+const removeItem = handler<
+  unknown,
+  { droppedItems: Cell<Item[]>; item: Cell<Item> }
+>(
   (_, { droppedItems, item }) => {
     const current = droppedItems.get();
     const index = current.findIndex((el) => Cell.equals(item, el));
     if (index >= 0) {
       droppedItems.set(current.toSpliced(index, 1));
     }
-  }
+  },
 );
 
 export default pattern<DragDropDemoInput, DragDropDemoOutput>(
   ({ availableItems, droppedItems }) => {
-
-    const counter = Counter({ value: 5 })
+    const counter = Counter({ value: 5 });
 
     // Compute the items list
     const items = computed(() => {
@@ -53,7 +64,13 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
         <div style={{ display: "flex", gap: "2rem", padding: "1rem" }}>
           <div style={{ flex: 1 }}>
             <h3 style={{ marginTop: 0 }}>Available Items</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.5rem",
+              }}
+            >
               {items.map((item) => (
                 <ct-drag-source $cell={item} type="item">
                   <div
@@ -97,7 +114,13 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
                 <p style={{ color: "#999", fontStyle: "italic" }}>
                   Drop items here
                 </p>,
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "0.5rem",
+                  }}
+                >
                   {droppedItems.map((item) => (
                     <div
                       style={{
@@ -116,7 +139,7 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
                       </ct-button>
                     </div>
                   ))}
-                </div>
+                </div>,
               )}
             </div>
           </ct-drop-zone>
@@ -125,5 +148,5 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
       availableItems,
       droppedItems,
     };
-  }
+  },
 );

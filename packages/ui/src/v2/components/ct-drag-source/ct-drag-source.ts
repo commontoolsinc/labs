@@ -1,7 +1,11 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { startDrag, endDrag, updateDragPointer } from "../../core/drag-state.ts";
+import {
+  endDrag,
+  startDrag,
+  updateDragPointer,
+} from "../../core/drag-state.ts";
 import { render } from "@commontools/html";
 import { UI } from "@commontools/runner";
 import type { Cell } from "@commontools/runner";
@@ -99,7 +103,9 @@ export class CTDragSource extends BaseElement {
     this._isTracking = true;
 
     // Capture pointer events
-    const cellContext = this.shadowRoot?.querySelector("ct-cell-context") as HTMLElement;
+    const cellContext = this.shadowRoot?.querySelector(
+      "ct-cell-context",
+    ) as HTMLElement;
     if (cellContext) {
       cellContext.setPointerCapture(e.pointerId);
     }
@@ -263,8 +269,8 @@ export class CTDragSource extends BaseElement {
   override render() {
     return html`
       <ct-cell-context
-        .cell=${this.cell}
-        @pointerdown=${this._handlePointerDown}
+        .cell="${this.cell}"
+        @pointerdown="${this._handlePointerDown}"
       >
         <slot></slot>
       </ct-cell-context>

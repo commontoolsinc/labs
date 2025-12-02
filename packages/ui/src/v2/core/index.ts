@@ -5,11 +5,11 @@
 export { BaseElement } from "./base-element.ts";
 export { DebugController } from "./debug-controller.ts";
 export {
-  type DragState,
   type DragListener,
-  startDrag,
+  type DragState,
   endDrag,
   getCurrentDrag,
   isDragging,
+  startDrag,
   subscribeToDrag,
 } from "./drag-state.ts";
