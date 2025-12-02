@@ -10,9 +10,11 @@ export default function TestDerive() {
   const point = cell({ x: 10, y: 20 } as Point);
   const multiplier = cell(2);
 
-  // Convenience pattern: transformer unwraps Cell<Point> so callback receives Point
-  // @ts-expect-error Testing convenience pattern: destructured param from Cell value
-  const result = derive(point, ({ x, y }) => (x + y) * multiplier.get());
+  // Destructuring requires .get() first since derive doesn't unwrap Cell
+  const result = derive(point, (p) => {
+    const { x, y } = p.get();
+    return (x + y) * multiplier.get();
+  });
 
   return result;
 }
