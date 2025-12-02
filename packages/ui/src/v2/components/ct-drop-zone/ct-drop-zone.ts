@@ -117,7 +117,7 @@ export class CTDropZone extends BaseElement {
    */
   private _isAccepted(dragType?: string): boolean {
     if (!this.accept) return true; // Accept all if no filter
-    if (!dragType) return true; // Accept untyped drags
+    if (!dragType) return false; // Reject untyped drags when filter is set
 
     const types = this.accept.split(",").map((t) => t.trim());
     return types.includes(dragType);
@@ -160,6 +160,9 @@ export class CTDropZone extends BaseElement {
       // Clean up visual state
       this._isDragOver = false;
       this.toggleAttribute("drag-over", false);
+
+      // Emit leave event before drop (dropping is a form of leaving)
+      this.emit("ct-drag-leave", {});
 
       // Emit drop event
       this.emit("ct-drop", {
