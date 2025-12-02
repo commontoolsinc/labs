@@ -1,9 +1,10 @@
 /// <cts-enable />
-import { Cell, computed, Default, ifElse, NAME, pattern, UI } from "commontools";
+import { Cell, computed, str, Default, ifElse, NAME, pattern, UI } from "commontools";
+import Counter from "./counter.tsx";
 
 interface Item {
-  id: string;
   title: string;
+  [UI]?: JSX.Element;
 }
 
 interface DragDropDemoInput {
@@ -18,12 +19,15 @@ interface DragDropDemoOutput {
 
 export default pattern<DragDropDemoInput, DragDropDemoOutput>(
   ({ availableItems, droppedItems }) => {
+
+    const counter = Counter({ value: 5 })
+
     // Compute the items list
     const items = computed(() => {
       const defaultItems: Item[] = [
-        { id: "1", title: "Item A" },
-        { id: "2", title: "Item B" },
-        { id: "3", title: "Item C" },
+        { title: "Item A", [UI]: <div>Hello World!!!</div> },
+        counter as unknown as Item,
+        { title: "Item C" },
       ];
 
       return availableItems.length > 0 ? availableItems : defaultItems;
