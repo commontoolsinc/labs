@@ -31,7 +31,7 @@ export class CTCellContext extends BaseElement {
       }
 
       :host([inline]) {
-        display: inline;
+        display: inline-block;
       }
 
       .container {
