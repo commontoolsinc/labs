@@ -414,7 +414,6 @@ export abstract class BaseObjectTraverser<
     public objectCreator: IObjectCreator<JSONValue> =
       new StandardObjectCreator(),
     protected traverseCells = true,
-    protected verbose = false,
   ) {}
   abstract traverse(doc: IAttestation): V | JSONValue | undefined;
   /**
@@ -500,15 +499,11 @@ export abstract class BaseObjectTraverser<
       }
       // Our link is based on the last link in the chain and not the first.
       const newLink = getNormalizedLink(doc.address, space, true, true);
-      //console.log("Calling createObject from traverseDAG");
       return this.objectCreator.createObject(newLink, newValue);
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isAnyCellLink(doc.value)) {
         // FIXME: A cell link with a schema needs to go back into traverseSchema behavior
-        if (this.verbose) {
-          console.log("Encountered cell link in traverseDAG", doc.value);
-        }
         const [newDoc, _] = getAtPath(
           this.tx,
           doc,
@@ -566,7 +561,6 @@ export abstract class BaseObjectTraverser<
         // Our link is based on the last link in the chain and not the first.
         const newLink = itemLink ??
           getNormalizedLink(doc.address, space, true, true);
-        //console.log("Calling createObject from traverseDAG 2");
         return this.objectCreator.createObject(newLink, newValue);
       }
     } else {
@@ -1229,10 +1223,8 @@ export class SchemaObjectTraverser<V extends JSONValue>
     >(deepEqual),
     objectCreator?: IObjectCreator<V>,
     traverseCells?: boolean,
-    verbose?: boolean,
   ) {
     super(tx, undefined, objectCreator, traverseCells);
-    if (verbose !== undefined) this.verbose = verbose;
   }
 
   override traverse(
@@ -1323,23 +1315,13 @@ export class SchemaObjectTraverser<V extends JSONValue>
   }
 
   // Generally handles anyOf
-  // TODO: Need to break this up -- it's too long
+  // TODO(@ubik2): Need to break this up -- it's too long
   traverseWithSchemaContext(
     doc: IAttestation,
     schemaContext: Readonly<SchemaContext>,
     link?: NormalizedFullLink,
   ): V | JSONValue | undefined {
-    //console.log("Called TWSC", doc.address, doc.value);
     // Handle any top-level $ref in the schema
-    const debugLink = getNormalizedLink(
-      doc.address,
-      this.space,
-      schemaContext.schema,
-      schemaContext.rootSchema,
-    );
-    if (this.verbose) {
-      console.log("Calling TWSC with", debugLink, doc.value, link);
-    }
     const resolved = this.resolveRefSchema(schemaContext);
     if (resolved === undefined) {
       return undefined;
@@ -1422,9 +1404,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
         : undefined;
       // A value of true or {} means we match anything
       // Resolve the rest of the doc, and return
-      if (this.verbose) {
-        console.log("Switching to traverseDAG for", debugLink);
-      }
       return this.traverseDAG(
         doc,
         this.space,
@@ -1791,7 +1770,9 @@ export class SchemaObjectTraverser<V extends JSONValue>
             rootSchema: schemaContext.rootSchema,
           });
           if (val !== undefined) {
-            console.log("merging asCell/asStream default", propKey, val);
+            logger.debug(
+              () => ["merging asCell/asStream default", propKey, val],
+            );
             filteredObj[propKey] = val;
           }
         } else {
@@ -1817,7 +1798,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
           //   value: undefined,
           // }, propSchema);
           if (val !== undefined) {
-            console.log("merging schema default", propKey, val);
+            logger.debug(() => ["merging schema default", propKey, val]);
             filteredObj[propKey] = val;
           }
         }
@@ -1830,7 +1811,15 @@ export class SchemaObjectTraverser<V extends JSONValue>
       if (Array.isArray(required)) {
         for (const requiredProperty of required) {
           if (!(requiredProperty in filteredObj)) {
-            console.log("Aborting; missing ", requiredProperty);
+            logger.debug(() => [
+              "Missing required property",
+              requiredProperty,
+              "in object",
+              doc.address,
+              doc.value,
+              "with schema",
+              schemaContext.schema,
+            ]);
             return undefined;
           }
         }
@@ -1861,14 +1850,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
     normalizedLink.rootSchema = normalizedLink.rootSchema !== undefined
       ? combineSchema(schemaContext.rootSchema, normalizedLink.rootSchema)
       : schemaContext.rootSchema;
-    //if (this.verbose) {
-    // console.log(
-    //   "Encountered cell link in traverseWithSchemaContext",
-    //   doc.value,
-    //   normalizedLink,
-    //   schemaContext,
-    // );
-    //}
     // For the runtime, where we don't traverse cells, we just want
     // to create a cell object and don't walk into the object.
     // For the memory system, where we do traverse cells, we will
@@ -1878,7 +1859,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
       !this.traverseCells &&
       SchemaObjectTraverser.asCellOrStream(normalizedLink.schema)
     ) {
-      if (this.verbose) console.log("TPWS creating object");
       return this.objectCreator.createObject(normalizedLink, undefined);
     }
     // FIXME: we should use the schema from normalizedLink here too
@@ -1916,10 +1896,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
     schemaObj: JSONSchemaObj,
     rootSchema: JSONSchema,
   ): JSONValue | V | undefined {
-    // TODO: do i want to point directly at the primitive value's cell
-    // or do i want the long path pointer?
     if (SchemaObjectTraverser.asCellOrStream(schemaObj)) {
-      //console.log("createOBject on primitive");
       return this.objectCreator.createObject(
         getNormalizedLink(
           doc.address,
@@ -1974,7 +1951,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
     doc: IAttestation,
     schema: JSONSchema,
   ): JSONValue | undefined {
-    if (this.verbose) console.log("SOT.AD", doc.value, schema);
     if (isObject(schema) && schema.default !== undefined) {
       const link = getNormalizedLink(
         doc.address,
