@@ -2862,6 +2862,7 @@ interface CTOutlinerElement extends CTHTMLElement {}
 interface CTCellLinkElement extends CTHTMLElement {}
 interface CTListElement extends CTHTMLElement {}
 interface CTListItemElement extends CTHTMLElement {}
+interface CTLoaderElement extends CTHTMLElement {}
 interface CTInputElement extends CTHTMLElement {}
 interface CTImageInputElement extends CTHTMLElement {}
 interface CTInputLegacyElement extends CTHTMLElement {}
@@ -3179,6 +3180,14 @@ interface CTListItemAttributes<T> extends CTHTMLAttributes<T> {
   "disabled"?: boolean;
   /** Fired when the row is activated (click/Enter/Space) */
   "onct-activate"?: any;
+}
+
+interface CTLoaderAttributes<T> extends CTHTMLAttributes<T> {
+  "size"?: "sm" | "md" | "lg";
+  "show-elapsed"?: boolean;
+  "show-stop"?: boolean;
+  /** Fired when stop button is clicked */
+  "onct-stop"?: EventHandler<{}>;
 }
 
 interface CTFabAttributes<T> extends CTHTMLAttributes<T> {
@@ -3793,6 +3802,10 @@ declare global {
       "ct-list-item": CTDOM.DetailedHTMLProps<
         CTListItemAttributes<CTListItemElement>,
         CTListItemElement
+      >;
+      "ct-loader": CTDOM.DetailedHTMLProps<
+        CTLoaderAttributes<CTLoaderElement>,
+        CTLoaderElement
       >;
       "ct-input": CTDOM.DetailedHTMLProps<
         CTInputAttributes<CTInputElement>,

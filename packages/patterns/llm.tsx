@@ -69,17 +69,26 @@ export default recipe<LLMTestInput>(({ title }) => {
         </ct-cell-context>
 
         <ct-cell-context $cell={llmResponse}>
-          {derive(llmResponse.result, (r) =>
-            r
-              ? (
-                <div>
-                  <h3>LLM Response:</h3>
-                  <pre>
-                    {r}
-                  </pre>
-                </div>
-              )
-              : null)}
+          {derive(
+            [llmResponse.pending, llmResponse.result],
+            ([pending, r]) =>
+              pending
+                ? (
+                  <div>
+                    <ct-loader show-elapsed /> Thinking...
+                  </div>
+                )
+                : r
+                ? (
+                  <div>
+                    <h3>LLM Response:</h3>
+                    <pre>
+                      {r}
+                    </pre>
+                  </div>
+                )
+                : null,
+          )}
         </ct-cell-context>
       </div>
     ),
