@@ -224,7 +224,13 @@ export class CTLoader extends BaseElement {
 
   override render() {
     return html`
-      <svg class="spinner" part="spinner" viewBox="0 0 24 24" role="status" aria-label="Loading">
+      <svg
+        class="spinner"
+        part="spinner"
+        viewBox="0 0 24 24"
+        role="status"
+        aria-label="Loading"
+      >
         <circle
           class="track"
           cx="12"
@@ -245,24 +251,26 @@ export class CTLoader extends BaseElement {
       </svg>
 
       ${this.showElapsed
-        ? html`<span class="elapsed" part="elapsed">${this._formatElapsed(this._elapsedMs)}</span>`
-        : null}
-
-      ${this.showStop
         ? html`
-            <button
-              class="stop-button"
-              part="stop"
-              type="button"
-              @click="${this._handleStop}"
-              aria-label="Stop"
-              title="Stop"
-            >
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <rect x="6" y="6" width="12" height="12" rx="1" />
-              </svg>
-            </button>
-          `
+          <span class="elapsed" part="elapsed">${this._formatElapsed(
+            this._elapsedMs,
+          )}</span>
+        `
+        : null} ${this.showStop
+        ? html`
+          <button
+            class="stop-button"
+            part="stop"
+            type="button"
+            @click="${this._handleStop}"
+            aria-label="Stop"
+            title="Stop"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="6" width="12" height="12" rx="1" />
+            </svg>
+          </button>
+        `
         : null}
 
       <span class="sr-only">Loading</span>
