@@ -22,7 +22,7 @@ const docAddress: BaseMemoryAddress = {
 };
 
 const selector: SchemaPathSelector = {
-  "path": [],
+  "path": ["value"],
   "schemaContext": {
     "schema": {
       "type": "object",

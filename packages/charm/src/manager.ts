@@ -54,6 +54,7 @@ export type UISchema = Schema<typeof uiSchema>;
 export const charmListSchema = {
   type: "array",
   items: { asCell: true },
+  default: [],
 } as const satisfies JSONSchema;
 
 export const spaceCellSchema = {
