@@ -3,12 +3,14 @@
 ## Problem Statement
 
 TypeScript infers literal types for `const` declarations:
+
 ```typescript
-const value = 5;  // Type: 5 (literal), not number
+const value = 5; // Type: 5 (literal), not number
 ```
 
 When generating JSON schemas from these inferred types, the transformer produces
 overly restrictive schemas:
+
 ```json
 { "type": "number", "enum": [5] }
 ```
@@ -20,14 +22,14 @@ derive input initialized with `5` should accept any number, not just `5`.
 
 Literal widening is **inconsistently applied**:
 
-| Construct | Widening? | Mechanism |
-|-----------|-----------|-----------|
-| `cell(10)` | ✅ Yes | `widenLiteralType()` in schema-injection.ts |
-| `Cell.of(10)` | ✅ Yes | Same as above |
-| `derive(value, fn)` | ❌ No | Raw `getTypeAtLocation()` |
-| `handler(fn)` captures | ❌ No | Raw type inference |
-| `lift(fn)` | ❌ No | Raw type inference |
-| Closure captures | ❌ No | Raw `getTypeAtLocation()` |
+| Construct              | Widening? | Mechanism                                   |
+| ---------------------- | --------- | ------------------------------------------- |
+| `cell(10)`             | ✅ Yes    | `widenLiteralType()` in schema-injection.ts |
+| `Cell.of(10)`          | ✅ Yes    | Same as above                               |
+| `derive(value, fn)`    | ❌ No     | Raw `getTypeAtLocation()`                   |
+| `handler(fn)` captures | ❌ No     | Raw type inference                          |
+| `lift(fn)`             | ❌ No     | Raw type inference                          |
+| Closure captures       | ❌ No     | Raw `getTypeAtLocation()`                   |
 
 ## Design Principle
 
@@ -35,6 +37,7 @@ Literal widening is **inconsistently applied**:
 
 When we infer a type from a value or expression, apply `widenLiteralType()`
 immediately. This ensures:
+
 1. Widening happens at the source, not as a downstream fix
 2. Future code paths automatically benefit
 3. Semantic correctness - we're widening "inferred types", not "all types"
@@ -42,11 +45,13 @@ immediately. This ensures:
 ## When to Widen
 
 **DO widen:**
+
 - Types inferred from expressions: `checker.getTypeAtLocation(expr)`
 - Types inferred from untyped parameters: `checker.getTypeOfSymbol(param)`
 - Closure-captured variable types
 
 **DO NOT widen:**
+
 - Explicit type annotations: `Cell.of<number>(10)` → use `number` as-is
 - Types from type arguments: `derive<Input, Output>(...)`
 - Types from interface/type declarations
@@ -56,6 +61,7 @@ immediately. This ensures:
 ### 1. schema-injection.ts Changes
 
 #### derive() - Line ~870
+
 ```typescript
 // BEFORE
 const argumentType = checker.getTypeAtLocation(firstArg);
@@ -63,27 +69,31 @@ const argumentType = checker.getTypeAtLocation(firstArg);
 // AFTER
 const argumentType = widenLiteralType(
   checker.getTypeAtLocation(firstArg),
-  checker
+  checker,
 );
 ```
 
 #### handler() - Captured state types
+
 Apply widening when inferring captured variable types for handler state schemas.
 
 #### lift() - Input types
+
 Apply widening when inferring input types from function parameters.
 
 #### pattern/recipe - Inferred input types
+
 Apply widening when no explicit type argument is provided.
 
 ### 2. closure-transformer.ts Changes
 
-When capturing variables in closures, the type of the captured variable may be
-a literal type. Apply widening when building the captures object type.
+When capturing variables in closures, the type of the captured variable may be a
+literal type. Apply widening when building the captures object type.
 
 ### 3. type-inference.ts Changes
 
 Consider adding a helper function:
+
 ```typescript
 /**
  * Infer type from an expression with automatic literal widening.
@@ -102,14 +112,18 @@ export function inferWidenedType(
 ## Test Cases
 
 ### Existing (should continue to work)
+
 - `literal-widen-number.input.tsx` - cell(10) → type: "number"
 - `literal-widen-string.input.tsx` - cell("hello") → type: "string"
 - `literal-widen-explicit-type-args.input.tsx` - Cell.of<number>(10) → preserved
 
 ### Updated
-- `derive-param-initializer.input.tsx` - Remove TODO, expect type: "number" (no enum)
+
+- `derive-param-initializer.input.tsx` - Remove TODO, expect type: "number" (no
+  enum)
 
 ### New (to add)
+
 - `derive-literal-input.input.tsx` - derive(5, fn) should widen
 - `handler-literal-capture.input.tsx` - captured const should widen
 - `closure-literal-capture.input.tsx` - closure capture should widen
@@ -117,15 +131,18 @@ export function inferWidenedType(
 ## Risks and Mitigations
 
 ### Risk: Breaking explicit literal type unions
+
 ```typescript
 type Status = "pending" | "active" | "done";
 const status: Status = "pending";
 ```
-**Mitigation:** Only widen *inferred* types, not types from explicit annotations.
-The annotation provides `Status`, not `"pending"`.
+
+**Mitigation:** Only widen _inferred_ types, not types from explicit
+annotations. The annotation provides `Status`, not `"pending"`.
 
 ### Risk: Over-widening in complex scenarios
-**Mitigation:** Only call `widenLiteralType()` on types we *know* are inferred
+
+**Mitigation:** Only call `widenLiteralType()` on types we _know_ are inferred
 from values, not on types from type nodes or signatures.
 
 ## Success Criteria
