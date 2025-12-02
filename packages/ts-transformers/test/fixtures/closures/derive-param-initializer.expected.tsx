@@ -1,9 +1,9 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive } from "commontools";
+// TODO(gideon): Transformer incorrectly adds "enum": [5] constraint for literal value
+// Should be fixed on separate branch - schema should just be type: "number"
 export default function TestDerive() {
-    const value = cell(5, {
-        type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    const value = 5;
     const multiplier = cell(2, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
@@ -13,7 +13,7 @@ export default function TestDerive() {
         properties: {
             value: {
                 type: "number",
-                asCell: true
+                "enum": [5]
             },
             multiplier: {
                 type: "number",

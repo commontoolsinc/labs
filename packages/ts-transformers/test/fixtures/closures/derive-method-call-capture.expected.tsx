@@ -34,14 +34,16 @@ export default function TestDerive(state: State) {
             }
         },
         required: ["value", "state"]
-    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema, {
         value,
         state: {
             counter: {
                 value: state.counter.value
             }
         }
-    }, ({ value: v, state }) => v + state.counter.value);
+    }, ({ value: v, state }) => v.get() + state.counter.value);
     return result;
 }
 // @ts-ignore: Internals

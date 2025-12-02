@@ -1,13 +1,13 @@
 /// <cts-enable />
 import { cell, NAME, recipe, UI } from "commontools";
 
-export default recipe("Optional Chain Predicate", () => {
+export default recipe("Conditional Empty Check", () => {
   const items = cell<string[]>([]);
   return {
-    [NAME]: "Optional chain predicate",
+    [NAME]: "Conditional empty check",
     [UI]: (
       <div>
-        {!items?.length && <span>No items</span>}
+        {!items.get().length && <span>No items</span>}
       </div>
     ),
   };

@@ -1,35 +1,24 @@
 import * as __ctHelpers from "commontools";
 import { Cell, recipe, UI } from "commontools";
-declare global {
-    interface MouseEvent {
-        detail: number;
-    }
-}
 interface State {
-    metrics: Cell<number>;
-    user?: {
-        clicks: Cell<number>;
-    };
+    selectedValue: Cell<string>;
+    changeCount: Cell<number>;
 }
+// Test typed event handler: ct-select has onct-change?: EventHandler<{ items: ...; value: ... }>
+// The handler receives { detail: { items: [...], value: ... } }
 export default recipe({
     type: "object",
     properties: {
-        metrics: {
-            type: "number",
+        selectedValue: {
+            type: "string",
             asCell: true
         },
-        user: {
-            type: "object",
-            properties: {
-                clicks: {
-                    type: "number",
-                    asCell: true
-                }
-            },
-            required: ["clicks"]
+        changeCount: {
+            type: "number",
+            asCell: true
         }
     },
-    required: ["metrics"]
+    required: ["selectedValue", "changeCount"]
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -138,10 +127,32 @@ export default recipe({
     }
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
-        [UI]: (<button type="button" onClick={__ctHelpers.handler({
+        [UI]: (<ct-select $value={state.selectedValue} items={[
+                { label: "Option A", value: "a" },
+                { label: "Option B", value: "b" },
+            ]} onct-change={__ctHelpers.handler({
             type: "object",
             properties: {
-                detail: true
+                detail: {
+                    type: "object",
+                    properties: {
+                        items: {
+                            type: "array",
+                            items: {
+                                type: "object",
+                                properties: {
+                                    label: {
+                                        type: "string"
+                                    },
+                                    value: true
+                                },
+                                required: ["label", "value"]
+                            }
+                        },
+                        value: true
+                    },
+                    required: ["items", "value"]
+                }
             },
             required: ["detail"]
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -150,35 +161,28 @@ export default recipe({
                 state: {
                     type: "object",
                     properties: {
-                        user: {
-                            type: "object",
-                            properties: {
-                                clicks: {
-                                    type: "number",
-                                    asCell: true
-                                }
-                            },
-                            required: ["clicks"]
+                        selectedValue: {
+                            type: "string",
+                            asCell: true
                         },
-                        metrics: {
+                        changeCount: {
                             type: "number",
                             asCell: true
                         }
                     },
-                    required: ["metrics"]
+                    required: ["selectedValue", "changeCount"]
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, (event, { state }) => state.user?.clicks.set(event.detail + state.metrics.get()))({
+        } as const satisfies __ctHelpers.JSONSchema, (event, { state }) => {
+            state.selectedValue.set(event.detail.value);
+            state.changeCount.set(state.changeCount.get() + 1);
+        })({
             state: {
-                user: {
-                    clicks: state.user?.clicks
-                },
-                metrics: state.metrics
+                selectedValue: state.selectedValue,
+                changeCount: state.changeCount
             }
-        })}>
-        Track
-      </button>),
+        })}/>),
     };
 });
 // @ts-ignore: Internals

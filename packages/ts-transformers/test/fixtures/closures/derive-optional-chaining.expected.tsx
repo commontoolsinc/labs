@@ -31,7 +31,7 @@ export default function TestDerive(config: Config) {
         config: {
             multiplier: config.multiplier
         }
-    }, ({ value: v, config }) => v * (config.multiplier ?? 1));
+    }, ({ value: v, config }) => v.get() * (config.multiplier ?? 1));
     return result;
 }
 // @ts-ignore: Internals

@@ -236,7 +236,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     }
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => !list?.[0] && <span>No first entry</span>)}
+        } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => !list.get()?.[0] && <span>No first entry</span>)}
       </div>),
     };
 });

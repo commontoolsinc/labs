@@ -34,7 +34,7 @@ export default function TestDeriveLocalVariable() {
         b: b,
         c: c
     }, ({ a: aVal, b, c }) => {
-        const sum = aVal + b.get();
+        const sum = aVal.get() + b.get();
         return sum * c.get();
     });
     return result;

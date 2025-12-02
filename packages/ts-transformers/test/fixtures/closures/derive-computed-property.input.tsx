@@ -6,7 +6,7 @@ export default function TestDerive() {
   const config = { multiplier: 2, divisor: 5 };
   const key = "multiplier";
 
-  const result = derive(value, (v) => v * config[key]);
+  const result = derive(value, (v) => v.get() * config[key]);
 
   return result;
 }

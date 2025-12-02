@@ -253,7 +253,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     }
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, { people: people }, ({ people }) => people.length > 0 && (<ul>
+        } as const satisfies __ctHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length > 0 && (<ul>
             {people.mapWithPattern(__ctHelpers.recipe({
                 type: "object",
                 properties: {

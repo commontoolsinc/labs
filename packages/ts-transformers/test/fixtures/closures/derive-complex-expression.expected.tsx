@@ -33,7 +33,7 @@ export default function TestDerive() {
         a,
         b: b,
         c: c
-    }, ({ a: x, b, c }) => (x * b.get() + c.get()) / 2);
+    }, ({ a: x, b, c }) => (x.get() * b.get() + c.get()) / 2);
     return result;
 }
 // @ts-ignore: Internals

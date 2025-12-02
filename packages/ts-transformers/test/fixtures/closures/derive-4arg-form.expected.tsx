@@ -26,7 +26,7 @@ export default function TestDerive() {
     } as const satisfies __ctHelpers.JSONSchema, {
         value,
         multiplier: multiplier
-    }, ({ value: v, multiplier }) => v * multiplier.get());
+    }, ({ value: v, multiplier }) => v.get() * multiplier.get());
     return result;
 }
 // @ts-ignore: Internals

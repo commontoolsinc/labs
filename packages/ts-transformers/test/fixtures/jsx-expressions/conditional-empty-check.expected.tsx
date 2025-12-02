@@ -117,17 +117,17 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
         }
     } as const satisfies __ctHelpers.JSONSchema);
     return {
-        [NAME]: "Optional chain predicate",
+        [NAME]: "Conditional empty check",
         [UI]: (<div>
         {__ctHelpers.derive({
             type: "object",
             properties: {
                 items: {
-                    type: "object",
-                    properties: {
-                        length: true
+                    type: "array",
+                    items: {
+                        type: "string"
                     },
-                    required: ["length"]
+                    asCell: true
                 }
             },
             required: ["items"]
@@ -236,9 +236,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     }
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, { items: {
-                length: items?.length
-            } }, ({ items }) => !items?.length && <span>No items</span>)}
+        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => !items.get().length && <span>No items</span>)}
       </div>),
     };
 });
