@@ -1,0 +1,629 @@
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { createBuilder } from "../src/builder/factory.ts";
+import { Runtime } from "../src/runtime.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
+
+describe("when and unless built-in functions", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
+  let when: ReturnType<typeof createBuilder>["commontools"]["when"];
+  let unless: ReturnType<typeof createBuilder>["commontools"]["unless"];
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+
+    tx = runtime.edit();
+
+    const { commontools } = createBuilder();
+    ({ recipe, lift, when, unless } = commontools);
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  describe("when function (&& semantics)", () => {
+    it("returns value when condition is truthy (true)", async () => {
+      const testRecipe = recipe<{ condition: boolean }>(
+        "when truthy test",
+        ({ condition }) => {
+          const result = when(condition, "success");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string | boolean }>(
+        space,
+        "when truthy true",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        testRecipe,
+        { condition: true },
+        resultCell,
+      );
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: "success" });
+    });
+
+    it("returns falsy condition when condition is false", async () => {
+      const testRecipe = recipe<{ condition: boolean }>(
+        "when falsy false test",
+        ({ condition }) => {
+          const result = when(condition, "success");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string | boolean }>(
+        space,
+        "when falsy false",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        testRecipe,
+        { condition: false },
+        resultCell,
+      );
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: false });
+    });
+
+    it("returns value when condition is truthy number (1)", async () => {
+      const testRecipe = recipe<{ condition: number }>(
+        "when truthy number test",
+        ({ condition }) => {
+          const result = when(condition, "has value");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string | number }>(
+        space,
+        "when truthy number",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, testRecipe, { condition: 42 }, resultCell);
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: "has value" });
+    });
+
+    it("returns 0 when condition is 0 (falsy)", async () => {
+      const testRecipe = recipe<{ condition: number }>(
+        "when falsy zero test",
+        ({ condition }) => {
+          const result = when(condition, "has value");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string | number }>(
+        space,
+        "when falsy zero",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, testRecipe, { condition: 0 }, resultCell);
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: 0 });
+    });
+
+    it("returns empty string when condition is empty string (falsy)", async () => {
+      const testRecipe = recipe<{ condition: string }>(
+        "when falsy empty string test",
+        ({ condition }) => {
+          const result = when(condition, "fallback");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string }>(
+        space,
+        "when falsy empty string",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, testRecipe, { condition: "" }, resultCell);
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: "" });
+    });
+
+    it("returns value when condition is non-empty string (truthy)", async () => {
+      const testRecipe = recipe<{ condition: string }>(
+        "when truthy string test",
+        ({ condition }) => {
+          const result = when(condition, "found");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string }>(
+        space,
+        "when truthy string",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        testRecipe,
+        { condition: "hello" },
+        resultCell,
+      );
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: "found" });
+    });
+
+    it("works with derived condition", async () => {
+      const testRecipe = recipe<{ count: number }>(
+        "when derived condition test",
+        ({ count }) => {
+          const isPositive = lift((n: number) => n > 0)(count);
+          const result = when(isPositive, "positive");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string | boolean }>(
+        space,
+        "when derived positive",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, testRecipe, { count: 5 }, resultCell);
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: "positive" });
+    });
+
+    it("works with derived condition returning false", async () => {
+      const testRecipe = recipe<{ count: number }>(
+        "when derived false condition test",
+        ({ count }) => {
+          const isPositive = lift((n: number) => n > 0)(count);
+          const result = when(isPositive, "positive");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string | boolean }>(
+        space,
+        "when derived negative",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, testRecipe, { count: -3 }, resultCell);
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: false });
+    });
+  });
+
+  describe("unless function (|| semantics)", () => {
+    it("returns truthy condition as-is when condition is true", async () => {
+      const testRecipe = recipe<{ condition: boolean }>(
+        "unless truthy test",
+        ({ condition }) => {
+          const result = unless(condition, "fallback");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string | boolean }>(
+        space,
+        "unless truthy true",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        testRecipe,
+        { condition: true },
+        resultCell,
+      );
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: true });
+    });
+
+    it("returns fallback value when condition is false", async () => {
+      const testRecipe = recipe<{ condition: boolean }>(
+        "unless falsy false test",
+        ({ condition }) => {
+          const result = unless(condition, "fallback");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string | boolean }>(
+        space,
+        "unless falsy false",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        testRecipe,
+        { condition: false },
+        resultCell,
+      );
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: "fallback" });
+    });
+
+    it("returns truthy number as-is", async () => {
+      const testRecipe = recipe<{ condition: number }>(
+        "unless truthy number test",
+        ({ condition }) => {
+          const result = unless(condition, 999);
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: number }>(
+        space,
+        "unless truthy number",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, testRecipe, { condition: 42 }, resultCell);
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: 42 });
+    });
+
+    it("returns fallback when condition is 0 (falsy)", async () => {
+      const testRecipe = recipe<{ condition: number }>(
+        "unless falsy zero test",
+        ({ condition }) => {
+          const result = unless(condition, 999);
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: number }>(
+        space,
+        "unless falsy zero",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, testRecipe, { condition: 0 }, resultCell);
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: 999 });
+    });
+
+    it("returns truthy string as-is", async () => {
+      const testRecipe = recipe<{ condition: string }>(
+        "unless truthy string test",
+        ({ condition }) => {
+          const result = unless(condition, "default");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string }>(
+        space,
+        "unless truthy string",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        testRecipe,
+        { condition: "hello" },
+        resultCell,
+      );
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: "hello" });
+    });
+
+    it("returns fallback when condition is empty string (falsy)", async () => {
+      const testRecipe = recipe<{ condition: string }>(
+        "unless falsy empty string test",
+        ({ condition }) => {
+          const result = unless(condition, "default");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string }>(
+        space,
+        "unless falsy empty string",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, testRecipe, { condition: "" }, resultCell);
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: "default" });
+    });
+
+    it("works with derived condition", async () => {
+      const testRecipe = recipe<{ name: string }>(
+        "unless derived condition test",
+        ({ name }) => {
+          const displayName = lift((n: string) => n || "")(name);
+          const result = unless(displayName, "Anonymous");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string }>(
+        space,
+        "unless derived with value",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, testRecipe, { name: "Alice" }, resultCell);
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: "Alice" });
+    });
+
+    it("works with derived condition returning empty", async () => {
+      const testRecipe = recipe<{ name: string }>(
+        "unless derived empty condition test",
+        ({ name }) => {
+          const displayName = lift((n: string) => n || "")(name);
+          const result = unless(displayName, "Anonymous");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string }>(
+        space,
+        "unless derived empty",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, testRecipe, { name: "" }, resultCell);
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: "Anonymous" });
+    });
+  });
+
+  describe("when and unless combined patterns", () => {
+    it("chain when followed by unless (a && b || c pattern)", async () => {
+      const testRecipe = recipe<{ hasData: boolean; data: string }>(
+        "when unless chain test",
+        ({ hasData, data }) => {
+          // Equivalent to: hasData && data || "no data"
+          const dataIfAvailable = when(hasData, data);
+          const result = unless(dataIfAvailable, "no data");
+          return { result };
+        },
+      );
+
+      // Test with truthy condition
+      const resultCell1 = runtime.getCell<{ result: string | boolean }>(
+        space,
+        "chain with data",
+        undefined,
+        tx,
+      );
+      const result1 = runtime.run(
+        tx,
+        testRecipe,
+        { hasData: true, data: "hello" },
+        resultCell1,
+      );
+      tx.commit();
+      await runtime.idle();
+
+      expect(result1.getAsQueryResult()).toMatchObject({ result: "hello" });
+    });
+
+    it("chain when followed by unless returns fallback when first is false", async () => {
+      const testRecipe = recipe<{ hasData: boolean; data: string }>(
+        "when unless chain fallback test",
+        ({ hasData, data }) => {
+          const dataIfAvailable = when(hasData, data);
+          const result = unless(dataIfAvailable, "no data");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string | boolean }>(
+        space,
+        "chain without data",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        testRecipe,
+        { hasData: false, data: "ignored" },
+        resultCell,
+      );
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: "no data" });
+    });
+
+    it("multiple when clauses (a && b && c pattern)", async () => {
+      const testRecipe = recipe<{ a: boolean; b: boolean }>(
+        "multiple when test",
+        ({ a, b }) => {
+          // Equivalent to: a && b && "all true"
+          const aAndB = when(a, b);
+          const result = when(aAndB, "all true");
+          return { result };
+        },
+      );
+
+      // Both true
+      const resultCell1 = runtime.getCell<{ result: string | boolean }>(
+        space,
+        "multiple when both true",
+        undefined,
+        tx,
+      );
+      const result1 = runtime.run(
+        tx,
+        testRecipe,
+        { a: true, b: true },
+        resultCell1,
+      );
+      tx.commit();
+      await runtime.idle();
+
+      expect(result1.getAsQueryResult()).toMatchObject({ result: "all true" });
+    });
+
+    it("multiple when returns false when first condition is false", async () => {
+      const testRecipe = recipe<{ a: boolean; b: boolean }>(
+        "multiple when first false test",
+        ({ a, b }) => {
+          const aAndB = when(a, b);
+          const result = when(aAndB, "all true");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string | boolean }>(
+        space,
+        "multiple when a false",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        testRecipe,
+        { a: false, b: true },
+        resultCell,
+      );
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: false });
+    });
+
+    it("multiple unless clauses (a || b || c pattern)", async () => {
+      const testRecipe = recipe<{ a: string; b: string }>(
+        "multiple unless test",
+        ({ a, b }) => {
+          // Equivalent to: a || b || "default"
+          const aOrB = unless(a, b);
+          const result = unless(aOrB, "default");
+          return { result };
+        },
+      );
+
+      // First is truthy
+      const resultCell1 = runtime.getCell<{ result: string }>(
+        space,
+        "multiple unless first truthy",
+        undefined,
+        tx,
+      );
+      const result1 = runtime.run(
+        tx,
+        testRecipe,
+        { a: "first", b: "second" },
+        resultCell1,
+      );
+      tx.commit();
+      await runtime.idle();
+
+      expect(result1.getAsQueryResult()).toMatchObject({ result: "first" });
+    });
+
+    it("multiple unless falls through to second when first is falsy", async () => {
+      const testRecipe = recipe<{ a: string; b: string }>(
+        "multiple unless second test",
+        ({ a, b }) => {
+          const aOrB = unless(a, b);
+          const result = unless(aOrB, "default");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string }>(
+        space,
+        "multiple unless second truthy",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(
+        tx,
+        testRecipe,
+        { a: "", b: "second" },
+        resultCell,
+      );
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: "second" });
+    });
+
+    it("multiple unless falls through to default when all are falsy", async () => {
+      const testRecipe = recipe<{ a: string; b: string }>(
+        "multiple unless default test",
+        ({ a, b }) => {
+          const aOrB = unless(a, b);
+          const result = unless(aOrB, "default");
+          return { result };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ result: string }>(
+        space,
+        "multiple unless all falsy",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, testRecipe, { a: "", b: "" }, resultCell);
+      tx.commit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toMatchObject({ result: "default" });
+    });
+  });
+});

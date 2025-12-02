@@ -1,16 +1,15 @@
 import * as __ctHelpers from "commontools";
-import { cell, NAME, recipe, UI } from "commontools";
+import { cell, recipe, UI } from "commontools";
+// Tests triple || chain: a || b || c
+// Should produce nested unless calls
 export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
-        $NAME: {
-            type: "string"
-        },
         $UI: {
             $ref: "#/$defs/Element"
         }
     },
-    required: ["$NAME", "$UI"],
+    required: ["$UI"],
     $defs: {
         Element: {
             type: "object",
@@ -109,20 +108,55 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, () => {
-    const list = cell<string[] | undefined>(undefined, {
+} as const satisfies __ctHelpers.JSONSchema, (_state) => {
+    const primary = cell("", {
+        type: "string"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const secondary = cell("", {
+        type: "string"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const items = cell<string[]>([], {
         type: "array",
         items: {
             type: "string"
         }
     } as const satisfies __ctHelpers.JSONSchema);
     return {
-        [NAME]: "Optional element access",
         [UI]: (<div>
-        {__ctHelpers.when(__ctHelpers.derive({
+        {/* Triple || chain - first truthy wins */}
+        <span>{__ctHelpers.unless(__ctHelpers.derive({
             type: "object",
             properties: {
-                list: {
+                primary: {
+                    type: "object",
+                    properties: {
+                        length: true
+                    },
+                    required: ["length"]
+                },
+                secondary: {
+                    type: "object",
+                    properties: {
+                        length: true
+                    },
+                    required: ["length"]
+                }
+            },
+            required: ["primary", "secondary"]
+        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
+            primary: {
+                length: primary.length
+            },
+            secondary: {
+                length: secondary.length
+            }
+        }, ({ primary, secondary }) => primary.length || secondary.length), "no content")}</span>
+
+        {/* Triple || with mixed types */}
+        <span>{__ctHelpers.unless(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                items: {
                     type: "array",
                     items: {
                         type: "string"
@@ -130,10 +164,8 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     asCell: true
                 }
             },
-            required: ["list"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => !list.get()?.[0]), <span>No first entry</span>)}
+            required: ["items"]
+        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items[0]?.length || items[1]?.length), 0)}</span>
       </div>),
     };
 });

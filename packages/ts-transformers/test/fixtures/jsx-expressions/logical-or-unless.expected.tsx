@@ -1,16 +1,13 @@
 import * as __ctHelpers from "commontools";
-import { cell, NAME, recipe, UI } from "commontools";
+import { cell, recipe, UI } from "commontools";
 export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
-        $NAME: {
-            type: "string"
-        },
         $UI: {
             $ref: "#/$defs/Element"
         }
     },
-    required: ["$NAME", "$UI"],
+    required: ["$UI"],
     $defs: {
         Element: {
             type: "object",
@@ -109,31 +106,31 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, () => {
-    const list = cell<string[] | undefined>(undefined, {
+} as const satisfies __ctHelpers.JSONSchema, (_state) => {
+    const items = cell<string[]>([], {
         type: "array",
         items: {
             type: "string"
         }
     } as const satisfies __ctHelpers.JSONSchema);
     return {
-        [NAME]: "Optional element access",
         [UI]: (<div>
-        {__ctHelpers.when(__ctHelpers.derive({
+        {/* Pattern: falsy check || fallback */}
+        {__ctHelpers.unless(__ctHelpers.derive({
             type: "object",
             properties: {
-                list: {
-                    type: "array",
-                    items: {
-                        type: "string"
+                items: {
+                    type: "object",
+                    properties: {
+                        length: true
                     },
-                    asCell: true
+                    required: ["length"]
                 }
             },
-            required: ["list"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => !list.get()?.[0]), <span>No first entry</span>)}
+            required: ["items"]
+        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { items: {
+                length: items.length
+            } }, ({ items }) => items.length), <span>List is empty</span>)}
       </div>),
     };
 });

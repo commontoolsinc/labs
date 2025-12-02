@@ -1,16 +1,13 @@
 import * as __ctHelpers from "commontools";
-import { cell, NAME, recipe, UI } from "commontools";
+import { cell, recipe, UI } from "commontools";
 export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
-        $NAME: {
-            type: "string"
-        },
         $UI: {
             $ref: "#/$defs/Element"
         }
     },
-    required: ["$NAME", "$UI"],
+    required: ["$UI"],
     $defs: {
         Element: {
             type: "object",
@@ -109,31 +106,78 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, () => {
-    const list = cell<string[] | undefined>(undefined, {
+} as const satisfies __ctHelpers.JSONSchema, (_state) => {
+    const items = cell<string[]>([], {
         type: "array",
         items: {
             type: "string"
         }
     } as const satisfies __ctHelpers.JSONSchema);
+    const isEnabled = cell(false, {
+        type: "boolean"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const count = cell(0, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
-        [NAME]: "Optional element access",
         [UI]: (<div>
+        {/* Nested && - both conditions reference opaque refs */}
         {__ctHelpers.when(__ctHelpers.derive({
             type: "object",
             properties: {
-                list: {
-                    type: "array",
-                    items: {
-                        type: "string"
+                items: {
+                    type: "object",
+                    properties: {
+                        length: true
                     },
+                    required: ["length"]
+                },
+                isEnabled: {
+                    type: "boolean",
                     asCell: true
                 }
             },
-            required: ["list"]
+            required: ["items", "isEnabled"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    type: "boolean",
+                    "enum": [false]
+                }, {
+                    type: "boolean",
+                    asCell: true
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            items: {
+                length: items.length
+            },
+            isEnabled: isEnabled
+        }, ({ items, isEnabled }) => items.length > 0 && isEnabled), <div>Enabled with items</div>)}
+
+        {/* Mixed || and && */}
+        {__ctHelpers.when(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                count: {
+                    type: "number",
+                    asCell: true
+                },
+                items: {
+                    type: "object",
+                    properties: {
+                        length: true
+                    },
+                    required: ["length"]
+                }
+            },
+            required: ["count", "items"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => !list.get()?.[0]), <span>No first entry</span>)}
+        } as const satisfies __ctHelpers.JSONSchema, {
+            count: count,
+            items: {
+                length: items.length
+            }
+        }, ({ count, items }) => (count > 10 || items.length > 5)), <div>Threshold met</div>)}
       </div>),
     };
 });

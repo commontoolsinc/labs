@@ -1,16 +1,13 @@
 import * as __ctHelpers from "commontools";
-import { cell, NAME, recipe, UI } from "commontools";
+import { cell, recipe, UI } from "commontools";
 export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
-        $NAME: {
-            type: "string"
-        },
         $UI: {
             $ref: "#/$defs/Element"
         }
     },
-    required: ["$NAME", "$UI"],
+    required: ["$UI"],
     $defs: {
         Element: {
             type: "object",
@@ -109,31 +106,87 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, () => {
-    const list = cell<string[] | undefined>(undefined, {
-        type: "array",
-        items: {
-            type: "string"
-        }
-    } as const satisfies __ctHelpers.JSONSchema);
-    return {
-        [NAME]: "Optional element access",
-        [UI]: (<div>
-        {__ctHelpers.when(__ctHelpers.derive({
-            type: "object",
-            properties: {
-                list: {
-                    type: "array",
-                    items: {
+} as const satisfies __ctHelpers.JSONSchema, (_state) => {
+    const user = cell<{
+        name: string;
+        age: number;
+    } | null>(null, {
+        anyOf: [{
+                type: "object",
+                properties: {
+                    name: {
                         type: "string"
                     },
-                    asCell: true
+                    age: {
+                        type: "number"
+                    }
+                },
+                required: ["name", "age"]
+            }, {
+                type: "null"
+            }]
+    } as const satisfies __ctHelpers.JSONSchema);
+    return {
+        [UI]: (<div>
+        {/* Non-JSX right side: string template with complex expression */}
+        <p>{__ctHelpers.when(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "object",
+                            properties: {
+                                length: true
+                            },
+                            required: ["length"]
+                        }
+                    },
+                    required: ["name"]
                 }
             },
-            required: ["list"]
+            required: ["user"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => !list.get()?.[0]), <span>No first entry</span>)}
+        } as const satisfies __ctHelpers.JSONSchema, { user: {
+                name: {
+                    length: user.name.length
+                }
+            } }, ({ user }) => user.name.length > 0), `Hello, ${__ctHelpers.derive({
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        name: true
+                    },
+                    required: ["name"]
+                }
+            },
+            required: ["user"]
+        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { user: {
+                name: user.name
+            } }, ({ user }) => user.name)}!`)}</p>
+
+        {/* Non-JSX right side: number expression */}
+        <p>Age: {__ctHelpers.when(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        age: true
+                    },
+                    required: ["age"]
+                }
+            },
+            required: ["user"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { user: {
+                age: user.age
+            } }, ({ user }) => user.age > 18), user.age)}</p>
       </div>),
     };
 });

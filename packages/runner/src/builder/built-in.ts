@@ -116,6 +116,46 @@ let ifElseFactory:
   | NodeFactory<{ condition: unknown; ifTrue: unknown; ifFalse: unknown }, any>
   | undefined;
 
+/**
+ * Short-circuit evaluation for && operator.
+ * Returns value if condition is truthy, otherwise returns the falsy condition.
+ * Equivalent to: condition && value
+ */
+export function when<T = unknown, U = unknown>(
+  condition: Opaque<T>,
+  value: Opaque<U>,
+): OpaqueRef<T | U> {
+  ifElseFactory ||= createNodeFactory({
+    type: "ref",
+    implementation: "ifElse",
+  });
+  return ifElseFactory({
+    condition,
+    ifTrue: value,
+    ifFalse: condition,
+  }) as OpaqueRef<T | U>;
+}
+
+/**
+ * Short-circuit evaluation for || operator.
+ * Returns condition if truthy, otherwise returns value.
+ * Equivalent to: condition || value
+ */
+export function unless<T = unknown, U = unknown>(
+  condition: Opaque<T>,
+  value: Opaque<U>,
+): OpaqueRef<T | U> {
+  ifElseFactory ||= createNodeFactory({
+    type: "ref",
+    implementation: "ifElse",
+  });
+  return ifElseFactory({
+    condition,
+    ifTrue: condition,
+    ifFalse: value,
+  }) as OpaqueRef<T | U>;
+}
+
 export const navigateTo = createNodeFactory({
   type: "ref",
   implementation: "navigateTo",

@@ -1,16 +1,15 @@
 import * as __ctHelpers from "commontools";
-import { cell, NAME, recipe, UI } from "commontools";
+import { cell, recipe, UI } from "commontools";
+// Tests mixed && and || operators: (a && b) || c
+// The && should use when, the || should use unless
 export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
-        $NAME: {
-            type: "string"
-        },
         $UI: {
             $ref: "#/$defs/Element"
         }
     },
-    required: ["$NAME", "$UI"],
+    required: ["$UI"],
     $defs: {
         Element: {
             type: "object",
@@ -109,31 +108,109 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, () => {
-    const list = cell<string[] | undefined>(undefined, {
-        type: "array",
-        items: {
-            type: "string"
-        }
-    } as const satisfies __ctHelpers.JSONSchema);
-    return {
-        [NAME]: "Optional element access",
-        [UI]: (<div>
-        {__ctHelpers.when(__ctHelpers.derive({
-            type: "object",
-            properties: {
-                list: {
-                    type: "array",
-                    items: {
+} as const satisfies __ctHelpers.JSONSchema, (_state) => {
+    const user = cell<{
+        name: string;
+        age: number;
+    } | null>(null, {
+        anyOf: [{
+                type: "object",
+                properties: {
+                    name: {
                         type: "string"
                     },
-                    asCell: true
+                    age: {
+                        type: "number"
+                    }
+                },
+                required: ["name", "age"]
+            }, {
+                type: "null"
+            }]
+    } as const satisfies __ctHelpers.JSONSchema);
+    const defaultMessage = cell("Guest", {
+        type: "string"
+    } as const satisfies __ctHelpers.JSONSchema);
+    return {
+        [UI]: (<div>
+        {/* (condition && value) || fallback pattern */}
+        <span>{__ctHelpers.unless(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        name: true
+                    },
+                    required: ["name"]
                 }
             },
-            required: ["list"]
+            required: ["user"]
+        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { user: {
+                name: user.name
+            } }, ({ user }) => (user.name.length > 0 && user.name)), defaultMessage)}</span>
+
+        {/* condition && (value || fallback) pattern */}
+        <span>{__ctHelpers.when(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        age: true
+                    },
+                    required: ["age"]
+                }
+            },
+            required: ["user"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => !list.get()?.[0]), <span>No first entry</span>)}
+        } as const satisfies __ctHelpers.JSONSchema, { user: {
+                age: user.age
+            } }, ({ user }) => user.age > 18), __ctHelpers.unless(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        name: true
+                    },
+                    required: ["name"]
+                }
+            },
+            required: ["user"]
+        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { user: {
+                name: user.name
+            } }, ({ user }) => user.name), "Anonymous Adult"))}</span>
+
+        {/* Complex: (a && b) || (c && d) */}
+        <span>
+          {__ctHelpers.unless(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        name: true,
+                        age: true
+                    },
+                    required: ["name", "age"]
+                }
+            },
+            required: ["user"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "boolean",
+                    "enum": [false]
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, { user: {
+                name: user.name,
+                age: user.age
+            } }, ({ user }) => (user.name.length > 0 && `Hello ${user.name}`) ||
+            (user.age > 0 && `Age: ${user.age}`)), "Unknown user")}
+        </span>
       </div>),
     };
 });
