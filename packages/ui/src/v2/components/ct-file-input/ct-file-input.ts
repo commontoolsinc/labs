@@ -294,8 +294,8 @@ export class CTFileInput extends BaseElement {
    * Compress a file
    * Subclasses override this for specific compression logic
    */
-  protected async compressFile(file: File): Promise<Blob> {
-    return file;
+  protected compressFile(file: File): Promise<Blob> {
+    return Promise.resolve(file);
   }
 
   /**
@@ -305,7 +305,9 @@ export class CTFileInput extends BaseElement {
   protected renderPreview(file: FileData): TemplateResult {
     // Smart default preview based on MIME type
     if (file.type.startsWith("image/")) {
-      return html`<img src="${file.url}" alt="${file.name}" />`;
+      return html`
+        <img src="${file.url}" alt="${file.name}" />
+      `;
     }
 
     // Generic file preview with icon
@@ -351,7 +353,9 @@ export class CTFileInput extends BaseElement {
     const currentFiles = this.getFiles();
 
     if (!this.showPreview || currentFiles.length === 0) {
-      return html``;
+      return html`
+
+      `;
     }
 
     return html`
@@ -360,18 +364,17 @@ export class CTFileInput extends BaseElement {
           (file) =>
             html`
               <div class="preview-item size-${this.previewSize}">
-                ${this.renderPreview(file)}
-                ${this.removable
+                ${this.renderPreview(file)} ${this.removable
                   ? html`
-                      <button
-                        type="button"
-                        class="remove-button"
-                        @click="${() => this._handleRemove(file.id)}"
-                        aria-label="Remove file"
-                      >
-                        ×
-                      </button>
-                    `
+                    <button
+                      type="button"
+                      class="remove-button"
+                      @click="${() => this._handleRemove(file.id)}"
+                      aria-label="Remove file"
+                    >
+                      ×
+                    </button>
+                  `
                   : ""}
                 <div class="file-info" title="${file.name}">
                   ${file.name} (${formatFileSize(file.size)})
@@ -403,7 +406,7 @@ export class CTFileInput extends BaseElement {
     return "📎";
   }
 
-  private async _readFileAsDataURL(file: Blob): Promise<string> {
+  private _readFileAsDataURL(file: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
@@ -456,7 +459,11 @@ export class CTFileInput extends BaseElement {
           // Check file size AFTER compression if maxSizeBytes is set
           if (this.maxSizeBytes && fileToProcess.size > this.maxSizeBytes) {
             console.warn(
-              `File ${file.name} (${formatFileSize(fileToProcess.size)}) exceeds maxSizeBytes (${formatFileSize(this.maxSizeBytes)}) even after compression`,
+              `File ${file.name} (${
+                formatFileSize(fileToProcess.size)
+              }) exceeds maxSizeBytes (${
+                formatFileSize(this.maxSizeBytes)
+              }) even after compression`,
             );
           }
 
@@ -533,11 +540,11 @@ export class CTFileInput extends BaseElement {
   override render() {
     return html`
       <div class="container">
-        ${this.renderFileInput()} ${this.renderButton()}
-        ${this.loading
-          ? html`<div class="loading">Processing files...</div>`
-          : ""}
-        ${this.renderPreviews()}
+        ${this.renderFileInput()} ${this.renderButton()} ${this.loading
+          ? html`
+            <div class="loading">Processing files...</div>
+          `
+          : ""} ${this.renderPreviews()}
       </div>
     `;
   }

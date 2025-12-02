@@ -1,10 +1,7 @@
 import { html, type TemplateResult } from "lit";
 import { property } from "lit/decorators.js";
 import { ifDefined } from "lit/directives/if-defined.js";
-import {
-  CTFileInput,
-  type FileData,
-} from "../ct-file-input/ct-file-input.ts";
+import { CTFileInput, type FileData } from "../ct-file-input/ct-file-input.ts";
 import {
   compressImage,
   formatFileSize,
@@ -165,7 +162,7 @@ export class CTImageInput extends CTFileInput {
           height: img.height,
         };
 
-        // TODO: Add EXIF extraction if this.extractExif is true
+        // TODO(#exif): Add EXIF extraction if this.extractExif is true
 
         resolve(imageData);
       };
@@ -177,7 +174,9 @@ export class CTImageInput extends CTFileInput {
 
   // Override: Always use <img> for images (we know they're images)
   protected override renderPreview(file: ImageData): TemplateResult {
-    return html`<img src="${file.url}" alt="${file.name}" />`;
+    return html`
+      <img src="${file.url}" alt="${file.name}" />
+    `;
   }
 
   // Override: Add capture attribute to file input
@@ -200,11 +199,11 @@ export class CTImageInput extends CTFileInput {
   override render() {
     return html`
       <div class="container">
-        ${this.renderFileInput()} ${this.renderButton()}
-        ${this.loading
-          ? html`<div class="loading">Processing images...</div>`
-          : ""}
-        ${this.renderPreviews()}
+        ${this.renderFileInput()} ${this.renderButton()} ${this.loading
+          ? html`
+            <div class="loading">Processing images...</div>
+          `
+          : ""} ${this.renderPreviews()}
       </div>
     `;
   }
@@ -216,21 +215,25 @@ export class CTImageInput extends CTFileInput {
   };
 
   // Override emit to add backward-compatible event details
-  override emit(eventName: string, detail?: any) {
-    if (eventName === "ct-change" && detail?.files) {
+  protected override emit<T = any>(
+    eventName: string,
+    detail?: T,
+    options?: EventInit,
+  ): boolean {
+    if (eventName === "ct-change" && (detail as any)?.files) {
       // Add 'images' property for backward compatibility
-      super.emit(eventName, {
+      return super.emit(eventName, {
         ...detail,
-        images: detail.files,
-      });
-    } else if (eventName === "ct-remove" && detail?.files) {
+        images: (detail as any).files,
+      } as T, options);
+    } else if (eventName === "ct-remove" && (detail as any)?.files) {
       // Add 'images' property for backward compatibility
-      super.emit(eventName, {
+      return super.emit(eventName, {
         ...detail,
-        images: detail.files,
-      });
+        images: (detail as any).files,
+      } as T, options);
     } else {
-      super.emit(eventName, detail);
+      return super.emit(eventName, detail, options);
     }
   }
 }
