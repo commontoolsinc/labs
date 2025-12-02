@@ -236,18 +236,23 @@ export class CTCard extends BaseElement {
     /** Update empty state classes based on slot content */
     private _updateEmptyStates(): void {
       const getSlot = (name: string) =>
-        this.shadowRoot?.querySelector(`slot[name="${name}"]`) as HTMLSlotElement | null;
+        this.shadowRoot?.querySelector(`slot[name="${name}"]`) as
+          | HTMLSlotElement
+          | null;
 
       const headerSlot = getSlot("header");
       const contentSlot = getSlot("content");
-      const defaultSlot = contentSlot?.querySelector("slot:not([name])") as HTMLSlotElement | null;
+      const defaultSlot = contentSlot?.querySelector("slot:not([name])") as
+        | HTMLSlotElement
+        | null;
       const footerSlot = getSlot("footer");
       const titleSlot = getSlot("title");
       const actionSlot = getSlot("action");
       const descriptionSlot = getSlot("description");
 
       const hasHeader = this._slotHasContent(headerSlot);
-      const hasContent = this._slotHasContent(contentSlot) || this._slotHasContent(defaultSlot);
+      const hasContent = this._slotHasContent(contentSlot) ||
+        this._slotHasContent(defaultSlot);
       const hasFooter = this._slotHasContent(footerSlot);
       const hasTitle = this._slotHasContent(titleSlot);
       const hasAction = this._slotHasContent(actionSlot);
@@ -256,10 +261,22 @@ export class CTCard extends BaseElement {
       const showHeader = hasHeader || hasTitle || hasAction || hasDescription;
       const showTitleWrapper = hasTitle || hasAction;
 
-      this.shadowRoot?.querySelector(".card-header")?.classList.toggle("empty", !showHeader);
-      this.shadowRoot?.querySelector(".card-content")?.classList.toggle("empty", !hasContent);
-      this.shadowRoot?.querySelector(".card-footer")?.classList.toggle("empty", !hasFooter);
-      this.shadowRoot?.querySelector(".card-title-wrapper")?.classList.toggle("empty", !showTitleWrapper);
+      this.shadowRoot?.querySelector(".card-header")?.classList.toggle(
+        "empty",
+        !showHeader,
+      );
+      this.shadowRoot?.querySelector(".card-content")?.classList.toggle(
+        "empty",
+        !hasContent,
+      );
+      this.shadowRoot?.querySelector(".card-footer")?.classList.toggle(
+        "empty",
+        !hasFooter,
+      );
+      this.shadowRoot?.querySelector(".card-title-wrapper")?.classList.toggle(
+        "empty",
+        !showTitleWrapper,
+      );
     }
 
     private _handleClick = (_event: Event): void => {
