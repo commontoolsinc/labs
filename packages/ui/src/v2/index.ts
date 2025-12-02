@@ -102,6 +102,7 @@ export * from "./components/ct-cell-link/index.ts";
 export * from "./components/ct-cell-context/index.ts";
 export * from "./components/ct-drag-source/index.ts";
 export * from "./components/ct-drop-zone/index.ts";
+export * from "./components/ct-picker/index.ts";
 
 // Type exports
 export type * from "./utils/types.ts";

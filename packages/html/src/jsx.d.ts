@@ -2869,6 +2869,7 @@ interface CTImageInputElement extends CTHTMLElement {}
 interface CTInputLegacyElement extends CTHTMLElement {}
 interface CTCheckboxElement extends CTHTMLElement {}
 interface CTSelectElement extends CTHTMLElement {}
+interface CTPickerElement extends CTHTMLElement {}
 interface CTToolsChipElement extends CTHTMLElement {}
 interface CTHeadingElement extends CTHTMLElement {}
 interface CTCollapsibleElement extends CTHTMLElement {}
@@ -3334,6 +3335,18 @@ interface CTSelectAttributes<T> extends CTHTMLAttributes<T> {
   "onct-change"?: EventHandler<
     { items: { label: string; value: any }[]; value: any | any[] }
   >;
+}
+
+interface CTPickerAttributes<T> extends CTHTMLAttributes<T> {
+  "$value"?: CellLike<any>;
+  "$items": Cell<any[]> | any[];
+  "disabled"?: boolean;
+  "min-height"?: string;
+  "onct-change"?: EventHandler<
+    { value: any; oldValue: any; items: any[] }
+  >;
+  "onct-focus"?: EventHandler<any>;
+  "onct-blur"?: EventHandler<any>;
 }
 
 interface CTToolsChipAttributes<T> extends CTHTMLAttributes<T> {
@@ -3870,6 +3883,10 @@ declare global {
       "ct-select": CTDOM.DetailedHTMLProps<
         CTSelectAttributes<CTSelectElement>,
         CTSelectElement
+      >;
+      "ct-picker": CTDOM.DetailedHTMLProps<
+        CTPickerAttributes<CTPickerElement>,
+        CTPickerElement
       >;
       "ct-tools-chip": CTDOM.DetailedHTMLProps<
         CTToolsChipAttributes<CTToolsChipElement>,
