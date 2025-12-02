@@ -45,8 +45,7 @@ export default recipe({
                 required: ["base", "multiplier"]
             },
             offset: {
-                type: "number",
-                "enum": [5]
+                type: "number"
             },
             threshold: {
                 type: "number",

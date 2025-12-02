@@ -175,8 +175,7 @@ export default recipe({
                                 required: ["discount", "taxRate"]
                             },
                             multiplier: {
-                                type: "number",
-                                "enum": [2]
+                                type: "number"
                             }
                         },
                         required: ["state", "multiplier"]
@@ -327,8 +326,7 @@ export default recipe({
                         required: ["discount", "taxRate"]
                     },
                     multiplier: {
-                        type: "number",
-                        "enum": [2]
+                        type: "number"
                     }
                 },
                 required: ["item", "state", "multiplier"]
