@@ -78,18 +78,31 @@ export class CTDragSource extends BaseElement {
       return;
     }
 
+    // Skip if Alt is held - user is interacting with ct-cell-context debug UI
+    if (e.altKey) {
+      return;
+    }
+
     // Skip if clicking on interactive elements
     const target = e.target as HTMLElement;
     if (this._isInteractiveElement(target)) {
       return;
     }
 
-    // Don't prevent default or capture yet - just track the start position
-    // This allows clicks to work normally
+    // Prevent default and capture pointer for drag
+    e.preventDefault();
+
+    // Store initial position
     this._startX = e.clientX;
     this._startY = e.clientY;
     this._pointerId = e.pointerId;
     this._isTracking = true;
+
+    // Capture pointer events
+    const cellContext = this.shadowRoot?.querySelector("ct-cell-context") as HTMLElement;
+    if (cellContext) {
+      cellContext.setPointerCapture(e.pointerId);
+    }
 
     // Add document-level listeners for move and up
     document.addEventListener("pointermove", this._boundPointerMove);
@@ -108,8 +121,6 @@ export class CTDragSource extends BaseElement {
     // Start drag after threshold (~5px)
     if (!this._isDragging && distance > 5) {
       this._isDragging = true;
-      // NOW we prevent default and capture - drag has started
-      e.preventDefault();
       this._startDrag(e);
     }
 

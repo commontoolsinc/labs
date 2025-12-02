@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, computed, str, Default, ifElse, NAME, pattern, UI } from "commontools";
+import { Cell, computed, handler, str, Default, ifElse, NAME, pattern, UI } from "commontools";
 import Counter from "./counter.tsx";
 
 interface Item {
@@ -16,6 +16,17 @@ interface DragDropDemoOutput {
   availableItems: Default<Item[], []>;
   droppedItems: Cell<Item[]>;
 }
+
+// Handler to remove an item from the dropped list
+const removeItem = handler<unknown, { droppedItems: Cell<Item[]>; item: Cell<Item> }>(
+  (_, { droppedItems, item }) => {
+    const current = droppedItems.get();
+    const index = current.findIndex((el) => Cell.equals(item, el));
+    if (index >= 0) {
+      droppedItems.set(current.toSpliced(index, 1));
+    }
+  }
+);
 
 export default pattern<DragDropDemoInput, DragDropDemoOutput>(
   ({ availableItems, droppedItems }) => {
@@ -100,17 +111,7 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
                       }}
                     >
                       <span>{item.title}</span>
-                      <ct-button
-                        onClick={() => {
-                          const current = droppedItems.get();
-                          const index = current.findIndex((el) =>
-                            Cell.equals(item, el)
-                          );
-                          if (index >= 0) {
-                            droppedItems.set(current.toSpliced(index, 1));
-                          }
-                        }}
-                      >
+                      <ct-button onClick={removeItem({ droppedItems, item })}>
                         ×
                       </ct-button>
                     </div>
