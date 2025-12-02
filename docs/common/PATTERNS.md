@@ -1124,6 +1124,105 @@ const activeItems = computed(() => items.filter(item => !item.done));
 | Event handler error | "'onclick' does not exist" | Change to camelCase: `onClick` |
 | Conditional rendering | Element doesn't show/hide | Use `ifElse()` not ternary |
 
+## Async Operations and Pending State
+
+CommonTools provides built-in functions for async operations. All return a consistent response structure:
+
+```typescript
+{
+  pending: boolean,        // true while operation is in progress
+  result: T | undefined,   // successful result (undefined while pending or on error)
+  error: any | undefined,  // error (undefined while pending or on success)
+}
+```
+
+This applies to: `fetchData`, `generateText`, `generateObject`, `compileAndRun`.
+
+### Visualizing Pending State with ct-loader
+
+Use `<ct-loader>` to show loading state:
+
+```tsx
+const data = fetchData({ url, mode: "json" });
+
+return {
+  [UI]: (
+    <div>
+      {ifElse(
+        data.pending,
+        <span><ct-loader size="sm" /> Loading...</span>,
+        ifElse(
+          data.error,
+          <ct-alert variant="error">Error: {data.error}</ct-alert>,
+          <pre>{JSON.stringify(data.result, null, 2)}</pre>
+        )
+      )}
+    </div>
+  ),
+};
+```
+
+### With Elapsed Time
+
+For long-running operations, show elapsed time:
+
+```tsx
+{ifElse(
+  response.pending,
+  <span><ct-loader show-elapsed /> Generating...</span>,
+  <div>{response.result}</div>
+)}
+```
+
+### With Stop Button
+
+For cancellable operations (like LLM generation), add a stop button:
+
+```tsx
+const { result, pending, cancel } = generateText({ prompt });
+
+{ifElse(
+  pending,
+  <span><ct-loader show-elapsed show-stop onct-stop={cancel} /> Generating...</span>,
+  <div>{result}</div>
+)}
+```
+
+### Inline Per-Item Loading
+
+For per-item async operations in lists:
+
+```tsx
+{items.map((item) => {
+  const summary = generateText({ prompt: `Summarize: ${item.content}` });
+
+  return (
+    <div>
+      <h3>{item.title}</h3>
+      {ifElse(
+        summary.pending,
+        <span><ct-loader size="sm" /> Summarizing...</span>,
+        <p>{summary.result}</p>
+      )}
+    </div>
+  );
+})}
+```
+
+### Disable Actions While Pending
+
+Prevent user actions during async operations:
+
+```tsx
+<ct-button disabled={analysis.pending} onClick={regenerate}>
+  {ifElse(
+    analysis.pending,
+    <span><ct-loader size="sm" /> Analyzing...</span>,
+    "Analyze"
+  )}
+</ct-button>
+```
+
 ## Summary
 
 **Level 1 patterns:**

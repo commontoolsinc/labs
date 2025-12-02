@@ -4,6 +4,7 @@ import { render } from "@commontools/html";
 import type { Cell } from "@commontools/runner";
 import { getRecipeIdFromCharm } from "@commontools/charm";
 import { type VNode } from "@commontools/runner";
+import "../ct-loader/ct-loader.ts";
 
 // Set to true to enable debug logging
 const DEBUG_LOGGING = false;
@@ -38,21 +39,6 @@ export class CTRender extends BaseElement {
       width: 100%;
       height: 100%;
     }
-
-    .spinner {
-      width: 20px;
-      height: 20px;
-      border: 2px solid var(--ct-color-border, #e0e0e0);
-      border-top-color: var(--ct-color-primary, #000);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-
-    @keyframes spin {
-      to {
-        transform: rotate(360deg);
-      }
-    }
   `;
 
   static override properties = {
@@ -83,7 +69,7 @@ export class CTRender extends BaseElement {
       ${!this._hasRendered
         ? html`
           <div class="loading-spinner">
-            <div class="spinner"></div>
+            <ct-loader size="lg"></ct-loader>
           </div>
         `
         : null}
