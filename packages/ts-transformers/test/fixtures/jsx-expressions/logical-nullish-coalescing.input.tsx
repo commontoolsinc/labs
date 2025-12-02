@@ -14,14 +14,14 @@ export default recipe("LogicalNullishCoalescing", (_state) => {
     [UI]: (
       <div>
         {/* ?? followed by || - different semantics */}
-        <span>Timeout: {(config.timeout ?? 30) || "disabled"}</span>
+        <span>Timeout: {(config.get().timeout ?? 30) || "disabled"}</span>
 
         {/* ?? followed by && */}
-        <span>{(config.retries ?? 3) > 0 && "Will retry"}</span>
+        <span>{(config.get().retries ?? 3) > 0 && "Will retry"}</span>
 
         {/* Mixed: ?? with && and || */}
         <span>
-          {items.length > 0 && (items[0] ?? "empty") || "no items"}
+          {items.get().length > 0 && (items.get()[0] ?? "empty") || "no items"}
         </span>
       </div>
     ),

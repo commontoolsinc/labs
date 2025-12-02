@@ -128,29 +128,21 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             type: "object",
             properties: {
                 primary: {
-                    type: "object",
-                    properties: {
-                        length: true
-                    },
-                    required: ["length"]
+                    type: "string",
+                    asCell: true
                 },
                 secondary: {
-                    type: "object",
-                    properties: {
-                        length: true
-                    },
-                    required: ["length"]
+                    type: "string",
+                    asCell: true
                 }
             },
             required: ["primary", "secondary"]
-        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
-            primary: {
-                length: primary.length
-            },
-            secondary: {
-                length: secondary.length
-            }
-        }, ({ primary, secondary }) => primary.length || secondary.length), "no content")}</span>
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            primary: primary,
+            secondary: secondary
+        }, ({ primary, secondary }) => primary.get().length || secondary.get().length), "no content")}</span>
 
         {/* Triple || with mixed types */}
         <span>{__ctHelpers.unless(__ctHelpers.derive({
@@ -165,7 +157,9 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                 }
             },
             required: ["items"]
-        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items[0]?.length || items[1]?.length), 0)}</span>
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.get()[0]?.length || items.get()[1]?.length), 0)}</span>
       </div>),
     };
 });

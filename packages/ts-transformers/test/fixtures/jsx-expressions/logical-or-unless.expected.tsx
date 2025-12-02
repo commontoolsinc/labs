@@ -120,17 +120,17 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             type: "object",
             properties: {
                 items: {
-                    type: "object",
-                    properties: {
-                        length: true
+                    type: "array",
+                    items: {
+                        type: "string"
                     },
-                    required: ["length"]
+                    asCell: true
                 }
             },
             required: ["items"]
-        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { items: {
-                length: items.length
-            } }, ({ items }) => items.length), <span>List is empty</span>)}
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length), <span>List is empty</span>)}
       </div>),
     };
 });

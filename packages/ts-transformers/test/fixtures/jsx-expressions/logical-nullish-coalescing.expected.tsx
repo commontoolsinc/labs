@@ -146,15 +146,25 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                 config: {
                     type: "object",
                     properties: {
-                        timeout: true
+                        timeout: {
+                            anyOf: [{
+                                    type: "number"
+                                }, {
+                                    type: "null"
+                                }]
+                        },
+                        retries: {
+                            type: "number"
+                        }
                     },
-                    required: ["timeout"]
+                    required: ["timeout"],
+                    asCell: true
                 }
             },
             required: ["config"]
-        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { config: {
-                timeout: config.timeout
-            } }, ({ config }) => (config.timeout ?? 30)), "disabled")}</span>
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { config: config }, ({ config }) => (config.get().timeout ?? 30)), "disabled")}</span>
 
         {/* ?? followed by && */}
         <span>{__ctHelpers.when(__ctHelpers.derive({
@@ -163,17 +173,25 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                 config: {
                     type: "object",
                     properties: {
-                        retries: true
+                        timeout: {
+                            anyOf: [{
+                                    type: "number"
+                                }, {
+                                    type: "null"
+                                }]
+                        },
+                        retries: {
+                            type: "number"
+                        }
                     },
-                    required: ["retries"]
+                    required: ["timeout"],
+                    asCell: true
                 }
             },
             required: ["config"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { config: {
-                retries: config.retries
-            } }, ({ config }) => (config.retries ?? 3) > 0), "Will retry")}</span>
+        } as const satisfies __ctHelpers.JSONSchema, { config: config }, ({ config }) => (config.get().retries ?? 3) > 0), "Will retry")}</span>
 
         {/* Mixed: ?? with && and || */}
         <span>
@@ -189,7 +207,14 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                 }
             },
             required: ["items"]
-        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.length > 0 && (items[0] ?? "empty")), "no items")}
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "boolean",
+                    "enum": [false]
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0 && (items.get()[0] ?? "empty")), "no items")}
         </span>
       </div>),
     };

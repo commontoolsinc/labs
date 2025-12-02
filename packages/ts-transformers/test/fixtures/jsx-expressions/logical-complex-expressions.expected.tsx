@@ -126,11 +126,11 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             type: "object",
             properties: {
                 items: {
-                    type: "object",
-                    properties: {
-                        length: true
+                    type: "array",
+                    items: {
+                        type: "string"
                     },
-                    required: ["length"]
+                    asCell: true
                 },
                 isEnabled: {
                     type: "boolean",
@@ -139,19 +139,11 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             },
             required: ["items", "isEnabled"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "boolean",
-                    "enum": [false]
-                }, {
-                    type: "boolean",
-                    asCell: true
-                }]
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
-            items: {
-                length: items.length
-            },
+            items: items,
             isEnabled: isEnabled
-        }, ({ items, isEnabled }) => items.length > 0 && isEnabled), <div>Enabled with items</div>)}
+        }, ({ items, isEnabled }) => items.get().length > 0 && isEnabled.get()), <div>Enabled with items</div>)}
 
         {/* Mixed || and && */}
         {__ctHelpers.when(__ctHelpers.derive({
@@ -162,11 +154,11 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     asCell: true
                 },
                 items: {
-                    type: "object",
-                    properties: {
-                        length: true
+                    type: "array",
+                    items: {
+                        type: "string"
                     },
-                    required: ["length"]
+                    asCell: true
                 }
             },
             required: ["count", "items"]
@@ -174,10 +166,8 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             count: count,
-            items: {
-                length: items.length
-            }
-        }, ({ count, items }) => (count > 10 || items.length > 5)), <div>Threshold met</div>)}
+            items: items
+        }, ({ count, items }) => (count.get() > 10 || items.get().length > 5)), <div>Threshold met</div>)}
       </div>),
     };
 });

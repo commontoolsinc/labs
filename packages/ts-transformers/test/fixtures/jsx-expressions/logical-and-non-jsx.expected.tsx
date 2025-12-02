@@ -110,21 +110,17 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     const user = cell<{
         name: string;
         age: number;
-    } | null>(null, {
-        anyOf: [{
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    age: {
-                        type: "number"
-                    }
-                },
-                required: ["name", "age"]
-            }, {
-                type: "null"
-            }]
+    }>({ name: "", age: 0 }, {
+        type: "object",
+        properties: {
+            name: {
+                type: "string"
+            },
+            age: {
+                type: "number"
+            }
+        },
+        required: ["name", "age"]
     } as const satisfies __ctHelpers.JSONSchema);
     return {
         [UI]: (<div>
@@ -136,38 +132,40 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     type: "object",
                     properties: {
                         name: {
-                            type: "object",
-                            properties: {
-                                length: true
-                            },
-                            required: ["length"]
+                            type: "string"
+                        },
+                        age: {
+                            type: "number"
                         }
                     },
-                    required: ["name"]
+                    required: ["name", "age"],
+                    asCell: true
                 }
             },
             required: ["user"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { user: {
-                name: {
-                    length: user.name.length
-                }
-            } }, ({ user }) => user.name.length > 0), `Hello, ${__ctHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name.length > 0), `Hello, ${__ctHelpers.derive({
             type: "object",
             properties: {
                 user: {
                     type: "object",
                     properties: {
-                        name: true
+                        name: {
+                            type: "string"
+                        },
+                        age: {
+                            type: "number"
+                        }
                     },
-                    required: ["name"]
+                    required: ["name", "age"],
+                    asCell: true
                 }
             },
             required: ["user"]
-        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { user: {
-                name: user.name
-            } }, ({ user }) => user.name)}!`)}</p>
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name)}!`)}</p>
 
         {/* Non-JSX right side: number expression */}
         <p>Age: {__ctHelpers.when(__ctHelpers.derive({
@@ -176,17 +174,50 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                 user: {
                     type: "object",
                     properties: {
-                        age: true
+                        name: {
+                            type: "string"
+                        },
+                        age: {
+                            type: "number"
+                        }
                     },
-                    required: ["age"]
+                    required: ["name", "age"],
+                    asCell: true
                 }
             },
             required: ["user"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { user: {
-                age: user.age
-            } }, ({ user }) => user.age > 18), user.age)}</p>
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().age > 18), __ctHelpers.derive({
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        },
+                        age: {
+                            type: "number"
+                        }
+                    },
+                    required: ["name", "age"],
+                    asCell: true
+                }
+            },
+            required: ["user"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                age: {
+                    type: "number"
+                }
+            },
+            required: ["name", "age"]
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get()).age)}</p>
       </div>),
     };
 });

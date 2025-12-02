@@ -113,24 +113,20 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
         active: boolean;
         verified: boolean;
         name: string;
-    } | null>(null, {
-        anyOf: [{
-                type: "object",
-                properties: {
-                    active: {
-                        type: "boolean"
-                    },
-                    verified: {
-                        type: "boolean"
-                    },
-                    name: {
-                        type: "string"
-                    }
-                },
-                required: ["active", "verified", "name"]
-            }, {
-                type: "null"
-            }]
+    }>({ active: false, verified: false, name: "" }, {
+        type: "object",
+        properties: {
+            active: {
+                type: "boolean"
+            },
+            verified: {
+                type: "boolean"
+            },
+            name: {
+                type: "string"
+            }
+        },
+        required: ["active", "verified", "name"]
     } as const satisfies __ctHelpers.JSONSchema);
     return {
         [UI]: (<div>
@@ -141,31 +137,47 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                 user: {
                     type: "object",
                     properties: {
-                        active: true,
-                        verified: true
+                        active: {
+                            type: "boolean"
+                        },
+                        verified: {
+                            type: "boolean"
+                        },
+                        name: {
+                            type: "string"
+                        }
                     },
-                    required: ["active", "verified"]
+                    required: ["active", "verified", "name"],
+                    asCell: true
                 }
             },
             required: ["user"]
-        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { user: {
-                active: user.active,
-                verified: user.verified
-            } }, ({ user }) => user.active && user.verified), <span>Welcome, {__ctHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().active && user.get().verified), <span>Welcome, {__ctHelpers.derive({
             type: "object",
             properties: {
                 user: {
                     type: "object",
                     properties: {
-                        name: true
+                        active: {
+                            type: "boolean"
+                        },
+                        verified: {
+                            type: "boolean"
+                        },
+                        name: {
+                            type: "string"
+                        }
                     },
-                    required: ["name"]
+                    required: ["active", "verified", "name"],
+                    asCell: true
                 }
             },
             required: ["user"]
-        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { user: {
-                name: user.name
-            } }, ({ user }) => user.name)}!</span>)}
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name)}!</span>)}
       </div>),
     };
 });

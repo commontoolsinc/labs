@@ -8,7 +8,7 @@ export default recipe("LogicalOrUnless", (_state) => {
     [UI]: (
       <div>
         {/* Pattern: falsy check || fallback */}
-        {items.length || <span>List is empty</span>}
+        {items.get().length || <span>List is empty</span>}
       </div>
     ),
   };
