@@ -29,6 +29,20 @@ export type AppStateSerialized = Omit<AppState, "identity" | "apiUrl"> & {
   apiUrl: string;
 };
 
+export function isAppStateConfigKey(
+  value: unknown,
+): value is AppStateConfigKey {
+  if (typeof value !== "string") return false;
+  switch (value) {
+    case "showShellCharmListView":
+    case "showDebuggerView":
+    case "showQuickJumpView":
+    case "showSidebar":
+      return true;
+  }
+  return false;
+}
+
 export function createAppState(
   initial: Pick<AppState, "view" | "apiUrl" | "identity"> & {
     config?: AppStateConfig;
@@ -38,12 +52,12 @@ export function createAppState(
 }
 
 export function clone(state: AppState): AppState {
-  const view = typeof state.view === "object"
-    ? Object.assign({}, state.view)
-    : state.view;
-  const cloned = Object.assign({}, state);
-  cloned.view = view;
-  return cloned;
+  return Object.assign({}, state, {
+    config: Object.assign({}, state.config),
+    view: typeof state.view === "object"
+      ? Object.assign({}, state.view)
+      : state.view,
+  });
 }
 
 export function applyCommand(
@@ -64,6 +78,9 @@ export function applyCommand(
       break;
     }
     case "set-config": {
+      if (!isAppStateConfigKey(command.key)) {
+        throw new Error(`Invalid config key: ${command.key}`);
+      }
       next.config[command.key] = command.value;
       break;
     }
