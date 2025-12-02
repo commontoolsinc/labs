@@ -2889,6 +2889,8 @@ interface CTKbdElement extends CTHTMLElement {}
 interface CTKeybindElement extends CTHTMLElement {}
 interface CTRenderElement extends CTHTMLElement {}
 interface CTCellContextElement extends CTHTMLElement {}
+interface CTDragSourceElement extends CTHTMLElement {}
+interface CTDropZoneElement extends CTHTMLElement {}
 interface CTChatMessageElement extends CTHTMLElement {}
 interface CTMarkdownElement extends CTHTMLElement {}
 interface CTVScrollElement extends CTHTMLElement {}
@@ -3161,6 +3163,22 @@ interface CTCellContextAttributes<T> extends CTHTMLAttributes<T> {
   "$cell": CellLike<any>;
   "label"?: string;
   "inline"?: boolean;
+}
+
+interface CTDragSourceAttributes<T> extends CTHTMLAttributes<T> {
+  "$cell": CellLike<any>;
+  "type"?: string;
+  "disabled"?: boolean;
+  "onct-drag-start"?: EventHandler<{ cell: any }>;
+  "onct-drag-end"?: EventHandler<{ cell: any; dropped: boolean }>;
+}
+
+interface CTDropZoneAttributes<T> extends CTHTMLAttributes<T> {
+  "$cell"?: CellLike<any>;
+  "accept"?: string;
+  "onct-drag-enter"?: EventHandler<{ cell: any; type?: string }>;
+  "onct-drag-leave"?: EventHandler<{ cell: any }>;
+  "onct-drop"?: EventHandler<{ sourceCell: any; targetCell?: any; type?: string }>;
 }
 
 interface CTListAttributes<T> extends CTHTMLAttributes<T> {
@@ -3889,6 +3907,14 @@ declare global {
       "ct-cell-context": CTDOM.DetailedHTMLProps<
         CTCellContextAttributes<CTCellContextElement>,
         CTCellContextElement
+      >;
+      "ct-drag-source": CTDOM.DetailedHTMLProps<
+        CTDragSourceAttributes<CTDragSourceElement>,
+        CTDragSourceElement
+      >;
+      "ct-drop-zone": CTDOM.DetailedHTMLProps<
+        CTDropZoneAttributes<CTDropZoneElement>,
+        CTDropZoneElement
       >;
       "ct-vscroll": CTDOM.DetailedHTMLProps<
         CTScrollAttributes<CTVScrollElement>,
