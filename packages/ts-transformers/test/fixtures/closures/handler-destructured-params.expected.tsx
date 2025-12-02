@@ -1,22 +1,23 @@
 import * as __ctHelpers from "commontools";
 import { Cell, recipe, UI } from "commontools";
-declare global {
-    interface EventTarget {
-        setAttribute(name: string, value: string): void;
-    }
-}
 interface State {
-    nested: Cell<string>;
+    selectedValue: Cell<string>;
+    lastItems: Cell<string>;
 }
+// Test destructured event handler params with typed ct-select onct-change
 export default recipe({
     type: "object",
     properties: {
-        nested: {
+        selectedValue: {
+            type: "string",
+            asCell: true
+        },
+        lastItems: {
             type: "string",
             asCell: true
         }
     },
-    required: ["nested"]
+    required: ["selectedValue", "lastItems"]
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -125,48 +126,62 @@ export default recipe({
     }
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
-        [UI]: (<button type="button" 
-        // Convenience pattern: transformer handles destructured handler params
-        // @ts-expect-error Testing convenience pattern: handler with destructured event and state params
-        onClick={__ctHelpers.handler({
+        [UI]: (<ct-select $value={state.selectedValue} items={[
+                { label: "Option A", value: "a" },
+                { label: "Option B", value: "b" },
+            ]} onct-change={__ctHelpers.handler({
             type: "object",
             properties: {
-                currentTarget: {
-                    $ref: "#/$defs/EventTarget"
+                detail: {
+                    type: "object",
+                    properties: {
+                        items: {
+                            type: "array",
+                            items: {
+                                type: "object",
+                                properties: {
+                                    label: {
+                                        type: "string"
+                                    },
+                                    value: true
+                                },
+                                required: ["label", "value"]
+                            }
+                        },
+                        value: true
+                    },
+                    required: ["items", "value"]
                 }
             },
-            required: ["currentTarget"],
-            $defs: {
-                EventTarget: {
-                    type: "object",
-                    properties: {}
-                }
-            }
+            required: ["detail"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "object",
             properties: {
                 state: {
                     type: "object",
                     properties: {
-                        nested: {
+                        selectedValue: {
+                            type: "string",
+                            asCell: true
+                        },
+                        lastItems: {
                             type: "string",
                             asCell: true
                         }
                     },
-                    required: ["nested"]
+                    required: ["selectedValue", "lastItems"]
                 }
             },
             required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, ({ currentTarget }, { state: { nested } }) => {
-            currentTarget.setAttribute("data-nested", nested.get());
-            console.log(state.nested === nested);
+        } as const satisfies __ctHelpers.JSONSchema, ({ detail: { value, items } }, { state }) => {
+            state.selectedValue.set(value);
+            state.lastItems.set(items.map(i => i.label).join(", "));
         })({
             state: {
-                nested: state.nested
+                selectedValue: state.selectedValue,
+                lastItems: state.lastItems
             }
-        })}>
-        Destructure
-      </button>),
+        })}/>),
     };
 });
 // @ts-ignore: Internals

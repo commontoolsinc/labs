@@ -1,30 +1,26 @@
 /// <cts-enable />
 import { Cell, recipe, UI } from "commontools";
 
-declare global {
-  interface EventTarget {
-    setAttribute(name: string, value: string): void;
-  }
-}
-
 interface State {
-  nested: Cell<string>;
+  selectedValue: Cell<string>;
+  lastItems: Cell<string>;
 }
 
+// Test destructured event handler params with typed ct-select onct-change
 export default recipe<State>("Destructure", (state) => {
   return {
     [UI]: (
-      <button
-        type="button"
-        // Convenience pattern: transformer handles destructured handler params
-        // @ts-expect-error Testing convenience pattern: handler with destructured event and state params
-        onClick={({ currentTarget }: { currentTarget: EventTarget }, { state: { nested } }: { state: { nested: Cell<string> } }) => {
-          currentTarget.setAttribute("data-nested", nested.get());
-          console.log(state.nested === nested);
+      <ct-select
+        $value={state.selectedValue}
+        items={[
+          { label: "Option A", value: "a" },
+          { label: "Option B", value: "b" },
+        ]}
+        onct-change={({ detail: { value, items } }) => {
+          state.selectedValue.set(value);
+          state.lastItems.set(items.map(i => i.label).join(", "));
         }}
-      >
-        Destructure
-      </button>
+      />
     ),
   };
 });
