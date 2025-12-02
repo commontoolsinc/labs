@@ -155,11 +155,37 @@ if (!Deno.env.get("SKIP_INPUT_CHECK")) {
   const batchStart = performance.now();
   for (const config of configs) {
     const configStart = performance.now();
-    console.log(`Batch type-checking fixtures in ${config.describe}...`);
 
-    const allFixtures = await loadAllFixturesInDirectory(
+    let allFixtures = await loadAllFixturesInDirectory(
       `${FIXTURES_ROOT}/${config.directory}`,
     );
+
+    // Apply FIXTURE/FIXTURE_PATTERN filter to batch type-checking for faster iteration
+    if (fixtureFilter || fixturePattern) {
+      const filteredFixtures: Record<string, string> = {};
+      for (const [path, content] of Object.entries(allFixtures)) {
+        // Extract base name from path (e.g., "test/fixtures/closures/map-basic.input.tsx" -> "map-basic")
+        const fileName = path.split("/").pop() || "";
+        const baseName = fileName.replace(/\.input\.(tsx?|ts)$/, "");
+
+        const matchesFilter = fixtureFilter
+          ? baseName === fixtureFilter
+          : new RegExp(fixturePattern!).test(baseName);
+
+        if (matchesFilter) {
+          filteredFixtures[path] = content;
+        }
+      }
+      allFixtures = filteredFixtures;
+    }
+
+    // Skip empty fixture sets (when filter doesn't match any in this directory)
+    if (Object.keys(allFixtures).length === 0) {
+      continue;
+    }
+
+    console.log(`Batch type-checking fixtures in ${config.describe}...`);
+
     const result = await batchTypeCheckFixtures(allFixtures, {
       types: { "commontools.d.ts": commontools },
     });

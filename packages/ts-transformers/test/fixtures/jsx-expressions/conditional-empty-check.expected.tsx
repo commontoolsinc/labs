@@ -117,7 +117,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
         }
     } as const satisfies __ctHelpers.JSONSchema);
     return {
-        [NAME]: "Optional chain predicate",
+        [NAME]: "Conditional empty check",
         [UI]: (<div>
         {__ctHelpers.derive({
             type: "object",

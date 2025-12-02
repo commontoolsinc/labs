@@ -134,7 +134,7 @@ export async function batchTypeCheckFixtures(
       return false;
     },
     readFile: (name) => {
-      if (transformedFiles[name]) return transformedFiles[name];
+      if (transformedFiles[name] !== undefined) return transformedFiles[name];
       if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
         return allTypes["es2023.d.ts"];
       }
@@ -337,7 +337,7 @@ export async function transformFiles(
       return false;
     },
     readFile: (name) => {
-      if (files[name]) return files[name];
+      if (files[name] !== undefined) return files[name];
       if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
         return allTypes["es2023.d.ts"];
       }
