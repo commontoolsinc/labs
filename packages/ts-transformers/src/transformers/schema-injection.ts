@@ -1145,6 +1145,8 @@ export class SchemaInjectionTransformer extends Transformer {
       }
 
       // Handler for when(condition, value) - prepends 2 schemas
+      // NOTE: Skip injection when condition is a derive call, since when() calls
+      // generated from logical && expressions already have schemas in the derive.
       if (callKind?.kind === "when") {
         const factory = transformation.factory;
         const args = node.arguments;
@@ -1160,6 +1162,16 @@ export class SchemaInjectionTransformer extends Transformer {
         }
 
         const [conditionExpr, valueExpr] = args;
+
+        // Skip if condition is a derive call - the logical transformer already
+        // embeds schemas in the derive call for && expressions
+        if (
+          conditionExpr &&
+          ts.isCallExpression(conditionExpr) &&
+          detectCallKind(conditionExpr, checker)?.kind === "derive"
+        ) {
+          return ts.visitEachChild(node, visit, transformation);
+        }
 
         // Infer types for each argument
         const conditionType = checker.getTypeAtLocation(conditionExpr!);
@@ -1209,6 +1221,8 @@ export class SchemaInjectionTransformer extends Transformer {
       }
 
       // Handler for unless(condition, fallback) - prepends 2 schemas
+      // NOTE: Skip injection when condition is a derive call, since unless() calls
+      // generated from logical || expressions already have schemas in the derive.
       if (callKind?.kind === "unless") {
         const factory = transformation.factory;
         const args = node.arguments;
@@ -1224,6 +1238,16 @@ export class SchemaInjectionTransformer extends Transformer {
         }
 
         const [conditionExpr, fallbackExpr] = args;
+
+        // Skip if condition is a derive call - the logical transformer already
+        // embeds schemas in the derive call for || expressions
+        if (
+          conditionExpr &&
+          ts.isCallExpression(conditionExpr) &&
+          detectCallKind(conditionExpr, checker)?.kind === "derive"
+        ) {
+          return ts.visitEachChild(node, visit, transformation);
+        }
 
         // Infer types for each argument
         const conditionType = checker.getTypeAtLocation(conditionExpr!);
