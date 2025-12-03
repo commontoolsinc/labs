@@ -1,6 +1,5 @@
 import app from "@/app.ts";
 import env from "@/env.ts";
-import * as Sentry from "@sentry/deno";
 import { identity } from "@/lib/identity.ts";
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -86,19 +85,12 @@ function startServer() {
   console.log(`Server is starting on port http://${env.HOST}:${env.PORT}`);
   initializeRuntime();
 
-  Sentry.init({
-    dsn: env.SENTRY_DSN,
-    tracesSampleRate: 1.0,
-    environment: env.ENV || "development",
-  });
-
   const serverOptions = {
     hostname: env.HOST,
     port: env.PORT,
     signal: ac.signal,
     onError: (error: unknown) => {
       console.error("Server error:", error);
-      Sentry.captureException(error);
       return new Response("Internal Server Error", { status: 500 });
     },
     onListen: ({ port, hostname }: { port: number; hostname: string }) => {
