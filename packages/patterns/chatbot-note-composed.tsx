@@ -4,7 +4,6 @@ import {
   Cell,
   cell,
   Default,
-  derive,
   handler,
   NAME,
   navigateTo,
@@ -25,10 +24,6 @@ import {
 } from "./common-tools.tsx";
 
 import { type MentionableCharm } from "./backlinks-index.tsx";
-
-function schemaifyWish<T>(path: string, def: T) {
-  return derive(wish<T>(path), (i) => i ?? def);
-}
 
 type ChatbotNoteInput = {
   title?: Cell<Default<string, "LLM Test">>;
@@ -171,13 +166,12 @@ type BacklinksIndex = {
 export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
   "Chatbot + Note",
   ({ title, messages }) => {
-    const allCharms = schemaifyWish<MentionableCharm[]>("#allCharms", []);
-    const index = schemaifyWish<BacklinksIndex>("#default/backlinksIndex", {
-      mentionable: [],
-    });
-    const mentionable = schemaifyWish<MentionableCharm[]>(
+    const allCharms = wish<Default<MentionableCharm[], []>>("#allCharms");
+    const index = wish<Default<BacklinksIndex, { mentionable: [] }>>(
+      "#default/backlinksIndex",
+    );
+    const mentionable = wish<Default<MentionableCharm[], []>>(
       "#mentionable",
-      [],
     );
 
     const list = cell<ListItem[]>([]);
