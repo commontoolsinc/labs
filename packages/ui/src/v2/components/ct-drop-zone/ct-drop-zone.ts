@@ -1,0 +1,188 @@
+import { css, html } from "lit";
+import { property, state } from "lit/decorators.js";
+import { BaseElement } from "../../core/base-element.ts";
+import { subscribeToDrag, subscribeToEndDrag } from "../../core/drag-state.ts";
+import type { DragState } from "../../core/drag-state.ts";
+
+/**
+ * CTDropZone - Marks a region as droppable and emits events when valid drops occur
+ *
+ * Purely behavioral component with no visual representation except CSS feedback
+ * during drag-over. Subscribes to drag state and checks if pointer intersects
+ * this element's bounding box.
+ *
+ * @element ct-drop-zone
+ *
+ * @property {string} accept - Optional filter by drag source type (comma-separated)
+ *
+ * @fires ct-drag-enter - When a valid drag enters the zone
+ * @fires ct-drag-leave - When a drag leaves the zone
+ * @fires ct-drop - When a valid drop occurs (drag ends while over this zone)
+ *
+ * @slot - Default slot for wrapped content
+ *
+ * @example
+ * <ct-drop-zone accept="item" onct-drop=${handleDrop}>
+ *   <div>Drop items here</div>
+ * </ct-drop-zone>
+ */
+export class CTDropZone extends BaseElement {
+  static override styles = [
+    BaseElement.baseStyles,
+    css`
+      :host {
+        display: block;
+      }
+
+      :host([drag-over]) {
+        outline: 2px dashed var(--ct-color-primary, #0066cc);
+        outline-offset: -2px;
+      }
+    `,
+  ];
+
+  @property({ type: String })
+  accept?: string;
+
+  @state()
+  private _isDragOver: boolean = false;
+
+  private _unsubscribeDrag?: () => void;
+  private _unsubscribeEndDrag?: () => void;
+
+  override connectedCallback() {
+    super.connectedCallback();
+
+    // Subscribe to global drag state changes
+    // This fires on every pointer move during drag
+    this._unsubscribeDrag = subscribeToDrag((state) => {
+      this._handleDragStateChange(state);
+    });
+
+    // Subscribe to drag end events to emit drop
+    this._unsubscribeEndDrag = subscribeToEndDrag((state) => {
+      this._handleDragEnd(state);
+    });
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+
+    // Unsubscribe from drag state
+    if (this._unsubscribeDrag) {
+      this._unsubscribeDrag();
+      this._unsubscribeDrag = undefined;
+    }
+    if (this._unsubscribeEndDrag) {
+      this._unsubscribeEndDrag();
+      this._unsubscribeEndDrag = undefined;
+    }
+  }
+
+  /**
+   * Handle drag state changes - check if pointer is over us
+   */
+  private _handleDragStateChange(state: DragState | null): void {
+    if (!state) {
+      // Drag ended - if we were in drag-over state, emit drop event
+      if (this._isDragOver) {
+        // We need to get the cell from the previous state, but it's gone now
+        // The drag-source will have already cleaned up, so we can't emit drop here
+        // Instead, we need to track the last known drag state
+        this._setDragOver(false);
+      }
+      return;
+    }
+
+    // Check if this drag type is accepted
+    if (!this._isAccepted(state.type)) {
+      if (this._isDragOver) {
+        this._setDragOver(false);
+      }
+      return;
+    }
+
+    // Check if pointer is within our bounding box
+    const isOver = this._isPointerOver(state.pointerX, state.pointerY);
+
+    if (isOver && !this._isDragOver) {
+      this._setDragOver(true, state);
+    } else if (!isOver && this._isDragOver) {
+      this._setDragOver(false);
+    }
+  }
+
+  /**
+   * Check if a drag type is accepted by this drop zone
+   */
+  private _isAccepted(dragType?: string): boolean {
+    if (!this.accept) return true; // Accept all if no filter
+    if (!dragType) return false; // Reject untyped drags when filter is set
+
+    const types = this.accept.split(",").map((t) => t.trim());
+    return types.includes(dragType);
+  }
+
+  /**
+   * Check if the pointer is within this element's bounding box
+   */
+  private _isPointerOver(x: number, y: number): boolean {
+    const rect = this.getBoundingClientRect();
+    return (
+      x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+    );
+  }
+
+  /**
+   * Update drag-over state and emit appropriate events
+   */
+  private _setDragOver(isOver: boolean, dragState?: DragState): void {
+    if (isOver === this._isDragOver) return;
+
+    this._isDragOver = isOver;
+    this.toggleAttribute("drag-over", isOver);
+
+    if (isOver && dragState) {
+      this.emit("ct-drag-enter", {
+        sourceCell: dragState.cell,
+        type: dragState.type,
+      });
+    } else {
+      this.emit("ct-drag-leave", {});
+    }
+  }
+
+  /**
+   * Handle drag end - if we're in drag-over state, emit drop
+   */
+  private _handleDragEnd(dragState: DragState): void {
+    if (this._isDragOver && this._isAccepted(dragState.type)) {
+      // Clean up visual state
+      this._isDragOver = false;
+      this.toggleAttribute("drag-over", false);
+
+      // Emit leave event before drop (dropping is a form of leaving)
+      this.emit("ct-drag-leave", {});
+
+      // Emit drop event
+      this.emit("ct-drop", {
+        sourceCell: dragState.cell,
+        type: dragState.type,
+      });
+    }
+  }
+
+  override render() {
+    return html`
+      <slot></slot>
+    `;
+  }
+}
+
+globalThis.customElements.define("ct-drop-zone", CTDropZone);
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "ct-drop-zone": CTDropZone;
+  }
+}
