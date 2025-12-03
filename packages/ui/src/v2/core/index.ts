@@ -12,4 +12,6 @@ export {
   isDragging,
   startDrag,
   subscribeToDrag,
+  subscribeToEndDrag,
+  updateDragPointer,
 } from "./drag-state.ts";

@@ -116,7 +116,8 @@ export class CTDragSource extends BaseElement {
   }
 
   private _handlePointerMove(e: PointerEvent) {
-    if (!this.cell || !this._isTracking) {
+    // Ignore events from other pointers (multi-touch, secondary mouse buttons)
+    if (!this.cell || !this._isTracking || e.pointerId !== this._pointerId) {
       return;
     }
 
@@ -139,7 +140,12 @@ export class CTDragSource extends BaseElement {
     }
   }
 
-  private _handlePointerUp(_e: PointerEvent) {
+  private _handlePointerUp(e: PointerEvent) {
+    // Ignore events from other pointers (multi-touch releases shouldn't cancel drag)
+    if (e.pointerId !== this._pointerId) {
+      return;
+    }
+
     // Clean up listeners
     document.removeEventListener("pointermove", this._boundPointerMove);
     document.removeEventListener("pointerup", this._boundPointerUp);
@@ -155,9 +161,12 @@ export class CTDragSource extends BaseElement {
   }
 
   private _isInteractiveElement(element: HTMLElement): boolean {
-    const tagName = element.tagName.toLowerCase();
-    const interactiveTags = ["input", "button", "select", "textarea", "a"];
-    return interactiveTags.includes(tagName);
+    // Check if element or any ancestor (up to this component) is interactive.
+    // This ensures clicks on descendants of buttons/links work correctly.
+    const interactiveSelector =
+      "input, button, select, textarea, a, [role='button']";
+    const interactive = element.closest(interactiveSelector);
+    return interactive !== null && this.contains(interactive);
   }
 
   private _startDrag(e: PointerEvent) {
