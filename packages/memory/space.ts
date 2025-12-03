@@ -1,6 +1,7 @@
 import {
   Database,
   SqliteError,
+  Statement,
   Transaction as DBTransaction,
 } from "@db/sqlite";
 
@@ -195,6 +196,84 @@ JOIN
 WHERE
   fact.this = :fact;
 `;
+
+// Batch query for labels using json_each() to handle array of 'of' values
+// This replaces N individual queries with a single query
+const GET_LABELS_BATCH = `SELECT
+  state.the as the,
+  state.of as of,
+  state.'is' as 'is',
+  state.cause as cause,
+  state.since as since,
+  state.fact as fact
+FROM
+  state
+WHERE
+  state.the = :the
+  AND state.of IN (SELECT value FROM json_each(:ofs))
+ORDER BY
+  since ASC
+`;
+
+/**
+ * Cache for prepared statements associated with each database connection.
+ * Using WeakMap ensures statements are cleaned up when database is closed.
+ */
+type PreparedStatements = {
+  export?: Statement;
+  causeChain?: Statement;
+  getFact?: Statement;
+  getLabelsBatch?: Statement;
+  importDatum?: Statement;
+  importFact?: Statement;
+  importMemory?: Statement;
+  swap?: Statement;
+};
+
+const preparedStatementsCache = new WeakMap<Database, PreparedStatements>();
+
+/**
+ * Get or create a prepared statement for a database connection.
+ * Prepared statements are cached and reused for better performance.
+ */
+const getPreparedStatement = (
+  db: Database,
+  key: keyof PreparedStatements,
+  sql: string,
+): Statement => {
+  let cache = preparedStatementsCache.get(db);
+  if (!cache) {
+    cache = {};
+    preparedStatementsCache.set(db, cache);
+  }
+
+  if (!cache[key]) {
+    cache[key] = db.prepare(sql);
+  }
+
+  return cache[key]!;
+};
+
+/**
+ * Finalize all prepared statements for a database connection.
+ * Called when closing the database to clean up resources.
+ */
+const finalizePreparedStatements = (db: Database): void => {
+  const cache = preparedStatementsCache.get(db);
+  if (cache) {
+    for (const stmt of Object.values(cache)) {
+      if (stmt) {
+        try {
+          stmt.finalize();
+        } catch (error) {
+          // Ignore errors during finalization
+          console.error("Error finalizing prepared statement:", error);
+        }
+      }
+    }
+    preparedStatementsCache.delete(db);
+  }
+};
 
 export type Options = {
   url: URL;
@@ -393,6 +472,7 @@ export const close = <Space extends MemorySpace>({
     addMemoryAttributes(span, { operation: "close" });
 
     try {
+      finalizePreparedStatements(store);
       store.close();
       return { ok: {} };
     } catch (cause) {
@@ -410,33 +490,33 @@ type StateRow = {
   since: number;
 };
 
+// Extended revision type that includes the stored fact hash
+type RevisionWithFact<T> = Revision<T> & { fact: string };
+
 const recall = <Space extends MemorySpace>(
   { store }: Session<Space>,
   { the, of }: { the: MIME; of: URI },
-): Revision<Fact> | null => {
-  const stmt = store.prepare(EXPORT);
-  try {
-    const row = stmt.get({ the, of }) as StateRow | undefined;
-    if (row) {
-      const revision: Revision<Fact> = {
-        the,
-        of,
-        cause: row.cause
-          ? (fromString(row.cause) as Reference<Assertion>)
-          : refer(unclaimed({ the, of })),
-        since: row.since,
-      };
+): RevisionWithFact<Fact> | null => {
+  const stmt = getPreparedStatement(store, "export", EXPORT);
+  const row = stmt.get({ the, of }) as StateRow | undefined;
+  if (row) {
+    const revision: RevisionWithFact<Fact> = {
+      the,
+      of,
+      cause: row.cause
+        ? (fromString(row.cause) as Reference<Assertion>)
+        : refer(unclaimed({ the, of })),
+      since: row.since,
+      fact: row.fact, // Include stored hash to avoid recomputing with refer()
+    };
 
-      if (row.is) {
-        revision.is = JSON.parse(row.is);
-      }
-
-      return revision;
-    } else {
-      return null;
+    if (row.is) {
+      revision.is = JSON.parse(row.is);
     }
-  } finally {
-    stmt.finalize();
+
+    return revision;
+  } else {
+    return null;
   }
 };
 
@@ -462,25 +542,21 @@ const _causeChain = <Space extends MemorySpace>(
   excludeFact: string | undefined,
 ): Revision<Fact>[] => {
   const { store } = session;
-  const stmt = store.prepare(CAUSE_CHAIN);
-  try {
-    const rows = stmt.all({ of, the }) as CauseRow[];
-    const revisions = [];
-    if (rows && rows.length) {
-      for (const result of rows) {
-        if (result.fact === excludeFact) {
-          continue;
-        }
-        const revision = getFact(session, { fact: result.fact });
-        if (revision) {
-          revisions.push(revision);
-        }
+  const stmt = getPreparedStatement(store, "causeChain", CAUSE_CHAIN);
+  const rows = stmt.all({ of, the }) as CauseRow[];
+  const revisions = [];
+  if (rows && rows.length) {
+    for (const result of rows) {
+      if (result.fact === excludeFact) {
+        continue;
+      }
+      const revision = getFact(session, { fact: result.fact });
+      if (revision) {
+        revisions.push(revision);
       }
     }
-    return revisions;
-  } finally {
-    stmt.finalize();
   }
+  return revisions;
 };
 
 /**
@@ -495,31 +571,27 @@ const getFact = <Space extends MemorySpace>(
   { store }: Session<Space>,
   { fact }: { fact: string },
 ): Revision<Fact> | undefined => {
-  const stmt = store.prepare(GET_FACT);
-  try {
-    const row = stmt.get({ fact }) as StateRow | undefined;
-    if (row === undefined) {
-      return undefined;
-    }
-    // It's possible to have more than one matching fact, but since the fact's id
-    // incorporates its cause chain, we would have to have issued a retraction,
-    // followed by the same chain of facts. At that point, it really is the same.
-    // Since `the` and `of` are part of the fact reference, they are also unique.
-    const revision: Revision<Fact> = {
-      the: row.the as MIME,
-      of: row.of as URI,
-      cause: row.cause
-        ? (fromString(row.cause) as Reference<Assertion>)
-        : refer(unclaimed(row as FactAddress)),
-      since: row.since,
-    };
-    if (row.is) {
-      revision.is = JSON.parse(row.is);
-    }
-    return revision;
-  } finally {
-    stmt.finalize();
+  const stmt = getPreparedStatement(store, "getFact", GET_FACT);
+  const row = stmt.get({ fact }) as StateRow | undefined;
+  if (row === undefined) {
+    return undefined;
   }
+  // It's possible to have more than one matching fact, but since the fact's id
+  // incorporates its cause chain, we would have to have issued a retraction,
+  // followed by the same chain of facts. At that point, it really is the same.
+  // Since `the` and `of` are part of the fact reference, they are also unique.
+  const revision: Revision<Fact> = {
+    the: row.the as MIME,
+    of: row.of as URI,
+    cause: row.cause
+      ? (fromString(row.cause) as Reference<Assertion>)
+      : refer(unclaimed(row as FactAddress)),
+    since: row.since,
+  };
+  if (row.is) {
+    revision.is = JSON.parse(row.is);
+  }
+  return revision;
 };
 
 const select = <Space extends MemorySpace>(
@@ -585,47 +657,39 @@ export const selectFacts = function <Space extends MemorySpace>(
   { store }: Session<Space>,
   { the, of, cause, is, since }: FactSelector,
 ): SelectedFact[] {
-  const stmt = store.prepare(EXPORT);
-  try {
-    const results = [];
-    for (
-      const row of stmt.iter({
-        the: the === SelectAllString ? null : the,
-        of: of === SelectAllString ? null : of,
-        cause: cause === SelectAllString ? null : cause,
-        is: is === undefined ? null : {},
-        since: since ?? null,
-      }) as Iterable<StateRow>
-    ) {
-      results.push(toFact(row));
-    }
-    return results;
-  } finally {
-    stmt.finalize();
+  const stmt = getPreparedStatement(store, "export", EXPORT);
+  const results = [];
+  for (
+    const row of stmt.iter({
+      the: the === SelectAllString ? null : the,
+      of: of === SelectAllString ? null : of,
+      cause: cause === SelectAllString ? null : cause,
+      is: is === undefined ? null : {},
+      since: since ?? null,
+    }) as Iterable<StateRow>
+  ) {
+    results.push(toFact(row));
   }
+  return results;
 };
 
 export const selectFact = function <Space extends MemorySpace>(
   { store }: Session<Space>,
   { the, of, since }: { the: MIME; of: URI; since?: number },
 ): SelectedFact | undefined {
-  const stmt = store.prepare(EXPORT);
-  try {
-    for (
-      const row of stmt.iter({
-        the: the,
-        of: of,
-        cause: null,
-        is: null,
-        since: since ?? null,
-      }) as Iterable<StateRow>
-    ) {
-      return toFact(row);
-    }
-    return undefined;
-  } finally {
-    stmt.finalize();
+  const stmt = getPreparedStatement(store, "export", EXPORT);
+  for (
+    const row of stmt.iter({
+      the: the,
+      of: of,
+      cause: null,
+      is: null,
+      since: since ?? null,
+    }) as Iterable<StateRow>
+  ) {
+    return toFact(row);
   }
+  return undefined;
 };
 
 /**
@@ -643,7 +707,12 @@ const importDatum = <Space extends MemorySpace>(
     return "undefined";
   } else {
     const is = refer(datum).toString();
-    session.store.run(IMPORT_DATUM, {
+    const stmt = getPreparedStatement(
+      session.store,
+      "importDatum",
+      IMPORT_DATUM,
+    );
+    stmt.run({
       this: is,
       source: JSON.stringify(datum),
     });
@@ -694,6 +763,15 @@ const swap = <Space extends MemorySpace>(
   const base = refer(unclaimed({ the, of })).toString();
   const expected = cause === base ? null : (expect as Reference<Fact>);
 
+  // IMPORTANT: Import datum BEFORE computing fact reference. The fact hash
+  // includes the datum as a sub-object, and merkle-reference caches sub-objects
+  // by identity during traversal. By hashing the datum first, we ensure the
+  // subsequent refer(assertion) call hits the cache for the payload (~2-4x faster).
+  let datumRef: string | undefined;
+  if (source.assert || source.retract) {
+    datumRef = importDatum(session, is);
+  }
+
   // Derive the merkle reference to the fact that memory will have after
   // successful update. If we have an assertion or retraction we derive fact
   // from it, but if it is a confirmation `cause` is the fact itself.
@@ -703,17 +781,19 @@ const swap = <Space extends MemorySpace>(
     ? refer(source.retract).toString()
     : source.claim.fact.toString();
 
-  // If this is an assertion we need to import asserted datum and then insert
-  // fact referencing it.
+  // If this is an assertion we need to insert fact referencing the datum.
   let imported = 0;
   if (source.assert || source.retract) {
-    // First we import datum and and then use its primary key as `is` field
-    // in the `fact` table upholding foreign key constraint.
-    imported = session.store.run(IMPORT_FACT, {
+    const importFactStmt = getPreparedStatement(
+      session.store,
+      "importFact",
+      IMPORT_FACT,
+    );
+    imported = importFactStmt.run({
       this: fact,
       the,
       of,
-      is: importDatum(session, is),
+      is: datumRef!,
       cause,
       since,
     });
@@ -731,14 +811,20 @@ const swap = <Space extends MemorySpace>(
   // therefore we insert or ignore here to ensure fact record exists and then
   // use update afterwards to update to desired state from expected `cause` state.
   if (expected == null) {
-    session.store.run(IMPORT_MEMORY, { the, of, fact });
+    const importMemoryStmt = getPreparedStatement(
+      session.store,
+      "importMemory",
+      IMPORT_MEMORY,
+    );
+    importMemoryStmt.run({ the, of, fact });
   }
 
   // Finally we perform a memory swap, using conditional update so it only
   // updates memory if the `cause` references expected state. We use return
   // value to figure out whether update took place, if it is `0` no records
   // were updated indicating potential conflict which we handle below.
-  const updated = session.store.run(SWAP, { fact, cause, the, of });
+  const swapStmt = getPreparedStatement(session.store, "swap", SWAP);
+  const updated = swapStmt.run({ fact, cause, the, of });
 
   // If no records were updated it implies that there was no record with
   // matching `cause`. It may be because `cause` referenced implicit fact
@@ -748,12 +834,12 @@ const swap = <Space extends MemorySpace>(
   // the record and comparing it to desired state.
   if (updated === 0) {
     const revision = recall(session, { the, of });
-    const { since: _, ...actual } = revision ? revision : { actual: null };
 
     // If actual state matches desired state it either was inserted by the
     // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
     // it as a conflict as current state is the asserted one.
-    if (refer(actual).toString() !== fact) {
+    // Use stored fact hash directly instead of recomputing with refer().
+    if (revision?.fact !== fact) {
       // Disable including history tracking for performance.
       // Re-enable this if you need to debug cause chains.
       const revisions: Revision<Fact>[] = [];
@@ -762,12 +848,18 @@ const swap = <Space extends MemorySpace>(
       //   { the, of },
       //   (imported !== 0) ? fact : undefined,
       // );
+      // Strip internal 'fact' field from revision for error reporting
+      let actual: Revision<Fact> | null = null;
+      if (revision) {
+        const { fact: _, ...rest } = revision;
+        actual = rest as Revision<Fact>;
+      }
       throw Error.conflict(transaction, {
         space: transaction.sub,
         the,
         of,
         expected,
-        actual: revision as Revision<Fact>,
+        actual,
         existsInHistory: imported === 0,
         history: revisions,
       });
@@ -781,13 +873,8 @@ const commit = <Space extends MemorySpace>(
 ): Commit<Space> => {
   const the = COMMIT_LOG_TYPE;
   const of = transaction.sub;
-  const stmt = session.store.prepare(EXPORT);
-  let row;
-  try {
-    row = stmt.get({ the, of }) as StateRow | undefined;
-  } finally {
-    stmt.finalize();
-  }
+  const stmt = getPreparedStatement(session.store, "export", EXPORT);
+  const row = stmt.get({ the, of }) as StateRow | undefined;
   const [since, cause] = row
     ? [
       (JSON.parse(row.is as string) as CommitData).since + 1,
@@ -961,6 +1048,7 @@ export type FactSelectionValue = { is?: JSONValue; since: number };
 // Get the labels associated with a set of commits.
 // It's possible to get more than one label for a single doc because our
 // includedFacts may include more than one cause for a single doc.
+// Uses a batched query (SELECT...IN) instead of N individual queries for performance.
 export function getLabels<
   Space extends MemorySpace,
   T,
@@ -969,25 +1057,46 @@ export function getLabels<
   includedFacts: OfTheCause<Revision<T>>,
 ): OfTheCause<FactSelectionValue> {
   const labels: OfTheCause<FactSelectionValue> = {};
+
+  // Collect unique 'of' values, excluding labels themselves
+  const ofs: URI[] = [];
   for (const fact of iterate(includedFacts)) {
-    // We don't restrict acccess to labels
-    if (fact.the === LABEL_TYPE) {
-      continue;
-    }
-    const labelFact = getLabel(session, fact.of);
-    if (labelFact !== undefined) {
-      set<FactSelectionValue, OfTheCause<FactSelectionValue>>(
-        labels,
-        labelFact.of,
-        labelFact.the,
-        labelFact.cause,
-        {
-          since: labelFact.since,
-          ...(labelFact.is ? { is: labelFact.is } : {}),
-        },
-      );
+    // We don't restrict access to labels
+    if (fact.the !== LABEL_TYPE) {
+      ofs.push(fact.of);
     }
   }
+
+  // No facts to look up labels for
+  if (ofs.length === 0) {
+    return labels;
+  }
+
+  // Batch query for all labels in a single SELECT...IN query
+  const stmt = getPreparedStatement(
+    session.store,
+    "getLabelsBatch",
+    GET_LABELS_BATCH,
+  );
+  for (
+    const row of stmt.iter({
+      the: LABEL_TYPE,
+      ofs: JSON.stringify(ofs),
+    }) as Iterable<StateRow>
+  ) {
+    const labelFact = toFact(row);
+    set<FactSelectionValue, OfTheCause<FactSelectionValue>>(
+      labels,
+      labelFact.of,
+      labelFact.the,
+      labelFact.cause,
+      {
+        since: labelFact.since,
+        ...(labelFact.is ? { is: labelFact.is } : {}),
+      },
+    );
+  }
+
   return labels;
 }
 
