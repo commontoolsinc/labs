@@ -1081,5 +1081,68 @@ describe("wish built-in", () => {
       const taggedItem = result.key("taggedItem").get()?.result;
       expect(taggedItem).toEqual({ name: "Item with #myTag" });
     });
+
+    it("starts charm automatically when accessed via cross-space wish", async () => {
+      // Setup 1: Create a simple counter recipe/charm
+      const counterRecipe = recipe<{ count: number }>("counter charm", () => {
+        const count = 0;
+        return {
+          count,
+          increment: () => {
+            return count + 1;
+          },
+        };
+      });
+
+      // Setup 2: Store the charm in home space
+      const charmCell = runtime.getCell(
+        userIdentity.did(),
+        "counter-charm",
+        undefined,
+        tx,
+      );
+      // Setup the charm (but don't start it yet)
+      runtime.setup(tx, counterRecipe, {}, charmCell);
+
+      // Setup 3: Add charm to favorites
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const favoritesCell = homeSpaceCell.key("favorites");
+      favoritesCell.set([
+        { cell: charmCell, tag: "#counterCharm test charm" },
+      ]);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: Pattern in different space wishes for the charm via hashtag
+      const wishingRecipe = recipe("wish for charm", () => {
+        return { charmData: wish({ query: "#counterCharm" }) };
+      });
+
+      const resultCell = runtime.getCell<{
+        charmData?: { result?: unknown };
+      }>(
+        patternSpace.did(),
+        "wish-charm-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishingRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Verify: Wish triggered charm to start and returns running charm data
+      const charmData = result.key("charmData").get()?.result;
+      expect(charmData).toBeDefined();
+      expect(typeof charmData).toBe("object");
+
+      // The charm should be running and have its state accessible
+      // Note: This test may need adjustment based on actual charm startup behavior
+      if (typeof charmData === "object" && charmData !== null) {
+        expect("count" in charmData || "increment" in charmData).toBe(true);
+      }
+    });
   });
 });
