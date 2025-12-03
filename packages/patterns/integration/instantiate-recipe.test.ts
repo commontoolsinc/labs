@@ -46,8 +46,10 @@ describe("instantiate-recipe integration test", () => {
 
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      spaceName: SPACE_NAME,
-      charmId,
+      view: {
+        spaceName: SPACE_NAME,
+        charmId,
+      },
       identity,
     });
 

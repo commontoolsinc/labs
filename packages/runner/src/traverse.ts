@@ -162,7 +162,7 @@ export class CycleTracker<K> {
   include(k: K, context?: unknown): Disposable | null {
     if (this.partial.has(k)) {
       if (!this.expectCycles) {
-        logger.warn(() => [
+        logger.warn("traverse", () => [
           "Cycle Detected!",
           k,
           context,
@@ -216,11 +216,12 @@ export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
           deepEqual(item, extraKey)
         );
         if (index === -1) {
-          logger.error(() => [
+          logger.error("traverse-error", () => [
             "Failed to dispose of missing key",
             extraKey,
             context,
           ]);
+          return;
         }
         if (entries.length === 0) {
           this.partial.delete(partialKey);
@@ -564,7 +565,10 @@ export abstract class BaseObjectTraverser<
         return this.objectCreator.createObject(newLink, newValue);
       }
     } else {
-      logger.error(() => ["Encountered unexpected object: ", doc.value]);
+      logger.error(
+        "traverse-error",
+        () => ["Encountered unexpected object: ", doc.value],
+      );
       return null;
     }
   }
@@ -806,6 +810,7 @@ export function loadSource(
     // undefined is strange, but acceptable
     if (source !== undefined) {
       logger.warn(
+        "traverse",
         () => ["Invalid source link", source, "in", valueEntry.address],
       );
     }
@@ -1153,7 +1158,10 @@ function narrowSchema(
   let pathIndex = 0;
   while (pathIndex < docPath.length && pathIndex < selector.path.length) {
     if (docPath[pathIndex] !== selector.path[pathIndex]) {
-      logger.warn(() => ["Mismatched paths", docPath, selector.path]);
+      logger.warn(
+        "traverse",
+        () => ["Mismatched paths", docPath, selector.path],
+      );
       return MinimalSchemaSelector;
     }
     pathIndex++;
@@ -1290,11 +1298,13 @@ export class SchemaObjectTraverser<V extends JSONValue>
       const schemaRef = schemaContext.schema["$ref"];
       if (!isObject(schemaContext.rootSchema)) {
         logger.warn(
+          "traverse",
           () => ["Unsupported $ref without root schema object: ", schemaRef],
         );
         return undefined;
       } else if (typeof schemaRef !== "string") {
         logger.warn(
+          "traverse",
           () => ["Invalid non-string $ref", schemaContext.schema, schemaRef],
         );
         return undefined;
@@ -1417,6 +1427,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       return undefined;
     } else if (!isObject(schemaContext.schema)) {
       logger.warn(
+        "traverse",
         () => ["Invalid schema is not an object", schemaContext.schema],
       );
       return undefined;
@@ -1771,6 +1782,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
           });
           if (val !== undefined) {
             logger.debug(
+              "traverse",
               () => ["merging asCell/asStream default", propKey, val],
             );
             filteredObj[propKey] = val;
@@ -1798,7 +1810,10 @@ export class SchemaObjectTraverser<V extends JSONValue>
           //   value: undefined,
           // }, propSchema);
           if (val !== undefined) {
-            logger.debug(() => ["merging schema default", propKey, val]);
+            logger.debug(
+              "traverse",
+              () => ["merging schema default", propKey, val],
+            );
             filteredObj[propKey] = val;
           }
         }
@@ -1811,7 +1826,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       if (Array.isArray(required)) {
         for (const requiredProperty of required) {
           if (!(requiredProperty in filteredObj)) {
-            logger.debug(() => [
+            logger.debug("traverse", () => [
               "Missing required property",
               requiredProperty,
               "in object",

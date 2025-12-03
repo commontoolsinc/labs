@@ -7,7 +7,7 @@ import { assert } from "@std/assert";
 import "../src/globals.ts";
 import { Identity } from "@commontools/identity";
 import { CharmsController } from "@commontools/charm/ops";
-import { FileSystemProgramResolver } from "@commontools/js-runtime";
+import { FileSystemProgramResolver } from "@commontools/js-compiler";
 
 const { API_URL, SPACE_NAME, FRONTEND_URL } = env;
 
@@ -52,13 +52,15 @@ describe("shell charm tests", () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      spaceName: SPACE_NAME,
-      charmId,
+      view: {
+        spaceName: SPACE_NAME,
+        charmId,
+      },
       identity,
     });
 
     let handle = await page.waitForSelector(
-      "ct-button",
+      "#counter-decrement",
       { strategy: "pierce" },
     );
     handle.click();

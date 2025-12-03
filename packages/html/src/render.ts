@@ -21,6 +21,8 @@ export type SetPropHandler = <T>(
 export interface RenderOptions {
   setProp?: SetPropHandler;
   document?: Document;
+  /** The root cell for auto-wrapping with ct-cell-context on [UI] traversal */
+  rootCell?: Cell;
 }
 
 export const vdomSchema: JSONSchema = {
@@ -61,9 +63,23 @@ export const render = (
   view: VNode | Cell<VNode>,
   options: RenderOptions = {},
 ): Cancel => {
-  // If this is a reactive cell, ensure the schema is VNode
-  if (isCell(view)) view = view.asSchema(vdomSchema);
-  return effect(view, (view: VNode) => renderImpl(parent, view, options));
+  // Initialize visited set with the original cell for cycle detection
+  const visited = new Set<object>();
+  let rootCell: Cell | undefined;
+
+  if (isCell(view)) {
+    visited.add(view);
+    rootCell = view; // Capture the original cell for ct-cell-context wrapping
+    view = view.asSchema(vdomSchema);
+  }
+
+  // Pass rootCell through options if we have one
+  const optionsWithCell = rootCell ? { ...options, rootCell } : options;
+
+  return effect(
+    view,
+    (view: VNode) => renderImpl(parent, view, optionsWithCell, visited),
+  );
 };
 
 /**
@@ -71,25 +87,31 @@ export const render = (
  * @param parent - The HTML element to render into
  * @param view - The VNode to render
  * @param options - Options for the renderer.
+ * @param visited - Set of visited cells/nodes for cycle detection
  * @returns A cancel function to remove the rendered content
  */
 export const renderImpl = (
   parent: HTMLElement,
   view: VNode,
   options: RenderOptions = {},
+  visited: Set<object> = new Set(),
 ): Cancel => {
   // If there is no valid vnode, don't render anything
-  if (!isVNode(view)) {
-    logger.debug("No valid vnode to render", view);
+  if (view === undefined) {
+    // Likely that content hasn't loaded yet
     return () => {};
   }
-  const [root, cancel] = renderNode(view, options);
+  if (!isVNode(view)) {
+    logger.debug("render", "No valid vnode to render", view);
+    return () => {};
+  }
+  const [root, cancel] = renderNode(view, options, visited);
   if (!root) {
-    logger.warn("Could not render view", view);
+    logger.warn("render", "Could not render view", view);
     return cancel;
   }
   parent.append(root);
-  logger.debug("Rendered root", root);
+  logger.debug("render", "Rendered root", root);
   return () => {
     root.remove();
     cancel();
@@ -98,16 +120,65 @@ export const renderImpl = (
 
 export default render;
 
+/** Create a placeholder element indicating a circular reference was detected */
+const createCyclePlaceholder = (document: Document): HTMLSpanElement => {
+  const element = document.createElement("span");
+  element.textContent = "🔄";
+  element.title = "Circular reference detected";
+  return element;
+};
+
+/** Check if a cell has been visited, using .equals() for cell comparison */
+const hasVisitedCell = (
+  visited: Set<object>,
+  cell: Cell<unknown>,
+): boolean => {
+  for (const item of visited) {
+    if (cell.equals(item)) {
+      return true;
+    }
+  }
+  return false;
+};
+
 const renderNode = (
   node: VNode,
   options: RenderOptions = {},
+  visited: Set<object> = new Set(),
 ): [HTMLElement | null, Cancel] => {
   const [cancel, addCancel] = useCancelGroup();
+
+  const document = options.document ?? globalThis.document;
+
+  // Check if we should wrap with ct-cell-context (when traversing [UI] with a rootCell)
+  const shouldWrapWithContext = node[UI] && options.rootCell;
+  const cellForContext = shouldWrapWithContext ? options.rootCell : undefined;
 
   // Follow `[UI]` to actual vdom. Do this before otherwise parsing the vnode,
   // so that if there are both, the `[UI]` annotation takes precedence (avoids
   // accidental collision with the otherwise quite generic property names)
-  while (node[UI]) node = node[UI];
+  while (node[UI]) {
+    // Detect cycles in UI chain
+    if (visited.has(node)) {
+      logger.warn("render", "Cycle detected in [UI] chain", node);
+      return [
+        createCyclePlaceholder(document),
+        cancel,
+      ];
+    }
+    visited.add(node);
+    node = node[UI];
+  }
+
+  // Check if the final node creates a cycle (for child -> parent references)
+  if (visited.has(node)) {
+    logger.warn("render", "Cycle detected in render tree", node);
+    return [
+      createCyclePlaceholder(document),
+      cancel,
+    ];
+  }
+  visited.add(node);
 
   const sanitizedNode = sanitizeNode(node);
 
@@ -127,8 +198,19 @@ const renderNode = (
       element,
       sanitizedNode.children,
       options,
+      visited,
     );
     addCancel(cancelChildren);
+  }
+
+  // Wrap with ct-cell-context if we traversed [UI] with a rootCell
+  if (cellForContext && element) {
+    const wrapper = document.createElement(
+      "ct-cell-context",
+    ) as HTMLElement & { cell?: Cell };
+    wrapper.cell = cellForContext;
+    wrapper.appendChild(element);
+    return [wrapper, cancel];
   }
 
   return [element, cancel];
@@ -138,6 +220,7 @@ const bindChildren = (
   element: HTMLElement,
   children: RenderNode,
   options: RenderOptions = {},
+  visited: Set<object> = new Set(),
 ): Cancel => {
   // Mapping from stable key to its rendered node and cancel function.
   let keyedChildren = new Map<string, { node: ChildNode; cancel: Cancel }>();
@@ -149,12 +232,31 @@ const bindChildren = (
     child: RenderNode,
     key: string,
   ): { node: ChildNode; cancel: Cancel } => {
-    let currentNode: ChildNode | null = null;
     const document = options.document ?? globalThis.document;
+
+    // Check for cell cycle before setting up effect (using .equals() for comparison)
+    if (isCell(child) && hasVisitedCell(visited, child)) {
+      logger.warn("render", "Cycle detected in cell graph", child);
+      return { node: createCyclePlaceholder(document), cancel: () => {} };
+    }
+
+    // Track if this child is a cell for the visited set
+    const childIsCell = isCell(child);
+
+    let currentNode: ChildNode | null = null;
     const cancel = effect(child, (childValue) => {
       let newRendered: { node: ChildNode; cancel: Cancel };
       if (isVNode(childValue)) {
-        const [childElement, childCancel] = renderNode(childValue, options);
+        // Create visited set for this child's subtree (cloned to avoid sibling interference)
+        const childVisited = new Set(visited);
+        if (childIsCell) {
+          childVisited.add(child);
+        }
+        const [childElement, childCancel] = renderNode(
+          childValue,
+          options,
+          childVisited,
+        );
         newRendered = {
           node: childElement ?? document.createTextNode(""),
           cancel: childCancel ?? (() => {}),
@@ -203,7 +305,14 @@ const bindChildren = (
 
     for (let i = 0; i < newChildren.length; i++) {
       const child = newChildren[i];
-      const rawKey = JSON.stringify(child);
+      // Try JSON.stringify for stable keys, fall back to index for circular structures
+      let rawKey: string;
+      try {
+        rawKey = JSON.stringify(child);
+      } catch {
+        // Circular structure or other JSON error - use index-based key
+        rawKey = `__circular_${i}`;
+      }
       const count = occurrence.get(rawKey) ?? 0;
       occurrence.set(rawKey, count + 1);
       // Composite key ensures that two structurally identical children get unique keys.
@@ -239,7 +348,7 @@ const bindChildren = (
       }
     }
 
-    logger.debug("new element order", { newKeyOrder });
+    logger.debug("render", "new element order", { newKeyOrder });
 
     keyedChildren = newMapping;
   };
@@ -279,7 +388,7 @@ const bindProps = (
           });
           addCancel(cancel);
         } else {
-          logger.warn("Could not bind event", propKey, propValue);
+          logger.warn("render", "Could not bind event", propKey, propValue);
         }
       } else if (propKey.startsWith("$")) {
         // Properties starting with $ get passed in as raw values, useful for
@@ -288,7 +397,7 @@ const bindProps = (
         setProperty(element, key, propValue);
       } else {
         const cancel = effect(propValue, (replacement) => {
-          logger.debug("prop update", propKey, replacement);
+          logger.debug("render", "prop update", propKey, replacement);
           // Replacements are set as properties not attributes to avoid
           // string serialization of complex datatypes.
           setProperty(element, propKey, replacement);

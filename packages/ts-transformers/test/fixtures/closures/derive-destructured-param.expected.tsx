@@ -5,8 +5,21 @@ interface Point {
     y: number;
 }
 export default function TestDerive() {
-    const point = cell({ x: 10, y: 20 } as Point);
-    const multiplier = cell(2);
+    const point = cell({ x: 10, y: 20 } as Point, {
+        type: "object",
+        properties: {
+            x: {
+                type: "number"
+            },
+            y: {
+                type: "number"
+            }
+        },
+        required: ["x", "y"]
+    } as const satisfies __ctHelpers.JSONSchema);
+    const multiplier = cell(2, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     // Destructured parameter
     const result = __ctHelpers.derive({
         type: "object",

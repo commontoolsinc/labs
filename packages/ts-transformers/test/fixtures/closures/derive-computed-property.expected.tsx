@@ -1,7 +1,9 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive } from "commontools";
 export default function TestDerive() {
-    const value = cell(10);
+    const value = cell(10, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     const config = { multiplier: 2, divisor: 5 };
     const key = "multiplier";
     const result = __ctHelpers.derive({
@@ -25,7 +27,7 @@ export default function TestDerive() {
             },
             key: {
                 type: "string",
-                enum: ["multiplier"]
+                "enum": ["multiplier"]
             }
         },
         required: ["value", "config", "key"]

@@ -14,7 +14,7 @@ interface NestedOptionalArgs {
     // deno-lint-ignore ban-types
     state: Default<NestedOptionalState, {}>;
 }
-const increment = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const increment = handler(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         state: {
@@ -65,10 +65,51 @@ export default recipe({
     properties: {
         state: {
             $ref: "#/$defs/NestedOptionalState",
-            default: {}
+            "default": {}
         }
     },
     required: ["state"],
+    $defs: {
+        NestedOptionalState: {
+            type: "object",
+            properties: {
+                nested: {
+                    $ref: "#/$defs/OptionalNested"
+                }
+            }
+        },
+        OptionalNested: {
+            type: "object",
+            properties: {
+                branch: {
+                    $ref: "#/$defs/OptionalBranch"
+                }
+            }
+        },
+        OptionalBranch: {
+            type: "object",
+            properties: {
+                counter: {
+                    type: "number"
+                },
+                label: {
+                    type: "string"
+                }
+            }
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        state: {
+            $ref: "#/$defs/NestedOptionalState",
+            asOpaque: true
+        },
+        increment: {
+            asStream: true
+        }
+    },
+    required: ["state", "increment"],
     $defs: {
         NestedOptionalState: {
             type: "object",

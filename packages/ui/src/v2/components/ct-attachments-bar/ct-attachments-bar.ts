@@ -16,20 +16,20 @@ interface Attachment {
 }
 
 /**
- * CTAttachmentsBar - Display attachments as a horizontal list of chips
+ * CTAttachmentsBar - Display pinned cells as a horizontal list of chips
  *
  * @element ct-attachments-bar
  *
- * @attr {boolean} removable - Whether attachments can be removed (default: false)
+ * @attr {boolean} removable - Whether pinned cells can be removed (default: false)
  *
- * @prop {Attachment[]} attachments - Array of attachments to display
+ * @prop {Attachment[]} pinnedCells - Array of pinned cells to display
  *
- * @fires ct-remove - Fired when an attachment is removed. detail: { id: string }
- * @fires ct-click - Fired when an attachment is clicked. detail: { id: string, attachment: Attachment }
+ * @fires ct-remove - Fired when a pinned cell is removed. detail: { id: string }
+ * @fires ct-click - Fired when a pinned cell is clicked. detail: { id: string, attachment: Attachment }
  *
  * @example
- * <ct-attachments-bar .attachments=${attachments}></ct-attachments-bar>
- * <ct-attachments-bar .attachments=${attachments} removable></ct-attachments-bar>
+ * <ct-attachments-bar .pinnedCells=${pinnedCells}></ct-attachments-bar>
+ * <ct-attachments-bar .pinnedCells=${pinnedCells} removable></ct-attachments-bar>
  */
 export class CTAttachmentsBar extends BaseElement {
   static override styles = [
@@ -57,7 +57,7 @@ export class CTAttachmentsBar extends BaseElement {
   ];
 
   @property({ type: Array })
-  attachments: Attachment[] = [];
+  pinnedCells: Attachment[] = [];
 
   @property({ type: Boolean })
   removable = false;
@@ -97,15 +97,15 @@ export class CTAttachmentsBar extends BaseElement {
   }
 
   override render() {
-    if (!this.attachments || this.attachments.length === 0) {
+    if (!this.pinnedCells || this.pinnedCells.length === 0) {
       return html`
-        <div class="empty-state">No attachments</div>
+        <div class="empty-state">No pinned cells</div>
       `;
     }
 
     return html`
       <div class="attachments-list">
-        ${this.attachments.map(
+        ${this.pinnedCells.map(
           (attachment) =>
             html`
               <ct-chip

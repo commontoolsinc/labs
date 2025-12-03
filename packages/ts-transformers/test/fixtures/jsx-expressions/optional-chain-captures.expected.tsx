@@ -47,6 +47,112 @@ export default recipe({
             }
         }
     }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/Element"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        Element: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        VNode: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        RenderNode: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "number"
+                }, {
+                    type: "boolean",
+                    "enum": [false]
+                }, {
+                    type: "boolean",
+                    "enum": [true]
+                }, {
+                    $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/RenderNode"
+                    }
+                }]
+        },
+        Props: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean",
+                        "enum": [false]
+                    }, {
+                        type: "boolean",
+                        "enum": [true]
+                    }, {
+                        type: "object",
+                        additionalProperties: true
+                    }, {
+                        type: "array",
+                        items: true
+                    }, {
+                        asCell: true
+                    }, {
+                        asStream: true
+                    }, {
+                        type: "null"
+                    }]
+            }
+        }
+    }
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
@@ -79,6 +185,103 @@ export default recipe({
                         }
                     }
                 }
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "object",
+                properties: {
+                    type: {
+                        type: "string",
+                        "enum": ["vnode"]
+                    },
+                    name: {
+                        type: "string"
+                    },
+                    props: {
+                        $ref: "#/$defs/Props"
+                    },
+                    children: {
+                        $ref: "#/$defs/RenderNode"
+                    },
+                    $UI: {
+                        $ref: "#/$defs/VNode"
+                    }
+                },
+                required: ["type", "name", "props"],
+                $defs: {
+                    VNode: {
+                        type: "object",
+                        properties: {
+                            type: {
+                                type: "string",
+                                "enum": ["vnode"]
+                            },
+                            name: {
+                                type: "string"
+                            },
+                            props: {
+                                $ref: "#/$defs/Props"
+                            },
+                            children: {
+                                $ref: "#/$defs/RenderNode"
+                            },
+                            $UI: {
+                                $ref: "#/$defs/VNode"
+                            }
+                        },
+                        required: ["type", "name", "props"]
+                    },
+                    RenderNode: {
+                        anyOf: [{
+                                type: "string"
+                            }, {
+                                type: "number"
+                            }, {
+                                type: "boolean",
+                                "enum": [false]
+                            }, {
+                                type: "boolean",
+                                "enum": [true]
+                            }, {
+                                $ref: "#/$defs/VNode"
+                            }, {
+                                type: "object",
+                                properties: {}
+                            }, {
+                                type: "array",
+                                items: {
+                                    $ref: "#/$defs/RenderNode"
+                                }
+                            }]
+                    },
+                    Props: {
+                        type: "object",
+                        properties: {},
+                        additionalProperties: {
+                            anyOf: [{
+                                    type: "string"
+                                }, {
+                                    type: "number"
+                                }, {
+                                    type: "boolean",
+                                    "enum": [false]
+                                }, {
+                                    type: "boolean",
+                                    "enum": [true]
+                                }, {
+                                    type: "object",
+                                    additionalProperties: true
+                                }, {
+                                    type: "array",
+                                    items: true
+                                }, {
+                                    asCell: true
+                                }, {
+                                    asStream: true
+                                }, {
+                                    type: "null"
+                                }]
+                        }
+                    }
+                }
             } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => (<span>{__ctHelpers.derive({
                 type: "object",
                 properties: {
@@ -101,7 +304,7 @@ export default recipe({
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         type: "number",
-                        enum: [0]
+                        "enum": [0]
                     }, {
                         type: "number",
                         asOpaque: true

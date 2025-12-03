@@ -1,5 +1,5 @@
 import { QuickJSHandle } from "./sandbox/quick.ts";
-import { type JsScript } from "@commontools/js-runtime";
+import { type JsScript } from "@commontools/js-compiler";
 import { GuestMessage, SandboxValue } from "./types.ts";
 import { Sandbox, SandboxConfig, SandboxStats } from "./sandbox/mod.ts";
 
@@ -11,7 +11,7 @@ type SandboxState = "unloaded" | "loaded" | "disposed";
 // must be called at least once.
 //
 // Each sandbox can load a single recipe compiled with
-// `js-runtime`, and then loaded via `sandbox.load(..)`.
+// `js-compiler`, and then loaded via `sandbox.load(..)`.
 // Functions exported by the typescript modules can be
 // then be invoked.
 export class RecipeSandbox {

@@ -5,6 +5,7 @@ import type {
   ISpaceReplica,
   IStorageManager,
   MemorySpace,
+  Signer,
 } from "../src/storage/interface.ts";
 import { Cell } from "../src/cell.ts";
 
@@ -38,6 +39,7 @@ class MockReplica implements ISpaceReplica {
 class MockStorageManager implements IStorageManager {
   id = "test-storage";
   replicas = new Map<MemorySpace, MockReplica>();
+  as = { did: () => "did:test:user" as const } as unknown as Signer;
 
   open(space: MemorySpace) {
     let replica = this.replicas.get(space);

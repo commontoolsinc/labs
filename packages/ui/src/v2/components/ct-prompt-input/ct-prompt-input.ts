@@ -24,9 +24,8 @@ import "../ct-chip/ct-chip.ts";
 export interface PromptAttachment {
   id: string; // UUID for reference
   name: string; // Display name
-  type: "file" | "clipboard" | "mention";
+  type: "file" | "clipboard";
   data?: File | Blob | string;
-  charm?: Mentionable; // For mention-type attachments
 }
 
 /**
@@ -55,10 +54,10 @@ export interface ModelItem {
  * @attr {ModelItem[]} modelItems - Array of model options for the model picker
  * @attr {Cell<string>|string} model - Selected model value (supports Cell binding)
  *
- * @fires ct-send - Fired when send button is clicked or Enter is pressed. detail: { text: string, attachments: PromptAttachment[], mentions: Mentionable[] }
+ * @fires ct-send - Fired when send button is clicked or Enter is pressed. detail: { text: string, attachments: PromptAttachment[], mentions: [] }
  * @fires ct-stop - Fired when stop button is clicked during pending state
  * @fires ct-input - Fired when textarea value changes. detail: { value: string }
- * @fires ct-attachment-add - Fired when an attachment is added (mention accepted, file uploaded, etc). detail: { attachment: PromptAttachment }
+ * @fires ct-attachment-add - Fired when an attachment is added (file uploaded, clipboard). detail: { attachment: PromptAttachment }
  * @fires ct-attachment-remove - Fired when an attachment is removed from the composer. detail: { id: string }
  *
  * @example
@@ -350,8 +349,8 @@ export class CTPromptInput extends BaseElement {
 
         // Mention controller
         private mentionController = new MentionController(this, {
-          onInsert: (markdown, mention) =>
-            this._insertMentionAtCursor(markdown, mention),
+          onInsert: (markdown, mentionCell) =>
+            this._insertMentionAtCursor(markdown, mentionCell),
           getCursorPosition: () => this._getCursorPosition(),
           getContent: () => this.value,
         });
@@ -476,22 +475,19 @@ export class CTPromptInput extends BaseElement {
 
           const text = textarea.value;
 
-          // Get all attachments and derive mentions from mention attachments
+          // Get all attachments (file uploads, clipboard)
           const attachments = Array.from(this.attachments.values());
-          const mentions = attachments
-            .filter((a) => a.type === "mention" && a.charm)
-            .map((a) => a.charm as Mentionable);
 
           // Clear the textarea and attachments
           textarea.value = "";
           this.value = "";
           this.attachments.clear();
 
-          // Emit the send event with new structure
+          // Emit the send event
           this.emit("ct-send", {
             text,
             attachments,
-            mentions,
+            mentions: [], // Mentions are now in the text as markdown links
             // Backward compatibility
             message: text,
           });
@@ -634,7 +630,7 @@ export class CTPromptInput extends BaseElement {
          */
         private _insertMentionAtCursor(
           _markdown: string,
-          mention: Mentionable,
+          mentionCell: Cell<Mentionable>,
         ): void {
           const textarea = this._textareaElement as HTMLTextAreaElement;
           if (!textarea) return;
@@ -648,26 +644,28 @@ export class CTPromptInput extends BaseElement {
           const beforeMention = this.value.substring(0, lastAtIndex);
           const afterMention = this.value.substring(cursorPos);
 
-          // Format the name: add brackets if it contains spaces
-          const name = mention[NAME] || "Unknown";
-          const formattedName = name.includes(" ") ? `[${name}]` : name;
+          // Get the name from the mention cell
+          const name = mentionCell.get()?.[NAME] || "Unknown";
 
-          this.value = beforeMention + formattedName + afterMention;
+          // Get the link in /of: format
+          const link = mentionCell.resolveAsCell().getAsNormalizedFullLink();
+          const handle = link.id || "";
+          const pathSegments = link.path || [];
+
+          // Format as /of:handle/path/segments
+          let linkPath = `/${handle}`;
+          if (pathSegments.length > 0) {
+            linkPath += `/${pathSegments.join("/")}`;
+          }
+
+          // Format as markdown link: [Name](/of:...)
+          const markdownLink = `[${name}](${linkPath})`;
+
+          this.value = beforeMention + markdownLink + afterMention;
           textarea.value = this.value;
 
-          // Create an attachment pill for the mention
-          const attachmentId = this._generateAttachmentId();
-          const attachment: PromptAttachment = {
-            id: attachmentId,
-            name,
-            type: "mention",
-            charm: mention,
-          };
-
-          this.addAttachment(attachment);
-
           // Set cursor after the inserted mention
-          const newCursorPos = beforeMention.length + formattedName.length;
+          const newCursorPos = beforeMention.length + markdownLink.length;
           textarea.setSelectionRange(newCursorPos, newCursorPos);
           textarea.focus();
 
@@ -811,8 +809,6 @@ export class CTPromptInput extends BaseElement {
          */
         private _getAttachmentIcon(type: PromptAttachment["type"]): string {
           switch (type) {
-            case "mention":
-              return "@";
             case "file":
               return "📎";
             case "clipboard":
@@ -826,8 +822,6 @@ export class CTPromptInput extends BaseElement {
           type: PromptAttachment["type"],
         ): "default" | "primary" | "accent" {
           switch (type) {
-            case "mention":
-              return "primary";
             case "clipboard":
               return "accent";
             case "file":
@@ -1011,7 +1005,7 @@ export class CTPromptInput extends BaseElement {
             }
             </style>
             <div class="mentions-dropdown" role="listbox">
-              ${filteredMentions.map((mention, index) =>
+              ${filteredMentions.map((mentionCell, index) =>
                 html`
                   <div
                     class="mention-item ${index ===
@@ -1020,11 +1014,11 @@ export class CTPromptInput extends BaseElement {
                       : ""}"
                     role="option"
                     @click="${() =>
-                      this.mentionController.insertMention(mention)}"
+                      this.mentionController.insertMention(mentionCell)}"
                     @mouseenter="${() =>
                       this.mentionController.selectMention(index)}"
                   >
-                    <div class="mention-name">${mention[NAME]}</div>
+                    <div class="mention-name">${mentionCell.get()?.[NAME]}</div>
                   </div>
                 `
               )}

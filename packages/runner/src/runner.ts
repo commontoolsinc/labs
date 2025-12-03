@@ -37,6 +37,7 @@ import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   isLink,
+  isSigilLink,
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
@@ -182,7 +183,7 @@ export class Runner implements IRunner {
       resultCell.withTx(tx).setSourceCell(processCell);
     }
 
-    logger.debug(() => [
+    logger.debug("cell-info", () => [
       `resultCell: ${resultCell.getAsNormalizedFullLink().id}`,
       `processCell: ${
         resultCell.withTx(tx).getSourceCell()?.getAsNormalizedFullLink().id
@@ -302,7 +303,14 @@ export class Runner implements IRunner {
     processCell.withTx(tx).setRaw({
       ...processCell.getRaw({ meta: ignoreReadForScheduling }),
       [TYPE]: recipeId || "unknown",
-      resultRef: resultCell.getAsLink({ base: processCell }),
+      resultRef: (recipe.resultSchema !== undefined
+        ? resultCell.asSchema(recipe.resultSchema).getAsLink({
+          base: processCell,
+          includeSchema: true,
+        })
+        : resultCell.getAsLink({
+          base: processCell,
+        })),
       internal,
       ...(recipeId !== undefined) ? { spell: getSpellLink(recipeId) } : {},
     });
@@ -517,7 +525,7 @@ export class Runner implements IRunner {
         resultCell.withTx(givenTx),
       );
     } else {
-      const error = await this.runtime.editWithRetry((tx) => {
+      const { error } = await this.runtime.editWithRetry((tx) => {
         setupRes = this.setupInternal(
           tx,
           recipe,
@@ -526,7 +534,7 @@ export class Runner implements IRunner {
         );
       });
       if (error) {
-        logger.error("Error setting up recipe", error);
+        logger.error("recipe-setup-error", "Error setting up recipe", error);
         setupRes = undefined;
       }
     }
@@ -544,7 +552,22 @@ export class Runner implements IRunner {
         // TODO(seefeld): Enforce this by adding a read-only flag for tx
         await tx.commit().then(({ error }) => {
           if (error) {
-            logger.error("Error committing transaction", error);
+            logger.error(
+              "tx-commit-error",
+              () => [
+                "Error committing transaction",
+                "\nError:",
+                JSON.stringify(error, null, 2),
+                error.name === "ConflictError"
+                  ? [
+                    "\nConflict details:",
+                    JSON.stringify(error.conflict, null, 2),
+                    "\nTransaction:",
+                    JSON.stringify(error.transaction, null, 2),
+                  ]
+                  : [],
+              ],
+            );
           }
         });
       }
@@ -634,7 +657,7 @@ export class Runner implements IRunner {
     }
 
     // Sync all the previously computed results.
-    if (recipe.resultSchema) {
+    if (recipe.resultSchema !== undefined) {
       cells.push(resultCell.asSchema(recipe.resultSchema));
     }
 
@@ -992,7 +1015,7 @@ export class Runner implements IRunner {
           const result = fn(argument);
 
           const postRun = (result: any) => {
-            if (containsOpaqueRef(result)) {
+            if (containsOpaqueRef(result) || frame.opaqueRefs.size > 0) {
               const resultRecipe = recipeFromFrame(
                 "event handler result",
                 undefined,
@@ -1083,7 +1106,7 @@ export class Runner implements IRunner {
           const result = fn(argument);
 
           const postRun = (result: any) => {
-            if (containsOpaqueRef(result)) {
+            if (containsOpaqueRef(result) || frame.opaqueRefs.size > 0) {
               const resultRecipe = recipeFromFrame(
                 "action result",
                 undefined,
@@ -1265,24 +1288,44 @@ export class Runner implements IRunner {
       processCell,
     );
     const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
-    const resultCell = this.runtime.getCell(
-      processCell.space,
-      {
-        recipe: module.implementation,
-        parent: processCell.entityId,
-        inputBindings,
-        outputBindings,
-      },
-      undefined,
-      tx,
-    );
+
+    // If output bindings is a link to a non-redirect cell,
+    // use that instead of creating a new cell.
+    let resultCell;
+    let sendToBindings: boolean;
+    if (isSigilLink(outputBindings) && !isWriteRedirectLink(outputBindings)) {
+      resultCell = this.runtime.getCellFromLink(
+        parseLink(outputBindings, processCell),
+        recipeImpl.resultSchema,
+        tx,
+      );
+      sendToBindings = false;
+    } else {
+      resultCell = this.runtime.getCell(
+        processCell.space,
+        {
+          recipe: module.implementation,
+          parent: processCell.entityId,
+          inputBindings,
+          outputBindings,
+        },
+        recipeImpl.resultSchema,
+        tx,
+      );
+      sendToBindings = true;
+    }
+
     this.run(tx, recipeImpl, inputs, resultCell);
-    sendValueToBinding(
-      tx,
-      processCell,
-      outputBindings,
-      resultCell.getAsLink({ base: processCell }),
-    );
+
+    if (sendToBindings) {
+      sendValueToBinding(
+        tx,
+        processCell,
+        outputBindings,
+        resultCell.getAsLink({ base: processCell }),
+      );
+    }
+
     // TODO(seefeld): Make sure to not cancel after a recipe is elevated to a
     // charm, e.g. via navigateTo. Nothing is cancelling right now, so leaving
     // this as TODO.

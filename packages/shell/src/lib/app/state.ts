@@ -5,26 +5,59 @@ import {
   TransferrableInsecureCryptoKeyPair,
 } from "@commontools/identity";
 import { Command } from "./commands.ts";
+import { AppView } from "./view.ts";
 
 // Primary application state.
 export interface AppState {
   identity?: Identity;
-  spaceName?: string;
-  activeCharmId?: string;
+  view: AppView;
   apiUrl: URL;
+  config: AppStateConfig;
+}
+
+export interface AppStateConfig {
   showShellCharmListView?: boolean;
   showDebuggerView?: boolean;
   showQuickJumpView?: boolean;
   showSidebar?: boolean;
 }
 
+export type AppStateConfigKey = keyof AppStateConfig;
+
 export type AppStateSerialized = Omit<AppState, "identity" | "apiUrl"> & {
   identity?: TransferrableInsecureCryptoKeyPair | null;
   apiUrl: string;
 };
 
+export function isAppStateConfigKey(
+  value: unknown,
+): value is AppStateConfigKey {
+  if (typeof value !== "string") return false;
+  switch (value) {
+    case "showShellCharmListView":
+    case "showDebuggerView":
+    case "showQuickJumpView":
+    case "showSidebar":
+      return true;
+  }
+  return false;
+}
+
+export function createAppState(
+  initial: Pick<AppState, "view" | "apiUrl" | "identity"> & {
+    config?: AppStateConfig;
+  },
+): AppState {
+  return Object.assign({}, initial, { config: initial.config ?? {} });
+}
+
 export function clone(state: AppState): AppState {
-  return Object.assign({}, state);
+  return Object.assign({}, state, {
+    config: Object.assign({}, state.config),
+    view: typeof state.view === "object"
+      ? Object.assign({}, state.view)
+      : state.view,
+  });
 }
 
 export function applyCommand(
@@ -33,39 +66,22 @@ export function applyCommand(
 ): AppState {
   const next = clone(state);
   switch (command.type) {
-    case "set-active-charm-id": {
-      next.activeCharmId = command.charmId;
-      if (command.charmId) {
-        next.showShellCharmListView = false;
-      }
-      break;
-    }
     case "set-identity": {
       next.identity = command.identity;
       break;
     }
-    case "set-space": {
-      next.spaceName = command.spaceName;
+    case "set-view": {
+      next.view = command.view;
+      if ("charmId" in command.view && command.view.charmId) {
+        next.config.showShellCharmListView = false;
+      }
       break;
     }
-    case "clear-authentication": {
-      next.identity = undefined;
-      break;
-    }
-    case "set-show-charm-list-view": {
-      next.showShellCharmListView = command.show;
-      break;
-    }
-    case "set-show-debugger-view": {
-      next.showDebuggerView = command.show;
-      break;
-    }
-    case "set-show-quick-jump-view": {
-      next.showQuickJumpView = command.show;
-      break;
-    }
-    case "set-show-sidebar": {
-      next.showSidebar = command.show;
+    case "set-config": {
+      if (!isAppStateConfigKey(command.key)) {
+        throw new Error(`Invalid config key: ${command.key}`);
+      }
+      next.config[command.key] = command.value;
       break;
     }
   }

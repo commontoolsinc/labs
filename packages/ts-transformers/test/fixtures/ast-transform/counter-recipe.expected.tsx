@@ -18,7 +18,7 @@ const increment = handler(true as const satisfies __ctHelpers.JSONSchema, {
 } as const satisfies __ctHelpers.JSONSchema, (_e, state) => {
     state.value.set(state.value.get() + 1);
 });
-const decrement = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const decrement = handler(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -37,10 +37,124 @@ export default recipe({
     properties: {
         value: {
             type: "number",
-            default: 0
+            "default": 0
         }
     },
     required: ["value"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $NAME: {
+            type: "string",
+            asOpaque: true
+        },
+        $UI: {
+            $ref: "#/$defs/Element"
+        },
+        value: {
+            type: "number",
+            asOpaque: true
+        }
+    },
+    required: ["$NAME", "$UI", "value"],
+    $defs: {
+        Element: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        VNode: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        RenderNode: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "number"
+                }, {
+                    type: "boolean",
+                    "enum": [false]
+                }, {
+                    type: "boolean",
+                    "enum": [true]
+                }, {
+                    $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/RenderNode"
+                    }
+                }]
+        },
+        Props: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean",
+                        "enum": [false]
+                    }, {
+                        type: "boolean",
+                        "enum": [true]
+                    }, {
+                        type: "object",
+                        additionalProperties: true
+                    }, {
+                        type: "array",
+                        items: true
+                    }, {
+                        asCell: true
+                    }, {
+                        asStream: true
+                    }, {
+                        type: "null"
+                    }]
+            }
+        }
+    }
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [NAME]: str `Simple counter: ${state.value}`,

@@ -1,4 +1,4 @@
-// Mirrors js-runtime fixture: recipe-with-types (inputSchema)
+// Mirrors schema-generator fixture: recipe-with-types (inputSchema)
 // Root type must be named SchemaRoot for the fixtures runner.
 
 import { Default } from "commontools";

@@ -20,7 +20,7 @@ export default recipe<Input, Result>(
     return {
       [NAME]: "ct-select demo",
       [UI]: (
-        <common-vstack gap="lg" style={{ padding: "1rem" }}>
+        <ct-vstack gap="3" style={{ padding: "1rem" }}>
           <h3>ct-select Component Demo</h3>
 
           <ct-card>
@@ -68,7 +68,7 @@ export default recipe<Input, Result>(
             />
             <p>Selected category: {category}</p>
           </ct-card>
-        </common-vstack>
+        </ct-vstack>
       ),
       selected,
       numericChoice,

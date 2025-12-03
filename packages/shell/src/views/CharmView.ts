@@ -13,7 +13,7 @@ export class XCharmView extends BaseView {
       min-height: 0; /* Important for flex children */
     }
 
-    common-charm {
+    ct-charm {
       flex: 1;
       display: flex;
       flex-direction: column;
@@ -42,9 +42,9 @@ export class XCharmView extends BaseView {
     const cell = this.charm.getCell();
 
     return html`
-      <common-charm .charmId="${this.charm.id}">
+      <ct-charm .charmId="${this.charm.id}">
         <ct-render .cell="${cell}"></ct-render>
-      </common-charm>
+      </ct-charm>
     `;
   }
 }

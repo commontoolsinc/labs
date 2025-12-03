@@ -3,7 +3,7 @@ import ts from "typescript";
 import type { Emitter } from "../types.ts";
 import { createBindingPlan } from "../bindings.ts";
 import {
-  createDeriveCallForExpression,
+  createComputedCallForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
 import { normalizeDataFlows } from "../../../ast/mod.ts";
@@ -45,5 +45,5 @@ export const emitPrefixUnaryExpression: Emitter = ({
   }
 
   const plan = createBindingPlan(relevantDataFlows);
-  return createDeriveCallForExpression(expression, plan, context);
+  return createComputedCallForExpression(expression, plan, context);
 };

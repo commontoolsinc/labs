@@ -1,10 +1,130 @@
 import * as __ctHelpers from "commontools";
 import { cell, recipe, UI } from "commontools";
-export default recipe("MapSingleCapture", (_state) => {
+export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/Element"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        Element: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        VNode: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        RenderNode: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "number"
+                }, {
+                    type: "boolean",
+                    "enum": [false]
+                }, {
+                    type: "boolean",
+                    "enum": [true]
+                }, {
+                    $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/RenderNode"
+                    }
+                }]
+        },
+        Props: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean",
+                        "enum": [false]
+                    }, {
+                        type: "boolean",
+                        "enum": [true]
+                    }, {
+                        type: "object",
+                        additionalProperties: true
+                    }, {
+                        type: "array",
+                        items: true
+                    }, {
+                        asCell: true
+                    }, {
+                        asStream: true
+                    }, {
+                        type: "null"
+                    }]
+            }
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, (_state) => {
     const people = cell([
         { id: "1", name: "Alice" },
         { id: "2", name: "Bob" },
-    ]);
+    ], {
+        type: "array",
+        items: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "string"
+                },
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["id", "name"]
+        }
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [UI]: (<div>
         {__ctHelpers.derive({
@@ -31,7 +151,7 @@ export default recipe("MapSingleCapture", (_state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     type: "boolean",
-                    enum: [false]
+                    "enum": [false]
                 }, {
                     $ref: "#/$defs/Element"
                 }],
@@ -41,7 +161,7 @@ export default recipe("MapSingleCapture", (_state) => {
                     properties: {
                         type: {
                             type: "string",
-                            enum: ["vnode"]
+                            "enum": ["vnode"]
                         },
                         name: {
                             type: "string"
@@ -63,7 +183,7 @@ export default recipe("MapSingleCapture", (_state) => {
                     properties: {
                         type: {
                             type: "string",
-                            enum: ["vnode"]
+                            "enum": ["vnode"]
                         },
                         name: {
                             type: "string"
@@ -87,10 +207,10 @@ export default recipe("MapSingleCapture", (_state) => {
                             type: "number"
                         }, {
                             type: "boolean",
-                            enum: [false]
+                            "enum": [false]
                         }, {
                             type: "boolean",
-                            enum: [true]
+                            "enum": [true]
                         }, {
                             $ref: "#/$defs/VNode"
                         }, {
@@ -113,10 +233,10 @@ export default recipe("MapSingleCapture", (_state) => {
                                 type: "number"
                             }, {
                                 type: "boolean",
-                                enum: [false]
+                                "enum": [false]
                             }, {
                                 type: "boolean",
-                                enum: [true]
+                                "enum": [true]
                             }, {
                                 type: "object",
                                 additionalProperties: true
@@ -133,8 +253,126 @@ export default recipe("MapSingleCapture", (_state) => {
                     }
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, { people: people }, ({ people }) => people.length > 0 && (<ul>
-            {people.map((person) => (<li key={person.id}>{person.name}</li>))}
+        } as const satisfies __ctHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length > 0 && (<ul>
+            {people.mapWithPattern(__ctHelpers.recipe({
+                type: "object",
+                properties: {
+                    element: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "string"
+                            },
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "name"]
+                    },
+                    params: {
+                        type: "object",
+                        properties: {}
+                    }
+                },
+                required: ["element", "params"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "object",
+                properties: {
+                    type: {
+                        type: "string",
+                        "enum": ["vnode"]
+                    },
+                    name: {
+                        type: "string"
+                    },
+                    props: {
+                        $ref: "#/$defs/Props"
+                    },
+                    children: {
+                        $ref: "#/$defs/RenderNode"
+                    },
+                    $UI: {
+                        $ref: "#/$defs/VNode"
+                    }
+                },
+                required: ["type", "name", "props"],
+                $defs: {
+                    VNode: {
+                        type: "object",
+                        properties: {
+                            type: {
+                                type: "string",
+                                "enum": ["vnode"]
+                            },
+                            name: {
+                                type: "string"
+                            },
+                            props: {
+                                $ref: "#/$defs/Props"
+                            },
+                            children: {
+                                $ref: "#/$defs/RenderNode"
+                            },
+                            $UI: {
+                                $ref: "#/$defs/VNode"
+                            }
+                        },
+                        required: ["type", "name", "props"]
+                    },
+                    RenderNode: {
+                        anyOf: [{
+                                type: "string"
+                            }, {
+                                type: "number"
+                            }, {
+                                type: "boolean",
+                                "enum": [false]
+                            }, {
+                                type: "boolean",
+                                "enum": [true]
+                            }, {
+                                $ref: "#/$defs/VNode"
+                            }, {
+                                type: "object",
+                                properties: {}
+                            }, {
+                                type: "array",
+                                items: {
+                                    $ref: "#/$defs/RenderNode"
+                                }
+                            }]
+                    },
+                    Props: {
+                        type: "object",
+                        properties: {},
+                        additionalProperties: {
+                            anyOf: [{
+                                    type: "string"
+                                }, {
+                                    type: "number"
+                                }, {
+                                    type: "boolean",
+                                    "enum": [false]
+                                }, {
+                                    type: "boolean",
+                                    "enum": [true]
+                                }, {
+                                    type: "object",
+                                    additionalProperties: true
+                                }, {
+                                    type: "array",
+                                    items: true
+                                }, {
+                                    asCell: true
+                                }, {
+                                    asStream: true
+                                }, {
+                                    type: "null"
+                                }]
+                        }
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: person, params: {} }) => (<li key={person.id}>{person.name}</li>)), {})}
           </ul>))}
       </div>),
     };

@@ -1,5 +1,5 @@
 /**
- * Well-known entity IDs used by built-in functions.
+ * Well-known entity IDs and patterns used by built-in functions.
  */
 
 /**

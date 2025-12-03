@@ -1,8 +1,15 @@
 import * as __ctHelpers from "commontools";
 import { cell, computed, recipe } from "commontools";
-export default recipe(() => {
-    const a = cell(10);
-    const b = cell(20);
+export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
+    type: "number",
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema, () => {
+    const a = cell(10, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const b = cell(20, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     const sum = __ctHelpers.derive({
         type: "object",
         properties: {

@@ -108,6 +108,7 @@ export class XCharmListView extends BaseView {
     });
     return html`
       <h3>${spaceName}</h3>
+      <x-acl-view .rt="${this.rt}"></x-acl-view>
       <ul>${list}</ul>
     `;
   }

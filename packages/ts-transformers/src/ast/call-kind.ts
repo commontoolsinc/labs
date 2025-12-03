@@ -21,11 +21,28 @@ const OPAQUE_REF_OWNER_NAMES = new Set([
   "OpaqueRef",
 ]);
 
+const CELL_LIKE_CLASSES = new Set([
+  "Cell",
+  "OpaqueCell",
+  "Stream",
+  "ComparableCell",
+  "ReadonlyCell",
+  "WriteonlyCell",
+  "CellTypeConstructor",
+]);
+
+const CELL_FACTORY_NAMES = new Set(["of"]);
+const CELL_FOR_NAMES = new Set(["for"]);
+
 export type CallKind =
   | { kind: "ifElse"; symbol?: ts.Symbol }
   | { kind: "builder"; symbol?: ts.Symbol; builderName: string }
   | { kind: "array-map"; symbol?: ts.Symbol }
-  | { kind: "derive"; symbol?: ts.Symbol };
+  | { kind: "derive"; symbol?: ts.Symbol }
+  | { kind: "cell-factory"; symbol?: ts.Symbol; factoryName: string }
+  | { kind: "cell-for"; symbol?: ts.Symbol }
+  | { kind: "wish"; symbol?: ts.Symbol }
+  | { kind: "generate-object"; symbol?: ts.Symbol };
 
 export function detectCallKind(
   call: ts.CallExpression,
@@ -49,6 +66,15 @@ function resolveExpressionKind(
     }
     if (name === "ifElse") {
       return { kind: "ifElse" };
+    }
+    if (name === "cell") {
+      return { kind: "cell-factory", factoryName: "cell" };
+    }
+    if (name === "wish") {
+      return { kind: "wish" };
+    }
+    if (name === "generateObject") {
+      return { kind: "generate-object" };
     }
     if (BUILDER_SYMBOL_NAMES.has(name)) {
       return { kind: "builder", builderName: name };
@@ -88,6 +114,12 @@ function resolveExpressionKind(
     }
     if (name === "ifElse") {
       return { kind: "ifElse" };
+    }
+    if (name === "wish") {
+      return { kind: "wish" };
+    }
+    if (name === "generateObject") {
+      return { kind: "generate-object" };
     }
     if (BUILDER_SYMBOL_NAMES.has(name)) {
       return { kind: "builder", builderName: name };
@@ -144,6 +176,10 @@ function resolveSymbolKind(
   for (const declaration of declarations) {
     const builderKind = detectBuilderFromDeclaration(resolved, declaration);
     if (builderKind) return builderKind;
+
+    const cellKind = detectCellMethodFromDeclaration(resolved, declaration);
+    if (cellKind) return cellKind;
+
     if (
       isArrayMapDeclaration(declaration) ||
       isOpaqueRefMapDeclaration(declaration)
@@ -172,16 +208,41 @@ function resolveSymbolKind(
     return { kind: "derive", symbol: resolved };
   }
 
+  if (name === "cell" && isCommonToolsSymbol(resolved)) {
+    return { kind: "cell-factory", symbol: resolved, factoryName: "cell" };
+  }
+
+  if (name === "wish" && isCommonToolsSymbol(resolved)) {
+    return { kind: "wish", symbol: resolved };
+  }
+
+  if (name === "generateObject" && isCommonToolsSymbol(resolved)) {
+    return { kind: "generate-object", symbol: resolved };
+  }
+
   if (BUILDER_SYMBOL_NAMES.has(name) && isCommonToolsSymbol(resolved)) {
     return { kind: "builder", symbol: resolved, builderName: name };
   }
 
+  // Fallback for when isCommonToolsSymbol check fails (e.g. in tests or incomplete environments)
   if (name === "ifElse") {
     return { kind: "ifElse", symbol: resolved };
   }
 
   if (name === "derive") {
     return { kind: "derive", symbol: resolved };
+  }
+
+  if (name === "cell") {
+    return { kind: "cell-factory", symbol: resolved, factoryName: "cell" };
+  }
+
+  if (name === "wish") {
+    return { kind: "wish", symbol: resolved };
+  }
+
+  if (name === "generateObject") {
+    return { kind: "generate-object", symbol: resolved };
   }
 
   if (BUILDER_SYMBOL_NAMES.has(name)) {
@@ -225,6 +286,28 @@ function detectBuilderFromDeclaration(
     symbol,
     builderName: name,
   };
+}
+
+function detectCellMethodFromDeclaration(
+  symbol: ts.Symbol,
+  declaration: ts.Declaration,
+): CallKind | undefined {
+  if (!hasIdentifierName(declaration)) return undefined;
+
+  const name = declaration.name.text;
+
+  // Check for static methods on Cell-like classes
+  const owner = findOwnerName(declaration);
+  if (owner && CELL_LIKE_CLASSES.has(owner)) {
+    if (CELL_FACTORY_NAMES.has(name)) {
+      return { kind: "cell-factory", symbol, factoryName: name };
+    }
+    if (CELL_FOR_NAMES.has(name)) {
+      return { kind: "cell-for", symbol };
+    }
+  }
+
+  return undefined;
 }
 
 function isArrayMapDeclaration(declaration: ts.Declaration): boolean {

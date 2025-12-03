@@ -191,11 +191,12 @@ jobs:
     name: "Attest and Upload Binaries"
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04-32-core
-    needs: [
-      "pattern-integration-test",
-      "package-integration-test",
-      "cli-integration-test",
-    ]
+    needs:
+      [
+        "pattern-integration-test",
+        "package-integration-test",
+        "cli-integration-test",
+      ]
     environment: ci
     permissions:
       id-token: write
@@ -418,6 +419,50 @@ jobs:
           username: bastion
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
           script: /opt/ct/deploy.sh ${{ vars.DEPLOYMENT_ENVIRONMENT }} ${{ github.sha }}
+
+  # Deploy shell static assets to staging GCS bucket
+  deploy-shell-staging:
+    name: "Deploy Shell to Staging"
+    if: github.ref == 'refs/heads/main'
+    needs:
+      [
+        "pattern-integration-test",
+        "package-integration-test",
+        "cli-integration-test",
+      ]
+    runs-on: ubuntu-latest
+    environment: ci
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🏗️ Build shell with staging API URL
+        working-directory: packages/shell
+        run: deno task production
+        env:
+          API_URL: ${{ secrets.CLUSTERDUCK_SHELL_API_URL }}
+
+      - name: 🔑 Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: ⚙️ Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: 📤 Upload shell assets to Staging GCS
+        run: |
+          # Upload to SHA-specific directory for versioning
+          gsutil -m rsync -r packages/shell/dist gs://staging-commontools-dev/builds/${{ github.sha }}/
+
+          # Upload to bucket root as "latest" (-d removes orphaned files)
+          gsutil -m rsync -r -d packages/shell/dist gs://staging-commontools-dev/
+
+          echo "📦 Staging Shell deployed"
+          echo "https://staging.commontools.dev/"
 
   # Post-deployment patterns test (runs after deployment, so this will NOT block deployments.)
   post-deploy-patterns-test:

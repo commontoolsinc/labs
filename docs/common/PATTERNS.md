@@ -1,8 +1,62 @@
-# Common Recipe Patterns
+# Common Patterns
 
-This guide demonstrates common patterns for building recipes, organized by complexity. Each pattern builds on concepts from previous sections.
+This guide demonstrates common patterns for building patterns, organized by complexity. Each pattern builds on concepts from previous sections.
 
-## 🌟 Golden Rule: Prefer Bidirectional Binding
+## Core Principles
+
+### ⚠️ CRITICAL: Never Directly Access Cell Data in Pattern Body
+
+**You cannot read or manipulate cell data directly in the pattern body.** Always use `computed()` for data transformations.
+
+```typescript
+// ❌ WRONG - Direct data access
+export default pattern(({ entries }) => {
+  const entriesByDate = {};
+  for (const entry of entries) {  // Error: "Tried to directly access an opaque value"
+    entriesByDate[entry.date] = entry;
+  }
+});
+
+// ✅ CORRECT - Use computed()
+export default pattern(({ entries }) => {
+  const entriesByDate = computed(() => {
+    const grouped = {};
+    for (const entry of entries) {
+      grouped[entry.date] = entry;
+    }
+    return grouped;
+  });
+});
+```
+
+**Why?** Cell references in pattern bodies are "opaque refs" - placeholders for future values. They can't be read directly; they must be transformed through `computed()` which creates reactive computations.
+
+See [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) for detailed explanation of opaque refs and reactivity.
+
+### Cell<> is for Write Access Only
+
+**The most important rule:** Only declare `Cell<>` in signatures when you need to **mutate** the value.
+
+```typescript
+// ✅ Read-only - No Cell<> needed (still reactive!)
+interface ReadOnlyInput {
+  count: number;        // Just display it
+  items: Item[];        // Just map/display
+}
+
+// ✅ Write access - Cell<> required
+interface WritableInput {
+  count: Cell<number>;  // Will call count.set()
+  items: Cell<Item[]>;  // Will call items.push()
+}
+```
+
+**Remember:** Everything is reactive whether you use `Cell<>` or not. `Cell<>` only indicates you'll call `.set()`, `.update()`, `.push()`, or `.key()`.
+
+See [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) for detailed reactivity guide.
+See [TYPES_AND_SCHEMAS.md](TYPES_AND_SCHEMAS.md) for type system details.
+
+### 🌟 Golden Rule: Prefer Bidirectional Binding
 
 **Before writing any handler, ask yourself**: "Am I just syncing UI ↔ data with no additional logic?"
 
@@ -54,7 +108,7 @@ The simplest and most common pattern: a list where users can check items and edi
 
 ```typescript
 /// <cts-enable />
-import { Cell, Default, NAME, recipe, UI } from "commontools";
+import { Cell, Default, NAME, pattern, UI } from "commontools";
 
 interface ShoppingItem {
   title: string;
@@ -69,8 +123,7 @@ interface ShoppingListOutput {
   items: Cell<ShoppingItem[]>;
 }
 
-export default recipe<ShoppingListInput, ShoppingListOutput>(
-  "Shopping List",
+export default pattern<ShoppingListInput, ShoppingListOutput>(
   ({ items }) => {
     return {
       [NAME]: "Shopping List",
@@ -136,7 +189,7 @@ Adding derived data transformations to create multiple views of the same data.
 
 ```typescript
 /// <cts-enable />
-import { Default, computed, NAME, OpaqueRef, recipe, UI } from "commontools";
+import { Default, computed, NAME, OpaqueRef, pattern, UI } from "commontools";
 
 interface ShoppingItem {
   title: string;
@@ -150,8 +203,7 @@ interface CategorizedListInput {
 
 interface CategorizedListOutput extends CategorizedListInput {}
 
-export default recipe<CategorizedListInput, CategorizedListOutput>(
-  "Shopping List (Categorized)",
+export default pattern<CategorizedListInput, CategorizedListOutput>(
   ({ items }) => {
     // Group items by category using computed
     const groupedItems = computed(() => {
@@ -206,13 +258,13 @@ export default recipe<CategorizedListInput, CategorizedListOutput>(
 
 ## Level 3: Linked Charms (Master-Detail Pattern)
 
-Two separate recipes sharing the same data through charm linking.
+Two separate patterns sharing the same data through charm linking.
 
 **Charm 1: Shopping List Editor**
 
 ```typescript
 /// <cts-enable />
-import { Cell, Default, NAME, recipe, UI } from "commontools";
+import { Cell, Default, NAME, pattern, UI } from "commontools";
 
 interface ShoppingItem {
   title: string;
@@ -228,8 +280,7 @@ interface EditorOutput {
   items: Cell<ShoppingItem[]>;
 }
 
-export default recipe<EditorInput, EditorOutput>(
-  "Shopping List Editor",
+export default pattern<EditorInput, EditorOutput>(
   ({ items }) => {
     const newCategory = Cell.of("Uncategorized");
 
@@ -294,13 +345,13 @@ deno task ct charm link --identity key.json --api-url ... --space myspace \
 
 ## Level 4: Pattern Composition
 
-When you want to display multiple patterns together that share the same data **within a single recipe** (without deploying separate charms), use pattern composition.
+When you want to display multiple patterns together that share the same data **within a single pattern** (without deploying separate charms), use pattern composition.
 
 **Key Concept**: Just reference the other instances directly: {view}.
 
 ```typescript
 /// <cts-enable />
-import { recipe, UI, NAME, Default, OpaqueRef } from "commontools";
+import { pattern, UI, NAME, Default, OpaqueRef } from "commontools";
 import ShoppingList from "./shopping-list.tsx";
 import ShoppingListByCategory from "./shopping-list-by-category.tsx";
 
@@ -314,8 +365,7 @@ interface ComposedInput {
   items: Default<ShoppingItem[], []>;
 }
 
-export default recipe<ComposedInput, ComposedInput>(
-  "Shopping List - Both Views",
+export default pattern<ComposedInput, ComposedInput>(
   ({ items }) => {
     // Create pattern instances that share the same items cell
     const basicView = ShoppingList({ items });
@@ -347,7 +397,7 @@ export default recipe<ComposedInput, ComposedInput>(
 - ✅ Both patterns receive the same `items` cell reference
 - ✅ `<div>...{basicView}</div>` - note the `basicView` use
 - ✅ Changes in one view automatically update the other (they share the same cell)
-- ✅ No charm deployment needed - all composed within one recipe
+- ✅ No charm deployment needed - all composed within one pattern
 
 **When to use Pattern Composition vs Linked Charms:**
 
@@ -355,7 +405,7 @@ export default recipe<ComposedInput, ComposedInput>(
 |----------|-----|
 | Multiple views of same data in one UI | Pattern Composition (Level 4) |
 | Independent charms with data flow | Linked Charms (Level 3) |
-| Reusable components within a recipe | Pattern Composition (Level 4) |
+| Reusable components within a pattern | Pattern Composition (Level 4) |
 | Separate deployments that communicate | Linked Charms (Level 3) |
 
 ## Common Pattern: Search/Filter with Inline Logic
@@ -380,7 +430,7 @@ const searchQuery = Cell.of("");
 <ct-input $value={searchQuery} placeholder="Search..." />
 ```
 
-**Wait, this looks wrong!** The `.filter()` will execute during recipe definition, not reactively. Here's the **correct** way:
+**Wait, this looks wrong!** The `.filter()` will execute during pattern definition, not reactively. Here's the **correct** way:
 
 ```typescript
 const searchQuery = Cell.of("");
@@ -581,14 +631,14 @@ These are the most frequent mistakes developers make when building patterns:
 </div>
 
 // ❌ WRONG - Object style on custom element
-<common-hstack style={{ flex: 1 }}>
+<ct-hstack style={{ flex: 1 }}>
   {/* Error */}
-</common-hstack>
+</ct-hstack>
 
 // ✅ CORRECT - String style on custom element
-<common-hstack style="flex: 1;">
+<ct-hstack style="flex: 1;">
   {/* Works! */}
-</common-hstack>
+</ct-hstack>
 ```
 
 **Rule:** HTML elements use object styles, custom elements use string styles. See "Styling: String vs Object Syntax" in `COMPONENTS.md` for details.
@@ -599,8 +649,9 @@ These are the most frequent mistakes developers make when building patterns:
 // ❌ AVOID - Unnecessary handler() for simple toggle
 const toggleDone = handler<unknown, { item: Cell<Item> }>(
   (_, { item }) => {
-    const current = item.get();
-    item.set({ ...current, done: !current.done });
+    const doneCell = item.key("done");
+    const current = doneCell.get();
+    doneCell.set(!current.done);
   }
 );
 <ct-checkbox checked={item.done} onct-change={toggleDone({ item })} />
@@ -612,8 +663,8 @@ const toggleDone = handler<unknown, { item: Cell<Item> }>(
 <ct-checkbox
   checked={item.done}
   onct-change={(e) => {
-    item.set({ ...item.get(), done: e.detail.checked });
-    console.log("Toggled:", item.get().title);
+    item.key("done").set(e.detail.checked);
+    console.log("Toggled:", item.key("title").get());
   }}
 />
 
@@ -634,36 +685,7 @@ const increment = handler<never, { count: Cell<number> }>(
 2. **Inline handlers** for simple operations with custom logic
 3. **`handler()`** only for complex or reusable logic
 
-#### 3. Trying to Use [ID] When You Don't Need It
-
-```typescript
-// ❌ UNNECESSARY - [ID] not needed for basic lists
-import { ID } from "commontools";
-
-interface TodoItem {
-  [ID]: number;  // Don't add this unless you actually need it
-  title: string;
-  done: boolean;
-}
-
-// ✅ CORRECT - Simple items don't need [ID]
-interface TodoItem {
-  title: string;
-  done: boolean;
-}
-```
-
-**When you DON'T need [ID]:**
-- Simple arrays of objects in your recipe
-- Items only displayed, not referenced elsewhere
-- Most basic CRUD operations
-
-**When you DO need [ID]:**
-- Creating referenceable data from within a `lift` function
-
-See RECIPES.md for detailed [ID] guidance.
-
-#### 4. Incorrect Handler Type Parameters
+#### 3. Incorrect Handler Type Parameters
 
 ```typescript
 // ❌ WRONG - OpaqueRef in handler parameters
@@ -703,8 +725,7 @@ interface ShoppingItem {
   title: string;
 }
 
-export default recipe<{ items: Default<ShoppingItem[], []> }, any>(
-  "Shopping List",
+export default pattern<{ items: Default<ShoppingItem[], []> }, any>(
   ({ items }) => ({
     [NAME]: "Shopping List",
     [UI]: (
@@ -861,7 +882,7 @@ const addItem = handler<
 ### Mental Model
 
 Think of it this way:
-- **Cell<T[]>**: A box containing an array (handler params, recipe params, returns)
+- **Cell<T[]>**: A box containing an array (handler params, pattern params, returns)
 - **T[]**: The plain array inside the box (result of `.get()`)
 - **OpaqueRef<T>**: A cell-like reference to each item (in JSX `.map()`, auto-inferred!)
 
@@ -875,7 +896,7 @@ Remember: HTML elements use object syntax, custom elements use string syntax.
 <span style={{ color: "red", fontWeight: "bold" }} />
 
 // ✅ Custom elements - String syntax
-<common-hstack style="flex: 1; padding: 1rem;" />
+<ct-hstack style="flex: 1; padding: 1rem;" />
 <ct-card style="border: 1px solid #ccc;" />
 
 // ❌ Common mistake
@@ -918,6 +939,290 @@ const categories = computed(() => Object.keys(groupedItems).sort());
 - ✅ No intermediate `computed()` needed for simple property access
 - ✅ Type inference works automatically, even in nested maps!
 
+## Common Pitfalls and How to Avoid Them
+
+This section covers mistakes that will cost you hours of debugging. Read this before building your first pattern!
+
+### Pitfall 1: Direct Data Access
+
+❌ **WRONG - Trying to loop/transform data directly:**
+
+```typescript
+export default pattern(({ entries }) => {
+  // Error: "Tried to directly access an opaque value. Use `derive` instead"
+  const grouped = {};
+  for (const entry of entries) {
+    grouped[entry.date] = entry;
+  }
+});
+```
+
+✅ **CORRECT - Wrap ALL data transformations in computed():**
+
+```typescript
+export default pattern(({ entries }) => {
+  const grouped = computed(() => {
+    const result = {};
+    for (const entry of entries) {
+      result[entry.date] = entry;
+    }
+    return result;
+  });
+});
+```
+
+**Rule:** NEVER directly read or iterate cell data in pattern body. Always use `computed()`.
+
+### Pitfall 2: Creating Cells Without Cell.of()
+
+❌ **WRONG - Returning plain arrays/objects:**
+
+```typescript
+return {
+  myData: [],           // Not a cell!
+  myCount: 0,          // Not a cell!
+}
+
+// Later trying to mutate:
+onClick={handler({ myData: [] })}  // Won't work!
+```
+
+✅ **CORRECT - Use Cell.of() for new cells:**
+
+```typescript
+return {
+  myData: Cell.of<Item[]>([]),     // Now a cell!
+  myCount: Cell.of(0),             // Now a cell!
+}
+
+// Now mutation works:
+onClick={handler({ myData })}
+```
+
+**Rule:** Use `Cell.of()` when creating NEW cells in pattern body or return values. Input cells are already cells.
+
+### Pitfall 3: Accessing Cells in Template Strings
+
+❌ **WRONG - Direct access in template string:**
+
+```typescript
+const seed = Cell.of(42);
+const prompt = `Generate with seed: ${seed}`;  // Error: "Accessing an opaque ref via closure"
+```
+
+✅ **CORRECT - Use computed() or .get():**
+
+```typescript
+const seed = Cell.of(42);
+
+// Option 1: Wrap in computed()
+const prompt = computed(() => `Generate with seed: ${seed}`);
+
+// Option 2: Use .get() in handler/inline
+const generateWithSeed = () => {
+  const promptText = `Generate with seed: ${seed.get()}`;
+  // Use promptText...
+};
+```
+
+**Rule:** Can't close over cells in strings/functions. Use `computed()` or `.get()` in handlers.
+
+### Pitfall 4: HTML Event Attribute Names
+
+❌ **WRONG - Lowercase HTML-style:**
+
+```typescript
+<button onclick={handler}>      // TypeScript error!
+<input onchange={handler}>      // TypeScript error!
+<div onmouseenter={handler}>    // TypeScript error!
+```
+
+✅ **CORRECT - camelCase React-style:**
+
+```typescript
+<button onClick={handler}>      // ✅ Works
+<input onChange={handler}>      // ✅ Works
+<div onMouseEnter={handler}>    // ✅ Works
+```
+
+**Rule:** JSX uses camelCase for all event handlers (onClick, onChange, onInput, onMouseEnter, etc.)
+
+### Pitfall 5: Plain Arrays in Return Values
+
+❌ **WRONG - Mixing cells and plain values:**
+
+```typescript
+export default pattern(({ inputData }) => {
+  return {
+    [UI]: <div>...</div>,
+    outputData: [],        // Plain array, not reactive!
+  };
+});
+```
+
+✅ **CORRECT - Use Cell.of() for output data:**
+
+```typescript
+export default pattern(({ inputData }) => {
+  const outputData = Cell.of<Item[]>([]);
+
+  return {
+    [UI]: <div>...</div>,
+    outputData,            // Now a reactive cell!
+  };
+});
+```
+
+**Rule:** Output values should be cells if you want them reactive and mutable.
+
+### Pitfall 6: Forgetting computed() for Filters/Sorts
+
+❌ **WRONG - Direct filter in JSX:**
+
+```typescript
+{items.filter(item => !item.done).map(item => ...)}  // Won't update reactively!
+```
+
+✅ **CORRECT - Use computed() outside JSX:**
+
+```typescript
+const activeItems = computed(() => items.filter(item => !item.done));
+{activeItems.map(item => ...)}  // Updates reactively!
+```
+
+**Rule:** Any data transformation (filter, sort, group, etc.) needs `computed()` outside JSX.
+
+### Pitfall 7: Using Ternary for Conditional Rendering
+
+❌ **WRONG - Ternary for elements:**
+
+```typescript
+{showDetails ? <div>Details</div> : null}  // Won't work!
+```
+
+✅ **CORRECT - Use ifElse():**
+
+```typescript
+{ifElse(showDetails, <div>Details</div>, null)}  // Works!
+```
+
+**Note:** Ternaries DO work for simple attribute values:
+```typescript
+<span style={item.done ? { textDecoration: "line-through" } : {}}>  // ✅ This is fine
+```
+
+**Rule:** Use `ifElse()` for conditional rendering, not ternaries.
+
+### Quick Reference: Common Fixes
+
+| Problem | Error Message | Fix |
+|---------|---------------|-----|
+| Direct data access | "Tried to directly access an opaque value" | Wrap in `computed()` |
+| Template string access | "Accessing an opaque ref via closure" | Use `computed()` or `.get()` |
+| Handler mutation fails | "Property 'set' does not exist" | Use `Cell.of()` to create cell |
+| Filter doesn't update | UI not reactive | Use `computed()` outside JSX |
+| Event handler error | "'onclick' does not exist" | Change to camelCase: `onClick` |
+| Conditional rendering | Element doesn't show/hide | Use `ifElse()` not ternary |
+
+## Async Operations and Pending State
+
+CommonTools provides built-in functions for async operations. All return a consistent response structure:
+
+```typescript
+{
+  pending: boolean,        // true while operation is in progress
+  result: T | undefined,   // successful result (undefined while pending or on error)
+  error: any | undefined,  // error (undefined while pending or on success)
+}
+```
+
+This applies to: `fetchData`, `generateText`, `generateObject`, `compileAndRun`.
+
+### Visualizing Pending State with ct-loader
+
+Use `<ct-loader>` to show loading state:
+
+```tsx
+const data = fetchData({ url, mode: "json" });
+
+return {
+  [UI]: (
+    <div>
+      {ifElse(
+        data.pending,
+        <span><ct-loader size="sm" /> Loading...</span>,
+        ifElse(
+          data.error,
+          <ct-alert variant="error">Error: {data.error}</ct-alert>,
+          <pre>{JSON.stringify(data.result, null, 2)}</pre>
+        )
+      )}
+    </div>
+  ),
+};
+```
+
+### With Elapsed Time
+
+For long-running operations, show elapsed time:
+
+```tsx
+{ifElse(
+  response.pending,
+  <span><ct-loader show-elapsed /> Generating...</span>,
+  <div>{response.result}</div>
+)}
+```
+
+### With Stop Button
+
+For cancellable operations (like LLM generation), add a stop button:
+
+```tsx
+const { result, pending, cancel } = generateText({ prompt });
+
+{ifElse(
+  pending,
+  <span><ct-loader show-elapsed show-stop onct-stop={cancel} /> Generating...</span>,
+  <div>{result}</div>
+)}
+```
+
+### Inline Per-Item Loading
+
+For per-item async operations in lists:
+
+```tsx
+{items.map((item) => {
+  const summary = generateText({ prompt: `Summarize: ${item.content}` });
+
+  return (
+    <div>
+      <h3>{item.title}</h3>
+      {ifElse(
+        summary.pending,
+        <span><ct-loader size="sm" /> Summarizing...</span>,
+        <p>{summary.result}</p>
+      )}
+    </div>
+  );
+})}
+```
+
+### Disable Actions While Pending
+
+Prevent user actions during async operations:
+
+```tsx
+<ct-button disabled={analysis.pending} onClick={regenerate}>
+  {ifElse(
+    analysis.pending,
+    <span><ct-loader size="sm" /> Analyzing...</span>,
+    "Analyze"
+  )}
+</ct-button>
+```
+
 ## Summary
 
 **Level 1 patterns:**
@@ -938,12 +1243,13 @@ const categories = computed(() => Object.keys(groupedItems).sort());
 
 **Level 4 patterns:**
 - Pattern composition with ct-render
-- Multiple views in single recipe
+- Multiple views in single pattern
 - Shared cell references between patterns
 
 **Key principles:**
-1. Use bidirectional binding when possible
-2. Use handlers for side effects and structural changes
-3. Use `computed()` for reactive transformations (but not in JSX - it's automatic there)
-4. Keep it simple - don't over-engineer
-5. Test incrementally with `deno task ct dev` and `deno task ct charm setsrc`
+1. Use `computed()` for ALL data transformations in pattern body
+2. Use `Cell.of()` when creating new cells
+3. Use bidirectional binding when possible
+4. Use handlers for side effects and structural changes
+5. Keep it simple - don't over-engineer
+6. Test incrementally with `deno task ct dev` and `deno task ct charm setsrc`

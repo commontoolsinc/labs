@@ -22,7 +22,11 @@ import type {
   BuiltInLLMState,
   FetchOptions,
   PatternToolFunction,
+  WishParams,
+  WishState,
 } from "commontools";
+import { isRecord } from "@commontools/utils/types";
+import { isCell } from "../cell.ts";
 
 export const compileAndRun = createNodeFactory({
   type: "ref",
@@ -115,26 +119,61 @@ let ifElseFactory:
 export const navigateTo = createNodeFactory({
   type: "ref",
   implementation: "navigateTo",
-}) as (cell: OpaqueRef<unknown>) => OpaqueRef<string>;
-
-let wishFactory: NodeFactory<[unknown, unknown], any> | undefined;
+}) as (cell: OpaqueRef<unknown>) => OpaqueRef<boolean>;
 
 export function wish<T = unknown>(
-  target: Opaque<string>,
-): OpaqueRef<T | undefined>;
+  target: Opaque<WishParams>,
+): OpaqueRef<Required<WishState<T>>>;
+export function wish<T = unknown>(
+  target: Opaque<WishParams>,
+  schema: JSONSchema,
+): OpaqueRef<Required<WishState<T>>>;
 export function wish<T = unknown>(
   target: Opaque<string>,
-  defaultValue: Opaque<T> | T,
 ): OpaqueRef<T>;
 export function wish<T = unknown>(
   target: Opaque<string>,
-  defaultValue?: Opaque<T> | T,
-): OpaqueRef<T | undefined> {
-  wishFactory ||= createNodeFactory({
+  schema: JSONSchema,
+): OpaqueRef<T>;
+export function wish<T = unknown>(
+  target: Opaque<string> | Opaque<WishParams>,
+  schema?: JSONSchema,
+): OpaqueRef<T | Required<WishState<T>>> {
+  let param;
+  let resultSchema;
+
+  if (schema !== undefined && isRecord(target) && !isCell(target)) {
+    param = {
+      schema,
+      ...target, // Pass in after, so schema here overrides any schema in target
+    };
+    resultSchema = !isCell(param.schema)
+      ? param.schema as JSONSchema | undefined
+      : schema;
+  } else {
+    param = target;
+    resultSchema = schema;
+  }
+  return createNodeFactory({
     type: "ref",
     implementation: "wish",
-  });
-  return wishFactory([target, defaultValue]) as OpaqueRef<T | undefined>;
+    argumentSchema: {
+      anyOf: [{
+        type: "string",
+        default: "",
+      }, {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          path: { type: "array", items: { type: "string" } },
+          schema: { type: "object" },
+          context: { type: "object", additionalProperties: { asCell: true } },
+          scope: { type: "array", items: { type: "string" } },
+        },
+      }],
+    } as const satisfies JSONSchema,
+    resultSchema,
+  })(param);
 }
 
 // Example:

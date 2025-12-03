@@ -1,5 +1,5 @@
 import { type Recipe } from "../builder/types.ts";
-import type { Program, ProgramResolver } from "@commontools/js-runtime";
+import type { Program, ProgramResolver } from "@commontools/js-compiler";
 
 export type HarnessedFunction = (input: any) => void;
 

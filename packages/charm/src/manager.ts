@@ -14,10 +14,12 @@ import {
   Recipe,
   Runtime,
   type Schema,
+  type SpaceCellContents,
   TYPE,
   UI,
   URI,
 } from "@commontools/runner";
+import * as favorites from "./favorites.ts";
 import { ALL_CHARMS_ID } from "../../runner/src/builtins/well-known.ts";
 import { vdomSchema } from "@commontools/html";
 import { type Session } from "@commontools/identity";
@@ -51,34 +53,41 @@ export const uiSchema = {
 
 export type UISchema = Schema<typeof uiSchema>;
 
+// We specify not true for the items, since we don't want to recursively load them
 export const charmListSchema = {
   type: "array",
-  items: { asCell: true },
+  items: { not: true, asCell: true },
   default: [],
 } as const satisfies JSONSchema;
-
-export const spaceCellSchema = {
-  type: "object",
-  properties: {
-    // Each field is a Cell<> reference to another cell
-    allCharms: { ...charmListSchema, asCell: true },
-    defaultPattern: { type: "object", asCell: true },
-    recentCharms: { ...charmListSchema, asCell: true },
-  },
-} as const satisfies JSONSchema;
-
-export type SpaceCell = Schema<typeof spaceCellSchema>;
 
 export const charmLineageSchema = {
   type: "object",
   properties: {
-    charm: { type: "object", asCell: true },
+    charm: { not: true, asCell: true },
     relation: { type: "string" },
     timestamp: { type: "number" },
   },
   required: ["charm", "relation", "timestamp"],
 } as const satisfies JSONSchema;
 export type CharmLineage = Schema<typeof charmLineageSchema>;
+
+export const favoriteEntrySchema = {
+  type: "object",
+  properties: {
+    cell: { not: true, asCell: true },
+    tag: { type: "string", default: "" },
+  },
+  required: ["cell"],
+} as const satisfies JSONSchema;
+
+export type FavoriteEntry = Schema<typeof favoriteEntrySchema>;
+
+export const favoriteListSchema = {
+  type: "array",
+  items: favoriteEntrySchema,
+} as const satisfies JSONSchema;
+
+export type FavoriteList = Schema<typeof favoriteListSchema>;
 
 export const charmSourceCellSchema = {
   type: "object",
@@ -105,28 +114,16 @@ export const processSchema = {
 } as const satisfies JSONSchema;
 
 /**
- * Helper to consistently compare entity IDs between cells
+ * Filters an array of charms by removing any that match the target cell
  */
-function isSameEntity(
-  a: Cell<unknown> | string | EntityId,
-  b: Cell<unknown> | string | EntityId,
-): boolean {
-  const idA = getEntityId(a);
-  const idB = getEntityId(b);
-  return idA && idB ? idA["/"] === idB["/"] : false;
-}
-
-/**
- * Filters an array of charms by removing any that match the target entity
- */
-function filterOutEntity(
+function filterOutCell(
   list: Cell<Cell<unknown>[]>,
-  target: Cell<unknown> | string | EntityId,
+  target: Cell<unknown>,
 ): Cell<unknown>[] {
-  const targetId = getEntityId(target);
-  if (!targetId) return list.get() as Cell<unknown>[];
-
-  return list.get().filter((charm) => !isSameEntity(charm, targetId));
+  const resolvedTarget = target.resolveAsCell();
+  return list.get().filter((charm) =>
+    !charm.resolveAsCell().equals(resolvedTarget)
+  );
 }
 
 export class CharmManager {
@@ -135,7 +132,7 @@ export class CharmManager {
   private charms: Cell<Cell<unknown>[]>;
   private pinnedCharms: Cell<Cell<unknown>[]>;
   private recentCharms: Cell<Cell<unknown>[]>;
-  private spaceCell: Cell<SpaceCell>;
+  private spaceCell: Cell<SpaceCellContents>;
 
   /**
    * Promise resolved when the charm manager gets the charm list.
@@ -162,11 +159,12 @@ export class CharmManager {
     );
     // Use the space DID as the cause - it's derived from the space name
     // and consistently available everywhere
-    this.spaceCell = this.runtime.getCell(
-      this.space,
-      this.space, // Space DID is stable per space and available to all clients
-      spaceCellSchema,
-    );
+    // For home space (where space DID = user identity DID), getHomeSpaceCell()
+    // uses homeSpaceCellSchema which includes favorites for proper sync/query behavior.
+    const isHomeSpace = this.space === this.runtime.userIdentityDID;
+    this.spaceCell = isHomeSpace
+      ? this.runtime.getHomeSpaceCell()
+      : this.runtime.getSpaceCell(this.space);
 
     const syncSpaceCell = Promise.resolve(this.spaceCell.sync());
 
@@ -175,7 +173,7 @@ export class CharmManager {
       this.runtime.editWithRetry((tx) => {
         const spaceCellWithTx = this.spaceCell.withTx(tx);
 
-        let existingSpace: Partial<SpaceCell> | undefined;
+        let existingSpace: Partial<SpaceCellContents> | undefined;
         try {
           existingSpace = spaceCellWithTx.get() ?? undefined;
         } catch {
@@ -197,13 +195,13 @@ export class CharmManager {
           recentCharmsField.set([]);
         }
 
-        const nextSpaceValue: Partial<SpaceCell> = {
+        const nextSpaceValue: Partial<SpaceCellContents> = {
           ...(existingSpace ?? {}),
-          allCharms: this.charms.withTx(tx),
-          recentCharms: recentCharmsField.withTx(tx),
+          allCharms: this.charms.withTx(tx).get() as Cell<never>[],
+          recentCharms: recentCharmsField.withTx(tx).get() as Cell<never>[],
         };
 
-        spaceCellWithTx.set(nextSpaceValue);
+        spaceCellWithTx.set(nextSpaceValue as SpaceCellContents);
 
         // defaultPattern will be linked later when the default pattern is found
       })
@@ -226,7 +224,7 @@ export class CharmManager {
     return this.space;
   }
 
-  getSpaceName(): string {
+  getSpaceName(): string | undefined {
     return this.session.spaceName;
   }
 
@@ -238,37 +236,29 @@ export class CharmManager {
   async pin(charm: Cell<unknown>) {
     await this.syncCharms(this.pinnedCharms);
     // Check if already pinned
-    if (
-      !filterOutEntity(this.pinnedCharms, charm).some((c) =>
-        isSameEntity(c, charm)
-      )
-    ) {
+    const resolvedCharm = charm.resolveAsCell();
+    const alreadyPinned = this.pinnedCharms.get().some((c) =>
+      c.resolveAsCell().equals(resolvedCharm)
+    );
+    if (!alreadyPinned) {
       this.pinnedCharms.push(charm);
       await this.runtime.idle();
     }
   }
 
-  async unpinById(charmId: EntityId) {
-    let changed = false;
-
+  async unpin(charm: Cell<unknown>) {
     await this.syncCharms(this.pinnedCharms);
-    return (!await this.runtime.editWithRetry((tx) => {
+    const { ok } = await this.runtime.editWithRetry((tx) => {
       const pinnedCharms = this.pinnedCharms.withTx(tx);
-      const newPinnedCharms = filterOutEntity(pinnedCharms, charmId);
+      const newPinnedCharms = filterOutCell(pinnedCharms, charm);
       if (newPinnedCharms.length !== pinnedCharms.get().length) {
         this.pinnedCharms.withTx(tx).set(newPinnedCharms);
-        changed = true;
+        return true;
       } else {
-        changed = false;
+        return false;
       }
-    })) && changed;
-  }
-
-  async unpin(charm: Cell<unknown> | string | EntityId) {
-    const id = getEntityId(charm);
-    if (!id) return false;
-
-    return await this.unpinById(id);
+    });
+    return !!ok;
   }
 
   getPinned(): Cell<Cell<unknown>[]> {
@@ -276,7 +266,7 @@ export class CharmManager {
     return this.pinnedCharms;
   }
 
-  getSpaceCell(): Cell<SpaceCell> {
+  getSpaceCell(): Cell<SpaceCellContents> {
     return this.spaceCell;
   }
 
@@ -296,20 +286,37 @@ export class CharmManager {
   }
 
   /**
+   * Get the default pattern cell from the space cell.
+   * @returns The default pattern cell, or undefined if not set
+   */
+  async getDefaultPattern(): Promise<Cell<NameSchema> | undefined> {
+    const cell = await this.spaceCell.key("defaultPattern").sync();
+    if (!cell.get().get()) {
+      return undefined;
+    }
+    return this.get(
+      cell.get(),
+      true,
+      nameSchema,
+    );
+  }
+
+  /**
    * Track a charm as recently viewed/interacted with.
    * Maintains a list of up to 10 most recent charms.
    * @param charm - The charm to track
    */
   async trackRecentCharm(charm: Cell<unknown>): Promise<void> {
-    const id = getEntityId(charm);
-    if (!id) return;
+    const resolvedCharm = charm.resolveAsCell();
 
     await this.runtime.editWithRetry((tx) => {
       const recentCharmsWithTx = this.recentCharms.withTx(tx);
       const recentCharms = recentCharmsWithTx.get() || [];
 
       // Remove any existing instance of this charm to avoid duplicates
-      const filtered = recentCharms.filter((c) => !isSameEntity(c, id));
+      const filtered = recentCharms.filter((c) =>
+        !c.resolveAsCell().equals(resolvedCharm)
+      );
 
       // Add charm to the beginning of the list
       const updated = [charm, ...filtered];
@@ -481,6 +488,7 @@ export class CharmManager {
     const seenEntityIds = new Set<string>(); // Track entities we've already processed
     const maxDepth = 10; // Prevent infinite recursion
     const maxResults = 50; // Prevent too many results from overwhelming the UI
+    const resolvedCharm = charm.resolveAsCell();
 
     if (!charm) return result;
 
@@ -517,14 +525,15 @@ export class CharmManager {
           return cId && docId["/"] === cId["/"];
         });
 
-        if (
-          matchingCharm && !isSameEntity(matchingCharm, charm) &&
-          !result.some((c) => isSameEntity(c, matchingCharm))
-        ) {
-          // Check if we've already found too many references
-          if (result.length < maxResults) {
+        if (matchingCharm) {
+          const resolvedMatching = matchingCharm.resolveAsCell();
+          const isNotSelf = !resolvedMatching.equals(resolvedCharm);
+          const notAlreadyInResult = !result.some((c) =>
+            c.resolveAsCell().equals(resolvedMatching)
+          );
+
+          if (isNotSelf && notAlreadyInResult && result.length < maxResults) {
             result.push(matchingCharm);
-            // Reference added to result
           }
         }
       };
@@ -678,6 +687,8 @@ export class CharmManager {
     const charmId = getEntityId(charm);
     if (!charmId) return result;
 
+    const resolvedCharm = charm.resolveAsCell();
+
     // Helper function to add a matching charm to the result
     const addReadingCharm = (otherCharm: Cell<unknown>) => {
       const otherCharmId = getEntityId(otherCharm);
@@ -691,12 +702,13 @@ export class CharmManager {
       if (seenEntityIds.has(entityIdStr)) return;
       seenEntityIds.add(entityIdStr);
 
-      if (!result.some((c) => isSameEntity(c, otherCharm))) {
-        // Check if we've already found too many references
-        if (result.length < maxResults) {
-          result.push(otherCharm);
-          // Charm reading from target added to result
-        }
+      const resolvedOther = otherCharm.resolveAsCell();
+      const notAlreadyInResult = !result.some((c) =>
+        c.resolveAsCell().equals(resolvedOther)
+      );
+
+      if (notAlreadyInResult && result.length < maxResults) {
+        result.push(otherCharm);
       }
     };
 
@@ -815,7 +827,7 @@ export class CharmManager {
 
     // Check each charm to see if it references this charm
     for (const otherCharm of allCharms) {
-      if (isSameEntity(otherCharm, charm)) continue; // Skip self
+      if (otherCharm.resolveAsCell().equals(resolvedCharm)) continue; // Skip self
 
       if (checkRefersToTarget(otherCharm, otherCharm, new Set(), 0)) {
         addReadingCharm(otherCharm);
@@ -891,31 +903,28 @@ export class CharmManager {
   }
 
   // note: removing a charm doesn't clean up the charm's cells
-  async remove(idOrCharm: string | EntityId | Cell<unknown>) {
-    let success = false;
-
+  async remove(charm: Cell<unknown>) {
     await Promise.all([
       this.syncCharms(this.charms),
       this.syncCharms(this.pinnedCharms),
     ]);
 
-    const id = getEntityId(idOrCharm);
-    if (!id) return false;
+    await this.unpin(charm);
 
-    await this.unpin(idOrCharm);
-
-    return (!await this.runtime.editWithRetry((tx) => {
+    const { ok } = await this.runtime.editWithRetry((tx) => {
       const charms = this.charms.withTx(tx);
 
       // Remove from main list
-      const newCharms = filterOutEntity(charms, id);
+      const newCharms = filterOutCell(charms, charm);
       if (newCharms.length !== charms.get().length) {
         charms.set(newCharms);
-        success = true;
+        return true;
       } else {
-        success = false;
+        return false;
       }
-    })) && success;
+    });
+
+    return !!ok;
   }
 
   async runPersistent<T = unknown>(
@@ -1048,9 +1057,14 @@ export class CharmManager {
 
   // Returns the charm from one of our active charm lists if it is present,
   // or undefined if it is not
-  getActiveCharm(charmId: Cell<unknown> | EntityId | string) {
-    return this.charms.get().find((charm) => isSameEntity(charm, charmId)) ??
-      this.pinnedCharms.get().find((charm) => isSameEntity(charm, charmId));
+  getActiveCharm(charmCell: Cell<unknown>) {
+    const resolved = charmCell.resolveAsCell();
+    return this.charms.get().find((charm) =>
+      charm.resolveAsCell().equals(resolved)
+    ) ??
+      this.pinnedCharms.get().find((charm) =>
+        charm.resolveAsCell().equals(resolved)
+      );
   }
 
   async link(
@@ -1113,6 +1127,40 @@ export class CharmManager {
     });
     await this.runtime.idle();
     await this.synced();
+  }
+
+  /**
+   * Add a charm to the user's favorites (in home space)
+   * @param charm - The charm to add to favorites
+   */
+  addFavorite(charm: Cell<unknown>): Promise<void> {
+    return favorites.addFavorite(this.runtime, charm);
+  }
+
+  /**
+   * Remove a charm from the user's favorites (in home space)
+   * @param charm - The charm to remove from favorites
+   * @returns true if the charm was removed, false if it wasn't in favorites
+   */
+  removeFavorite(charm: Cell<unknown>): Promise<boolean> {
+    return favorites.removeFavorite(this.runtime, charm);
+  }
+
+  /**
+   * Check if a charm is in the user's favorites (in home space)
+   * @param charm - The charm to check
+   * @returns true if the charm is favorited, false otherwise
+   */
+  isFavorite(charm: Cell<unknown>): boolean {
+    return favorites.isFavorite(this.runtime, charm);
+  }
+
+  /**
+   * Get the favorites cell from the home space
+   * @returns Cell containing the array of favorite entries with cell and tag
+   */
+  getFavorites(): Cell<FavoriteList> {
+    return favorites.getHomeFavorites(this.runtime);
   }
 }
 

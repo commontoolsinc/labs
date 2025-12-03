@@ -56,8 +56,10 @@ describe("Chat pattern test", () => {
       const page = shell.page();
       await shell.goto({
         frontendUrl: FRONTEND_URL,
-        spaceName: SPACE_NAME,
-        charmId,
+        view: {
+          spaceName: SPACE_NAME,
+          charmId,
+        },
         identity,
       });
 

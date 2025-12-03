@@ -3,7 +3,7 @@ import { type HFunction, type RenderNode, type VNode } from "@commontools/api";
 /**
  * Fragment element name used for JSX fragments.
  */
-const FRAGMENT_ELEMENT = "common-fragment";
+const FRAGMENT_ELEMENT = "ct-fragment";
 
 /**
  * JSX factory function for creating virtual DOM nodes.

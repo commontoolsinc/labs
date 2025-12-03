@@ -19,6 +19,8 @@ export class PrimitiveFormatter implements TypeFormatter {
       (flags & ts.TypeFlags.BooleanLiteral) !== 0 ||
       (flags & ts.TypeFlags.StringLiteral) !== 0 ||
       (flags & ts.TypeFlags.NumberLiteral) !== 0 ||
+      (flags & ts.TypeFlags.BigInt) !== 0 ||
+      (flags & ts.TypeFlags.BigIntLiteral) !== 0 ||
       (flags & ts.TypeFlags.Null) !== 0 ||
       (flags & ts.TypeFlags.Undefined) !== 0 ||
       (flags & ts.TypeFlags.Void) !== 0 ||
@@ -27,26 +29,45 @@ export class PrimitiveFormatter implements TypeFormatter {
       (flags & ts.TypeFlags.Any) !== 0;
   }
 
-  formatType(type: ts.Type, _context: GenerationContext): SchemaDefinition {
+  formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
     const flags = type.flags;
 
     // Handle literal types first (more specific)
+    // If widenLiterals flag is set, skip enum generation and return base type
     if (flags & ts.TypeFlags.StringLiteral) {
+      if (context.widenLiterals) {
+        return { type: "string" };
+      }
       return {
         type: "string",
         enum: [(type as ts.StringLiteralType).value],
       };
     }
     if (flags & ts.TypeFlags.NumberLiteral) {
+      if (context.widenLiterals) {
+        return { type: "number" };
+      }
       return {
         type: "number",
         enum: [(type as ts.NumberLiteralType).value],
       };
     }
     if (flags & ts.TypeFlags.BooleanLiteral) {
+      if (context.widenLiterals) {
+        return { type: "boolean" };
+      }
       return {
         type: "boolean",
         enum: [(type as TypeWithInternals).intrinsicName === "true"],
+      };
+    }
+    if (flags & ts.TypeFlags.BigIntLiteral) {
+      if (context.widenLiterals) {
+        return { type: "integer" };
+      }
+      return {
+        type: "integer",
+        enum: [Number((type as ts.BigIntLiteralType).value.base10Value)],
       };
     }
 
@@ -59,6 +80,9 @@ export class PrimitiveFormatter implements TypeFormatter {
     }
     if (flags & ts.TypeFlags.Boolean) {
       return { type: "boolean" };
+    }
+    if (flags & ts.TypeFlags.BigInt) {
+      return { type: "integer" };
     }
     if (flags & ts.TypeFlags.Null) {
       return { type: "null" };

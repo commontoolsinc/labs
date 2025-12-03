@@ -1,7 +1,118 @@
 import * as __ctHelpers from "commontools";
 import { cell, recipe, UI } from "commontools";
-export default recipe("MapArrayLengthConditional", (_state) => {
-    const list = cell(["apple", "banana", "cherry"]);
+export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/Element"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        Element: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        VNode: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        RenderNode: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "number"
+                }, {
+                    type: "boolean",
+                    "enum": [false]
+                }, {
+                    type: "boolean",
+                    "enum": [true]
+                }, {
+                    $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/RenderNode"
+                    }
+                }]
+        },
+        Props: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean",
+                        "enum": [false]
+                    }, {
+                        type: "boolean",
+                        "enum": [true]
+                    }, {
+                        type: "object",
+                        additionalProperties: true
+                    }, {
+                        type: "array",
+                        items: true
+                    }, {
+                        asCell: true
+                    }, {
+                        asStream: true
+                    }, {
+                        type: "null"
+                    }]
+            }
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, (_state) => {
+    const list = cell(["apple", "banana", "cherry"], {
+        type: "array",
+        items: {
+            type: "string"
+        }
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [UI]: (<div>
         {__ctHelpers.derive({
@@ -19,7 +130,7 @@ export default recipe("MapArrayLengthConditional", (_state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     type: "boolean",
-                    enum: [false]
+                    "enum": [false]
                 }, {
                     $ref: "#/$defs/Element"
                 }],
@@ -29,7 +140,7 @@ export default recipe("MapArrayLengthConditional", (_state) => {
                     properties: {
                         type: {
                             type: "string",
-                            enum: ["vnode"]
+                            "enum": ["vnode"]
                         },
                         name: {
                             type: "string"
@@ -51,7 +162,7 @@ export default recipe("MapArrayLengthConditional", (_state) => {
                     properties: {
                         type: {
                             type: "string",
-                            enum: ["vnode"]
+                            "enum": ["vnode"]
                         },
                         name: {
                             type: "string"
@@ -75,10 +186,10 @@ export default recipe("MapArrayLengthConditional", (_state) => {
                             type: "number"
                         }, {
                             type: "boolean",
-                            enum: [false]
+                            "enum": [false]
                         }, {
                             type: "boolean",
-                            enum: [true]
+                            "enum": [true]
                         }, {
                             $ref: "#/$defs/VNode"
                         }, {
@@ -101,10 +212,10 @@ export default recipe("MapArrayLengthConditional", (_state) => {
                                 type: "number"
                             }, {
                                 type: "boolean",
-                                enum: [false]
+                                "enum": [false]
                             }, {
                                 type: "boolean",
-                                enum: [true]
+                                "enum": [true]
                             }, {
                                 type: "object",
                                 additionalProperties: true
@@ -122,7 +233,116 @@ export default recipe("MapArrayLengthConditional", (_state) => {
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => list.get().length > 0 && (<div>
-            {list.map((name) => (<span>{name}</span>))}
+            {list.mapWithPattern(__ctHelpers.recipe({
+                type: "object",
+                properties: {
+                    element: {
+                        type: "string"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {}
+                    }
+                },
+                required: ["element", "params"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "object",
+                properties: {
+                    type: {
+                        type: "string",
+                        "enum": ["vnode"]
+                    },
+                    name: {
+                        type: "string"
+                    },
+                    props: {
+                        $ref: "#/$defs/Props"
+                    },
+                    children: {
+                        $ref: "#/$defs/RenderNode"
+                    },
+                    $UI: {
+                        $ref: "#/$defs/VNode"
+                    }
+                },
+                required: ["type", "name", "props"],
+                $defs: {
+                    VNode: {
+                        type: "object",
+                        properties: {
+                            type: {
+                                type: "string",
+                                "enum": ["vnode"]
+                            },
+                            name: {
+                                type: "string"
+                            },
+                            props: {
+                                $ref: "#/$defs/Props"
+                            },
+                            children: {
+                                $ref: "#/$defs/RenderNode"
+                            },
+                            $UI: {
+                                $ref: "#/$defs/VNode"
+                            }
+                        },
+                        required: ["type", "name", "props"]
+                    },
+                    RenderNode: {
+                        anyOf: [{
+                                type: "string"
+                            }, {
+                                type: "number"
+                            }, {
+                                type: "boolean",
+                                "enum": [false]
+                            }, {
+                                type: "boolean",
+                                "enum": [true]
+                            }, {
+                                $ref: "#/$defs/VNode"
+                            }, {
+                                type: "object",
+                                properties: {}
+                            }, {
+                                type: "array",
+                                items: {
+                                    $ref: "#/$defs/RenderNode"
+                                }
+                            }]
+                    },
+                    Props: {
+                        type: "object",
+                        properties: {},
+                        additionalProperties: {
+                            anyOf: [{
+                                    type: "string"
+                                }, {
+                                    type: "number"
+                                }, {
+                                    type: "boolean",
+                                    "enum": [false]
+                                }, {
+                                    type: "boolean",
+                                    "enum": [true]
+                                }, {
+                                    type: "object",
+                                    additionalProperties: true
+                                }, {
+                                    type: "array",
+                                    items: true
+                                }, {
+                                    asCell: true
+                                }, {
+                                    asStream: true
+                                }, {
+                                    type: "null"
+                                }]
+                        }
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: name, params: {} }) => (<span>{name}</span>)), {})}
           </div>))}
       </div>),
     };
@@ -131,4 +351,3 @@ export default recipe("MapArrayLengthConditional", (_state) => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-

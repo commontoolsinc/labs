@@ -161,8 +161,14 @@ class MemoryConsumerSession<
         try {
           return this.receive(command as ProviderCommand<MemoryProtocol>);
         } catch (error) {
-          logger.error(() => ["TransformStream transform error:", error]);
-          logger.error(() => ["Failed command:", JSON.stringify(command)]);
+          logger.error(
+            "stream-error",
+            () => ["TransformStream transform error:", error],
+          );
+          logger.error(
+            "stream-error",
+            () => ["Failed command:", JSON.stringify(command)],
+          );
           throw error;
         }
       },
@@ -170,7 +176,10 @@ class MemoryConsumerSession<
         try {
           return this.close();
         } catch (error) {
-          logger.error(() => ["TransformStream flush error:", error]);
+          logger.error(
+            "stream-error",
+            () => ["TransformStream flush error:", error],
+          );
           throw error;
         }
       },

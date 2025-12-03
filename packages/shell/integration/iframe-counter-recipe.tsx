@@ -58,9 +58,7 @@ const runIframeRecipe = (
 ) =>
   recipe(argumentSchema, resultSchema, (data) => ({
     [NAME]: name,
-    [UI]: (
-      <common-iframe src={src} $context={data as CellLike<any>}></common-iframe>
-    ),
+    [UI]: <ct-iframe src={src} $context={data as CellLike<any>}></ct-iframe>,
     count: data.count,
   }));
 

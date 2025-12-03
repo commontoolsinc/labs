@@ -1,5 +1,5 @@
-import { type JsScript, Program } from "@commontools/js-runtime";
-import { FileSystemProgramResolver } from "@commontools/js-runtime";
+import { type JsScript, Program } from "@commontools/js-compiler";
+import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { Identity } from "@commontools/identity";
 import { Engine, Runtime } from "@commontools/runner";
 import { basename } from "@std/path";

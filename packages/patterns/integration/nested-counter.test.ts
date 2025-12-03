@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
-import { FileSystemProgramResolver } from "@commontools/js-runtime";
+import { FileSystemProgramResolver } from "@commontools/js-compiler";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -44,8 +44,10 @@ describe("nested counter integration test", () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      spaceName: SPACE_NAME,
-      charmId: charm.id,
+      view: {
+        spaceName: SPACE_NAME,
+        charmId: charm.id,
+      },
       identity,
     });
 
@@ -99,8 +101,10 @@ describe("nested counter integration test", () => {
     // Navigate to the charm to see if UI reflects the change
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      spaceName: SPACE_NAME,
-      charmId: charm.id,
+      view: {
+        spaceName: SPACE_NAME,
+        charmId: charm.id,
+      },
       identity,
     });
 

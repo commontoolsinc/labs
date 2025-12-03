@@ -1,7 +1,9 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive } from "commontools";
 export default function TestDeriveCollisionProperty() {
-    const multiplier = cell(2);
+    const multiplier = cell(2, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     // Input name 'multiplier' collides with captured variable 'multiplier'
     // The callback returns an object with a property named 'multiplier'
     // Only the variable reference should be renamed, NOT the property name

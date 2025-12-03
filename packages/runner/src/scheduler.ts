@@ -156,6 +156,7 @@ export class Scheduler implements IScheduler {
     const reads = this.setDependencies(action, log);
 
     logger.debug(
+      "schedule",
       () => ["Subscribing to action:", action, reads, scheduleImmediately],
     );
 
@@ -165,7 +166,7 @@ export class Scheduler implements IScheduler {
     } else {
       const pathsByEntity = addressesToPathByEntity(reads);
 
-      logger.debug(() => [
+      logger.debug("schedule", () => [
         `[SUBSCRIBE] Action: ${action.name || "anonymous"}`,
         `Entities: ${pathsByEntity.size}`,
         `Reads: ${reads.length}`,
@@ -186,14 +187,14 @@ export class Scheduler implements IScheduler {
         );
         this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
 
-        logger.debug(() => [
+        logger.debug("schedule", () => [
           `[SUBSCRIBE] Registered action for ${spaceAndURI}`,
           `Paths: ${pathsWithValues.map((p) => p.join("/")).join(", ")}`,
         ]);
       }
 
       this.cancels.set(action, () => {
-        logger.debug(() => [
+        logger.debug("schedule", () => [
           `[UNSUBSCRIBE] Action: ${action.name || "anonymous"}`,
           `Entities: ${entities.size}`,
         ]);
@@ -219,7 +220,7 @@ export class Scheduler implements IScheduler {
       action,
     });
 
-    logger.debug(() => [
+    logger.debug("schedule-run-start", () => [
       `[RUN] Starting action: ${action.name || "anonymous"}`,
     ]);
 
@@ -232,7 +233,7 @@ export class Scheduler implements IScheduler {
       const finalizeAction = (error?: unknown) => {
         try {
           if (error) {
-            logger.error(() => [
+            logger.error("schedule-error", () => [
               `[RUN] Action failed: ${action.name || "anonymous"}`,
               `Error: ${error}`,
             ]);
@@ -253,7 +254,11 @@ export class Scheduler implements IScheduler {
             // even after we run out of retries, this will be re-triggered when
             // input data changes.
             if (error) {
-              logger.info("Error committing transaction", error);
+              logger.info(
+                "schedule-run-error",
+                "Error committing transaction",
+                error,
+              );
 
               this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
               if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
@@ -270,7 +275,7 @@ export class Scheduler implements IScheduler {
           });
           const log = txToReactivityLog(tx);
 
-          logger.debug(() => [
+          logger.debug("schedule-run-complete", () => [
             `[RUN] Action completed: ${action.name || "anonymous"}`,
             `Reads: ${log.reads.length}`,
             `Writes: ${log.writes.length}`,
@@ -282,9 +287,19 @@ export class Scheduler implements IScheduler {
       };
 
       try {
+        const actionStartTime = performance.now();
         Promise.resolve(action(tx))
           .then((actionResult) => {
             result = actionResult;
+            logger.debug("schedule-action-timing", () => {
+              const duration = ((performance.now() - actionStartTime) / 1000)
+                .toFixed(3);
+              return [
+                `Action ${
+                  action.name || "anonymous"
+                } completed in ${duration}s`,
+              ];
+            });
             finalizeAction();
           })
           .catch((error) => finalizeAction(error));
@@ -305,7 +320,11 @@ export class Scheduler implements IScheduler {
       } // Once nothing is running, see if more work is queued up. If not, then
       // resolve the idle promise, otherwise add it to the idle promises list
       // that will be resolved once all the work is done.
-      else if (this.pending.size === 0 && this.eventQueue.length === 0) {
+      // IMPORTANT: Also check !this.scheduled to wait for any queued macro task execution
+      else if (
+        this.pending.size === 0 && this.eventQueue.length === 0 &&
+        !this.scheduled
+      ) {
         resolve();
       } else {
         this.idlePromises.push(resolve);
@@ -360,7 +379,7 @@ export class Scheduler implements IScheduler {
         const space = notification.space;
 
         // Log notification details
-        logger.debug(() => [
+        logger.debug("schedule", () => [
           `[NOTIFICATION] Type: ${notification.type}`,
           `Space: ${space}`,
           `Has source: ${
@@ -375,7 +394,7 @@ export class Scheduler implements IScheduler {
           let changeIndex = 0;
           for (const change of notification.changes) {
             changeIndex++;
-            logger.debug(() => [
+            logger.debug("schedule", () => [
               `[CHANGE ${changeIndex}]`,
               `Address: ${change.address.id}/${change.address.path.join("/")}`,
               `Before: ${JSON.stringify(change.before)}`,
@@ -387,7 +406,7 @@ export class Scheduler implements IScheduler {
             });
 
             if (change.address.type !== "application/json") {
-              logger.debug(() => [
+              logger.debug("schedule", () => [
                 `[CHANGE ${changeIndex}] Skipping non-JSON type: ${change.address.type}`,
               ]);
               continue;
@@ -397,7 +416,7 @@ export class Scheduler implements IScheduler {
             const paths = this.triggers.get(spaceAndURI);
 
             if (paths) {
-              logger.debug(() => [
+              logger.debug("schedule", () => [
                 `[CHANGE ${changeIndex}] Found ${paths.size} registered actions for ${spaceAndURI}`,
               ]);
 
@@ -408,12 +427,12 @@ export class Scheduler implements IScheduler {
                 change.address.path,
               );
 
-              logger.debug(() => [
+              logger.debug("schedule", () => [
                 `[CHANGE ${changeIndex}] Triggered ${triggeredActions.length} actions`,
               ]);
 
               for (const action of triggeredActions) {
-                logger.debug(() => [
+                logger.debug("schedule", () => [
                   `[TRIGGERED] Action for ${spaceAndURI}/${
                     change.address.path.join("/")
                   }`,
@@ -423,7 +442,7 @@ export class Scheduler implements IScheduler {
                 this.pending.add(action);
               }
             } else {
-              logger.debug(() => [
+              logger.debug("schedule", () => [
                 `[CHANGE ${changeIndex}] No registered actions for ${spaceAndURI}`,
               ]);
             }
@@ -436,7 +455,7 @@ export class Scheduler implements IScheduler {
 
   private queueExecution(): void {
     if (this.scheduled) return;
-    queueMicrotask(() => this.execute());
+    queueTask(() => this.execute());
     this.scheduled = true;
   }
 
@@ -518,7 +537,11 @@ export class Scheduler implements IScheduler {
               try {
                 onCommit(tx);
               } catch (callbackError) {
-                logger.error("Error in event commit callback:", callbackError);
+                logger.error(
+                  "schedule-error",
+                  "Error in event commit callback:",
+                  callbackError,
+                );
               }
             }
           });
@@ -527,9 +550,19 @@ export class Scheduler implements IScheduler {
       const tx = this.runtime.edit();
 
       try {
+        const actionStartTime = performance.now();
         this.runningPromise = Promise.resolve(
           this.runtime.harness.invoke(() => action(tx)),
-        ).then(() => finalize()).catch((error) => finalize(error));
+        ).then(() => {
+          logger.debug("action-timing", () => {
+            const duration = ((performance.now() - actionStartTime) / 1000)
+              .toFixed(3);
+            return [
+              `Action ${action.name || "anonymous"} completed in ${duration}s`,
+            ];
+          });
+          finalize();
+        }).catch((error) => finalize(error));
         await this.runningPromise;
       } catch (error) {
         finalize(error);
@@ -538,7 +571,7 @@ export class Scheduler implements IScheduler {
 
     const order = topologicalSort(this.pending, this.dependencies);
 
-    logger.debug(() => [
+    logger.debug("schedule", () => [
       `[EXECUTE] Canceling subscriptions for ${order.length} actions before execution`,
     ]);
 
@@ -572,7 +605,8 @@ export class Scheduler implements IScheduler {
       this.loopCounter = new WeakMap();
       this.scheduled = false;
     } else {
-      queueMicrotask(() => this.execute());
+      // Keep scheduled = true since we're queuing another execution
+      queueTask(() => this.execute());
     }
   }
 }
@@ -712,4 +746,8 @@ function getCharmMetadataFromFrame(frame?: Frame): {
     JSON.stringify(resultCell?.entityId ?? {}),
   )["/"];
   return result;
+}
+
+function queueTask(fn: () => void): void {
+  setTimeout(fn, 0);
 }

@@ -5,6 +5,7 @@ import type {
   AuthorizationError as IAuthorizationError,
   ConflictError as IConflictError,
   ConnectionError as IConnectionError,
+  DID,
   Fact,
   Invariant as IClaim,
   JSONValue,
@@ -25,6 +26,7 @@ import { Cell } from "../cell.ts";
 
 export type {
   Assertion,
+  DID,
   Fact,
   IClaim,
   JSONValue,
@@ -32,6 +34,7 @@ export type {
   MemorySpace,
   Result,
   SchemaPathSelector,
+  Signer,
   State,
   Unit,
   URI,
@@ -65,6 +68,12 @@ export interface StorageValue<T = any> {
 
 export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
+
+  /**
+   * The signer used for authenticating storage operations.
+   * Can be used to derive the user's identity DID via `as.did()`.
+   */
+  as: Signer;
 
   /**
    * Open a new connection to the storage provider associated with the given
@@ -912,3 +921,10 @@ export interface IAttestation {
   readonly address: IMemoryAddress;
   readonly value?: JSONValue;
 }
+
+// Re-export transaction wrapper utilities from implementation
+export {
+  createChildCellTransaction,
+  createNonReactiveTransaction,
+  TransactionWrapper,
+} from "./extended-storage-transaction.ts";

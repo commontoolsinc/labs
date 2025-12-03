@@ -29,6 +29,47 @@ export default recipe({
             required: ["title", "done"]
         }
     }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        mapped: {
+            type: "array",
+            items: {
+                type: "string"
+            },
+            asOpaque: true
+        },
+        filtered: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    title: {
+                        type: "string",
+                        asOpaque: true
+                    },
+                    done: {
+                        anyOf: [{
+                                type: "boolean",
+                                "enum": [false],
+                                asOpaque: true
+                            }, {
+                                type: "boolean",
+                                "enum": [true],
+                                asOpaque: true
+                            }]
+                    },
+                    position: {
+                        type: "number",
+                        asOpaque: true
+                    }
+                },
+                required: ["title", "done", "position"]
+            },
+            asOpaque: true
+        }
+    },
+    required: ["mapped", "filtered"]
 } as const satisfies __ctHelpers.JSONSchema, ({ items }) => {
     // Map on opaque ref arrays should be transformed to mapWithPattern
     const mapped = items.mapWithPattern(__ctHelpers.recipe({
@@ -57,6 +98,9 @@ export default recipe({
                 required: ["title", "done"]
             }
         }
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "string",
+        asOpaque: true
     } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => item.title), {});
     // This should also be transformed
     const filtered = items.mapWithPattern(__ctHelpers.recipe({
@@ -88,7 +132,31 @@ export default recipe({
                 required: ["title", "done"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, ({ element: item, index: index, params: {} }) => ({
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "object",
+        properties: {
+            title: {
+                type: "string",
+                asOpaque: true
+            },
+            done: {
+                anyOf: [{
+                        type: "boolean",
+                        "enum": [false],
+                        asOpaque: true
+                    }, {
+                        type: "boolean",
+                        "enum": [true],
+                        asOpaque: true
+                    }]
+            },
+            position: {
+                type: "number",
+                asOpaque: true
+            }
+        },
+        required: ["title", "done", "position"]
+    } as const satisfies __ctHelpers.JSONSchema, ({ element: item, index, params: {} }) => ({
         title: item.title,
         done: item.done,
         position: index,

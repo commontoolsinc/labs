@@ -19,6 +19,8 @@ import { BaseElement } from "../../core/base-element.ts";
  *   <p slot="content">Card content goes here</p>
  *   <ct-button slot="footer">Action</ct-button>
  * </ct-card>
+ *
+ * Uses JS to detect empty slots (CSS :has() can't distinguish assigned vs fallback content).
  */
 
 export class CTCard extends BaseElement {
@@ -70,8 +72,13 @@ export class CTCard extends BaseElement {
         padding-bottom: 0;
       }
 
-      /* Hide header if it has no slotted content */
-      .card-header:not(:has(*)) {
+      /* When header is the only section, add bottom padding */
+      .card-header:not(.empty):has(+ .card-content.empty) {
+        padding-bottom: 1.5rem;
+      }
+
+      /* Hide header if empty (controlled by JS via .empty class) */
+      .card-header.empty {
         display: none;
         padding: 0;
       }
@@ -84,7 +91,8 @@ export class CTCard extends BaseElement {
         gap: 1rem;
       }
 
-      .card-title-wrapper:not(:has([slot])) {
+      /* Hide title wrapper if empty (controlled by JS via .empty class) */
+      .card-title-wrapper.empty {
         display: none;
       }
 
@@ -110,8 +118,8 @@ export class CTCard extends BaseElement {
         padding: 1.5rem;
       }
 
-      /* Hide content if it has no slotted content */
-      .card-content:not(:has(*)) {
+      /* Hide content if empty (controlled by JS via .empty class) */
+      .card-content.empty {
         display: none;
         padding: 0;
       }
@@ -122,8 +130,8 @@ export class CTCard extends BaseElement {
         padding-top: 0;
       }
 
-      /* Hide footer if it has no slotted content */
-      .card-footer:not(:has(*)) {
+      /* Hide footer if empty (controlled by JS via .empty class) */
+      .card-footer.empty {
         display: none;
         padding: 0;
       }
@@ -155,6 +163,16 @@ export class CTCard extends BaseElement {
         this.addEventListener("click", this._handleClick);
         this.addEventListener("keydown", this._handleKeydown);
       }
+    }
+
+    override firstUpdated() {
+      // Set up slot change listeners to detect empty slots
+      this.shadowRoot?.querySelectorAll("slot").forEach((slot) => {
+        slot.addEventListener("slotchange", () => this._updateEmptyStates());
+      });
+
+      // Initial check for empty states
+      this._updateEmptyStates();
     }
 
     override disconnectedCallback() {
@@ -202,6 +220,63 @@ export class CTCard extends BaseElement {
           </div>
         </div>
       `;
+    }
+
+    /** Check if slot has real content (not just whitespace) */
+    private _slotHasContent(slot: HTMLSlotElement | null): boolean {
+      if (!slot) return false;
+      return slot.assignedNodes().some((node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+          return node.textContent?.trim() !== "";
+        }
+        return true;
+      });
+    }
+
+    /** Update empty state classes based on slot content */
+    private _updateEmptyStates(): void {
+      const getSlot = (name: string) =>
+        this.shadowRoot?.querySelector(`slot[name="${name}"]`) as
+          | HTMLSlotElement
+          | null;
+
+      const headerSlot = getSlot("header");
+      const contentSlot = getSlot("content");
+      const defaultSlot = contentSlot?.querySelector("slot:not([name])") as
+        | HTMLSlotElement
+        | null;
+      const footerSlot = getSlot("footer");
+      const titleSlot = getSlot("title");
+      const actionSlot = getSlot("action");
+      const descriptionSlot = getSlot("description");
+
+      const hasHeader = this._slotHasContent(headerSlot);
+      const hasContent = this._slotHasContent(contentSlot) ||
+        this._slotHasContent(defaultSlot);
+      const hasFooter = this._slotHasContent(footerSlot);
+      const hasTitle = this._slotHasContent(titleSlot);
+      const hasAction = this._slotHasContent(actionSlot);
+      const hasDescription = this._slotHasContent(descriptionSlot);
+
+      const showHeader = hasHeader || hasTitle || hasAction || hasDescription;
+      const showTitleWrapper = hasTitle || hasAction;
+
+      this.shadowRoot?.querySelector(".card-header")?.classList.toggle(
+        "empty",
+        !showHeader,
+      );
+      this.shadowRoot?.querySelector(".card-content")?.classList.toggle(
+        "empty",
+        !hasContent,
+      );
+      this.shadowRoot?.querySelector(".card-footer")?.classList.toggle(
+        "empty",
+        !hasFooter,
+      );
+      this.shadowRoot?.querySelector(".card-title-wrapper")?.classList.toggle(
+        "empty",
+        !showTitleWrapper,
+      );
     }
 
     private _handleClick = (_event: Event): void => {

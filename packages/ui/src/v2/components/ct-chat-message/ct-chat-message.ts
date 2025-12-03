@@ -1,11 +1,11 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
-import { unsafeHTML } from "lit/directives/unsafe-html.js";
-import { marked } from "marked";
 import { BaseElement } from "../../core/base-element.ts";
 import "../ct-tool-call/ct-tool-call.ts";
 import "../ct-button/ct-button.ts";
+import "../ct-copy-button/ct-copy-button.ts";
+import "../ct-markdown/ct-markdown.ts";
 import type {
   BuiltInLLMContent,
   BuiltInLLMTextPart,
@@ -112,28 +112,6 @@ export class CTChatMessage extends BaseElement {
         }
       }
 
-      /* Streaming text effect - can be triggered by adding 'streaming' class */
-      .message.streaming .message-content {
-        animation: none;
-        opacity: 1;
-      }
-
-      .message.streaming .message-content::after {
-        content: "▊";
-        animation: blink 1s infinite;
-        margin-left: 2px;
-        color: currentColor;
-      }
-
-      @keyframes blink {
-        0%, 50% {
-          opacity: 1;
-        }
-        51%, 100% {
-          opacity: 0;
-        }
-      }
-
       .message-user {
         background-color: var(--ct-theme-color-primary, #3b82f6);
         color: var(--ct-theme-color-primary-foreground, #ffffff);
@@ -143,9 +121,10 @@ export class CTChatMessage extends BaseElement {
         color: var(--ct-theme-color-text, #111827);
       }
 
-      .message-content {
+      /* ct-markdown inherits color from parent */
+      ct-markdown {
+        color: inherit;
         line-height: 1.5;
-        animation: textFadeIn 0.4s ease-out 0.1s both;
       }
 
       /* Avatar styling */
@@ -213,81 +192,6 @@ export class CTChatMessage extends BaseElement {
         max-width: 500px;
       }
 
-      /* Markdown styling */
-      .message-content p {
-        margin: 0;
-      }
-
-      .message-content p:not(:last-child) {
-        margin-bottom: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
-      }
-
-      .message-content code {
-        background-color: var(--ct-theme-color-surface, #f9fafb);
-        padding: var(--ct-theme-padding-code, var(--ct-spacing-1, 0.25rem));
-        border-radius: var(--ct-theme-border-radius, 0.5rem);
-        font-family: var(--ct-theme-mono-font-family, ui-monospace, monospace);
-        font-size: 0.875em;
-      }
-
-      .message-content pre {
-        background-color: var(--ct-theme-color-surface, #f9fafb);
-        padding: var(--ct-theme-padding-block, var(--ct-spacing-3, 0.75rem));
-        border-radius: var(--ct-theme-border-radius, 0.5rem);
-        border: 1px solid var(--ct-theme-color-border, #e5e7eb);
-        overflow-x: auto;
-        margin: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem)) 0;
-      }
-
-      .message-content pre code {
-        background-color: transparent;
-        padding: 0;
-      }
-
-      .message-content ul,
-      .message-content ol {
-        margin: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem)) 0;
-        padding-left: var(--ct-theme-padding, var(--ct-spacing-3, 0.75rem));
-      }
-
-      .message-content blockquote {
-        border-left: 4px solid var(--ct-theme-color-border, #e5e7eb);
-        margin: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem)) 0;
-        padding-left: var(--ct-theme-padding, var(--ct-spacing-3, 0.75rem));
-        font-style: italic;
-        color: var(--ct-theme-color-text-muted, #6b7280);
-      }
-
-      /* Adjust colors for user messages */
-      :host([role="user"]) .message-content code {
-        background-color: rgba(255, 255, 255, 0.2);
-        color: var(
-          --ct-theme-color-accent-foreground,
-          var(--ct-color-white, #ffffff)
-        );
-      }
-
-      :host([role="user"]) .message-content pre {
-        background-color: rgba(255, 255, 255, 0.2);
-        border: none;
-      }
-
-      :host([role="user"]) .message-content pre code {
-        background-color: transparent;
-        color: var(
-          --ct-theme-color-accent-foreground,
-          var(--ct-color-white, #ffffff)
-        );
-      }
-
-      :host([role="user"]) .message-content blockquote {
-        border-left-color: rgba(255, 255, 255, 0.6);
-        color: var(
-          --ct-theme-color-accent-foreground,
-          var(--ct-color-white, #ffffff)
-        );
-      }
-
       /* Message actions */
       .message-actions {
         display: flex;
@@ -298,24 +202,6 @@ export class CTChatMessage extends BaseElement {
       }
 
       .message-bubble:hover .message-actions {
-        opacity: 1;
-      }
-
-      /* Code block copy button styles */
-      .code-block-container {
-        position: relative;
-      }
-
-      .code-copy-button {
-        position: absolute;
-        top: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
-        right: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
-        opacity: 0;
-        transition: opacity var(--ct-theme-animation-duration, 0.2s) ease;
-        z-index: 1;
-      }
-
-      .code-block-container:hover .code-copy-button {
         opacity: 1;
       }
 
@@ -340,13 +226,6 @@ export class CTChatMessage extends BaseElement {
       :host([compact]) .tool-attachments {
         margin-top: var(--ct-theme-spacing-compact, var(--ct-spacing-1, 0.25rem));
         gap: var(--ct-theme-spacing-compact, var(--ct-spacing-1, 0.25rem));
-      }
-
-      :host([compact]) .message-content p:not(:last-child) {
-        margin-bottom: var(
-          --ct-theme-spacing-compact,
-          var(--ct-spacing-1, 0.25rem)
-        );
       }
     `,
   ];
@@ -373,129 +252,11 @@ export class CTChatMessage extends BaseElement {
   @property({ attribute: false })
   declare theme?: CTTheme;
 
-  @property({ type: Boolean })
-  private _copied = false;
-
-  private _codeBlockCopiedStates = new Map<string, boolean>();
-
   constructor() {
     super();
     this.role = "user";
     this.content = "";
     this.streaming = false;
-  }
-
-  private _renderMarkdown(content: string): string {
-    if (!content) return "";
-
-    // Configure marked for safer rendering
-    marked.setOptions({
-      breaks: true,
-      gfm: true,
-    });
-
-    let renderedHtml = marked(content) as string;
-
-    // Wrap code blocks with copy buttons
-    renderedHtml = this._wrapCodeBlocksWithCopyButtons(renderedHtml);
-
-    return renderedHtml;
-  }
-
-  private _wrapCodeBlocksWithCopyButtons(html: string): string {
-    // Use a regex to find <pre><code>...</code></pre> blocks and wrap them
-    return html.replace(
-      /<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g,
-      (_match, codeAttrs, codeContent) => {
-        const blockId = `code-${Math.random().toString(36).substr(2, 9)}`;
-        // Decode HTML entities for the copy content
-        const decodedContent = this._decodeHtmlEntities(codeContent);
-
-        return `<div class="code-block-container">
-          <pre><code${codeAttrs}>${codeContent}</code></pre>
-          <ct-button
-            class="code-copy-button"
-            variant="ghost"
-            size="sm"
-            data-block-id="${blockId}"
-            data-copy-content="${this._escapeForAttribute(decodedContent)}"
-            title="Copy code"
-          >
-            📋
-          </ct-button>
-        </div>`;
-      },
-    );
-  }
-
-  private _decodeHtmlEntities(text: string): string {
-    const textarea = document.createElement("textarea");
-    textarea.innerHTML = text;
-    return textarea.value;
-  }
-
-  private _escapeForAttribute(text: string): string {
-    return text
-      .replace(/&/g, "&amp;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-  }
-
-  private async _copyMessage() {
-    const textContent = this._extractTextContent();
-    if (!textContent) return;
-
-    try {
-      await navigator.clipboard.writeText(textContent);
-      this._copied = true;
-
-      // Reset copied state after 2 seconds
-      setTimeout(() => {
-        this._copied = false;
-        this.requestUpdate();
-      }, 2000);
-
-      this.requestUpdate();
-    } catch (err) {
-      console.error("Failed to copy message:", err);
-    }
-  }
-
-  private async _copyCodeBlock(blockId: string, content: string) {
-    try {
-      // Decode the content from the attribute
-      const decodedContent = content
-        .replace(/&amp;/g, "&")
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">");
-
-      await navigator.clipboard.writeText(decodedContent);
-      this._codeBlockCopiedStates.set(blockId, true);
-
-      // Update the button to show copied state
-      const button = this.shadowRoot?.querySelector(
-        `[data-block-id="${blockId}"]`,
-      ) as HTMLElement;
-      if (button) {
-        button.textContent = "✓";
-        button.title = "Copied!";
-      }
-
-      // Reset copied state after 2 seconds
-      setTimeout(() => {
-        this._codeBlockCopiedStates.set(blockId, false);
-        if (button) {
-          button.textContent = "📋";
-          button.title = "Copy code";
-        }
-      }, 2000);
-    } catch (err) {
-      console.error("Failed to copy code block:", err);
-    }
   }
 
   private _renderToolAttachments() {
@@ -579,14 +340,12 @@ export class CTChatMessage extends BaseElement {
       <div class="message-actions">
         ${this.role === "assistant"
           ? html`
-            <ct-button
+            <ct-copy-button
+              text="${textContent}"
               variant="ghost"
               size="sm"
-              @click="${this._copyMessage}"
-              title="${this._copied ? "Copied!" : "Copy message"}"
-            >
-              ${this._copied ? "✓" : "📋"}
-            </ct-button>
+              icon-only
+            ></ct-copy-button>
           `
           : null}
       </div>
@@ -610,11 +369,6 @@ export class CTChatMessage extends BaseElement {
     if (changedProperties.has("theme") && this.theme) {
       this._updateThemeProperties();
     }
-
-    // Add event listeners to code copy buttons after render
-    if (changedProperties.has("content")) {
-      this._setupCodeCopyButtons();
-    }
   }
 
   private _updateThemeProperties() {
@@ -622,38 +376,22 @@ export class CTChatMessage extends BaseElement {
     applyThemeToElement(this, this.theme);
   }
 
-  private _setupCodeCopyButtons() {
-    const copyButtons = this.shadowRoot?.querySelectorAll(".code-copy-button");
-    copyButtons?.forEach((button) => {
-      button.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const target = e.target as HTMLElement;
-        const blockId = target.getAttribute("data-block-id");
-        const content = target.getAttribute("data-copy-content");
-        if (blockId && content) {
-          this._copyCodeBlock(blockId, content);
-        }
-      });
-    });
-  }
-
   override render() {
-    const messageClass = `message message-${this.role}${
-      this.streaming ? " streaming" : ""
-    }`;
-
+    const messageClass = `message message-${this.role}`;
     const textContent = this._extractTextContent();
-    const renderedContent = this._renderMarkdown(textContent);
+    const variant = this.role === "user" ? "inverse" : "default";
 
     return html`
       <div class="message-wrapper">
         ${this._renderAvatar()}
         <div class="message-bubble">
           <div class="${messageClass}">
-            <div class="message-content">
-              ${unsafeHTML(renderedContent)}
-            </div>
+            <ct-markdown
+              .content="${textContent}"
+              .variant="${variant}"
+              ?streaming="${this.streaming}"
+              ?compact="${this.compact}"
+            ></ct-markdown>
           </div>
           ${this._renderToolAttachments()} ${this._renderMessageActions()}
         </div>

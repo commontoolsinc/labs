@@ -2,6 +2,7 @@ import ts from "typescript";
 
 import { detectCallKind } from "../ast/call-kind.ts";
 import { setParentPointers } from "../ast/utils.ts";
+import { registerDeriveCallType } from "../ast/type-inference.ts";
 import { Transformer } from "../core/transformers.ts";
 import type { TransformationContext } from "../core/mod.ts";
 
@@ -22,9 +23,14 @@ export class ComputedTransformer extends Transformer {
   /**
    * Filter: Only run if the file contains 'computed' somewhere.
    * This is a quick optimization to skip files without computed calls.
+   * Falls back to AST traversal if text search fails (e.g., computed calls
+   * created by other transformers).
    */
   override filter(context: TransformationContext): boolean {
-    return context.sourceFile.text.includes("computed");
+    if (context.sourceFile.text.includes("computed")) {
+      return true;
+    }
+    return sourceContainsComputedCall(context);
   }
 
   override transform(context: TransformationContext): ts.SourceFile {
@@ -68,9 +74,10 @@ function createComputedToDeriveVisitor(
 
     // Transform: computed(() => expr) → derive({}, () => expr)
     // Keep the zero-parameter callback as-is
+    // Always use __ctHelpers.derive for safety (it's always available via cts-enable)
     const deriveCall = factory.updateCallExpression(
       node,
-      factory.createIdentifier("derive"), // Replace 'computed' with 'derive'
+      context.ctHelpers.getHelperExpr("derive"),
       node.typeArguments, // Preserve type arguments (if any)
       [
         factory.createObjectLiteralExpression([], false), // First arg: empty object {}
@@ -78,13 +85,52 @@ function createComputedToDeriveVisitor(
       ],
     );
 
-    // Set parent pointers so parent-walking logic works (e.g., in shouldTransformMap)
-    // Don't manually set callback.parent - let it keep its original parent from source
-    // so that getSourceFile() works correctly for capture detection
-    setParentPointers(deriveCall);
+    // Visit children to transform any nested computed() calls
+    const visitedDeriveCall = ts.visitEachChild(deriveCall, visitor, tsContext);
 
-    return deriveCall;
+    // Transfer type from original computed() call to the visited derive call
+    // (ts.visitEachChild creates new nodes, so register on the visited node)
+    if (context.options.typeRegistry) {
+      const computedType = context.options.typeRegistry.get(node);
+      if (computedType) {
+        registerDeriveCallType(
+          visitedDeriveCall,
+          undefined, // resultTypeNode - not needed since we have resultType
+          computedType, // resultType from the computed call
+          checker,
+          context.options.typeRegistry,
+        );
+      }
+    }
+
+    // Set parent pointers on the visited result since ts.visitEachChild creates
+    // new nodes. This maintains the parent chain for nested callback analysis.
+    setParentPointers(visitedDeriveCall, node.parent);
+
+    return visitedDeriveCall;
   };
 
   return visitor;
+}
+
+function sourceContainsComputedCall(
+  context: TransformationContext,
+): boolean {
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isCallExpression(node)) {
+      const callKind = detectCallKind(node, context.checker);
+      if (
+        callKind?.kind === "builder" &&
+        callKind.builderName === "computed"
+      ) {
+        found = true;
+        return;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(context.sourceFile);
+  return found;
 }

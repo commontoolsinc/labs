@@ -35,7 +35,7 @@ function parseArgs(libDir?: string, outFile?: string): CompileOptions {
     Deno.exit(1);
   }
   return {
-    target: "es2023", // Target used in js-runtime
+    target: "es2023", // Target used in js-compiler
     libDir,
     outFile,
   };

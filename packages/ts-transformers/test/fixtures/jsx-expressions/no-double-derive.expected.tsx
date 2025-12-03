@@ -5,15 +5,15 @@ import { derive } from "commontools";
 export default function TestComponent({ items, cellRef }) {
     return (<div>
       {/* User-written derive with simple parameter transformation - should NOT be double-wrapped */}
-      <span>Count: {derive(items.length, (n) => n + 1)}</span>
+      <span>Count: {derive(true as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, items.length, (n) => n + 1)}</span>
 
       {/* User-written derive accessing opaque ref property - should NOT be double-wrapped */}
-      <span>Name: {derive(cellRef, (ref) => ref.name || "Unknown")}</span>
+      <span>Name: {derive(true as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, cellRef, (ref) => ref.name || "Unknown")}</span>
 
       {/* Nested in map with user-written derive - derives should NOT be double-wrapped */}
       {items.map((item, index) => (<li key={item.id}>
           {/* These user-written derives should remain as-is, not wrapped in another derive */}
-          Item {derive(index, (i) => i + 1)}: {derive(item, (it) => it.title)}
+          Item {derive(true as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, index, (i) => i + 1)}: {derive(true as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, item, (it) => it.title)}
         </li>))}
 
       {/* Simple property access - should NOT be transformed */}

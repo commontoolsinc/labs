@@ -1,13 +1,11 @@
 /// <cts-enable />
 import {
   BuiltInLLMContent,
-  BuiltInLLMMessage,
   Cell,
-  cell,
   Default,
   derive,
+  generateText,
   handler,
-  llm,
   NAME,
   recipe,
   UI,
@@ -33,17 +31,12 @@ const askQuestion = handler<
 });
 
 export default recipe<LLMTestInput>(({ title }) => {
-  // It is possible to make inline cells like this, but always consider whether it should just be part of the argument cell.
-  // These cells are effectively 'hidden state' from other recipes
-  const question = cell<string>("");
+  const question = Cell.of("");
 
-  const llmResponse = llm({
+  const llmResponse = generateText({
     system:
       "You are a helpful assistant. Answer questions clearly and concisely.",
-    messages: derive<string, BuiltInLLMMessage[]>(
-      question,
-      (q) => q ? [{ role: "user", content: q }] : [],
-    ),
+    prompt: question,
   });
 
   return {
@@ -61,29 +54,42 @@ export default recipe<LLMTestInput>(({ title }) => {
           />
         </div>
 
-        {derive(question, (q) =>
-          q
-            ? (
-              <div>
-                <h3>Your Question:</h3>
-                <blockquote>
-                  {q}
-                </blockquote>
-              </div>
-            )
-            : null)}
+        <ct-cell-context $cell={question}>
+          {derive(question, (q) =>
+            q
+              ? (
+                <div>
+                  <h3>Your Question:</h3>
+                  <blockquote>
+                    {q}
+                  </blockquote>
+                </div>
+              )
+              : null)}
+        </ct-cell-context>
 
-        {derive(llmResponse.result, (r) =>
-          r
-            ? (
-              <div>
-                <h3>LLM Response:</h3>
-                <pre>
-                  {JSON.stringify(r, null, 2)}
-                </pre>
-              </div>
-            )
-            : null)}
+        <ct-cell-context $cell={llmResponse}>
+          {derive(
+            [llmResponse.pending, llmResponse.result],
+            ([pending, r]) =>
+              pending
+                ? (
+                  <div>
+                    <ct-loader show-elapsed /> Thinking...
+                  </div>
+                )
+                : r
+                ? (
+                  <div>
+                    <h3>LLM Response:</h3>
+                    <pre>
+                      {r}
+                    </pre>
+                  </div>
+                )
+                : null,
+          )}
+        </ct-cell-context>
       </div>
     ),
     question,

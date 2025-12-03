@@ -11,13 +11,20 @@ export default recipe({
         }
     },
     required: ["base", "multiplier"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number",
+    asOpaque: true
 } as const satisfies __ctHelpers.JSONSchema, (config: {
     base: number;
     multiplier: number;
 }) => {
-    const value = cell(10);
+    const value = cell(10, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     const offset = 5; // non-cell local
-    const threshold = cell(15); // cell local
+    const threshold = cell(15, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema); // cell local
     const result = __ctHelpers.derive({
         type: "object",
         properties: {
@@ -39,7 +46,7 @@ export default recipe({
             },
             offset: {
                 type: "number",
-                enum: [5]
+                "enum": [5]
             },
             threshold: {
                 type: "number",

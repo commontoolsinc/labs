@@ -1,7 +1,116 @@
 import * as __ctHelpers from "commontools";
 import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, OpaqueRef, recipe, UI, } from "commontools";
 // the simple charm (to which we'll store references within a cell)
-const SimpleRecipe = recipe("Simple Recipe", () => ({
+const SimpleRecipe = recipe(false as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $NAME: {
+            type: "string"
+        },
+        $UI: {
+            $ref: "#/$defs/Element"
+        }
+    },
+    required: ["$NAME", "$UI"],
+    $defs: {
+        Element: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        VNode: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        RenderNode: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "number"
+                }, {
+                    type: "boolean",
+                    "enum": [false]
+                }, {
+                    type: "boolean",
+                    "enum": [true]
+                }, {
+                    $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/RenderNode"
+                    }
+                }]
+        },
+        Props: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean",
+                        "enum": [false]
+                    }, {
+                        type: "boolean",
+                        "enum": [true]
+                    }, {
+                        type: "object",
+                        additionalProperties: true
+                    }, {
+                        type: "array",
+                        items: true
+                    }, {
+                        asCell: true
+                    }, {
+                        asStream: true
+                    }, {
+                        type: "null"
+                    }]
+            }
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, () => ({
     [NAME]: "Some Simple Recipe",
     [UI]: <div>Some Simple Recipe</div>,
 }));
@@ -9,13 +118,16 @@ const SimpleRecipe = recipe("Simple Recipe", () => ({
 const createCellRef = lift({
     type: "object",
     properties: {
-        isInitialized: { type: "boolean", default: false, asCell: true },
+        isInitialized: { type: "boolean", "default": false, asCell: true },
         storedCellRef: { type: "object", asCell: true },
     },
 }, undefined, ({ isInitialized, storedCellRef }) => {
     if (!isInitialized.get()) {
         console.log("Creating cellRef - first time");
-        const newCellRef = Cell.for<any[]>("charmsArray");
+        const newCellRef = Cell.for<any[]>("charmsArray").asSchema({
+            type: "array",
+            items: true
+        } as const satisfies __ctHelpers.JSONSchema);
         newCellRef.set([]);
         storedCellRef.set(newCellRef);
         isInitialized.set(true);
@@ -69,7 +181,9 @@ const createSimpleRecipe = handler(true as const satisfies __ctHelpers.JSONSchem
     required: ["cellRef"]
 } as const satisfies __ctHelpers.JSONSchema, (_, { cellRef }) => {
     // Create isInitialized cell for this charm addition
-    const isInitialized = cell(false);
+    const isInitialized = cell(false, {
+        type: "boolean"
+    } as const satisfies __ctHelpers.JSONSchema);
     // Create the charm
     const charm = SimpleRecipe({});
     // Store the charm in the array and navigate
@@ -87,10 +201,122 @@ const goToCharm = handler(true as const satisfies __ctHelpers.JSONSchema, {
     return navigateTo(charm);
 });
 // create the named cell inside the recipe body, so we do it just once
-export default recipe("Charms Launcher", () => {
+export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $NAME: {
+            type: "string"
+        },
+        $UI: {
+            $ref: "#/$defs/Element"
+        },
+        cellRef: true
+    },
+    required: ["$NAME", "$UI", "cellRef"],
+    $defs: {
+        Element: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        VNode: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        RenderNode: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "number"
+                }, {
+                    type: "boolean",
+                    "enum": [false]
+                }, {
+                    type: "boolean",
+                    "enum": [true]
+                }, {
+                    $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/RenderNode"
+                    }
+                }]
+        },
+        Props: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean",
+                        "enum": [false]
+                    }, {
+                        type: "boolean",
+                        "enum": [true]
+                    }, {
+                        type: "object",
+                        additionalProperties: true
+                    }, {
+                        type: "array",
+                        items: true
+                    }, {
+                        asCell: true
+                    }, {
+                        asStream: true
+                    }, {
+                        type: "null"
+                    }]
+            }
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, () => {
     // cell to store array of charms we created
     const { cellRef } = createCellRef({
-        isInitialized: cell(false),
+        isInitialized: cell(false, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema),
         storedCellRef: cell(),
     });
     // Type assertion to help TypeScript understand cellRef is an OpaqueRef<any[]>
@@ -104,15 +330,21 @@ export default recipe("Charms Launcher", () => {
             type: "object",
             properties: {
                 typedCellRef: {
-                    type: "array",
-                    items: true,
-                    asOpaque: true
+                    type: "object",
+                    properties: {
+                        length: {
+                            type: "number"
+                        }
+                    },
+                    required: ["length"]
                 }
             },
             required: ["typedCellRef"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { typedCellRef: typedCellRef }, ({ typedCellRef }) => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
+        } as const satisfies __ctHelpers.JSONSchema, { typedCellRef: {
+                length: typedCellRef?.length
+            } }, ({ typedCellRef }) => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
             {typedCellRef.mapWithPattern(__ctHelpers.recipe({
                 type: "object",
                 properties: {
@@ -126,7 +358,104 @@ export default recipe("Charms Launcher", () => {
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: charm, index: index, params: {} }) => (<li>
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "object",
+                properties: {
+                    type: {
+                        type: "string",
+                        "enum": ["vnode"]
+                    },
+                    name: {
+                        type: "string"
+                    },
+                    props: {
+                        $ref: "#/$defs/Props"
+                    },
+                    children: {
+                        $ref: "#/$defs/RenderNode"
+                    },
+                    $UI: {
+                        $ref: "#/$defs/VNode"
+                    }
+                },
+                required: ["type", "name", "props"],
+                $defs: {
+                    VNode: {
+                        type: "object",
+                        properties: {
+                            type: {
+                                type: "string",
+                                "enum": ["vnode"]
+                            },
+                            name: {
+                                type: "string"
+                            },
+                            props: {
+                                $ref: "#/$defs/Props"
+                            },
+                            children: {
+                                $ref: "#/$defs/RenderNode"
+                            },
+                            $UI: {
+                                $ref: "#/$defs/VNode"
+                            }
+                        },
+                        required: ["type", "name", "props"]
+                    },
+                    RenderNode: {
+                        anyOf: [{
+                                type: "string"
+                            }, {
+                                type: "number"
+                            }, {
+                                type: "boolean",
+                                "enum": [false]
+                            }, {
+                                type: "boolean",
+                                "enum": [true]
+                            }, {
+                                $ref: "#/$defs/VNode"
+                            }, {
+                                type: "object",
+                                properties: {}
+                            }, {
+                                type: "array",
+                                items: {
+                                    $ref: "#/$defs/RenderNode"
+                                }
+                            }]
+                    },
+                    Props: {
+                        type: "object",
+                        properties: {},
+                        additionalProperties: {
+                            anyOf: [{
+                                    type: "string"
+                                }, {
+                                    type: "number"
+                                }, {
+                                    type: "boolean",
+                                    "enum": [false]
+                                }, {
+                                    type: "boolean",
+                                    "enum": [true]
+                                }, {
+                                    type: "object",
+                                    additionalProperties: true
+                                }, {
+                                    type: "array",
+                                    items: true
+                                }, {
+                                    asCell: true
+                                }, {
+                                    asStream: true
+                                }, {
+                                    type: "null"
+                                }]
+                        }
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: charm, index, params: {} }) => (<li>
                 <ct-button onClick={goToCharm({ charm })}>
                   Go to Charm {__ctHelpers.derive({
                 type: "object",

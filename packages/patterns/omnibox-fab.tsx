@@ -1,22 +1,24 @@
 /// <cts-enable />
 import {
   Cell,
-  compileAndRun,
   computed,
-  derive,
-  fetchProgram,
   handler,
   ifElse,
   NAME,
-  navigateTo,
   pattern,
-  recipe,
+  patternTool,
   UI,
 } from "commontools";
 import Chatbot from "./chatbot.tsx";
-import { calculator, readWebpage, searchWeb } from "./common-tools.tsx";
+import {
+  calculator,
+  fetchAndRunPattern,
+  listPatternIndex,
+  navigateToPattern,
+  readWebpage,
+  searchWeb,
+} from "./common-tools.tsx";
 import { MentionableCharm } from "./backlinks-index.tsx";
-import { linkTool } from "./link-tool.tsx";
 
 interface OmniboxFABInput {
   mentionable: Cell<MentionableCharm[]>;
@@ -40,45 +42,11 @@ const dismissPeek = handler<
   peekDismissedIndex.set(assistantMessageCount);
 });
 
-const _fetchAndRunAndNavigateToPattern = handler<
-  { url: string },
-  { mentionable: Cell<MentionableCharm[]> }
->(({ url }, { mentionable: _mentionable }) => {
-  const { pending: _fetchPending, result: program, error: _fetchError } =
-    fetchProgram({ url });
-
-  const compileParams = derive(program, (p) => ({
-    files: p?.files ?? [],
-    main: p?.main ?? "",
-    input: { value: 10 },
-  }));
-  const { pending: _compilePending, result, error: _compileError } =
-    compileAndRun(compileParams);
-
-  return navigateTo(result);
-});
-
-const fetchAndRunPattern = pattern(({ url }: { url: string }) => {
-  const { pending: _fetchPending, result: program, error: _fetchError } =
-    fetchProgram({ url });
-
-  const compileParams = derive(program, (p) => ({
-    files: p?.files ?? [],
-    main: p?.main ?? "",
-    input: { value: 10 },
-  }));
-  const { pending: _compilePending, result, error: _compileError } =
-    compileAndRun(compileParams);
-
-  return result;
-});
-
-export default recipe<OmniboxFABInput>(
-  "OmniboxFAB",
-  ({ mentionable }) => {
+export default pattern<OmniboxFABInput>(
+  (_) => {
     const omnibot = Chatbot({
       system:
-        "You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.\n\nTool usage priority:\n- Search this space first: listMentionable → addAttachment to access items\n- Search externally only when clearly needed: searchWeb for current events, external information, or when nothing relevant exists in the space\n\nBe matter-of-fact. Prefer action to explanation.",
+        "You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.\n\nTool usage priority:\n- For patterns: listPatternIndex first\n- For existing pages/notes/content: listRecent or listMentionable to identify what they're referencing\n- Attach relevant items to conversation after instantiation/retrieval if they support ongoing tasks\n- Remove attachments when no longer relevant\n- Search web only as last resort when nothing exists in the space\n\nBe matter-of-fact. Prefer action to explanation.",
       tools: {
         searchWeb: {
           pattern: searchWeb,
@@ -89,15 +57,9 @@ export default recipe<OmniboxFABInput>(
         calculator: {
           pattern: calculator,
         },
-        fetchAndRunPattern: {
-          description: "Fetch a pattern from the URL, compile it and run it.",
-          pattern: fetchAndRunPattern,
-        },
-        createLink: {
-          description:
-            "Create a link between two charm cells. Use paths like 'CharmName/result/value' or 'CharmName/input/field'. Creates a bidirectional binding where changes to the source are reflected in the target.",
-          handler: linkTool({ mentionable }),
-        },
+        fetchAndRunPattern: patternTool(fetchAndRunPattern),
+        listPatternIndex: patternTool(listPatternIndex),
+        navigateTo: patternTool(navigateToPattern),
       },
     });
 
@@ -172,7 +134,9 @@ export default recipe<OmniboxFABInput>(
                 {omnibot.ui.attachmentsAndTools}
               </div>
               <div style="flex: 1; overflow-y: auto; min-height: 0;">
-                {omnibot.ui.chatLog}
+                <ct-cell-context $cell={omnibot}>
+                  {omnibot.ui.chatLog}
+                </ct-cell-context>
               </div>
             </div>
 
@@ -200,12 +164,14 @@ export default recipe<OmniboxFABInput>(
                   onClick={toggle({ value: showHistory })}
                   style="cursor: pointer;"
                 >
-                  <ct-chat-message
-                    role="assistant"
-                    compact
-                    content={latestAssistantMessage}
-                    pending={omnibot.pending}
-                  />
+                  <ct-cell-context $cell={latestAssistantMessage}>
+                    <ct-chat-message
+                      role="assistant"
+                      compact
+                      content={latestAssistantMessage}
+                      pending={omnibot.pending}
+                    />
+                  </ct-cell-context>
                 </div>
               </div>,
               null,

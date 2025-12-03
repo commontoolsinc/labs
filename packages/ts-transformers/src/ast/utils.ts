@@ -7,7 +7,8 @@ import * as ts from "typescript";
  */
 export function getExpressionText(expr: ts.Expression): string {
   const sourceFile = expr.getSourceFile();
-  if (!sourceFile) {
+  // Check both: no source file OR synthetic node (pos=-1)
+  if (!sourceFile || expr.pos === -1) {
     // Synthetic node - use printer
     try {
       const printer = ts.createPrinter();
@@ -42,8 +43,15 @@ export function getTypeAtLocationWithFallback(
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
   logger?: (message: string) => void,
 ): ts.Type | undefined {
+  // Check current node first
   if (typeRegistry?.has(node)) {
     return typeRegistry.get(node)!;
+  }
+
+  // Check original node (in case this node was cloned during transformation)
+  const original = ts.getOriginalNode(node);
+  if (original !== node && typeRegistry?.has(original)) {
+    return typeRegistry.get(original)!;
   }
 
   try {

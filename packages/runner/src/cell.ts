@@ -69,6 +69,10 @@ import type {
   IExtendedStorageTransaction,
   IReadOptions,
 } from "./storage/interface.ts";
+import {
+  createChildCellTransaction,
+  createNonReactiveTransaction,
+} from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 
@@ -114,7 +118,9 @@ declare module "@commontools/api" {
     ): Cell<Schema<S>>;
     asSchema<T>(
       schema?: JSONSchema,
+      rootSchema?: JSONSchema,
     ): Cell<T>;
+    asSchemaFromLinks<T = unknown>(): Cell<T>;
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
     sink(callback: (value: Readonly<T>) => Cancel | undefined | void): Cancel;
     sync(): Promise<Cell<T>> | Cell<T>;
@@ -204,6 +210,7 @@ export type { MemorySpace } from "@commontools/memory/interface";
 
 const cellMethods = new Set<keyof ICell<unknown>>([
   "get",
+  "sample",
   "set",
   "send",
   "update",
@@ -442,7 +449,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     }
 
     // Create an entity ID from the cause, including the frame's
-    const id = toURI(createRef({ frame: cause }, cause));
+    const id = toURI(createRef({ frame: cause }, this._frame.cause));
 
     // Populate the id in the shared causeContainer
     // All siblings will see this update
@@ -463,7 +470,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   get schema(): JSONSchema | undefined {
-    if (this._link.schema) return this._link.schema;
+    if (this._link.schema !== undefined) return this._link.schema;
 
     // If no schema is defined, resolve link and get schema from there (which is
     // what .get() would do).
@@ -480,7 +487,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   get rootSchema(): JSONSchema | undefined {
-    if (this._link.rootSchema) return this._link.rootSchema;
+    if (this._link.rootSchema !== undefined) return this._link.rootSchema;
 
     // If no root schema is defined, resolve link and get root schema from there
     // (which is what .get() would do).
@@ -515,6 +522,26 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   get(): Readonly<T> {
     if (!this.synced) this.sync(); // No await, just kicking this off
     return validateAndTransform(this.runtime, this.tx, this.link);
+  }
+
+  /**
+   * Read the cell's current value without creating a reactive dependency.
+   * Unlike `get()`, calling `sample()` inside a handler won't cause the handler
+   * to re-run when this cell's value changes.
+   *
+   * Use this when you need to read a value but don't want changes to that value
+   * to trigger re-execution of the current reactive context.
+   */
+  sample(): Readonly<T> {
+    if (!this.synced) this.sync(); // No await, just kicking this off
+
+    // Wrap the transaction to make all reads non-reactive. Child cells created
+    // during validateAndTransform will use the original transaction (via
+    // getTransactionForChildCells).
+    const readTx = this.runtime.readTx(this.tx);
+    const nonReactiveTx = createNonReactiveTransaction(readTx);
+
+    return validateAndTransform(this.runtime, nonReactiveTx, this.link);
   }
 
   set(
@@ -732,14 +759,15 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   ): Cell<Schema<S>>;
   asSchema<T>(
     schema?: JSONSchema,
+    rootSchema?: JSONSchema,
   ): Cell<T>;
-  asSchema(schema?: JSONSchema): Cell<any> {
+  asSchema(schema?: JSONSchema, rootSchema?: JSONSchema): Cell<any> {
     // asSchema creates a sibling with same identity but different schema
     // Create a new link with modified schema
     const siblingLink: NormalizedLink = {
       ...this._link,
       schema: schema,
-      rootSchema: schema,
+      rootSchema: rootSchema ?? schema,
     };
 
     return new CellImpl(
@@ -750,6 +778,56 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       this._causeContainer, // Share the causeContainer with siblings
       this._kind,
     ) as unknown as Cell<any>;
+  }
+
+  /**
+   * Follow all links, even beyond write redirects to get final schema.
+   *
+   * If there is none look for resultSchema of associated pattern.
+   *
+   * Otherwise the link stays the same, i.e. it does not advance to resolved
+   * link.
+   *
+   * Note: That means that the schema might change if the link behind it change.
+   * The reads are logged though, so should trigger reactive flows.
+   *
+   * @returns Cell with schema from links
+   */
+  asSchemaFromLinks<T = unknown>(): Cell<T> {
+    let { schema, rootSchema } = resolveLink(
+      this.runtime.readTx(this.tx),
+      this.link,
+    );
+
+    if (!schema) {
+      const sourceCell = this.getSourceCell<{ resultRef: Cell<unknown> }>({
+        type: "object",
+        properties: { resultRef: { asCell: true } },
+      });
+      const sourceCellSchema = sourceCell?.key("resultRef").get()?.schema;
+      if (sourceCellSchema !== undefined) {
+        const cfc = new ContextualFlowControl();
+        schema = cfc.schemaAtPath(
+          sourceCellSchema,
+          this._link.path,
+          sourceCellSchema,
+        );
+        rootSchema = sourceCellSchema;
+      }
+    }
+
+    return new CellImpl(
+      this.runtime,
+      this.tx,
+      {
+        ...this._link,
+        ...(schema !== undefined && { schema }),
+        ...(rootSchema !== undefined && { rootSchema }),
+      },
+      false, // Reset synced flag, since schema is changing
+      this._causeContainer, // Share the causeContainer with siblings
+      this._kind,
+    ) as unknown as Cell<T>;
   }
 
   withTx(newTx?: IExtendedStorageTransaction): Cell<T> {
@@ -1021,7 +1099,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
         : this._initialValue,
       name: this._causeContainer.cause as string | undefined,
       external: this._link.id
-        ? this.getAsWriteRedirectLink({
+        ? this.getAsLink({
           baseSpace: this._frame.space,
           includeSchema: true,
         })
@@ -1206,17 +1284,14 @@ function subscribeToReferencedDocs<T>(
   const cancel = runtime.scheduler.subscribe((tx) => {
     if (isCancel(cleanup)) cleanup();
 
-    // Run once with tx to capture _this_ cell's read dependencies.
-    validateAndTransform(runtime, tx, link);
-
-    // Using a new transaction for the callback, as we're only interested in
+    // Using a new transaction for child cells, as we're only interested in
     // dependencies for the initial get, not further cells the callback might
     // read. The callback is responsible for calling sink on those cells if it
     // wants to stay updated.
-
     const extraTx = runtime.edit();
+    const wrappedTx = createChildCellTransaction(tx, extraTx);
 
-    const newValue = validateAndTransform(runtime, extraTx, link);
+    const newValue = validateAndTransform(runtime, wrappedTx, link);
     cleanup = callback(newValue);
 
     // no async await here, but that also means no retry. TODO(seefeld): Should
@@ -1412,12 +1487,18 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       }
 
       // Convert schema to object form and merge default value if value is defined
-      const schema: JSONSchema | undefined = value !== undefined
-        ? {
-          ...ContextualFlowControl.toSchemaObj(providedSchema),
-          default: value as any,
-        }
-        : providedSchema;
+      // BUT: Don't embed Cell objects in the schema's default property, as this
+      // causes infinite recursion when the schema is serialized
+      // TODO(ubik2): Use Cell links for default here once that's supported
+      const schema: JSONSchema | undefined =
+        value !== undefined && !isCell(value)
+          ? {
+            ...ContextualFlowControl.toSchemaObj(providedSchema),
+            default: value as any,
+          }
+          : providedSchema === undefined
+          ? undefined
+          : ContextualFlowControl.toSchemaObj(providedSchema);
 
       // Create a cell without a link - it will be created on demand via .for()
       const cell = createCell<T>(

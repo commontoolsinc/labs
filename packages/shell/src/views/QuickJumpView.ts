@@ -200,7 +200,11 @@ export class XQuickJumpView extends BaseView {
   private close() {
     this.query = "";
     this.selectedIndex = 0;
-    this.command({ type: "set-show-quick-jump-view", show: false });
+    this.command({
+      type: "set-config",
+      key: "showQuickJumpView",
+      value: false,
+    });
   }
 
   private getItems(): CharmItem[] {
@@ -288,7 +292,7 @@ export class XQuickJumpView extends BaseView {
   private navigateTo(id: string) {
     const spaceName = this.rt?.cc().manager().getSpaceName();
     if (!spaceName) return;
-    navigate({ type: "charm", spaceName, charmId: id });
+    navigate({ spaceName, charmId: id });
     this.close();
   }
 

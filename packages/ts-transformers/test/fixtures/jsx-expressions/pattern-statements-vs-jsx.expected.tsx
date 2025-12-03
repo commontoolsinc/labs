@@ -3,7 +3,7 @@ import { Cell, handler, NAME, pattern, str, UI } from "commontools";
 interface PatternState {
     value: number;
 }
-const increment = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const increment = handler(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -17,7 +17,7 @@ const increment = handler(true as const satisfies __ctHelpers.JSONSchema, {
 }) => {
     state.value.set(state.value.get() + 1);
 });
-const decrement = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const decrement = handler(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -152,8 +152,7 @@ export default pattern((state) => {
             type: "number"
         }
     },
-    required: ["value"],
-    asOpaque: true
+    required: ["value"]
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -191,7 +190,7 @@ export default pattern((state) => {
             properties: {
                 type: {
                     type: "string",
-                    enum: ["vnode"]
+                    "enum": ["vnode"]
                 },
                 name: {
                     type: "string"
@@ -213,7 +212,7 @@ export default pattern((state) => {
             properties: {
                 type: {
                     type: "string",
-                    enum: ["vnode"]
+                    "enum": ["vnode"]
                 },
                 name: {
                     type: "string"
@@ -237,10 +236,10 @@ export default pattern((state) => {
                     type: "number"
                 }, {
                     type: "boolean",
-                    enum: [false]
+                    "enum": [false]
                 }, {
                     type: "boolean",
-                    enum: [true]
+                    "enum": [true]
                 }, {
                     $ref: "#/$defs/VNode"
                 }, {
@@ -263,10 +262,10 @@ export default pattern((state) => {
                         type: "number"
                     }, {
                         type: "boolean",
-                        enum: [false]
+                        "enum": [false]
                     }, {
                         type: "boolean",
-                        enum: [true]
+                        "enum": [true]
                     }, {
                         type: "object",
                         additionalProperties: true
@@ -288,4 +287,3 @@ export default pattern((state) => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-

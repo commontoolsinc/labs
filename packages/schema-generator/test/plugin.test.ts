@@ -17,7 +17,7 @@ describe("Plugin Interface", () => {
     );
 
     // Verify generateSchema has the right number of parameters
-    expect(transformer.generateSchema.length).toBe(3);
+    expect(transformer.generateSchema.length).toBe(4);
   });
 
   it("transforms a simple object via plugin", async () => {

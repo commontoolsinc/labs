@@ -8,10 +8,10 @@ import {
   handler,
   NAME,
   navigateTo,
-  type OpaqueRef,
   patternTool,
   recipe,
   str,
+  Stream,
   UI,
   wish,
 } from "commontools";
@@ -21,15 +21,15 @@ type Input = {
   content?: Cell<Default<string, "">>;
 };
 
+/** Represents a small #note a user took to remember some text. */
 type Output = {
   mentioned: Default<Array<MentionableCharm>, []>;
   backlinks: MentionableCharm[];
 
-  /** The content of the note */
   content: Default<string, "">;
-  grep: OpaqueRef<{ query: string }>;
-  translate: OpaqueRef<{ language: string }>;
-  editContent: OpaqueRef<{ detail: { value: string } }>;
+  grep: Stream<{ query: string }>;
+  translate: Stream<{ language: string }>;
+  editContent: Stream<{ detail: { value: string } }>;
 };
 
 const _updateTitle = handler<

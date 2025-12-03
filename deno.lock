@@ -1822,7 +1822,7 @@
           "npm:@scure/bip39@^1.5.4"
         ]
       },
-      "packages/js-runtime": {
+      "packages/js-compiler": {
         "dependencies": [
           "npm:source-map-js@^1.2.1",
           "npm:typescript@*"

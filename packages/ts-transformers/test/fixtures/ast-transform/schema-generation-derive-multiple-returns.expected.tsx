@@ -5,7 +5,7 @@ declare const flag: boolean;
 export const multiReturn = derive({
     type: "boolean"
 } as const satisfies __ctHelpers.JSONSchema, {
-    enum: ["hello", 42]
+    "enum": ["hello", 42]
 } as const satisfies __ctHelpers.JSONSchema, flag, (value) => {
     if (value) {
         return "hello";

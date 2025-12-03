@@ -1,10 +1,12 @@
-export { Runtime } from "./runtime.ts";
+export { homeSpaceCellSchema, Runtime, spaceCellSchema } from "./runtime.ts";
 export type {
   CharmMetadata,
   ConsoleHandler,
   ErrorHandler,
   ErrorWithContext as RuntimeErrorWithContext,
+  IRuntime,
   RuntimeOptions,
+  SpaceCellContents,
 } from "./runtime.ts";
 export { raw } from "./module.ts";
 export type { Cell, Stream } from "./cell.ts";
@@ -50,6 +52,7 @@ export {
   isWriteRedirectLink,
   parseLink,
   parseLinkOrThrow,
+  parseLLMFriendlyLink,
 } from "./link-utils.ts";
 export * from "./recipe-manager.ts";
 

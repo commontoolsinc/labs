@@ -1,4 +1,4 @@
-import { App } from "./app/controller.ts";
+import { App, AppView, appViewToUrlPath, urlToAppView } from "./app/mod.ts";
 import { getLogger } from "@commontools/utils/logger";
 
 const logger = getLogger("shell.navigation", {
@@ -6,18 +6,7 @@ const logger = getLogger("shell.navigation", {
   level: "debug",
 });
 
-// Could contain other nav types, like external pages,
-// or viewing a User's "Settings" etc.
-export type NavigationCommandType = "charm" | "space";
-
-export type NavigationCommand = {
-  type: "charm";
-  charmId: string;
-  spaceName: string;
-} | {
-  type: "space";
-  spaceName: string;
-};
+export type NavigationCommand = AppView;
 
 const NavigationEventName = "ct-navigate";
 
@@ -66,7 +55,8 @@ export class Navigation {
     );
     globalThis.addEventListener("popstate", this.onPopState);
 
-    const init = generateCommandFromPageLoad();
+    const thisUrl = new URL(globalThis.location.href);
+    const init = urlToAppView(thisUrl);
     // Initial state is `null` -- reflect the state given
     // from the current URL.
     this.replace(init);
@@ -101,7 +91,7 @@ export class Navigation {
   // Push a new command state to the browser's history.
   private push(command: NavigationCommand) {
     logger.log("Push", command);
-    globalThis.history.pushState(command, "", getNavigationHref(command));
+    globalThis.history.pushState(command, "", appViewToUrlPath(command));
   }
 
   // Updates the current browser history state and page with a new title.
@@ -110,59 +100,13 @@ export class Navigation {
     globalThis.history.replaceState(
       command,
       title || "",
-      getNavigationHref(command),
+      appViewToUrlPath(command),
     );
   }
 
   // Propagates the command state into the App.
   private apply(command: NavigationCommand) {
     logger.log("Apply", command);
-    switch (command.type) {
-      case "charm": {
-        this.#app.setSpace(command.spaceName);
-        this.#app.setActiveCharmId(command.charmId);
-        break;
-      }
-      case "space": {
-        this.#app.setSpace(command.spaceName);
-        this.#app.setActiveCharmId(undefined);
-        break;
-      }
-      default: {
-        throw new Error("Unsupported navigation type.");
-      }
-    }
-  }
-}
-
-function getNavigationHref(command: NavigationCommand): string {
-  let content = "";
-  switch (command.type) {
-    case "charm": {
-      content = `${command.spaceName}/${command.charmId}`;
-      break;
-    }
-    case "space": {
-      content = `${command.spaceName}`;
-      break;
-    }
-    default: {
-      throw new Error("Unsupported navigation type.");
-    }
-  }
-  return `/${content}`;
-}
-
-function generateCommandFromPageLoad(): NavigationCommand {
-  const location = new URL(globalThis.location.href);
-  const segments = location.pathname.split("/");
-  segments.shift(); // shift off the pathnames' prefix "/";
-  const [first, charmId] = [segments[0], segments[1]];
-
-  const spaceName = first || "common-knowledge";
-  if (charmId) {
-    return { type: "charm", spaceName, charmId };
-  } else {
-    return { type: "space", spaceName };
+    this.#app.setView(command);
   }
 }

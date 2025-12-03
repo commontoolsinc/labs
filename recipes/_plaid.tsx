@@ -654,11 +654,11 @@ export default recipe(
                   <label style="display: block; margin-bottom: 5px; font-weight: 500;">
                     Days to Sync
                   </label>
-                  <common-input
+                  <ct-input
                     customStyle="border: 1px solid #ddd; padding: 10px; border-radius: 4px; width: 200px;"
                     value={settings.daysToSync}
                     placeholder="90"
-                    oncommon-input={updateDaysToSync({
+                    onct-input={updateDaysToSync({
                       daysToSync: settings.daysToSync,
                     })}
                   />
@@ -668,11 +668,11 @@ export default recipe(
                   <label style="display: block; margin-bottom: 5px; font-weight: 500;">
                     Transaction Limit
                   </label>
-                  <common-input
+                  <ct-input
                     customStyle="border: 1px solid #ddd; padding: 10px; border-radius: 4px; width: 200px;"
                     value={settings.syncLimit}
                     placeholder="500"
-                    oncommon-input={updateSyncLimit({
+                    onct-input={updateSyncLimit({
                       syncLimit: settings.syncLimit,
                     })}
                   />

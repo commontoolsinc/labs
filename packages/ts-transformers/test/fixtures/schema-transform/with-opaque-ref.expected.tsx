@@ -12,7 +12,7 @@ const model = {
         }
     },
     required: ["value"],
-    default: {
+    "default": {
         value: 0
     }
 } as const satisfies __ctHelpers.JSONSchema;

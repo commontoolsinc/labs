@@ -33,22 +33,22 @@ other scripts.
 :label: state_send_message_placeholder
 :linenos: false
 :emphasize-lines: 
-    <common-send-message
+    <ct-message-input
       name="Update"
       placeholder="Update Name"
       // we need to fill out the event listener attribute below
-      // onmessagesend= 
+      // onct-send= 
     />
 ```
 
 If you deploy this update, you'll see an input field, but nothing happens
 when you enter data. As the comments indicate, we
-need to fill out code for the onmessagesend JSX event listener.
+need to fill out code for the onct-send JSX event listener.
 
 This is when we learn about `handler`.
 A `handler` is a Common Tools runtime component that, like its name
 suggests, handles events.
-The JSX event listener (such as `onmessagesend` in our code) will call
+The JSX event listener (such as `onct-send` in our code) will call
 our handler to handle the event emitted by the JSX component.
 
 ## Understanding Handlers
@@ -74,7 +74,7 @@ The `handler` function returns a factory that you call with your actual argument
 :::
 
 We'll start by writing our handler which takes the event emitted by the
-`<common-send-message>` component. This component emits a CustomEvent with the structure `{detail: {message: string}}`,
+`<ct-message-input>` component. This component emits a CustomEvent with the structure `{detail: {message: string}}`,
 where `message` contains the text the user entered.
 The handler will also take in the
 `characterName` cell. It will simply set the cell with the new name
@@ -107,10 +107,10 @@ Now we can attach this handler to our input component:
 :label: state_handler_attach
 :linenos: false
 :emphasize-lines:
-<common-send-message
+<ct-message-input
   name="Update"
   placeholder="Update Name"
-  onmessagesend={updateName({ characterName })}
+  onct-send={updateName({ characterName })}
 />
 ```
 

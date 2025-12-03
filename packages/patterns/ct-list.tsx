@@ -18,7 +18,7 @@ export default recipe<ListInput, ListOutput>(
     return {
       [NAME]: title,
       [UI]: (
-        <common-vstack gap="md" style="padding: 1rem; max-width: 600px;">
+        <ct-vstack gap="2" style="padding: 1rem; max-width: 600px;">
           <ct-input
             $value={title}
             placeholder="List title"
@@ -34,7 +34,7 @@ export default recipe<ListInput, ListOutput>(
               title="Items"
             />
           </ct-card>
-        </common-vstack>
+        </ct-vstack>
       ),
       title,
       items,

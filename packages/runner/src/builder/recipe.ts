@@ -229,7 +229,7 @@ function factoryFromRecipe<T, R>(
   });
 
   // First from results
-  if (isRecord(outputs)) {
+  if (isRecord(outputs) && !isCell(outputs)) {
     Object.entries(outputs).forEach(([key, value]: [string, unknown]) => {
       if (isCell(value)) {
         const exported = value.export();
@@ -263,8 +263,8 @@ function factoryFromRecipe<T, R>(
     });
   });
 
-  // [For unsafe bindings] Also collect otherwise disconnected cells and nodes,
-  // since they might only be mentioned via a code closure in a lifted function.
+  // Also collect otherwise disconnected cells and nodes, e.g. those that are
+  // assigned to cells via .set or .push and aren't otherwise connected.
   getTopFrame()?.opaqueRefs.forEach((ref) => collectCellsAndNodes(ref));
 
   // Then assign paths on the recipe cell for all cells. For now we just assign

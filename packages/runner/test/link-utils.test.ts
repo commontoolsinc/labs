@@ -3,7 +3,10 @@ import { expect } from "@std/expect";
 import {
   areLinksSame,
   createDataCellURI,
+  createLLMFriendlyLink,
   createSigilLinkFromParsedLink,
+  decodeJsonPointer,
+  encodeJsonPointer,
   isLegacyAlias,
   isLink,
   isSigilValue,
@@ -11,6 +14,7 @@ import {
   type NormalizedLink,
   parseLink,
   parseLinkOrThrow,
+  parseLLMFriendlyLink,
   sanitizeSchemaForLinks,
 } from "../src/link-utils.ts";
 import { getJSONFromDataURI } from "../src/uri-utils.ts";
@@ -244,6 +248,8 @@ describe("link-utils", () => {
         path: [],
         space: space,
         type: "application/json",
+        schema: undefined,
+        rootSchema: undefined,
       });
     });
 
@@ -890,6 +896,109 @@ describe("link-utils", () => {
       expect(parsed.value.arabic).toBe("مرحبا بالعالم");
       expect(parsed.value.special).toBe("Ñoño™©®");
       expect(parsed.value.mixed).toBe("Test 🎉 with ñ and 中文");
+    });
+  });
+
+  describe("JSON Pointer Utils", () => {
+    it("should encode JSON Pointer", () => {
+      expect(encodeJsonPointer(["foo", "bar"])).toBe("foo/bar");
+      expect(encodeJsonPointer(["foo/bar", "baz~qux"])).toBe(
+        "foo~1bar/baz~0qux",
+      );
+      expect(encodeJsonPointer([])).toBe("");
+    });
+
+    it("should decode JSON Pointer", () => {
+      expect(decodeJsonPointer("foo/bar")).toEqual(["foo", "bar"]);
+      expect(decodeJsonPointer("foo~1bar/baz~0qux")).toEqual([
+        "foo/bar",
+        "baz~qux",
+      ]);
+      expect(decodeJsonPointer("")).toEqual([""]);
+    });
+  });
+
+  describe("parseLLMFriendlyLink", () => {
+    const longId = "of:bafyabc12345678901234567890";
+
+    it("should parse valid LLM friendly link", () => {
+      const link = `/${longId}/path/to/cell`;
+      const result = parseLLMFriendlyLink(link, space);
+
+      expect(result).toEqual({
+        id: longId,
+        path: ["path", "to", "cell"],
+        space: space,
+        type: "application/json",
+      });
+    });
+
+    it("should parse link without space if optional", () => {
+      const link = `/${longId}/path`;
+      const result = parseLLMFriendlyLink(link);
+
+      expect(result).toEqual({
+        id: longId,
+        path: ["path"],
+        type: "application/json",
+      });
+    });
+
+    it("should throw if target does not start with slash", () => {
+      expect(() => parseLLMFriendlyLink(`${longId}/path`, space)).toThrow(
+        'Target must include a charm handle, e.g. "/of:bafyabc123/path".',
+      );
+    });
+
+    it("should throw if target does not include handle", () => {
+      expect(() => parseLLMFriendlyLink("/path/only", space)).toThrow(
+        'Target must include a charm handle, e.g. "/of:bafyabc123/path".',
+      );
+    });
+
+    it("should throw if handle is too short (human name)", () => {
+      expect(() => parseLLMFriendlyLink("/of:short/path", space)).toThrow(
+        'Charm references must use handles (e.g., "/of:bafyabc123/path"), not human names (e.g., "of:short").',
+      );
+    });
+  });
+
+  describe("createLLMFriendlyLink", () => {
+    const longId = "of:bafyabc12345678901234567890";
+
+    it("should create LLM friendly link from normalized link", () => {
+      const link: NormalizedLink = {
+        id: longId,
+        path: ["path", "to", "cell"],
+        space: space,
+      };
+      // We need to cast to NormalizedFullLink because createLLMFriendlyLink expects it,
+      // but it only uses id and path.
+      const result = createLLMFriendlyLink(link as any);
+
+      expect(result).toBe(`/${longId}/path/to/cell`);
+    });
+
+    it("should handle empty path", () => {
+      const link: NormalizedLink = {
+        id: longId,
+        path: [],
+        space: space,
+      };
+      const result = createLLMFriendlyLink(link as any);
+
+      expect(result).toBe(`/${longId}`);
+    });
+
+    it("should encode special characters in path", () => {
+      const link: NormalizedLink = {
+        id: longId,
+        path: ["path/with/slash", "path~with~tilde"],
+        space: space,
+      };
+      const result = createLLMFriendlyLink(link as any);
+
+      expect(result).toBe(`/${longId}/path~1with~1slash/path~0with~0tilde`);
     });
   });
 });

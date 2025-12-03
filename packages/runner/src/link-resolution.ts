@@ -70,14 +70,17 @@ export function resolveLink(
 
   while (true) {
     if (iteration++ > MAX_PATH_RESOLUTION_LENGTH) {
-      logger.error(`Link resolution iteration limit reached`);
+      logger.error("link-res-error", `Link resolution iteration limit reached`);
       throw new Error(`Link resolution iteration limit reached`);
     }
 
     // Detect cycles.
     const key = JSON.stringify([link.space, link.id, link.path]);
     if (seen.has(key)) {
-      logger.error(`Link cycle detected ${key} [${JSON.stringify([...seen])}]`);
+      logger.error(
+        "link-res-error",
+        `Link cycle detected ${key} [${JSON.stringify([...seen])}]`,
+      );
       throw new Error(
         `Link cycle detected at ${key} [${JSON.stringify([...seen])}]`,
       );
@@ -147,19 +150,19 @@ export function resolveLink(
 
         if (nextLink) {
           const remainingPath = link.path.slice(lastValid.length);
-          let linkSchema = nextLink.schema;
-          if (linkSchema !== undefined && remainingPath.length > 0) {
+          let { schema, ...restLink } = nextLink;
+          if (schema !== undefined && remainingPath.length > 0) {
             const cfc = new ContextualFlowControl();
-            linkSchema = cfc.getSchemaAtPath(
-              linkSchema,
+            schema = cfc.getSchemaAtPath(
+              schema,
               remainingPath,
               nextLink.rootSchema,
             );
           }
           nextLink = {
-            ...nextLink,
+            ...restLink,
             path: [...nextLink.path, ...remainingPath],
-            ...(linkSchema ? { schema: linkSchema } : {}),
+            ...(schema !== undefined && { schema }),
           };
         }
       }

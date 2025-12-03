@@ -7,6 +7,7 @@ import { type JSONSchema, type JSONValue } from "./builder/types.ts";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
+import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type IRuntime } from "./runtime.ts";
 import {
   createDataCellURI,
@@ -142,7 +143,7 @@ export function processDefaultValue(
     // document when the value is changed. A classic example is
     // `currentlySelected` with a default of `null`.
     if (
-      !defaultValue && isObject(resolvedSchema) &&
+      defaultValue === undefined && isObject(resolvedSchema) &&
       resolvedSchema.default !== undefined
     ) {
       return runtime.getImmutableCell(
@@ -159,7 +160,7 @@ export function processDefaultValue(
           schema: mergeDefaults(resolvedSchema, defaultValue),
           rootSchema,
         },
-        tx,
+        getTransactionForChildCells(tx),
       );
     }
   }
@@ -332,7 +333,9 @@ function annotateWithBackToCellSymbols(
   ) {
     // Non-enumerable, so that {...obj} won't copy these symbols
     Object.defineProperty(value, toCell, {
-      value: () => createCell(runtime, link, tx),
+      // Use getTransactionForChildCells so that if this was called from sample(),
+      // the resulting cell is still reactive
+      value: () => createCell(runtime, link, getTransactionForChildCells(tx)),
       enumerable: false,
     });
     Object.freeze(value);
@@ -478,7 +481,7 @@ class TransformObjectCreator
         return createCell(
           this.runtime,
           { ...link, schema: restSchema },
-          this.tx,
+          getTransactionForChildCells(this.tx),
         ) as AnyCellWrapping<JSONValue>;
       }
       // If it's not a cell/stream, but the schema is true-ish, use a

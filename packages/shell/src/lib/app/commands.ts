@@ -1,14 +1,11 @@
 import { Identity } from "@commontools/identity";
+import { AppView, isAppView } from "./view.ts";
+import { AppStateConfigKey, isAppStateConfigKey } from "./state.ts";
 
 export type Command =
-  | { type: "set-active-charm-id"; charmId?: string }
-  | { type: "set-identity"; identity: Identity }
-  | { type: "set-space"; spaceName: string }
-  | { type: "clear-authentication" }
-  | { type: "set-show-charm-list-view"; show: boolean }
-  | { type: "set-show-debugger-view"; show: boolean }
-  | { type: "set-show-quick-jump-view"; show: boolean }
-  | { type: "set-show-sidebar"; show: boolean };
+  | { type: "set-view"; view: AppView }
+  | { type: "set-identity"; identity: Identity | undefined }
+  | { type: "set-config"; key: AppStateConfigKey; value: boolean };
 
 export function isCommand(value: unknown): value is Command {
   if (
@@ -19,30 +16,15 @@ export function isCommand(value: unknown): value is Command {
   }
   switch (value.type) {
     case "set-identity": {
-      return "identity" in value && value.identity instanceof Identity;
+      return "identity" in value &&
+        (value.identity === undefined || value.identity instanceof Identity);
     }
-    case "set-space": {
-      return "spaceName" in value && !!value.spaceName &&
-        typeof value.spaceName === "string";
+    case "set-view": {
+      return "view" in value && isAppView(value.view);
     }
-    case "set-active-charm-id": {
-      return "charmId" in value && !!value.charmId &&
-        (typeof value.charmId === "string" || value.charmId === undefined);
-    }
-    case "clear-authentication": {
-      return true;
-    }
-    case "set-show-charm-list-view": {
-      return "show" in value && typeof value.show === "boolean";
-    }
-    case "set-show-debugger-view": {
-      return "show" in value && typeof value.show === "boolean";
-    }
-    case "set-show-quick-jump-view": {
-      return "show" in value && typeof value.show === "boolean";
-    }
-    case "set-show-sidebar": {
-      return "show" in value && typeof value.show === "boolean";
+    case "set-config": {
+      return "key" in value && isAppStateConfigKey(value.key) &&
+        "value" in value && typeof value.value === "boolean";
     }
   }
   return false;

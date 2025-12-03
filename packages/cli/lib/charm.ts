@@ -13,7 +13,7 @@ import { charmId, CharmManager, extractUserCode } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
 import { join } from "@std/path";
 import { isVNode, type VNode } from "@commontools/html";
-import { FileSystemProgramResolver } from "@commontools/js-runtime";
+import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { setLLMUrl } from "@commontools/llm";
 
 export interface EntryConfig {

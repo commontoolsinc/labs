@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
+import { getTypeAtLocationWithFallback } from "./utils.ts";
 
 /**
  * Type inference utilities for function signatures
@@ -10,11 +11,59 @@ const TYPE_NODE_FLAGS = ts.NodeBuilderFlags.NoTruncation |
   ts.NodeBuilderFlags.UseStructuralFallback;
 
 /**
- * Check if a type is 'any' or 'unknown'
+ * Check if a type is 'any', 'unknown', or an uninstantiated type parameter
+ * These types cannot be used to generate schemas at compile time
  */
 export function isAnyOrUnknownType(type: ts.Type | undefined): boolean {
   if (!type) return false;
-  return (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
+  return (type.flags &
+    (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.TypeParameter)) !==
+    0;
+}
+
+/**
+ * Widen literal types to their base types for more flexible schemas.
+ * - NumberLiteral (e.g., 10) → number
+ * - StringLiteral (e.g., "hello") → string
+ * - BooleanLiteral (e.g., true) → boolean
+ * - BigIntLiteral (e.g., 10n) → bigint
+ * - Other types are returned unchanged
+ */
+export function widenLiteralType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): ts.Type {
+  // Number literal → number
+  if (type.flags & ts.TypeFlags.NumberLiteral) {
+    return checker.getNumberType();
+  }
+
+  // String literal → string
+  if (type.flags & ts.TypeFlags.StringLiteral) {
+    return checker.getStringType();
+  }
+
+  // Boolean literal (true/false) → boolean
+  if (type.flags & ts.TypeFlags.BooleanLiteral) {
+    // TypeChecker doesn't have getBooleanType(), so we need to create it
+    // by getting the union of true | false
+    const trueType = checker.getTrueType?.() ?? type;
+    const falseType = checker.getFalseType?.() ?? type;
+    if (trueType && falseType) {
+      return (checker as ts.TypeChecker & {
+        getUnionType?: (types: readonly ts.Type[]) => ts.Type;
+      }).getUnionType?.([trueType, falseType]) ?? type;
+    }
+    return type;
+  }
+
+  // BigInt literal → bigint
+  if (type.flags & ts.TypeFlags.BigIntLiteral) {
+    return checker.getBigIntType();
+  }
+
+  // All other types (including already-widened types) return unchanged
+  return type;
 }
 
 /**
@@ -216,6 +265,71 @@ export function registerTypeForNode(
 }
 
 /**
+ * Get the Type from a TypeNode, checking typeRegistry first.
+ *
+ * Similar to getTypeAtLocationWithFallback but for TypeNodes specifically.
+ * This is useful when working with TypeNodes that may have been created by
+ * prior transformers and already have types registered.
+ *
+ * @param typeNode The TypeNode to get the Type for
+ * @param checker TypeChecker instance
+ * @param typeRegistry Optional registry of types for synthetic nodes
+ * @returns The Type corresponding to the TypeNode
+ */
+export function getTypeFromTypeNodeWithFallback(
+  typeNode: ts.TypeNode,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.Type {
+  // Check typeRegistry first (for synthetic TypeNodes)
+  if (typeRegistry) {
+    const registeredType = typeRegistry.get(typeNode);
+    if (registeredType) {
+      return registeredType;
+    }
+  }
+
+  // Fall back to TypeChecker
+  return checker.getTypeFromTypeNode(typeNode);
+}
+
+/**
+ * Register the result type for a synthetic derive CallExpression.
+ *
+ * This is needed because synthetic nodes created by transformers don't have
+ * type information from the TypeChecker. We need to explicitly register the
+ * type so that later transformations can infer types correctly.
+ *
+ * @param deriveCall The synthetic derive CallExpression to register type for
+ * @param resultTypeNode The TypeNode representing the derive's result type
+ * @param resultType Optional pre-computed Type object for the result
+ * @param checker TypeChecker instance
+ * @param typeRegistry The type registry to update
+ */
+export function registerDeriveCallType(
+  deriveCall: ts.CallExpression,
+  resultTypeNode: ts.TypeNode | undefined,
+  resultType: ts.Type | undefined,
+  checker: ts.TypeChecker,
+  typeRegistry: WeakMap<ts.Node, ts.Type>,
+): void {
+  // Try to get the type - either from provided resultType or from resultTypeNode
+  let typeToRegister = resultType;
+
+  if (!typeToRegister && resultTypeNode) {
+    typeToRegister = getTypeFromTypeNodeWithFallback(
+      resultTypeNode,
+      checker,
+      typeRegistry,
+    );
+  }
+
+  if (typeToRegister) {
+    typeRegistry.set(deriveCall, typeToRegister);
+  }
+}
+
+/**
  * Helper to find Reference type within an intersection type
  */
 function findReferenceTypeInIntersection(
@@ -282,10 +396,15 @@ export function inferArrayElementType(
     checker: ts.TypeChecker;
     factory: ts.NodeFactory;
     sourceFile: ts.SourceFile;
+    typeRegistry?: WeakMap<ts.Node, ts.Type>;
   },
 ): { typeNode: ts.TypeNode; type?: ts.Type } {
-  const { checker, factory } = context;
-  const arrayType = checker.getTypeAtLocation(arrayExpr);
+  const { checker, factory, typeRegistry } = context;
+  // Use getTypeAtLocationWithFallback to check typeRegistry first (for synthetic nodes)
+  // getTypeAtLocationWithFallback handles undefined typeRegistry gracefully
+  const arrayType =
+    getTypeAtLocationWithFallback(arrayExpr, checker, typeRegistry) ??
+      checker.getTypeAtLocation(arrayExpr);
 
   // Try to unwrap OpaqueRef<T[]> → T[] → T
   let actualType = arrayType;
@@ -378,4 +497,17 @@ export function inferArrayElementType(
   return {
     typeNode: factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
   };
+}
+/**
+ * Infers the expected type of an expression from its context (e.g., variable assignment).
+ */
+export function inferContextualType(
+  node: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  const contextualType = checker.getContextualType(node);
+  if (contextualType && !isAnyOrUnknownType(contextualType)) {
+    return contextualType;
+  }
+  return undefined;
 }

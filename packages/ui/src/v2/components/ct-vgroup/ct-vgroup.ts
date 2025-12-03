@@ -14,7 +14,7 @@ import { BaseElement } from "../../core/base-element.ts";
  * @slot - Content to be grouped vertically
  *
  * @example
- * <ct-vgroup gap="sm">
+ * <ct-vgroup gap="1">
  *   <ct-label>Name</ct-label>
  *   <ct-input placeholder="Enter your name" />
  * </ct-vgroup>

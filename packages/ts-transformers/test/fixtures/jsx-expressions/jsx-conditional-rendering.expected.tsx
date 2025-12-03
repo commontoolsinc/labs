@@ -31,6 +31,112 @@ export default recipe({
         }
     },
     required: ["isActive", "count", "userType", "score", "hasPermission", "isPremium"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/Element"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        Element: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        VNode: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        RenderNode: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "number"
+                }, {
+                    type: "boolean",
+                    "enum": [false]
+                }, {
+                    type: "boolean",
+                    "enum": [true]
+                }, {
+                    $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/RenderNode"
+                    }
+                }]
+        },
+        Props: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean",
+                        "enum": [false]
+                    }, {
+                        type: "boolean",
+                        "enum": [true]
+                    }, {
+                        type: "object",
+                        additionalProperties: true
+                    }, {
+                        type: "array",
+                        items: true
+                    }, {
+                        asCell: true
+                    }, {
+                        asStream: true
+                    }, {
+                        type: "null"
+                    }]
+            }
+        }
+    }
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
@@ -94,7 +200,7 @@ export default recipe({
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            enum: ["B", "C"]
+            "enum": ["B", "C"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 score: state.score
             } }, ({ state }) => state.score >= 80 ? "B" : "C"))}</span>
@@ -134,7 +240,7 @@ export default recipe({
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            enum: ["Single", "Multiple"]
+            "enum": ["Single", "Multiple"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 count: state.count
             } }, ({ state }) => state.count === 1
@@ -153,11 +259,11 @@ export default recipe({
                         isPremium: {
                             anyOf: [{
                                     type: "boolean",
-                                    enum: [false],
+                                    "enum": [false],
                                     asOpaque: true
                                 }, {
                                     type: "boolean",
-                                    enum: [true],
+                                    "enum": [true],
                                     asOpaque: true
                                 }]
                         }
@@ -167,7 +273,7 @@ export default recipe({
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            enum: ["Premium Active", "Regular Active"]
+            "enum": ["Premium Active", "Regular Active"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 isPremium: state.isPremium
             } }, ({ state }) => (state.isPremium ? "Premium Active" : "Regular Active")), "Inactive")}
@@ -208,7 +314,7 @@ export default recipe({
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            enum: ["User", "Guest"]
+            "enum": ["User", "Guest"]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 userType: state.userType
             } }, ({ state }) => state.userType === "user"
@@ -227,22 +333,22 @@ export default recipe({
                         isActive: {
                             anyOf: [{
                                     type: "boolean",
-                                    enum: [false],
+                                    "enum": [false],
                                     asOpaque: true
                                 }, {
                                     type: "boolean",
-                                    enum: [true],
+                                    "enum": [true],
                                     asOpaque: true
                                 }]
                         },
                         hasPermission: {
                             anyOf: [{
                                     type: "boolean",
-                                    enum: [false],
+                                    "enum": [false],
                                     asOpaque: true
                                 }, {
                                     type: "boolean",
-                                    enum: [true],
+                                    "enum": [true],
                                     asOpaque: true
                                 }]
                         }
@@ -254,11 +360,11 @@ export default recipe({
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     type: "boolean",
-                    enum: [false],
+                    "enum": [false],
                     asOpaque: true
                 }, {
                     type: "boolean",
-                    enum: [true],
+                    "enum": [true],
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
@@ -298,11 +404,11 @@ export default recipe({
                         isPremium: {
                             anyOf: [{
                                     type: "boolean",
-                                    enum: [false],
+                                    "enum": [false],
                                     asOpaque: true
                                 }, {
                                     type: "boolean",
-                                    enum: [true],
+                                    "enum": [true],
                                     asOpaque: true
                                 }]
                         },

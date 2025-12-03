@@ -4,8 +4,8 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { Program } from "@commontools/js-runtime";
-import { CompilerError } from "@commontools/js-runtime/typescript";
+import type { Program } from "@commontools/js-compiler";
+import { CompilerError } from "@commontools/js-compiler/typescript";
 
 /**
  * Compile a recipe/module and run it.
@@ -124,13 +124,12 @@ export function compileAndRun(
               contents: { type: "string" },
             },
             required: ["name", "contents"],
-            additionalProperties: false,
           },
+          default: [],
         },
-        main: { type: "string" },
+        main: { type: "string", default: "" },
       },
       required: ["files", "main"],
-      additionalProperties: false,
     }).withTx(tx).get();
     const input = inputsCell.withTx(tx).key("input");
 

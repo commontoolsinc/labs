@@ -54,8 +54,7 @@ export default pattern((cell) => {
             type: "number"
         }
     },
-    required: ["value"],
-    asOpaque: true
+    required: ["value"]
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -74,7 +73,7 @@ export default pattern((cell) => {
             properties: {
                 type: {
                     type: "string",
-                    enum: ["vnode"]
+                    "enum": ["vnode"]
                 },
                 name: {
                     type: "string"
@@ -96,7 +95,7 @@ export default pattern((cell) => {
             properties: {
                 type: {
                     type: "string",
-                    enum: ["vnode"]
+                    "enum": ["vnode"]
                 },
                 name: {
                     type: "string"
@@ -120,10 +119,10 @@ export default pattern((cell) => {
                     type: "number"
                 }, {
                     type: "boolean",
-                    enum: [false]
+                    "enum": [false]
                 }, {
                     type: "boolean",
-                    enum: [true]
+                    "enum": [true]
                 }, {
                     $ref: "#/$defs/VNode"
                 }, {
@@ -146,10 +145,10 @@ export default pattern((cell) => {
                         type: "number"
                     }, {
                         type: "boolean",
-                        enum: [false]
+                        "enum": [false]
                     }, {
                         type: "boolean",
-                        enum: [true]
+                        "enum": [true]
                     }, {
                         type: "object",
                         additionalProperties: true
@@ -171,4 +170,3 @@ export default pattern((cell) => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-

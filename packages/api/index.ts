@@ -76,6 +76,12 @@ export interface IAnyCell<T> {
  */
 export interface IReadable<T> {
   get(): Readonly<T>;
+  /**
+   * Read the cell's current value without creating a reactive dependency.
+   * Unlike `get()`, calling `sample()` inside a lift won't cause the lift
+   * to re-run when this cell's value changes.
+   */
+  sample(): Readonly<T>;
 }
 
 /**
@@ -882,13 +888,18 @@ export interface BuiltInLLMParams {
    * Each tool has a description, input schema, and handler function that runs client-side.
    */
   tools?: Record<string, BuiltInLLMTool>;
+  /**
+   * Context cells to make available to the LLM.
+   * These cells appear in the system prompt with their schemas and current values.
+   */
+  context?: Record<string, Cell<any>>;
 }
 
 export interface BuiltInLLMState {
   pending: boolean;
   result?: BuiltInLLMContent;
   partial?: string;
-  error: unknown;
+  error?: unknown;
   cancelGeneration: Stream<void>;
 }
 
@@ -896,7 +907,7 @@ export interface BuiltInLLMGenerateObjectState<T> {
   pending: boolean;
   result?: T;
   partial?: string;
-  error: unknown;
+  error?: unknown;
   cancelGeneration: Stream<void>;
 }
 
@@ -906,6 +917,7 @@ export interface BuiltInLLMDialogState {
   cancelGeneration: Stream<void>;
   addMessage: Stream<BuiltInLLMMessage>;
   flattenedTools: Record<string, any>;
+  pinnedCells: Array<{ path: string; name: string }>;
 }
 
 export type BuiltInGenerateObjectParams =
@@ -913,27 +925,32 @@ export type BuiltInGenerateObjectParams =
     model?: string;
     prompt: BuiltInLLMContent;
     messages?: never;
+    context?: Record<string, any>;
     schema?: JSONSchema;
     system?: string;
     cache?: boolean;
     maxTokens?: number;
     metadata?: Record<string, string | undefined | object>;
+    tools?: Record<string, BuiltInLLMTool>;
   }
   | {
     model?: string;
     prompt?: never;
     messages: BuiltInLLMMessage[];
+    context?: Record<string, any>;
     schema?: JSONSchema;
     system?: string;
     cache?: boolean;
     maxTokens?: number;
     metadata?: Record<string, string | undefined | object>;
+    tools?: Record<string, BuiltInLLMTool>;
   };
 
 export type BuiltInGenerateTextParams =
   | {
-    prompt: BuiltInLLMContent;
+    prompt: string;
     messages?: never;
+    context?: Record<string, any>;
     system?: string;
     model?: string;
     maxTokens?: number;
@@ -942,6 +959,7 @@ export type BuiltInGenerateTextParams =
   | {
     prompt?: never;
     messages: BuiltInLLMMessage[];
+    context?: Record<string, any>;
     system?: string;
     model?: string;
     maxTokens?: number;
@@ -951,6 +969,7 @@ export type BuiltInGenerateTextParams =
 export interface BuiltInGenerateTextState {
   pending: boolean;
   result?: string;
+  error?: unknown;
   partial?: string;
   requestHash?: string;
 }
@@ -981,7 +1000,7 @@ export type PatternFunction = {
   ): RecipeFactory<StripCell<T>, StripCell<R>>;
 
   <T>(
-    fn: (input: OpaqueRef<Required<T>>) => unknown,
+    fn: (input: OpaqueRef<Required<T>>) => any,
   ): RecipeFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
   <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
@@ -1239,10 +1258,39 @@ export type CompileAndRunFunction = <T = any, S = any>(
   params: Opaque<BuiltInCompileAndRunParams<T>>,
 ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
 
-export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<string>;
-export type WishFunction = <T = unknown>(
-  target: Opaque<string>,
-) => OpaqueRef<T>;
+export type WishTag = `/${string}` | `#${string}`;
+
+export type DID = `did:${string}:${string}`;
+
+export type WishParams = {
+  query: WishTag | string;
+  path?: string[];
+  context?: Record<string, any>;
+  schema?: JSONSchema;
+  scope?: (DID | "~" | ".")[];
+};
+
+export type WishState<T> = {
+  result?: T;
+  error?: any;
+  [UI]?: VNode;
+};
+
+export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<boolean>;
+export type WishFunction = {
+  <T = unknown>(target: Opaque<WishParams>): OpaqueRef<Required<WishState<T>>>;
+  <S extends JSONSchema = JSONSchema>(
+    target: Opaque<WishParams>,
+    schema: S,
+  ): OpaqueRef<Required<WishState<Schema<S>>>>;
+
+  // TODO(seefeld): Remove old interface mid December 2025
+  <T = unknown>(target: Opaque<string>): OpaqueRef<T>;
+  <S extends JSONSchema = JSONSchema>(
+    target: Opaque<string>,
+    schema: S,
+  ): OpaqueRef<Schema<S>>;
+};
 
 export type CreateNodeFactoryFunction = <T = any, R = any>(
   moduleSpec: Module,
@@ -1319,8 +1367,6 @@ export declare const toSchema: ToSchemaFunction;
 export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
   : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
   : T;
-
-export type WishKey = `/${string}` | `#${string}`;
 
 // ===== JSON Pointer Path Resolution Utilities =====
 

@@ -13,8 +13,9 @@ export function createSchemaTransformerV2() {
       type: ts.Type,
       checker: ts.TypeChecker,
       typeArg?: ts.TypeNode,
+      options?: { widenLiterals?: boolean },
     ) {
-      return generator.generateSchema(type, checker, typeArg);
+      return generator.generateSchema(type, checker, typeArg, options);
     },
 
     generateSchemaFromSyntheticTypeNode(

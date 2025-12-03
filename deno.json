@@ -11,7 +11,7 @@
     "./packages/identity",
     "./packages/iframe-sandbox",
     "./packages/integration",
-    "./packages/js-runtime",
+    "./packages/js-compiler",
     "./packages/js-sandbox",
     "./packages/ts-transformers",
     "./packages/test-support",
@@ -57,10 +57,12 @@
     "**/dist/",
     "**/build/",
     "**/.cache/",
-    "**/coverage/"
+    "**/coverage/",
+    "./tutorials/"
   ],
   "lint": {
     "exclude": [
+      ".beads/",
       "./packages/static/assets",
       "./packages/vendor-astral"
     ],
@@ -86,6 +88,7 @@
     "singleQuote": false,
     "proseWrap": "always",
     "exclude": [
+      ".beads/",
       ".claude/",
       "docs/",
       "packages/seeder/templates/",

@@ -10,7 +10,7 @@ export default recipe("MapSingleCapture", (_state) => {
   return {
     [UI]: (
       <div>
-        {people.length > 0 && (
+        {people.get().length > 0 && (
           <ul>
             {people.map((person) => (
               <li key={person.id}>{person.name}</li>

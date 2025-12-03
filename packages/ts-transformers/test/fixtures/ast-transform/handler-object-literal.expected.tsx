@@ -4,7 +4,7 @@ interface State {
     value: Cell<number>;
     name?: Cell<string>;
 }
-const myHandler = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const myHandler = handler(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -23,7 +23,21 @@ const myHandler = handler(true as const satisfies __ctHelpers.JSONSchema, {
 export default recipe({
     type: "object",
     properties: { value: { type: "number" }, name: { type: "string" } },
-}, (state) => {
+}, {
+    type: "object",
+    properties: {
+        onClick1: {
+            asStream: true
+        },
+        onClick2: {
+            asStream: true
+        },
+        onClick3: {
+            asStream: true
+        }
+    },
+    required: ["onClick1", "onClick2", "onClick3"]
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         // Test case 1: Object literal with all properties from state
         onClick1: myHandler({ value: state.value, name: state.name }),

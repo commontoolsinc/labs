@@ -2,10 +2,14 @@
 import {
   BuiltInLLMTool,
   Cell,
+  compileAndRun,
+  computed,
   derive,
   fetchData,
+  fetchProgram,
   handler,
   ifElse,
+  navigateTo,
   recipe,
 } from "commontools";
 
@@ -197,3 +201,74 @@ export default recipe<ToolsInput>(({ list }) => {
 
   return { tools, list };
 });
+
+/**
+ * `fetchAndRunPattern({ url: "https://...", args: {} })`
+ *
+ * Instantiates patterns (e.g. from listPatternIndex) and returns the cell that
+ * contains the results. The instantiated pattern will keep running and updating
+ * the cell. Pass the resulting cell to `navigateTo` to show the pattern's UI.
+ *
+ * Pass in arguments to initialize the pattern. It's especially useful to pass
+ * in links to other cells as `{ "@link": "/of:bafe.../path/to/data" }`.
+ */
+type FetchAndRunPatternInput = {
+  url: string;
+  args: Cell<any>;
+};
+export const fetchAndRunPattern = recipe<FetchAndRunPatternInput>(
+  ({ url, args }) => {
+    const { pending: _fetchPending, result: program, error: _fetchError } =
+      fetchProgram({ url });
+
+    // Use derive to safely handle when program is undefined/pending
+    const compileParams = derive(program, (p) => ({
+      files: p?.files ?? [],
+      main: p?.main ?? "",
+      input: args,
+    }));
+
+    const { pending, result, error } = compileAndRun(compileParams);
+
+    return ifElse(
+      computed(() => pending || (!result && !error)),
+      undefined,
+      {
+        cell: result,
+        error,
+      },
+    );
+  },
+);
+
+/**
+ * `navigateTo({ cell: { "@link": "/of:xyz" } })` - Navigates to that cell's UI
+ *
+ * Especially useful after instantiating a pattern with fetchAndRunPattern:
+ * Pass the "@link" you get at `cell` to navigate to the pattern's view.
+ */
+type NavigateToPatternInput = { cell: Cell<any> }; // Hack to steer LLM
+export const navigateToPattern = recipe<NavigateToPatternInput>(
+  ({ cell }) => {
+    const success = navigateTo(cell);
+
+    return ifElse(success, { success }, undefined);
+  },
+);
+
+/**
+ * `listPatternIndex()` - Returns the index of patterns.
+ *
+ * Useful as input to fetchAndRun.
+ */
+type ListPatternIndexInput = Record<string, never>;
+
+export const listPatternIndex = recipe<ListPatternIndexInput>(
+  ({ _ }) => {
+    const { pending, result } = fetchData({
+      url: "/api/patterns/index.md",
+      mode: "text",
+    });
+    return ifElse(computed(() => pending || !result), undefined, { result });
+  },
+);

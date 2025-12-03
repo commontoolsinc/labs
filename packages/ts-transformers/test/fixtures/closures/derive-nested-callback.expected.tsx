@@ -1,8 +1,15 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive } from "commontools";
 export default function TestDerive() {
-    const numbers = cell([1, 2, 3]);
-    const multiplier = cell(2);
+    const numbers = cell([1, 2, 3], {
+        type: "array",
+        items: {
+            type: "number"
+        }
+    } as const satisfies __ctHelpers.JSONSchema);
+    const multiplier = cell(2, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
     // Nested callback - inner array map should not capture outer multiplier
     const result = __ctHelpers.derive({
         type: "object",
@@ -29,12 +36,27 @@ export default function TestDerive() {
     } as const satisfies __ctHelpers.JSONSchema, {
         numbers,
         multiplier: multiplier
-    }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__ctHelpers.recipe<{
-        element: number;
-        params: {
-            multiplier: __ctHelpers.Cell<number>;
-        };
-    }>(({ element: n, params: { multiplier } }) => n * multiplier.get()), {
+    }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__ctHelpers.recipe({
+        type: "object",
+        properties: {
+            element: {
+                type: "number"
+            },
+            params: {
+                type: "object",
+                properties: {
+                    multiplier: {
+                        type: "number",
+                        asCell: true
+                    }
+                },
+                required: ["multiplier"]
+            }
+        },
+        required: ["element", "params"]
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema, ({ element: n, params: { multiplier } }) => n * multiplier.get()), {
         multiplier: multiplier
     }));
     return result;

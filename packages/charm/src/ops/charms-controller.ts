@@ -79,7 +79,11 @@ export class CharmsController<T = unknown> {
 
   async remove(charmId: string): Promise<boolean> {
     this.disposeCheck();
-    const removed = await this.#manager.remove(charmId);
+    const charm = this.#manager.runtime.getCellFromEntityId(
+      this.#manager.getSpace(),
+      { "/": charmId },
+    );
+    const removed = await this.#manager.remove(charm);
     // Ensure full synchronization
     if (removed) {
       await this.#manager.runtime.idle();

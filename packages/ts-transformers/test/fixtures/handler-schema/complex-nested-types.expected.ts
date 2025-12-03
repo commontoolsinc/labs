@@ -38,7 +38,7 @@ const userHandler = handler({
             required: ["name", "email"]
         },
         action: {
-            enum: ["create", "update", "delete"]
+            "enum": ["create", "update", "delete"]
         }
     },
     required: ["user", "action"]
@@ -118,7 +118,10 @@ const _updateTags = handler({
     state.tags.set(detail?.tags ?? []);
 });
 export { userHandler };
-export default recipe("complex-nested-types test", () => {
+export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {}
+} as const satisfies __ctHelpers.JSONSchema, () => {
     return { userHandler };
 });
 // @ts-ignore: Internals

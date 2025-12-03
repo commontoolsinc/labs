@@ -575,17 +575,17 @@ Same as ct-hstack **Example**:
 ```html
 <ct-form>
   <ct-vstack gap="4">
-    <ct-vgroup gap="sm">
+    <ct-vgroup gap="1">
       <ct-label for="name" required>Full Name</ct-label>
       <ct-input id="name" name="name" required></ct-input>
     </ct-vgroup>
 
-    <ct-vgroup gap="sm">
+    <ct-vgroup gap="1">
       <ct-label for="email" required>Email</ct-label>
       <ct-input id="email" name="email" type="email" required></ct-input>
     </ct-vgroup>
 
-    <ct-vgroup gap="sm">
+    <ct-vgroup gap="1">
       <ct-label for="message">Message</ct-label>
       <ct-textarea id="message" name="message" rows="4"></ct-textarea>
     </ct-vgroup>

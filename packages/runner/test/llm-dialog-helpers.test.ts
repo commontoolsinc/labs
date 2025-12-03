@@ -49,7 +49,7 @@ Deno.test("parseTargetString recognizes ~ encoded path elements", () => {
     parsed.id,
     "of:baedreidptbmcghfoqcb2xa3l3qsvype5gjcfuektmzdjalfb7yqztjda5q",
   );
-  assertEquals(parsed.path, ["foo/bar", "~", ""]);
+  assertEquals(parsed.path, ["foo/bar", "~"]);
 });
 
 Deno.test("parseTargetString errors on human name", () => {

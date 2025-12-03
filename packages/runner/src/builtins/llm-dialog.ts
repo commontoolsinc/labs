@@ -9,31 +9,48 @@ import type {
   BuiltInLLMMessage,
   BuiltInLLMParams,
   BuiltInLLMTextPart,
+  BuiltInLLMTool,
   BuiltInLLMToolCallPart,
   JSONSchema,
   Schema,
 } from "commontools";
+import {
+  LLMMessageSchema,
+  LLMParamsSchema,
+  LLMToolSchema,
+} from "./llm-schemas.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { isBoolean, isObject } from "@commontools/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { isCell, isStream } from "../cell.ts";
-import { ID, NAME, type Recipe, TYPE } from "../builder/types.ts";
+import { ID, NAME, type Recipe } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { formatTransactionSummary } from "../storage/transaction-summary.ts";
-import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
-import { resolveLink } from "../link-resolution.ts";
-import { navigateTo } from "./navigate-to.ts";
+import {
+  createLLMFriendlyLink,
+  encodeJsonPointer,
+  matchLLMFriendlyLink,
+  parseLink,
+  parseLLMFriendlyLink,
+} from "../link-utils.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
+import { ContextualFlowControl } from "../cfc.ts";
+
 // Avoid importing from @commontools/charm to prevent circular deps in tests
 
 const logger = getLogger("llm-dialog", {
-  enabled: true,
+  enabled: false,
   level: "info",
 });
 
 const client = new LLMClient();
 const REQUEST_TIMEOUT = 1000 * 60 * 5; // 5 minutes
+const TOOL_CALL_TIMEOUT = 1000 * 30 * 1; // 30 seconds
 
 /**
  * Remove the injected `result` field from a JSON schema so tools don't
@@ -83,38 +100,17 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
  * - Prefer a non-empty recipe.resultSchema if recipe is loaded
  * - Otherwise derive a simple object schema from the current value
  */
-async function getCharmResultSchemaAsync(
-  runtime: IRuntime,
-  charm: Cell<any>,
-): Promise<JSONSchema | undefined> {
-  try {
-    const source = charm.getSourceCell();
-    const recipeId = source?.get()?.[TYPE];
-    if (recipeId) {
-      await runtime.recipeManager.loadRecipe(recipeId, charm.space);
-    }
-    return (
-      getLoadedRecipeResultSchema(runtime, charm) ??
-        buildMinimalSchemaFromValue(charm)
-    );
-  } catch (_e) {
-    return buildMinimalSchemaFromValue(charm);
-  }
-}
+function getCellSchema(
+  cell: Cell<unknown>,
+): { schema?: JSONSchema; rootSchema?: JSONSchema } | undefined {
+  // Extract schema from cell, including from resultSchema of associated pattern
+  const { schema, rootSchema } = cell.asSchemaFromLinks()
+    .getAsNormalizedFullLink();
 
-function getLoadedRecipeResultSchema(
-  runtime: IRuntime | undefined,
-  charm: Cell<any>,
-): JSONSchema | undefined {
-  const source = charm.getSourceCell();
-  const recipeId = source?.get()?.[TYPE];
-  const recipe = recipeId
-    ? runtime?.recipeManager.recipeById(recipeId)
-    : undefined;
-  if (recipe?.resultSchema !== undefined) {
-    return recipe.resultSchema;
-  }
-  return undefined;
+  if (schema !== undefined) return { schema, rootSchema };
+
+  // Fall back to minimal schema based on current value
+  return { schema: buildMinimalSchemaFromValue(cell) };
 }
 
 function buildMinimalSchemaFromValue(charm: Cell<any>): JSONSchema | undefined {
@@ -136,104 +132,98 @@ function buildMinimalSchemaFromValue(charm: Cell<any>): JSONSchema | undefined {
 }
 
 /**
- * Encodes a JSON Pointer path according to RFC 6901.
- * Each token has ~ replaced with ~0 and / replaced with ~1, then joined with /.
- * @param path - Array of path tokens to encode
- * @returns The encoded JSON Pointer string
- */
-function encodeJsonPointer(path: readonly string[]): string {
-  return path
-    .map((token) => token.replace(/~/g, "~0").replace(/\//g, "~1"))
-    .join("/");
-}
-
-/**
- * Decodes a JSON Pointer string according to RFC 6901.
- * Splits by / then replaces ~1 with / and ~0 with ~ in each token.
- * @param pointer - The JSON Pointer string to decode
- * @returns Array of decoded path tokens
- */
-function decodeJsonPointer(pointer: string): string[] {
-  return pointer
-    .split("/")
-    .map((token) => token.replace(/~1/g, "/").replace(/~0/g, "~"));
-}
-
-/**
- * Parses a LLM friendly link from a target string.
- *
- * @param target - The target string to parse
- * @param space - The space to use to get the cells
- * @returns The parsed LLM friendly link
- */
-function parseLLMFriendlyLink(
-  target: string,
-  space: MemorySpace,
-): NormalizedFullLink {
-  target = target.trim();
-
-  if (!matchLLMFriendlyLink.test(target)) {
-    throw new Error(
-      'Target must include a charm handle, e.g. "/of:bafyabc123/path".',
-    );
-  }
-
-  const [empty, id, ...path] = decodeJsonPointer(target);
-
-  if (empty !== "") {
-    throw new Error("Target must start with a slash.");
-  }
-
-  // Check if first segment looks like a CID/handle by length
-  //
-  // CIDs are long encoded strings (typically 40+ chars), whereas human names
-  // are short. Use a conservative threshold to distinguish handles from
-  // human-readable names Handle format is "/of:..." (the internal storage
-  // format)
-  if (id === undefined || id.length < 20) {
-    throw new Error(
-      `Charm references must use handles (e.g., "/of:bafyabc123/path"), not human names (e.g., "${id}"). Use listAttachments() to see available charm handles and their names.`,
-    );
-  }
-
-  return {
-    id: id as `${string}:${string}`,
-    path,
-    space,
-    type: "application/json",
-  };
-}
-
-function createLLMFriendlyLink(link: NormalizedFullLink): string {
-  return encodeJsonPointer(["", link.id, ...link.path]);
-}
-
-/**
  * Traverses a value and serializes any cells mentioned to our LLM-friendly JSON
  * link object format.
  *
  * @param value - The value to traverse and serialize
  * @returns The serialized value
  */
-function traverseAndSerialize(value: unknown): unknown {
+function traverseAndSerialize(
+  value: unknown,
+  schema: JSONSchema | undefined,
+  rootSchema: JSONSchema | undefined = schema,
+  seen: Set<unknown> = new Set(),
+): unknown {
+  if (!isRecord(value)) return value;
+
+  // If we encounter an `any` schema, turn value into a cell link
+  if (
+    seen.size > 0 && schema !== undefined &&
+    ContextualFlowControl.isTrueSchema(schema) &&
+    isCellResultForDereferencing(value)
+  ) {
+    // Next step will turn this into a link
+    value = getCellOrThrow(value);
+  }
+
+  // Turn cells into a link, unless they are data: URIs and traverse instead
   if (isCell(value)) {
-    const link = value.getAsNormalizedFullLink();
-    return { "/": encodeJsonPointer(["", link.id, ...link.path]) };
+    const link = value.resolveAsCell().getAsNormalizedFullLink();
+    if (link.id.startsWith("data:")) {
+      return traverseAndSerialize(value.get(), schema, rootSchema, seen);
+    } else {
+      return { "@link": encodeJsonPointer(["", link.id, ...link.path]) };
+    }
   }
+
+  // If we've already seen this and it can be mapped to a cell, serialized as
+  // cell link, otherwise throw (this should never happen in our cases)
+  if (seen.has(value)) {
+    if (isCellResultForDereferencing(value)) {
+      return traverseAndSerialize(
+        getCellOrThrow(value),
+        schema,
+        rootSchema,
+        seen,
+      );
+    } else {
+      throw new Error(
+        "Cannot serialize a value that has already been seen and cannot be mapped to a cell.",
+      );
+    }
+  }
+  seen.add(value);
+
+  const cfc = new ContextualFlowControl();
+
   if (Array.isArray(value)) {
-    return value.map(traverseAndSerialize);
-  }
-  if (isRecord(value)) {
+    return value.map((v, index) => {
+      const linkSchema = schema !== undefined
+        ? cfc.schemaAtPath(schema, [index.toString()], rootSchema)
+        : undefined;
+      let result = traverseAndSerialize(v, linkSchema, rootSchema, seen);
+      // Decorate array entries with links that point to underlying cells, if
+      // any. Ignores data: URIs, since they're not useful as links for the LLM.
+      if (isRecord(result) && isCellResultForDereferencing(v)) {
+        const link = getCellOrThrow(v).resolveAsCell()
+          .getAsNormalizedFullLink();
+        if (!link.id.startsWith("data:")) {
+          result = {
+            "@arrayEntry": encodeJsonPointer(["", link.id, ...link.path]),
+            ...result,
+          };
+        }
+      }
+      return result;
+    });
+  } else {
     return Object.fromEntries(
-      Object.entries(value).map((
+      Object.entries(value as Record<string, unknown>).map((
         [key, value],
-      ) => [key, traverseAndSerialize(value)]),
+      ) => [
+        key,
+        traverseAndSerialize(
+          value,
+          schema !== undefined
+            ? cfc.schemaAtPath(schema, [key], rootSchema)
+            : undefined,
+          rootSchema,
+          seen,
+        ),
+      ]),
     );
   }
-  return value;
 }
-
-const matchLLMFriendlyLink = new RegExp("^/[a-zA-Z0-9]+:");
 
 /**
  * Traverses a value and converts any of our LLM friendly JSON link object
@@ -253,10 +243,10 @@ function traverseAndCellify(
   // - it's a record with a single key "/"
   // - the value of the "/" key is a string that matches the URI pattern
   if (
-    isRecord(value) && typeof value["/"] === "string" &&
-    Object.keys(value).length === 1 && matchLLMFriendlyLink.test(value["/"])
+    isRecord(value) && typeof value["@link"] === "string" &&
+    Object.keys(value).length === 1 && matchLLMFriendlyLink.test(value["@link"])
   ) {
-    const link = parseLLMFriendlyLink(value["/"], space);
+    const link = parseLLMFriendlyLink(value["@link"], space);
     return runtime.getCellFromLink(link);
   }
   if (Array.isArray(value)) {
@@ -272,77 +262,6 @@ function traverseAndCellify(
   return value;
 }
 
-const LLMMessageSchema = {
-  type: "object",
-  properties: {
-    role: { type: "string" },
-    content: {
-      anyOf: [{
-        type: "array",
-        items: {
-          anyOf: [{
-            type: "object",
-            properties: {
-              // This should be anyOf with const values for type
-              type: { type: "string" },
-              text: { type: "string" },
-              image: { type: "string" },
-              toolCallId: { type: "string" },
-              toolName: { type: "string" },
-              input: { type: "object" },
-              output: {},
-            },
-            required: ["type"],
-          }, { type: "string" }],
-        },
-      }, { type: "string" }],
-    },
-  },
-  required: ["role", "content"],
-} as const satisfies JSONSchema;
-
-const LLMToolSchema = {
-  type: "object",
-  properties: {
-    description: { type: "string" },
-    inputSchema: { type: "object" },
-    handler: {
-      // Deliberately no schema, so it gets populated from the handler
-      asStream: true,
-    },
-    pattern: {
-      type: "object",
-      properties: {
-        argumentSchema: { type: "object" },
-        resultSchema: { type: "object" },
-        nodes: { type: "array", items: { type: "object" } },
-        program: { type: "object" },
-        initial: { type: "object" },
-      },
-      required: ["argumentSchema", "resultSchema", "nodes"],
-      asCell: true,
-    },
-    extraParams: { type: "object" },
-    charm: {
-      // Accept whole charm - its own schema defines its handlers
-      asCell: true,
-    },
-  },
-  required: [],
-} as const satisfies JSONSchema;
-
-const LLMParamsSchema = {
-  type: "object",
-  properties: {
-    messages: { type: "array", items: LLMMessageSchema, default: [] },
-    model: { type: "string" },
-    maxTokens: { type: "number" },
-    system: { type: "string" },
-    tools: { type: "object", additionalProperties: LLMToolSchema, default: {} },
-  },
-  required: ["messages"],
-} as const satisfies JSONSchema;
-
 const resultSchema = {
   type: "object",
   properties: {
@@ -350,6 +269,16 @@ const resultSchema = {
     addMessage: { ...LLMMessageSchema, asStream: true },
     cancelGeneration: { asStream: true },
     flattenedTools: { type: "object", default: {} },
+    pinnedCells: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          name: { type: "string" },
+        },
+      },
+    },
   },
   required: ["pending", "addMessage", "cancelGeneration"],
 } as const satisfies JSONSchema;
@@ -379,12 +308,10 @@ type CharmToolEntry = {
 type ToolCatalog = {
   llmTools: Record<string, { description: string; inputSchema: JSONSchema }>;
   dynamicToolCells: Map<string, Cell<Schema<typeof LLMToolSchema>>>;
-  charmMap: Map<string, Cell<any>>;
-  handleMap: Map<string, { charm: Cell<any>; charmName: string }>;
 };
 
 function collectToolEntries(
-  toolsCell: Cell<any>,
+  toolsCell: Cell<Record<string, Schema<typeof LLMToolSchema>>>,
 ): { legacy: LegacyToolEntry[]; charms: CharmToolEntry[] } {
   const tools = toolsCell.get() ?? {};
   const legacy: LegacyToolEntry[] = [];
@@ -417,35 +344,45 @@ function collectToolEntries(
 }
 
 const READ_TOOL_NAME = "read";
-const RUN_TOOL_NAME = "run";
+const INVOKE_TOOL_NAME = "invoke";
 const SCHEMA_TOOL_NAME = "schema";
-const LIST_ATTACHMENTS_TOOL_NAME = "listAttachments";
-const NAVIGATE_TO_TOOL_NAME = "navigateTo";
+const PIN_TOOL_NAME = "pin";
+const UNPIN_TOOL_NAME = "unpin";
+const FINAL_RESULT_TOOL_NAME = "finalResult";
+const UPDATE_ARGUMENT_TOOL_NAME = "updateArgument";
 
 const READ_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
     path: {
-      type: "string",
+      type: "object",
+      properties: {
+        "@link": { type: "string" },
+      },
+      required: ["@link"],
       description:
-        "Target path in the form handle/child/grandchild (e.g., /of:bafyabc123/result/content).",
+        'Link to the cell to read. Format: { "@link": "/of:bafyabc123/path" }.',
     },
   },
   required: ["path"],
   additionalProperties: false,
 };
 
-const RUN_INPUT_SCHEMA: JSONSchema = {
+const INVOKE_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
     path: {
-      type: "string",
+      type: "object",
+      properties: {
+        "@link": { type: "string" },
+      },
+      required: ["@link"],
       description:
-        "Target handler path in the form handle/handler/path (e.g., /of:bafyabc123/handlers/doThing).",
+        'Link to the handler or pattern to invoke. Format: { "@link": "/of:bafyabc123/doThing" }.',
     },
     args: {
       type: "object",
-      description: "Arguments passed to the handler.",
+      description: "Arguments passed to the handler or pattern.",
     },
   },
   required: ["path"],
@@ -456,38 +393,103 @@ const SCHEMA_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
     path: {
-      type: "string",
-      description: "Name of the attached charm.",
+      type: "object",
+      properties: {
+        "@link": { type: "string" },
+      },
+      required: ["@link"],
+      description:
+        'Link to the cell to inspect. Format: { "@link": "/of:bafyabc123" }.',
     },
   },
   required: ["path"],
   additionalProperties: false,
 };
 
-const LIST_ATTACHMENTS_INPUT_SCHEMA: JSONSchema = {
-  type: "object",
-  properties: {},
-  additionalProperties: false,
-};
-
-const NAVIGATE_TO_INPUT_SCHEMA: JSONSchema = {
+const PIN_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
     path: {
-      type: "string",
+      type: "object",
+      properties: {
+        "@link": { type: "string" },
+      },
+      required: ["@link"],
       description:
-        "Target path to navigate to in the form handle/path (e.g., /of:bafyabc123/result).",
+        'Link to pin for easy reference. Format: { "@link": "/of:bafyabc123" }.',
+    },
+    name: {
+      type: "string",
+      description: "Human-readable name for this pinned cell.",
+    },
+  },
+  required: ["path", "name"],
+  additionalProperties: false,
+};
+
+const UNPIN_INPUT_SCHEMA: JSONSchema = {
+  type: "object",
+  properties: {
+    path: {
+      type: "object",
+      properties: {
+        "@link": { type: "string" },
+      },
+      required: ["@link"],
+      description:
+        'Link of the pinned cell to remove. Format: { "@link": "/of:bafyabc123" }.',
     },
   },
   required: ["path"],
   additionalProperties: false,
 };
+
+const UPDATE_ARGUMENT_INPUT_SCHEMA: JSONSchema = {
+  type: "object",
+  properties: {
+    path: {
+      type: "object",
+      properties: {
+        "@link": { type: "string" },
+      },
+      required: ["@link"],
+      description:
+        'Link to the pattern instance to update. Format: { "@link": "/of:bafyabc123" }.',
+    },
+    updates: {
+      type: "object",
+      description:
+        "Field updates to apply to the pattern's arguments. Keys are field paths (e.g., 'query' or 'config.theme'), values are new values.",
+    },
+  },
+  required: ["path", "updates"],
+  additionalProperties: false,
+};
+
+/**
+ * Represents a pinned cell in the conversation.
+ * Pinned cells are links of interest that the LLM can add/remove as a scratchpad.
+ */
+type PinnedCell = {
+  path: string; // e.g., "/of:bafyabc123" or "/of:bafyabc123"
+  name: string; // Human-readable name for display
+};
+
+// ============================================================================
+// Path Utility Functions
+// ============================================================================
+// These utilities handle the conversion between LLM-facing path format (/of:...)
+// and internal runtime format (of:...). The LLM sees paths with a leading slash
+// to make it clear that strings are links.
 
 function ensureString(
   value: unknown,
   field: string,
   example: string,
 ): string {
+  if (isRecord(value) && typeof value["@link"] === "string") {
+    return ensureString(value["@link"], field, example);
+  }
   if (typeof value === "string") {
     const trimmed = value.trim();
     if (trimmed.length === 0) {
@@ -565,38 +567,57 @@ function flattenTools(
     flattened[entry.name] = passThrough;
   }
 
-  // Always add read/run tools since they work with ANY valid handle, not just attachments
+  // Build pinned cells context for tool descriptions
   const handleList = charms.length > 0
     ? charms.map((e) => `${e.charmName} (${e.handle})`).join(", ")
     : "";
-  const availability = handleList
-    ? `Attached charms: ${handleList}.`
-    : "No charms currently attached, but you can still read/run any valid handle.";
+  const pinnedCellsContext = handleList
+    ? `Currently pinned: ${handleList}.`
+    : "";
 
   flattened[READ_TOOL_NAME] = {
-    description: "Read data from ANY charm using a handle path like " +
-      '"/of:bafyabc123/result/path". ' + availability,
+    description:
+      'Read data from any cell. Input: { "@link": "/of:bafyabc123/path" }. ' +
+      "Returns the cell's data with nested cells as link objects. " +
+      "Compose with invoke(): invoke() returns a link, then read(link) gets the data. " +
+      pinnedCellsContext,
     inputSchema: READ_INPUT_SCHEMA,
   };
-  flattened[RUN_TOOL_NAME] = {
-    description: "Invoke a handler on ANY charm. Provide the handle " +
-      'path like "/of:bafyabc123/handlers/doThing" plus args if required. ' +
-      availability,
-    inputSchema: RUN_INPUT_SCHEMA,
+  flattened[INVOKE_TOOL_NAME] = {
+    description:
+      'Invoke a handler or pattern. If you do not know the schema of the the handler, use schema() first. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
+      'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ' +
+      pinnedCellsContext,
+    inputSchema: INVOKE_INPUT_SCHEMA,
   };
-
-  if (charms.length > 0) {
-    flattened[LIST_ATTACHMENTS_TOOL_NAME] = {
-      description: "List all attached charms with their handles and names.",
-      inputSchema: LIST_ATTACHMENTS_INPUT_SCHEMA,
-    };
-    // flattened[SCHEMA_TOOL_NAME] = {
-    //   description:
-    //     "Return the JSON schema for an attached charm to understand " +
-    //     "available fields and handlers. " + availability,
-    //   inputSchema: SCHEMA_INPUT_SCHEMA,
-    // };
-  }
+  flattened[PIN_TOOL_NAME] = {
+    description:
+      'Pin a cell for easy reference. Input: { "@link": "/of:bafyabc123" } and a name. ' +
+      "Pinned cells and their values appear in the system prompt. " +
+      "Use to track important cells you're working with.",
+    inputSchema: PIN_INPUT_SCHEMA,
+  };
+  flattened[UNPIN_TOOL_NAME] = {
+    description: 'Unpin a cell. Input: { "@link": "/of:bafyabc123" }. ' +
+      "Use when you no longer need quick access to a cell.",
+    inputSchema: UNPIN_INPUT_SCHEMA,
+  };
+  flattened[UPDATE_ARGUMENT_TOOL_NAME] = {
+    description:
+      'Update arguments of a running pattern instance. Input: { "@link": "/of:bafyabc123" } and updates object. ' +
+      "The pattern will automatically re-execute with the new arguments. " +
+      "Use after invoke() creates a pattern, or to modify attached pattern instances. " +
+      'Example: updateArgument({ "@link": "/of:xyz" }, { "query": "new search" })',
+    inputSchema: UPDATE_ARGUMENT_INPUT_SCHEMA,
+  };
+  flattened[SCHEMA_TOOL_NAME] = {
+    description:
+      "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
+      'Input: { "@link": "/of:bafyabc123" }. ' +
+      "Returns schema showing what data can be read and what handlers can be invoked. " +
+      pinnedCellsContext,
+    inputSchema: SCHEMA_INPUT_SCHEMA,
+  };
 
   return flattened;
 }
@@ -653,26 +674,36 @@ function toolsHaveChanged(
 }
 
 function buildToolCatalog(
-  _runtime: IRuntime,
-  toolsCell: Cell<any>,
+  toolsCell:
+    | Cell<Record<string, Schema<typeof LLMToolSchema>>>
+    | Cell<Record<string, BuiltInLLMTool> | undefined>,
 ): ToolCatalog {
-  const { legacy, charms } = collectToolEntries(toolsCell);
-
+  const { legacy } = collectToolEntries(
+    toolsCell.asSchema(
+      {
+        type: "object",
+        additionalProperties: LLMToolSchema,
+      } as const as JSONSchema,
+    ),
+  );
   const llmTools: ToolCatalog["llmTools"] = {};
   const dynamicToolCells = new Map<
     string,
     Cell<Schema<typeof LLMToolSchema>>
   >();
-  const charmMap = new Map<string, Cell<any>>();
-  const handleMap = new Map<string, { charm: Cell<any>; charmName: string }>();
 
   for (const entry of legacy) {
-    const toolValue: any = entry.tool ?? {};
+    const toolValue = entry.tool ?? {};
     const pattern = toolValue?.pattern?.get?.() ?? toolValue?.pattern;
-    const handler = toolValue?.handler;
+    const handler = isCell(toolValue?.handler)
+      ? toolValue.handler.resolveAsCell()
+      : undefined;
     let inputSchema = pattern?.argumentSchema ?? handler?.schema ??
       toolValue?.inputSchema;
-    if (inputSchema === undefined) continue;
+    if (inputSchema === undefined) {
+      logger.warn("llm", `No input schema found for tool ${entry.name}`);
+      continue;
+    }
     inputSchema = normalizeInputSchema(inputSchema);
     const description: string = toolValue.description ??
       (inputSchema as any)?.description ?? "";
@@ -680,102 +711,187 @@ function buildToolCatalog(
     dynamicToolCells.set(entry.name, entry.cell);
   }
 
-  for (const entry of charms) {
-    charmMap.set(entry.charmName, entry.charm);
-    handleMap.set(entry.handle, {
-      charm: entry.charm,
-      charmName: entry.charmName,
-    });
-  }
-
-  // Always add read/run tools since they work with ANY valid handle
-  const handleList = charms.length > 0
-    ? charms.map((e) => `${e.charmName} (${e.handle})`).join(", ")
-    : "";
-  const availability = handleList
-    ? `Attached charms: ${handleList}.`
-    : "No charms currently attached, but you can still read/run any valid handle.";
-
   llmTools[READ_TOOL_NAME] = {
-    description: "Read data from ANY charm using a handle path like " +
-      '"/of:bafyabc123/result/path". Works with any valid handle, not just attached charms. ' +
-      availability,
+    description:
+      'Read data from any cell. Input: { "@link": "/of:bafyabc123/path" }. ' +
+      "Returns the cell's data with nested cells as link objects. " +
+      "Compose with invoke(): invoke() returns a link, then read(link) gets the data. ",
     inputSchema: READ_INPUT_SCHEMA,
   };
-  llmTools[RUN_TOOL_NAME] = {
-    description: "Run a handler on ANY charm. Provide the handle path like " +
-      '"/of:bafyabc123/handlers/doThing" and optionally args. Works with any valid handle. ' +
-      availability,
-    inputSchema: RUN_INPUT_SCHEMA,
-  };
-  llmTools[NAVIGATE_TO_TOOL_NAME] = {
+  llmTools[INVOKE_TOOL_NAME] = {
     description:
-      "Navigate to ANY charm or path. Provide the handle path like " +
-      '"/of:bafyabc123" or "/of:bafyabc123/result". Works with any valid handle. ' +
-      availability,
-    inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
+      'Invoke a handler or pattern. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
+      'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ',
+    inputSchema: INVOKE_INPUT_SCHEMA,
+  };
+  llmTools[PIN_TOOL_NAME] = {
+    description:
+      'Pin a cell for easy reference. Input: { "@link": "/of:bafyabc123" } and a name. ' +
+      "Pinned cells and their values appear in the system prompt. " +
+      "Use to track important cells you're working with.",
+    inputSchema: PIN_INPUT_SCHEMA,
+  };
+  llmTools[UNPIN_TOOL_NAME] = {
+    description: 'Unpin a cell. Input: { "@link": "/of:bafyabc123" }. ' +
+      "Use when you no longer need quick access to a cell.",
+    inputSchema: UNPIN_INPUT_SCHEMA,
+  };
+  llmTools[UPDATE_ARGUMENT_TOOL_NAME] = {
+    description:
+      'Update arguments of a running pattern instance. Input: { "@link": "/of:bafyabc123" } and updates object. ' +
+      "The pattern will automatically re-execute with the new arguments. " +
+      "Use after invoke() creates a pattern, or to modify attached pattern instances. " +
+      'Example: updateArgument({ "@link": "/of:xyz" }, { "query": "new search" })',
+    inputSchema: UPDATE_ARGUMENT_INPUT_SCHEMA,
+  };
+  llmTools[SCHEMA_TOOL_NAME] = {
+    description:
+      "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
+      'Input: { "@link": "/of:bafyabc123" }. ' +
+      "Returns schema showing what data can be read and what handlers can be invoked. ",
+    inputSchema: SCHEMA_INPUT_SCHEMA,
   };
 
-  // Schema and listAttachments only work with attached charms
-  if (charms.length > 0) {
-    llmTools[SCHEMA_TOOL_NAME] = {
-      description:
-        "Return the JSON schema for an attached charm to discover its " +
-        "fields and handlers. Note: schemas are also provided in the system " +
-        "prompt for convenience. " + availability,
-      inputSchema: SCHEMA_INPUT_SCHEMA,
-    };
-    llmTools[LIST_ATTACHMENTS_TOOL_NAME] = {
-      description:
-        "List all attached charms with their handles and human-readable names. " +
-        "Use this to discover which charms are available and their handles for " +
-        "use with read() and run().",
-      inputSchema: LIST_ATTACHMENTS_INPUT_SCHEMA,
-    };
-  }
-
-  return { llmTools, dynamicToolCells, charmMap, handleMap };
+  return { llmTools, dynamicToolCells };
 }
 
 /**
- * Build a formatted documentation string describing all attached charm schemas.
- * This is appended to the system prompt so the LLM has immediate context about
- * available charms without needing to call schema() first.
+ * Build a formatted documentation string describing all available cells:
+ * both context cells (passed via the context parameter) and pinned cells
+ * (managed by pin/unpin tools). Includes schemas and current values for each cell.
+ * This is appended to the system prompt so the LLM has immediate context.
  */
-async function buildCharmSchemasDocumentation(
+function buildAvailableCellsDocumentation(
   runtime: IRuntime,
-  handleMap: Map<string, { charm: Cell<any>; charmName: string }>,
-): Promise<string> {
-  if (handleMap.size === 0) {
-    return "";
+  space: MemorySpace,
+  context: Record<string, Cell<any>> | undefined,
+  pinnedCells: Cell<PinnedCell[]>,
+): string {
+  const entries: string[] = [];
+
+  // First, process context cells (if provided)
+  if (context) {
+    for (const [name, cell] of Object.entries(context)) {
+      try {
+        const resolvedCell = cell.resolveAsCell();
+        const link = resolvedCell.getAsNormalizedFullLink();
+        const path = createLLMFriendlyLink(link);
+        const schemaInfo = getCellSchema(resolvedCell);
+
+        let entry = `## ${name} (${path})\n`;
+
+        if (schemaInfo?.schema) {
+          const schemaJson = JSON.stringify(schemaInfo.schema, null, 2);
+          entry += `- Schema: \`\`\`json\n${schemaJson}\n\`\`\`\n`;
+        }
+
+        try {
+          const value = resolvedCell.get();
+          const serialized = traverseAndSerialize(
+            value,
+            schemaInfo?.schema,
+            schemaInfo?.rootSchema,
+          );
+
+          let valueJson = JSON.stringify(serialized, null, 2);
+
+          const MAX_VALUE_LENGTH = 2000;
+          if (valueJson.length > MAX_VALUE_LENGTH) {
+            valueJson = valueJson.substring(0, MAX_VALUE_LENGTH) +
+              "\n... (truncated)";
+          }
+
+          entry += `- Current Value: \`\`\`json\n${valueJson}\n\`\`\`\n`;
+        } catch (e) {
+          logger.warn(
+            "llm",
+            `Failed to serialize value for context cell ${name}:`,
+            e,
+          );
+          entry += `- Current Value: (unable to serialize)\n`;
+        }
+
+        entries.push(entry);
+      } catch (e) {
+        logger.warn("llm", `Failed to document context cell ${name}:`, e);
+      }
+    }
   }
 
-  const schemaEntries: string[] = [];
-
-  for (const [handle, { charm, charmName }] of handleMap.entries()) {
+  // Then, process pinned cells
+  const currentPinnedCells = pinnedCells.get() || [];
+  for (const pinnedCell of currentPinnedCells) {
     try {
-      const schema = await getCharmResultSchemaAsync(runtime, charm);
-      if (schema) {
-        const schemaJson = JSON.stringify(schema, null, 2);
-        schemaEntries.push(
-          `## ${charmName} (${handle})\n\`\`\`json\n${schemaJson}\n\`\`\``,
+      // Parse the path using the same parser as read/run tools
+      const link = parseLLMFriendlyLink(pinnedCell.path, space);
+
+      // Get cell from link
+      const cell = runtime.getCellFromLink(link);
+      if (!cell) {
+        logger.warn(
+          "llm",
+          `Could not resolve pinned cell ${pinnedCell.path} to a cell`,
         );
+        continue;
       }
+
+      const resolvedCell = cell.resolveAsCell();
+
+      // Get schema for the cell. Resolve picks up all schemas on links from it.
+      const schemaInfo = getCellSchema(resolvedCell);
+
+      // Build documentation entry with both schema and value
+      let entry = `## ${pinnedCell.name} (${pinnedCell.path})\n`;
+
+      // Add schema if available
+      if (schemaInfo?.schema) {
+        const schemaJson = JSON.stringify(schemaInfo.schema, null, 2);
+        entry += `- Schema: \`\`\`json\n${schemaJson}\n\`\`\`\n`;
+      }
+
+      // Add current value
+      try {
+        const value = resolvedCell.get();
+        const serialized = traverseAndSerialize(
+          value,
+          schemaInfo?.schema,
+          schemaInfo?.rootSchema,
+        );
+
+        let valueJson = JSON.stringify(serialized, null, 2);
+
+        // Truncate if too large
+        const MAX_VALUE_LENGTH = 2000;
+        if (valueJson.length > MAX_VALUE_LENGTH) {
+          valueJson = valueJson.substring(0, MAX_VALUE_LENGTH) +
+            "\n... (truncated)";
+        }
+
+        entry += `- Current Value: \`\`\`json\n${valueJson}\n\`\`\`\n`;
+      } catch (e) {
+        logger.warn(
+          "llm",
+          `Failed to serialize value for ${pinnedCell.name}:`,
+          e,
+        );
+        entry += `- Current Value: (unable to serialize)\n`;
+      }
+
+      entries.push(entry);
     } catch (e) {
       logger.warn(
-        `Failed to get schema for charm ${charmName} (${handle}):`,
+        "llm",
+        `Failed to document pinned cell ${pinnedCell.name} (${pinnedCell.path}):`,
         e,
       );
     }
   }
 
-  if (schemaEntries.length === 0) {
+  if (entries.length === 0) {
     return "";
   }
 
-  return `\n\n# Attached Charm Schemas\n\nThe following charms are attached and have schemas available. However, you can use read() and run() with ANY valid handle (/of:.../path), not just the ones listed below.\n\n## Important: Tool Results and Links\n\nWhen you call run() or other tools (except read()), the result will be a link string in the format "/of:bafyabc123/path/to/result". These links are NOT the actual values - they are references to cells containing the values.\n\nTo get the actual value from any "/of:..." prefixed string, you MUST use the read() tool:\n\n1. Call a tool (e.g., run()): Result is "/of:bafyabc123/result"\n2. Use read() to get the value: read({"path": "/of:bafyabc123/result"})\n3. The read() result contains the actual data\n\nThis works for ANY valid handle - you can read/run handles that aren't in the attachments list below.\n\n${
-    schemaEntries.join("\n\n")
-  }`;
+  return "\n\n# Available Cells\n\n" + entries.join("\n\n");
 }
 
 // Discriminated union separating external tools from built-in tools
@@ -787,12 +903,19 @@ type ResolvedToolCall =
     toolDef: Cell<Schema<typeof LLMToolSchema>>;
   }
   // Built-in tools provided by llm-dialog itself
-  | { type: "listAttachments"; call: LLMToolCall }
-  | { type: "schema"; call: LLMToolCall; charm: Cell<any> }
+  | { type: "pin"; call: LLMToolCall; path: string; name: string }
+  | { type: "unpin"; call: LLMToolCall; path: string }
+  | { type: "schema"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "read"; call: LLMToolCall; cellRef: Cell<any> }
-  | { type: "navigateTo"; call: LLMToolCall; cellRef: Cell<any> }
+  | { type: "finalResult"; call: LLMToolCall; result: unknown }
   | {
-    type: "run";
+    type: "updateArgument";
+    call: LLMToolCall;
+    cellRef: Cell<any>;
+    updates: Record<string, unknown>;
+  }
+  | {
+    type: "invoke";
     call: LLMToolCall;
     // Implementation details for how to invoke the target
     pattern?: Readonly<Recipe>;
@@ -819,42 +942,76 @@ function resolveToolCall(
   }
 
   if (
-    name === READ_TOOL_NAME || name === RUN_TOOL_NAME ||
-    name === SCHEMA_TOOL_NAME || name === LIST_ATTACHMENTS_TOOL_NAME ||
-    name === NAVIGATE_TO_TOOL_NAME
+    name === READ_TOOL_NAME || name === INVOKE_TOOL_NAME ||
+    name === SCHEMA_TOOL_NAME || name === PIN_TOOL_NAME ||
+    name === UNPIN_TOOL_NAME || name === FINAL_RESULT_TOOL_NAME ||
+    name === UPDATE_ARGUMENT_TOOL_NAME
   ) {
-    // Schema and listAttachments require attachments, but read/run work with any handle
-    if (
-      (name === SCHEMA_TOOL_NAME || name === LIST_ATTACHMENTS_TOOL_NAME) &&
-      catalog.handleMap.size === 0 && catalog.charmMap.size === 0
-    ) {
-      throw new Error("No charm attachments available.");
-    }
-
-    // Handle listAttachments
-    if (name === LIST_ATTACHMENTS_TOOL_NAME) {
+    // Handle pin
+    if (name === PIN_TOOL_NAME) {
+      const path = extractStringField(
+        toolCallPart.input,
+        "path",
+        "/of:bafyabc123",
+      );
+      const pinnedCellName = extractStringField(
+        toolCallPart.input,
+        "name",
+        "My Cell",
+      );
       return {
-        type: "listAttachments",
-        call: { id, name, input: {} },
+        type: "pin",
+        call: { id, name, input: { path, name: pinnedCellName } },
+        path,
+        name: pinnedCellName,
       };
     }
 
-    if (name === SCHEMA_TOOL_NAME) {
-      const charmName = extractStringField(
+    // Handle unpin
+    if (name === UNPIN_TOOL_NAME) {
+      const path = extractStringField(
         toolCallPart.input,
         "path",
-        "/of:bafyabc123/path",
+        "/of:bafyabc123",
       );
-      const charm = catalog.charmMap.get(charmName);
-      if (!charm) {
+      return {
+        type: "unpin",
+        call: { id, name, input: { path } },
+        path,
+      };
+    }
+
+    // Handle finalResult (builtin tool for generateObject)
+    if (name === FINAL_RESULT_TOOL_NAME) {
+      return {
+        type: "finalResult",
+        call: { id, name, input: toolCallPart.input },
+        result: toolCallPart.input,
+      };
+    }
+
+    // Handle updateArgument
+    if (name === UPDATE_ARGUMENT_TOOL_NAME) {
+      const target = extractStringField(
+        toolCallPart.input,
+        "path",
+        "/of:bafyabc123",
+      );
+      const link = parseLLMFriendlyLink(target, space);
+      const cellRef = runtime.getCellFromLink(link);
+
+      const updates = toolCallPart.input?.updates;
+      if (!updates || typeof updates !== "object") {
         throw new Error(
-          `Unknown charm "${charmName}". Use listAttachments() for options.`,
+          "updates must be an object with field names and values",
         );
       }
+
       return {
-        type: "schema",
-        charm,
-        call: { id, name, input: { charm: charmName } },
+        type: "updateArgument",
+        cellRef,
+        call: { id, name, input: { path: target, updates } },
+        updates: updates as Record<string, unknown>,
       };
     }
 
@@ -865,17 +1022,25 @@ function resolveToolCall(
     );
 
     const link = parseLLMFriendlyLink(target, space);
+    const cellRef = runtime.getCellFromLink(link);
+
+    if (name === SCHEMA_TOOL_NAME) {
+      const charmName = extractStringField(
+        toolCallPart.input,
+        "path",
+        "/of:bafyabc123/path",
+      );
+      return {
+        type: "schema",
+        cellRef,
+        call: { id, name, input: { charm: charmName } },
+      };
+    }
 
     if (name === READ_TOOL_NAME) {
       // Get cell reference from the link - works for any valid handle
-      const cellRef = runtime.getCellFromLink(link);
-      if (!cellRef) {
-        throw new Error(
-          `Could not resolve handle "${id}" to a cell. The handle may not exist in this space.`,
-        );
-      }
-      if (isStream(cellRef)) {
-        throw new Error(`Path resolves to a handler; use run("${target}").`);
+      if (isStream(cellRef.resolveAsCell())) {
+        throw new Error(`Path resolves to a handler; use invoke() instead.`);
       }
 
       return {
@@ -885,34 +1050,10 @@ function resolveToolCall(
       };
     }
 
-    if (name === NAVIGATE_TO_TOOL_NAME) {
-      // Get cell reference from the link - works for any valid handle
-      const cellRef = runtime.getCellFromLink(link);
-      if (!cellRef) {
-        throw new Error(
-          `Could not resolve handle "${id}" to a cell. The handle may not exist in this space.`,
-        );
-      }
-
+    if (isStream(cellRef.resolveAsCell())) {
       return {
-        type: "navigateTo",
-        cellRef,
-        call: { id, name, input: { path: target } },
-      };
-    }
-
-    // For run(), resolve the cell and check if it's a handler or pattern
-    const cellRef: Cell<any> = runtime.getCellFromLink(link);
-
-    // Get optional charm metadata for validation (only used for handlers)
-    const charmEntry = catalog.handleMap.get(link.id);
-    const charm = charmEntry?.charm;
-
-    if (isStream(cellRef)) {
-      return {
-        type: "run",
-        handler: cellRef as any,
-        charm,
+        type: "invoke",
+        handler: cellRef as unknown as Stream<any>,
         call: {
           id,
           name,
@@ -921,14 +1062,13 @@ function resolveToolCall(
       };
     }
 
-    const pattern = (cellRef as Cell<any>).key("pattern")
+    const pattern = cellRef.key("pattern")
       .getRaw() as unknown as Readonly<Recipe> | undefined;
     if (pattern) {
       return {
-        type: "run",
+        type: "invoke",
         pattern,
-        extraParams: (cellRef as Cell<any>).key("extraParams").get() ?? {},
-        charm,
+        extraParams: cellRef.key("extraParams").get() ?? {},
         call: {
           id,
           name,
@@ -1015,6 +1155,7 @@ async function executeToolCalls(
   space: MemorySpace,
   toolCatalog: ToolCatalog,
   toolCallParts: BuiltInLLMToolCallPart[],
+  pinnedCells?: Cell<PinnedCell[]>,
 ): Promise<ToolCallExecutionResult[]> {
   const results: ToolCallExecutionResult[] = [];
   for (const part of toolCallParts) {
@@ -1025,6 +1166,7 @@ async function executeToolCalls(
         space,
         resolved,
         toolCatalog,
+        pinnedCells,
       );
       results.push({
         id: part.toolCallId,
@@ -1081,6 +1223,7 @@ export const llmDialogTestHelpers = {
   buildAssistantMessage,
   createToolResultMessages,
   hasValidContent,
+  FINAL_RESULT_TOOL_NAME,
 };
 
 /**
@@ -1088,12 +1231,14 @@ export const llmDialogTestHelpers = {
  * These functions handle tool catalog building, tool call resolution, and execution.
  */
 export const llmToolExecutionHelpers = {
+  FINAL_RESULT_TOOL_NAME,
   buildToolCatalog,
   executeToolCalls,
   extractToolCallParts,
   buildAssistantMessage,
   createToolResultMessages,
   hasValidContent,
+  buildAvailableCellsDocumentation,
 };
 
 /**
@@ -1115,78 +1260,91 @@ async function safelyPerformUpdate(
   requestId: string,
   action: (tx: IExtendedStorageTransaction) => void,
 ) {
-  let success = false;
-  const error = await runtime.editWithRetry((tx) => {
+  const { ok } = await runtime.editWithRetry((tx) => {
     if (
       pending.withTx(tx).get() &&
       internal.withTx(tx).key("requestId").get() === requestId
     ) {
       action(tx);
       internal.withTx(tx).key("lastActivity").set(Date.now());
-      success = true;
+      return true;
     } else {
       // We might have flagged success as true in a previous call, but if the
       // retry flow lands us here, it means it wasn't written and that now
       // the requestId has changed.
-      success = false;
+      return false;
     }
   });
 
-  return !error && success;
+  return !!ok;
 }
 
 /**
- * Ensures that a source charm is running using the charm context,
- * then calls runSynced to ensure it's actively running.
- *
- * @param runtime - The runtime instance
- * @param meta - The charm context containing handler and owning charm
- * @returns Promise that resolves when the charm is running
+ * Handles the pin tool call.
  */
-async function ensureSourceCharmRunning(
+function handlePin(
   runtime: IRuntime,
-  meta: { handler?: any; charm: Cell<any> },
-): Promise<void> {
-  const charm = meta.charm;
-  const result = charm.asSchema({});
-  const process = charm.getSourceCell();
-  const recipeId = process?.get()?.[TYPE];
-  if (recipeId) {
-    const recipe = await runtime.recipeManager.loadRecipe(
-      recipeId,
-      charm.space,
-    );
-    await runtime.runSynced(result, recipe);
-    // Ensure scheduler has registered handlers before we enqueue events
-    await runtime.idle();
+  resolved: ResolvedToolCall & { type: "pin" },
+  pinnedCells: Cell<PinnedCell[]>,
+): { type: string; value: any } {
+  const current = pinnedCells.get() || [];
+
+  // Check if already pinned
+  if (current.some((p) => p.path === resolved.path)) {
+    return {
+      type: "json",
+      value: { success: false, message: "Already pinned" },
+    };
   }
+
+  // Add new pinned cell using a transaction
+  runtime.editWithRetry((tx) => {
+    const currentInTx = pinnedCells.withTx(tx).get() || [];
+    pinnedCells.withTx(tx).set([
+      ...currentInTx,
+      { path: resolved.path, name: resolved.name },
+    ]);
+  });
+
+  return { type: "json", value: { success: true } };
 }
 
 /**
- * Handles the listAttachments tool call.
+ * Handles the unpin tool call.
  */
-function handleListAttachments(
-  catalog?: ToolCatalog,
+function handleUnpin(
+  runtime: IRuntime,
+  resolved: ResolvedToolCall & { type: "unpin" },
+  pinnedCells: Cell<PinnedCell[]>,
 ): { type: string; value: any } {
-  if (!catalog?.handleMap) {
-    return { type: "json", value: [] };
+  const current = pinnedCells.get() || [];
+  const filtered = current.filter((p) => p.path !== resolved.path);
+
+  if (filtered.length === current.length) {
+    return {
+      type: "json",
+      value: { success: false, message: "Not found" },
+    };
   }
-  const attachments = Array.from(catalog.handleMap.entries()).map(
-    ([handle, { charmName }]) => ({ handle, name: charmName }),
-  );
-  return { type: "json", value: attachments };
+
+  // Remove pinned cell using a transaction
+  runtime.editWithRetry((tx) => {
+    const currentInTx = pinnedCells.withTx(tx).get() || [];
+    const filteredInTx = currentInTx.filter((p) => p.path !== resolved.path);
+    pinnedCells.withTx(tx).set(filteredInTx);
+  });
+
+  return { type: "json", value: { success: true } };
 }
 
 /**
  * Handles the schema tool call.
  */
-async function handleSchema(
-  runtime: IRuntime,
+function handleSchema(
   resolved: ResolvedToolCall & { type: "schema" },
-): Promise<{ type: string; value: any }> {
-  const schema = await getCharmResultSchemaAsync(runtime, resolved.charm) ??
-    {};
-  const value = JSON.parse(JSON.stringify(schema ?? {}));
+): { type: string; value: any } {
+  const schema = getCellSchema(resolved.cellRef) ?? {};
+  const value = JSON.parse(JSON.stringify(schema));
   return { type: "json", value };
 }
 
@@ -1195,53 +1353,72 @@ async function handleSchema(
  */
 function handleRead(
   resolved: ResolvedToolCall & { type: "read" },
-): { type: string; value: any } {
-  const serialized = traverseAndSerialize(resolved.cellRef.get());
+): { type: string; value: unknown } {
+  let cell = resolved.cellRef;
+  if (!cell.schema) {
+    cell = cell.asSchema(getCellSchema(cell)?.schema);
+  }
 
-  // Handle undefined values gracefully - return null for undefined/null
-  const value = serialized === undefined || serialized === null
-    ? null
-    : JSON.parse(JSON.stringify(serialized));
+  const schema = cell.schema;
+  const serialized = traverseAndSerialize(cell.get(), schema);
 
-  return { type: "json", value };
+  // Handle undefined by returning null (valid JSON) instead
+  return {
+    type: "json",
+    value: serialized ?? null,
+    ...(schema !== undefined && { schema }),
+  };
 }
 
 /**
- * Handles the navigateTo tool call.
+ * Handles the update Argument tool call.
  */
-function handleNavigateTo(
+function handleUpdateArgument(
   runtime: IRuntime,
-  _space: MemorySpace,
-  resolved: ResolvedToolCall & { type: "navigateTo" },
+  resolved: ResolvedToolCall & { type: "updateArgument" },
 ): { type: string; value: any } {
-  // The cellRef already points to the full path from the link resolution
-  const cellLink = resolved.cellRef.getAsNormalizedFullLink();
+  const cell = resolved.cellRef;
+  const updates = resolved.updates;
 
-  // Resolve any intermediate links and get the final cell
-  const resolvedLink = resolveLink(runtime.readTx(), cellLink);
-  const resolvedCell = runtime.getCellFromLink(resolvedLink);
-
-  // Call the navigateTo builtin with the resolved cell
-  runtime.editWithRetry((tx) => {
-    const action = navigateTo(
-      resolvedCell,
-      () => {},
-      () => {},
-      [],
-      resolvedCell,
-      runtime,
+  // Get the source cell (process cell) that stores the pattern metadata
+  const sourceCell = cell.getSourceCell();
+  if (!sourceCell) {
+    throw new Error(
+      "Target is not a pattern instance - no source cell found. " +
+        "updateArgument only works with running patterns (e.g., from invoke() or attached patterns).",
     );
-    action(tx);
+  }
+
+  // Access the argument cell
+  const argumentCell = sourceCell.key("argument");
+  const cellifiedValue = traverseAndCellify(
+    runtime,
+    argumentCell.space,
+    updates,
+  );
+
+  // Apply updates to argument fields
+  runtime.editWithRetry((tx) => {
+    if (isObject(cellifiedValue) && !isCell(cellifiedValue)) {
+      argumentCell.withTx(tx).update(cellifiedValue);
+    } else {
+      argumentCell.withTx(tx).set(cellifiedValue);
+    }
   });
 
-  // Return null since navigation is a side effect, not a value
-  return { type: "json", value: null };
+  return {
+    type: "json",
+    value: {
+      success: true,
+      message: "Arguments updated. Pattern will re-execute automatically.",
+    },
+  };
 }
 
 /**
- * Handles the run tool call (both pattern and handler execution).
+ * Handles the invoke tool call (both pattern and handler execution).
  */
-async function handleRun(
+async function handleInvoke(
   runtime: IRuntime,
   space: MemorySpace,
   resolved: ResolvedToolCall,
@@ -1252,7 +1429,6 @@ async function handleRun(
   let pattern: Readonly<Recipe> | undefined;
   let extraParams: Record<string, unknown> = {};
   let handler: any;
-  let charm: Cell<any> | undefined;
 
   if (resolved.type === "external") {
     pattern = resolved.toolDef.key("pattern").getRaw() as unknown as
@@ -1260,16 +1436,10 @@ async function handleRun(
       | undefined;
     extraParams = resolved.toolDef.key("extraParams").get() ?? {};
     handler = resolved.toolDef.key("handler");
-  } else if (resolved.type === "run") {
+  } else if (resolved.type === "invoke") {
     pattern = resolved.pattern;
     extraParams = resolved.extraParams ?? {};
     handler = resolved.handler;
-    charm = resolved.charm;
-  }
-
-  // Ensure the charm this handler originates from is actually running
-  if (handler && !pattern && charm) {
-    await ensureSourceCharmRunning(runtime, { handler, charm });
   }
 
   const input = traverseAndCellify(runtime, space, toolCall.input) as object;
@@ -1279,7 +1449,7 @@ async function handleRun(
   // Create result cell reference that will be set in the transaction
   let result: Cell<any> = null as any;
 
-  runtime.editWithRetry((tx) => {
+  await runtime.editWithRetry((tx) => {
     // Create the result cell within the transaction context
     result = runtime.getCell<any>(
       space,
@@ -1304,19 +1474,48 @@ async function handleRun(
     }
   });
 
+  await runtime.idle();
+
   // Wait for the pattern/handler to complete and write the result
   const cancel = result.sink((r) => {
     r !== undefined && resolve(r);
   });
-  await promise;
-  cancel();
+
+  let timeout;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error("Tool call timed out"));
+    }, TOOL_CALL_TIMEOUT);
+  }).then(() => {
+    throw new Error("Tool call timed out");
+  });
+
+  try {
+    await Promise.race([promise, timeoutPromise]);
+  } finally {
+    clearTimeout(timeout);
+    cancel();
+  }
 
   // Get the actual entity ID from the result cell
   const resultLink = createLLMFriendlyLink(result.getAsNormalizedFullLink());
 
-  // Patterns always write to the result cell, so always return the link
+  const resultSchema = getCellSchema(result);
+
+  // Patterns a lways write to the result cell, so always return the link
   if (pattern) {
-    return { type: "json", value: resultLink };
+    return {
+      type: "json",
+      value: {
+        "@resultLocation": resultLink,
+        result: traverseAndSerialize(
+          result.get(),
+          resultSchema?.schema,
+          resultSchema?.rootSchema,
+        ),
+        schema: resultSchema?.schema,
+      },
+    };
   }
 
   // Handlers may or may not write to the result cell
@@ -1325,7 +1524,18 @@ async function handleRun(
     const resultValue = result.get();
 
     if (resultValue !== undefined && resultValue !== null) {
-      return { type: "json", value: resultLink };
+      return {
+        type: "json",
+        value: {
+          "@resultLocation": resultLink,
+          result: traverseAndSerialize(
+            resultValue,
+            resultSchema?.schema,
+            resultSchema?.rootSchema,
+          ),
+          schema: resultSchema?.schema,
+        },
+      };
     }
     // Handler didn't write anything, return null
     return { type: "json", value: null };
@@ -1349,27 +1559,38 @@ async function invokeToolCall(
   runtime: IRuntime,
   space: MemorySpace,
   resolved: ResolvedToolCall,
-  catalog?: ToolCatalog,
+  _catalog?: ToolCatalog,
+  pinnedCells?: Cell<PinnedCell[]>,
 ) {
-  // Handle simple query tools
-  if (resolved.type === "listAttachments") {
-    return await handleListAttachments(catalog);
+  // Handle pinned cell tools
+  if (resolved.type === "pin") {
+    return handlePin(runtime, resolved, pinnedCells!);
+  }
+
+  if (resolved.type === "unpin") {
+    return handleUnpin(runtime, resolved, pinnedCells!);
   }
 
   if (resolved.type === "schema") {
-    return await handleSchema(runtime, resolved);
+    return handleSchema(resolved);
   }
 
   if (resolved.type === "read") {
     return handleRead(resolved);
   }
 
-  if (resolved.type === "navigateTo") {
-    return handleNavigateTo(runtime, space, resolved);
+  if (resolved.type === "finalResult") {
+    // Return the structured result directly
+    return traverseAndCellify(runtime, space, resolved.result);
   }
 
   // Handle run-type tools (external, run with pattern/handler)
-  return await handleRun(runtime, space, resolved);
+  if (resolved.type === "updateArgument") {
+    return handleUpdateArgument(runtime, resolved);
+  }
+
+  // Handle invoke-type tools (external, invoke with pattern/handler)
+  return await handleInvoke(runtime, space, resolved);
 }
 
 /**
@@ -1408,6 +1629,7 @@ export function llmDialog(
   let cellsInitialized = false;
   let result: Cell<Schema<typeof resultSchema>>;
   let internal: Cell<Schema<typeof internalSchema>>;
+  let pinnedCells: Cell<PinnedCell[]>;
   let requestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
 
@@ -1455,11 +1677,31 @@ export function llmDialog(
       );
       internal.sync(); // Kick off sync, no need to await
 
+      // Create pinnedCells cell to store the internal pinned cells state
+      const pinnedCellsSchema = {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+            name: { type: "string" },
+          },
+          required: ["path", "name"],
+        },
+      } as const;
+      pinnedCells = runtime.getCell(
+        parentCell.space,
+        { llmDialog: { pinnedCells: cause } },
+        pinnedCellsSchema,
+        tx,
+      );
+      pinnedCells.sync(); // Kick off sync, no need to await
+
       const pending = result.key("pending");
 
-      // Write the stream markers into the result cell. This write might fail
-      // (since the original data wasn't loaded yet), but that's ok, since in
-      // that case another instance already wrote these.
+      // Write the stream markers and initialize pinnedCells as empty array.
+      // This write might fail (since the original data wasn't loaded yet), but
+      // that's ok, since in that case another instance already wrote these.
       //
       // We are carrying the existing pending state over, in case the result
       // cell was already loaded. We don't want to overwrite it.
@@ -1467,6 +1709,7 @@ export function llmDialog(
         ...result.getRaw(),
         addMessage: { $stream: true },
         cancelGeneration: { $stream: true },
+        pinnedCells: [],
       });
 
       // Declare `addMessage` handler and register
@@ -1520,6 +1763,7 @@ export function llmDialog(
             inputs,
             pending,
             internal,
+            pinnedCells,
             requestId,
             abortController.signal,
           );
@@ -1563,6 +1807,25 @@ export function llmDialog(
       result.withTx(tx).key("flattenedTools").set(flattened as any);
     }
 
+    // Update merged pinnedCells whenever context or internal pinnedCells change
+    const contextCells = inputs.key("context").withTx(tx).get() ?? {};
+    const toolPinnedCells = pinnedCells.withTx(tx).get() ?? [];
+
+    // Convert context cells to PinnedCell format
+    const contextAsPinnedCells: PinnedCell[] = Object.entries(contextCells).map(
+      ([name, cell]) => {
+        const link = cell.resolveAsCell().getAsNormalizedFullLink();
+        const path = createLLMFriendlyLink(link);
+        return { name, path };
+      },
+    );
+
+    // Merge context cells and tool-pinned cells
+    const mergedPinnedCells = [...contextAsPinnedCells, ...toolPinnedCells];
+
+    // Write to result cell
+    result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
+
     if (
       (!result.withTx(tx).key("pending").get() ||
         requestId !== internal.withTx(tx).key("requestId").get()) && requestId
@@ -1575,7 +1838,7 @@ export function llmDialog(
   };
 }
 
-async function startRequest(
+function startRequest(
   tx: IExtendedStorageTransaction,
   runtime: IRuntime,
   space: MemorySpace,
@@ -1583,24 +1846,78 @@ async function startRequest(
   inputs: Cell<Schema<typeof LLMParamsSchema>>,
   pending: Cell<boolean>,
   internal: Cell<Schema<typeof internalSchema>>,
+  pinnedCells: Cell<PinnedCell[]>,
   requestId: string,
   abortSignal: AbortSignal,
 ) {
   const { system, maxTokens, model } = inputs.get();
 
   const messagesCell = inputs.key("messages");
-  const toolsCell = inputs.key("tools");
+  const toolsCell = inputs.key("tools") as Cell<
+    Record<string, Schema<typeof LLMToolSchema>>
+  >;
 
   // No need to flatten here; UI handles flattened tools reactively
 
-  const toolCatalog = buildToolCatalog(runtime, toolsCell);
+  const toolCatalog = buildToolCatalog(toolsCell);
 
-  // Build charm schemas documentation and append to system prompt
-  const charmSchemasDocs = await buildCharmSchemasDocumentation(
+  // Build available cells documentation (both context and pinned cells)
+  const context = inputs.key("context").get();
+  const cellsDocs = buildAvailableCellsDocumentation(
     runtime,
-    toolCatalog.handleMap,
+    space,
+    context,
+    pinnedCells,
   );
-  const augmentedSystem = (system ?? "") + charmSchemasDocs;
+
+  const linkModelDocs = `
+
+# Link and Cell Model
+
+The system organizes all data and computation into **cells**:
+
+- **Data cells**: Contain JSON data that can be read and written
+- **Handler cells (streams)**: Executable functions that can be invoked but not read directly
+- **Pattern cells**: Running program instances that may contain both data fields and handler fields
+
+## Links
+
+Links are universal identifiers that point to cells. They use the format:
+
+\`\`\`json
+{ "@link": "/of:bafyabc123/path/to/cell" }
+\`\`\`
+
+Where:
+- \`of:bafyabc123\` is the handle/ID of the root entity (charm, pattern instance, etc.)
+- \`/path/to/cell\` is the path within that entity to a specific cell
+
+## Tool Composition
+
+Tools work together by passing links between them:
+
+1. \`invoke({ "@link": "/of:abc/handler" }, args)\` → Returns \`{ "@link": "/of:xyz/result" }\`
+2. \`read({ "@link": "/of:xyz/result" })\` → Returns the data, which may contain nested links
+3. \`updateArgument({ "@link": "/of:pattern" }, { field: value })\` → Updates running pattern arguments
+4. Data often contains links to other cells: \`{ items: [{ "@link": "/of:123" }, { "@link": "/of:456" }] }\`
+
+## Pages
+
+Some operations (especially \`invoke()\` with patterns) create "Pages" - running pattern instances that:
+- Have their own identity accessible via a link
+- Contain data fields that can be read with \`read()\`
+- Contain handler fields that can be invoked with \`invoke()\`
+- Arguments can be updated with \`updateArgument()\` to change pattern behavior dynamically
+- May link to other cells in the system
+
+**Use links to navigate between related data and compose operations.**`;
+
+  const listRecentHint =
+    "\n\nIf the user's request is unclear or you need context about what they're referring to, " +
+    "call listRecent() to see recently viewed charms.";
+
+  const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs +
+    listRecentHint;
 
   const llmParams: LLMRequest = {
     system: augmentedSystem,
@@ -1623,7 +1940,10 @@ async function startRequest(
         // LLM returned empty or invalid content (e.g., stream aborted mid-flight,
         // or AI SDK bug with empty text blocks). Insert a proper error message
         // instead of storing invalid content.
-        logger.warn("LLM returned invalid/empty content, adding error message");
+        logger.warn(
+          "llm",
+          "LLM returned invalid/empty content, adding error message",
+        );
         const errorMessage = {
           [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
           role: "assistant",
@@ -1658,11 +1978,31 @@ async function startRequest(
             llmContent,
             toolCallParts,
           );
+
+          // Add ID to assistant message and publish immediately
+          (assistantMessage as BuiltInLLMMessage & { [ID]: unknown })[ID] = {
+            llmDialog: { message: cause, id: crypto.randomUUID() },
+          };
+
+          await safelyPerformUpdate(
+            runtime,
+            pending,
+            internal,
+            requestId,
+            (tx) => {
+              messagesCell.withTx(tx).push(
+                assistantMessage as Schema<typeof LLMMessageSchema>,
+              );
+            },
+          );
+
+          // Now execute the tool calls
           const toolResults = await executeToolCalls(
             runtime,
             space,
             toolCatalog,
             toolCallParts,
+            pinnedCells,
           );
 
           // Validate that we have a result for every tool call with matching IDs
@@ -1673,6 +2013,7 @@ async function startRequest(
 
           if (mismatch) {
             logger.error(
+              "llm-error",
               `Tool execution mismatch: ${toolCallParts.length} calls [${
                 Array.from(toolCallIds)
               }] but ${toolResults.length} results [${Array.from(resultIds)}]`,
@@ -1699,12 +2040,10 @@ async function startRequest(
             return;
           }
 
-          const newMessages: BuiltInLLMMessage[] = [
-            assistantMessage,
-            ...createToolResultMessages(toolResults),
-          ];
+          // Create and publish tool result messages
+          const toolResultMessages = createToolResultMessages(toolResults);
 
-          newMessages.forEach((message) => {
+          toolResultMessages.forEach((message) => {
             (message as BuiltInLLMMessage & { [ID]: unknown })[ID] = {
               llmDialog: { message: cause, id: crypto.randomUUID() },
             };
@@ -1717,13 +2056,13 @@ async function startRequest(
             requestId,
             (tx) => {
               messagesCell.withTx(tx).push(
-                ...(newMessages as Schema<typeof LLMMessageSchema>[]),
+                ...(toolResultMessages as Schema<typeof LLMMessageSchema>[]),
               );
             },
           );
 
           if (success) {
-            logger.info("Continuing conversation after tool calls...");
+            logger.info("llm", "Continuing conversation after tool calls...");
 
             const continueTx = runtime.edit();
             startRequest(
@@ -1734,12 +2073,16 @@ async function startRequest(
               inputs,
               pending,
               internal,
+              pinnedCells,
               requestId,
               abortSignal,
             );
             continueTx.commit();
           } else {
-            logger.info("Skipping write: pending=false or request changed");
+            logger.info(
+              "llm",
+              "Skipping write: pending=false or request changed",
+            );
           }
         } catch (error: unknown) {
           console.error(error);

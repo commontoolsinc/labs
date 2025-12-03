@@ -1,7 +1,121 @@
 import * as __ctHelpers from "commontools";
 import { cell, NAME, recipe, UI } from "commontools";
-export default recipe("Optional Chain Predicate", () => {
-    const items = cell<string[]>([]);
+export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $NAME: {
+            type: "string"
+        },
+        $UI: {
+            $ref: "#/$defs/Element"
+        }
+    },
+    required: ["$NAME", "$UI"],
+    $defs: {
+        Element: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        VNode: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        RenderNode: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "number"
+                }, {
+                    type: "boolean",
+                    "enum": [false]
+                }, {
+                    type: "boolean",
+                    "enum": [true]
+                }, {
+                    $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/RenderNode"
+                    }
+                }]
+        },
+        Props: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean",
+                        "enum": [false]
+                    }, {
+                        type: "boolean",
+                        "enum": [true]
+                    }, {
+                        type: "object",
+                        additionalProperties: true
+                    }, {
+                        type: "array",
+                        items: true
+                    }, {
+                        asCell: true
+                    }, {
+                        asStream: true
+                    }, {
+                        type: "null"
+                    }]
+            }
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, () => {
+    const items = cell<string[]>([], {
+        type: "array",
+        items: {
+            type: "string"
+        }
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
         [NAME]: "Optional chain predicate",
         [UI]: (<div>
@@ -9,18 +123,18 @@ export default recipe("Optional Chain Predicate", () => {
             type: "object",
             properties: {
                 items: {
-                    type: "array",
-                    items: {
-                        type: "string"
+                    type: "object",
+                    properties: {
+                        length: true
                     },
-                    asCell: true
+                    required: ["length"]
                 }
             },
             required: ["items"]
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     type: "boolean",
-                    enum: [false]
+                    "enum": [false]
                 }, {
                     $ref: "#/$defs/Element"
                 }],
@@ -30,7 +144,7 @@ export default recipe("Optional Chain Predicate", () => {
                     properties: {
                         type: {
                             type: "string",
-                            enum: ["vnode"]
+                            "enum": ["vnode"]
                         },
                         name: {
                             type: "string"
@@ -52,7 +166,7 @@ export default recipe("Optional Chain Predicate", () => {
                     properties: {
                         type: {
                             type: "string",
-                            enum: ["vnode"]
+                            "enum": ["vnode"]
                         },
                         name: {
                             type: "string"
@@ -76,10 +190,10 @@ export default recipe("Optional Chain Predicate", () => {
                             type: "number"
                         }, {
                             type: "boolean",
-                            enum: [false]
+                            "enum": [false]
                         }, {
                             type: "boolean",
-                            enum: [true]
+                            "enum": [true]
                         }, {
                             $ref: "#/$defs/VNode"
                         }, {
@@ -102,10 +216,10 @@ export default recipe("Optional Chain Predicate", () => {
                                 type: "number"
                             }, {
                                 type: "boolean",
-                                enum: [false]
+                                "enum": [false]
                             }, {
                                 type: "boolean",
-                                enum: [true]
+                                "enum": [true]
                             }, {
                                 type: "object",
                                 additionalProperties: true
@@ -122,7 +236,9 @@ export default recipe("Optional Chain Predicate", () => {
                     }
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => !items?.length && <span>No items</span>)}
+        } as const satisfies __ctHelpers.JSONSchema, { items: {
+                length: items?.length
+            } }, ({ items }) => !items?.length && <span>No items</span>)}
       </div>),
     };
 });
@@ -130,4 +246,3 @@ export default recipe("Optional Chain Predicate", () => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-

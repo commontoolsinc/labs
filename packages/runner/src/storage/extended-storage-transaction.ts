@@ -35,9 +35,9 @@ const logResult = (
   ...args: unknown[]
 ) => {
   if (result.error) {
-    logger.error(`${kind} Error`, result.error, ...args);
+    logger.error("storage-error", `${kind} Error`, result.error, ...args);
   } else {
-    logger.info(`${kind} Success`, result.ok, ...args);
+    logger.info("storage", `${kind} Success`, result.ok, ...args);
   }
 };
 
@@ -192,7 +192,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         try {
           callback(this);
         } catch (error) {
-          logger.error("Error in commit callback:", error);
+          logger.error("storage-error", "Error in commit callback:", error);
         }
       }
     });
@@ -213,4 +213,174 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   addCommitCallback(callback: (tx: IExtendedStorageTransaction) => void): void {
     this.commitCallbacks.add(callback);
   }
+}
+
+/**
+ * Options for configuring a TransactionWrapper.
+ */
+export interface TransactionWrapperOptions {
+  /**
+   * If true, adds ignoreReadForScheduling meta to all reads, making them
+   * non-reactive.
+   */
+  nonReactive?: boolean;
+
+  /**
+   * Transaction to use for creating child cells. If not provided, uses the
+   * wrapped transaction.
+   */
+  childCellTx?: IExtendedStorageTransaction;
+}
+
+/**
+ * A configurable wrapper around an IExtendedStorageTransaction.
+ *
+ * Supports two modes that can be combined:
+ * - nonReactive: Adds ignoreReadForScheduling meta to all reads
+ * - childCellTx: Uses a different transaction for child cells
+ *
+ * Used by:
+ * - Cell.sample(): nonReactive=true, childCellTx=wrapped (child cells reactive)
+ * - Cell.sink(): nonReactive=false, childCellTx=extraTx (child cells on separate tx)
+ */
+export class TransactionWrapper implements IExtendedStorageTransaction {
+  constructor(
+    private wrapped: IExtendedStorageTransaction,
+    private options: TransactionWrapperOptions = {},
+  ) {}
+
+  /**
+   * Get the transaction to use for creating child cells.
+   */
+  getTransactionForChildCells(): IExtendedStorageTransaction {
+    return this.options.childCellTx ?? this.wrapped;
+  }
+
+  get tx(): IStorageTransaction {
+    return this.wrapped.tx;
+  }
+
+  get journal(): ITransactionJournal {
+    return this.wrapped.journal;
+  }
+
+  status(): StorageTransactionStatus {
+    return this.wrapped.status();
+  }
+
+  reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
+    return this.wrapped.reader(space);
+  }
+
+  private transformReadOptions(options?: IReadOptions): IReadOptions {
+    if (!this.options.nonReactive) {
+      return options ?? {};
+    }
+    return {
+      ...options,
+      meta: { ...options?.meta, ...ignoreReadForScheduling },
+    };
+  }
+
+  read(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): Result<IAttestation, ReadError> {
+    return this.wrapped.read(address, this.transformReadOptions(options));
+  }
+
+  readOrThrow(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): JSONValue | undefined {
+    return this.wrapped.readOrThrow(
+      address,
+      this.transformReadOptions(options),
+    );
+  }
+
+  readValueOrThrow(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): JSONValue | undefined {
+    return this.wrapped.readValueOrThrow(
+      address,
+      this.transformReadOptions(options),
+    );
+  }
+
+  writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
+    return this.wrapped.writer(space);
+  }
+
+  write(
+    address: IMemorySpaceAddress,
+    value: JSONValue | undefined,
+  ): Result<IAttestation, WriteError | WriterError> {
+    return this.wrapped.write(address, value);
+  }
+
+  writeOrThrow(
+    address: IMemorySpaceAddress,
+    value: JSONValue | undefined,
+  ): void {
+    return this.wrapped.writeOrThrow(address, value);
+  }
+
+  writeValueOrThrow(
+    address: IMemorySpaceAddress,
+    value: JSONValue | undefined,
+  ): void {
+    return this.wrapped.writeValueOrThrow(address, value);
+  }
+
+  abort(reason?: unknown): Result<Unit, InactiveTransactionError> {
+    return this.wrapped.abort(reason);
+  }
+
+  commit(): Promise<Result<Unit, CommitError>> {
+    return this.wrapped.commit();
+  }
+
+  addCommitCallback(callback: (tx: IExtendedStorageTransaction) => void): void {
+    return this.wrapped.addCommitCallback(callback);
+  }
+}
+
+/**
+ * Create a non-reactive transaction wrapper for Cell.sample().
+ * Reads won't trigger re-execution, but child cells will be reactive.
+ */
+export function createNonReactiveTransaction(
+  tx: IExtendedStorageTransaction,
+): TransactionWrapper {
+  return new TransactionWrapper(tx, { nonReactive: true, childCellTx: tx });
+}
+
+/**
+ * Create a transaction wrapper for Cell.sink() that uses a separate transaction
+ * for child cells.
+ */
+export function createChildCellTransaction(
+  tx: IExtendedStorageTransaction,
+  childCellTx: IExtendedStorageTransaction,
+): TransactionWrapper {
+  return new TransactionWrapper(tx, { childCellTx });
+}
+
+/**
+ * Helper function to get the transaction to use for creating child cells from a
+ * potentially wrapped transaction. If the transaction is not wrapped, returns
+ * it as-is.
+ *
+ * Used when creating child cells that should use a different transaction than
+ * the parent read (e.g., in Cell.sample() or Cell.sink()).
+ */
+export function getTransactionForChildCells(
+  tx: IExtendedStorageTransaction | undefined,
+): IExtendedStorageTransaction | undefined {
+  if (tx instanceof TransactionWrapper) {
+    return tx.getTransactionForChildCells();
+  }
+  return tx;
 }

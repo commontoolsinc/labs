@@ -1,8 +1,12 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive } from "commontools";
 export default function TestDerive() {
-    const value = cell(10);
-    const prefix = cell("Value: ");
+    const value = cell(10, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const prefix = cell("Value: ", {
+        type: "string"
+    } as const satisfies __ctHelpers.JSONSchema);
     const result = __ctHelpers.derive({
         type: "object",
         properties: {

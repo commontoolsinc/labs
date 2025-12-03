@@ -2859,9 +2859,12 @@ type CtListItem = {
 };
 
 interface CTOutlinerElement extends CTHTMLElement {}
+interface CTCellLinkElement extends CTHTMLElement {}
 interface CTListElement extends CTHTMLElement {}
 interface CTListItemElement extends CTHTMLElement {}
+interface CTLoaderElement extends CTHTMLElement {}
 interface CTInputElement extends CTHTMLElement {}
+interface CTFileInputElement extends CTHTMLElement {}
 interface CTImageInputElement extends CTHTMLElement {}
 interface CTInputLegacyElement extends CTHTMLElement {}
 interface CTCheckboxElement extends CTHTMLElement {}
@@ -2875,6 +2878,7 @@ interface CTCodeEditorLegacyElement extends CTHTMLElement {}
 interface CTScreenElement extends CTHTMLElement {}
 interface CTAutoLayoutElement extends CTHTMLElement {}
 interface CTButtonElement extends CTHTMLElement {}
+interface CTCopyButtonElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
 interface CTHStackElement extends CTHTMLElement {}
 interface CTFabElement extends CTHTMLElement {}
@@ -2886,7 +2890,9 @@ interface CTToolbarElement extends CTHTMLElement {}
 interface CTKbdElement extends CTHTMLElement {}
 interface CTKeybindElement extends CTHTMLElement {}
 interface CTRenderElement extends CTHTMLElement {}
+interface CTCellContextElement extends CTHTMLElement {}
 interface CTChatMessageElement extends CTHTMLElement {}
+interface CTMarkdownElement extends CTHTMLElement {}
 interface CTVScrollElement extends CTHTMLElement {}
 interface CTSendMessageElement extends CTHTMLElement {}
 interface CTTextElement extends CTHTMLElement {}
@@ -2902,6 +2908,10 @@ interface CTGoogleOAuthElement extends CTHTMLElement {}
 interface CTCanvasElement extends CTHTMLElement {}
 interface CTDraggableElement extends CTHTMLElement {}
 interface CTPlaidLinkElement extends CTHTMLElement {}
+interface CTCharmElement extends CTHTMLElement {}
+interface CTIFrameElement extends CTHTMLElement {}
+interface CTVoiceInputElement extends CTHTMLElement {}
+interface CTAudioVisualizerElement extends CTHTMLElement {}
 
 interface CTDraggableAttributes<T> extends CTHTMLAttributes<T> {
   "key"?: number;
@@ -2932,6 +2942,43 @@ interface CTUpdaterAttributes<T> extends CTHTMLAttributes<T> {
   "$state"?: CellLike<any>;
 }
 
+interface CTCharmAttributes<T> extends CTHTMLAttributes<T> {
+  "charm-id"?: string;
+  "space-name"?: string;
+}
+
+interface CTVoiceInputAttributes<T> extends CTHTMLAttributes<T> {
+  "$transcription"?: CellLike<any>;
+  "recordingMode"?: "hold" | "toggle";
+  "autoTranscribe"?: boolean;
+  "maxDuration"?: number;
+  "showWaveform"?: boolean;
+  "disabled"?: boolean;
+  "barCount"?: number;
+  "barWidth"?: number;
+  "barGap"?: number;
+  "minHeight"?: number;
+  "maxHeight"?: number;
+  "visualizerColor"?: string;
+  "smoothing"?: number;
+  "onct-transcription-complete"?: EventHandler<any>;
+  "onct-transcription-error"?: EventHandler<any>;
+  "onct-recording-start"?: EventHandler<any>;
+  "onct-recording-stop"?: EventHandler<any>;
+  "onct-error"?: EventHandler<any>;
+  "onct-change"?: EventHandler<any>;
+}
+
+interface CTAudioVisualizerAttributes<T> extends CTHTMLAttributes<T> {
+  "barCount"?: number;
+  "barWidth"?: number;
+  "barGap"?: number;
+  "minHeight"?: number;
+  "maxHeight"?: number;
+  "color"?: string;
+  "smoothing"?: number;
+}
+
 interface CTChatAttributes<T> extends CTHTMLAttributes<T> {
   "$messages"?: CellLike<any>;
   "pending"?: boolean;
@@ -2955,7 +3002,7 @@ interface CTPromptInputAttributes<T> extends CTHTMLAttributes<T> {
 
 interface CTAttachmentsBarAttributes<T> extends CTHTMLAttributes<T> {
   "removable"?: boolean;
-  "attachments"?: any;
+  "pinnedCells"?: any;
 }
 
 interface CTTagsAttributes<T> extends CTHTMLAttributes<T> {
@@ -3033,7 +3080,7 @@ interface CTSendMessageAttributes<T> extends CTHTMLAttributes<T> {
   "value"?: any;
   "placeholder"?: string;
   "appearance"?: "rounded";
-  "onmessagesend"?: EventHandler<{ message: string }>;
+  "onct-send"?: EventHandler<{ message: string }>;
   "inline"?: Booleanish;
 }
 
@@ -3050,6 +3097,11 @@ interface CTOutlinerAttributes<T> extends CTHTMLAttributes<T> {
   "oncharm-link-click"?: EventHandler<{ charm: Cell<Charm> }>;
 }
 
+interface CTCellLinkAttributes<T> extends CTHTMLAttributes<T> {
+  "link"?: string;
+  "$cell": CellLike<any>;
+}
+
 interface CTChatMessageAttributes<T> extends CTHTMLAttributes<T> {
   "role"?: "user" | "assistant";
   "content"?: string;
@@ -3057,6 +3109,13 @@ interface CTChatMessageAttributes<T> extends CTHTMLAttributes<T> {
   "name"?: string;
   "compact"?: boolean;
   "pending"?: boolean;
+}
+
+interface CTMarkdownAttributes<T> extends CTHTMLAttributes<T> {
+  "content"?: string;
+  "$content"?: CellLike<string>;
+  "variant"?: "default" | "inverse";
+  "streaming"?: boolean;
 }
 
 interface CTButtonAttributes<T> extends CTHTMLAttributes<T> {
@@ -3075,6 +3134,22 @@ interface CTButtonAttributes<T> extends CTHTMLAttributes<T> {
   "type"?: "button" | "submit" | "reset";
 }
 
+interface CTCopyButtonAttributes<T> extends CTHTMLAttributes<T> {
+  "text": string;
+  "variant"?:
+    | "primary"
+    | "secondary"
+    | "destructive"
+    | "outline"
+    | "ghost"
+    | "link"
+    | "pill";
+  "size"?: "default" | "sm" | "lg" | "icon" | "md";
+  "disabled"?: boolean;
+  "feedback-duration"?: number;
+  "icon-only"?: boolean;
+}
+
 interface CTIframeAttributes<T> extends CTHTMLAttributes<T> {
   "src": string;
   "$context": CellLike<any>;
@@ -3082,6 +3157,12 @@ interface CTIframeAttributes<T> extends CTHTMLAttributes<T> {
 
 interface CTRenderAttributes<T> extends CTHTMLAttributes<T> {
   "$cell": CellLike<any>;
+}
+
+interface CTCellContextAttributes<T> extends CTHTMLAttributes<T> {
+  "$cell": CellLike<any>;
+  "label"?: string;
+  "inline"?: boolean;
 }
 
 interface CTListAttributes<T> extends CTHTMLAttributes<T> {
@@ -3100,6 +3181,14 @@ interface CTListItemAttributes<T> extends CTHTMLAttributes<T> {
   "disabled"?: boolean;
   /** Fired when the row is activated (click/Enter/Space) */
   "onct-activate"?: any;
+}
+
+interface CTLoaderAttributes<T> extends CTHTMLAttributes<T> {
+  "size"?: "sm" | "md" | "lg";
+  "show-elapsed"?: boolean;
+  "show-stop"?: boolean;
+  /** Fired when stop button is clicked */
+  "onct-stop"?: EventHandler<{}>;
 }
 
 interface CTFabAttributes<T> extends CTHTMLAttributes<T> {
@@ -3157,6 +3246,32 @@ interface CTInputLegacyAttributes<T> extends CTHTMLAttributes<T> {
   "placeholder"?: string;
   "appearance"?: string;
   "customStyle"?: string;
+}
+
+interface CTFileInputAttributes<T> extends CTHTMLAttributes<T> {
+  "multiple"?: boolean;
+  "maxFiles"?: number;
+  "accept"?: string;
+  "buttonText"?: string;
+  "variant"?:
+    | "default"
+    | "primary"
+    | "secondary"
+    | "outline"
+    | "ghost"
+    | "link"
+    | "destructive";
+  "size"?: "default" | "sm" | "lg" | "icon";
+  "showPreview"?: boolean;
+  "previewSize"?: "sm" | "md" | "lg";
+  "removable"?: boolean;
+  "disabled"?: boolean;
+  "maxSizeBytes"?: number;
+  "files"?: any[]; // FileData[]
+  "$files"?: any; // CellLike<FileData[]>
+  "onct-change"?: EventHandler<any>;
+  "onct-remove"?: EventHandler<any>;
+  "onct-error"?: EventHandler<any>;
 }
 
 interface CTImageInputAttributes<T> extends CTHTMLAttributes<T> {
@@ -3699,6 +3814,10 @@ declare global {
 
     interface IntrinsicElements extends DOMIntrinsicElements {
       //[elemName: string]: any;
+      "ct-cell-link": CTDOM.DetailedHTMLProps<
+        CTCellLinkAttributes<CTCellLinkElement>,
+        CTCellLinkElement
+      >;
       "ct-outliner": CTDOM.DetailedHTMLProps<
         CTOutlinerAttributes<CTOutlinerElement>,
         CTOutlinerElement
@@ -3711,9 +3830,17 @@ declare global {
         CTListItemAttributes<CTListItemElement>,
         CTListItemElement
       >;
+      "ct-loader": CTDOM.DetailedHTMLProps<
+        CTLoaderAttributes<CTLoaderElement>,
+        CTLoaderElement
+      >;
       "ct-input": CTDOM.DetailedHTMLProps<
         CTInputAttributes<CTInputElement>,
         CTInputElement
+      >;
+      "ct-file-input": CTDOM.DetailedHTMLProps<
+        CTFileInputAttributes<CTFileInputElement>,
+        CTFileInputElement
       >;
       "ct-image-input": CTDOM.DetailedHTMLProps<
         CTImageInputAttributes<CTImageInputElement>,
@@ -3759,9 +3886,9 @@ declare global {
         CTButtonAttributes<CTButtonElement>,
         CTButtonElement
       >;
-      "common-iframe": CTDOM.DetailedHTMLProps<
-        CTIframeAttributes<CTIFrameElement>,
-        CTIFrameElement
+      "ct-copy-button": CTDOM.DetailedHTMLProps<
+        CTCopyButtonAttributes<CTCopyButtonElement>,
+        CTCopyButtonElement
       >;
       "ct-fab": CTDOM.DetailedHTMLProps<
         CTFabAttributes<CTFabElement>,
@@ -3778,6 +3905,10 @@ declare global {
       "ct-chat-message": CTDOM.DetailedHTMLProps<
         CTChatMessageAttributes<CTChatMessageElement>,
         CTChatMessageElement
+      >;
+      "ct-markdown": CTDOM.DetailedHTMLProps<
+        CTMarkdownAttributes<CTMarkdownElement>,
+        CTMarkdownElement
       >;
       "ct-card": CTDOM.DetailedHTMLProps<
         CTHTMLAttributes<CTCardElement>,
@@ -3798,6 +3929,10 @@ declare global {
       "ct-render": CTDOM.DetailedHTMLProps<
         CTRenderAttributes<CTRenderElement>,
         CTRenderElement
+      >;
+      "ct-cell-context": CTDOM.DetailedHTMLProps<
+        CTCellContextAttributes<CTCellContextElement>,
+        CTCellContextElement
       >;
       "ct-vscroll": CTDOM.DetailedHTMLProps<
         CTScrollAttributes<CTVScrollElement>,
@@ -3835,26 +3970,6 @@ declare global {
         CTHTMLAttributes<CTCTCollapsibleElement>,
         CTCTCollapsibleElement
       >;
-      "common-fragment": CTDOM.DetailedHTMLProps<
-        CTHTMLAttributes<CTFragmentElement>,
-        CTFragmentElement
-      >;
-      "common-updater": CTDOM.DetailedHTMLProps<
-        CTUpdaterAttributes<CTUpdaterElement>,
-        CTUpdaterElement
-      >;
-      "common-input": CTDOM.DetailedHTMLProps<
-        CTInputLegacyAttributes<CTInputLegacyElement>,
-        CTInputLegacyElement
-      >;
-      "common-send-message": CTDOM.DetailedHTMLProps<
-        CTSendMessageAttributes<CTSendMessageElement>,
-        CTSendMessageElement
-      >;
-      "common-google-oauth": CTDOM.DetailedHTMLProps<
-        CTGoogleOAuthAttributes<CTGoogleOAuthElement>,
-        CTGoogleOAuthElement
-      >;
       "ct-canvas": CTDOM.DetailedHTMLProps<
         CTCanvasAttributes<CTCanvasElement>,
         CTCanvasElement
@@ -3871,29 +3986,44 @@ declare global {
         CTHTMLAttributes<CTHTMLElement>,
         CTHTMLElement
       >;
-      "common-code-editor": CTDOM.DetailedHTMLProps<
-        CTCodeEditorLegacyAttributes<CTCodeEditorLegacyElement>,
-        CTCodeEditorLegacyElement
+      "ct-charm": CTDOM.DetailedHTMLProps<
+        CTCharmAttributes<CTCharmElement>,
+        CTCharmElement
       >;
-      "common-plaid-link": CTDOM.DetailedHTMLProps<
+      "ct-voice-input": CTDOM.DetailedHTMLProps<
+        CTVoiceInputAttributes<CTVoiceInputElement>,
+        CTVoiceInputElement
+      >;
+      "ct-audio-visualizer": CTDOM.DetailedHTMLProps<
+        CTAudioVisualizerAttributes<CTAudioVisualizerElement>,
+        CTAudioVisualizerElement
+      >;
+      "ct-fragment": CTDOM.DetailedHTMLProps<
+        CTHTMLAttributes<CTFragmentElement>,
+        CTFragmentElement
+      >;
+      "ct-iframe": CTDOM.DetailedHTMLProps<
+        CTIframeAttributes<CTIFrameElement>,
+        CTIFrameElement
+      >;
+      "ct-updater": CTDOM.DetailedHTMLProps<
+        CTUpdaterAttributes<CTUpdaterElement>,
+        CTUpdaterElement
+      >;
+      "ct-google-oauth": CTDOM.DetailedHTMLProps<
+        CTGoogleOAuthAttributes<CTGoogleOAuthElement>,
+        CTGoogleOAuthElement
+      >;
+      "ct-plaid-link": CTDOM.DetailedHTMLProps<
         CTPlaidLinkAttributes<CTPlaidLinkElement>,
         CTPlaidLinkElement
       >;
-      // Define both `ct-` and `common-` variants
       "ct-hstack": CTDOM.DetailedHTMLProps<
         CTStackAttributes<CTHStackElement>,
         CTHStackElement
       >;
       "ct-vstack": CTDOM.DetailedHTMLProps<
         CTStackAttributes<CTVStackElement>,
-        CTVStackElement
-      >;
-      "common-hstack": CTDOM.DetailedHTMLProps<
-        CTStackLegacyAttributes<CTHStackElement>,
-        CTHStackElement
-      >;
-      "common-vstack": CTDOM.DetailedHTMLProps<
-        CTStackLegacyAttributes<CTVStackElement>,
         CTVStackElement
       >;
     }
