@@ -157,15 +157,6 @@ export function maybeReuseIdentifier(
   return ts.factory.createIdentifier(fresh);
 }
 
-export function createSafeIdentifier(
-  name: string,
-  used: Set<string>,
-  options?: UniqueIdentifierOptions,
-): ts.Identifier {
-  const text = getUniqueIdentifier(name, used, options);
-  return ts.factory.createIdentifier(text);
-}
-
 export function createPropertyName(
   name: string,
   factory: ts.NodeFactory,
