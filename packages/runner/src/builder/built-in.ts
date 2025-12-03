@@ -105,6 +105,7 @@ export function ifElse<T = unknown, U = unknown, V = unknown>(
   conditionSchemaOrCondition: JSONSchema | Opaque<T>,
   ifTrueSchemaOrIfTrue: JSONSchema | Opaque<U>,
   ifFalseSchemaOrIfFalse: JSONSchema | Opaque<V>,
+  resultSchemaOrCondition?: JSONSchema | Opaque<T>,
   condition?: Opaque<T>,
   ifTrue?: Opaque<U>,
   ifFalse?: Opaque<V>,
@@ -114,13 +115,14 @@ export function ifElse<T = unknown, U = unknown, V = unknown>(
     implementation: "ifElse",
   });
 
-  // Check if schemas were provided (6 args) or not (3 args)
+  // Check if schemas were provided (7 args) or not (3 args)
   if (condition !== undefined && ifTrue !== undefined && ifFalse !== undefined) {
-    // New signature with schemas: ifElse(condSchema, trueSchema, falseSchema, cond, ifTrue, ifFalse)
+    // New signature with schemas: ifElse(condSchema, trueSchema, falseSchema, resultSchema, cond, ifTrue, ifFalse)
     return ifElseFactory({
       conditionSchema: conditionSchemaOrCondition as JSONSchema,
       ifTrueSchema: ifTrueSchemaOrIfTrue as JSONSchema,
       ifFalseSchema: ifFalseSchemaOrIfFalse as JSONSchema,
+      resultSchema: resultSchemaOrCondition as JSONSchema,
       condition,
       ifTrue,
       ifFalse,
@@ -140,6 +142,7 @@ let ifElseFactory:
       conditionSchema?: JSONSchema;
       ifTrueSchema?: JSONSchema;
       ifFalseSchema?: JSONSchema;
+      resultSchema?: JSONSchema;
       condition: unknown;
       ifTrue: unknown;
       ifFalse: unknown;
@@ -150,6 +153,7 @@ let ifElseFactory:
 export function when<T = unknown, U = unknown>(
   conditionSchemaOrCondition: JSONSchema | Opaque<T>,
   valueSchemaOrValue: JSONSchema | Opaque<U>,
+  resultSchemaOrCondition?: JSONSchema | Opaque<T>,
   condition?: Opaque<T>,
   value?: Opaque<U>,
 ): OpaqueRef<T | U> {
@@ -158,12 +162,13 @@ export function when<T = unknown, U = unknown>(
     implementation: "when",
   });
 
-  // Check if schemas were provided (4 args) or not (2 args)
+  // Check if schemas were provided (5 args) or not (2 args)
   if (condition !== undefined && value !== undefined) {
-    // New signature with schemas: when(condSchema, valueSchema, cond, value)
+    // New signature with schemas: when(condSchema, valueSchema, resultSchema, cond, value)
     return whenFactory({
       conditionSchema: conditionSchemaOrCondition as JSONSchema,
       valueSchema: valueSchemaOrValue as JSONSchema,
+      resultSchema: resultSchemaOrCondition as JSONSchema,
       condition,
       value,
     }) as OpaqueRef<T | U>;
@@ -180,6 +185,7 @@ let whenFactory:
   | NodeFactory<{
       conditionSchema?: JSONSchema;
       valueSchema?: JSONSchema;
+      resultSchema?: JSONSchema;
       condition: unknown;
       value: unknown;
     }, any>
@@ -189,6 +195,7 @@ let whenFactory:
 export function unless<T = unknown, U = unknown>(
   conditionSchemaOrCondition: JSONSchema | Opaque<T>,
   fallbackSchemaOrFallback: JSONSchema | Opaque<U>,
+  resultSchemaOrCondition?: JSONSchema | Opaque<T>,
   condition?: Opaque<T>,
   fallback?: Opaque<U>,
 ): OpaqueRef<T | U> {
@@ -197,12 +204,13 @@ export function unless<T = unknown, U = unknown>(
     implementation: "unless",
   });
 
-  // Check if schemas were provided (4 args) or not (2 args)
+  // Check if schemas were provided (5 args) or not (2 args)
   if (condition !== undefined && fallback !== undefined) {
-    // New signature with schemas: unless(condSchema, fallbackSchema, cond, fallback)
+    // New signature with schemas: unless(condSchema, fallbackSchema, resultSchema, cond, fallback)
     return unlessFactory({
       conditionSchema: conditionSchemaOrCondition as JSONSchema,
       fallbackSchema: fallbackSchemaOrFallback as JSONSchema,
+      resultSchema: resultSchemaOrCondition as JSONSchema,
       condition,
       fallback,
     }) as OpaqueRef<T | U>;
@@ -219,6 +227,7 @@ let unlessFactory:
   | NodeFactory<{
       conditionSchema?: JSONSchema;
       fallbackSchema?: JSONSchema;
+      resultSchema?: JSONSchema;
       condition: unknown;
       fallback: unknown;
     }, any>

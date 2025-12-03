@@ -1144,15 +1144,15 @@ export class SchemaInjectionTransformer extends Transformer {
         }
       }
 
-      // Handler for when(condition, value) - prepends 2 schemas
+      // Handler for when(condition, value) - prepends 3 schemas (condition, value, result)
       // NOTE: Skip injection when condition is a derive call, since when() calls
       // generated from logical && expressions already have schemas in the derive.
       if (callKind?.kind === "when") {
         const factory = transformation.factory;
         const args = node.arguments;
 
-        // Skip if already has schemas (4+ args means schemas present)
-        if (args.length >= 4) {
+        // Skip if already has schemas (5+ args means schemas present)
+        if (args.length >= 5) {
           return ts.visitEachChild(node, visit, transformation);
         }
 
@@ -1177,6 +1177,10 @@ export class SchemaInjectionTransformer extends Transformer {
         const conditionType = checker.getTypeAtLocation(conditionExpr!);
         const valueType = checker.getTypeAtLocation(valueExpr!);
 
+        // Get the result type from TypeScript's inferred return type of the call
+        // This will be the union type (e.g., boolean | string for when(enabled, message))
+        const resultType = checker.getTypeAtLocation(node);
+
         // Create schema TypeNodes (with literal widening for consistency)
         const conditionTypeNode = typeToSchemaTypeNode(
           widenLiteralType(conditionType, checker),
@@ -1186,6 +1190,12 @@ export class SchemaInjectionTransformer extends Transformer {
 
         const valueTypeNode = typeToSchemaTypeNode(
           widenLiteralType(valueType, checker),
+          checker,
+          sourceFile,
+        ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+        const resultTypeNode = typeToSchemaTypeNode(
+          widenLiteralType(resultType, checker),
           checker,
           sourceFile,
         ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
@@ -1203,32 +1213,39 @@ export class SchemaInjectionTransformer extends Transformer {
           typeRegistry,
           { widenLiterals: true },
         );
+        const resultSchema = createSchemaCallWithRegistryTransfer(
+          context,
+          resultTypeNode,
+          typeRegistry,
+          { widenLiterals: true },
+        );
 
         // Register in TypeRegistry for SchemaGeneratorTransformer
         if (typeRegistry) {
           typeRegistry.set(conditionSchema, conditionType);
           typeRegistry.set(valueSchema, valueType);
+          typeRegistry.set(resultSchema, resultType);
         }
 
-        // Create new call with schemas prepended
+        // Create new call with schemas prepended: when(condSchema, valueSchema, resultSchema, cond, value)
         const updated = factory.createCallExpression(
           node.expression,
           undefined,
-          [conditionSchema, valueSchema, ...args],
+          [conditionSchema, valueSchema, resultSchema, ...args],
         );
 
         return ts.visitEachChild(updated, visit, transformation);
       }
 
-      // Handler for unless(condition, fallback) - prepends 2 schemas
+      // Handler for unless(condition, fallback) - prepends 3 schemas (condition, fallback, result)
       // NOTE: Skip injection when condition is a derive call, since unless() calls
       // generated from logical || expressions already have schemas in the derive.
       if (callKind?.kind === "unless") {
         const factory = transformation.factory;
         const args = node.arguments;
 
-        // Skip if already has schemas (4+ args means schemas present)
-        if (args.length >= 4) {
+        // Skip if already has schemas (5+ args means schemas present)
+        if (args.length >= 5) {
           return ts.visitEachChild(node, visit, transformation);
         }
 
@@ -1253,6 +1270,10 @@ export class SchemaInjectionTransformer extends Transformer {
         const conditionType = checker.getTypeAtLocation(conditionExpr!);
         const fallbackType = checker.getTypeAtLocation(fallbackExpr!);
 
+        // Get the result type from TypeScript's inferred return type of the call
+        // This will be the union type (e.g., boolean | string for unless(enabled, fallback))
+        const resultType = checker.getTypeAtLocation(node);
+
         // Create schema TypeNodes (with literal widening for consistency)
         const conditionTypeNode = typeToSchemaTypeNode(
           widenLiteralType(conditionType, checker),
@@ -1262,6 +1283,12 @@ export class SchemaInjectionTransformer extends Transformer {
 
         const fallbackTypeNode = typeToSchemaTypeNode(
           widenLiteralType(fallbackType, checker),
+          checker,
+          sourceFile,
+        ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+        const resultTypeNode = typeToSchemaTypeNode(
+          widenLiteralType(resultType, checker),
           checker,
           sourceFile,
         ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
@@ -1279,27 +1306,124 @@ export class SchemaInjectionTransformer extends Transformer {
           typeRegistry,
           { widenLiterals: true },
         );
+        const resultSchema = createSchemaCallWithRegistryTransfer(
+          context,
+          resultTypeNode,
+          typeRegistry,
+          { widenLiterals: true },
+        );
 
         // Register in TypeRegistry for SchemaGeneratorTransformer
         if (typeRegistry) {
           typeRegistry.set(conditionSchema, conditionType);
           typeRegistry.set(fallbackSchema, fallbackType);
+          typeRegistry.set(resultSchema, resultType);
         }
 
-        // Create new call with schemas prepended
+        // Create new call with schemas prepended: unless(condSchema, fallbackSchema, resultSchema, cond, fallback)
         const updated = factory.createCallExpression(
           node.expression,
           undefined,
-          [conditionSchema, fallbackSchema, ...args],
+          [conditionSchema, fallbackSchema, resultSchema, ...args],
         );
 
         return ts.visitEachChild(updated, visit, transformation);
       }
 
-      // NOTE: ifElse does NOT get schema injection here.
-      // The ternary transformer creates ifElse(derive(...), el1, el2) which already
-      // has schemas embedded in the derive call. Direct ifElse calls don't need
-      // schemas prepended as they work with the existing runtime signatures.
+      // Handler for ifElse(condition, ifTrue, ifFalse) - prepends 4 schemas (condition, ifTrue, ifFalse, result)
+      if (callKind?.kind === "ifElse") {
+        const factory = transformation.factory;
+        const args = node.arguments;
+
+        // Skip if already has schemas (7+ args means schemas present)
+        if (args.length >= 7) {
+          return ts.visitEachChild(node, visit, transformation);
+        }
+
+        // Must have exactly 3 arguments: condition, ifTrue, ifFalse
+        if (args.length !== 3) {
+          return ts.visitEachChild(node, visit, transformation);
+        }
+
+        const [conditionExpr, ifTrueExpr, ifFalseExpr] = args;
+
+        // Infer types for each argument
+        const conditionType = checker.getTypeAtLocation(conditionExpr!);
+        const ifTrueType = checker.getTypeAtLocation(ifTrueExpr!);
+        const ifFalseType = checker.getTypeAtLocation(ifFalseExpr!);
+
+        // Get the result type from TypeScript's inferred return type of the call
+        // This will be the union type (e.g., string | number for ifElse(cond, str, num))
+        const resultType = checker.getTypeAtLocation(node);
+
+        // Create schema TypeNodes (with literal widening for consistency)
+        const conditionTypeNode = typeToSchemaTypeNode(
+          widenLiteralType(conditionType, checker),
+          checker,
+          sourceFile,
+        ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+        const ifTrueTypeNode = typeToSchemaTypeNode(
+          widenLiteralType(ifTrueType, checker),
+          checker,
+          sourceFile,
+        ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+        const ifFalseTypeNode = typeToSchemaTypeNode(
+          widenLiteralType(ifFalseType, checker),
+          checker,
+          sourceFile,
+        ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+        const resultTypeNode = typeToSchemaTypeNode(
+          widenLiteralType(resultType, checker),
+          checker,
+          sourceFile,
+        ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+        // Create toSchema<T>() calls
+        const conditionSchema = createSchemaCallWithRegistryTransfer(
+          context,
+          conditionTypeNode,
+          typeRegistry,
+          { widenLiterals: true },
+        );
+        const ifTrueSchema = createSchemaCallWithRegistryTransfer(
+          context,
+          ifTrueTypeNode,
+          typeRegistry,
+          { widenLiterals: true },
+        );
+        const ifFalseSchema = createSchemaCallWithRegistryTransfer(
+          context,
+          ifFalseTypeNode,
+          typeRegistry,
+          { widenLiterals: true },
+        );
+        const resultSchema = createSchemaCallWithRegistryTransfer(
+          context,
+          resultTypeNode,
+          typeRegistry,
+          { widenLiterals: true },
+        );
+
+        // Register in TypeRegistry for SchemaGeneratorTransformer
+        if (typeRegistry) {
+          typeRegistry.set(conditionSchema, conditionType);
+          typeRegistry.set(ifTrueSchema, ifTrueType);
+          typeRegistry.set(ifFalseSchema, ifFalseType);
+          typeRegistry.set(resultSchema, resultType);
+        }
+
+        // Create new call with schemas prepended: ifElse(condSchema, trueSchema, falseSchema, resultSchema, cond, ifTrue, ifFalse)
+        const updated = factory.createCallExpression(
+          node.expression,
+          undefined,
+          [conditionSchema, ifTrueSchema, ifFalseSchema, resultSchema, ...args],
+        );
+
+        return ts.visitEachChild(updated, visit, transformation);
+      }
 
       return ts.visitEachChild(node, visit, transformation);
     };

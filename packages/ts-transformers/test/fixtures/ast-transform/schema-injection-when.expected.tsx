@@ -137,6 +137,14 @@ export default recipe({
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "string",
         asOpaque: true
+    } as const satisfies __ctHelpers.JSONSchema, {
+        anyOf: [{
+                type: "boolean",
+                asOpaque: true
+            }, {
+                type: "string",
+                asOpaque: true
+            }]
     } as const satisfies __ctHelpers.JSONSchema, enabled, message);
     return {
         [NAME]: "when schema test",

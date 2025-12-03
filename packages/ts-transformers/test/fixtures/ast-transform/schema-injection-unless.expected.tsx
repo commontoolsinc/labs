@@ -136,6 +136,9 @@ export default recipe({
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "string",
         asOpaque: true
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "string",
+        asOpaque: true
     } as const satisfies __ctHelpers.JSONSchema, value, defaultValue);
     return {
         [NAME]: "unless schema test",
