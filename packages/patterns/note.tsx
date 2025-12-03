@@ -103,9 +103,8 @@ const handleCharmLinkClicked = handler<void, { charm: Cell<MentionableCharm> }>(
 const Note = recipe<Input, Output>(
   "Note",
   ({ title, content }) => {
-    const mentionable = wish<MentionableCharm[]>(
+    const mentionable = wish<Default<MentionableCharm[], []>>(
       "#mentionable",
-      [],
     );
     const mentioned = cell<MentionableCharm[]>([]);
 

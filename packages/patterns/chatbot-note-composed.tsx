@@ -166,13 +166,12 @@ type BacklinksIndex = {
 export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
   "Chatbot + Note",
   ({ title, messages }) => {
-    const allCharms = wish<MentionableCharm[]>("#allCharms", []);
-    const index = wish<BacklinksIndex>("#default/backlinksIndex", {
-      mentionable: [],
-    });
-    const mentionable = wish<MentionableCharm[]>(
+    const allCharms = wish<Default<MentionableCharm[], []>>("#allCharms");
+    const index = wish<Default<BacklinksIndex, { mentionable: [] }>>(
+      "#default/backlinksIndex",
+    );
+    const mentionable = wish<Default<MentionableCharm[], []>>(
       "#mentionable",
-      [],
     );
 
     const list = cell<ListItem[]>([]);
