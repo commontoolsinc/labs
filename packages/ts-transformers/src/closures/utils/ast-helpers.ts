@@ -15,20 +15,3 @@ export function unwrapArrowFunction(
   }
   return undefined;
 }
-
-/**
- * Normalize a parameter declaration, optionally replacing its name.
- */
-export function normalizeParameter(
-  param: ts.ParameterDeclaration,
-  newName?: string | ts.BindingName,
-): ts.ParameterDeclaration {
-  return ts.factory.createParameterDeclaration(
-    param.modifiers,
-    param.dotDotDotToken,
-    newName || param.name,
-    param.questionToken,
-    param.type,
-    param.initializer,
-  );
-}

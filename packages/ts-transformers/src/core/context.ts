@@ -27,7 +27,6 @@ export class TransformationContext {
   readonly ctHelpers: CTHelpers;
   readonly diagnostics: TransformationDiagnostic[] = [];
   readonly tsContext: ts.TransformationContext;
-  #typeCache = new Map<ts.Node, ts.Type>();
 
   constructor(config: TransformationContextConfig) {
     this.program = config.program;
@@ -43,17 +42,6 @@ export class TransformationContext {
       ...DEFAULT_OPTIONS,
       ...config.options,
     };
-  }
-
-  // Currently unused function
-  getType(node: ts.Node): ts.Type {
-    const cached = this.#typeCache.get(node);
-    if (cached) {
-      return cached;
-    }
-    const type = this.checker.getTypeAtLocation(node);
-    this.#typeCache.set(node, type);
-    return type;
   }
 
   reportDiagnostic(input: DiagnosticInput): void {

@@ -1,6 +1,4 @@
 import ts from "typescript";
-import { symbolDeclaresCommonToolsDefault } from "../../core/mod.ts";
-import { getMemberSymbol } from "../../ast/mod.ts";
 import {
   getCellBrand,
   getCellKind as utilGetCellKind,
@@ -49,57 +47,6 @@ export function getCellKind(
   checker: ts.TypeChecker,
 ): "opaque" | "cell" | "stream" | undefined {
   return utilGetCellKind(type, checker);
-}
-
-export function containsOpaqueRef(
-  node: ts.Node,
-  checker: ts.TypeChecker,
-): boolean {
-  let found = false;
-  const visit = (n: ts.Node): void => {
-    if (found) return;
-    if (ts.isPropertyAccessExpression(n)) {
-      const type = checker.getTypeAtLocation(n);
-      if (isOpaqueRefType(type, checker)) {
-        found = true;
-        return;
-      }
-      const propertySymbol = getMemberSymbol(n, checker);
-      if (symbolDeclaresCommonToolsDefault(propertySymbol, checker)) {
-        found = true;
-        return;
-      }
-    }
-    if (
-      ts.isCallExpression(n) &&
-      ts.isPropertyAccessExpression(n.expression) &&
-      n.expression.name.text === "get" &&
-      n.arguments.length === 0
-    ) {
-      return;
-    }
-    if (ts.isIdentifier(n)) {
-      const parent = n.parent;
-      if (
-        parent && ts.isPropertyAccessExpression(parent) && parent.name === n
-      ) {
-        return;
-      }
-      const type = checker.getTypeAtLocation(n);
-      if (isOpaqueRefType(type, checker)) {
-        found = true;
-        return;
-      }
-      const symbol = checker.getSymbolAtLocation(n);
-      if (symbolDeclaresCommonToolsDefault(symbol, checker)) {
-        found = true;
-        return;
-      }
-    }
-    ts.forEachChild(n, visit);
-  };
-  visit(node);
-  return found;
 }
 
 export function isSimpleOpaqueRefAccess(

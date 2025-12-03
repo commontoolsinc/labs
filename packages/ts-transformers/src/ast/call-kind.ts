@@ -1,3 +1,45 @@
+/**
+ * Call Kind Detection
+ *
+ * This module identifies CommonTools-specific call expressions (derive, ifElse,
+ * recipe, etc.) to enable appropriate transformation behavior.
+ *
+ * ## Detection Strategy
+ *
+ * Detection uses a layered approach with name-based fallbacks:
+ *
+ * 1. **Identifier check**: For direct calls like `derive(...)`, we match by
+ *    function name. This is the fast path for the common case.
+ *
+ * 2. **Symbol resolution**: For property access and aliased calls, we resolve
+ *    the symbol and check if it originates from `commontools.d.ts` via
+ *    `isCommonToolsSymbol()`.
+ *
+ * 3. **Name-based fallback**: If symbol resolution fails or the symbol doesn't
+ *    come from CommonTools declarations, we fall back to name matching.
+ *
+ * ## Why Fallbacks Exist
+ *
+ * The name-based fallbacks are intentional and necessary for:
+ *
+ * - **Test environments**: Tests use synthetic type declarations that don't
+ *   come from `commontools.d.ts`, so `isCommonToolsSymbol()` returns false.
+ *
+ * - **Synthetic nodes**: During transformation, we create synthetic AST nodes
+ *   that lack proper source file associations.
+ *
+ * - **Incomplete type information**: Some edge cases where TypeScript's type
+ *   checker can't fully resolve symbols.
+ *
+ * ## False Positive Risk
+ *
+ * Name-based detection could theoretically match user-defined functions with
+ * the same names (e.g., a custom `derive` function). In practice:
+ *
+ * - These names are domain-specific and unlikely to collide
+ * - A false positive would still produce valid (if unexpected) transformations
+ * - The `isCommonToolsSymbol` check catches most production cases correctly
+ */
 import ts from "typescript";
 
 import { isCommonToolsSymbol } from "../core/mod.ts";
@@ -58,7 +100,9 @@ function resolveExpressionKind(
 ): CallKind | undefined {
   const target = stripWrappers(expression);
 
-  // Check for simple identifier names first (for cases where symbol resolution might fail)
+  // Fast path: match identifier names directly without symbol resolution.
+  // This handles the common case of direct calls like `derive(...)`.
+  // See module documentation for why name-based detection is acceptable.
   if (ts.isIdentifier(target)) {
     const name = target.text;
     if (name === "derive") {
@@ -224,7 +268,7 @@ function resolveSymbolKind(
     return { kind: "builder", symbol: resolved, builderName: name };
   }
 
-  // Fallback for when isCommonToolsSymbol check fails (e.g. in tests or incomplete environments)
+  // Name-based fallback (see module documentation for rationale)
   if (name === "ifElse") {
     return { kind: "ifElse", symbol: resolved };
   }

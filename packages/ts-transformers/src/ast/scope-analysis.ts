@@ -116,20 +116,3 @@ export function isDeclaredWithinFunction(
 
   return false;
 }
-
-/**
- * Check if a declaration is within any function-like node.
- * Useful for determining if a variable is local vs closure-captured.
- */
-export function isDeclaredInFunctionScope(
-  decl: ts.Declaration,
-): ts.SignatureDeclaration | undefined {
-  let current: ts.Node | undefined = decl;
-  while (current) {
-    if (ts.isFunctionLike(current)) {
-      return current;
-    }
-    current = current.parent;
-  }
-  return undefined;
-}
