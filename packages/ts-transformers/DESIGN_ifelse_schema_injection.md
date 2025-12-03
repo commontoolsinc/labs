@@ -2,24 +2,39 @@
 
 ## Overview
 
-This document outlines the design for adding schema injection support to the `ifElse`, `when`, and `unless` functions in the ts-transformers package.
+This document outlines the design for adding schema injection support to the
+`ifElse`, `when`, and `unless` functions in the ts-transformers package.
 
 ## Current State
 
 ### What Exists
 
-1. **Call Detection**: `ifElse` is detected in `call-kind.ts` (line 38, 67-68), but `when` and `unless` are NOT detected.
+1. **Call Detection**: `ifElse` is detected in `call-kind.ts` (line 38, 67-68),
+   but `when` and `unless` are NOT detected.
 
 2. **Runtime Signatures** (from `runner/src/builder/built-in.ts`):
    ```typescript
-   function ifElse<T, U, V>(condition: Opaque<T>, ifTrue: Opaque<U>, ifFalse: Opaque<V>): OpaqueRef<U | V>
-   function when<T, U>(condition: Opaque<T>, value: Opaque<U>): OpaqueRef<T | U>
-   function unless<T, U>(condition: Opaque<T>, value: Opaque<U>): OpaqueRef<T | U>
+   function ifElse<T, U, V>(
+     condition: Opaque<T>,
+     ifTrue: Opaque<U>,
+     ifFalse: Opaque<V>,
+   ): OpaqueRef<U | V>;
+   function when<T, U>(
+     condition: Opaque<T>,
+     value: Opaque<U>,
+   ): OpaqueRef<T | U>;
+   function unless<T, U>(
+     condition: Opaque<T>,
+     value: Opaque<U>,
+   ): OpaqueRef<T | U>;
    ```
 
-3. **Schema Injection**: No handlers exist for any of these functions in `SchemaInjectionTransformer`.
+3. **Schema Injection**: No handlers exist for any of these functions in
+   `SchemaInjectionTransformer`.
 
-4. **Transformation Pipeline**: `OpaqueRefJSXTransformer` creates `when`/`unless` calls from `&&`/`||` expressions, but these bypass schema injection entirely.
+4. **Transformation Pipeline**: `OpaqueRefJSXTransformer` creates
+   `when`/`unless` calls from `&&`/`||` expressions, but these bypass schema
+   injection entirely.
 
 ### Current Generated Output (no schemas)
 
@@ -46,18 +61,18 @@ Add `when` and `unless` to the `CallKind` type and detection logic:
 // Line 37-45: Extend CallKind type
 export type CallKind =
   | { kind: "ifElse"; symbol?: ts.Symbol }
-  | { kind: "when"; symbol?: ts.Symbol }      // NEW
-  | { kind: "unless"; symbol?: ts.Symbol }    // NEW
-  | { kind: "builder"; symbol?: ts.Symbol; builderName: string }
-  // ... rest unchanged
+  | { kind: "when"; symbol?: ts.Symbol } // NEW
+  | { kind: "unless"; symbol?: ts.Symbol } // NEW
+  | { kind: "builder"; symbol?: ts.Symbol; builderName: string };
+// ... rest unchanged
 
 // Line 62-78: Add identifier detection
 if (ts.isIdentifier(target)) {
   const name = target.text;
-  if (name === "when") {           // NEW
+  if (name === "when") { // NEW
     return { kind: "when" };
   }
-  if (name === "unless") {         // NEW
+  if (name === "unless") { // NEW
     return { kind: "unless" };
   }
   // ... existing cases
@@ -79,7 +94,7 @@ export function ifElse<T = unknown, U = unknown, V = unknown>(
   condition: Opaque<T>,
   ifTrue: Opaque<U>,
   ifFalse: Opaque<V>,
-): OpaqueRef<U | V>
+): OpaqueRef<U | V>;
 
 // when: 2 schemas for 2 arguments
 export function when<T = unknown, U = unknown>(
@@ -87,7 +102,7 @@ export function when<T = unknown, U = unknown>(
   valueSchema: JSONSchema,
   condition: Opaque<T>,
   value: Opaque<U>,
-): OpaqueRef<T | U>
+): OpaqueRef<T | U>;
 
 // unless: 2 schemas for 2 arguments
 export function unless<T = unknown, U = unknown>(
@@ -95,10 +110,11 @@ export function unless<T = unknown, U = unknown>(
   valueSchema: JSONSchema,
   condition: Opaque<T>,
   value: Opaque<U>,
-): OpaqueRef<T | U>
+): OpaqueRef<T | U>;
 ```
 
-**Backward Compatibility**: Support both old (no schemas) and new (with schemas) signatures by checking argument count/types.
+**Backward Compatibility**: Support both old (no schemas) and new (with schemas)
+signatures by checking argument count/types.
 
 ### 3. Schema Injection Handlers
 
@@ -133,13 +149,13 @@ if (callKind?.kind === "when") {
   const conditionTypeNode = typeToSchemaTypeNode(
     widenLiteralType(conditionType, checker),
     checker,
-    sourceFile
+    sourceFile,
   ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
   const valueTypeNode = typeToSchemaTypeNode(
     widenLiteralType(valueType, checker),
     checker,
-    sourceFile
+    sourceFile,
   ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
   // Create toSchema<T>() calls
@@ -156,7 +172,7 @@ if (callKind?.kind === "when") {
   const updated = factory.createCallExpression(
     node.expression,
     undefined,
-    [conditionSchema, valueSchema, ...args]
+    [conditionSchema, valueSchema, ...args],
   );
 
   return ts.visitEachChild(updated, visit, transformation);
@@ -193,15 +209,21 @@ if (callKind?.kind === "ifElse") {
 
   // Create schema TypeNodes (with literal widening)
   const conditionTypeNode = typeToSchemaTypeNode(
-    widenLiteralType(conditionType, checker), checker, sourceFile
+    widenLiteralType(conditionType, checker),
+    checker,
+    sourceFile,
   ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
   const ifTrueTypeNode = typeToSchemaTypeNode(
-    widenLiteralType(ifTrueType, checker), checker, sourceFile
+    widenLiteralType(ifTrueType, checker),
+    checker,
+    sourceFile,
   ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
   const ifFalseTypeNode = typeToSchemaTypeNode(
-    widenLiteralType(ifFalseType, checker), checker, sourceFile
+    widenLiteralType(ifFalseType, checker),
+    checker,
+    sourceFile,
   ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
   // Create toSchema<T>() calls
@@ -220,7 +242,7 @@ if (callKind?.kind === "ifElse") {
   const updated = factory.createCallExpression(
     node.expression,
     undefined,
-    [conditionSchema, ifTrueSchema, ifFalseSchema, ...args]
+    [conditionSchema, ifTrueSchema, ifFalseSchema, ...args],
   );
 
   return ts.visitEachChild(updated, visit, transformation);
@@ -251,32 +273,36 @@ __ctHelpers.when(
 ## Implementation Plan
 
 ### Phase 1: Call Detection
+
 1. Add `when` and `unless` to `CallKind` type
 2. Add identifier detection in `resolveExpressionKind()`
 3. Add symbol-based detection for completeness
 
 ### Phase 2: Schema Injection
+
 1. Add `when` handler in `SchemaInjectionTransformer`
 2. Add `unless` handler (nearly identical)
 3. Add `ifElse` handler (3 schemas instead of 2)
 
 ### Phase 3: Runtime Support
+
 1. Update `ifElse`/`when`/`unless` signatures in runner
 2. Add backward compatibility for calls without schemas
 3. Wire schemas through to `ifElseFactory`
 
 ### Phase 4: Testing
+
 1. Add transformer fixture tests for each function
 2. Add integration tests verifying runtime behavior
 3. Verify existing JSX expression tests still pass
 
 ## Files to Modify
 
-| File | Changes |
-|------|---------|
-| `src/ast/call-kind.ts` | Add `when`/`unless` to CallKind, detection logic |
-| `src/transformers/schema-injection.ts` | Add 3 new handlers (~100 lines) |
-| `runner/src/builder/built-in.ts` | Update signatures for schema args |
+| File                                   | Changes                                          |
+| -------------------------------------- | ------------------------------------------------ |
+| `src/ast/call-kind.ts`                 | Add `when`/`unless` to CallKind, detection logic |
+| `src/transformers/schema-injection.ts` | Add 3 new handlers (~100 lines)                  |
+| `runner/src/builder/built-in.ts`       | Update signatures for schema args                |
 
 ## New Business Logic Required?
 
@@ -287,20 +313,27 @@ __ctHelpers.when(
 - `widenLiteralType()` - existing utility for literal widening
 - `createToSchemaCall()` - existing utility for creating `toSchema<T>()` calls
 - `TypeRegistry` - existing mechanism for type preservation
-- `SchemaGeneratorTransformer` - handles `toSchema<T>()` → JSON schema conversion automatically
+- `SchemaGeneratorTransformer` - handles `toSchema<T>()` → JSON schema
+  conversion automatically
 
-The implementation is mechanical application of existing patterns to new call kinds.
+The implementation is mechanical application of existing patterns to new call
+kinds.
 
 ## Open Questions
 
 1. **Literal Widening**: Should we use `widenLiterals: true`?
-   - **Recommendation**: Yes, for consistency with `cell()` and because conditional branches often contain literals.
+   - **Recommendation**: Yes, for consistency with `cell()` and because
+     conditional branches often contain literals.
 
-2. **Nested Reactive Expressions**: What if arguments are already `derive()`/`lift()` calls?
-   - **Answer**: Not a problem. We inject schemas for `when()`'s arguments. If an argument is `derive()`, that `derive()` already has its own schemas. The `when()` schema describes the *output* type of that derive.
+2. **Nested Reactive Expressions**: What if arguments are already
+   `derive()`/`lift()` calls?
+   - **Answer**: Not a problem. We inject schemas for `when()`'s arguments. If
+     an argument is `derive()`, that `derive()` already has its own schemas. The
+     `when()` schema describes the _output_ type of that derive.
 
 3. **VNode/JSX Schemas**: How should JSX elements be schematized?
-   - **Answer**: The existing JSX transformation already handles this. VNode types have established schema patterns.
+   - **Answer**: The existing JSX transformation already handles this. VNode
+     types have established schema patterns.
 
 ## Test Cases
 

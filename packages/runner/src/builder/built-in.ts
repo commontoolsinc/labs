@@ -116,7 +116,9 @@ export function ifElse<T = unknown, U = unknown, V = unknown>(
   });
 
   // Check if schemas were provided (7 args) or not (3 args)
-  if (condition !== undefined && ifTrue !== undefined && ifFalse !== undefined) {
+  if (
+    condition !== undefined && ifTrue !== undefined && ifFalse !== undefined
+  ) {
     // New signature with schemas: ifElse(condSchema, trueSchema, falseSchema, resultSchema, cond, ifTrue, ifFalse)
     return ifElseFactory({
       conditionSchema: conditionSchemaOrCondition as JSONSchema,
@@ -139,14 +141,14 @@ export function ifElse<T = unknown, U = unknown, V = unknown>(
 
 let ifElseFactory:
   | NodeFactory<{
-      conditionSchema?: JSONSchema;
-      ifTrueSchema?: JSONSchema;
-      ifFalseSchema?: JSONSchema;
-      resultSchema?: JSONSchema;
-      condition: unknown;
-      ifTrue: unknown;
-      ifFalse: unknown;
-    }, any>
+    conditionSchema?: JSONSchema;
+    ifTrueSchema?: JSONSchema;
+    ifFalseSchema?: JSONSchema;
+    resultSchema?: JSONSchema;
+    condition: unknown;
+    ifTrue: unknown;
+    ifFalse: unknown;
+  }, any>
   | undefined;
 
 // when(condition, value) - returns value if condition is truthy, else condition
@@ -183,12 +185,12 @@ export function when<T = unknown, U = unknown>(
 
 let whenFactory:
   | NodeFactory<{
-      conditionSchema?: JSONSchema;
-      valueSchema?: JSONSchema;
-      resultSchema?: JSONSchema;
-      condition: unknown;
-      value: unknown;
-    }, any>
+    conditionSchema?: JSONSchema;
+    valueSchema?: JSONSchema;
+    resultSchema?: JSONSchema;
+    condition: unknown;
+    value: unknown;
+  }, any>
   | undefined;
 
 // unless(condition, fallback) - returns condition if truthy, else fallback
@@ -225,12 +227,12 @@ export function unless<T = unknown, U = unknown>(
 
 let unlessFactory:
   | NodeFactory<{
-      conditionSchema?: JSONSchema;
-      fallbackSchema?: JSONSchema;
-      resultSchema?: JSONSchema;
-      condition: unknown;
-      fallback: unknown;
-    }, any>
+    conditionSchema?: JSONSchema;
+    fallbackSchema?: JSONSchema;
+    resultSchema?: JSONSchema;
+    condition: unknown;
+    fallback: unknown;
+  }, any>
   | undefined;
 
 export const navigateTo = createNodeFactory({
