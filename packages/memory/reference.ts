@@ -24,13 +24,23 @@ const treeBuilder = Reference.Tree.createBuilder(nodeSha256);
 
 /**
  * Object interning cache: maps JSON content to a canonical object instance.
- * Uses WeakRef so interned objects can be garbage collected when no longer used.
- * This enables merkle-reference's WeakMap cache to hit on identical content.
+ * Uses strong references with LRU eviction to ensure cache hits.
+ *
+ * Previously used WeakRef, but this caused cache misses because GC would
+ * collect interned objects between calls when no strong reference held them.
+ * This prevented merkle-reference's WeakMap from getting cache hits.
+ *
+ * With strong references + LRU eviction, interned objects stay alive long
+ * enough for refer() to benefit from merkle-reference's identity-based cache.
  */
-const internCache = new Map<string, WeakRef<object>>();
-const finalizationRegistry = new FinalizationRegistry((key: string) => {
-  internCache.delete(key);
-});
+const INTERN_CACHE_MAX_SIZE = 10000;
+const internCache = new Map<string, object>();
+
+/**
+ * WeakSet to track objects that are already interned (canonical instances).
+ * This allows O(1) early return for already-interned objects.
+ */
+const internedObjects = new WeakSet<object>();
 
 /**
  * Recursively intern an object and all its nested objects.
@@ -49,18 +59,28 @@ export const intern = <T>(source: T): T => {
     return source;
   }
 
+  // Fast path: if this object is already interned, return it immediately
+  if (internedObjects.has(source)) {
+    return source;
+  }
+
   // Handle arrays
   if (Array.isArray(source)) {
     const internedArray = source.map((item) => intern(item));
     const key = JSON.stringify(internedArray);
-    const cached = internCache.get(key)?.deref();
+    const cached = internCache.get(key);
 
     if (cached !== undefined) {
       return cached as T;
     }
 
-    internCache.set(key, new WeakRef(internedArray));
-    finalizationRegistry.register(internedArray, key);
+    // Evict oldest entry if cache is full
+    if (internCache.size >= INTERN_CACHE_MAX_SIZE) {
+      const oldest = internCache.keys().next().value;
+      if (oldest !== undefined) internCache.delete(oldest);
+    }
+    internCache.set(key, internedArray);
+    internedObjects.add(internedArray);
     return internedArray as T;
   }
 
@@ -71,15 +91,20 @@ export const intern = <T>(source: T): T => {
   }
 
   const key = JSON.stringify(internedObj);
-  const cached = internCache.get(key)?.deref();
+  const cached = internCache.get(key);
 
   if (cached !== undefined) {
     return cached as T;
   }
 
+  // Evict oldest entry if cache is full
+  if (internCache.size >= INTERN_CACHE_MAX_SIZE) {
+    const oldest = internCache.keys().next().value;
+    if (oldest !== undefined) internCache.delete(oldest);
+  }
   // Store this object as the canonical instance
-  internCache.set(key, new WeakRef(internedObj));
-  finalizationRegistry.register(internedObj, key);
+  internCache.set(key, internedObj);
+  internedObjects.add(internedObj);
 
   return internedObj as T;
 };
