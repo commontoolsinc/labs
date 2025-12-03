@@ -52,25 +52,18 @@ export interface DataFlowAnalysis {
   rewriteHint?: RewriteHint;
 }
 
-interface DataFlowScopeInternal {
-  readonly id: number;
-  readonly parentId: number | null;
-  readonly parameterSymbols: ts.Symbol[];
-  readonly aggregated: Set<ts.Symbol>;
-}
-
 interface AnalyzerContext {
   nextNodeId: number;
   nextScopeId: number;
   readonly collectedNodes: DataFlowNode[]; // All nodes collected during analysis
-  readonly scopes: Map<number, DataFlowScopeInternal>;
+  readonly scopes: Map<number, DataFlowScope>;
+  readonly expressionToNodeId: Map<ts.Expression, number>; // For O(1) parent lookups
 }
 
 interface InternalAnalysis {
   containsOpaqueRef: boolean;
   requiresRewrite: boolean;
   dataFlows: ts.Expression[];
-  localNodes: DataFlowNode[]; // Nodes from this expression subtree only
   rewriteHint?: RewriteHint;
 }
 
@@ -78,7 +71,6 @@ const emptyAnalysis = (): InternalAnalysis => ({
   containsOpaqueRef: false,
   requiresRewrite: false,
   dataFlows: [],
-  localNodes: [],
   rewriteHint: undefined,
 });
 
@@ -86,19 +78,16 @@ const mergeAnalyses = (...analyses: InternalAnalysis[]): InternalAnalysis => {
   let contains = false;
   let requires = false;
   const dataFlows: ts.Expression[] = [];
-  const localNodes: DataFlowNode[] = [];
   for (const analysis of analyses) {
     if (!analysis) continue;
     contains ||= analysis.containsOpaqueRef;
     requires ||= analysis.requiresRewrite;
     dataFlows.push(...analysis.dataFlows);
-    localNodes.push(...analysis.localNodes);
   }
   return {
     containsOpaqueRef: contains,
     requiresRewrite: requires,
     dataFlows,
-    localNodes,
     rewriteHint: undefined,
   };
 };
@@ -106,56 +95,82 @@ const mergeAnalyses = (...analyses: InternalAnalysis[]): InternalAnalysis => {
 export function createDataFlowAnalyzer(
   checker: ts.TypeChecker,
 ): (expression: ts.Expression) => DataFlowAnalysis {
+  // === Synthetic node helpers ===
+  // These enable unified handling of both synthetic (transformer-created) and
+  // non-synthetic (original source) nodes by gracefully handling cases where
+  // the TypeChecker can't resolve symbols or types.
+
+  const isSynthetic = (node: ts.Node): boolean => !node.getSourceFile();
+
+  const tryGetSymbol = (node: ts.Node): ts.Symbol | undefined => {
+    try {
+      return checker.getSymbolAtLocation(node) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const tryGetType = (node: ts.Node): ts.Type | undefined => {
+    try {
+      return checker.getTypeAtLocation(node);
+    } catch {
+      return undefined;
+    }
+  };
+
+  // Convert symbols to enriched parameters with name and declaration info
+  const toScopeParameters = (
+    symbols: ts.Symbol[],
+  ): DataFlowScopeParameter[] =>
+    symbols.map((symbol) => {
+      const declarations = symbol.getDeclarations();
+      const parameterDecl = declarations?.find((
+        decl,
+      ): decl is ts.ParameterDeclaration => ts.isParameter(decl));
+      return parameterDecl
+        ? { name: symbol.getName(), symbol, declaration: parameterDecl }
+        : { name: symbol.getName(), symbol };
+    });
+
   const createScope = (
     context: AnalyzerContext,
-    parent: DataFlowScopeInternal | null,
+    parent: DataFlowScope | null,
     parameterSymbols: ts.Symbol[],
-  ): DataFlowScopeInternal => {
-    const aggregated = parent
-      ? new Set(parent.aggregated)
-      : new Set<ts.Symbol>();
-    for (const symbol of parameterSymbols) aggregated.add(symbol);
-    const scope: DataFlowScopeInternal = {
+  ): DataFlowScope => {
+    const scope: DataFlowScope = {
       id: context.nextScopeId++,
       parentId: parent ? parent.id : null,
-      parameterSymbols,
-      aggregated,
+      parameters: toScopeParameters(parameterSymbols),
     };
     context.scopes.set(scope.id, scope);
     return scope;
   };
 
+  // Compute all parameters accessible from a scope (own + ancestors) on-demand
+  const getAggregatedSymbols = (
+    scope: DataFlowScope,
+    scopes: Map<number, DataFlowScope>,
+  ): Set<ts.Symbol> => {
+    const result = new Set<ts.Symbol>();
+    let current: DataFlowScope | undefined = scope;
+    while (current) {
+      for (const param of current.parameters) {
+        result.add(param.symbol);
+      }
+      current = current.parentId !== null
+        ? scopes.get(current.parentId)
+        : undefined;
+    }
+    return result;
+  };
+
   const createCanonicalKey = (
     expression: ts.Expression,
-    scope: DataFlowScopeInternal,
+    scope: DataFlowScope,
   ): string => {
     const text = getExpressionText(expression);
     return `${scope.id}:${text}`;
   };
-
-  const toDataFlowScope = (
-    scope: DataFlowScopeInternal,
-  ): DataFlowScope => ({
-    id: scope.id,
-    parentId: scope.parentId,
-    parameters: scope.parameterSymbols.map((symbol) => {
-      const declarations = symbol.getDeclarations();
-      const parameterDecl = declarations?.find((
-        decl,
-      ): decl is ts.ParameterDeclaration => ts.isParameter(decl));
-      if (parameterDecl) {
-        return {
-          name: symbol.getName(),
-          symbol,
-          declaration: parameterDecl,
-        } satisfies DataFlowScopeParameter;
-      }
-      return {
-        name: symbol.getName(),
-        symbol,
-      } satisfies DataFlowScopeParameter;
-    }),
-  });
 
   // Determine how CallExpressions should be handled based on their call kind.
   // Returns the appropriate InternalAnalysis with correct requiresRewrite logic.
@@ -205,344 +220,19 @@ export function createDataFlowAnalyzer(
 
   const analyzeExpression = (
     expression: ts.Expression,
-    scope: DataFlowScopeInternal,
+    scope: DataFlowScope,
     context: AnalyzerContext,
   ): InternalAnalysis => {
-    // Handle synthetic nodes (created by previous transformers)
-    // We can't analyze them directly, but we need to visit children
-    if (!expression.getSourceFile()) {
-      // Set parent pointers for the entire synthetic subtree to enable
-      // parent-based logic (method call detection, etc.) to work
+    // Set parent pointers for synthetic nodes (needed for parent-based logic like method call detection)
+    if (isSynthetic(expression)) {
       setParentPointers(expression);
-      // Synthetic nodes don't have positions, so getText() will crash
-      // We don't currently use the printed text, but keep it for debugging
-      try {
-        const printer = ts.createPrinter();
-        const _exprText = printer.printNode(
-          ts.EmitHint.Unspecified,
-          expression,
-          expression.getSourceFile() ||
-            ts.createSourceFile("", "", ts.ScriptTarget.Latest),
-        );
-        // _exprText could be logged for debugging if needed
-        void _exprText;
-      } catch {
-        // Ignore errors
-      }
-
-      // Special handling for synthetic identifiers (must come BEFORE child traversal)
-      // These are likely parameters from map closure transformation (like `discount`)
-      // We can't resolve symbols for synthetic nodes, but we should treat them as opaque
-      if (ts.isIdentifier(expression)) {
-        // Skip property names in property access expressions - they're not data flows.
-        // For example, `toSchema` in `__ctHelpers.toSchema` is just a property name.
-        if (
-          expression.parent &&
-          ts.isPropertyAccessExpression(expression.parent) &&
-          expression.parent.name === expression
-        ) {
-          // This is a property name, not a value reference - don't capture it
-          return emptyAnalysis();
-        }
-
-        // If it's a synthetic identifier, treat it as opaque
-        // This handles cases like `discount` where the whole identifier is synthetic
-        // We need to record it in the graph so normalizeDataFlows can find it
-        const node: DataFlowNode = {
-          id: context.nextNodeId++,
-          expression,
-          canonicalKey: `${scope.id}:${getExpressionText(expression)}`,
-          parentId: null,
-          scopeId: scope.id,
-          isExplicit: true, // Explicit: synthetic opaque parameter
-        };
-        context.collectedNodes.push(node);
-        return {
-          containsOpaqueRef: true,
-          requiresRewrite: false,
-          dataFlows: [expression],
-          localNodes: [node],
-        };
-      }
-
-      // Collect analyses from all children
-      const childAnalyses: InternalAnalysis[] = [];
-
-      // Helper to analyze a child expression
-      const analyzeChild = (child: ts.Node) => {
-        if (ts.isExpression(child)) {
-          const childAnalysis = analyzeExpression(child, scope, context);
-          childAnalyses.push(childAnalysis);
-        }
-      };
-
-      // Special handling for JSX elements - ts.forEachChild doesn't traverse JSX expression children
-      if (ts.isJsxElement(expression)) {
-        // Traverse opening element attributes
-        if (expression.openingElement.attributes) {
-          expression.openingElement.attributes.properties.forEach(analyzeChild);
-        }
-        // Traverse JSX children (this is what forEachChild misses!)
-        expression.children.forEach((child) => {
-          if (ts.isJsxExpression(child)) {
-            if (child.expression) {
-              analyzeChild(child.expression);
-            }
-          } else {
-            analyzeChild(child);
-          }
-        });
-      } else if (ts.isJsxSelfClosingElement(expression)) {
-        // Traverse self-closing element attributes
-        if (expression.attributes) {
-          expression.attributes.properties.forEach(analyzeChild);
-        }
-      } else if (ts.isJsxFragment(expression)) {
-        // Traverse fragment children
-        expression.children.forEach((child) => {
-          if (ts.isJsxExpression(child) && child.expression) {
-            analyzeChild(child.expression);
-          } else {
-            analyzeChild(child);
-          }
-        });
-      } else {
-        // For non-JSX nodes, use the default traversal
-        ts.forEachChild(expression, analyzeChild);
-      }
-
-      // Inherit properties from children
-      if (childAnalyses.length > 0) {
-        const merged = mergeAnalyses(...childAnalyses);
-
-        // For synthetic CallExpressions, detect call kind and set rewriteHint
-        if (ts.isCallExpression(expression)) {
-          const callKind = detectCallKind(expression, checker);
-          const rewriteHint: RewriteHint | undefined = (() => {
-            if (callKind?.kind === "builder") {
-              return { kind: "skip-call-rewrite", reason: "builder" };
-            }
-            if (callKind?.kind === "array-map") {
-              return { kind: "skip-call-rewrite", reason: "array-map" };
-            }
-            if (
-              callKind?.kind === "ifElse" && expression.arguments.length > 0
-            ) {
-              const predicate = expression.arguments[0];
-              if (predicate) {
-                return { kind: "call-if-else", predicate };
-              }
-            }
-            return undefined;
-          })();
-
-          // For synthetic CallExpressions, we don't have a separate callee analysis
-          // Approximate by using merged for both parameters
-          return handleCallExpression(merged, callKind, merged, rewriteHint);
-        }
-
-        // Special handling for synthetic property access expressions
-        // For synthetic nodes, we can't use checker.getSymbolAtLocation or isOpaqueRefType reliably
-        // But we can detect if this looks like a property access that should be a dataflow
-        if (ts.isPropertyAccessExpression(expression)) {
-          // Find the root identifier by walking up the property chain
-          let current: ts.Expression = expression;
-          while (ts.isPropertyAccessExpression(current)) {
-            current = current.expression;
-          }
-
-          if (ts.isIdentifier(current)) {
-            const symbol = checker.getSymbolAtLocation(current);
-            if (symbol) {
-              // Check if this is a parameter in an opaque call (builder or array-map)
-              const declarations = symbol.getDeclarations();
-              if (declarations) {
-                for (const decl of declarations) {
-                  if (ts.isParameter(decl)) {
-                    // Walk up to find if this parameter belongs to a builder or array-map call
-                    let func: ts.Node | undefined = decl.parent;
-                    while (func && !ts.isFunctionLike(func)) func = func.parent;
-                    if (func) {
-                      let callNode: ts.Node | undefined = func.parent;
-                      while (callNode && !ts.isCallExpression(callNode)) {
-                        callNode = callNode.parent;
-                      }
-                      if (callNode) {
-                        const callKind = detectCallKind(
-                          callNode as ts.CallExpression,
-                          checker,
-                        );
-                        if (
-                          callKind?.kind === "array-map" ||
-                          callKind?.kind === "builder"
-                        ) {
-                          // This is element.price or state.foo - return full property access as dataflow
-                          // Add to graph so normalizeDataFlows can find it
-                          const node: DataFlowNode = {
-                            id: context.nextNodeId++,
-                            expression,
-                            canonicalKey: `${scope.id}:${
-                              getExpressionText(expression)
-                            }`,
-                            parentId: null,
-                            scopeId: scope.id,
-                            isExplicit: true, // Explicit: synthetic opaque property access
-                          };
-                          context.collectedNodes.push(node);
-                          return {
-                            containsOpaqueRef: true,
-                            requiresRewrite: true,
-                            dataFlows: [expression],
-                            localNodes: [node],
-                          };
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            } else {
-              // Symbol is undefined for the root - this is likely a synthetic parameter
-              // from a transformer (like `element` from map closure transformer).
-              // We can't resolve symbols for synthetic nodes, but if this looks like
-              // a property access on a simple identifier (not a complex expression),
-              // treat it as an opaque property access that needs derive wrapping.
-              // This handles cases like `element.price` where `element` is synthetic.
-
-              // Skip __ctHelpers.* property accesses - these are helper functions, not opaque refs.
-              // For example: __ctHelpers.toSchema, __ctHelpers.recipe, __ctHelpers.derive
-              if (
-                ts.isIdentifier(current) &&
-                current.text === "__ctHelpers"
-              ) {
-                // This is a helper function access, not an opaque ref - don't capture it
-                return merged;
-              }
-
-              // Don't capture property accesses that are method calls.
-              // For example, `element.trim` in `element.trim()` should not be captured.
-              if (isMethodCall(expression)) {
-                // This is a method call like element.trim() - don't capture it
-                return merged;
-              }
-
-              // Add to graph so normalizeDataFlows can find it
-              const node: DataFlowNode = {
-                id: context.nextNodeId++,
-                expression,
-                canonicalKey: `${scope.id}:${getExpressionText(expression)}`,
-                parentId: null,
-                scopeId: scope.id,
-                isExplicit: true, // Explicit: synthetic opaque property access
-              };
-              context.collectedNodes.push(node);
-              return {
-                containsOpaqueRef: true,
-                requiresRewrite: true,
-                dataFlows: [expression],
-                localNodes: [node],
-              };
-            }
-          }
-          // Otherwise preserve merged analysis from children
-          // NOTE: We should rarely hit this - it means the root wasn't an identifier
-          return merged;
-        }
-
-        // For binary expressions with OpaqueRef, set requiresRewrite based on containsOpaqueRef
-        // This matches the logic in the non-synthetic code path (line 380-388)
-        if (ts.isBinaryExpression(expression)) {
-          return {
-            ...merged,
-            requiresRewrite: merged.containsOpaqueRef,
-          };
-        }
-
-        // For conditional expressions, set requiresRewrite to true if they contain opaque refs
-        // This matches the non-synthetic code path for conditional expressions (line 720)
-        if (ts.isConditionalExpression(expression)) {
-          return {
-            ...merged,
-            requiresRewrite: true,
-          };
-        }
-
-        // Element access expressions: static indices don't need derive wrapping,
-        // but dynamic indices with opaque refs do (e.g., tagCounts[element])
-        if (ts.isElementAccessExpression(expression)) {
-          const isStaticIndex = isStaticElementAccess(expression);
-
-          if (isStaticIndex) {
-            // Static index like element[0] - preserve merged analysis
-            return merged;
-          } else if (merged.containsOpaqueRef) {
-            // Dynamic index with opaque refs - requires derive wrapper
-            return {
-              ...merged,
-              requiresRewrite: true,
-            };
-          }
-          return merged;
-        }
-
-        // For JSX elements, arrow functions, and other expression containers, preserve requiresRewrite from children
-        // This matches the non-synthetic code paths for these node types
-        if (
-          ts.isJsxElement(expression) ||
-          ts.isJsxFragment(expression) ||
-          ts.isJsxSelfClosingElement(expression) ||
-          ts.isParenthesizedExpression(expression) ||
-          ts.isArrowFunction(expression) ||
-          ts.isFunctionExpression(expression)
-        ) {
-          return merged;
-        }
-
-        // Other synthetic nodes don't require rewrite
-        return {
-          ...merged,
-          requiresRewrite: false,
-        };
-      }
-
-      // No children with analysis
-      return {
-        containsOpaqueRef: false,
-        requiresRewrite: false,
-        dataFlows: [],
-        localNodes: [],
-        rewriteHint: undefined,
-      };
     }
 
-    const isSymbolIgnored = (symbol: ts.Symbol | undefined): boolean => {
-      if (!symbol) return false;
-      if (scope.aggregated.has(symbol) && isRootOpaqueParameter(symbol)) {
-        return false;
-      }
-      return scope.aggregated.has(symbol);
-    };
-
-    const originatesFromIgnored = (expr: ts.Expression): boolean => {
-      if (ts.isIdentifier(expr)) {
-        const symbol = checker.getSymbolAtLocation(expr);
-        return isSymbolIgnored(symbol);
-      }
-      if (
-        ts.isPropertyAccessExpression(expr) ||
-        ts.isElementAccessExpression(expr)
-      ) {
-        return originatesFromIgnored(expr.expression);
-      }
-      if (ts.isCallExpression(expr)) {
-        return originatesFromIgnored(expr.expression);
-      }
-      return false;
-    };
+    // === Helper functions (available for both synthetic and non-synthetic paths) ===
 
     const recordDataFlow = (
       expr: ts.Expression,
-      ownerScope: DataFlowScopeInternal,
+      ownerScope: DataFlowScope,
       parentId: number | null = null,
       isExplicit: boolean = false,
     ): DataFlowNode => {
@@ -555,6 +245,7 @@ export function createDataFlowAnalyzer(
         isExplicit,
       };
       context.collectedNodes.push(node);
+      context.expressionToNodeId.set(expr, node.id);
       return node;
     };
 
@@ -624,43 +315,91 @@ export function createDataFlowAnalyzer(
     ): boolean => {
       const root = findRootIdentifier(expr);
       if (!root) return false;
-      const symbol = checker.getSymbolAtLocation(root);
+      const symbol = tryGetSymbol(root);
       return isRootOpaqueParameter(symbol);
     };
 
+    const isSymbolIgnored = (symbol: ts.Symbol | undefined): boolean => {
+      if (!symbol) return false;
+      const aggregated = getAggregatedSymbols(scope, context.scopes);
+      if (aggregated.has(symbol) && isRootOpaqueParameter(symbol)) {
+        return false;
+      }
+      return aggregated.has(symbol);
+    };
+
+    const originatesFromIgnored = (expr: ts.Expression): boolean => {
+      if (ts.isIdentifier(expr)) {
+        const symbol = tryGetSymbol(expr);
+        return isSymbolIgnored(symbol);
+      }
+      if (
+        ts.isPropertyAccessExpression(expr) ||
+        ts.isElementAccessExpression(expr)
+      ) {
+        return originatesFromIgnored(expr.expression);
+      }
+      if (ts.isCallExpression(expr)) {
+        return originatesFromIgnored(expr.expression);
+      }
+      return false;
+    };
+
+    // === Expression type handlers ===
+
     if (ts.isIdentifier(expression)) {
-      const symbol = checker.getSymbolAtLocation(expression);
+      // Skip property names in property access expressions - they're not data flows.
+      // For example, `toSchema` in `__ctHelpers.toSchema` is just a property name.
+      if (
+        expression.parent &&
+        ts.isPropertyAccessExpression(expression.parent) &&
+        expression.parent.name === expression
+      ) {
+        return emptyAnalysis();
+      }
+
+      const symbol = tryGetSymbol(expression);
+
+      // Can't resolve symbol - if synthetic, treat as opaque parameter
+      // This handles cases like `discount` where the whole identifier is synthetic
+      if (!symbol && isSynthetic(expression)) {
+        recordDataFlow(expression, scope, null, true); // Explicit: synthetic opaque parameter
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: false,
+          dataFlows: [expression],
+        };
+      }
+
       if (isSymbolIgnored(symbol)) {
         return emptyAnalysis();
       }
-      const type = checker.getTypeAtLocation(expression);
-      if (isOpaqueRefType(type, checker)) {
-        const node = recordDataFlow(expression, scope, null, true); // Explicit: direct OpaqueRef
+
+      const type = tryGetType(expression);
+      if (type && isOpaqueRefType(type, checker)) {
+        recordDataFlow(expression, scope, null, true); // Explicit: direct OpaqueRef
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,
           dataFlows: [expression],
-          localNodes: [node],
         };
       }
       if (symbolDeclaresCommonToolsDefault(symbol, checker)) {
-        const node = recordDataFlow(expression, scope, null, true); // Explicit: CommonTools default
+        recordDataFlow(expression, scope, null, true); // Explicit: CommonTools default
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,
           dataFlows: [expression],
-          localNodes: [node],
         };
       }
       // Check if this identifier is a parameter to a builder or array-map call (like recipe)
       // These parameters become implicitly opaque even though their type isn't OpaqueRef
       if (isRootOpaqueParameter(symbol)) {
-        const node = recordDataFlow(expression, scope, null, true); // Explicit: opaque parameter
+        recordDataFlow(expression, scope, null, true); // Explicit: opaque parameter
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,
           dataFlows: [expression],
-          localNodes: [node],
         };
       }
       return emptyAnalysis();
@@ -668,16 +407,15 @@ export function createDataFlowAnalyzer(
 
     if (ts.isPropertyAccessExpression(expression)) {
       const target = analyzeExpression(expression.expression, scope, context);
-      const propertyType = checker.getTypeAtLocation(expression);
+      const propertyType = tryGetType(expression);
 
-      if (isOpaqueRefType(propertyType, checker)) {
+      if (propertyType && isOpaqueRefType(propertyType, checker)) {
         if (originatesFromIgnored(expression.expression)) {
           return emptyAnalysis();
         }
         const parentId =
-          findParentNodeId(target.localNodes, expression.expression) ??
-            null;
-        const node = recordDataFlow(expression, scope, parentId, true); // Explicit: OpaqueRef property
+          context.expressionToNodeId.get(expression.expression) ?? null;
+        recordDataFlow(expression, scope, parentId, true); // Explicit: OpaqueRef property
 
         // If the target is a complex expression requiring rewrite (like ElementAccess),
         // propagate its dataFlows. Otherwise, add this property access as a dataFlow.
@@ -686,14 +424,12 @@ export function createDataFlowAnalyzer(
             containsOpaqueRef: true,
             requiresRewrite: target.requiresRewrite,
             dataFlows: target.dataFlows,
-            localNodes: [node],
           };
         } else {
           return {
             containsOpaqueRef: true,
             requiresRewrite: target.requiresRewrite,
             dataFlows: [expression],
-            localNodes: [node],
           };
         }
       }
@@ -703,13 +439,12 @@ export function createDataFlowAnalyzer(
           return emptyAnalysis();
         }
         const parentId =
-          findParentNodeId(target.localNodes, expression.expression) ?? null;
-        const node = recordDataFlow(expression, scope, parentId, true); // Explicit: CommonTools property
+          context.expressionToNodeId.get(expression.expression) ?? null;
+        recordDataFlow(expression, scope, parentId, true); // Explicit: CommonTools property
         return {
           containsOpaqueRef: true,
           requiresRewrite: true,
           dataFlows: [expression],
-          localNodes: [node],
         };
       }
       if (isImplicitOpaqueRefExpression(expression)) {
@@ -721,7 +456,7 @@ export function createDataFlowAnalyzer(
         const isPropertyOnCall = ts.isCallExpression(expression.expression);
 
         const parentId =
-          findParentNodeId(target.localNodes, expression.expression) ?? null;
+          context.expressionToNodeId.get(expression.expression) ?? null;
 
         // If the target is a complex expression requiring rewrite (ElementAccess or Call),
         // propagate its dataFlows. Otherwise add this property access as a dataFlow.
@@ -730,30 +465,80 @@ export function createDataFlowAnalyzer(
           (target.requiresRewrite && target.dataFlows.length > 0)
         ) {
           // This is a computed expression - use the dependencies from the target
-          const node = recordDataFlow(expression, scope, parentId, false);
+          recordDataFlow(expression, scope, parentId, false);
           return {
             containsOpaqueRef: true,
             requiresRewrite: true,
             dataFlows: target.dataFlows,
-            localNodes: [node],
           };
         }
 
         // This is a direct property access on an OpaqueRef (like state.charms.length)
         // It should be its own explicit dependency
-        const node = recordDataFlow(expression, scope, parentId, true);
+        recordDataFlow(expression, scope, parentId, true);
         return {
           containsOpaqueRef: true,
           requiresRewrite: true,
           dataFlows: [expression],
-          localNodes: [node],
         };
       }
+
+      // For synthetic nodes where type/symbol resolution failed, check the root identifier
+      if (isSynthetic(expression)) {
+        const root = findRootIdentifier(expression);
+        if (root && ts.isIdentifier(root)) {
+          const rootSymbol = tryGetSymbol(root);
+          if (rootSymbol) {
+            // Root symbol found - check if it's from builder/array-map
+            const callKind = getOpaqueParameterCallKind(rootSymbol);
+            if (callKind) {
+              // This is element.price or similar - treat as opaque property access
+              const parentId =
+                context.expressionToNodeId.get(expression.expression) ?? null;
+              recordDataFlow(expression, scope, parentId, true);
+              return {
+                containsOpaqueRef: true,
+                requiresRewrite: true,
+                dataFlows: [expression],
+              };
+            }
+          } else {
+            // Root symbol undefined - fully synthetic parameter (like `element`)
+            // Skip __ctHelpers.* property accesses - these are helper functions
+            if (root.text === "__ctHelpers") {
+              return {
+                containsOpaqueRef: target.containsOpaqueRef,
+                requiresRewrite: target.requiresRewrite ||
+                  target.containsOpaqueRef,
+                dataFlows: target.dataFlows,
+              };
+            }
+            // Skip method calls like element.trim()
+            if (isMethodCall(expression)) {
+              return {
+                containsOpaqueRef: target.containsOpaqueRef,
+                requiresRewrite: target.requiresRewrite ||
+                  target.containsOpaqueRef,
+                dataFlows: target.dataFlows,
+              };
+            }
+            // Treat as opaque property access
+            const parentId =
+              context.expressionToNodeId.get(expression.expression) ?? null;
+            recordDataFlow(expression, scope, parentId, true);
+            return {
+              containsOpaqueRef: true,
+              requiresRewrite: true,
+              dataFlows: [expression],
+            };
+          }
+        }
+      }
+
       return {
         containsOpaqueRef: target.containsOpaqueRef,
         requiresRewrite: target.requiresRewrite || target.containsOpaqueRef,
         dataFlows: target.dataFlows,
-        localNodes: target.localNodes,
       };
     }
 
@@ -780,14 +565,13 @@ export function createDataFlowAnalyzer(
           return emptyAnalysis();
         }
         const parentId =
-          findParentNodeId(target.localNodes, expression.expression) ?? null;
+          context.expressionToNodeId.get(expression.expression) ?? null;
         // Element access on implicit opaque ref - this is likely an explicit dependency
-        const node = recordDataFlow(expression, scope, parentId, true);
+        recordDataFlow(expression, scope, parentId, true);
         return {
           containsOpaqueRef: true,
           requiresRewrite: true,
           dataFlows: [expression],
-          localNodes: [node],
         };
       }
       return {
@@ -795,7 +579,6 @@ export function createDataFlowAnalyzer(
           argument.containsOpaqueRef,
         requiresRewrite: true,
         dataFlows: [...target.dataFlows, ...argument.dataFlows],
-        localNodes: [...target.localNodes, ...argument.localNodes],
       };
     }
 
@@ -829,11 +612,6 @@ export function createDataFlowAnalyzer(
           ...whenTrue.dataFlows,
           ...whenFalse.dataFlows,
         ],
-        localNodes: [
-          ...condition.localNodes,
-          ...whenTrue.localNodes,
-          ...whenFalse.localNodes,
-        ],
       };
     }
 
@@ -856,7 +634,6 @@ export function createDataFlowAnalyzer(
         containsOpaqueRef: operand.containsOpaqueRef,
         requiresRewrite: operand.containsOpaqueRef,
         dataFlows: operand.dataFlows,
-        localNodes: operand.localNodes,
       };
     }
 
@@ -885,7 +662,7 @@ export function createDataFlowAnalyzer(
         if (isFunctionLikeExpression(arg)) {
           const parameterSymbols: ts.Symbol[] = [];
           for (const parameter of arg.parameters) {
-            const symbol = checker.getSymbolAtLocation(parameter.name);
+            const symbol = tryGetSymbol(parameter.name);
             if (symbol) {
               parameterSymbols.push(symbol);
             }
@@ -933,7 +710,7 @@ export function createDataFlowAnalyzer(
     if (isFunctionLikeExpression(expression)) {
       const parameterSymbols: ts.Symbol[] = [];
       for (const parameter of expression.parameters) {
-        const symbol = checker.getSymbolAtLocation(parameter.name);
+        const symbol = tryGetSymbol(parameter.name);
         if (symbol) parameterSymbols.push(symbol);
       }
       const childScope = createScope(context, scope, parameterSymbols);
@@ -976,29 +753,74 @@ export function createDataFlowAnalyzer(
       return mergeAnalyses(...analyses);
     }
 
-    // Handle JSX elements in non-synthetic path too
-    if (ts.isJsxElement(expression)) {
-      const analyses: InternalAnalysis[] = [];
-      // Analyze opening element attributes
-      if (expression.openingElement.attributes) {
-        expression.openingElement.attributes.properties.forEach((attr) => {
-          if (ts.isExpression(attr)) {
-            analyses.push(analyzeExpression(attr, scope, context));
+    // === JSX Expression Handling ===
+    // The analyzer provides complete data flow analysis for JSX elements,
+    // including both attributes (like `value={expr}`) and children.
+    // This makes the analyzer self-contained - callers get correct results
+    // regardless of how they traverse the AST.
+
+    // Helper: analyze JSX attributes (JsxAttribute and JsxSpreadAttribute)
+    const analyzeJsxAttributes = (
+      attributes: ts.JsxAttributes,
+    ): InternalAnalysis[] => {
+      const results: InternalAnalysis[] = [];
+      for (const attr of attributes.properties) {
+        if (ts.isJsxAttribute(attr)) {
+          // <Component value={expr} /> - analyze the expression inside {expr}
+          if (
+            attr.initializer &&
+            ts.isJsxExpression(attr.initializer) &&
+            attr.initializer.expression
+          ) {
+            results.push(
+              analyzeExpression(attr.initializer.expression, scope, context),
+            );
           }
-        });
-      }
-      // Analyze JSX children - must handle JsxExpression specially
-      expression.children.forEach((child) => {
-        if (ts.isJsxExpression(child)) {
-          if (child.expression) {
-            analyses.push(analyzeExpression(child.expression, scope, context));
-          }
-        } else if (ts.isJsxElement(child)) {
-          analyses.push(analyzeExpression(child, scope, context));
+          // String literal initializers (value="string") have no dependencies
+        } else if (ts.isJsxSpreadAttribute(attr)) {
+          // <Component {...expr} /> - analyze the spread expression
+          results.push(analyzeExpression(attr.expression, scope, context));
         }
-        // Ignore JsxText and other non-expression children
-      });
-      return mergeAnalyses(...analyses);
+      }
+      return results;
+    };
+
+    // Helper: analyze JSX children
+    const analyzeJsxChildren = (
+      children: ts.NodeArray<ts.JsxChild>,
+    ): InternalAnalysis[] => {
+      const results: InternalAnalysis[] = [];
+      for (const child of children) {
+        if (ts.isJsxExpression(child) && child.expression) {
+          // {expr} - analyze the inner expression
+          results.push(analyzeExpression(child.expression, scope, context));
+        } else if (
+          ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child)
+        ) {
+          // Nested JSX elements - recurse
+          results.push(analyzeExpression(child, scope, context));
+        }
+        // JsxText nodes have no dependencies
+      }
+      return results;
+    };
+
+    if (ts.isJsxElement(expression)) {
+      const attrAnalyses = analyzeJsxAttributes(
+        expression.openingElement.attributes,
+      );
+      const childAnalyses = analyzeJsxChildren(expression.children);
+      return mergeAnalyses(...attrAnalyses, ...childAnalyses);
+    }
+
+    if (ts.isJsxSelfClosingElement(expression)) {
+      const attrAnalyses = analyzeJsxAttributes(expression.attributes);
+      return mergeAnalyses(...attrAnalyses);
+    }
+
+    if (ts.isJsxFragment(expression)) {
+      const childAnalyses = analyzeJsxChildren(expression.children);
+      return mergeAnalyses(...childAnalyses);
     }
 
     const analyses: InternalAnalysis[] = [];
@@ -1019,16 +841,15 @@ export function createDataFlowAnalyzer(
       nextScopeId: 0,
       collectedNodes: [],
       scopes: new Map(),
+      expressionToNodeId: new Map(),
     };
     const rootScope = createScope(context, null, []);
     const result = analyzeExpression(expression, rootScope, context);
-    const scopes = Array.from(context.scopes.values()).map(toDataFlowScope);
-    const { localNodes: _, ...resultWithoutNodes } = result;
     return {
-      ...resultWithoutNodes,
+      ...result,
       graph: {
         nodes: context.collectedNodes,
-        scopes,
+        scopes: Array.from(context.scopes.values()),
         rootScopeId: rootScope.id,
       },
     };
@@ -1090,15 +911,3 @@ export function collectOpaqueRefs(
   visit(node);
   return refs;
 }
-const findParentNodeId = (
-  nodes: DataFlowNode[],
-  target: ts.Expression,
-): number | null => {
-  for (let index = nodes.length - 1; index >= 0; index--) {
-    const node = nodes[index];
-    if (node && node.expression === target) {
-      return node.id;
-    }
-  }
-  return null;
-};
