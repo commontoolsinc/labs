@@ -2,6 +2,7 @@ import ts from "typescript";
 import type { TransformationContext } from "../core/mod.ts";
 import type { CaptureTreeNode } from "../utils/capture-tree.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
+import { inferWidenedTypeFromExpression } from "./type-inference.ts";
 import {
   isOptionalProperty,
   isOptionalPropertyAccess,
@@ -43,13 +44,16 @@ export function typeToTypeNodeWithRegistry(
 
 /**
  * Converts an expression to a TypeNode by getting its type at that location.
+ * Automatically widens literal types (e.g., `5` → `number`) for more flexible schemas.
  * Automatically registers in the type registry if available.
  */
 export function expressionToTypeNode(
   expr: ts.Expression,
   context: TransformationContext,
 ): ts.TypeNode {
-  const type = context.checker.getTypeAtLocation(expr);
+  // Use inferWidenedTypeFromExpression to widen literal types
+  // This ensures `const x = 5` produces `number`, not `5`
+  const type = inferWidenedTypeFromExpression(expr, context.checker);
   return typeToTypeNodeWithRegistry(
     type,
     context,

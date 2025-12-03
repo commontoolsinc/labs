@@ -869,7 +869,11 @@ export class SchemaInjectionTransformer extends Transformer {
             // Don't set argType - let schema generator handle the synthetic node
           } else {
             // Normal case - infer from the argument type
-            const argumentType = checker.getTypeAtLocation(firstArg);
+            // Apply literal widening so `const x = 5; derive(x, fn)` produces `number`, not `5`
+            const argumentType = widenLiteralType(
+              checker.getTypeAtLocation(firstArg),
+              checker,
+            );
             const inferred = collectFunctionSchemaTypeNodes(
               callback,
               checker,
