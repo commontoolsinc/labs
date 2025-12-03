@@ -100,20 +100,128 @@ export const streamData = createNodeFactory({
   }>,
 ) => OpaqueRef<{ pending: boolean; result: T; error: unknown }>;
 
+// ifElse with optional schema arguments (backward compatible)
 export function ifElse<T = unknown, U = unknown, V = unknown>(
-  condition: Opaque<T>,
-  ifTrue: Opaque<U>,
-  ifFalse: Opaque<V>,
+  conditionSchemaOrCondition: JSONSchema | Opaque<T>,
+  ifTrueSchemaOrIfTrue: JSONSchema | Opaque<U>,
+  ifFalseSchemaOrIfFalse: JSONSchema | Opaque<V>,
+  condition?: Opaque<T>,
+  ifTrue?: Opaque<U>,
+  ifFalse?: Opaque<V>,
 ): OpaqueRef<U | V> {
   ifElseFactory ||= createNodeFactory({
     type: "ref",
     implementation: "ifElse",
   });
-  return ifElseFactory({ condition, ifTrue, ifFalse }) as OpaqueRef<U | V>;
+
+  // Check if schemas were provided (6 args) or not (3 args)
+  if (condition !== undefined && ifTrue !== undefined && ifFalse !== undefined) {
+    // New signature with schemas: ifElse(condSchema, trueSchema, falseSchema, cond, ifTrue, ifFalse)
+    return ifElseFactory({
+      conditionSchema: conditionSchemaOrCondition as JSONSchema,
+      ifTrueSchema: ifTrueSchemaOrIfTrue as JSONSchema,
+      ifFalseSchema: ifFalseSchemaOrIfFalse as JSONSchema,
+      condition,
+      ifTrue,
+      ifFalse,
+    }) as OpaqueRef<U | V>;
+  }
+
+  // Old signature without schemas: ifElse(cond, ifTrue, ifFalse)
+  return ifElseFactory({
+    condition: conditionSchemaOrCondition,
+    ifTrue: ifTrueSchemaOrIfTrue,
+    ifFalse: ifFalseSchemaOrIfFalse,
+  }) as OpaqueRef<U | V>;
 }
 
 let ifElseFactory:
-  | NodeFactory<{ condition: unknown; ifTrue: unknown; ifFalse: unknown }, any>
+  | NodeFactory<{
+      conditionSchema?: JSONSchema;
+      ifTrueSchema?: JSONSchema;
+      ifFalseSchema?: JSONSchema;
+      condition: unknown;
+      ifTrue: unknown;
+      ifFalse: unknown;
+    }, any>
+  | undefined;
+
+// when(condition, value) - returns value if condition is truthy, else condition
+export function when<T = unknown, U = unknown>(
+  conditionSchemaOrCondition: JSONSchema | Opaque<T>,
+  valueSchemaOrValue: JSONSchema | Opaque<U>,
+  condition?: Opaque<T>,
+  value?: Opaque<U>,
+): OpaqueRef<T | U> {
+  whenFactory ||= createNodeFactory({
+    type: "ref",
+    implementation: "when",
+  });
+
+  // Check if schemas were provided (4 args) or not (2 args)
+  if (condition !== undefined && value !== undefined) {
+    // New signature with schemas: when(condSchema, valueSchema, cond, value)
+    return whenFactory({
+      conditionSchema: conditionSchemaOrCondition as JSONSchema,
+      valueSchema: valueSchemaOrValue as JSONSchema,
+      condition,
+      value,
+    }) as OpaqueRef<T | U>;
+  }
+
+  // Old signature without schemas: when(cond, value)
+  return whenFactory({
+    condition: conditionSchemaOrCondition,
+    value: valueSchemaOrValue,
+  }) as OpaqueRef<T | U>;
+}
+
+let whenFactory:
+  | NodeFactory<{
+      conditionSchema?: JSONSchema;
+      valueSchema?: JSONSchema;
+      condition: unknown;
+      value: unknown;
+    }, any>
+  | undefined;
+
+// unless(condition, fallback) - returns condition if truthy, else fallback
+export function unless<T = unknown, U = unknown>(
+  conditionSchemaOrCondition: JSONSchema | Opaque<T>,
+  fallbackSchemaOrFallback: JSONSchema | Opaque<U>,
+  condition?: Opaque<T>,
+  fallback?: Opaque<U>,
+): OpaqueRef<T | U> {
+  unlessFactory ||= createNodeFactory({
+    type: "ref",
+    implementation: "unless",
+  });
+
+  // Check if schemas were provided (4 args) or not (2 args)
+  if (condition !== undefined && fallback !== undefined) {
+    // New signature with schemas: unless(condSchema, fallbackSchema, cond, fallback)
+    return unlessFactory({
+      conditionSchema: conditionSchemaOrCondition as JSONSchema,
+      fallbackSchema: fallbackSchemaOrFallback as JSONSchema,
+      condition,
+      fallback,
+    }) as OpaqueRef<T | U>;
+  }
+
+  // Old signature without schemas: unless(cond, fallback)
+  return unlessFactory({
+    condition: conditionSchemaOrCondition,
+    fallback: fallbackSchemaOrFallback,
+  }) as OpaqueRef<T | U>;
+}
+
+let unlessFactory:
+  | NodeFactory<{
+      conditionSchema?: JSONSchema;
+      fallbackSchema?: JSONSchema;
+      condition: unknown;
+      fallback: unknown;
+    }, any>
   | undefined;
 
 /**
