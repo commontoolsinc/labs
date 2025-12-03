@@ -3,7 +3,6 @@ import ts from "typescript";
 import {
   getExpressionText,
   getMemberSymbol,
-  isFunctionParameter,
   isMethodCall,
   setParentPointers,
 } from "./utils.ts";
@@ -854,60 +853,4 @@ export function createDataFlowAnalyzer(
       },
     };
   };
-}
-
-export function collectOpaqueRefs(
-  node: ts.Node,
-  checker: ts.TypeChecker,
-): ts.Expression[] {
-  const refs: ts.Expression[] = [];
-  const processedNodes = new Set<ts.Node>();
-
-  const visit = (n: ts.Node): void => {
-    if (ts.isJsxAttribute(n)) {
-      const name = n.name.getText();
-      if (name && name.startsWith("on")) {
-        return;
-      }
-    }
-
-    if (processedNodes.has(n)) return;
-    processedNodes.add(n);
-
-    if (ts.isPropertyAccessExpression(n) && ts.isExpression(n)) {
-      if (
-        ts.isIdentifier(n.expression) &&
-        isFunctionParameter(n.expression, checker)
-      ) {
-        return;
-      }
-
-      const type = checker.getTypeAtLocation(n);
-      if (isOpaqueRefType(type, checker)) {
-        refs.push(n);
-        return;
-      }
-    }
-
-    if (ts.isIdentifier(n) && ts.isExpression(n)) {
-      const parent = n.parent;
-      if (ts.isPropertyAccessExpression(parent) && parent.name === n) {
-        return;
-      }
-
-      if (isFunctionParameter(n, checker)) {
-        return;
-      }
-
-      const type = checker.getTypeAtLocation(n);
-      if (isOpaqueRefType(type, checker)) {
-        refs.push(n);
-      }
-    }
-
-    ts.forEachChild(n, visit);
-  };
-
-  visit(node);
-  return refs;
 }
