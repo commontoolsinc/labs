@@ -966,7 +966,10 @@ describe("wish built-in", () => {
 
       // Verify: Gets pattern space's #default, not home space's
       const defaultData = result.key("defaultData").get()?.result;
-      expect(defaultData).toEqual({ title: "Pattern Default", value: "pattern" });
+      expect(defaultData).toEqual({
+        title: "Pattern Default",
+        value: "pattern",
+      });
     });
 
     it("resolves mixed tags (#favorites from home, / from pattern) in single pattern", async () => {
