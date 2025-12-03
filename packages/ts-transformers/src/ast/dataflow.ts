@@ -52,25 +52,18 @@ export interface DataFlowAnalysis {
   rewriteHint?: RewriteHint;
 }
 
-interface DataFlowScopeInternal {
-  readonly id: number;
-  readonly parentId: number | null;
-  readonly parameterSymbols: ts.Symbol[];
-  readonly aggregated: Set<ts.Symbol>;
-}
-
 interface AnalyzerContext {
   nextNodeId: number;
   nextScopeId: number;
   readonly collectedNodes: DataFlowNode[]; // All nodes collected during analysis
-  readonly scopes: Map<number, DataFlowScopeInternal>;
+  readonly scopes: Map<number, DataFlowScope>;
+  readonly expressionToNodeId: Map<ts.Expression, number>; // For O(1) parent lookups
 }
 
 interface InternalAnalysis {
   containsOpaqueRef: boolean;
   requiresRewrite: boolean;
   dataFlows: ts.Expression[];
-  localNodes: DataFlowNode[]; // Nodes from this expression subtree only
   rewriteHint?: RewriteHint;
 }
 
@@ -78,7 +71,6 @@ const emptyAnalysis = (): InternalAnalysis => ({
   containsOpaqueRef: false,
   requiresRewrite: false,
   dataFlows: [],
-  localNodes: [],
   rewriteHint: undefined,
 });
 
@@ -86,19 +78,16 @@ const mergeAnalyses = (...analyses: InternalAnalysis[]): InternalAnalysis => {
   let contains = false;
   let requires = false;
   const dataFlows: ts.Expression[] = [];
-  const localNodes: DataFlowNode[] = [];
   for (const analysis of analyses) {
     if (!analysis) continue;
     contains ||= analysis.containsOpaqueRef;
     requires ||= analysis.requiresRewrite;
     dataFlows.push(...analysis.dataFlows);
-    localNodes.push(...analysis.localNodes);
   }
   return {
     containsOpaqueRef: contains,
     requiresRewrite: requires,
     dataFlows,
-    localNodes,
     rewriteHint: undefined,
   };
 };
@@ -106,56 +95,59 @@ const mergeAnalyses = (...analyses: InternalAnalysis[]): InternalAnalysis => {
 export function createDataFlowAnalyzer(
   checker: ts.TypeChecker,
 ): (expression: ts.Expression) => DataFlowAnalysis {
+  // Convert symbols to enriched parameters with name and declaration info
+  const toScopeParameters = (
+    symbols: ts.Symbol[],
+  ): DataFlowScopeParameter[] =>
+    symbols.map((symbol) => {
+      const declarations = symbol.getDeclarations();
+      const parameterDecl = declarations?.find((
+        decl,
+      ): decl is ts.ParameterDeclaration => ts.isParameter(decl));
+      return parameterDecl
+        ? { name: symbol.getName(), symbol, declaration: parameterDecl }
+        : { name: symbol.getName(), symbol };
+    });
+
   const createScope = (
     context: AnalyzerContext,
-    parent: DataFlowScopeInternal | null,
+    parent: DataFlowScope | null,
     parameterSymbols: ts.Symbol[],
-  ): DataFlowScopeInternal => {
-    const aggregated = parent
-      ? new Set(parent.aggregated)
-      : new Set<ts.Symbol>();
-    for (const symbol of parameterSymbols) aggregated.add(symbol);
-    const scope: DataFlowScopeInternal = {
+  ): DataFlowScope => {
+    const scope: DataFlowScope = {
       id: context.nextScopeId++,
       parentId: parent ? parent.id : null,
-      parameterSymbols,
-      aggregated,
+      parameters: toScopeParameters(parameterSymbols),
     };
     context.scopes.set(scope.id, scope);
     return scope;
   };
 
+  // Compute all parameters accessible from a scope (own + ancestors) on-demand
+  const getAggregatedSymbols = (
+    scope: DataFlowScope,
+    scopes: Map<number, DataFlowScope>,
+  ): Set<ts.Symbol> => {
+    const result = new Set<ts.Symbol>();
+    let current: DataFlowScope | undefined = scope;
+    while (current) {
+      for (const param of current.parameters) {
+        result.add(param.symbol);
+      }
+      current = current.parentId !== null
+        ? scopes.get(current.parentId)
+        : undefined;
+    }
+    return result;
+  };
+
   const createCanonicalKey = (
     expression: ts.Expression,
-    scope: DataFlowScopeInternal,
+    scope: DataFlowScope,
   ): string => {
     const text = getExpressionText(expression);
     return `${scope.id}:${text}`;
   };
-
-  const toDataFlowScope = (
-    scope: DataFlowScopeInternal,
-  ): DataFlowScope => ({
-    id: scope.id,
-    parentId: scope.parentId,
-    parameters: scope.parameterSymbols.map((symbol) => {
-      const declarations = symbol.getDeclarations();
-      const parameterDecl = declarations?.find((
-        decl,
-      ): decl is ts.ParameterDeclaration => ts.isParameter(decl));
-      if (parameterDecl) {
-        return {
-          name: symbol.getName(),
-          symbol,
-          declaration: parameterDecl,
-        } satisfies DataFlowScopeParameter;
-      }
-      return {
-        name: symbol.getName(),
-        symbol,
-      } satisfies DataFlowScopeParameter;
-    }),
-  });
 
   // Determine how CallExpressions should be handled based on their call kind.
   // Returns the appropriate InternalAnalysis with correct requiresRewrite logic.
@@ -205,7 +197,7 @@ export function createDataFlowAnalyzer(
 
   const analyzeExpression = (
     expression: ts.Expression,
-    scope: DataFlowScopeInternal,
+    scope: DataFlowScope,
     context: AnalyzerContext,
   ): InternalAnalysis => {
     // Handle synthetic nodes (created by previous transformers)
@@ -257,11 +249,11 @@ export function createDataFlowAnalyzer(
           isExplicit: true, // Explicit: synthetic opaque parameter
         };
         context.collectedNodes.push(node);
+        context.expressionToNodeId.set(expression, node.id);
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,
           dataFlows: [expression],
-          localNodes: [node],
         };
       }
 
@@ -389,11 +381,11 @@ export function createDataFlowAnalyzer(
                             isExplicit: true, // Explicit: synthetic opaque property access
                           };
                           context.collectedNodes.push(node);
+                          context.expressionToNodeId.set(expression, node.id);
                           return {
                             containsOpaqueRef: true,
                             requiresRewrite: true,
                             dataFlows: [expression],
-                            localNodes: [node],
                           };
                         }
                       }
@@ -436,11 +428,11 @@ export function createDataFlowAnalyzer(
                 isExplicit: true, // Explicit: synthetic opaque property access
               };
               context.collectedNodes.push(node);
+              context.expressionToNodeId.set(expression, node.id);
               return {
                 containsOpaqueRef: true,
                 requiresRewrite: true,
                 dataFlows: [expression],
-                localNodes: [node],
               };
             }
           }
@@ -510,17 +502,17 @@ export function createDataFlowAnalyzer(
         containsOpaqueRef: false,
         requiresRewrite: false,
         dataFlows: [],
-        localNodes: [],
         rewriteHint: undefined,
       };
     }
 
     const isSymbolIgnored = (symbol: ts.Symbol | undefined): boolean => {
       if (!symbol) return false;
-      if (scope.aggregated.has(symbol) && isRootOpaqueParameter(symbol)) {
+      const aggregated = getAggregatedSymbols(scope, context.scopes);
+      if (aggregated.has(symbol) && isRootOpaqueParameter(symbol)) {
         return false;
       }
-      return scope.aggregated.has(symbol);
+      return aggregated.has(symbol);
     };
 
     const originatesFromIgnored = (expr: ts.Expression): boolean => {
@@ -542,7 +534,7 @@ export function createDataFlowAnalyzer(
 
     const recordDataFlow = (
       expr: ts.Expression,
-      ownerScope: DataFlowScopeInternal,
+      ownerScope: DataFlowScope,
       parentId: number | null = null,
       isExplicit: boolean = false,
     ): DataFlowNode => {
@@ -555,6 +547,7 @@ export function createDataFlowAnalyzer(
         isExplicit,
       };
       context.collectedNodes.push(node);
+      context.expressionToNodeId.set(expr, node.id);
       return node;
     };
 
@@ -635,32 +628,29 @@ export function createDataFlowAnalyzer(
       }
       const type = checker.getTypeAtLocation(expression);
       if (isOpaqueRefType(type, checker)) {
-        const node = recordDataFlow(expression, scope, null, true); // Explicit: direct OpaqueRef
+        recordDataFlow(expression, scope, null, true); // Explicit: direct OpaqueRef
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,
           dataFlows: [expression],
-          localNodes: [node],
         };
       }
       if (symbolDeclaresCommonToolsDefault(symbol, checker)) {
-        const node = recordDataFlow(expression, scope, null, true); // Explicit: CommonTools default
+        recordDataFlow(expression, scope, null, true); // Explicit: CommonTools default
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,
           dataFlows: [expression],
-          localNodes: [node],
         };
       }
       // Check if this identifier is a parameter to a builder or array-map call (like recipe)
       // These parameters become implicitly opaque even though their type isn't OpaqueRef
       if (isRootOpaqueParameter(symbol)) {
-        const node = recordDataFlow(expression, scope, null, true); // Explicit: opaque parameter
+        recordDataFlow(expression, scope, null, true); // Explicit: opaque parameter
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,
           dataFlows: [expression],
-          localNodes: [node],
         };
       }
       return emptyAnalysis();
@@ -675,9 +665,8 @@ export function createDataFlowAnalyzer(
           return emptyAnalysis();
         }
         const parentId =
-          findParentNodeId(target.localNodes, expression.expression) ??
-            null;
-        const node = recordDataFlow(expression, scope, parentId, true); // Explicit: OpaqueRef property
+          context.expressionToNodeId.get(expression.expression) ?? null;
+        recordDataFlow(expression, scope, parentId, true); // Explicit: OpaqueRef property
 
         // If the target is a complex expression requiring rewrite (like ElementAccess),
         // propagate its dataFlows. Otherwise, add this property access as a dataFlow.
@@ -686,14 +675,12 @@ export function createDataFlowAnalyzer(
             containsOpaqueRef: true,
             requiresRewrite: target.requiresRewrite,
             dataFlows: target.dataFlows,
-            localNodes: [node],
           };
         } else {
           return {
             containsOpaqueRef: true,
             requiresRewrite: target.requiresRewrite,
             dataFlows: [expression],
-            localNodes: [node],
           };
         }
       }
@@ -703,13 +690,12 @@ export function createDataFlowAnalyzer(
           return emptyAnalysis();
         }
         const parentId =
-          findParentNodeId(target.localNodes, expression.expression) ?? null;
-        const node = recordDataFlow(expression, scope, parentId, true); // Explicit: CommonTools property
+          context.expressionToNodeId.get(expression.expression) ?? null;
+        recordDataFlow(expression, scope, parentId, true); // Explicit: CommonTools property
         return {
           containsOpaqueRef: true,
           requiresRewrite: true,
           dataFlows: [expression],
-          localNodes: [node],
         };
       }
       if (isImplicitOpaqueRefExpression(expression)) {
@@ -721,7 +707,7 @@ export function createDataFlowAnalyzer(
         const isPropertyOnCall = ts.isCallExpression(expression.expression);
 
         const parentId =
-          findParentNodeId(target.localNodes, expression.expression) ?? null;
+          context.expressionToNodeId.get(expression.expression) ?? null;
 
         // If the target is a complex expression requiring rewrite (ElementAccess or Call),
         // propagate its dataFlows. Otherwise add this property access as a dataFlow.
@@ -730,30 +716,27 @@ export function createDataFlowAnalyzer(
           (target.requiresRewrite && target.dataFlows.length > 0)
         ) {
           // This is a computed expression - use the dependencies from the target
-          const node = recordDataFlow(expression, scope, parentId, false);
+          recordDataFlow(expression, scope, parentId, false);
           return {
             containsOpaqueRef: true,
             requiresRewrite: true,
             dataFlows: target.dataFlows,
-            localNodes: [node],
           };
         }
 
         // This is a direct property access on an OpaqueRef (like state.charms.length)
         // It should be its own explicit dependency
-        const node = recordDataFlow(expression, scope, parentId, true);
+        recordDataFlow(expression, scope, parentId, true);
         return {
           containsOpaqueRef: true,
           requiresRewrite: true,
           dataFlows: [expression],
-          localNodes: [node],
         };
       }
       return {
         containsOpaqueRef: target.containsOpaqueRef,
         requiresRewrite: target.requiresRewrite || target.containsOpaqueRef,
         dataFlows: target.dataFlows,
-        localNodes: target.localNodes,
       };
     }
 
@@ -780,14 +763,13 @@ export function createDataFlowAnalyzer(
           return emptyAnalysis();
         }
         const parentId =
-          findParentNodeId(target.localNodes, expression.expression) ?? null;
+          context.expressionToNodeId.get(expression.expression) ?? null;
         // Element access on implicit opaque ref - this is likely an explicit dependency
-        const node = recordDataFlow(expression, scope, parentId, true);
+        recordDataFlow(expression, scope, parentId, true);
         return {
           containsOpaqueRef: true,
           requiresRewrite: true,
           dataFlows: [expression],
-          localNodes: [node],
         };
       }
       return {
@@ -795,7 +777,6 @@ export function createDataFlowAnalyzer(
           argument.containsOpaqueRef,
         requiresRewrite: true,
         dataFlows: [...target.dataFlows, ...argument.dataFlows],
-        localNodes: [...target.localNodes, ...argument.localNodes],
       };
     }
 
@@ -829,11 +810,6 @@ export function createDataFlowAnalyzer(
           ...whenTrue.dataFlows,
           ...whenFalse.dataFlows,
         ],
-        localNodes: [
-          ...condition.localNodes,
-          ...whenTrue.localNodes,
-          ...whenFalse.localNodes,
-        ],
       };
     }
 
@@ -856,7 +832,6 @@ export function createDataFlowAnalyzer(
         containsOpaqueRef: operand.containsOpaqueRef,
         requiresRewrite: operand.containsOpaqueRef,
         dataFlows: operand.dataFlows,
-        localNodes: operand.localNodes,
       };
     }
 
@@ -1019,16 +994,15 @@ export function createDataFlowAnalyzer(
       nextScopeId: 0,
       collectedNodes: [],
       scopes: new Map(),
+      expressionToNodeId: new Map(),
     };
     const rootScope = createScope(context, null, []);
     const result = analyzeExpression(expression, rootScope, context);
-    const scopes = Array.from(context.scopes.values()).map(toDataFlowScope);
-    const { localNodes: _, ...resultWithoutNodes } = result;
     return {
-      ...resultWithoutNodes,
+      ...result,
       graph: {
         nodes: context.collectedNodes,
-        scopes,
+        scopes: Array.from(context.scopes.values()),
         rootScopeId: rootScope.id,
       },
     };
@@ -1090,15 +1064,3 @@ export function collectOpaqueRefs(
   visit(node);
   return refs;
 }
-const findParentNodeId = (
-  nodes: DataFlowNode[],
-  target: ts.Expression,
-): number | null => {
-  for (let index = nodes.length - 1; index >= 0; index--) {
-    const node = nodes[index];
-    if (node && node.expression === target) {
-      return node.id;
-    }
-  }
-  return null;
-};
