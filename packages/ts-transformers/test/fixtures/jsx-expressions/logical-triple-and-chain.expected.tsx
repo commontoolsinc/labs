@@ -1,16 +1,15 @@
 import * as __ctHelpers from "commontools";
-import { cell, NAME, recipe, UI } from "commontools";
+import { cell, recipe, UI } from "commontools";
+// Tests triple && chain: a && b && c
+// Should produce nested when calls or derive the entire chain
 export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
-        $NAME: {
-            type: "string"
-        },
         $UI: {
             $ref: "#/$defs/Element"
         }
     },
-    required: ["$NAME", "$UI"],
+    required: ["$UI"],
     $defs: {
         Element: {
             type: "object",
@@ -109,31 +108,76 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, () => {
-    const list = cell<string[] | undefined>(undefined, {
-        type: "array",
-        items: {
-            type: "string"
-        }
+} as const satisfies __ctHelpers.JSONSchema, (_state) => {
+    const user = cell<{
+        active: boolean;
+        verified: boolean;
+        name: string;
+    }>({ active: false, verified: false, name: "" }, {
+        type: "object",
+        properties: {
+            active: {
+                type: "boolean"
+            },
+            verified: {
+                type: "boolean"
+            },
+            name: {
+                type: "string"
+            }
+        },
+        required: ["active", "verified", "name"]
     } as const satisfies __ctHelpers.JSONSchema);
     return {
-        [NAME]: "Optional element access",
         [UI]: (<div>
+        {/* Triple && chain with complex conditions */}
         {__ctHelpers.when(__ctHelpers.derive({
             type: "object",
             properties: {
-                list: {
-                    type: "array",
-                    items: {
-                        type: "string"
+                user: {
+                    type: "object",
+                    properties: {
+                        active: {
+                            type: "boolean"
+                        },
+                        verified: {
+                            type: "boolean"
+                        },
+                        name: {
+                            type: "string"
+                        }
                     },
+                    required: ["active", "verified", "name"],
                     asCell: true
                 }
             },
-            required: ["list"]
+            required: ["user"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => !list.get()?.[0]), <span>No first entry</span>)}
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().active && user.get().verified), <span>Welcome, {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        active: {
+                            type: "boolean"
+                        },
+                        verified: {
+                            type: "boolean"
+                        },
+                        name: {
+                            type: "string"
+                        }
+                    },
+                    required: ["active", "verified", "name"],
+                    asCell: true
+                }
+            },
+            required: ["user"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name)}!</span>)}
       </div>),
     };
 });

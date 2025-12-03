@@ -1,16 +1,15 @@
 import * as __ctHelpers from "commontools";
-import { cell, NAME, recipe, UI } from "commontools";
+import { cell, recipe, UI } from "commontools";
+// Tests nullish coalescing (??) interaction with && and ||
+// ?? should NOT be transformed to when/unless (different semantics)
 export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
-        $NAME: {
-            type: "string"
-        },
         $UI: {
             $ref: "#/$defs/Element"
         }
     },
-    required: ["$NAME", "$UI"],
+    required: ["$UI"],
     $defs: {
         Element: {
             type: "object",
@@ -109,20 +108,97 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, () => {
-    const list = cell<string[] | undefined>(undefined, {
+} as const satisfies __ctHelpers.JSONSchema, (_state) => {
+    const config = cell<{
+        timeout: number | null;
+        retries: number | undefined;
+    }>({
+        timeout: null,
+        retries: undefined,
+    }, {
+        type: "object",
+        properties: {
+            timeout: {
+                anyOf: [{
+                        type: "number"
+                    }, {
+                        type: "null"
+                    }]
+            },
+            retries: {
+                type: "number"
+            }
+        },
+        required: ["timeout"]
+    } as const satisfies __ctHelpers.JSONSchema);
+    const items = cell<string[]>([], {
         type: "array",
         items: {
             type: "string"
         }
     } as const satisfies __ctHelpers.JSONSchema);
     return {
-        [NAME]: "Optional element access",
         [UI]: (<div>
-        {__ctHelpers.when(__ctHelpers.derive({
+        {/* ?? followed by || - different semantics */}
+        <span>Timeout: {__ctHelpers.unless(__ctHelpers.derive({
             type: "object",
             properties: {
-                list: {
+                config: {
+                    type: "object",
+                    properties: {
+                        timeout: {
+                            anyOf: [{
+                                    type: "number"
+                                }, {
+                                    type: "null"
+                                }]
+                        },
+                        retries: {
+                            type: "number"
+                        }
+                    },
+                    required: ["timeout"],
+                    asCell: true
+                }
+            },
+            required: ["config"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { config: config }, ({ config }) => (config.get().timeout ?? 30)), "disabled")}</span>
+
+        {/* ?? followed by && */}
+        <span>{__ctHelpers.when(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                config: {
+                    type: "object",
+                    properties: {
+                        timeout: {
+                            anyOf: [{
+                                    type: "number"
+                                }, {
+                                    type: "null"
+                                }]
+                        },
+                        retries: {
+                            type: "number"
+                        }
+                    },
+                    required: ["timeout"],
+                    asCell: true
+                }
+            },
+            required: ["config"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { config: config }, ({ config }) => (config.get().retries ?? 3) > 0), "Will retry")}</span>
+
+        {/* Mixed: ?? with && and || */}
+        <span>
+          {__ctHelpers.unless(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                items: {
                     type: "array",
                     items: {
                         type: "string"
@@ -130,10 +206,16 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     asCell: true
                 }
             },
-            required: ["list"]
+            required: ["items"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => !list.get()?.[0]), <span>No first entry</span>)}
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "boolean",
+                    "enum": [false]
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0 && (items.get()[0] ?? "empty")), "no items")}
+        </span>
       </div>),
     };
 });

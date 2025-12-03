@@ -119,7 +119,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     return {
         [NAME]: "Conditional empty check",
         [UI]: (<div>
-        {__ctHelpers.derive({
+        {__ctHelpers.when(__ctHelpers.derive({
             type: "object",
             properties: {
                 items: {
@@ -132,111 +132,8 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             },
             required: ["items"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "boolean",
-                    "enum": [false]
-                }, {
-                    $ref: "#/$defs/Element"
-                }],
-            $defs: {
-                Element: {
-                    type: "object",
-                    properties: {
-                        type: {
-                            type: "string",
-                            "enum": ["vnode"]
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        props: {
-                            $ref: "#/$defs/Props"
-                        },
-                        children: {
-                            $ref: "#/$defs/RenderNode"
-                        },
-                        $UI: {
-                            $ref: "#/$defs/VNode"
-                        }
-                    },
-                    required: ["type", "name", "props"]
-                },
-                VNode: {
-                    type: "object",
-                    properties: {
-                        type: {
-                            type: "string",
-                            "enum": ["vnode"]
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        props: {
-                            $ref: "#/$defs/Props"
-                        },
-                        children: {
-                            $ref: "#/$defs/RenderNode"
-                        },
-                        $UI: {
-                            $ref: "#/$defs/VNode"
-                        }
-                    },
-                    required: ["type", "name", "props"]
-                },
-                RenderNode: {
-                    anyOf: [{
-                            type: "string"
-                        }, {
-                            type: "number"
-                        }, {
-                            type: "boolean",
-                            "enum": [false]
-                        }, {
-                            type: "boolean",
-                            "enum": [true]
-                        }, {
-                            $ref: "#/$defs/VNode"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }, {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/RenderNode"
-                            }
-                        }]
-                },
-                Props: {
-                    type: "object",
-                    properties: {},
-                    additionalProperties: {
-                        anyOf: [{
-                                type: "string"
-                            }, {
-                                type: "number"
-                            }, {
-                                type: "boolean",
-                                "enum": [false]
-                            }, {
-                                type: "boolean",
-                                "enum": [true]
-                            }, {
-                                type: "object",
-                                additionalProperties: true
-                            }, {
-                                type: "array",
-                                items: true
-                            }, {
-                                asCell: true
-                            }, {
-                                asStream: true
-                            }, {
-                                type: "null"
-                            }]
-                    }
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => !items.get().length && <span>No items</span>)}
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => !items.get().length), <span>No items</span>)}
       </div>),
     };
 });

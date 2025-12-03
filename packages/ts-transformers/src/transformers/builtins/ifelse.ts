@@ -36,3 +36,58 @@ export function createIfElseCall(params: IfElseParams): ts.CallExpression {
     [predicate, whenTrue, whenFalse],
   );
 }
+
+export interface WhenParams {
+  condition: ts.Expression;
+  value: ts.Expression;
+  factory: ts.NodeFactory;
+  ctHelpers: CTHelpers;
+}
+
+/**
+ * Creates when(condition, value) call for && operator optimization.
+ * Equivalent to: ifElse(condition, value, condition)
+ */
+export function createWhenCall(params: WhenParams): ts.CallExpression {
+  const { factory, ctHelpers, condition, value } = params;
+  const whenExpr = ctHelpers.getHelperExpr("when");
+
+  let cond = condition;
+  let val = value;
+  while (ts.isParenthesizedExpression(cond)) {
+    cond = cond.expression;
+  }
+  while (ts.isParenthesizedExpression(val)) {
+    val = val.expression;
+  }
+
+  return factory.createCallExpression(
+    whenExpr,
+    undefined,
+    [cond, val],
+  );
+}
+
+/**
+ * Creates unless(condition, value) call for || operator optimization.
+ * Equivalent to: ifElse(condition, condition, value)
+ */
+export function createUnlessCall(params: WhenParams): ts.CallExpression {
+  const { factory, ctHelpers, condition, value } = params;
+  const unlessExpr = ctHelpers.getHelperExpr("unless");
+
+  let cond = condition;
+  let val = value;
+  while (ts.isParenthesizedExpression(cond)) {
+    cond = cond.expression;
+  }
+  while (ts.isParenthesizedExpression(val)) {
+    val = val.expression;
+  }
+
+  return factory.createCallExpression(
+    unlessExpr,
+    undefined,
+    [cond, val],
+  );
+}

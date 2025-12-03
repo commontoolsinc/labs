@@ -37,6 +37,8 @@ import {
   patternTool,
   str,
   streamData,
+  unless,
+  when,
   wish,
 } from "./built-in.ts";
 import { cellConstructorFactory } from "../cell.ts";
@@ -88,6 +90,8 @@ export const createBuilder = (): {
       // Built-in modules
       str,
       ifElse,
+      when,
+      unless,
       llm,
       llmDialog,
       generateObject,

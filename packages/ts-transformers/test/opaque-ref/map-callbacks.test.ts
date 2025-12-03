@@ -74,10 +74,14 @@ describe("OpaqueRef map callbacks", () => {
                 type: "number"
             } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)`,
     );
-    // element[NAME] uses NAME from module scope (import), defaultName from params
+    // element[NAME] || defaultName should now use unless helper wrapping schema-based derive
     assertStringIncludes(
       output,
-      "({ charm, state }) => charm[NAME] || state.defaultName",
+      "__ctHelpers.unless(__ctHelpers.derive(",
+    );
+    assertStringIncludes(
+      output,
+      "({ charm }) => charm[NAME]",
     );
     // ifElse still gets derive for the negation and preserves callback body
     assertStringIncludes(

@@ -1,16 +1,15 @@
 import * as __ctHelpers from "commontools";
-import { cell, NAME, recipe, UI } from "commontools";
+import { cell, recipe, UI } from "commontools";
+// Tests triple || chain: a || b || c
+// Should produce nested unless calls
 export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
-        $NAME: {
-            type: "string"
-        },
         $UI: {
             $ref: "#/$defs/Element"
         }
     },
-    required: ["$NAME", "$UI"],
+    required: ["$UI"],
     $defs: {
         Element: {
             type: "object",
@@ -109,20 +108,47 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, () => {
-    const list = cell<string[] | undefined>(undefined, {
+} as const satisfies __ctHelpers.JSONSchema, (_state) => {
+    const primary = cell("", {
+        type: "string"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const secondary = cell("", {
+        type: "string"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const items = cell<string[]>([], {
         type: "array",
         items: {
             type: "string"
         }
     } as const satisfies __ctHelpers.JSONSchema);
     return {
-        [NAME]: "Optional element access",
         [UI]: (<div>
-        {__ctHelpers.when(__ctHelpers.derive({
+        {/* Triple || chain - first truthy wins */}
+        <span>{__ctHelpers.unless(__ctHelpers.derive({
             type: "object",
             properties: {
-                list: {
+                primary: {
+                    type: "string",
+                    asCell: true
+                },
+                secondary: {
+                    type: "string",
+                    asCell: true
+                }
+            },
+            required: ["primary", "secondary"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            primary: primary,
+            secondary: secondary
+        }, ({ primary, secondary }) => primary.get().length || secondary.get().length), "no content")}</span>
+
+        {/* Triple || with mixed types */}
+        <span>{__ctHelpers.unless(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                items: {
                     type: "array",
                     items: {
                         type: "string"
@@ -130,10 +156,10 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     asCell: true
                 }
             },
-            required: ["list"]
+            required: ["items"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => !list.get()?.[0]), <span>No first entry</span>)}
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.get()[0]?.length || items.get()[1]?.length), 0)}</span>
       </div>),
     };
 });

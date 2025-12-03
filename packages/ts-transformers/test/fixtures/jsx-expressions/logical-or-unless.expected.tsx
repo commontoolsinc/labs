@@ -1,16 +1,13 @@
 import * as __ctHelpers from "commontools";
-import { cell, NAME, recipe, UI } from "commontools";
+import { cell, recipe, UI } from "commontools";
 export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
-        $NAME: {
-            type: "string"
-        },
         $UI: {
             $ref: "#/$defs/Element"
         }
     },
-    required: ["$NAME", "$UI"],
+    required: ["$UI"],
     $defs: {
         Element: {
             type: "object",
@@ -109,20 +106,20 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, () => {
-    const list = cell<string[] | undefined>(undefined, {
+} as const satisfies __ctHelpers.JSONSchema, (_state) => {
+    const items = cell<string[]>([], {
         type: "array",
         items: {
             type: "string"
         }
     } as const satisfies __ctHelpers.JSONSchema);
     return {
-        [NAME]: "Optional element access",
         [UI]: (<div>
-        {__ctHelpers.when(__ctHelpers.derive({
+        {/* Pattern: falsy check || fallback */}
+        {__ctHelpers.unless(__ctHelpers.derive({
             type: "object",
             properties: {
-                list: {
+                items: {
                     type: "array",
                     items: {
                         type: "string"
@@ -130,10 +127,10 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     asCell: true
                 }
             },
-            required: ["list"]
+            required: ["items"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => !list.get()?.[0]), <span>No first entry</span>)}
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length), <span>List is empty</span>)}
       </div>),
     };
 });

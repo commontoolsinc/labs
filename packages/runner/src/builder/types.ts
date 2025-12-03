@@ -42,6 +42,8 @@ import type {
   schema as schemaFunction,
   StreamDataFunction,
   StrFunction,
+  UnlessFunction,
+  WhenFunction,
   WishFunction,
 } from "@commontools/api";
 import { toSchema } from "@commontools/api";
@@ -238,6 +240,8 @@ export interface BuilderFunctionsAndConstants {
   // Built-in modules
   str: StrFunction;
   ifElse: IfElseFunction;
+  when: WhenFunction;
+  unless: UnlessFunction;
   llm: LLMFunction;
   llmDialog: LLMDialogFunction;
   generateObject: GenerateObjectFunction;
