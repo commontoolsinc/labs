@@ -100,14 +100,10 @@ const handleCharmLinkClicked = handler<void, { charm: Cell<MentionableCharm> }>(
   },
 );
 
-function schemaifyWish<T>(path: string, def: T) {
-  return derive(wish<T>(path) as T, (i) => i ?? def);
-}
-
 const Note = recipe<Input, Output>(
   "Note",
   ({ title, content }) => {
-    const mentionable = schemaifyWish<MentionableCharm[]>(
+    const mentionable = wish<MentionableCharm[]>(
       "#mentionable",
       [],
     );
