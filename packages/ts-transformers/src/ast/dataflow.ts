@@ -753,53 +753,74 @@ export function createDataFlowAnalyzer(
       return mergeAnalyses(...analyses);
     }
 
-    // Handle JSX elements - forEachChild doesn't traverse JSX expression children properly
-    if (ts.isJsxElement(expression)) {
-      const analyses: InternalAnalysis[] = [];
-      // Analyze opening element attributes
-      if (expression.openingElement.attributes) {
-        expression.openingElement.attributes.properties.forEach((attr) => {
-          if (ts.isExpression(attr)) {
-            analyses.push(analyzeExpression(attr, scope, context));
+    // === JSX Expression Handling ===
+    // The analyzer provides complete data flow analysis for JSX elements,
+    // including both attributes (like `value={expr}`) and children.
+    // This makes the analyzer self-contained - callers get correct results
+    // regardless of how they traverse the AST.
+
+    // Helper: analyze JSX attributes (JsxAttribute and JsxSpreadAttribute)
+    const analyzeJsxAttributes = (
+      attributes: ts.JsxAttributes,
+    ): InternalAnalysis[] => {
+      const results: InternalAnalysis[] = [];
+      for (const attr of attributes.properties) {
+        if (ts.isJsxAttribute(attr)) {
+          // <Component value={expr} /> - analyze the expression inside {expr}
+          if (
+            attr.initializer &&
+            ts.isJsxExpression(attr.initializer) &&
+            attr.initializer.expression
+          ) {
+            results.push(
+              analyzeExpression(attr.initializer.expression, scope, context),
+            );
           }
-        });
-      }
-      // Analyze JSX children - must handle JsxExpression specially
-      expression.children.forEach((child) => {
-        if (ts.isJsxExpression(child)) {
-          if (child.expression) {
-            analyses.push(analyzeExpression(child.expression, scope, context));
-          }
-        } else if (ts.isJsxElement(child)) {
-          analyses.push(analyzeExpression(child, scope, context));
+          // String literal initializers (value="string") have no dependencies
+        } else if (ts.isJsxSpreadAttribute(attr)) {
+          // <Component {...expr} /> - analyze the spread expression
+          results.push(analyzeExpression(attr.expression, scope, context));
         }
-        // Ignore JsxText and other non-expression children
-      });
-      return mergeAnalyses(...analyses);
+      }
+      return results;
+    };
+
+    // Helper: analyze JSX children
+    const analyzeJsxChildren = (
+      children: ts.NodeArray<ts.JsxChild>,
+    ): InternalAnalysis[] => {
+      const results: InternalAnalysis[] = [];
+      for (const child of children) {
+        if (ts.isJsxExpression(child) && child.expression) {
+          // {expr} - analyze the inner expression
+          results.push(analyzeExpression(child.expression, scope, context));
+        } else if (
+          ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child)
+        ) {
+          // Nested JSX elements - recurse
+          results.push(analyzeExpression(child, scope, context));
+        }
+        // JsxText nodes have no dependencies
+      }
+      return results;
+    };
+
+    if (ts.isJsxElement(expression)) {
+      const attrAnalyses = analyzeJsxAttributes(
+        expression.openingElement.attributes,
+      );
+      const childAnalyses = analyzeJsxChildren(expression.children);
+      return mergeAnalyses(...attrAnalyses, ...childAnalyses);
     }
 
     if (ts.isJsxSelfClosingElement(expression)) {
-      const analyses: InternalAnalysis[] = [];
-      if (expression.attributes) {
-        expression.attributes.properties.forEach((attr) => {
-          if (ts.isExpression(attr)) {
-            analyses.push(analyzeExpression(attr, scope, context));
-          }
-        });
-      }
-      return mergeAnalyses(...analyses);
+      const attrAnalyses = analyzeJsxAttributes(expression.attributes);
+      return mergeAnalyses(...attrAnalyses);
     }
 
     if (ts.isJsxFragment(expression)) {
-      const analyses: InternalAnalysis[] = [];
-      expression.children.forEach((child) => {
-        if (ts.isJsxExpression(child) && child.expression) {
-          analyses.push(analyzeExpression(child.expression, scope, context));
-        } else if (ts.isJsxElement(child)) {
-          analyses.push(analyzeExpression(child, scope, context));
-        }
-      });
-      return mergeAnalyses(...analyses);
+      const childAnalyses = analyzeJsxChildren(expression.children);
+      return mergeAnalyses(...childAnalyses);
     }
 
     const analyses: InternalAnalysis[] = [];
