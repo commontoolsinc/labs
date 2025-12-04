@@ -1,18 +1,10 @@
 /// <cts-enable />
 
-import {
-  Cell,
-  computed,
-  Default,
-  NAME,
-  OpaqueCell,
-  recipe,
-  UI,
-} from "commontools";
+import { Cell, computed, NAME, recipe, UI } from "commontools";
 import Counter from "./counter.tsx";
 import Note from "./note.tsx";
 
-type Input = {};
+type Input = Record<string, never>;
 
 type Result = {
   counterAValue: number;

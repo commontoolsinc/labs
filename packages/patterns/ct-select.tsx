@@ -1,8 +1,6 @@
 /// <cts-enable />
 
-import { Cell, Default, NAME, OpaqueCell, recipe, UI } from "commontools";
-import Counter from "./counter.tsx";
-import Note from "./note.tsx";
+import { Cell, Default, NAME, recipe, UI } from "commontools";
 
 type Input = {
   selected: Cell<Default<string, "opt_1">>;
@@ -19,16 +17,6 @@ type Result = {
 export default recipe<Input, Result>(
   "ct-select demo",
   ({ selected, numericChoice, category }) => {
-    // Create counter instances for ct-picker demo
-
-    const counterA = Counter({ value: 1 });
-    const counterB = Note({ content: "test" });
-    const counterC = Counter({ value: 3 });
-
-    const counters = [counterA, counterB, counterC];
-
-    const selection = Cell.of<OpaqueCell<unknown>>(counterA);
-
     return {
       [NAME]: "ct-select demo",
       [UI]: (
