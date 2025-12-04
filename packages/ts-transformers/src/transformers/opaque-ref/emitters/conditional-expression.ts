@@ -2,7 +2,10 @@ import ts from "typescript";
 
 import type { Emitter } from "../types.ts";
 import { createIfElseCall } from "../../builtins/ifelse.ts";
-import { selectDataFlowsReferencedIn } from "../../../ast/mod.ts";
+import {
+  registerSyntheticCallType,
+  selectDataFlowsReferencedIn,
+} from "../../../ast/mod.ts";
 import type { NormalizedDataFlowSet } from "../../../ast/mod.ts";
 import { isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 import { createBindingPlan } from "../bindings.ts";
@@ -94,7 +97,7 @@ export const emitConditionalExpression: Emitter = ({
     rewriteChildren,
   );
 
-  return createIfElseCall({
+  const ifElseCall = createIfElseCall({
     expression,
     factory: context.factory,
     ctHelpers: context.ctHelpers,
@@ -105,4 +108,17 @@ export const emitConditionalExpression: Emitter = ({
       whenFalse,
     },
   });
+
+  // Register the result type for schema injection
+  // The result type is the union of whenTrue and whenFalse types (from the original ternary)
+  if (context.options.typeRegistry) {
+    const resultType = context.checker.getTypeAtLocation(expression);
+    registerSyntheticCallType(
+      ifElseCall,
+      resultType,
+      context.options.typeRegistry,
+    );
+  }
+
+  return ifElseCall;
 };

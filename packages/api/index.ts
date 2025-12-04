@@ -1203,7 +1203,7 @@ export type WhenFunction = <T = any, U = any>(
 
 export type UnlessFunction = <T = any, U = any>(
   condition: Opaque<T>,
-  value: Opaque<U>,
+  fallback: Opaque<U>,
 ) => OpaqueRef<T | U>;
 
 /** @deprecated Use generateText() or generateObject() instead */
