@@ -474,7 +474,6 @@ export abstract class BaseObjectTraverser<
             ? defaultValue[index]
             : undefined;
         let docItem: IAttestation = {
-          ...doc,
           address: {
             ...doc.address,
             path: [...doc.address.path, index.toString()],
@@ -546,7 +545,6 @@ export abstract class BaseObjectTraverser<
           [k, v],
         ) => {
           const itemDoc = {
-            ...doc,
             address: { ...doc.address, path: [...doc.address.path, k] },
             value: v,
           };
@@ -1620,7 +1618,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
         schemaContext.rootSchema,
       );
       let curDoc: IAttestation = {
-        ...doc,
         address: {
           ...doc.address,
           path: [...doc.address.path, index.toString()],
@@ -1779,7 +1776,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
         continue;
       }
       const elementDoc = {
-        ...doc,
         address: {
           ...doc.address,
           path: [...doc.address.path, propKey],
@@ -1811,7 +1807,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
         }
         if (propSchema.asCell || propSchema.asStream) {
           const val = this.traverseWithSchemaContext({
-            ...doc,
             address: {
               ...doc.address,
               path: [...doc.address.path, propKey],
