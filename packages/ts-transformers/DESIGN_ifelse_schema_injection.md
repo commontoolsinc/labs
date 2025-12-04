@@ -98,7 +98,9 @@ export function ifElse<T = unknown, U = unknown, V = unknown>(
   ifFalse?: Opaque<V>,
 ): OpaqueRef<U | V> {
   // Detects signature by checking if later args are provided
-  if (condition !== undefined && ifTrue !== undefined && ifFalse !== undefined) {
+  if (
+    condition !== undefined && ifTrue !== undefined && ifFalse !== undefined
+  ) {
     // New signature with schemas
   } else {
     // Legacy signature without schemas
@@ -138,9 +140,10 @@ export function unless<T = unknown, U = unknown>(
 }
 ```
 
-**Backward Compatibility**: The functions detect which signature is being used by
-checking whether the later arguments are provided. This allows existing code without
-schemas to continue working while transformed code can pass schema arguments.
+**Backward Compatibility**: The functions detect which signature is being used
+by checking whether the later arguments are provided. This allows existing code
+without schemas to continue working while transformed code can pass schema
+arguments.
 
 ### 3. Schema Injection Handlers
 
