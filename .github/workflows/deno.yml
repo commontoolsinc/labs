@@ -391,27 +391,6 @@ jobs:
         with:
           cache: false
 
-      - name: 🔽 Pre-download Sentry CLI
-        run: |
-          echo "::group::Downloading Sentry CLI"
-          deno run --allow-all npm:@sentry/cli --version
-          echo "::endgroup::"
-
-      - name: 📊 Create Toolshed server Sentry release
-        run: |
-          # Create a release with version based on commit SHA
-          deno run --allow-all npm:@sentry/cli releases new ${{ github.sha }}
-
-          # Associate commits with the release
-          deno run --allow-all npm:@sentry/cli releases set-commits ${{ github.sha }} --auto
-
-          # Finalize the release
-          deno run --allow-all npm:@sentry/cli releases finalize ${{ github.sha }}
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ vars.SENTRY_TOOLSHED_PROJECT }}
-
       - name: 🚀 Deploy application to Toolshed (Staging)
         uses: appleboy/ssh-action@master
         with:

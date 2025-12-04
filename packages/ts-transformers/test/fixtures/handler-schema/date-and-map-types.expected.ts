@@ -1,12 +1,12 @@
 import * as __ctHelpers from "commontools";
-import { handler } from "commontools";
+import { handler, Cell } from "commontools";
 interface TimedEvent {
     timestamp: Date;
     data: Map<string, number>;
 }
 interface TimedState {
-    lastUpdate: Date;
-    history: Map<string, Date>;
+    lastUpdate: Cell<Date>;
+    history: Cell<Map<string, Date>>;
 }
 const timedHandler = handler({
     type: "object",
@@ -36,10 +36,12 @@ const timedHandler = handler({
     properties: {
         lastUpdate: {
             type: "string",
-            format: "date-time"
+            format: "date-time",
+            asCell: true
         },
         history: {
-            $ref: "#/$defs/Map"
+            $ref: "#/$defs/Map",
+            asCell: true
         }
     },
     required: ["lastUpdate", "history"],
@@ -55,9 +57,9 @@ const timedHandler = handler({
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, (event, state) => {
-    state.lastUpdate = event.timestamp;
+    state.lastUpdate.set(event.timestamp);
     event.data.forEach((_value, key) => {
-        state.history.set(key, new Date());
+        state.history.get().set(key, new Date());
     });
 });
 export { timedHandler };

@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  type Cell,
+  Cell,
   computed,
   type Default,
   pattern,
@@ -23,18 +23,22 @@ export default pattern<
   WishState<never>
 >(
   ({ query: _query, context: _context, candidates }) => {
+    const selectedIndex = Cell.of(0);
+    const result = computed(() => {
+      if (candidates.length === 0) return undefined;
+      const idx = Math.min(selectedIndex.get(), candidates.length - 1);
+      return candidates[idx];
+    });
+
     return {
-      result: computed(() => candidates.length > 0 ? candidates[0] : undefined),
+      result,
       [UI]: (
         <div>
-          {candidates.map((candidate) => (
-            /* TODO(seefeld/ben): Implement picker that updates `result` */
-            <div>
-              <ct-cell-link
-                $cell={candidate}
-              />
-            </div>
-          ))}
+          <ct-card>
+            <h2>Wish Results ({candidates.length})</h2>
+            <ct-picker $items={candidates} $selectedIndex={selectedIndex} />
+            <ct-cell-link $cell={result} />
+          </ct-card>
         </div>
       ),
     };

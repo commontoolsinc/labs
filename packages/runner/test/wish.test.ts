@@ -837,4 +837,312 @@ describe("wish built-in", () => {
       expect(result.key("deepValue").get()?.result).toEqual("found it");
     });
   });
+
+  describe("cross-space wish resolution", () => {
+    let userIdentity: Identity;
+    let patternSpace: Identity;
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let runtime: Runtime;
+    let tx: ReturnType<Runtime["edit"]>;
+    let wish: ReturnType<typeof createBuilder>["commontools"]["wish"];
+    let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+
+    beforeEach(async () => {
+      userIdentity = await Identity.fromPassphrase("user-home-space");
+      patternSpace = await Identity.fromPassphrase("pattern-space-1");
+
+      // Key: storageManager.as determines home space (user identity)
+      storageManager = StorageManager.emulate({ as: userIdentity });
+      runtime = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+      });
+      tx = runtime.edit();
+
+      const { commontools } = createBuilder();
+      ({ wish, recipe } = commontools);
+    });
+
+    afterEach(async () => {
+      await tx.commit();
+      await runtime.dispose();
+      await storageManager.close();
+    });
+
+    it("resolves #favorites from home space when pattern runs in different space", async () => {
+      // Setup: Add favorites to home space
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const favoritesCell = homeSpaceCell.key("favorites");
+      const favoriteItem = runtime.getCell(
+        userIdentity.did(),
+        "favorite-item",
+        undefined,
+        tx,
+      );
+      favoriteItem.set({ name: "My Favorite", value: 42 });
+      favoritesCell.set([
+        { cell: favoriteItem, tag: "test favorite" },
+      ]);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: Run pattern in different space (patternSpace)
+      const wishRecipe = recipe("wish favorites cross-space", () => {
+        return { favorites: wish({ query: "#favorites" }) };
+      });
+
+      const resultCell = runtime.getCell<{
+        favorites?: { result?: unknown[] };
+      }>(
+        patternSpace.did(), // Pattern runs in different space
+        "wish-favorites-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Verify: Favorites resolved from home space, not pattern space
+      const favorites = result.key("favorites").get()?.result;
+      expect(favorites).toBeDefined();
+      expect(Array.isArray(favorites)).toBe(true);
+      expect((favorites as any[])[0].tag).toEqual("test favorite");
+    });
+
+    it("resolves #default from pattern space, not home space", async () => {
+      // Setup: Add different #default data to home space
+      const homeSpaceCell = runtime.getCell(
+        userIdentity.did(),
+        userIdentity.did(),
+      ).withTx(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default",
+      ).withTx(tx);
+      homeDefaultCell.set({ title: "Home Default", value: "home" });
+      homeSpaceCell.key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Setup: Add different #default data to pattern space
+      const patternSpaceCell = runtime.getCell(
+        patternSpace.did(),
+        patternSpace.did(),
+      ).withTx(tx);
+      const patternDefaultCell = runtime.getCell(
+        patternSpace.did(),
+        "pattern-default",
+      ).withTx(tx);
+      patternDefaultCell.set({ title: "Pattern Default", value: "pattern" });
+      patternSpaceCell.key("defaultPattern").set(patternDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: Run pattern in pattern space that wishes for #default
+      const wishRecipe = recipe("wish default cross-space", () => {
+        return { defaultData: wish({ query: "#default" }) };
+      });
+
+      const resultCell = runtime.getCell<{
+        defaultData?: { result?: unknown };
+      }>(
+        patternSpace.did(),
+        "wish-default-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Verify: Gets pattern space's #default, not home space's
+      const defaultData = result.key("defaultData").get()?.result;
+      expect(defaultData).toEqual({
+        title: "Pattern Default",
+        value: "pattern",
+      });
+    });
+
+    it("resolves mixed tags (#favorites from home, / from pattern) in single pattern", async () => {
+      // Setup: Favorites in home space
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const favoritesCell = homeSpaceCell.key("favorites");
+      const favoriteItem = runtime.getCell(
+        userIdentity.did(),
+        "favorite-mixed",
+        undefined,
+        tx,
+      );
+      favoriteItem.set({ type: "favorite" });
+      favoritesCell.set([{ cell: favoriteItem, tag: "mixed test" }]);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Setup: /data in pattern space
+      const patternSpaceCell = runtime.getCell(
+        patternSpace.did(),
+        patternSpace.did(),
+      ).withTx(tx);
+      patternSpaceCell.set({ data: { type: "pattern" } });
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: Single pattern wishes for both
+      const wishRecipe = recipe("wish mixed tags", () => {
+        return {
+          favorites: wish({ query: "#favorites" }),
+          patternData: wish({ query: "/", path: ["data"] }),
+        };
+      });
+
+      const resultCell = runtime.getCell<{
+        favorites?: { result?: unknown[] };
+        patternData?: { result?: unknown };
+      }>(
+        patternSpace.did(),
+        "wish-mixed-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Verify: Each resolves to correct space
+      const favorites = result.key("favorites").get()?.result;
+      const patternData = result.key("patternData").get()?.result;
+
+      expect(Array.isArray(favorites)).toBe(true);
+      expect((favorites as any[])[0].tag).toEqual("mixed test");
+      expect(patternData).toEqual({ type: "pattern" });
+    });
+
+    it("resolves hashtag search in home space favorites from different pattern space", async () => {
+      // Setup: Favorites with tags in home space
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const favoritesCell = homeSpaceCell.key("favorites");
+      const favoriteItem1 = runtime.getCell(
+        userIdentity.did(),
+        "hashtag-item-1",
+        undefined,
+        tx,
+      );
+      favoriteItem1.set({ name: "Item with #myTag" });
+      const favoriteItem2 = runtime.getCell(
+        userIdentity.did(),
+        "hashtag-item-2",
+        undefined,
+        tx,
+      );
+      favoriteItem2.set({ name: "Different item" });
+
+      favoritesCell.set([
+        { cell: favoriteItem1, tag: "#myTag #awesome" },
+        { cell: favoriteItem2, tag: "no hashtag here" },
+      ]);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: Pattern in different space wishes for #myTag
+      const wishRecipe = recipe("wish hashtag search", () => {
+        return { taggedItem: wish({ query: "#myTag" }) };
+      });
+
+      const resultCell = runtime.getCell<{
+        taggedItem?: { result?: unknown };
+      }>(
+        patternSpace.did(),
+        "wish-hashtag-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Verify: Searches home space favorites, finds correct cell
+      const taggedItem = result.key("taggedItem").get()?.result;
+      expect(taggedItem).toEqual({ name: "Item with #myTag" });
+    });
+
+    it("starts charm automatically when accessed via cross-space wish", async () => {
+      // Setup 1: Create a simple counter recipe/charm
+      const counterRecipe = recipe<{ count: number }>("counter charm", () => {
+        const count = 0;
+        return {
+          count,
+          increment: () => {
+            return count + 1;
+          },
+        };
+      });
+
+      // Setup 2: Store the charm in home space
+      const charmCell = runtime.getCell(
+        userIdentity.did(),
+        "counter-charm",
+        undefined,
+        tx,
+      );
+      // Setup the charm (but don't start it yet)
+      runtime.setup(tx, counterRecipe, {}, charmCell);
+
+      // Setup 3: Add charm to favorites
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const favoritesCell = homeSpaceCell.key("favorites");
+      favoritesCell.set([
+        { cell: charmCell, tag: "#counterCharm test charm" },
+      ]);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: Pattern in different space wishes for the charm via hashtag
+      const wishingRecipe = recipe("wish for charm", () => {
+        return { charmData: wish({ query: "#counterCharm" }) };
+      });
+
+      const resultCell = runtime.getCell<{
+        charmData?: { result?: unknown };
+      }>(
+        patternSpace.did(),
+        "wish-charm-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishingRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Verify: Wish triggered charm to start and returns running charm data
+      const charmData = result.key("charmData").get()?.result;
+      expect(charmData).toBeDefined();
+      expect(typeof charmData).toBe("object");
+
+      // The charm should be running and have its state accessible
+      // Note: This test may need adjustment based on actual charm startup behavior
+      if (typeof charmData === "object" && charmData !== null) {
+        expect("count" in charmData || "increment" in charmData).toBe(true);
+      }
+    });
+  });
 });

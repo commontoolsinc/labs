@@ -23,6 +23,7 @@ export {
   inferContextualType,
   inferParameterType,
   inferReturnType,
+  inferWidenedTypeFromExpression,
   isAnyOrUnknownType,
   typeToSchemaTypeNode,
   typeToTypeNode,

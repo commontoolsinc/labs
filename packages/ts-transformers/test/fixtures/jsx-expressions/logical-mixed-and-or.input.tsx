@@ -1,0 +1,28 @@
+/// <cts-enable />
+import { cell, recipe, UI } from "commontools";
+
+// Tests mixed && and || operators: (a && b) || c
+// The && should use when, the || should use unless
+export default recipe("LogicalMixedAndOr", (_state) => {
+  const user = cell<{ name: string; age: number }>({ name: "", age: 0 });
+  const defaultMessage = cell("Guest");
+
+  return {
+    [UI]: (
+      <div>
+        {/* (condition && value) || fallback pattern */}
+        <span>{(user.get().name.length > 0 && user.get().name) || defaultMessage.get()}</span>
+
+        {/* condition && (value || fallback) pattern */}
+        <span>{user.get().age > 18 && (user.get().name || "Anonymous Adult")}</span>
+
+        {/* Complex: (a && b) || (c && d) */}
+        <span>
+          {(user.get().name.length > 0 && `Hello ${user.get().name}`) ||
+            (user.get().age > 0 && `Age: ${user.get().age}`) ||
+            "Unknown user"}
+        </span>
+      </div>
+    ),
+  };
+});

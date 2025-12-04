@@ -18,10 +18,6 @@ import {
 } from "commontools";
 import { type MentionableCharm } from "./backlinks-index.tsx";
 
-function schemaifyWish<T>(path: string) {
-  return wish<T>(path);
-}
-
 const sendMessage = handler<
   {
     detail: {
@@ -156,8 +152,8 @@ const listRecent = pattern<
 export default pattern<ChatInput, ChatOutput>(
   ({ messages, tools, theme, system }) => {
     const model = Cell.of<string>("anthropic:claude-sonnet-4-5");
-    const mentionable = schemaifyWish<MentionableCharm[]>("#mentionable");
-    const recentCharms = schemaifyWish<MentionableCharm[]>("#recent");
+    const mentionable = wish<MentionableCharm[]>("#mentionable");
+    const recentCharms = wish<MentionableCharm[]>("#recent");
 
     const assistantTools = {
       listMentionable: patternTool(listMentionable, { mentionable }),

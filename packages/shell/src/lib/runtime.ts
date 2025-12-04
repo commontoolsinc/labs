@@ -146,7 +146,6 @@ export class RuntimeInternals extends EventTarget {
       }),
       errorHandlers: [(error) => {
         console.error(error);
-        //Sentry.captureException(error);
       }],
       telemetry,
       consoleHandler: (metadata, method, args) => {

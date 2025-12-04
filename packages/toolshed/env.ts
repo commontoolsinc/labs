@@ -88,12 +88,6 @@ const EnvSchema = z.object({
     { message: "DB_PATH must be an absolute path" },
   ).optional(),
   MEMORY_URL: z.string().default("http://localhost:8000"),
-  // ===========================================================================
-  // Sentry DSN global middleware
-  //   * /lib/create-app.ts
-  // ===========================================================================
-  SENTRY_DSN: z.string().default(""),
-  // ===========================================================================
 
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),

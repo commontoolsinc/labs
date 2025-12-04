@@ -9,9 +9,9 @@ export default recipe("OpaqueRefOperations", (_state) => {
     [UI]: (
       <div>
         <p>Count: {count}</p>
-        <p>Next: {count + 1}</p>
-        <p>Double: {count * 2}</p>
-        <p>Total: {price * 1.1}</p>
+        <p>Next: {count.get() + 1}</p>
+        <p>Double: {count.get() * 2}</p>
+        <p>Total: {price.get() * 1.1}</p>
       </div>
     ),
   };

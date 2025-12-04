@@ -1,25 +1,27 @@
 /// <cts-enable />
 import { Cell, recipe, UI } from "commontools";
 
-declare global {
-  interface MouseEvent {
-    detail: number;
-  }
-}
-
 interface State {
-  metrics: Cell<number>;
-  user?: {
-    clicks: Cell<number>;
-  };
+  selectedValue: Cell<string>;
+  changeCount: Cell<number>;
 }
 
-export default recipe<State>("Analytics", (state) => {
+// Test typed event handler: ct-select has onct-change?: EventHandler<{ items: ...; value: ... }>
+// The handler receives { detail: { items: [...], value: ... } }
+export default recipe<State>("SelectTracker", (state) => {
   return {
     [UI]: (
-      <button type="button" onClick={(event) => state.user?.clicks.set(event.detail + state.metrics.get())}>
-        Track
-      </button>
+      <ct-select
+        $value={state.selectedValue}
+        items={[
+          { label: "Option A", value: "a" },
+          { label: "Option B", value: "b" },
+        ]}
+        onct-change={(event) => {
+          state.selectedValue.set(event.detail.value);
+          state.changeCount.set(state.changeCount.get() + 1);
+        }}
+      />
     ),
   };
 });

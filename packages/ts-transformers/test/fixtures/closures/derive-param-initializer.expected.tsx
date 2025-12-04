@@ -1,9 +1,7 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive } from "commontools";
 export default function TestDerive() {
-    const value = cell(5, {
-        type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
+    const value = 5;
     const multiplier = cell(2, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
@@ -12,8 +10,7 @@ export default function TestDerive() {
         type: "object",
         properties: {
             value: {
-                type: "number",
-                asCell: true
+                type: "number"
             },
             multiplier: {
                 type: "number",

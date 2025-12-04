@@ -20,7 +20,7 @@ export default function TestDerive() {
     const multiplier = cell(2, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
-    // Destructured parameter
+    // Destructuring requires .get() first since derive doesn't unwrap Cell
     const result = __ctHelpers.derive({
         type: "object",
         properties: {
@@ -53,7 +53,10 @@ export default function TestDerive() {
     } as const satisfies __ctHelpers.JSONSchema, {
         point,
         multiplier: multiplier
-    }, ({ point: { x, y }, multiplier }) => (x + y) * multiplier.get());
+    }, ({ point: p, multiplier }) => {
+        const { x, y } = p.get();
+        return (x + y) * multiplier.get();
+    });
     return result;
 }
 // @ts-ignore: Internals

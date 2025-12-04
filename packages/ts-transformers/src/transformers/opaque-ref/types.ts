@@ -3,7 +3,12 @@ import ts from "typescript";
 import type { DataFlowAnalysis, NormalizedDataFlowSet } from "../../ast/mod.ts";
 import { TransformationContext } from "../../core/mod.ts";
 
-export type OpaqueRefHelperName = "derive" | "ifElse" | "toSchema";
+export type OpaqueRefHelperName =
+  | "derive"
+  | "ifElse"
+  | "when"
+  | "unless"
+  | "toSchema";
 export type AnalyzeFn = (expression: ts.Expression) => DataFlowAnalysis;
 
 export interface RewriteParams {

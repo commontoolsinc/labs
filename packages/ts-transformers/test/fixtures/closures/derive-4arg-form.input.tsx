@@ -7,10 +7,10 @@ export default function TestDerive() {
 
   // Explicit 4-arg form with schemas - should still transform captures
   const result = derive(
-    { type: "number", asOpaque: true } as const satisfies JSONSchema,
+    { type: "number", asCell: true } as const satisfies JSONSchema,
     { type: "number" } as const satisfies JSONSchema,
     value,
-    (v) => v * multiplier.get()
+    (v) => v.get() * multiplier.get()
   );
 
   return result;

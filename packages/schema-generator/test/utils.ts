@@ -164,6 +164,139 @@ export async function getTypeFromCode(
     : { type: foundType, checker };
 }
 
+/**
+ * Check TypeScript diagnostics for a code snippet.
+ * Returns an array of diagnostic messages, empty if no errors.
+ */
+export async function checkTypeErrors(code: string): Promise<ts.Diagnostic[]> {
+  const { program, sourceFile } = await createTestProgram(code);
+  const diagnostics = ts.getPreEmitDiagnostics(program, sourceFile);
+  return [...diagnostics];
+}
+
+/**
+ * Batch type-check multiple fixture files in a single TypeScript program.
+ * Returns a map from file path to diagnostics.
+ */
+export async function batchTypeCheckFixtures(
+  fixtures: Record<string, string>,
+): Promise<Map<string, ts.Diagnostic[]>> {
+  const typeLibs = await getTypeScriptEnvironmentTypes();
+
+  // Prepend Cell prelude to all fixture files
+  const fixturesWithPrelude: Record<string, string> = {};
+  for (const [path, code] of Object.entries(fixtures)) {
+    fixturesWithPrelude[path] = `${CELL_BRAND_PRELUDE}\n${code}`;
+  }
+
+  const compilerOptions: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ES2023,
+    module: ts.ModuleKind.ESNext,
+    lib: ["ES2023", "DOM", "JSX"],
+    strict: true,
+    strictNullChecks: true,
+  };
+
+  // Cache for type definition source files
+  const typeDefCache = new Map<string, ts.SourceFile>();
+
+  const compilerHost: ts.CompilerHost = {
+    getSourceFile: (name) => {
+      // Check if it's a fixture file
+      if (fixturesWithPrelude[name] !== undefined) {
+        return ts.createSourceFile(
+          name,
+          fixturesWithPrelude[name],
+          compilerOptions.target!,
+          true,
+        );
+      }
+
+      // Check cache for type definition files
+      if (typeDefCache.has(name)) {
+        return typeDefCache.get(name);
+      }
+
+      let sourceText: string | undefined;
+
+      // Map lib.d.ts requests to es2023 definitions
+      if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
+        sourceText = typeLibs.es2023 || "";
+      } else {
+        // Handle other library files (map case-insensitive)
+        const libName = name.toLowerCase().replace(".d.ts", "");
+        if (typeLibs[libName]) {
+          sourceText = typeLibs[libName];
+        }
+      }
+
+      if (sourceText === undefined) {
+        return undefined;
+      }
+
+      const sourceFile = ts.createSourceFile(
+        name,
+        sourceText,
+        compilerOptions.target!,
+        true,
+      );
+      typeDefCache.set(name, sourceFile);
+      return sourceFile;
+    },
+    writeFile: () => {},
+    getCurrentDirectory: () => "/",
+    getDirectories: () => [],
+    fileExists: (name) => {
+      if (fixturesWithPrelude[name] !== undefined) return true;
+      if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) return true;
+      const libName = name.toLowerCase().replace(".d.ts", "");
+      return !!typeLibs[libName];
+    },
+    readFile: (name) => {
+      if (fixturesWithPrelude[name] !== undefined) {
+        return fixturesWithPrelude[name];
+      }
+      if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
+        return typeLibs.es2023;
+      }
+      const libName = name.toLowerCase().replace(".d.ts", "");
+      return typeLibs[libName];
+    },
+    getCanonicalFileName: (f) => f,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => "\n",
+    getDefaultLibFileName: () => "lib.d.ts",
+  };
+
+  const fileNames = Object.keys(fixturesWithPrelude);
+  const program = ts.createProgram(fileNames, compilerOptions, compilerHost);
+
+  // Get all diagnostics
+  const allDiagnostics = ts.getPreEmitDiagnostics(program);
+
+  // Group diagnostics by file
+  const diagnosticsByFile = new Map<string, ts.Diagnostic[]>();
+
+  // Initialize empty arrays for all fixture files
+  for (const filePath of fileNames) {
+    diagnosticsByFile.set(filePath, []);
+  }
+
+  // Assign diagnostics to their respective files
+  for (const diagnostic of allDiagnostics) {
+    if (
+      diagnostic.file &&
+      fixturesWithPrelude[diagnostic.file.fileName] !== undefined
+    ) {
+      const existing = diagnosticsByFile.get(diagnostic.file.fileName) || [];
+      existing.push(diagnostic);
+      diagnosticsByFile.set(diagnostic.file.fileName, existing);
+    }
+  }
+
+  return diagnosticsByFile;
+}
+
 export function normalizeSchema<T extends Record<string, unknown> | boolean>(
   schema: T,
 ): T {

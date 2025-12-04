@@ -67,6 +67,28 @@ export function widenLiteralType(
 }
 
 /**
+ * Infer type from an expression with automatic literal widening.
+ * Use this for value-based type inference where literal types should
+ * be widened to their base types (e.g., `const x = 5` should produce `number`, not `5`).
+ *
+ * This is the preferred method for inferring types for:
+ * - Closure-captured variables
+ * - Derive input arguments
+ * - Handler/lift captured state
+ *
+ * @param expr - The expression to infer type from
+ * @param checker - TypeChecker instance
+ * @returns The widened type (literals expanded to base types)
+ */
+export function inferWidenedTypeFromExpression(
+  expr: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.Type {
+  const type = checker.getTypeAtLocation(expr);
+  return widenLiteralType(type, checker);
+}
+
+/**
  * Infer the type of a function parameter, with optional fallback
  * Returns undefined if the type cannot be inferred
  */

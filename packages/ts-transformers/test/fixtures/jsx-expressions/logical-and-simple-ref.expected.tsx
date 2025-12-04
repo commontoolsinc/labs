@@ -1,16 +1,13 @@
 import * as __ctHelpers from "commontools";
-import { cell, NAME, recipe, UI } from "commontools";
+import { cell, recipe, UI } from "commontools";
 export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
-        $NAME: {
-            type: "string"
-        },
         $UI: {
             $ref: "#/$defs/Element"
         }
     },
-    required: ["$NAME", "$UI"],
+    required: ["$UI"],
     $defs: {
         Element: {
             type: "object",
@@ -109,58 +106,47 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, () => {
-    const items = cell<string[]>([], {
-        type: "array",
-        items: {
-            type: "string"
-        }
+} as const satisfies __ctHelpers.JSONSchema, (_state) => {
+    const showPanel = cell(true, {
+        type: "boolean"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const userName = cell("Alice", {
+        type: "string"
     } as const satisfies __ctHelpers.JSONSchema);
     return {
-        [NAME]: "Optional chain predicate",
         [UI]: (<div>
+        {/* Simple opaque ref - should NOT use when, just derive the whole expression */}
         {__ctHelpers.derive({
             type: "object",
             properties: {
-                items: {
-                    type: "object",
-                    properties: {
-                        length: true
-                    },
-                    required: ["length"]
+                showPanel: {
+                    type: "boolean",
+                    asCell: true
                 }
             },
-            required: ["items"]
+            required: ["showPanel"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "boolean",
-                    "enum": [false]
-                }, {
-                    $ref: "#/$defs/Element"
-                }],
-            $defs: {
-                Element: {
-                    type: "object",
-                    properties: {
-                        type: {
-                            type: "string",
-                            "enum": ["vnode"]
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        props: {
-                            $ref: "#/$defs/Props"
-                        },
-                        children: {
-                            $ref: "#/$defs/RenderNode"
-                        },
-                        $UI: {
-                            $ref: "#/$defs/VNode"
-                        }
-                    },
-                    required: ["type", "name", "props"]
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
                 },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"],
+            $defs: {
                 VNode: {
                     type: "object",
                     properties: {
@@ -236,9 +222,116 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     }
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, { items: {
-                length: items?.length
-            } }, ({ items }) => !items?.length && <span>No items</span>)}
+        } as const satisfies __ctHelpers.JSONSchema, { showPanel: showPanel }, ({ showPanel }) => showPanel && <div>Panel content</div>)}
+
+        {/* Another simple ref */}
+        {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                userName: {
+                    type: "string",
+                    asCell: true
+                }
+            },
+            required: ["userName"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"],
+            $defs: {
+                VNode: {
+                    type: "object",
+                    properties: {
+                        type: {
+                            type: "string",
+                            "enum": ["vnode"]
+                        },
+                        name: {
+                            type: "string"
+                        },
+                        props: {
+                            $ref: "#/$defs/Props"
+                        },
+                        children: {
+                            $ref: "#/$defs/RenderNode"
+                        },
+                        $UI: {
+                            $ref: "#/$defs/VNode"
+                        }
+                    },
+                    required: ["type", "name", "props"]
+                },
+                RenderNode: {
+                    anyOf: [{
+                            type: "string"
+                        }, {
+                            type: "number"
+                        }, {
+                            type: "boolean",
+                            "enum": [false]
+                        }, {
+                            type: "boolean",
+                            "enum": [true]
+                        }, {
+                            $ref: "#/$defs/VNode"
+                        }, {
+                            type: "object",
+                            properties: {}
+                        }, {
+                            type: "array",
+                            items: {
+                                $ref: "#/$defs/RenderNode"
+                            }
+                        }]
+                },
+                Props: {
+                    type: "object",
+                    properties: {},
+                    additionalProperties: {
+                        anyOf: [{
+                                type: "string"
+                            }, {
+                                type: "number"
+                            }, {
+                                type: "boolean",
+                                "enum": [false]
+                            }, {
+                                type: "boolean",
+                                "enum": [true]
+                            }, {
+                                type: "object",
+                                additionalProperties: true
+                            }, {
+                                type: "array",
+                                items: true
+                            }, {
+                                asCell: true
+                            }, {
+                                asStream: true
+                            }, {
+                                type: "null"
+                            }]
+                    }
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema, { userName: userName }, ({ userName }) => userName && <span>Hello {userName}</span>)}
       </div>),
     };
 });

@@ -11,12 +11,7 @@ import {
   State,
   Unclaimed,
 } from "./interface.ts";
-import {
-  fromJSON,
-  fromString,
-  is as isReference,
-  refer,
-} from "merkle-reference";
+import { fromJSON, fromString, is as isReference, refer } from "./reference.ts";
 
 /**
  * Creates an unclaimed fact.

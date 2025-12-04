@@ -125,7 +125,9 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                 }
             },
             required: ["count"]
-        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count + 1)}</p>
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count.get() + 1)}</p>
         <p>Double: {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -137,7 +139,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             required: ["count"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count * 2)}</p>
+        } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count.get() * 2)}</p>
         <p>Total: {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -149,7 +151,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             required: ["price"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { price: price }, ({ price }) => price * 1.1)}</p>
+        } as const satisfies __ctHelpers.JSONSchema, { price: price }, ({ price }) => price.get() * 1.1)}</p>
       </div>),
     };
 });

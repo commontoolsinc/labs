@@ -1,29 +1,36 @@
 #!/usr/bin/env -S deno run --allow-read --allow-run
 import * as path from "@std/path";
-
-const decoder = new TextDecoder();
+import { decode, encode } from "@commontools/utils/encoding";
 
 export const ALL_DISABLED = [
   "background-charm-service", // no tests yet
   "vendor-astral", // no tests yet
 ];
 
-export async function testPackage(packagePath: string): Promise<boolean> {
-  const result = await new Deno.Command(Deno.execPath(), {
-    args: ["task", "test"],
-    cwd: packagePath,
-    stdout: "piped",
-  }).output();
-
-  const stdout = decoder.decode(result.stdout);
-  if (stdout) {
-    console.log(stdout);
+export async function testPackage(
+  packagePath: string,
+): Promise<{ packagePath: string; result: Deno.CommandOutput }> {
+  try {
+    return {
+      packagePath,
+      result: await new Deno.Command(Deno.execPath(), {
+        args: ["task", "test"],
+        cwd: packagePath,
+        stdout: "piped",
+      }).output(),
+    };
+  } catch (e) {
+    return {
+      packagePath,
+      result: {
+        success: false,
+        stdout: new Uint8Array(),
+        stderr: encode(`${e}`),
+        code: 1,
+        signal: null,
+      },
+    };
   }
-  const stderr = decoder.decode(result.stderr);
-  if (stderr) {
-    console.error(stderr);
-  }
-  return result.success;
 }
 
 export async function runTests(disabledPackages: string[]): Promise<boolean> {
@@ -31,8 +38,7 @@ export async function runTests(disabledPackages: string[]): Promise<boolean> {
   const manifest = JSON.parse(await Deno.readTextFile("./deno.json"));
   const members: string[] = manifest.workspace;
 
-  const failedPackages: string[] = [];
-
+  const tests = [];
   for (const memberPath of members) {
     // Convert "./packages/memory" to "memory"
     const packageName = memberPath.substring(2).split("/")[1];
@@ -42,18 +48,21 @@ export async function runTests(disabledPackages: string[]): Promise<boolean> {
     }
     console.log(`Testing ${packageName}...`);
     const packagePath = path.join(workspaceCwd, "packages", packageName);
-    if (!await testPackage(packagePath)) {
-      failedPackages.push(packageName);
-    }
+    tests.push(testPackage(packagePath));
   }
+
+  const results = await Promise.all(tests);
+  const failedPackages = results.filter((result) => !result.result.success);
 
   if (failedPackages.length === 0) {
     console.log("All tests passing!");
   } else {
     console.error("One or more tests failed.");
     console.error("Failed packages:");
-    for (const pkg of failedPackages) {
-      console.error(`- ${pkg}`);
+    for (const result of failedPackages) {
+      console.error(`- ${result.packagePath}`);
+      console.log(decode(result.result.stdout));
+      console.error(decode(result.result.stderr));
     }
     Deno.exit(1);
   }

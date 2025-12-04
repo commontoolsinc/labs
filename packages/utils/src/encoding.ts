@@ -6,7 +6,8 @@ const decoder = new TextDecoder();
  * @param input - The string to encode
  * @returns The encoded Uint8Array
  */
-export const encode = (input: string): Uint8Array => encoder.encode(input);
+export const encode = (input: string): Uint8Array<ArrayBuffer> =>
+  encoder.encode(input);
 
 /**
  * Decodes a Uint8Array into a string using UTF-8 decoding.

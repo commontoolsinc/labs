@@ -7,7 +7,7 @@ export default recipe("Optional Element Access", () => {
     [NAME]: "Optional element access",
     [UI]: (
       <div>
-        {!list?.[0] && <span>No first entry</span>}
+        {!list.get()?.[0] && <span>No first entry</span>}
       </div>
     ),
   };

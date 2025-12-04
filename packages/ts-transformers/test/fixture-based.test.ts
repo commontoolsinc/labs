@@ -4,8 +4,13 @@ import {
 } from "@commontools/test-support/fixture-runner";
 import { StaticCacheFS } from "@commontools/static";
 import { resolve } from "@std/path";
+import ts from "typescript";
 
-import { loadFixture, transformFixture } from "./utils.ts";
+import {
+  batchTypeCheckFixtures,
+  loadFixture,
+  transformFixture,
+} from "./utils.ts";
 
 interface FixtureConfig {
   directory: string;
@@ -98,6 +103,109 @@ const FIXTURES_ROOT = "./test/fixtures";
 const fixtureFilter = Deno.env.get("FIXTURE");
 const fixturePattern = Deno.env.get("FIXTURE_PATTERN");
 
+/**
+ * Loads all fixture input files from a directory for batch type-checking
+ */
+async function loadAllFixturesInDirectory(
+  directory: string,
+): Promise<Record<string, string>> {
+  const fixtures: Record<string, string> = {};
+
+  // Find all .input.* files in the directory
+  for await (const entry of Deno.readDir(directory)) {
+    if (entry.isFile && entry.name.includes(".input.")) {
+      const fullPath = `${directory}/${entry.name}`;
+      const content = await Deno.readTextFile(fullPath);
+      // Normalize path: remove leading ./ if present
+      const normalizedPath = fullPath.startsWith("./")
+        ? fullPath.slice(2)
+        : fullPath;
+      fixtures[normalizedPath] = content;
+    }
+  }
+
+  return fixtures;
+}
+
+// PERFORMANCE OPTIMIZATION: Batch Type-Checking
+//
+// Input fixture type-checking is ENABLED BY DEFAULT. Set SKIP_INPUT_CHECK=1 to disable.
+//
+// We batch type-check all fixtures upfront in a single TypeScript program instead of
+// creating separate programs per fixture. This provides a significant performance improvement:
+//
+// - WITHOUT batching: ~16s (166 programs × 100ms each)
+// - WITH batching: ~4s (1 program × 600ms + 166 transforms × 20ms)
+// - Speedup: 4-6x faster
+//
+// The batching works by:
+// 1. Loading all fixture files upfront
+// 2. Creating one ts.Program with all fixtures as separate files
+// 3. Running ts.getPreEmitDiagnostics() once for all files
+// 4. Storing diagnostics in a Map keyed by file path
+// 5. Individual tests retrieve their precomputed diagnostics from the Map
+//
+// To skip input validation temporarily, run with SKIP_INPUT_CHECK=1.
+const batchedDiagnosticsByConfig = new Map<
+  string,
+  Map<string, ts.Diagnostic[]>
+>();
+
+if (!Deno.env.get("SKIP_INPUT_CHECK")) {
+  const batchStart = performance.now();
+  for (const config of configs) {
+    const configStart = performance.now();
+
+    let allFixtures = await loadAllFixturesInDirectory(
+      `${FIXTURES_ROOT}/${config.directory}`,
+    );
+
+    // Apply FIXTURE/FIXTURE_PATTERN filter to batch type-checking for faster iteration
+    if (fixtureFilter || fixturePattern) {
+      const filteredFixtures: Record<string, string> = {};
+      for (const [path, content] of Object.entries(allFixtures)) {
+        // Extract base name from path (e.g., "test/fixtures/closures/map-basic.input.tsx" -> "map-basic")
+        const fileName = path.split("/").pop() || "";
+        const baseName = fileName.replace(/\.input\.(tsx?|ts)$/, "");
+
+        const matchesFilter = fixtureFilter
+          ? baseName === fixtureFilter
+          : new RegExp(fixturePattern!).test(baseName);
+
+        if (matchesFilter) {
+          filteredFixtures[path] = content;
+        }
+      }
+      allFixtures = filteredFixtures;
+    }
+
+    // Skip empty fixture sets (when filter doesn't match any in this directory)
+    if (Object.keys(allFixtures).length === 0) {
+      continue;
+    }
+
+    console.log(`Batch type-checking fixtures in ${config.describe}...`);
+
+    const result = await batchTypeCheckFixtures(allFixtures, {
+      types: { "commontools.d.ts": commontools },
+    });
+
+    console.log(
+      `  -> ${Object.keys(allFixtures).length} fixtures in ${
+        (performance.now() - configStart).toFixed(0)
+      }ms`,
+    );
+
+    batchedDiagnosticsByConfig.set(config.describe, result.diagnosticsByFile);
+  }
+  console.log(
+    `Total batch type-checking time: ${
+      (performance.now() - batchStart).toFixed(0)
+    }ms`,
+  );
+}
+
+// Now run the tests
 for (const config of configs) {
   const suiteConfig = {
     suiteName: config.describe,
@@ -116,10 +224,21 @@ for (const config of configs) {
       return false;
     },
     async execute(fixture: { relativeInputPath: string }) {
+      // Construct full path matching the keys in batchedDiagnostics (remove leading ./)
+      const fullPath =
+        `${FIXTURES_ROOT}/${config.directory}/${fixture.relativeInputPath}`
+          .replace(/^\.\//, "");
+
+      // Get precomputed diagnostics if available
+      const diagnosticsMap = batchedDiagnosticsByConfig.get(config.describe);
+      const precomputedDiagnostics = diagnosticsMap?.get(fullPath);
+
       return await transformFixture(
         `${config.directory}/${fixture.relativeInputPath}`,
         {
           types: { "commontools.d.ts": commontools },
+          typeCheck: !Deno.env.get("SKIP_INPUT_CHECK"),
+          precomputedDiagnostics,
         },
       );
     },

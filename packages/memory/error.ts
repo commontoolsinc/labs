@@ -13,7 +13,7 @@ import type {
   TransactionError,
 } from "./interface.ts";
 import { MemorySpace } from "./interface.ts";
-import { refer } from "merkle-reference";
+import { refer } from "./reference.ts";
 
 export const unauthorized = (
   message: string,

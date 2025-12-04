@@ -10,7 +10,7 @@ export default function TestDerive() {
         asCell: true
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, value, (v) => v * 2);
+    } as const satisfies __ctHelpers.JSONSchema, value, (v) => v.get() * 2);
     return result;
 }
 // @ts-ignore: Internals

@@ -33,7 +33,7 @@ export default function TestDerive() {
         value,
         multiplier: multiplier,
         offset: offset
-    }, ({ value: v, multiplier, offset }) => (v * multiplier.get()) + offset.get());
+    }, ({ value: v, multiplier, offset }) => (v.get() * multiplier.get()) + offset.get());
     return result;
 }
 // @ts-ignore: Internals

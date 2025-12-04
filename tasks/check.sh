@@ -9,6 +9,7 @@ if [[ ! " ${DENO_VERSIONS_ALLOWED[@]} " =~ " ${DENO_VERSION} " ]]; then
   exit 1
 fi
 
+deno check tasks/*.ts
 deno check recipes/[!_]*.ts*
 deno check \
   packages/api \

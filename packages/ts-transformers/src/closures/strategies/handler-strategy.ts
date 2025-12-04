@@ -112,20 +112,3 @@ export function transformHandlerJsxAttribute(
 
   return factory.createJsxAttribute(attribute.name, newInitializer);
 }
-
-/**
- * Transform explicit handler() calls.
- * This is less common than JSX attributes but supported.
- */
-export function transformHandlerCall(
-  _node: ts.CallExpression,
-  _context: TransformationContext,
-  _visitor: ts.Visitor,
-): ts.CallExpression | undefined {
-  // Implementation for explicit handler calls
-  // Currently the transformer only handles JSX attributes explicitly
-  // But we can add support here if needed.
-  // For now, return undefined as the original transformer didn't have a dedicated
-  // transformHandlerCall function (it was handled via JSX attribute visitor).
-  return undefined;
-}

@@ -26,7 +26,7 @@ export default function TestDerive() {
     } as const satisfies __ctHelpers.JSONSchema, {
         value,
         __ct_reserved: __ct_reserved
-    }, ({ value: v, __ct_reserved }) => v * __ct_reserved.get());
+    }, ({ value: v, __ct_reserved }) => v.get() * __ct_reserved.get());
     return result;
 }
 // @ts-ignore: Internals

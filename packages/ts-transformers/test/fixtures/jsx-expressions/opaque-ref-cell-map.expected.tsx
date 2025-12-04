@@ -485,7 +485,13 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     charm: true
                 },
                 required: ["charm"]
-            } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { charm: charm }, ({ charm }) => charm[NAME] || "Unnamed")}</span>
+            } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { charm: charm }, ({ charm }) => __ctHelpers.unless(__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    charm: true
+                },
+                required: ["charm"]
+            } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { charm: charm }, ({ charm }) => charm[NAME]), "Unnamed"))}</span>
               </li>)), {})}
           </ul>)}
 

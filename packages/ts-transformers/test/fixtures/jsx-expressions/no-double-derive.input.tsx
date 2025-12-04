@@ -3,7 +3,7 @@ import { derive } from "commontools";
 
 // Test case: User-written derive calls should not be double-wrapped
 // This tests that derive(index, (i) => i + 1) doesn't become derive(index, index => derive(index, (i) => i + 1))
-export default function TestComponent({ items, cellRef }) {
+export default function TestComponent({ items, cellRef }: { items: { id: number; title: string }[]; cellRef: { name?: string; value: string } }) {
   return (
     <div>
       {/* User-written derive with simple parameter transformation - should NOT be double-wrapped */}

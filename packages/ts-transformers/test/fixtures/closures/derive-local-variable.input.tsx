@@ -7,7 +7,7 @@ export default function TestDeriveLocalVariable() {
   const c = cell(30);
 
   const result = derive(a, (aVal) => {
-    const sum = aVal + b.get();
+    const sum = aVal.get() + b.get();
     return sum * c.get();
   });
 

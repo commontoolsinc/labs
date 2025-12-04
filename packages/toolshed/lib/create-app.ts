@@ -3,7 +3,6 @@ import { notFound, serveEmojiFavicon } from "stoker/middlewares";
 import { defaultHook } from "stoker/openapi";
 import { pinoLogger } from "@/middlewares/pino-logger.ts";
 import { otelTracing } from "@/middlewares/opentelemetry.ts";
-import { sentry } from "@hono/sentry";
 import env from "@/env.ts";
 import type { AppBindings, AppOpenAPI } from "@/lib/types.ts";
 import { initOpenTelemetry } from "@/lib/otel.ts";
@@ -20,8 +19,6 @@ export default function createApp() {
   initOpenTelemetry();
 
   const app = createRouter();
-
-  app.use("*", sentry({ dsn: env.SENTRY_DSN }));
 
   // Add OpenTelemetry tracing if enabled
   if (env.OTEL_ENABLED) {

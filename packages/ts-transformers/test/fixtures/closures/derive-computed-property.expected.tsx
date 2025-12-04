@@ -26,8 +26,7 @@ export default function TestDerive() {
                 required: ["multiplier", "divisor"]
             },
             key: {
-                type: "string",
-                "enum": ["multiplier"]
+                type: "string"
             }
         },
         required: ["value", "config", "key"]
@@ -37,7 +36,7 @@ export default function TestDerive() {
         value,
         config: config,
         key: key
-    }, ({ value: v, config, key }) => v * config[key]);
+    }, ({ value: v, config, key }) => v.get() * config[key]);
     return result;
 }
 // @ts-ignore: Internals

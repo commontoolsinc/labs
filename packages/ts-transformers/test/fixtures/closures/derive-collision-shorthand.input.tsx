@@ -8,7 +8,7 @@ export default function TestDeriveCollisionShorthand() {
   // The callback uses shorthand property { multiplier }
   // This should expand to { multiplier: multiplier_1 } after renaming
   const result = derive(multiplier, (m) => ({
-    value: m * 3,
+    value: m.get() * 3,
     data: { multiplier },
   }));
 
