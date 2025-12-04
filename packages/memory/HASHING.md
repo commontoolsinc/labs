@@ -154,6 +154,14 @@ Note: The end-to-end `refer()` time includes more than just hashing (sorting,
 tree traversal, object allocation), so the overall speedup is smaller than the
 raw hash speedup.
 
+**Environment-Specific Behavior**: The memory package uses conditional crypto:
+- **Browser environments** (shell): Uses `@noble/hashes` (pure JS, works everywhere)
+- **Server environments** (toolshed, Node.js, Deno): Uses `node:crypto` for
+  hardware-accelerated performance
+
+This is detected at module load time via `globalThis.document`/`globalThis.window`
+and uses dynamic import to avoid bundler issues with `node:crypto` in browsers.
+
 ### 2. merkle-reference Caches Sub-objects by Identity
 
 `merkle-reference` uses a `WeakMap` internally to cache computed tree nodes and
@@ -271,24 +279,49 @@ it caches the final Reference, not intermediate objects. This saves the entire
 
 ## Current Implementation
 
-### 1. Native crypto hashing
+### 1. Conditional crypto hashing (browser vs server)
 
-Swap the hash function to use node:crypto:
+Use merkle-reference's default `refer()` in browsers (which uses `@noble/hashes`
+internally), upgrade to a custom TreeBuilder with `node:crypto` in server
+environments for hardware acceleration:
 
 ```typescript
 import * as Reference from "merkle-reference";
-import { createHash } from "node:crypto";
 
-const nodeSha256 = (payload: Uint8Array): Uint8Array => {
-  return createHash("sha256").update(payload).digest();
-};
+// Default to merkle-reference's built-in refer (uses @noble/hashes)
+let referImpl: <T>(source: T) => Reference.View<T> = Reference.refer;
 
-const treeBuilder = Reference.Tree.createBuilder(nodeSha256);
+// In server environments, upgrade to node:crypto for better performance
+const isBrowser =
+  typeof globalThis.document !== "undefined" ||
+  typeof globalThis.window !== "undefined";
+
+if (!isBrowser) {
+  try {
+    // Dynamic import avoids bundler resolution in browsers
+    const nodeCrypto = await import("node:crypto");
+    const nodeSha256 = (payload: Uint8Array): Uint8Array => {
+      return nodeCrypto.createHash("sha256").update(payload).digest();
+    };
+    const treeBuilder = Reference.Tree.createBuilder(nodeSha256);
+    referImpl = <T>(source: T): Reference.View<T> => {
+      return treeBuilder.refer(source) as unknown as Reference.View<T>;
+    };
+  } catch {
+    // node:crypto not available, use merkle-reference's default
+  }
+}
 
 export const refer = <T>(source: T): Reference.View<T> => {
-  return treeBuilder.refer(source);
+  return referImpl(source);
 };
 ```
+
+**Key design points:**
+- Browser: Uses `Reference.refer()` directly (merkle-reference uses @noble/hashes)
+- Server: Creates custom TreeBuilder with `node:crypto` for ~1.5-2x speedup
+- Dynamic import (`await import()`) prevents bundlers from resolving `node:crypto`
+- Environment detection via `globalThis.document`/`globalThis.window`
 
 ### 2. Recursive object interning
 
@@ -492,7 +525,9 @@ object keys must be sorted deterministically. This is why:
 
 ## Current Optimizations Applied
 
-1. **Native crypto** (node:crypto vs @noble/hashes): ~1.5-2x speedup on hashing
+1. **Conditional crypto** (node:crypto in server, @noble/hashes in browser):
+   ~1.5-2x speedup on hashing in server environments, while maintaining browser
+   compatibility
 2. **Recursive object interning**: ~2.5x on shared content
 3. **Prepared statement caching**: ~2x on queries
 4. **Batch label lookups**: Eliminated N queries
@@ -503,7 +538,7 @@ object keys must be sorted deterministically. This is why:
 
 ## Files Reference
 
-- `reference.ts`: TreeBuilder with native crypto, intern() function
+- `reference.ts`: TreeBuilder with conditional crypto (noble/node:crypto), intern() function
 - `fact.ts`: Fact.assert(), unclaimedRef() caching
 - `space.ts`: swap(), commit(), transact() - core write path
 - `transaction.ts`: Transaction structure definition

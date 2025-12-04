@@ -1,5 +1,4 @@
 import * as Reference from "merkle-reference";
-import { createHash } from "node:crypto";
 export * from "merkle-reference";
 
 // Don't know why deno does not seem to see there is a `fromString` so we just
@@ -9,18 +8,34 @@ export const fromString = Reference.fromString as (
 ) => Reference.View;
 
 /**
- * Use node:crypto SHA-256 instead of @noble/hashes for ~1.5-2x speedup.
- * node:crypto uses native OpenSSL with hardware SHA-NI acceleration.
+ * Refer function - uses merkle-reference's default in browsers (@noble/hashes),
+ * upgrades to node:crypto in server environments for ~1.5-2x speedup.
+ *
+ * Browser environments use merkle-reference's default (pure JS, works everywhere).
+ * Server environments (Node.js, Deno) use node:crypto when available.
  */
-const nodeSha256 = (payload: Uint8Array): Uint8Array => {
-  return createHash("sha256").update(payload).digest();
-};
+let referImpl: <T>(source: T) => Reference.View<T> = Reference.refer;
 
-/**
- * Tree builder using node:crypto for faster hashing.
- * This is used for all refer() calls to get consistent caching.
- */
-const treeBuilder = Reference.Tree.createBuilder(nodeSha256);
+// In non-browser environments, try to use node:crypto for better performance
+const isBrowser =
+  typeof globalThis.document !== "undefined" ||
+  typeof globalThis.window !== "undefined";
+
+if (!isBrowser) {
+  try {
+    // Dynamic import to avoid bundler resolution in browsers
+    const nodeCrypto = await import("node:crypto");
+    const nodeSha256 = (payload: Uint8Array): Uint8Array => {
+      return nodeCrypto.createHash("sha256").update(payload).digest();
+    };
+    const treeBuilder = Reference.Tree.createBuilder(nodeSha256);
+    referImpl = <T>(source: T): Reference.View<T> => {
+      return treeBuilder.refer(source) as unknown as Reference.View<T>;
+    };
+  } catch {
+    // node:crypto not available, use merkle-reference's default
+  }
+}
 
 /**
  * Object interning cache: maps JSON content to a canonical object instance.
@@ -112,17 +127,12 @@ export const intern = <T>(source: T): T => {
 /**
  * Compute a merkle reference for the given source.
  *
- * Uses node:crypto SHA-256 (with hardware acceleration) instead of @noble/hashes
- * for ~1.5-2x speedup on new objects.
+ * In server environments, uses node:crypto SHA-256 (with hardware acceleration)
+ * for ~1.5-2x speedup. In browsers, uses merkle-reference's default (@noble/hashes).
  *
  * merkle-reference's internal WeakMap caches sub-objects by identity, so passing
  * the same payload object to multiple assertions will benefit from caching.
  */
 export const refer = <T>(source: T): Reference.View<T> => {
-  // Type assertion required due to TypeScript's handling of private class fields.
-  // TreeBuilder.refer() returns the same Reference object at runtime, but TS sees
-  // the #private field declarations as incompatible between the return type and
-  // Reference.View<T>. This is a known TS limitation with nominal private fields
-  // in declaration files - the runtime types are identical.
-  return treeBuilder.refer(source) as unknown as Reference.View<T>;
+  return referImpl(source);
 };
