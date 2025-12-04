@@ -9,44 +9,8 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import {
-  type Cell,
-  getCellOrThrow,
-  isCell,
-  isQueryResult,
-} from "@commontools/runner";
+import { areLinksSame, type Cell } from "@commontools/runner";
 import { createCellController } from "../../core/cell-controller.ts";
-
-// Debug logging - set to true to trace selection issues
-const DEBUG_SELECT = false;
-const debugLog = (...args: any[]) => {
-  if (DEBUG_SELECT) console.log("[ct-select]", ...args);
-};
-
-/**
- * Compare two values that might be cell proxies.
- * Extracts underlying cells and uses Cell.equals() for comparison.
- */
-function areCellValuesSame(a: any, b: any): boolean {
-  // Strict equality check first
-  if (a === b) return true;
-
-  // Try to extract underlying cells
-  try {
-    const cellA = isQueryResult(a) ? getCellOrThrow(a) : isCell(a) ? a : null;
-    const cellB = isQueryResult(b) ? getCellOrThrow(b) : isCell(b) ? b : null;
-
-    if (cellA && cellB) {
-      const same = cellA.equals(cellB);
-      debugLog("areCellValuesSame: cellA.equals(cellB) =", same);
-      return same;
-    }
-  } catch {
-    // Not cell proxies, fall through
-  }
-
-  return false;
-}
 
 /**
  * CTSelect – Dropdown/select component that accepts an array of generic JS objects
@@ -304,8 +268,6 @@ export class CTSelect extends BaseElement {
     private _renderOptions() {
       if (!this.items?.length) return nothing;
 
-      debugLog("_renderOptions: rendering", this.items.length, "items");
-
       // Group items by `group` key
       const groups = new Map<string | undefined, SelectItem[]>();
       this.items.forEach((item) => {
@@ -317,9 +279,6 @@ export class CTSelect extends BaseElement {
 
       const renderItem = (item: SelectItem, index: number) => {
         const optionKey = this._makeKey(item, index);
-        debugLog(
-          `_renderOptions: rendering option key="${optionKey}" label="${item.label}" at index ${index}`,
-        );
         return html`
           <option
             value="${optionKey}"
@@ -358,10 +317,6 @@ export class CTSelect extends BaseElement {
       const _oldValue = this.getCurrentValue();
       let newValue: unknown | unknown[];
 
-      debugLog("_onChange: select.value =", select.value);
-      debugLog("_onChange: select.selectedIndex =", select.selectedIndex);
-      debugLog("_onChange: keyMap =", [...this._keyMap.entries()]);
-
       if (this.multiple) {
         const selectedKeys = Array.from(select.selectedOptions).map(
           (o) => o.value,
@@ -369,14 +324,10 @@ export class CTSelect extends BaseElement {
         newValue = selectedKeys.map((k) => this._keyMap.get(k)!.value);
       } else {
         const optKey = select.value;
-        const item = this._keyMap.get(optKey);
-        debugLog("_onChange: optKey =", optKey, "item =", item);
-        newValue = item?.value;
-        debugLog("_onChange: newValue =", newValue);
+        newValue = this._keyMap.get(optKey)?.value;
       }
 
       // Always update through cell controller
-      debugLog("_onChange: calling setValue with", newValue);
       this._cellController.setValue(newValue);
     }
 
@@ -405,11 +356,8 @@ export class CTSelect extends BaseElement {
 
     private _buildKeyMap() {
       this._keyMap.clear();
-      debugLog("_buildKeyMap: items =", this.items);
       this.items.forEach((item, index) => {
-        const key = this._makeKey(item, index);
-        debugLog(`_buildKeyMap: setting key="${key}" to item`, item);
-        this._keyMap.set(key, item);
+        this._keyMap.set(this._makeKey(item, index), item);
       });
     }
 
@@ -428,33 +376,21 @@ export class CTSelect extends BaseElement {
       if (!this._select) return;
 
       const currentValue = this.getCurrentValue();
-      debugLog("applyValueToDom: currentValue =", currentValue);
 
       if (this.multiple) {
         const values = (currentValue as unknown[] | undefined) ?? [];
         Array.from(this._select.options).forEach((opt) => {
           const item = this._keyMap.get(opt.value);
           opt.selected = item
-            ? values.some((v) => areCellValuesSame(v, item.value))
+            ? values.some((v) => areLinksSame(v, item.value))
             : false;
         });
       } else {
         const val = currentValue;
-
-        // Debug: check comparison for each item
-        [...this._keyMap.entries()].forEach(([key, item]) => {
-          const same = areCellValuesSame(item.value, val);
-          debugLog(
-            `applyValueToDom: areCellValuesSame(items[${key}].value, currentValue) =`,
-            same,
-          );
-        });
-
         const matchKey = [...this._keyMap.entries()].find(
-          ([, item]) => areCellValuesSame(item.value, val),
+          ([, item]) => areLinksSame(item.value, val),
         )?.[0];
 
-        debugLog("applyValueToDom: matchKey =", matchKey);
         this._select.value = matchKey ?? "";
       }
     }
