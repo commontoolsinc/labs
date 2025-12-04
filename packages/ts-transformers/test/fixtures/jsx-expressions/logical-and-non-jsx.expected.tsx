@@ -125,7 +125,17 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     return {
         [UI]: (<div>
         {/* Non-JSX right side: string template with complex expression */}
-        <p>{__ctHelpers.when(__ctHelpers.derive({
+        <p>{__ctHelpers.when({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "boolean"
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 user: {
@@ -168,7 +178,17 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
         } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name)}!`)}</p>
 
         {/* Non-JSX right side: number expression */}
-        <p>Age: {__ctHelpers.when(__ctHelpers.derive({
+        <p>Age: {__ctHelpers.when({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    type: "number"
+                }, {
+                    type: "boolean"
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 user: {

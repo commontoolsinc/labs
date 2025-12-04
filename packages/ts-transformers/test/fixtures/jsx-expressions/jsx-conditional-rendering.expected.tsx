@@ -141,11 +141,37 @@ export default recipe({
     return {
         [UI]: (<div>
         <h3>Basic Ternary</h3>
-        <span>{__ctHelpers.ifElse(state.isActive, "Active", "Inactive")}</span>
-        <span>{__ctHelpers.ifElse(state.hasPermission, "Authorized", "Denied")}</span>
+        <span>{__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Active", "Inactive"]
+        } as const satisfies __ctHelpers.JSONSchema, state.isActive, "Active", "Inactive")}</span>
+        <span>{__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Authorized", "Denied"]
+        } as const satisfies __ctHelpers.JSONSchema, state.hasPermission, "Authorized", "Denied")}</span>
 
         <h3>Ternary with Comparisons</h3>
-        <span>{__ctHelpers.ifElse(__ctHelpers.derive({
+        <span>{__ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["High", "Low"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -165,7 +191,15 @@ export default recipe({
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 count: state.count
             } }, ({ state }) => state.count > 10), "High", "Low")}</span>
-        <span>{__ctHelpers.ifElse(__ctHelpers.derive({
+        <span>{__ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["B", "C"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["B", "C", "A"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -205,7 +239,15 @@ export default recipe({
                 score: state.score
             } }, ({ state }) => state.score >= 80 ? "B" : "C"))}</span>
         <span>
-          {__ctHelpers.ifElse(__ctHelpers.derive({
+          {__ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Single", "Multiple"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Single", "Multiple", "Empty"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -250,7 +292,16 @@ export default recipe({
 
         <h3>Nested Ternary</h3>
         <span>
-          {__ctHelpers.ifElse(state.isActive, __ctHelpers.derive({
+          {__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Premium Active", "Regular Active"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Inactive", "Premium Active", "Regular Active"]
+        } as const satisfies __ctHelpers.JSONSchema, state.isActive, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -279,7 +330,15 @@ export default recipe({
             } }, ({ state }) => (state.isPremium ? "Premium Active" : "Regular Active")), "Inactive")}
         </span>
         <span>
-          {__ctHelpers.ifElse(__ctHelpers.derive({
+          {__ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["User", "Guest"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["User", "Guest", "Admin"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -324,7 +383,16 @@ export default recipe({
 
         <h3>Complex Conditions</h3>
         <span>
-          {__ctHelpers.ifElse(__ctHelpers.derive({
+          {__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Full Access", "Limited Access"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -373,7 +441,15 @@ export default recipe({
             } }, ({ state }) => state.isActive && state.hasPermission), "Full Access", "Limited Access")}
         </span>
         <span>
-          {__ctHelpers.ifElse(__ctHelpers.derive({
+          {__ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["In Range", "Out of Range"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -395,7 +471,15 @@ export default recipe({
             } }, ({ state }) => state.count > 0 && state.count < 10), "In Range", "Out of Range")}
         </span>
         <span>
-          {__ctHelpers.ifElse(__ctHelpers.derive({
+          {__ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Premium Features", "Basic Features"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {

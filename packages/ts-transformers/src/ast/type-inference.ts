@@ -388,8 +388,24 @@ export function registerDeriveCallType(
   }
 
   if (typeToRegister) {
-    typeRegistry.set(deriveCall, typeToRegister);
+    registerSyntheticCallType(deriveCall, typeToRegister, typeRegistry);
   }
+}
+
+/**
+ * Register the result type for a synthetic call (derive, ifElse, when, unless, etc.) in the TypeRegistry.
+ * This enables schema injection to find the correct result type for the call.
+ *
+ * @param call The synthetic call node
+ * @param resultType The result type to register
+ * @param typeRegistry The type registry to update
+ */
+export function registerSyntheticCallType(
+  call: ts.CallExpression,
+  resultType: ts.Type,
+  typeRegistry: WeakMap<ts.Node, ts.Type>,
+): void {
+  typeRegistry.set(call, resultType);
 }
 
 /**
