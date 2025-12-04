@@ -10,8 +10,6 @@ export default pattern<Record<string, never>>((_) => {
       <div>
         <pre>{wishResult.result.content}</pre>
         <hr />
-        {wishResult.result}
-        <hr />
         {wishResult}
       </div>
     ),
