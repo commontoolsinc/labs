@@ -1206,3 +1206,332 @@ Deno.bench({
     b.end();
   },
 });
+
+// ==========================================================================
+// FILE-BASED BENCHMARKS: Test real WAL/pragma impact
+// ==========================================================================
+
+const benchDir = Deno.makeTempDirSync({ prefix: "memory-bench-" });
+let fileDbCounter = 0;
+
+// Helper to open a fresh file-based space
+async function openFileSpace() {
+  // DID must be in pathname - format: file:///path/to/did:key:xxx.sqlite
+  const dbPath = `${benchDir}/${space.did()}-${fileDbCounter++}.sqlite`;
+  const result = await Space.open({
+    url: new URL(`file://${dbPath}`),
+  });
+  if (result.error) throw result.error;
+  return result.ok;
+}
+
+Deno.bench({
+  name: "file: set fact (single ~16KB assertion)",
+  group: "file-set",
+  baseline: true,
+  async fn(b) {
+    const session = await openFileSpace();
+    warmUp(session);
+
+    const doc = createDoc();
+    const payload = createTypicalPayload();
+
+    b.start();
+    const assertion = Fact.assert({
+      the,
+      of: doc,
+      is: payload,
+    });
+
+    const transaction = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([assertion]),
+    });
+
+    const result = session.transact(transaction);
+    b.end();
+
+    if (result.error) throw result.error;
+    session.close();
+  },
+});
+
+Deno.bench({
+  name: "file: set fact (10 ~16KB assertions batch)",
+  group: "file-set",
+  async fn(b) {
+    const session = await openFileSpace();
+    warmUp(session);
+
+    const docs = Array.from({ length: 10 }, () => createDoc());
+    const payloads = Array.from({ length: 10 }, () => createTypicalPayload());
+
+    b.start();
+    const assertions = docs.map((doc, i) =>
+      Fact.assert({
+        the,
+        of: doc,
+        is: payloads[i],
+      })
+    );
+
+    const transaction = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from(assertions),
+    });
+
+    const result = session.transact(transaction);
+    b.end();
+
+    if (result.error) throw result.error;
+    session.close();
+  },
+});
+
+Deno.bench({
+  name: "file: set fact (100 ~16KB assertions batch)",
+  group: "file-set",
+  async fn(b) {
+    const session = await openFileSpace();
+    warmUp(session);
+
+    const docs = Array.from({ length: 100 }, () => createDoc());
+    const payloads = Array.from({ length: 100 }, () => createTypicalPayload());
+
+    b.start();
+    const assertions = docs.map((doc, i) =>
+      Fact.assert({
+        the,
+        of: doc,
+        is: payloads[i],
+      })
+    );
+
+    const transaction = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from(assertions),
+    });
+
+    const result = session.transact(transaction);
+    b.end();
+
+    if (result.error) throw result.error;
+    session.close();
+  },
+});
+
+// File-based get benchmarks
+Deno.bench({
+  name: "file: get fact (single ~16KB query)",
+  group: "file-get",
+  baseline: true,
+  async fn(b) {
+    const session = await openFileSpace();
+    const doc = createDoc();
+
+    // Setup: create the fact first
+    const assertion = Fact.assert({ the, of: doc, is: createTypicalPayload() });
+    const transaction = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([assertion]),
+    });
+    session.transact(transaction);
+
+    b.start();
+    const query = Query.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      select: { [doc]: { [the]: {} } },
+    });
+    const result = session.query(query);
+    b.end();
+
+    if (result.error) throw result.error;
+    session.close();
+  },
+});
+
+Deno.bench({
+  name: "file: get fact (wildcard query 100 ~16KB docs)",
+  group: "file-get",
+  async fn(b) {
+    const session = await openFileSpace();
+
+    // Setup: create 100 facts
+    const assertions = Array.from({ length: 100 }, () =>
+      Fact.assert({
+        the,
+        of: createDoc(),
+        is: createTypicalPayload(),
+      }));
+    const transaction = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from(assertions),
+    });
+    session.transact(transaction);
+
+    b.start();
+    const query = Query.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      select: { _: { [the]: {} } },
+    });
+    const result = session.query(query);
+    b.end();
+
+    if (result.error) throw result.error;
+    session.close();
+  },
+});
+
+// File-based update benchmark
+Deno.bench({
+  name: "file: update fact (single ~16KB)",
+  group: "file-update",
+  baseline: true,
+  async fn(b) {
+    const session = await openFileSpace();
+    const doc = createDoc();
+    const payload1 = createTypicalPayload();
+    const payload2 = createTypicalPayload();
+
+    // Setup: create the initial fact
+    const v1 = Fact.assert({ the, of: doc, is: payload1 });
+    const createTx = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v1]),
+    });
+    session.transact(createTx);
+
+    b.start();
+    const v2 = Fact.assert({ the, of: doc, is: payload2, cause: v1 });
+    const updateTx = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v2]),
+    });
+    const result = session.transact(updateTx);
+    b.end();
+
+    if (result.error) throw result.error;
+    session.close();
+  },
+});
+
+Deno.bench({
+  name: "file: update fact (10 sequential ~16KB updates)",
+  group: "file-update",
+  async fn(b) {
+    const session = await openFileSpace();
+    const doc = createDoc();
+    const payloads = Array.from({ length: 11 }, () => createTypicalPayload());
+
+    // Setup: create the initial fact
+    let current = Fact.assert({ the, of: doc, is: payloads[0] });
+    const createTx = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([current]),
+    });
+    session.transact(createTx);
+
+    b.start();
+    for (let i = 1; i <= 10; i++) {
+      const next = Fact.assert({
+        the,
+        of: doc,
+        is: payloads[i],
+        cause: current,
+      });
+      const updateTx = Transaction.create({
+        issuer: alice.did(),
+        subject: space.did(),
+        changes: Changes.from([next]),
+      });
+      const result = session.transact(updateTx);
+      if (result.error) throw result.error;
+      current = next;
+    }
+    b.end();
+
+    session.close();
+  },
+});
+
+// File-based workflow benchmark
+Deno.bench({
+  name: "file: workflow: create -> read -> update -> read -> retract",
+  group: "file-workflow",
+  async fn(b) {
+    const session = await openFileSpace();
+    warmUp(session);
+
+    const doc = createDoc();
+    const payload1 = createTypicalPayload();
+    const payload2 = createTypicalPayload();
+
+    b.start();
+    // Create
+    const v1 = Fact.assert({ the, of: doc, is: payload1 });
+    const createResult = session.transact(
+      Transaction.create({
+        issuer: alice.did(),
+        subject: space.did(),
+        changes: Changes.from([v1]),
+      }),
+    );
+
+    // Read
+    const readResult1 = session.query(
+      Query.create({
+        issuer: alice.did(),
+        subject: space.did(),
+        select: { [doc]: { [the]: {} } },
+      }),
+    );
+
+    // Update
+    const v2 = Fact.assert({ the, of: doc, is: payload2, cause: v1 });
+    const updateResult = session.transact(
+      Transaction.create({
+        issuer: alice.did(),
+        subject: space.did(),
+        changes: Changes.from([v2]),
+      }),
+    );
+
+    // Read again
+    const readResult2 = session.query(
+      Query.create({
+        issuer: alice.did(),
+        subject: space.did(),
+        select: { [doc]: { [the]: {} } },
+      }),
+    );
+
+    // Retract
+    const r = Fact.retract(v2);
+    const retractResult = session.transact(
+      Transaction.create({
+        issuer: alice.did(),
+        subject: space.did(),
+        changes: Changes.from([r]),
+      }),
+    );
+    b.end();
+
+    if (createResult.error) throw createResult.error;
+    if (readResult1.error) throw readResult1.error;
+    if (updateResult.error) throw updateResult.error;
+    if (readResult2.error) throw readResult2.error;
+    if (retractResult.error) throw retractResult.error;
+
+    session.close();
+  },
+});
