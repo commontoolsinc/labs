@@ -4,13 +4,13 @@
  */
 
 import ts from "typescript";
-import * as path from "node:path";
+import { join } from "@std/path";
 
 const projectRoot = "/Users/gideonwald/coding/common_tools/labs";
-const testFile = path.join(projectRoot, "packages/ts-transformers/test/fixtures/bug-repro/actual-types-repro.ts");
+const testFile = join(projectRoot, "packages/ts-transformers/test/fixtures/bug-repro/actual-types-repro.ts");
 
 // Parse deno.json for import mappings
-const denoJson = JSON.parse(Deno.readTextFileSync(path.join(projectRoot, "deno.json")));
+const denoJson = JSON.parse(Deno.readTextFileSync(join(projectRoot, "deno.json")));
 const imports: Record<string, string> = denoJson.imports || {};
 
 const compilerOptions: ts.CompilerOptions = {
@@ -21,7 +21,7 @@ const compilerOptions: ts.CompilerOptions = {
   noEmit: true,
   skipLibCheck: true,
   paths: {
-    "commontools": [path.join(projectRoot, "packages/api/index.ts")],
+    "commontools": [join(projectRoot, "packages/api/index.ts")],
   },
   baseUrl: projectRoot,
 };
@@ -31,7 +31,7 @@ host.resolveModuleNames = (moduleNames, containingFile, _reusedNames, _redirecte
   return moduleNames.map((moduleName) => {
     if (imports[moduleName]) {
       const resolvedPath = imports[moduleName].startsWith("./")
-        ? path.join(projectRoot, imports[moduleName])
+        ? join(projectRoot, imports[moduleName])
         : imports[moduleName];
       if (resolvedPath.endsWith(".ts")) {
         return { resolvedFileName: resolvedPath, isExternalLibraryImport: false };
@@ -63,7 +63,7 @@ ts.forEachChild(sourceFile, (node) => {
 
       const hasNull = typeString.includes("null");
       const isInnerType = name.endsWith("Inner") || name.endsWith("Get");
-      const expectNull = name.includes("Value") || name.includes("Direct");
+      const _expectNull = name.includes("Value") || name.includes("Direct");
 
       let status = "";
       if (isInnerType) {
