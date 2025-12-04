@@ -12,9 +12,7 @@ import {
 import Counter from "./counter.tsx";
 import Note from "./note.tsx";
 
-type Input = {
-  dummy: Cell<Default<number, 0>>;
-};
+type Input = {};
 
 type Result = {
   counterAValue: number;
@@ -23,8 +21,8 @@ type Result = {
 };
 
 export default recipe<Input, Result>(
-  "ct-select-test demo",
-  ({ dummy }) => {
+  "ct-picker demo",
+  (_) => {
     // Create counter instances - these are OpaqueRefs to recipe results
     const counterA = Counter({ value: 10 });
     const counterB = Note({ content: "This is item B (a Note)" });
@@ -35,10 +33,10 @@ export default recipe<Input, Result>(
     const selection = computed(() => items[selectedIndex.get()]);
 
     return {
-      [NAME]: "ct-select-test demo",
+      [NAME]: "ct-picker demo",
       [UI]: (
         <ct-vstack gap="3" style={{ padding: "1rem" }}>
-          <h3>ct-select-test Component Demo</h3>
+          <h3>ct-picker Component Demo</h3>
 
           <ct-card>
             <ct-button
