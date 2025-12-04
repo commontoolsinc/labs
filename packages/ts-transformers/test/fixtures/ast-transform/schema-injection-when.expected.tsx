@@ -127,13 +127,8 @@ export default recipe({
 } as const satisfies __ctHelpers.JSONSchema, ({ enabled, message }) => {
     // when(condition, value) - returns value if condition is truthy, else condition
     const result = when({
-        anyOf: [{
-                type: "boolean",
-                asOpaque: true
-            }, {
-                type: "boolean",
-                asOpaque: true
-            }]
+        type: "boolean",
+        asOpaque: true
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "string",
         asOpaque: true
