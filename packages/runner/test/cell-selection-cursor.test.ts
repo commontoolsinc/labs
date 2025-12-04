@@ -9,7 +9,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { isCell } from "../src/cell.ts";
-import { NAME, UI, type OpaqueCell } from "../src/builder/types.ts";
+import { NAME, type OpaqueCell, UI } from "../src/builder/types.ts";
 import { recipe } from "../src/builder/recipe.ts";
 import type { Default } from "@commontools/api";
 import { createDataCellURI } from "../src/link-utils.ts";
@@ -140,15 +140,35 @@ describe("Cell Selection - Single vs Double Wrapping", () => {
     it("should verify Cell.equals behavior with persisted cells", () => {
       withinHandlerContext(runtime, space, tx, () => {
         // Use runtime.getCell for persisted cells that work with Cell.equals
-        const itemA = runtime.getCell<{ title: string }>(space, "item-A-equals", undefined, tx);
-        const itemB = runtime.getCell<{ title: string }>(space, "item-B-equals", undefined, tx);
-        const itemC = runtime.getCell<{ title: string }>(space, "item-C-equals", undefined, tx);
+        const itemA = runtime.getCell<{ title: string }>(
+          space,
+          "item-A-equals",
+          undefined,
+          tx,
+        );
+        const itemB = runtime.getCell<{ title: string }>(
+          space,
+          "item-B-equals",
+          undefined,
+          tx,
+        );
+        const itemC = runtime.getCell<{ title: string }>(
+          space,
+          "item-C-equals",
+          undefined,
+          tx,
+        );
 
         itemA.set({ title: "A" });
         itemB.set({ title: "B" });
         itemC.set({ title: "C" });
 
-        const selected = runtime.getCell<unknown>(space, "selected-equals", undefined, tx);
+        const selected = runtime.getCell<unknown>(
+          space,
+          "selected-equals",
+          undefined,
+          tx,
+        );
         selected.set(itemA);
 
         // Cell.equals() resolves links, so when selected contains a link to itemA,
@@ -246,13 +266,28 @@ describe("Cell Selection - Single vs Double Wrapping", () => {
     it("should understand link resolution with persisted cells", () => {
       withinHandlerContext(runtime, space, tx, () => {
         // Use runtime.getCell for predictable behavior
-        const itemA = runtime.getCell<{ title: string }>(space, "double-item-A", undefined, tx);
-        const itemB = runtime.getCell<{ title: string }>(space, "double-item-B", undefined, tx);
+        const itemA = runtime.getCell<{ title: string }>(
+          space,
+          "double-item-A",
+          undefined,
+          tx,
+        );
+        const itemB = runtime.getCell<{ title: string }>(
+          space,
+          "double-item-B",
+          undefined,
+          tx,
+        );
 
         itemA.set({ title: "A" });
         itemB.set({ title: "B" });
 
-        const selected = runtime.getCell<unknown>(space, "double-selected", undefined, tx);
+        const selected = runtime.getCell<unknown>(
+          space,
+          "double-selected",
+          undefined,
+          tx,
+        );
         selected.set(itemA);
 
         // Cell.get() resolves links, so we get the VALUE of itemA, not the cell itself
@@ -280,18 +315,36 @@ describe("Cell Selection - Single vs Double Wrapping", () => {
     it("should use getRaw to see the underlying link structure", () => {
       withinHandlerContext(runtime, space, tx, () => {
         // Use runtime.getCell for predictable behavior
-        const itemA = runtime.getCell<{ title: string }>(space, "raw-item-A", undefined, tx);
-        const itemB = runtime.getCell<{ title: string }>(space, "raw-item-B", undefined, tx);
+        const itemA = runtime.getCell<{ title: string }>(
+          space,
+          "raw-item-A",
+          undefined,
+          tx,
+        );
+        const itemB = runtime.getCell<{ title: string }>(
+          space,
+          "raw-item-B",
+          undefined,
+          tx,
+        );
 
         itemA.set({ title: "A" });
         itemB.set({ title: "B" });
 
-        const selected = runtime.getCell<unknown>(space, "raw-selected", undefined, tx);
+        const selected = runtime.getCell<unknown>(
+          space,
+          "raw-selected",
+          undefined,
+          tx,
+        );
         selected.set(itemA);
 
         // getRaw() shows the raw storage value - a link to itemA
         const rawValue = selected.getRaw();
-        console.log("selected.getRaw() after setting itemA:", JSON.stringify(rawValue));
+        console.log(
+          "selected.getRaw() after setting itemA:",
+          JSON.stringify(rawValue),
+        );
 
         // The raw value should be a link object (not undefined for persisted cells)
         expect(rawValue).toBeDefined();
@@ -299,7 +352,10 @@ describe("Cell Selection - Single vs Double Wrapping", () => {
         // After setting to itemB, raw value should be a different link
         selected.set(itemB);
         const newRawValue = selected.getRaw();
-        console.log("selected.getRaw() after setting itemB:", JSON.stringify(newRawValue));
+        console.log(
+          "selected.getRaw() after setting itemB:",
+          JSON.stringify(newRawValue),
+        );
         expect(newRawValue).toBeDefined();
       });
     });
@@ -360,7 +416,9 @@ describe("Cell Selection - Single vs Double Wrapping", () => {
         ]);
 
         // Method 2: runtime.getCell - creates a persisted cell
-        const runtimeArray = runtime.getCell<{ title: string; count: number }[]>(
+        const runtimeArray = runtime.getCell<
+          { title: string; count: number }[]
+        >(
           space,
           "runtime-array",
           undefined,
@@ -373,13 +431,25 @@ describe("Cell Selection - Single vs Double Wrapping", () => {
 
         console.log("=== Cell.of array ===");
         console.log("cellOfArray.get():", JSON.stringify(cellOfArray.get()));
-        console.log("cellOfArray.key(0).get():", JSON.stringify(cellOfArray.key(0).get()));
-        console.log("cellOfArray.key(1).get():", JSON.stringify(cellOfArray.key(1).get()));
+        console.log(
+          "cellOfArray.key(0).get():",
+          JSON.stringify(cellOfArray.key(0).get()),
+        );
+        console.log(
+          "cellOfArray.key(1).get():",
+          JSON.stringify(cellOfArray.key(1).get()),
+        );
 
         console.log("=== runtime.getCell array ===");
         console.log("runtimeArray.get():", JSON.stringify(runtimeArray.get()));
-        console.log("runtimeArray.key(0).get():", JSON.stringify(runtimeArray.key(0).get()));
-        console.log("runtimeArray.key(1).get():", JSON.stringify(runtimeArray.key(1).get()));
+        console.log(
+          "runtimeArray.key(0).get():",
+          JSON.stringify(runtimeArray.key(0).get()),
+        );
+        console.log(
+          "runtimeArray.key(1).get():",
+          JSON.stringify(runtimeArray.key(1).get()),
+        );
 
         // Check if Cell.of array supports .key()
         // This might be the issue - Cell.of might not persist data the same way
@@ -551,8 +621,18 @@ describe("Cell Selection - Single vs Double Wrapping", () => {
     it("should resolve $alias objects when Cell.key() is called on data URI cells", () => {
       withinHandlerContext(runtime, space, tx, () => {
         // Create target cells in normal storage
-        const targetA = runtime.getCell<{ title: string }>(space, "target-A", undefined, tx);
-        const targetB = runtime.getCell<{ title: string }>(space, "target-B", undefined, tx);
+        const targetA = runtime.getCell<{ title: string }>(
+          space,
+          "target-A",
+          undefined,
+          tx,
+        );
+        const targetB = runtime.getCell<{ title: string }>(
+          space,
+          "target-B",
+          undefined,
+          tx,
+        );
         targetA.set({ title: "Target A" });
         targetB.set({ title: "Target B" });
 
@@ -563,13 +643,28 @@ describe("Cell Selection - Single vs Double Wrapping", () => {
         // Create a data URI containing alias objects (simulating vnode serialization)
         // This is what happens when vnodes are serialized with $alias references
         const dataContent = [
-          { $alias: { cell: { "/": targetALink.id.replace("of:", "") }, path: [] } },
-          { $alias: { cell: { "/": targetBLink.id.replace("of:", "") }, path: [] } },
+          {
+            $alias: {
+              cell: { "/": targetALink.id.replace("of:", "") },
+              path: [],
+            },
+          },
+          {
+            $alias: {
+              cell: { "/": targetBLink.id.replace("of:", "") },
+              path: [],
+            },
+          },
         ];
 
         // Create data URI cell using the helper
         const dataUri = createDataCellURI(dataContent);
-        const dataCell = runtime.getImmutableCell(space, dataContent, undefined, tx);
+        const dataCell = runtime.getImmutableCell(
+          space,
+          dataContent,
+          undefined,
+          tx,
+        );
 
         // Call .key(0) - should resolve the alias and return cell pointing to targetA
         const child0 = dataCell.key(0);
@@ -599,17 +694,32 @@ describe("Cell Selection - Single vs Double Wrapping", () => {
     it("should handle $alias with nested paths", () => {
       withinHandlerContext(runtime, space, tx, () => {
         // Create a target cell with nested data
-        const target = runtime.getCell<{ nested: { value: number } }>(space, "nested-target", undefined, tx);
+        const target = runtime.getCell<{ nested: { value: number } }>(
+          space,
+          "nested-target",
+          undefined,
+          tx,
+        );
         target.set({ nested: { value: 42 } });
 
         const targetLink = target.getAsNormalizedFullLink();
 
         // Create alias pointing to nested.value path
         const dataContent = [
-          { $alias: { cell: { "/": targetLink.id.replace("of:", "") }, path: ["nested", "value"] } },
+          {
+            $alias: {
+              cell: { "/": targetLink.id.replace("of:", "") },
+              path: ["nested", "value"],
+            },
+          },
         ];
 
-        const dataCell = runtime.getImmutableCell(space, dataContent, undefined, tx);
+        const dataCell = runtime.getImmutableCell(
+          space,
+          dataContent,
+          undefined,
+          tx,
+        );
 
         // Call .key(0) - should resolve alias with nested path
         const child0 = dataCell.key(0);
@@ -637,7 +747,12 @@ describe("Cell Selection - Single vs Double Wrapping", () => {
           { title: "Item B" },
         ];
 
-        const dataCell = runtime.getImmutableCell(space, dataContent, undefined, tx);
+        const dataCell = runtime.getImmutableCell(
+          space,
+          dataContent,
+          undefined,
+          tx,
+        );
 
         // Call .key(0) - should return cell pointing into data URI (no alias to resolve)
         const child0 = dataCell.key(0);
@@ -656,7 +771,6 @@ describe("Cell Selection - Single vs Double Wrapping", () => {
       });
     });
   });
-
 });
 
 // Separate describe block for recipe-based tests to avoid frame issues
@@ -835,8 +949,8 @@ describe("Cell Selection with Recipe OpaqueRefs", () => {
             counterBValue: inputs.b,
             counterCValue: inputs.c,
             countersLength: 3,
-            allDistinct:
-              inputs.a === 100 && inputs.b === 200 && inputs.c === 300,
+            allDistinct: inputs.a === 100 && inputs.b === 200 &&
+              inputs.c === 300,
           }),
         )({ a: counterA.value, b: counterB.value, c: counterC.value });
 
@@ -1083,7 +1197,12 @@ describe("Cell Selection with Recipe OpaqueRefs", () => {
       undefined,
       tx,
     );
-    const result = runtime.run(tx, KeyIndexTestRecipe, { dummy: 0 }, resultCell);
+    const result = runtime.run(
+      tx,
+      KeyIndexTestRecipe,
+      { dummy: 0 },
+      resultCell,
+    );
     tx.commit();
     await runtime.idle();
 

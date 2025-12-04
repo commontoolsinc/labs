@@ -9,7 +9,12 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import { type Cell, getCellOrThrow, isQueryResult, isCell } from "@commontools/runner";
+import {
+  type Cell,
+  getCellOrThrow,
+  isCell,
+  isQueryResult,
+} from "@commontools/runner";
 import { createCellController } from "../../core/cell-controller.ts";
 
 // Debug logging - set to true to trace selection issues
@@ -312,7 +317,9 @@ export class CTSelect extends BaseElement {
 
       const renderItem = (item: SelectItem, index: number) => {
         const optionKey = this._makeKey(item, index);
-        debugLog(`_renderOptions: rendering option key="${optionKey}" label="${item.label}" at index ${index}`);
+        debugLog(
+          `_renderOptions: rendering option key="${optionKey}" label="${item.label}" at index ${index}`,
+        );
         return html`
           <option
             value="${optionKey}"
@@ -437,7 +444,10 @@ export class CTSelect extends BaseElement {
         // Debug: check comparison for each item
         [...this._keyMap.entries()].forEach(([key, item]) => {
           const same = areCellValuesSame(item.value, val);
-          debugLog(`applyValueToDom: areCellValuesSame(items[${key}].value, currentValue) =`, same);
+          debugLog(
+            `applyValueToDom: areCellValuesSame(items[${key}].value, currentValue) =`,
+            same,
+          );
         });
 
         const matchKey = [...this._keyMap.entries()].find(

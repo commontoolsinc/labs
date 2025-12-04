@@ -1,6 +1,6 @@
 /// <cts-enable />
 
-import { Cell, OpaqueCell, Default, NAME, recipe, UI } from "commontools";
+import { Cell, Default, NAME, OpaqueCell, recipe, UI } from "commontools";
 import Counter from "./counter.tsx";
 import Note from "./note.tsx";
 
@@ -89,18 +89,30 @@ export default recipe<Input, Result>(
               components share the same selection state.
             </p>
             <div style={{ marginBottom: "1rem" }}>
-              <ct-picker $items={counters} $value={selection} min-height="250px" />
+              <ct-picker
+                $items={counters}
+                $value={selection}
+                min-height="250px"
+              />
             </div>
-            {/*<ct-select
+            {
+              /*<ct-select
               items={counters.map((counter, i) => ({
                 label: `Counter ${i + 1}`,
                 value: counter,
               }))}
               $value={pickerSelection}
-            />*/}
-            <p style={{ marginTop: "0.5rem", fontSize: "0.875rem", color: "#666" }}>
-              Try using the arrows in the picker or changing the dropdown -
-              they stay in sync!
+            />*/
+            }
+            <p
+              style={{
+                marginTop: "0.5rem",
+                fontSize: "0.875rem",
+                color: "#666",
+              }}
+            >
+              Try using the arrows in the picker or changing the dropdown - they
+              stay in sync!
             </p>
           </ct-card>
         </ct-vstack>
