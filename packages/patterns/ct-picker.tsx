@@ -53,7 +53,8 @@ export default recipe<Input, Result>(
           </ct-card>
 
           <ct-card>
-            <ct-picker items={items} $selectedIndex={selectedIndex} />
+            {/* The cast is because OpaqueCell does not satisfy CellLike, but... it is */}
+            <ct-picker $items={items as any} $selectedIndex={selectedIndex} />
           </ct-card>
         </ct-vstack>
       ),
