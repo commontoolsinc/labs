@@ -1,19 +1,15 @@
-import { AnyCellWrapping, JSONSchemaObj } from "@commontools/api";
+import { AnyCellWrapping } from "@commontools/api";
 import { getLogger } from "@commontools/utils/logger";
 import { Immutable, isObject, isRecord } from "@commontools/utils/types";
 import { JSONSchemaMutable } from "@commontools/runner";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
 import { createCell, isCell } from "./cell.ts";
-import { readMaybeLink, resolveLink } from "./link-resolution.ts";
+import { resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type IRuntime } from "./runtime.ts";
-import {
-  createDataCellURI,
-  type NormalizedFullLink,
-  parseLink,
-} from "./link-utils.ts";
+import { type NormalizedFullLink } from "./link-utils.ts";
 import {
   createQueryResultProxy,
   isCellResultForDereferencing,
@@ -22,12 +18,13 @@ import { toCell } from "./back-to-cell.ts";
 import {
   combineSchema,
   IObjectCreator,
+  mergeSchemaFlags,
   OptJSONValue,
   SchemaObjectTraverser,
 } from "@commontools/runner/traverse";
 
 const logger = getLogger("validateAndTransform", {
-  enabled: true,
+  enabled: false,
   level: "debug",
 });
 
@@ -166,7 +163,7 @@ export function processDefaultValue(
   }
 
   if (isObject(schema) && schema.asStream) {
-    console.warn(
+    logger.warn(
       "Created asStream as a default value, but this is likely unintentional",
     );
     // This can receive events, but at first nothing will be bound to it.
@@ -399,28 +396,40 @@ export function validateAndTransform(
 
   // Update our link to match the potentially merged schema
   link.schema = filteredSchema !== undefined
-    ? combineSchema(schema!, filteredSchema)
+    ? schema != undefined
+      ? combineSchema(schema, filteredSchema)
+      : filteredSchema
     : schema;
 
   // Now resolve further links until we get the actual value.
   const ref = resolveLink(tx ?? runtime.edit(), link);
-
   const objectCreator = new TransformObjectCreator(runtime, tx!);
 
   // If our link is asCell/asStream, and we don't have any path portions, we
   // can just create the cell and skip reading the value and traversal.
   if (SchemaObjectTraverser.asCellOrStream(schema)) {
-    return objectCreator.createObject(ref, undefined);
+    // If our ref has a schema, merge our schema flags into that schema
+    // Otherwise, we won't return a cell like we are supposed to.
+    const mergedRef = ref.schema !== undefined
+      ? {
+        ...ref,
+        schema: mergeSchemaFlags(schema!, ref.schema),
+      }
+      : ref;
+    return objectCreator.createObject(mergedRef, undefined);
   }
 
   // Link paths don't include value, but doc address should
   const { id, type, path } = ref;
   const address = { id, type, path: ["value", ...path] };
   const doc = { address, value: tx!.readValueOrThrow(ref) };
-  // We need the asCell that's in the original schema to be passed into the traverser so it knows the top level obj is a cell
+  // If we have a ref with a schema, use that; otherwise, use the link's schema
   const selector = {
     path: doc.address.path,
-    schemaContext: { schema: link.schema!, rootSchema: rootSchema! },
+    schemaContext: {
+      schema: ref.schema ?? link.schema!,
+      rootSchema: ref.rootSchema ?? link.rootSchema!,
+    },
   };
   // TODO(@ubik2): these constructor parameters are complex enough that we should
   // use an options struct
@@ -433,8 +442,7 @@ export function validateAndTransform(
     objectCreator,
     false,
   );
-  const result = traverser.traverse(doc, link);
-  return result;
+  return traverser.traverse(doc, link);
 }
 
 class TransformObjectCreator

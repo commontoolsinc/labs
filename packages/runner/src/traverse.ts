@@ -360,10 +360,14 @@ export interface IObjectCreator<T> {
   // functions or actualy create the cell.
   createObject(
     link: NormalizedFullLink,
-    value: T[] | Record<string, T> | T | undefined,
+    value: (T | undefined)[] | Record<string, (T | undefined)> | T | undefined,
   ): T;
 }
 
+/**
+ * This is the ObjectCreator used by the SchemaObjectTraverser for processing
+ * queries. We don't need to do anything special here.
+ */
 class StandardObjectCreator implements IObjectCreator<JSONValue> {
   addOptionalProperty(
     obj: Record<string, unknown>,
@@ -378,6 +382,13 @@ class StandardObjectCreator implements IObjectCreator<JSONValue> {
   ): JSONValue | undefined {
     return defaultValue;
   }
+  /**
+   * When processing queries, we want JSON, so we replace undefined with null.
+   *
+   * @param _link
+   * @param value
+   * @returns
+   */
   createObject(
     _link: NormalizedFullLink,
     value: JSONValue[] | Record<string, JSONValue> | JSONValue | undefined,
@@ -440,20 +451,18 @@ export abstract class BaseObjectTraverser<
     schemaTracker?: MapSet<string, SchemaPathSelector>,
     defaultValue?: JSONValue,
     itemLink?: NormalizedFullLink,
-  ): JSONValue {
+  ): JSONValue | undefined {
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
-      // Otherwise, return null
-      return defaultValue != undefined
-        ? this.objectCreator.applyDefault(
-          { ...doc.address, space },
-          defaultValue,
-        )!
-        : null;
+      // Otherwise, return undefined
+      return this.objectCreator.applyDefault(
+        { ...doc.address, space },
+        defaultValue,
+      );
     } else if (isPrimitive(doc.value)) {
       return doc.value;
     } else if (Array.isArray(doc.value)) {
-      const newValue: JSONValue[] = [];
+      const newValue: (JSONValue | undefined)[] = [];
       using t = tracker.include(doc.value, SchemaAll, newValue, doc);
       if (t === null) {
         return tracker.getExisting(doc.value, SchemaAll);
@@ -493,8 +502,8 @@ export abstract class BaseObjectTraverser<
           itemDefault,
         );
       });
-      // We copy the contents of our result into newValue so that if we have
-      // a cycle, we can return newValue before we actually populate it.
+      // We copy the contents of our result into newValue so that if we have a
+      // cycle, we can return newValue before we actually finish populating it.
       for (const v of entries) {
         newValue.push(v);
       }
@@ -915,7 +924,7 @@ function mergeDefs(sourceSchema: JSONSchemaObj, destSchema: JSONSchemaObj) {
 }
 
 // Merge any schema flags like asCell or asStream from flagSchema into schema.
-function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
+export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
   if (isObject(flagSchema)) {
     // we want to preserve asCell and asStream -- if true, these will override
     // the value in the schema
@@ -1314,6 +1323,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
         schemaContext.schema,
       );
       if (resolved === undefined) {
+        console.log("rEturning undefined");
         return undefined;
       }
       schemaContext = {
@@ -1326,6 +1336,16 @@ export class SchemaObjectTraverser<V extends JSONValue>
 
   // Generally handles anyOf
   // TODO(@ubik2): Need to break this up -- it's too long
+  /**
+   * Traverse the doc with the specified schema context.
+   *
+   * @param doc
+   * @param schemaContext
+   * @param link optional top level link information that we may need to
+   *  pass to the object creator later
+   * @returns the traversed value, or undefined if the doc does not match
+   *  the schema
+   */
   traverseWithSchemaContext(
     doc: IAttestation,
     schemaContext: Readonly<SchemaContext>,
@@ -1339,6 +1359,8 @@ export class SchemaObjectTraverser<V extends JSONValue>
     schemaContext = resolved;
     // Do some partial anyOf handling -- this should be improved later
     if (isObject(schemaContext.schema)) {
+      // There are a lot of valid logical schema flags, and we only handle
+      // a very limited set here, with no support for combinations.
       if (schemaContext.schema.anyOf) {
         const { anyOf, ...restSchema } = schemaContext.schema;
         // Consider items without asCell or asStream first, since if we aren't
@@ -1353,20 +1375,18 @@ export class SchemaObjectTraverser<V extends JSONValue>
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
             continue;
           }
-          // TODO: This merge isn't quite right.
-          // A {type: object, anyOf: [{type: string}]} schema should never match
-          const mergedSchema = isObject(optionSchema)
-            ? { ...restSchema, ...optionSchema }
-            : optionSchema
-            ? restSchema // optionSchema === true
-            : false; // optionSchema === false
-          // TODO: do i need to merge the link schema?
-          // TODO: I think I want to not pass link if we're asCell/asStream
+          const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
+          // TODO(@ubik2): do i need to merge the link schema?
           const val = this.traverseWithSchemaContext(doc, {
             schema: mergedSchema,
             rootSchema: schemaContext.rootSchema,
           }, link);
           if (val !== undefined) {
+            // FIXME(@ubik2): these value objects should be merged. While this
+            // isn't JSONSchema spec, when we have an anyOf with branches where
+            // name is set in one schema, but the address is ignored, and a
+            // second option where address is set, and name is ignored, we want
+            // to include both.
             return val;
           }
         }
@@ -1379,20 +1399,18 @@ export class SchemaObjectTraverser<V extends JSONValue>
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
             return undefined;
           }
-          // TODO: This merge isn't quite right.
-          // A {type: object, allOf: [{type: string}]} schema should never match
-          const mergedSchema = isObject(optionSchema)
-            ? { ...restSchema, ...optionSchema }
-            : optionSchema
-            ? restSchema // optionSchema === true
-            : false; // optionSchema === false
-          // TODO: do i need to merge the link schema?
+          const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
+          // TODO(@ubik2: do i need to merge the link schema?
           const val = this.traverseWithSchemaContext(doc, {
             schema: mergedSchema,
             rootSchema: schemaContext.rootSchema,
           }, link);
           if (val !== undefined) {
-            // TODO: these should be merged?
+            // FIXME(@ubik2): these value objects should be merged. While this
+            // isn't JSONSchema spec, when we have an allOf with branches where
+            // name is set in one schema, but the address is ignored, and a
+            // second option where address is set, and name is ignored, we want
+            // to include both.
             lastVal = val;
           } else {
             // One of the allOf patterns failed to match
@@ -1435,7 +1453,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
     const schemaObj = schemaContext.schema;
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
-      // Otherwise, return null
+      // Otherwise, return undefined
       return this.applyDefault(doc, schemaContext.schema);
     } else if (doc.value === null) {
       return this.isValidType(schemaObj, "null")
@@ -1577,13 +1595,14 @@ export class SchemaObjectTraverser<V extends JSONValue>
   }
 
   /**
-   * Traverse an object according to the specified schema, returning
-   * a new object that only includes the properties that matched the schema.
+   * Traverse an an array according to the specified schema, returning
+   * a new array that includes the elements that matched the schema.
    *
    * @param doc doc with address and value to traverse
    * @param schemaContext schema and rootSchema that apply to this object
    * @param link optional link to pass to createObject callback
-   * @returns An object with only the properties that matched the schema
+   * @returns the newly created array with entries or undefined if one of our
+   *  elements failed to validate.
    */
   private traverseArrayWithSchema(
     doc: IAttestation,
@@ -1679,14 +1698,36 @@ export class SchemaObjectTraverser<V extends JSONValue>
         // Our selector's path needs to be updated to match the new doc
         curSelector.path = curDoc.address.path;
       }
-      // We want those links to point directly at the linked cells, instead of
-      // using our path (e.g. ["items", "0"]), so don't pass in a modified link.
-      const val = this.traverseWithSelector(curDoc, curSelector);
-      if (val === undefined) {
-        // this array is invalid, since one or more items do not match the schema
-        return undefined;
+      // If we've asked for cells in the array and we don't need to traverse cells,
+      // add the created cell instead.
+      if (
+        !this.traverseCells &&
+        SchemaObjectTraverser.asCellOrStream(itemSchema) && isLink(item)
+      ) {
+        // This is redundant, since the getAtPath that happened earlier
+        // already did this work, but I don't have easy access here.
+        const itemLink = parseLink(item, {
+          ...doc.address, // should trim path, but it doesn't matter
+          space: this.space,
+        });
+        // The link may not have the asCell flags, so pull that from itemSchema
+        const elementLink = {
+          ...itemLink,
+          schema: mergeSchemaFlags(itemSchema, itemLink.schema ?? {}),
+        };
+        const val = this.objectCreator.createObject(elementLink, undefined);
+        arrayObj.push(val);
+      } else {
+        // FIXME: If we have an asCell in our schema,
+        // We want those links to point directly at the linked cells, instead of
+        // using our path (e.g. ["items", "0"]), so don't pass in a modified link.
+        const val = this.traverseWithSelector(curDoc, curSelector);
+        if (val === undefined) {
+          // this array is invalid, since one or more items do not match the schema
+          return undefined;
+        }
+        arrayObj.push(val);
       }
-      arrayObj.push(val);
     }
     return arrayObj;
   }
@@ -1801,14 +1842,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
             propLink,
             propSchema.default,
           );
-          // const propDocAddress = {
-          //   ...doc.address,
-          //   path: [...doc.address.path, propKey],
-          // };
-          // const val = this.applyDefault({
-          //   address: propDocAddress,
-          //   value: undefined,
-          // }, propSchema);
           if (val !== undefined) {
             logger.debug(
               "traverse",
@@ -1893,6 +1926,10 @@ export class SchemaObjectTraverser<V extends JSONValue>
       this.traverseCells,
     );
     if (newDoc.value === undefined) {
+      logger.debug(
+        "traversePointerWithSchema",
+        () => ["Encountered link to undefined value", doc, normalizedLink],
+      );
       return null;
     }
     // The call to getAtPath above will track entry into the pointer,
@@ -1901,6 +1938,10 @@ export class SchemaObjectTraverser<V extends JSONValue>
     // doc we were called with (not the one we resolved, which may be a pointer).
     using t = this.tracker.include(doc.value!, schemaContext, null, doc);
     if (t === null) {
+      logger.debug(
+        "traversePointerWithSchema",
+        () => ["Encountered cycle", doc, normalizedLink],
+      );
       return null;
     }
     return this.traverseWithSelector(newDoc, newSelector!, link);
@@ -1975,7 +2016,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       );
       return this.objectCreator.applyDefault(link, schema.default);
     }
-    return null;
+    return undefined;
   }
 }
 
@@ -1996,4 +2037,28 @@ export function isSchemaSuperset(
 ) {
   return (ContextualFlowControl.isTrueSchema(schemaA)) ||
     deepEqual(schemaA, schemaB) || (schemaB === false);
+}
+
+/**
+ * When we have anyOf/allOf/oneOf schemas, the outer portion may contain some
+ * of our shared information, while the inner portion contains other parts.
+ *
+ * This combines the two while also handling potential boolean innerSchema.
+ *
+ * @param outerSchema
+ * @param innerSchema
+ */
+function mergeSchemaOption(
+  outerSchema: JSONSchemaObj,
+  innerSchema: JSONSchema,
+) {
+  // TODO(@ubik2): There are situations where this merge doesn't do what the
+  // JSONSchema rules should.
+  // For example, `{type: "object", anyOf: [{type: "string"}]}` schema should
+  // never match
+  return isObject(innerSchema)
+    ? { ...outerSchema, ...innerSchema }
+    : innerSchema
+    ? outerSchema // innerSchema === true
+    : false; // innerSchema === false
 }

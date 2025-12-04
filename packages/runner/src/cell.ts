@@ -806,8 +806,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       });
       const sourceCellSchema = sourceCell?.key("resultRef").get()?.schema;
       if (sourceCellSchema !== undefined) {
-        const cfc = new ContextualFlowControl();
-        schema = cfc.schemaAtPath(
+        schema = this.runtime.cfc.schemaAtPath(
           sourceCellSchema,
           this._link.path,
           sourceCellSchema,
