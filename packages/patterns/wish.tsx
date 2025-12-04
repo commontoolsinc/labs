@@ -24,9 +24,11 @@ export default pattern<
 >(
   ({ query: _query, context: _context, candidates }) => {
     const selectedIndex = Cell.of(0);
-    const result = computed(() =>
-      candidates.length > 0 ? candidates[selectedIndex.get()] : undefined
-    );
+    const result = computed(() => {
+      if (candidates.length === 0) return undefined;
+      const idx = Math.min(selectedIndex.get(), candidates.length - 1);
+      return candidates[idx];
+    });
 
     return {
       result,
