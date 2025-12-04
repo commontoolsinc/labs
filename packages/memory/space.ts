@@ -135,6 +135,22 @@ JOIN
 COMMIT;
 `;
 
+// Pragmas applied to every database connection
+const PRAGMAS = `
+  PRAGMA journal_mode=WAL;
+  PRAGMA synchronous=NORMAL;
+  PRAGMA busy_timeout=5000;
+  PRAGMA cache_size=-64000;
+  PRAGMA temp_store=MEMORY;
+  PRAGMA mmap_size=268435456;
+  PRAGMA foreign_keys=ON;
+`;
+
+// Must be set before database has any content (new DBs only)
+const NEW_DB_PRAGMAS = `
+  PRAGMA page_size=32768;
+`;
+
 const IMPORT_DATUM =
   `INSERT OR IGNORE INTO datum (this, source) VALUES (:this, :source);`;
 
@@ -411,6 +427,7 @@ export const connect = async <Subject extends MemorySpace>({
       database = await new Database(address ?? ":memory:", {
         create: false,
       });
+      database.exec(PRAGMAS);
       database.exec(PREPARE);
       const session = new Space(subject as Subject, database);
       return { ok: session };
@@ -446,6 +463,8 @@ export const open = async <Subject extends MemorySpace>({
       database = await new Database(address ?? ":memory:", {
         create: true,
       });
+      database.exec(NEW_DB_PRAGMAS);
+      database.exec(PRAGMAS);
       database.exec(PREPARE);
       const session = new Space(subject as Subject, database);
       return { ok: session };
