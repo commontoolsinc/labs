@@ -1165,15 +1165,21 @@ export class SchemaInjectionTransformer extends Transformer {
         // Infer types for each argument
         // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g., derive calls)
         // which have their types registered in the typeRegistry
-        const conditionType = getTypeAtLocationWithFallback(conditionExpr!, checker, typeRegistry)
-          ?? checker.getTypeAtLocation(conditionExpr!);
-        const valueType = getTypeAtLocationWithFallback(valueExpr!, checker, typeRegistry)
-          ?? checker.getTypeAtLocation(valueExpr!);
+        const conditionType = getTypeAtLocationWithFallback(
+          conditionExpr!,
+          checker,
+          typeRegistry,
+        ) ??
+          checker.getTypeAtLocation(conditionExpr!);
+        const valueType =
+          getTypeAtLocationWithFallback(valueExpr!, checker, typeRegistry) ??
+            checker.getTypeAtLocation(valueExpr!);
 
         // Get the result type from TypeScript's inferred return type of the call
         // This will be the union type (e.g., boolean | string for when(enabled, message))
-        const resultType = getTypeAtLocationWithFallback(node, checker, typeRegistry)
-          ?? checker.getTypeAtLocation(node);
+        const resultType =
+          getTypeAtLocationWithFallback(node, checker, typeRegistry) ??
+            checker.getTypeAtLocation(node);
 
         // Create schema TypeNodes (with literal widening for consistency)
         const conditionTypeNode = typeToSchemaTypeNode(
@@ -1251,15 +1257,21 @@ export class SchemaInjectionTransformer extends Transformer {
         // Infer types for each argument
         // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g., derive calls)
         // which have their types registered in the typeRegistry
-        const conditionType = getTypeAtLocationWithFallback(conditionExpr!, checker, typeRegistry)
-          ?? checker.getTypeAtLocation(conditionExpr!);
-        const fallbackType = getTypeAtLocationWithFallback(fallbackExpr!, checker, typeRegistry)
-          ?? checker.getTypeAtLocation(fallbackExpr!);
+        const conditionType = getTypeAtLocationWithFallback(
+          conditionExpr!,
+          checker,
+          typeRegistry,
+        ) ??
+          checker.getTypeAtLocation(conditionExpr!);
+        const fallbackType =
+          getTypeAtLocationWithFallback(fallbackExpr!, checker, typeRegistry) ??
+            checker.getTypeAtLocation(fallbackExpr!);
 
         // Get the result type from TypeScript's inferred return type of the call
         // This will be the union type (e.g., boolean | string for unless(enabled, fallback))
-        const resultType = getTypeAtLocationWithFallback(node, checker, typeRegistry)
-          ?? checker.getTypeAtLocation(node);
+        const resultType =
+          getTypeAtLocationWithFallback(node, checker, typeRegistry) ??
+            checker.getTypeAtLocation(node);
 
         // Create schema TypeNodes (with literal widening for consistency)
         const conditionTypeNode = typeToSchemaTypeNode(
@@ -1337,17 +1349,24 @@ export class SchemaInjectionTransformer extends Transformer {
         // Infer types for each argument
         // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g., derive calls)
         // which have their types registered in the typeRegistry
-        const conditionType = getTypeAtLocationWithFallback(conditionExpr!, checker, typeRegistry)
-          ?? checker.getTypeAtLocation(conditionExpr!);
-        const ifTrueType = getTypeAtLocationWithFallback(ifTrueExpr!, checker, typeRegistry)
-          ?? checker.getTypeAtLocation(ifTrueExpr!);
-        const ifFalseType = getTypeAtLocationWithFallback(ifFalseExpr!, checker, typeRegistry)
-          ?? checker.getTypeAtLocation(ifFalseExpr!);
+        const conditionType = getTypeAtLocationWithFallback(
+          conditionExpr!,
+          checker,
+          typeRegistry,
+        ) ??
+          checker.getTypeAtLocation(conditionExpr!);
+        const ifTrueType =
+          getTypeAtLocationWithFallback(ifTrueExpr!, checker, typeRegistry) ??
+            checker.getTypeAtLocation(ifTrueExpr!);
+        const ifFalseType =
+          getTypeAtLocationWithFallback(ifFalseExpr!, checker, typeRegistry) ??
+            checker.getTypeAtLocation(ifFalseExpr!);
 
         // Get the result type from TypeScript's inferred return type of the call
         // This will be the union type (e.g., string | number for ifElse(cond, str, num))
-        const resultType = getTypeAtLocationWithFallback(node, checker, typeRegistry)
-          ?? checker.getTypeAtLocation(node);
+        const resultType =
+          getTypeAtLocationWithFallback(node, checker, typeRegistry) ??
+            checker.getTypeAtLocation(node);
 
         // Create schema TypeNodes (with literal widening for consistency)
         const conditionTypeNode = typeToSchemaTypeNode(

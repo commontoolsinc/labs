@@ -130,7 +130,17 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     return {
         [UI]: (<div>
         {/* (condition && value) || fallback pattern */}
-        <span>{__ctHelpers.unless(__ctHelpers.derive({
+        <span>{__ctHelpers.unless({
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "boolean"
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 user: {
@@ -158,7 +168,17 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
         } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => (user.get().name.length > 0 && user.get().name)), defaultMessage.get())}</span>
 
         {/* condition && (value || fallback) pattern */}
-        <span>{__ctHelpers.when(__ctHelpers.derive({
+        <span>{__ctHelpers.when({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "boolean"
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 user: {
@@ -178,7 +198,13 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             required: ["user"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().age > 18), __ctHelpers.unless(__ctHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().age > 18), __ctHelpers.unless({
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 user: {
@@ -202,7 +228,17 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
 
         {/* Complex: (a && b) || (c && d) */}
         <span>
-          {__ctHelpers.unless(__ctHelpers.derive({
+          {__ctHelpers.unless({
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "boolean"
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 user: {

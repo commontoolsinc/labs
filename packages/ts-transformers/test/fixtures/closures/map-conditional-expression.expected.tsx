@@ -290,7 +290,16 @@ export default recipe({
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => (<div>
-            Price: ${__ctHelpers.ifElse(__ctHelpers.derive({
+            Price: ${__ctHelpers.ifElse({
+                type: "boolean"
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number",
+                asOpaque: true
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
                 type: "object",
                 properties: {
                     item: {
