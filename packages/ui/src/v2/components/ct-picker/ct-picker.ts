@@ -35,343 +35,510 @@ export class CTPicker extends BaseElement {
         display: block;
         width: 100%;
         position: relative;
+        --stack-offset: 12px;
+        --stack-inset-1: 4%;
+        --stack-inset-2: 8%;
       }
 
       .picker-container {
         position: relative;
         width: 100%;
-        height: var(--ct-picker-min-height, 200px);
         min-height: var(--ct-picker-min-height, 200px);
-        overflow: hidden;
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         justify-content: center;
+        /* Extra padding at bottom for stacked cards to show */
+        margin-bottom: calc(var(--stack-offset) * 6 + 8px);
       }
 
       .card-stack {
         position: relative;
-        width: 100%;
-        height: 100%;
-        flex: 1;
+        width: 80%;
+        min-height: var(--ct-picker-min-height, 200px);
       }
 
       .card-wrapper {
         position: absolute;
-        inset: 0;
-        opacity: 0;
-        pointer-events: none;
-        overflow: hidden;
-      }
-
-      .card-wrapper.active {
-        opacity: 1;
-        pointer-events: auto;
-      }
-
-      .nav-arrow {
-        position: absolute;
-        top: 50%;
-        transform: translateY(-50%);
-        z-index: 10;
+        top: 0;
+        min-height: var(--ct-picker-min-height, 200px);
         display: flex;
-        align-items: center;
+        align-items: stretch;
         justify-content: center;
-        width: 2.5rem;
-        height: 2.5rem;
-        border: none;
-        border-radius: 50%;
-        background: var(--ct-theme-color-surface, rgba(255, 255, 255, 0.9));
-        color: var(--ct-theme-color-text, #111827);
-        cursor: pointer;
-        opacity: 0;
-        transition: opacity 150ms ease, background-color 150ms ease;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        transition: all 300ms ease;
+        border-radius: var(--ct-theme-border-radius, 0.5rem);
+        background: var(--ct-theme-color-surface, #ffffff);
+        overflow: hidden;
+        transform-origin: center top;
+        /* Animated gradient drop shadow */
+        animation: glow-shift 8s ease infinite;
       }
 
-      .nav-arrow:hover {
-        background: var(--ct-theme-color-background, #ffffff);
-      }
+      @keyframes glow-shift {
+        0%, 100% {
+          box-shadow:
+            0 2px 8px rgba(168, 85, 247, 0.15),
+            0 4px 16px rgba(168, 85, 247, 0.1);
+          }
+          33% {
+            box-shadow:
+              0 2px 8px rgba(59, 130, 246, 0.15),
+              0 4px 16px rgba(59, 130, 246, 0.1);
+            }
+            66% {
+              box-shadow:
+                0 2px 8px rgba(16, 185, 129, 0.12),
+                0 4px 16px rgba(16, 185, 129, 0.08);
+              }
+            }
 
-      .nav-arrow:focus {
-        outline: 2px solid var(--ct-theme-color-primary, #3b82f6);
-        outline-offset: 2px;
-      }
+            @keyframes float-0 {
+              0%, 100% {
+                transform: translateY(0) rotate(0deg);
+              }
+              50% {
+                transform: translateY(-3px) rotate(0deg);
+              }
+            }
 
-      .nav-arrow.left { left: 0.5rem; }
-      .nav-arrow.right { right: 0.5rem; }
+            @keyframes float-1 {
+              0%, 100% {
+                transform: translateY(var(--stack-offset)) rotate(1deg);
+              }
+              50% {
+                transform: translateY(calc(var(--stack-offset) - 2px)) rotate(1deg);
+              }
+            }
 
-      :host(:hover) .nav-arrow,
-      :host(:focus-within) .nav-arrow {
-        opacity: 1;
-      }
+            @keyframes float-2 {
+              0%, 100% {
+                transform: translateY(calc(var(--stack-offset) * 2)) rotate(-1.5deg);
+              }
+              50% {
+                transform: translateY(calc(var(--stack-offset) * 2 - 1.5px))
+                  rotate(-1.5deg);
+                }
+              }
 
-      :host([disabled]) .nav-arrow,
-      .nav-arrow.hidden {
-        display: none;
-      }
+              /* Stack positions: cards behind are inset and offset */
+              .card-wrapper[data-position="0"] {
+                z-index: 3;
+                left: 0;
+                right: 0;
+                opacity: 1;
+                pointer-events: auto;
+                animation: glow-shift 8s ease infinite, float-0 6s ease-in-out infinite;
+              }
 
-      :host([disabled]) {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
+              .card-wrapper[data-position="1"] {
+                z-index: 2;
+                left: var(--stack-inset-1);
+                right: var(--stack-inset-1);
+                opacity: 0.5;
+                pointer-events: none;
+                filter: brightness(0.92);
+                animation: glow-shift 8s ease infinite, float-1 7s ease-in-out infinite;
+              }
 
-      :host([disabled]) .picker-container {
-        pointer-events: none;
-      }
+              .card-wrapper[data-position="2"] {
+                z-index: 1;
+                left: var(--stack-inset-2);
+                right: var(--stack-inset-2);
+                opacity: 0.3;
+                pointer-events: none;
+                filter: brightness(0.85);
+                animation: glow-shift 8s ease infinite, float-2 8s ease-in-out infinite;
+              }
 
-      .picker-container.touching {
-        touch-action: none;
-      }
+              .card-wrapper[data-position="hidden"] {
+                z-index: 0;
+                left: var(--stack-inset-2);
+                right: var(--stack-inset-2);
+                transform: translateY(calc(var(--stack-offset) * 2)) rotate(0deg);
+                opacity: 0;
+                pointer-events: none;
+                animation: none;
+              }
 
-      .arrow-icon {
-        width: 1.25rem;
-        height: 1.25rem;
-      }
-    `,
-  ];
+              .card-wrapper ct-render {
+                width: 100%;
+                height: 100%;
+              }
 
-  static override properties = {
-    items: { attribute: false },
-    selectedIndex: { attribute: false },
-    minHeight: { type: String, attribute: "min-height" },
-    disabled: { type: Boolean, reflect: true },
-  };
+              .nav-arrow {
+                position: absolute;
+                top: 50%;
+                transform: translateY(-50%);
+                z-index: 10;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 2.5rem;
+                height: 2.5rem;
+                border: none;
+                border-radius: 50%;
+                background: var(--ct-theme-color-surface, rgba(255, 255, 255, 0.95));
+                color: var(--ct-theme-color-text, #111827);
+                cursor: pointer;
+                opacity: 0;
+                transition:
+                  opacity 150ms ease,
+                  background-color 150ms ease,
+                  transform 150ms ease;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+              }
 
-  declare items: Cell<any[]>;
-  declare selectedIndex: Cell<number>;
-  declare minHeight: string;
-  declare disabled: boolean;
+              .nav-arrow:hover {
+                background: var(--ct-theme-color-background, #ffffff);
+                transform: translateY(-50%) scale(1.05);
+              }
 
-  private _touchStartX = 0;
-  private _isTouching = false;
+              .nav-arrow:active {
+                transform: translateY(-50%) scale(0.95);
+              }
 
-  private _cellController = createCellController<number>(this, {
-    timing: { strategy: "immediate" },
-    onChange: (newIndex) => {
-      this.emit("ct-change", {
-        index: newIndex,
-        value: this.items?.key(newIndex ?? 0),
-        items: this.items,
-      });
-    },
-  });
+              .nav-arrow:focus {
+                outline: 2px solid var(--ct-theme-color-primary, #3b82f6);
+                outline-offset: 2px;
+              }
 
-  private get _currentIndex(): number {
-    return this._cellController.getValue() ?? 0;
-  }
+              .nav-arrow.left {
+                left: 0;
+              }
+              .nav-arrow.right {
+                right: 0;
+              }
 
-  constructor() {
-    super();
-    this.minHeight = "200px";
-    this.disabled = false;
-  }
+              :host(:hover) .nav-arrow,
+              :host(:focus-within) .nav-arrow {
+                opacity: 1;
+              }
 
-  override connectedCallback() {
-    super.connectedCallback();
-    this.setAttribute("role", "listbox");
-    this.tabIndex = this.disabled ? -1 : 0;
-    this.addEventListener("keydown", this._handleKeyDown);
-    this.addEventListener("focus", this._handleFocus);
-    this.addEventListener("blur", this._handleBlur);
-  }
+              :host([disabled]) .nav-arrow,
+              .nav-arrow.hidden {
+                display: none;
+              }
 
-  override disconnectedCallback() {
-    super.disconnectedCallback();
-    this.removeEventListener("keydown", this._handleKeyDown);
-    this.removeEventListener("focus", this._handleFocus);
-    this.removeEventListener("blur", this._handleBlur);
-  }
+              :host([disabled]) {
+                opacity: 0.5;
+                cursor: not-allowed;
+              }
 
-  override firstUpdated() {
-    this._cellController.bind(this.selectedIndex);
-    this._updateAriaAttributes();
-    this._updateMinHeight();
-  }
+              :host([disabled]) .picker-container {
+                pointer-events: none;
+              }
 
-  override willUpdate(changedProperties: PropertyValues) {
-    super.willUpdate(changedProperties);
-    if (changedProperties.has("selectedIndex")) {
-      this._cellController.bind(this.selectedIndex);
-    }
-  }
+              .picker-container.touching {
+                touch-action: none;
+              }
 
-  override updated(changed: PropertyValues) {
-    if (changed.has("selectedIndex") || changed.has("items")) {
-      this._updateAriaAttributes();
-    }
-    if (changed.has("disabled")) {
-      this.tabIndex = this.disabled ? -1 : 0;
-      this._updateAriaAttributes();
-    }
-    if (changed.has("minHeight")) {
-      this._updateMinHeight();
-    }
-  }
+              .arrow-icon {
+                width: 1.25rem;
+                height: 1.25rem;
+              }
 
-  override render() {
-    const items = this.items?.get() ?? [];
-    const hasMultipleItems = items.length > 1;
+              .empty-state {
+                color: var(--ct-theme-color-text-secondary, #6b7280);
+                font-size: 0.875rem;
+              }
+            `,
+          ];
 
-    return html`
-      <div
-        class="picker-container ${this._isTouching ? "touching" : ""}"
-        @touchstart="${this._handleTouchStart}"
-        @touchend="${this._handleTouchEnd}"
-        @touchcancel="${this._handleTouchCancel}"
-      >
-        <button
-          class="nav-arrow left ${hasMultipleItems ? "" : "hidden"}"
-          @click="${this._selectPrevious}"
-          ?disabled="${this.disabled}"
-          aria-label="Previous item"
-          tabindex="-1"
-        >
-          <svg class="arrow-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="15 18 9 12 15 6"></polyline>
-          </svg>
-        </button>
+          static override properties = {
+            items: { attribute: false },
+            selectedIndex: { attribute: false },
+            minHeight: { type: String, attribute: "min-height" },
+            disabled: { type: Boolean, reflect: true },
+          };
 
-        <div class="card-stack">
-          ${items.length
-            ? items.map((_, index) => html`
-                <div
-                  class="card-wrapper ${index === this._currentIndex ? "active" : ""}"
-                  role="option"
-                  aria-selected="${index === this._currentIndex}"
-                  id="picker-item-${index}"
+          declare items: Cell<any[]>;
+          declare selectedIndex: Cell<number>;
+          declare minHeight: string;
+          declare disabled: boolean;
+
+          private _touchStartX = 0;
+          private _isTouching = false;
+
+          private _cellController = createCellController<number>(this, {
+            timing: { strategy: "immediate" },
+            onChange: (newIndex) => {
+              this.emit("ct-change", {
+                index: newIndex,
+                value: this.items?.key(newIndex ?? 0),
+                items: this.items,
+              });
+            },
+          });
+
+          private get _currentIndex(): number {
+            return this._cellController.getValue() ?? 0;
+          }
+
+          constructor() {
+            super();
+            this.minHeight = "200px";
+            this.disabled = false;
+          }
+
+          override connectedCallback() {
+            super.connectedCallback();
+            this.setAttribute("role", "listbox");
+            this.tabIndex = this.disabled ? -1 : 0;
+            this.addEventListener("keydown", this._handleKeyDown);
+            this.addEventListener("focus", this._handleFocus);
+            this.addEventListener("blur", this._handleBlur);
+          }
+
+          override disconnectedCallback() {
+            super.disconnectedCallback();
+            this.removeEventListener("keydown", this._handleKeyDown);
+            this.removeEventListener("focus", this._handleFocus);
+            this.removeEventListener("blur", this._handleBlur);
+          }
+
+          override firstUpdated() {
+            this._cellController.bind(this.selectedIndex);
+            this._updateAriaAttributes();
+            this._updateMinHeight();
+          }
+
+          override willUpdate(changedProperties: PropertyValues) {
+            super.willUpdate(changedProperties);
+            if (changedProperties.has("selectedIndex")) {
+              this._cellController.bind(this.selectedIndex);
+            }
+          }
+
+          override updated(changed: PropertyValues) {
+            if (changed.has("selectedIndex") || changed.has("items")) {
+              this._updateAriaAttributes();
+            }
+            if (changed.has("disabled")) {
+              this.tabIndex = this.disabled ? -1 : 0;
+              this._updateAriaAttributes();
+            }
+            if (changed.has("minHeight")) {
+              this._updateMinHeight();
+            }
+          }
+
+          /**
+           * Calculate the visual position of a card in the stack.
+           * Position 0 = front (selected), 1 = first behind, 2 = second behind, hidden = not visible
+           */
+          private _getStackPosition(
+            index: number,
+            currentIndex: number,
+            totalItems: number,
+          ): string {
+            if (totalItems <= 1) return index === currentIndex ? "0" : "hidden";
+
+            // Calculate distance from current index (wrapping around)
+            const distance = (index - currentIndex + totalItems) % totalItems;
+
+            // Show up to 3 cards in the stack (0, 1, 2), hide the rest
+            if (distance === 0) return "0";
+            if (distance === 1) return "1";
+            if (distance === 2) return "2";
+            return "hidden";
+          }
+
+          override render() {
+            const items = this.items?.get() ?? [];
+            const hasMultipleItems = items.length > 1;
+            const currentIndex = this._currentIndex;
+
+            return html`
+              <div
+                class="picker-container ${this._isTouching ? "touching" : ""}"
+                @touchstart="${this._handleTouchStart}"
+                @touchend="${this._handleTouchEnd}"
+                @touchcancel="${this._handleTouchCancel}"
+              >
+                <button
+                  class="nav-arrow left ${hasMultipleItems ? "" : "hidden"}"
+                  @click="${this._selectPrevious}"
+                  ?disabled="${this.disabled}"
+                  aria-label="Previous item"
+                  tabindex="-1"
                 >
-                  <ct-render .cell="${this.items.key(index)}"></ct-render>
+                  <svg
+                    class="arrow-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <polyline points="15 18 9 12 15 6"></polyline>
+                  </svg>
+                </button>
+
+                <div class="card-stack">
+                  ${items.length
+                    ? items.map((_, index) =>
+                      html`
+                        <div
+                          class="card-wrapper"
+                          data-position="${this._getStackPosition(
+                            index,
+                            currentIndex,
+                            items.length,
+                          )}"
+                          role="option"
+                          aria-selected="${index === currentIndex}"
+                          id="picker-item-${index}"
+                        >
+                          <ct-render .cell="${this.items.key(
+                            index,
+                          )}"></ct-render>
+                        </div>
+                      `
+                    )
+                    : html`
+                      <div class="empty-state">No items</div>
+                    `}
                 </div>
-              `)
-            : html`<div class="empty-state">No items</div>`}
-        </div>
 
-        <button
-          class="nav-arrow right ${hasMultipleItems ? "" : "hidden"}"
-          @click="${this._selectNext}"
-          ?disabled="${this.disabled}"
-          aria-label="Next item"
-          tabindex="-1"
-        >
-          <svg class="arrow-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="9 18 15 12 9 6"></polyline>
-          </svg>
-        </button>
-      </div>
-    `;
-  }
+                <button
+                  class="nav-arrow right ${hasMultipleItems ? "" : "hidden"}"
+                  @click="${this._selectNext}"
+                  ?disabled="${this.disabled}"
+                  aria-label="Next item"
+                  tabindex="-1"
+                >
+                  <svg
+                    class="arrow-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                </button>
+              </div>
+            `;
+          }
 
-  // --- Selection methods ---
+          // --- Selection methods ---
 
-  private _selectPrevious = (): void => {
-    if (this.disabled || !this.items?.get().length) return;
-    const len = this.items.get().length;
-    this._selectIndex(this._currentIndex <= 0 ? len - 1 : this._currentIndex - 1);
-  };
+          private _selectPrevious = (): void => {
+            if (this.disabled || !this.items?.get().length) return;
+            const len = this.items.get().length;
+            this._selectIndex(
+              this._currentIndex <= 0 ? len - 1 : this._currentIndex - 1,
+            );
+          };
 
-  private _selectNext = (): void => {
-    if (this.disabled || !this.items?.get().length) return;
-    const len = this.items.get().length;
-    this._selectIndex(this._currentIndex >= len - 1 ? 0 : this._currentIndex + 1);
-  };
+          private _selectNext = (): void => {
+            if (this.disabled || !this.items?.get().length) return;
+            const len = this.items.get().length;
+            this._selectIndex(
+              this._currentIndex >= len - 1 ? 0 : this._currentIndex + 1,
+            );
+          };
 
-  private _selectIndex(index: number): void {
-    const len = this.items?.get()?.length ?? 0;
-    if (index < 0 || index >= len || index === this._currentIndex) return;
-    this._cellController.setValue(index);
-    this._updateAriaAttributes();
-    this.requestUpdate();
-  }
+          private _selectIndex(index: number): void {
+            const len = this.items?.get()?.length ?? 0;
+            if (index < 0 || index >= len || index === this._currentIndex) {
+              return;
+            }
+            this._cellController.setValue(index);
+            this._updateAriaAttributes();
+            this.requestUpdate();
+          }
 
-  // --- Keyboard navigation ---
+          // --- Keyboard navigation ---
 
-  private _handleKeyDown = (event: KeyboardEvent): void => {
-    if (this.disabled || !this.items?.get().length) return;
-    switch (event.key) {
-      case "ArrowLeft":
-      case "ArrowUp":
-        event.preventDefault();
-        this._selectPrevious();
-        break;
-      case "ArrowRight":
-      case "ArrowDown":
-        event.preventDefault();
-        this._selectNext();
-        break;
-      case "Home":
-        event.preventDefault();
-        this._selectIndex(0);
-        break;
-      case "End":
-        event.preventDefault();
-        this._selectIndex(this.items.get().length - 1);
-        break;
-    }
-  };
+          private _handleKeyDown = (event: KeyboardEvent): void => {
+            if (this.disabled || !this.items?.get().length) return;
+            switch (event.key) {
+              case "ArrowLeft":
+              case "ArrowUp":
+                event.preventDefault();
+                this._selectPrevious();
+                break;
+              case "ArrowRight":
+              case "ArrowDown":
+                event.preventDefault();
+                this._selectNext();
+                break;
+              case "Home":
+                event.preventDefault();
+                this._selectIndex(0);
+                break;
+              case "End":
+                event.preventDefault();
+                this._selectIndex(this.items.get().length - 1);
+                break;
+            }
+          };
 
-  // --- Touch/swipe handling ---
+          // --- Touch/swipe handling ---
 
-  private _handleTouchStart = (event: TouchEvent): void => {
-    if (this.disabled) return;
-    this._touchStartX = event.touches[0].clientX;
-    this._isTouching = true;
-  };
+          private _handleTouchStart = (event: TouchEvent): void => {
+            if (this.disabled) return;
+            this._touchStartX = event.touches[0].clientX;
+            this._isTouching = true;
+          };
 
-  private _handleTouchEnd = (event: TouchEvent): void => {
-    if (this.disabled || !this._isTouching) return;
-    const deltaX = event.changedTouches[0].clientX - this._touchStartX;
-    if (Math.abs(deltaX) > 50) {
-      deltaX > 0 ? this._selectPrevious() : this._selectNext();
-    }
-    this._isTouching = false;
-  };
+          private _handleTouchEnd = (event: TouchEvent): void => {
+            if (this.disabled || !this._isTouching) return;
+            const deltaX = event.changedTouches[0].clientX - this._touchStartX;
+            if (Math.abs(deltaX) > 50) {
+              deltaX > 0 ? this._selectPrevious() : this._selectNext();
+            }
+            this._isTouching = false;
+          };
 
-  private _handleTouchCancel = (): void => {
-    this._isTouching = false;
-  };
+          private _handleTouchCancel = (): void => {
+            this._isTouching = false;
+          };
 
-  // --- Focus handling ---
+          // --- Focus handling ---
 
-  private _handleFocus = (): void => {
-    this.emit("ct-focus");
-  };
+          private _handleFocus = (): void => {
+            this.emit("ct-focus");
+          };
 
-  private _handleBlur = (): void => {
-    this.emit("ct-blur");
-  };
+          private _handleBlur = (): void => {
+            this.emit("ct-blur");
+          };
 
-  // --- ARIA ---
+          // --- ARIA ---
 
-  private _updateAriaAttributes(): void {
-    this.setAttribute("aria-activedescendant", `picker-item-${this._currentIndex}`);
-    this.setAttribute("aria-disabled", String(this.disabled));
-  }
+          private _updateAriaAttributes(): void {
+            this.setAttribute(
+              "aria-activedescendant",
+              `picker-item-${this._currentIndex}`,
+            );
+            this.setAttribute("aria-disabled", String(this.disabled));
+          }
 
-  // --- Styling helpers ---
+          // --- Styling helpers ---
 
-  private _updateMinHeight(): void {
-    this.style.setProperty("--ct-picker-min-height", this.minHeight);
-  }
+          private _updateMinHeight(): void {
+            this.style.setProperty("--ct-picker-min-height", this.minHeight);
+          }
 
-  // --- Public API ---
+          // --- Public API ---
 
-  getSelectedIndex(): number {
-    return this._currentIndex;
-  }
+          getSelectedIndex(): number {
+            return this._currentIndex;
+          }
 
-  getSelectedItem(): any | undefined {
-    return this.items?.get()[this._currentIndex];
-  }
+          getSelectedItem(): any | undefined {
+            return this.items?.get()[this._currentIndex];
+          }
 
-  selectByIndex(index: number): void {
-    this._selectIndex(index);
-  }
-}
+          selectByIndex(index: number): void {
+            this._selectIndex(index);
+          }
+        }
 
-globalThis.customElements.define("ct-picker", CTPicker);
+        globalThis.customElements.define("ct-picker", CTPicker);
 
-declare global {
-  interface HTMLElementTagNameMap {
-    "ct-picker": CTPicker;
-  }
-}
+        declare global {
+          interface HTMLElementTagNameMap {
+            "ct-picker": CTPicker;
+          }
+        }
