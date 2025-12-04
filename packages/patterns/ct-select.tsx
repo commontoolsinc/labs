@@ -8,7 +8,6 @@ type Input = {
   selected: Cell<Default<string, "opt_1">>;
   numericChoice: Cell<Default<number, 1>>;
   category: Cell<Default<string, "Other">>;
-  pickerSelection: Cell<Default<unknown, null>>;
 };
 
 type Result = {
@@ -19,7 +18,7 @@ type Result = {
 
 export default recipe<Input, Result>(
   "ct-select demo",
-  ({ selected, numericChoice, category, pickerSelection }) => {
+  ({ selected, numericChoice, category }) => {
     // Create counter instances for ct-picker demo
 
     const counterA = Counter({ value: 1 });
@@ -80,40 +79,6 @@ export default recipe<Input, Result>(
               ]}
             />
             <p>Selected category: {category}</p>
-          </ct-card>
-
-          <ct-card>
-            <h4>ct-picker + ct-select Synchronization</h4>
-            <p>
-              ct-picker displays cells with [UI] in a card stack. Both
-              components share the same selection state.
-            </p>
-            <div style={{ marginBottom: "1rem" }}>
-              <ct-picker
-                $items={counters}
-                $value={selection}
-                min-height="250px"
-              />
-            </div>
-            {
-              /*<ct-select
-              items={counters.map((counter, i) => ({
-                label: `Counter ${i + 1}`,
-                value: counter,
-              }))}
-              $value={pickerSelection}
-            />*/
-            }
-            <p
-              style={{
-                marginTop: "0.5rem",
-                fontSize: "0.875rem",
-                color: "#666",
-              }}
-            >
-              Try using the arrows in the picker or changing the dropdown - they
-              stay in sync!
-            </p>
           </ct-card>
         </ct-vstack>
       ),
