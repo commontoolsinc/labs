@@ -4,9 +4,10 @@
  */
 
 import ts from "typescript";
-import { join } from "@std/path";
+import { dirname, fromFileUrl, join } from "@std/path";
 
-const projectRoot = "/Users/gideonwald/coding/common_tools/labs";
+// Derive project root from this file's location (6 levels up: bug-repro → fixtures → test → ts-transformers → packages → labs)
+const projectRoot = dirname(dirname(dirname(dirname(dirname(dirname(fromFileUrl(import.meta.url)))))));
 const testFile = join(projectRoot, "packages/ts-transformers/test/fixtures/bug-repro/actual-types-repro.ts");
 
 // Parse deno.json for import mappings
