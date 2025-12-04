@@ -80,10 +80,17 @@ describe("OpaqueRef map callbacks", () => {
       output,
       "__ctHelpers.unless(",
     );
-    // The derive call is still present (as a condition argument after the schemas)
+    // The derive call for the charm[NAME] condition is present within the unless call
+    // This specific pattern ensures the derive is for the unless condition, not another derive
     assertStringIncludes(
       output,
-      "__ctHelpers.derive(",
+      `__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    charm: true
+                },
+                required: ["charm"]
+            } as const satisfies __ctHelpers.JSONSchema`,
     );
     assertStringIncludes(
       output,

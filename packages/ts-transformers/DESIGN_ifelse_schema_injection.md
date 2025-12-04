@@ -83,38 +83,64 @@ if (ts.isIdentifier(target)) {
 
 **File**: `runner/src/builder/built-in.ts`
 
-Update runtime signatures to accept schema arguments:
+Update runtime signatures to accept schema arguments while preserving backward
+compatibility. Each function uses argument detection to support both signatures:
 
 ```typescript
-// ifElse: 3 schemas for 3 arguments
+// ifElse: supports both legacy (3 args) and new (7 args with 4 schemas) signatures
 export function ifElse<T = unknown, U = unknown, V = unknown>(
-  conditionSchema: JSONSchema,
-  ifTrueSchema: JSONSchema,
-  ifFalseSchema: JSONSchema,
-  condition: Opaque<T>,
-  ifTrue: Opaque<U>,
-  ifFalse: Opaque<V>,
-): OpaqueRef<U | V>;
+  conditionSchemaOrCondition: JSONSchema | Opaque<T>,
+  ifTrueSchemaOrIfTrue: JSONSchema | Opaque<U>,
+  ifFalseSchemaOrIfFalse: JSONSchema | Opaque<V>,
+  resultSchemaOrCondition?: JSONSchema | Opaque<T>,
+  condition?: Opaque<T>,
+  ifTrue?: Opaque<U>,
+  ifFalse?: Opaque<V>,
+): OpaqueRef<U | V> {
+  // Detects signature by checking if later args are provided
+  if (condition !== undefined && ifTrue !== undefined && ifFalse !== undefined) {
+    // New signature with schemas
+  } else {
+    // Legacy signature without schemas
+  }
+}
 
-// when: 2 schemas for 2 arguments
+// when: supports both legacy (2 args) and new (5 args with 3 schemas) signatures
 export function when<T = unknown, U = unknown>(
-  conditionSchema: JSONSchema,
-  valueSchema: JSONSchema,
-  condition: Opaque<T>,
-  value: Opaque<U>,
-): OpaqueRef<T | U>;
+  conditionSchemaOrCondition: JSONSchema | Opaque<T>,
+  valueSchemaOrValue: JSONSchema | Opaque<U>,
+  resultSchemaOrCondition?: JSONSchema | Opaque<T>,
+  condition?: Opaque<T>,
+  value?: Opaque<U>,
+): OpaqueRef<T | U> {
+  // Detects signature by checking if condition and value args are provided
+  if (condition !== undefined && value !== undefined) {
+    // New signature with schemas
+  } else {
+    // Legacy signature without schemas
+  }
+}
 
-// unless: 2 schemas for 2 arguments
+// unless: supports both legacy (2 args) and new (5 args with 3 schemas) signatures
 export function unless<T = unknown, U = unknown>(
-  conditionSchema: JSONSchema,
-  valueSchema: JSONSchema,
-  condition: Opaque<T>,
-  value: Opaque<U>,
-): OpaqueRef<T | U>;
+  conditionSchemaOrCondition: JSONSchema | Opaque<T>,
+  fallbackSchemaOrFallback: JSONSchema | Opaque<U>,
+  resultSchemaOrCondition?: JSONSchema | Opaque<T>,
+  condition?: Opaque<T>,
+  fallback?: Opaque<U>,
+): OpaqueRef<T | U> {
+  // Detects signature by checking if condition and fallback args are provided
+  if (condition !== undefined && fallback !== undefined) {
+    // New signature with schemas
+  } else {
+    // Legacy signature without schemas
+  }
+}
 ```
 
-**Backward Compatibility**: Support both old (no schemas) and new (with schemas)
-signatures by checking argument count/types.
+**Backward Compatibility**: The functions detect which signature is being used by
+checking whether the later arguments are provided. This allows existing code without
+schemas to continue working while transformed code can pass schema arguments.
 
 ### 3. Schema Injection Handlers
 
