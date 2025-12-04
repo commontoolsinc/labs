@@ -3338,8 +3338,8 @@ interface CTSelectAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 interface CTPickerAttributes<T> extends CTHTMLAttributes<T> {
-  "$value"?: CellLike<any>;
-  "$items": Cell<any[]> | any[];
+  "$selectedIndex"?: CellLike<number>;
+  "$items": CellLike<any[]>;
   "disabled"?: boolean;
   "min-height"?: string;
   "onct-change"?: EventHandler<

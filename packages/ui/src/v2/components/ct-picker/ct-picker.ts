@@ -1,67 +1,31 @@
-import { css, html, nothing, PropertyValues } from "lit";
+import { css, html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { createCellController } from "../../core/cell-controller.ts";
-import {
-  type Cell,
-  getCellOrThrow,
-  isCell,
-  isQueryResult,
-} from "@commontools/runner";
-import { render } from "@commontools/html";
-import type { VNode } from "@commontools/runner";
-
-// Debug logging - set to true to trace selection issues
-const DEBUG_PICKER = false;
-const debugLog = (...args: any[]) => {
-  if (DEBUG_PICKER) console.log("[ct-picker]", ...args);
-};
-
-/**
- * Compare two values that might be cell proxies.
- * Extracts underlying cells and uses Cell.equals() for comparison.
- */
-function areCellValuesSame(a: any, b: any): boolean {
-  // Strict equality check first
-  if (a === b) return true;
-
-  // Try to extract underlying cells
-  try {
-    const cellA = isQueryResult(a) ? getCellOrThrow(a) : isCell(a) ? a : null;
-    const cellB = isQueryResult(b) ? getCellOrThrow(b) : isCell(b) ? b : null;
-
-    if (cellA && cellB) {
-      const same = cellA.equals(cellB);
-      debugLog("areCellValuesSame: cellA.equals(cellB) =", same);
-      return same;
-    }
-  } catch {
-    // Not cell proxies, fall through
-  }
-
-  return false;
-}
+import { type Cell } from "@commontools/runner";
+import "../ct-render/ct-render.ts";
 
 /**
  * CTPicker - Visual card-stack selection component for cells with UI
  *
  * Displays a stack of renderable cells, allowing users to cycle through
  * items using arrow indicators (hover), swipe gestures (touch), or keyboard.
- * Shares selection state with ct-select via common cell binding.
+ * Uses index-based selection for simplicity.
  *
  * @element ct-picker
  *
  * @attr {boolean} disabled - Whether the picker is disabled
  * @attr {string} min-height - Minimum height for the picker area (default: 200px)
  *
- * @prop {Cell[]} items - Array of Cells with [UI] to render in stack
- * @prop {Cell<unknown>|unknown} value - Selected value (same API as ct-select)
+ * @prop {Cell<any[]>} items - Array of Cells with [UI] to render in stack
+ * @prop {Cell<number>} selectedIndex - Two-way bound cell for current selection index
  *
- * @fires ct-change - Fired when selection changes: { value, oldValue, items }
+ * @fires ct-change - Fired when selection changes: { index, value, items }
  * @fires ct-focus - Fired when picker gains focus
  * @fires ct-blur - Fired when picker loses focus
  *
  * @example
- * <ct-picker .items=${cellsWithUI} $value=${selectedCell}></ct-picker>
+ * const selectedIndex = Cell.of(0);
+ * <ct-picker .items=${cellsWithUI} $selectedIndex=${selectedIndex}></ct-picker>
  */
 export class CTPicker extends BaseElement {
   static override styles = [
@@ -84,23 +48,16 @@ export class CTPicker extends BaseElement {
         justify-content: center;
       }
 
-      /* Card stack area */
       .card-stack {
         position: relative;
         width: 100%;
         height: 100%;
         flex: 1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
       }
 
       .card-wrapper {
         position: absolute;
         inset: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
         opacity: 0;
         pointer-events: none;
         overflow: hidden;
@@ -111,13 +68,6 @@ export class CTPicker extends BaseElement {
         pointer-events: auto;
       }
 
-      .card-content {
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-      }
-
-      /* Arrow navigation buttons */
       .nav-arrow {
         position: absolute;
         top: 50%;
@@ -147,21 +97,14 @@ export class CTPicker extends BaseElement {
         outline-offset: 2px;
       }
 
-      .nav-arrow.left {
-        left: 0.5rem;
-      }
+      .nav-arrow.left { left: 0.5rem; }
+      .nav-arrow.right { right: 0.5rem; }
 
-      .nav-arrow.right {
-        right: 0.5rem;
-      }
-
-      /* Show arrows on hover */
       :host(:hover) .nav-arrow,
       :host(:focus-within) .nav-arrow {
         opacity: 1;
       }
 
-      /* Hide arrows when only one item or disabled */
       :host([disabled]) .nav-arrow,
       .nav-arrow.hidden {
         display: none;
@@ -176,12 +119,10 @@ export class CTPicker extends BaseElement {
         pointer-events: none;
       }
 
-      /* Touch handling */
       .picker-container.touching {
         touch-action: none;
       }
 
-      /* Arrow icons */
       .arrow-icon {
         width: 1.25rem;
         height: 1.25rem;
@@ -191,32 +132,33 @@ export class CTPicker extends BaseElement {
 
   static override properties = {
     items: { attribute: false },
-    value: { attribute: false },
+    selectedIndex: { attribute: false },
     minHeight: { type: String, attribute: "min-height" },
     disabled: { type: Boolean, reflect: true },
   };
 
   declare items: Cell<any[]>;
-  declare value: Cell<unknown> | unknown;
+  declare selectedIndex: Cell<number>;
   declare minHeight: string;
   declare disabled: boolean;
 
-  private _currentIndex = 0;
   private _touchStartX = 0;
   private _isTouching = false;
-  private _renderCleanups: Map<number, () => void> = new Map();
 
-  private _cellController = createCellController<unknown>(this, {
+  private _cellController = createCellController<number>(this, {
     timing: { strategy: "immediate" },
-    onChange: (newValue, oldValue) => {
-      this._syncIndexFromValue();
+    onChange: (newIndex) => {
       this.emit("ct-change", {
-        value: newValue,
-        oldValue,
+        index: newIndex,
+        value: this.items?.key(newIndex ?? 0),
         items: this.items,
       });
     },
   });
+
+  private get _currentIndex(): number {
+    return this._cellController.getValue() ?? 0;
+  }
 
   constructor() {
     super();
@@ -238,46 +180,37 @@ export class CTPicker extends BaseElement {
     this.removeEventListener("keydown", this._handleKeyDown);
     this.removeEventListener("focus", this._handleFocus);
     this.removeEventListener("blur", this._handleBlur);
-    this._cleanupAllRenders();
   }
 
   override firstUpdated() {
-    this._cellController.bind(this.value);
-    this._syncIndexFromValue();
+    this._cellController.bind(this.selectedIndex);
     this._updateAriaAttributes();
     this._updateMinHeight();
   }
 
   override willUpdate(changedProperties: PropertyValues) {
     super.willUpdate(changedProperties);
-
-    if (changedProperties.has("value")) {
-      this._cellController.bind(this.value);
+    if (changedProperties.has("selectedIndex")) {
+      this._cellController.bind(this.selectedIndex);
     }
   }
 
   override updated(changed: PropertyValues) {
-    if (changed.has("value") || changed.has("items")) {
-      this._syncIndexFromValue();
+    if (changed.has("selectedIndex") || changed.has("items")) {
       this._updateAriaAttributes();
     }
-
     if (changed.has("disabled")) {
       this.tabIndex = this.disabled ? -1 : 0;
       this._updateAriaAttributes();
     }
-
     if (changed.has("minHeight")) {
       this._updateMinHeight();
-    }
-
-    if (changed.has("items")) {
-      this._renderAllItems();
     }
   }
 
   override render() {
-    const hasMultipleItems = this.items?.get().length > 1;
+    const items = this.items?.get() ?? [];
+    const hasMultipleItems = items.length > 1;
 
     return html`
       <div
@@ -293,37 +226,24 @@ export class CTPicker extends BaseElement {
           aria-label="Previous item"
           tabindex="-1"
         >
-          <svg
-            class="arrow-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          >
+          <svg class="arrow-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="15 18 9 12 15 6"></polyline>
           </svg>
         </button>
 
         <div class="card-stack">
-          ${this.items?.get().length
-            ? this.items.get().map(
-              (_, index) =>
-                html`
-                  <div
-                    class="card-wrapper ${index === this._currentIndex
-                      ? "active"
-                      : ""}"
-                    role="option"
-                    aria-selected="${index === this._currentIndex}"
-                    id="picker-item-${index}"
-                  >
-                    <div class="card-content" data-index="${index}"></div>
-                  </div>
-                `,
-            )
-            : html`
-              <div class="empty-state">No items</div>
-            `}
+          ${items.length
+            ? items.map((_, index) => html`
+                <div
+                  class="card-wrapper ${index === this._currentIndex ? "active" : ""}"
+                  role="option"
+                  aria-selected="${index === this._currentIndex}"
+                  id="picker-item-${index}"
+                >
+                  <ct-render .cell="${this.items.key(index)}"></ct-render>
+                </div>
+              `)
+            : html`<div class="empty-state">No items</div>`}
         </div>
 
         <button
@@ -333,13 +253,7 @@ export class CTPicker extends BaseElement {
           aria-label="Next item"
           tabindex="-1"
         >
-          <svg
-            class="arrow-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          >
+          <svg class="arrow-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="9 18 15 12 9 6"></polyline>
           </svg>
         </button>
@@ -351,104 +265,28 @@ export class CTPicker extends BaseElement {
 
   private _selectPrevious = (): void => {
     if (this.disabled || !this.items?.get().length) return;
-    const newIndex = this._currentIndex <= 0
-      ? this.items.get().length - 1
-      : this._currentIndex - 1;
-    this._selectIndex(newIndex);
+    const len = this.items.get().length;
+    this._selectIndex(this._currentIndex <= 0 ? len - 1 : this._currentIndex - 1);
   };
 
   private _selectNext = (): void => {
     if (this.disabled || !this.items?.get().length) return;
-    const newIndex = this._currentIndex >= this.items.get().length - 1
-      ? 0
-      : this._currentIndex + 1;
-    this._selectIndex(newIndex);
-  };
-
-  private _selectFirst = (): void => {
-    if (this.disabled || !this.items?.get().length) return;
-    this._selectIndex(0);
-  };
-
-  private _selectLast = (): void => {
-    if (this.disabled || !this.items?.get().length) return;
-    this._selectIndex(this.items.get().length - 1);
+    const len = this.items.get().length;
+    this._selectIndex(this._currentIndex >= len - 1 ? 0 : this._currentIndex + 1);
   };
 
   private _selectIndex(index: number): void {
-    debugLog("_selectIndex called", {
-      index,
-      currentIndex: this._currentIndex,
-      itemsLength: this.items?.get().length,
-    });
-
-    if (index < 0 || index >= this.items.get().length) {
-      debugLog("_selectIndex: index out of bounds, returning");
-      return;
-    }
-    if (index === this._currentIndex) {
-      debugLog("_selectIndex: same as current, returning");
-      return;
-    }
-
-    this._currentIndex = index;
-    const selectedItem = this.items.key(index);
-    debugLog(
-      "_selectIndex: setting value to item at index",
-      index,
-      selectedItem,
-    );
-
-    // Update value through cell controller
-    this._cellController.setValue(selectedItem);
+    const len = this.items?.get()?.length ?? 0;
+    if (index < 0 || index >= len || index === this._currentIndex) return;
+    this._cellController.setValue(index);
     this._updateAriaAttributes();
     this.requestUpdate();
-  }
-
-  private _syncIndexFromValue(): void {
-    debugLog("_syncIndexFromValue called", {
-      itemsLength: this.items?.get().length,
-    });
-
-    if (!this.items?.get().length) {
-      this._currentIndex = 0;
-      debugLog("_syncIndexFromValue: no items, setting index to 0");
-      return;
-    }
-
-    const currentValue = this._cellController.getValue();
-    debugLog("_syncIndexFromValue: currentValue from controller", currentValue);
-
-    // Debug: check comparison for each item
-    this.items.get().forEach((item, i) => {
-      const same = areCellValuesSame(item, currentValue);
-      debugLog(
-        `_syncIndexFromValue: areCellValuesSame(items[${i}], currentValue) =`,
-        same,
-      );
-    });
-
-    // Use our custom comparison that properly handles cell proxies
-    const index = this.items.get().findIndex((item) =>
-      areCellValuesSame(item, currentValue)
-    );
-    debugLog("_syncIndexFromValue: found index", index);
-
-    if (index >= 0) {
-      this._currentIndex = index;
-      debugLog("_syncIndexFromValue: setting _currentIndex to", index);
-    } else if (this.items.get().length > 0) {
-      // Default to first item if value not found
-      this._currentIndex = 0;
-      debugLog("_syncIndexFromValue: value not found, defaulting to 0");
-    }
   }
 
   // --- Keyboard navigation ---
 
   private _handleKeyDown = (event: KeyboardEvent): void => {
     if (this.disabled || !this.items?.get().length) return;
-
     switch (event.key) {
       case "ArrowLeft":
       case "ArrowUp":
@@ -462,11 +300,11 @@ export class CTPicker extends BaseElement {
         break;
       case "Home":
         event.preventDefault();
-        this._selectFirst();
+        this._selectIndex(0);
         break;
       case "End":
         event.preventDefault();
-        this._selectLast();
+        this._selectIndex(this.items.get().length - 1);
         break;
     }
   };
@@ -481,18 +319,10 @@ export class CTPicker extends BaseElement {
 
   private _handleTouchEnd = (event: TouchEvent): void => {
     if (this.disabled || !this._isTouching) return;
-
     const deltaX = event.changedTouches[0].clientX - this._touchStartX;
-    const threshold = 50;
-
-    if (Math.abs(deltaX) > threshold) {
-      if (deltaX > 0) {
-        this._selectPrevious(); // swipe right = previous
-      } else {
-        this._selectNext(); // swipe left = next
-      }
+    if (Math.abs(deltaX) > 50) {
+      deltaX > 0 ? this._selectPrevious() : this._selectNext();
     }
-
     this._isTouching = false;
   };
 
@@ -513,10 +343,7 @@ export class CTPicker extends BaseElement {
   // --- ARIA ---
 
   private _updateAriaAttributes(): void {
-    this.setAttribute(
-      "aria-activedescendant",
-      `picker-item-${this._currentIndex}`,
-    );
+    this.setAttribute("aria-activedescendant", `picker-item-${this._currentIndex}`);
     this.setAttribute("aria-disabled", String(this.disabled));
   }
 
@@ -526,75 +353,16 @@ export class CTPicker extends BaseElement {
     this.style.setProperty("--ct-picker-min-height", this.minHeight);
   }
 
-  // --- Cell UI rendering ---
-
-  private _renderAllItems(): void {
-    this._cleanupAllRenders();
-
-    // Wait for next frame to ensure DOM is ready
-    requestAnimationFrame(() => {
-      this.items?.get().forEach((cell, index) => {
-        this._renderItemAtIndex(cell, index);
-      });
-    });
-  }
-
-  private _renderItemAtIndex(cell: any, index: number): void {
-    const container = this.shadowRoot?.querySelector(
-      `.card-content[data-index="${index}"]`,
-    ) as HTMLElement | null;
-
-    if (!container) return;
-
-    // Clean up previous render for this index
-    const existingCleanup = this._renderCleanups.get(index);
-    if (existingCleanup) {
-      existingCleanup();
-      this._renderCleanups.delete(index);
-    }
-
-    try {
-      // Render the cell's UI into the container
-      const cleanup = render(container, cell as Cell<VNode>);
-      this._renderCleanups.set(index, cleanup);
-    } catch (error) {
-      console.error(
-        `[ct-picker] Error rendering item at index ${index}:`,
-        error,
-      );
-      // Fallback: show cell link
-      container.innerHTML = `<ct-cell-link></ct-cell-link>`;
-      const cellLink = container.querySelector("ct-cell-link") as any;
-      if (cellLink) {
-        cellLink.cell = cell;
-      }
-    }
-  }
-
-  private _cleanupAllRenders(): void {
-    this._renderCleanups.forEach((cleanup) => cleanup());
-    this._renderCleanups.clear();
-  }
-
   // --- Public API ---
 
-  /**
-   * Get the currently selected index
-   */
   getSelectedIndex(): number {
     return this._currentIndex;
   }
 
-  /**
-   * Get the currently selected item
-   */
   getSelectedItem(): any | undefined {
     return this.items?.get()[this._currentIndex];
   }
 
-  /**
-   * Select an item by index
-   */
   selectByIndex(index: number): void {
     this._selectIndex(index);
   }
