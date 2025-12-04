@@ -952,10 +952,10 @@ export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
 
 /**
  * Generate a schema that represents the pseudo-intersection of two other
- * scheams.
+ * schemas.
  *
  * This lets us combine the schema that we entered this doc with a schema
- * encounterd within a link in the doc.
+ * encountered within a link in the doc.
  *
  * We could handle this with an allOf (implemented with state snapshots),
  * and be JSONSchema compliant, but that leaves an unclear strategy for
@@ -1400,7 +1400,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
             return undefined;
           }
           const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
-          // TODO(@ubik2: do i need to merge the link schema?
+          // TODO(@ubik2): do i need to merge the link schema?
           const val = this.traverseWithSchemaContext(doc, {
             schema: mergedSchema,
             rootSchema: schemaContext.rootSchema,
