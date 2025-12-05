@@ -3332,8 +3332,8 @@ interface CTCheckboxAttributes<T> extends CTHTMLAttributes<T> {
 interface CTAutocompleteAttributes<T> extends CTHTMLAttributes<T> {
   "items": { value: string; label?: string; group?: string; searchAliases?: string[] }[];
   "placeholder"?: string;
-  "max-visible"?: number;
-  "allow-custom"?: boolean;
+  "maxVisible"?: number;
+  "allowCustom"?: boolean;
   "disabled"?: boolean;
   "onct-select"?: EventHandler<{ value: string; label: string; group?: string; isCustom: boolean }>;
   "onct-open"?: EventHandler<any>;

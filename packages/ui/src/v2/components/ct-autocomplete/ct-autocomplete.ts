@@ -195,8 +195,8 @@ export class CTAutocomplete extends BaseElement {
   static override properties = {
     items: { attribute: false },
     placeholder: { type: String },
-    maxVisible: { type: Number, attribute: "max-visible" },
-    allowCustom: { type: Boolean, attribute: "allow-custom" },
+    maxVisible: { type: Number },
+    allowCustom: { type: Boolean },
     disabled: { type: Boolean },
   };
 
