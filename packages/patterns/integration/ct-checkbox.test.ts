@@ -1,7 +1,9 @@
-import { env, waitFor } from "@commontools/integration";
+import { env } from "@commontools/integration";
+import { sleep } from "@commontools/utils/sleep";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
+import { assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
 import { CharmsController } from "@commontools/charm/ops";
 import { ANYONE_USER } from "@commontools/memory/acl";
@@ -65,62 +67,49 @@ testComponents.forEach(({ name, file }) => {
     it("should show disabled content initially", async () => {
       const page = shell.page();
 
-      await waitFor(async () => {
-        const featureStatus = await page.waitForSelector("#feature-status", {
-          strategy: "pierce",
-        });
-        const statusText = await featureStatus.evaluate((el: HTMLElement) =>
-          el.textContent
-        );
-        return statusText?.trim() === "⚠ Feature is disabled";
+      const featureStatus = await page.waitForSelector("#feature-status", {
+        strategy: "pierce",
       });
+      const statusText = await featureStatus.evaluate((el: HTMLElement) =>
+        el.textContent
+      );
+      assertEquals(statusText?.trim(), "⚠ Feature is disabled");
     });
 
     it("should toggle to enabled content when checkbox is clicked", async () => {
       const page = shell.page();
 
-      await waitFor(async () => {
-        const checkbox = await page.waitForSelector("ct-checkbox", {
-          strategy: "pierce",
-        });
-        // This could throw due to lacking a box model to click on.
-        // Catch in lieu of handling time sensitivity.
-        try {
-          await checkbox.click();
-        } catch (_) {
-          return false;
-        }
-        const featureStatus = await page.waitForSelector("#feature-status", {
-          strategy: "pierce",
-        });
-        const statusText = await featureStatus.evaluate((el: HTMLElement) =>
-          el.textContent
-        );
-        return statusText?.trim() === "✓ Feature is enabled!";
+      const checkbox = await page.waitForSelector("ct-checkbox", {
+        strategy: "pierce",
       });
+      await checkbox.click();
+      await sleep(500);
+
+      const featureStatus = await page.$("#feature-status", {
+        strategy: "pierce",
+      });
+      const statusText = await featureStatus?.evaluate((el: HTMLElement) =>
+        el.textContent
+      );
+      assertEquals(statusText?.trim(), "✓ Feature is enabled!");
     });
 
     it("should toggle back to disabled content when checkbox is clicked again", async () => {
       const page = shell.page();
-      await waitFor(async () => {
-        const checkbox = await page.waitForSelector("ct-checkbox", {
-          strategy: "pierce",
-        });
-        // This could throw due to lacking a box model to click on.
-        // Catch in lieu of handling time sensitivity.
-        try {
-          await checkbox.click();
-        } catch (_) {
-          return false;
-        }
-        const featureStatus = await page.waitForSelector("#feature-status", {
-          strategy: "pierce",
-        });
-        const statusText = await featureStatus.evaluate((el: HTMLElement) =>
-          el.textContent
-        );
-        return statusText?.trim() === "⚠ Feature is disabled";
+
+      const checkbox = await page.$("ct-checkbox", {
+        strategy: "pierce",
       });
+      await checkbox?.click();
+      await sleep(1000);
+
+      const featureStatus = await page.$("#feature-status", {
+        strategy: "pierce",
+      });
+      const statusText = await featureStatus?.evaluate((el: HTMLElement) =>
+        el.textContent
+      );
+      assertEquals(statusText?.trim(), "⚠ Feature is disabled");
     });
   });
 });

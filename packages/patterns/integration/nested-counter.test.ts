@@ -51,15 +51,16 @@ describe("nested counter integration test", () => {
       identity,
     });
 
-    await waitFor(async () => {
-      const counterResult = await page.waitForSelector("#counter-result", {
-        strategy: "pierce",
-      });
-      const initialText = await counterResult.evaluate((el: HTMLElement) =>
-        el.textContent
-      );
-      return initialText?.trim() === "Counter is the 0th number";
+    const counterResult = await page.waitForSelector("#counter-result", {
+      strategy: "pierce",
     });
+    assert(counterResult, "Should find counter-result element");
+
+    // Verify initial value is 0
+    const initialText = await counterResult.evaluate((el: HTMLElement) =>
+      el.textContent
+    );
+    assertEquals(initialText?.trim(), "Counter is the 0th number");
 
     // Verify via direct operations that the nested structure works
     assertEquals(charm.result.get(["value"]), 0);

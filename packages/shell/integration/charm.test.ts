@@ -59,25 +59,20 @@ describe("shell charm tests", () => {
       identity,
     });
 
-    // Click twice
-    for (let i = 0; i < 2; i++) {
-      const handle = await page.waitForSelector(
-        "#counter-decrement",
-        { strategy: "pierce" },
-      );
-      // Wait for inner text. There's some
-      // race here where we can click before the
-      // box model is available.
-      const _ = await handle.innerText();
-      handle.click();
-      await sleep(1000);
-    }
-    const handle = await page.waitForSelector(
+    let handle = await page.waitForSelector(
+      "#counter-decrement",
+      { strategy: "pierce" },
+    );
+    handle.click();
+    await sleep(1000);
+    handle.click();
+    await sleep(1000);
+    handle = await page.waitForSelector(
       "#counter-result",
       { strategy: "pierce" },
     );
-    await sleep(1500);
-    const text = await handle.innerText();
+    await sleep(1000);
+    const text = await handle?.innerText();
     assert(text === "Counter is the -2th number");
   });
 });
