@@ -1,4 +1,5 @@
 import * as Reference from "merkle-reference";
+import { isDeno } from "@commontools/utils/env";
 export * from "merkle-reference";
 
 // Don't know why deno does not seem to see there is a `fromString` so we just
@@ -16,12 +17,8 @@ export const fromString = Reference.fromString as (
  */
 let referImpl: <T>(source: T) => Reference.View<T> = Reference.refer;
 
-// In non-browser environments, try to use node:crypto for better performance
-const isBrowser =
-  typeof globalThis.document !== "undefined" ||
-  typeof globalThis.window !== "undefined";
-
-if (!isBrowser) {
+// In Deno, try to use node:crypto for better performance
+if (isDeno()) {
   try {
     // Dynamic import to avoid bundler resolution in browsers
     const nodeCrypto = await import("node:crypto");
@@ -86,6 +83,9 @@ export const intern = <T>(source: T): T => {
     const cached = internCache.get(key);
 
     if (cached !== undefined) {
+      // Move to end (most recently used) by re-inserting
+      internCache.delete(key);
+      internCache.set(key, cached);
       return cached as T;
     }
 
@@ -109,6 +109,9 @@ export const intern = <T>(source: T): T => {
   const cached = internCache.get(key);
 
   if (cached !== undefined) {
+    // Move to end (most recently used) by re-inserting
+    internCache.delete(key);
+    internCache.set(key, cached);
     return cached as T;
   }
 

@@ -11,6 +11,7 @@ import {
   State,
   Unclaimed,
 } from "./interface.ts";
+import * as Ref from "./reference.ts";
 import {
   fromJSON,
   fromString,
@@ -32,7 +33,7 @@ export const unclaimed = (
  * Caches the refer() result so repeated calls with same {the, of} are O(1).
  * This saves ~29µs per call (refer cost on small objects).
  */
-const unclaimedRefCache = new Map<string, Reference<Unclaimed>>();
+const unclaimedRefCache = new Map<string, Ref.View<Unclaimed>>();
 
 /**
  * Returns a cached merkle reference to an unclaimed fact.
@@ -40,7 +41,7 @@ const unclaimedRefCache = new Map<string, Reference<Unclaimed>>();
  */
 export const unclaimedRef = (
   { the, of }: { the: MIME; of: URI },
-): Reference<Unclaimed> => {
+): Ref.View<Unclaimed> => {
   const key = `${the}|${of}`;
   let ref = unclaimedRefCache.get(key);
   if (!ref) {
