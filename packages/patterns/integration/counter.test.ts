@@ -3,7 +3,7 @@ import { CharmController, CharmsController } from "@commontools/charm/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
-import { assert, assertEquals } from "@std/assert";
+import { assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 
@@ -50,16 +50,16 @@ describe("counter direct operations test", () => {
       identity,
     });
 
-    const counterResult = await page.waitForSelector("#counter-result", {
-      strategy: "pierce",
-    });
-    assert(counterResult, "Should find counter-result element");
-
     // Verify initial value is 0
-    const initialText = await counterResult.evaluate((el: HTMLElement) =>
-      el.textContent
-    );
-    assertEquals(initialText?.trim(), "Counter is the 0th number");
+    await waitFor(async () => {
+      const counterResult = await page.waitForSelector("#counter-result", {
+        strategy: "pierce",
+      });
+      const initialText = await counterResult.evaluate((el: HTMLElement) =>
+        el.textContent
+      );
+      return initialText?.trim() === "Counter is the 0th number";
+    });
 
     assertEquals(charm.result.get(["value"]), 0);
   });
@@ -67,15 +67,17 @@ describe("counter direct operations test", () => {
   it("should update counter value via direct operation (live)", async () => {
     const page = shell.page();
 
-    // Get the counter result element
-    const counterResult = await page.waitForSelector("#counter-result", {
+    await page.waitForSelector("#counter-result", {
       strategy: "pierce",
     });
 
-    console.log("Setting counter value to 42 via direct operation");
     await charm.result.set(42, ["value"]);
 
     await waitFor(async () => {
+      const counterResult = await page.waitForSelector("#counter-result", {
+        strategy: "pierce",
+      });
+
       const updatedText = await counterResult.evaluate((el: HTMLElement) =>
         el.textContent
       );
@@ -105,19 +107,15 @@ describe("counter direct operations test", () => {
     });
 
     // Get the counter result element after refresh
-    const counterResult = await page.waitForSelector("#counter-result", {
-      strategy: "pierce",
-    });
-    assert(counterResult, "Should find counter-result element after refresh");
+    await waitFor(async () => {
+      const counterResult = await page.waitForSelector("#counter-result", {
+        strategy: "pierce",
+      });
 
-    // Check if the UI shows the updated value after refresh
-    const textAfterRefresh = await counterResult.evaluate((el: HTMLElement) =>
-      el.textContent
-    );
-    assertEquals(
-      textAfterRefresh?.trim(),
-      "Counter is the 42th number",
-      "UI should show persisted value after refresh",
-    );
+      const textAfterRefresh = await counterResult.evaluate((el: HTMLElement) =>
+        el.textContent
+      );
+      return textAfterRefresh?.trim() === "Counter is the 42th number";
+    });
   });
 });

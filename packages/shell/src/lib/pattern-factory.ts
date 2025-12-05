@@ -1,8 +1,9 @@
 import { CharmController, CharmsController } from "@commontools/charm/ops";
 import { HttpProgramResolver } from "@commontools/js-compiler";
 import { API_URL } from "./env.ts";
+import { NameSchema } from "@commontools/charm";
 
-export type BuiltinPatternType = "home" | "space-default";
+export type BuiltinPatternType = "home" | "space-root";
 
 type BuiltinPatternConfig = {
   url: URL;
@@ -16,17 +17,17 @@ const Configs: Record<BuiltinPatternType, BuiltinPatternConfig> = {
     url: new URL(`/api/patterns/home.tsx`, API_URL),
     cause: "home-pattern",
   },
-  "space-default": {
+  "space-root": {
     name: "DefaultCharmList",
     url: new URL(`/api/patterns/default-app.tsx`, API_URL),
-    cause: "default-charm",
+    cause: "space-root",
   },
 };
 
 export async function create(
   cc: CharmsController,
   type: BuiltinPatternType,
-): Promise<CharmController> {
+): Promise<CharmController<NameSchema>> {
   const config = Configs[type];
   const manager = cc.manager();
   const runtime = manager.runtime;
@@ -35,7 +36,11 @@ export async function create(
     new HttpProgramResolver(config.url.href),
   );
 
-  const charm = await cc.create(program, { start: true }, config.cause);
+  const charm = await cc.create<NameSchema>(
+    program,
+    { start: true },
+    config.cause,
+  );
 
   // Wait for the link to be processed
   await runtime.idle();
@@ -49,7 +54,7 @@ export async function create(
 
 export async function get(
   cc: CharmsController,
-): Promise<CharmController | undefined> {
+): Promise<CharmController<NameSchema> | undefined> {
   const pattern = await cc.manager().getDefaultPattern();
   if (!pattern) {
     return undefined;
@@ -60,7 +65,7 @@ export async function get(
 export async function getOrCreate(
   cc: CharmsController,
   type: BuiltinPatternType,
-): Promise<CharmController> {
+): Promise<CharmController<NameSchema>> {
   const pattern = await get(cc);
   if (pattern) {
     return pattern;
