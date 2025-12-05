@@ -122,6 +122,17 @@ export const MinimalSchemaSelector = {
   schemaContext: { schema: false, rootSchema: false },
 } as const;
 
+/**
+ * Check if we crossed document boundaries (cross-document link)
+ * vs intra-document reference ($alias stays in same doc)
+ */
+function isCrossDocumentLink(
+  sourceDoc: IAttestation,
+  targetDoc: IAttestation,
+): boolean {
+  return targetDoc.address.id !== sourceDoc.address.id;
+}
+
 export class CycleTracker<K> {
   private partial: Set<K>;
   private expectCycles: boolean;
@@ -247,21 +258,29 @@ export class CompoundCycleTracker<PartialKey, ExtraKey> {
     docId: string,
     path: readonly string[],
     _schemaContext: unknown,
-  ): { setCachedResult: (result: unknown) => void } | null {
+  ): { setCachedResult: (result: unknown) => void; cached?: unknown } | null {
     // For cycle detection, we only need doc+path - schema doesn't matter
     // If we're currently traversing this doc+path, don't start again
     const key = `${docId}|${path.join("/")}`;
     return this.includeWithStringKey(key);
   }
 
-  // String-keyed tracking for cross-document links (cycle detection only)
-  // Note: We only track in-progress to detect cycles, not completed.
-  // Object-level WeakMap caching handles memoization.
+  // String-keyed tracking for cross-document links
+  // Tracks both in-progress (for cycle detection) and completed (for memoization)
   private stringKeyInProgress = new Set<string>();
+  private stringKeyCompleted = new Map<string, unknown>();
 
   private includeWithStringKey(
     key: string,
-  ): { setCachedResult: (result: unknown) => void } | null {
+  ): { setCachedResult: (result: unknown) => void; cached?: unknown } | null {
+    // Check completed cache first - return cached result
+    if (this.stringKeyCompleted.has(key)) {
+      return {
+        cached: this.stringKeyCompleted.get(key),
+        setCachedResult: () => {}, // No-op for completed
+      };
+    }
+
     // Check in-progress (cycle detection)
     if (this.stringKeyInProgress.has(key)) {
       return null; // Cycle
@@ -271,9 +290,9 @@ export class CompoundCycleTracker<PartialKey, ExtraKey> {
     this.stringKeyInProgress.add(key);
 
     return {
-      setCachedResult: (_result: unknown) => {
+      setCachedResult: (result: unknown) => {
         this.stringKeyInProgress.delete(key);
-        // No persistent cache - object-level WeakMap handles memoization
+        this.stringKeyCompleted.set(key, result); // Cache the result
       },
     };
   }
@@ -395,7 +414,7 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
     if (isPrimitive(doc.value)) {
       return doc.value;
     } else if (Array.isArray(doc.value)) {
-      const t = tracker.include(doc.value, SchemaAll, doc);
+      using t = tracker.include(doc.value, SchemaAll, doc);
       if (t === null) {
         return null;
       }
@@ -403,29 +422,25 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
       if ("cached" in t) {
         return t.cached as Immutable<JSONValue>;
       }
-      try {
-        const result = doc.value.map((item, index) =>
-          this.traverseDAG(
-            {
-              ...doc,
-              address: {
-                ...doc.address,
-                path: [...doc.address.path, index.toString()],
-              },
-              value: item,
+      const result = doc.value.map((item, index) =>
+        this.traverseDAG(
+          {
+            ...doc,
+            address: {
+              ...doc.address,
+              path: [...doc.address.path, index.toString()],
             },
-            tracker,
-            schemaTracker,
-          )
-        ) as Immutable<JSONValue>[];
-        // Cache the result reference
-        if ("setCachedResult" in t && t.setCachedResult) {
-          t.setCachedResult(result);
-        }
-        return result;
-      } finally {
-        t[Symbol.dispose]();
+            value: item,
+          },
+          tracker,
+          schemaTracker,
+        )
+      ) as Immutable<JSONValue>[];
+      // Cache the result reference
+      if ("setCachedResult" in t && t.setCachedResult) {
+        t.setCachedResult(result);
       }
+      return result;
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isAnyCellLink(doc.value)) {
@@ -442,10 +457,7 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
           return null;
         }
 
-        // Check if we crossed document boundaries (cross-document link)
-        // vs intra-document reference ($alias stays in same doc)
-        const crossedDocBoundary = newDoc.address.id !== doc.address.id;
-        if (crossedDocBoundary) {
+        if (isCrossDocumentLink(doc, newDoc)) {
           // Use document-level tracking to avoid diamond problem
           const tracker_result = tracker.includeDocument(
             newDoc.address.id,
@@ -453,7 +465,11 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
             SchemaAll,
           );
           if (tracker_result === null) {
-            return null; // already visited or cycle detected
+            return null; // cycle detected
+          }
+          // Return cached result if available
+          if ("cached" in tracker_result) {
+            return tracker_result.cached as Immutable<JSONValue>;
           }
           // First visit - traverse and mark complete
           const result = this.traverseDAG(newDoc, tracker, schemaTracker);
@@ -463,7 +479,7 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
         // Intra-document reference ($alias) - always re-traverse
         return this.traverseDAG(newDoc, tracker, schemaTracker);
       } else {
-        const t = tracker.include(doc.value, SchemaAll, doc);
+        using t = tracker.include(doc.value, SchemaAll, doc);
         if (t === null) {
           return null;
         }
@@ -471,29 +487,25 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
         if ("cached" in t) {
           return t.cached as Immutable<JSONValue>;
         }
-        try {
-          const result = Object.fromEntries(
-            Object.entries(doc.value as JSONObject).map(([k, value]) => [
-              k,
-              this.traverseDAG(
-                {
-                  ...doc,
-                  address: { ...doc.address, path: [...doc.address.path, k] },
-                  value: value,
-                },
-                tracker,
-                schemaTracker,
-              ),
-            ]),
-          ) as Immutable<JSONValue>;
-          // Cache the result reference
-          if ("setCachedResult" in t && t.setCachedResult) {
-            t.setCachedResult(result);
-          }
-          return result;
-        } finally {
-          t[Symbol.dispose]();
+        const result = Object.fromEntries(
+          Object.entries(doc.value as JSONObject).map(([k, value]) => [
+            k,
+            this.traverseDAG(
+              {
+                ...doc,
+                address: { ...doc.address, path: [...doc.address.path, k] },
+                value: value,
+              },
+              tracker,
+              schemaTracker,
+            ),
+          ]),
+        ) as Immutable<JSONValue>;
+        // Cache the result reference
+        if ("setCachedResult" in t && t.setCachedResult) {
+          t.setCachedResult(result);
         }
+        return result;
       }
     } else {
       logger.error(
@@ -1145,9 +1157,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
       return null;
     }
 
-    // Check if we crossed document boundaries (cross-document link)
-    const crossedDocBoundary = newDoc.address.id !== doc.address.id;
-    if (crossedDocBoundary) {
+    if (isCrossDocumentLink(doc, newDoc)) {
       // Use document-level tracking to avoid diamond problem
       const tracker_result = this.tracker.includeDocument(
         newDoc.address.id,
@@ -1155,7 +1165,11 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
         newSelector?.schemaContext,
       );
       if (tracker_result === null) {
-        return null; // already visited or cycle detected
+        return null; // cycle detected
+      }
+      // Return cached result if available
+      if ("cached" in tracker_result) {
+        return tracker_result.cached as Immutable<JSONValue>;
       }
       // First visit - traverse and mark complete
       const result = this.traverseWithSelector(newDoc, newSelector!);
