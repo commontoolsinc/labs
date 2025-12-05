@@ -9,6 +9,8 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
+import { type Cell } from "@commontools/runner";
+import { createCellController } from "../../core/cell-controller.ts";
 
 /**
  * AutocompleteItem - Item format for ct-autocomplete
@@ -25,28 +27,47 @@ export interface AutocompleteItem {
 }
 
 /**
- * CTAutocomplete - Search input with filterable dropdown
+ * CTAutocomplete - Search input with filterable dropdown and optional value binding
+ *
+ * Supports both single-select and multi-select modes, with bidirectional Cell binding.
  *
  * @element ct-autocomplete
  *
  * @attr {string} placeholder - Placeholder text for the input
  * @attr {number} maxVisible - Maximum items to show in dropdown (default: 8)
  * @attr {boolean} allowCustom - Allow free-form custom values (default: false)
+ * @attr {boolean} multiple - Enable multi-select mode (default: false)
  * @attr {boolean} disabled - Whether the component is disabled
  *
  * @prop {AutocompleteItem[]} items - Items to choose from
+ * @prop {Cell<string>|Cell<string[]>|string|string[]} value - Selected value(s) - supports Cell binding
  *
+ * @fires ct-change - Fired when value changes: { value, oldValue }
  * @fires ct-select - Fired when an item is selected: { value, label, group?, isCustom }
  * @fires ct-open - Fired when dropdown opens
  * @fires ct-close - Fired when dropdown closes
  *
- * @example
+ * @example Single-select with $value binding
+ * const selected = cell<string | undefined>(undefined);
  * <ct-autocomplete
- *   .items=${[
- *     { value: "colleague", label: "Colleague", group: "Professional" },
- *     { value: "friend", label: "Friend", group: "Personal" },
- *   ]}
- *   @ct-select=${(e) => console.log('Selected:', e.detail)}
+ *   items={relationshipTypes}
+ *   $value={selected}
+ *   placeholder="Search..."
+ * />
+ *
+ * @example Multi-select with $value binding
+ * const selected = cell<string[]>([]);
+ * <ct-autocomplete
+ *   items={relationshipTypes}
+ *   $value={selected}
+ *   multiple={true}
+ *   placeholder="Search to add..."
+ * />
+ *
+ * @example Event-only API (no value binding)
+ * <ct-autocomplete
+ *   items={items}
+ *   onct-select={(e) => console.log('Selected:', e.detail)}
  *   placeholder="Search..."
  * />
  */
@@ -171,6 +192,56 @@ export class CTAutocomplete extends BaseElement {
         font-style: italic;
       }
 
+      /* Already selected items (shown at bottom in multi-select) */
+      .option.already-selected {
+        cursor: pointer;
+        opacity: 0.7;
+        background-color: var(--ct-theme-color-surface, #f1f5f9);
+      }
+
+      .option.already-selected:hover {
+        background-color: #fef2f2;
+      }
+
+      .option.already-selected.highlighted {
+        background-color: #fecaca;
+        color: #991b1b;
+      }
+
+      .option.already-selected .status-label {
+        font-size: 0.75rem;
+        font-style: italic;
+        color: var(--ct-theme-color-text-muted, #6b7280);
+        margin-left: 0.5rem;
+      }
+
+      /* Show "Already added" by default, "Remove" when hovered/highlighted */
+      .option.already-selected .already-added-text {
+        display: inline;
+      }
+      .option.already-selected .remove-text {
+        display: none;
+      }
+
+      .option.already-selected:hover .already-added-text,
+      .option.already-selected.highlighted .already-added-text {
+        display: none;
+      }
+      .option.already-selected:hover .remove-text,
+      .option.already-selected.highlighted .remove-text {
+        display: inline;
+        color: #dc2626;
+      }
+      .option.already-selected.highlighted .remove-text {
+        color: #991b1b;
+      }
+
+      .selected-separator {
+        border-top: 1px solid var(--ct-theme-color-border, #e5e7eb);
+        margin-top: 0.25rem;
+        padding-top: 0.25rem;
+      }
+
       /* Empty state */
       .empty-state {
         padding: 0.75rem;
@@ -183,18 +254,31 @@ export class CTAutocomplete extends BaseElement {
 
   static override properties = {
     items: { attribute: false },
+    value: { attribute: false },
     placeholder: { type: String },
     maxVisible: { type: Number },
     allowCustom: { type: Boolean },
+    multiple: { type: Boolean },
     disabled: { type: Boolean },
   };
 
   // Public properties
   declare items: AutocompleteItem[];
+  declare value: Cell<string> | Cell<string[]> | string | string[] | undefined;
   declare placeholder: string;
   declare maxVisible: number;
   declare allowCustom: boolean;
+  declare multiple: boolean;
   declare disabled: boolean;
+
+  // Cell controller for value binding
+  private _cellController = createCellController<string | string[]>(this, {
+    timing: { strategy: "immediate" },
+    onChange: (newValue, oldValue) => {
+      this.requestUpdate();
+      this.emit("ct-change", { value: newValue, oldValue });
+    },
+  });
 
   // Internal state
   @state() private _isOpen = false;
@@ -209,9 +293,11 @@ export class CTAutocomplete extends BaseElement {
   constructor() {
     super();
     this.items = [];
+    this.value = undefined;
     this.placeholder = "";
     this.maxVisible = 8;
     this.allowCustom = false;
+    this.multiple = false;
     this.disabled = false;
   }
 
@@ -245,7 +331,20 @@ export class CTAutocomplete extends BaseElement {
   override firstUpdated() {
     this._input = this.shadowRoot?.querySelector("input") || null;
     this._dropdown = this.shadowRoot?.querySelector(".dropdown") || null;
+
+    // Initialize cell controller binding
+    this._cellController.bind(this.value as Cell<string | string[]> | string | string[]);
+
     applyThemeToElement(this, this.theme ?? defaultTheme);
+  }
+
+  override willUpdate(changedProperties: PropertyValues) {
+    super.willUpdate(changedProperties);
+
+    // If the value property itself changed (e.g., switched to a different cell)
+    if (changedProperties.has("value")) {
+      this._cellController.bind(this.value as Cell<string | string[]> | string | string[]);
+    }
   }
 
   override updated(changedProperties: PropertyValues) {
@@ -259,37 +358,107 @@ export class CTAutocomplete extends BaseElement {
     }
   }
 
-  // Computed: filtered items based on query
+  // Helper to get current value from cell controller
+  private _getCurrentValue(): string | readonly string[] | undefined {
+    return this._cellController.getValue();
+  }
+
+  // Helper to get display label for a value
+  private _getLabelForValue(value: string): string {
+    const item = (this.items || []).find(i => i.value === value);
+    return item?.label || value;
+  }
+
+  // Get the display value for the input in single-select mode
+  private get _displayValue(): string {
+    // If in multi-select mode, always show the query (user is always searching)
+    if (this.multiple) {
+      return this._query;
+    }
+
+    // In single-select mode:
+    // - If user is typing (has query), show the query
+    // - Otherwise, show the selected value's label
+    if (this._query) {
+      return this._query;
+    }
+
+    const currentValue = this._getCurrentValue() as string | undefined;
+    if (currentValue) {
+      return this._getLabelForValue(currentValue);
+    }
+
+    return "";
+  }
+
+  // Helper to check if an item matches the search query
+  private _itemMatchesQuery(item: AutocompleteItem, query: string): boolean {
+    const label = (item.label || item.value).toLowerCase();
+    const value = item.value.toLowerCase();
+    const group = (item.group || "").toLowerCase();
+
+    // Check label, value, and group
+    if (
+      label.includes(query) ||
+      value.includes(query) ||
+      group.includes(query)
+    ) {
+      return true;
+    }
+
+    // Check searchAliases
+    if (item.searchAliases) {
+      return item.searchAliases.some((alias) =>
+        alias.toLowerCase().includes(query)
+      );
+    }
+
+    return false;
+  }
+
+  // Get the set of already-selected values (for multi-select)
+  private get _selectedValues(): Set<string> {
+    if (!this.multiple) return new Set();
+    const selected = (this._getCurrentValue() as string[] | undefined) || [];
+    return new Set(selected);
+  }
+
+  // Computed: filtered items based on query (selectable items only)
   private get _filteredItems(): AutocompleteItem[] {
+    const items = this.items || [];
+    const selectedValues = this._selectedValues;
+
+    // Filter out already-selected items (they'll be shown separately)
+    const selectableItems = this.multiple
+      ? items.filter(item => !selectedValues.has(item.value))
+      : items;
+
+    // Apply search filter
     if (!this._query.trim()) {
-      return this.items;
+      return selectableItems;
     }
 
     const query = this._query.toLowerCase();
+    return selectableItems.filter(item => this._itemMatchesQuery(item, query));
+  }
 
-    return this.items.filter((item) => {
-      const label = (item.label || item.value).toLowerCase();
-      const value = item.value.toLowerCase();
-      const group = (item.group || "").toLowerCase();
+  // Computed: already-selected items that match the query (for multi-select)
+  private get _alreadySelectedItems(): AutocompleteItem[] {
+    if (!this.multiple) return [];
 
-      // Check label, value, and group
-      if (
-        label.includes(query) ||
-        value.includes(query) ||
-        group.includes(query)
-      ) {
-        return true;
-      }
+    const items = this.items || [];
+    const selectedValues = this._selectedValues;
 
-      // Check searchAliases
-      if (item.searchAliases) {
-        return item.searchAliases.some((alias) =>
-          alias.toLowerCase().includes(query)
-        );
-      }
+    // Get selected items
+    const selectedItems = items.filter(item => selectedValues.has(item.value));
 
-      return false;
-    });
+    // Apply search filter if there's a query
+    if (!this._query.trim()) {
+      return selectedItems;
+    }
+
+    const query = this._query.toLowerCase();
+    return selectedItems.filter(item => this._itemMatchesQuery(item, query));
   }
 
   // Computed: should show custom value option
@@ -298,18 +467,36 @@ export class CTAutocomplete extends BaseElement {
       return false;
     }
 
-    // Don't show if query exactly matches an existing item
     const queryLower = this._query.toLowerCase();
-    return !this.items.some(
+    const queryTrimmed = this._query.trim();
+
+    // Don't show if query exactly matches an existing item
+    const matchesExistingItem = (this.items || []).some(
       (item) =>
         item.value.toLowerCase() === queryLower ||
         (item.label || "").toLowerCase() === queryLower
     );
+
+    if (matchesExistingItem) {
+      return false;
+    }
+
+    // In multi mode, don't show if already selected
+    if (this.multiple) {
+      const selected = (this._getCurrentValue() as string[] | undefined) || [];
+      if (selected.includes(queryTrimmed)) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   // Computed: total selectable items (filtered + custom if applicable)
   private get _totalSelectableItems(): number {
-    return this._filteredItems.length + (this._showCustomOption ? 1 : 0);
+    return this._filteredItems.length +
+           (this._showCustomOption ? 1 : 0) +
+           this._alreadySelectedItems.length;
   }
 
   override render() {
@@ -329,7 +516,7 @@ export class CTAutocomplete extends BaseElement {
           aria-activedescendant="${this._isOpen
             ? `option-${this._highlightedIndex}`
             : ""}"
-          .value="${this._query}"
+          .value="${this._displayValue}"
           placeholder="${this.placeholder}"
           ?disabled="${this.disabled}"
           @input="${this._handleInput}"
@@ -352,8 +539,10 @@ export class CTAutocomplete extends BaseElement {
 
   private _renderDropdownContent() {
     const filtered = this._filteredItems;
+    const alreadySelected = this._alreadySelectedItems;
 
-    if (filtered.length === 0 && !this._showCustomOption) {
+    // Show empty state only if no selectable items, no custom option, AND no already-selected items
+    if (filtered.length === 0 && !this._showCustomOption && alreadySelected.length === 0) {
       return html`<div class="empty-state">No matching options</div>`;
     }
 
@@ -380,9 +569,44 @@ export class CTAutocomplete extends BaseElement {
       `;
     });
 
-    // Add custom value option if applicable
+    // Add already-selected items after filtered items (multi-select only)
+    // Order: filtered items → already-selected items → custom option
+    const alreadySelectedStartIndex = filtered.length;
+    if (alreadySelected.length > 0) {
+      // Add separator if there are selectable items above
+      const needsSeparator = filtered.length > 0;
+
+      alreadySelected.forEach((item, index) => {
+        const globalIndex = alreadySelectedStartIndex + index;
+        const optionClasses = {
+          option: true,
+          "already-selected": true,
+          "selected-separator": needsSeparator && index === 0,
+          highlighted: globalIndex === this._highlightedIndex,
+        };
+
+        options.push(html`
+          <div
+            id="option-${globalIndex}"
+            class="${classMap(optionClasses)}"
+            role="option"
+            aria-selected="${globalIndex === this._highlightedIndex}"
+            @click="${() => this._removeItem(item)}"
+            @mouseenter="${() => this._setHighlight(globalIndex)}"
+          >
+            <span class="option-label">${item.label || item.value}</span>
+            <span class="status-label">
+              <span class="already-added-text">Already added</span>
+              <span class="remove-text">Remove</span>
+            </span>
+          </div>
+        `);
+      });
+    }
+
+    // Add custom value option at the very end
     if (this._showCustomOption) {
-      const customIndex = filtered.length;
+      const customIndex = filtered.length + alreadySelected.length;
       const customClasses = {
         option: true,
         custom: true,
@@ -418,6 +642,16 @@ export class CTAutocomplete extends BaseElement {
   }
 
   private _handleFocus() {
+    // In single-select mode with a selected value, select all text so user can easily replace
+    if (!this.multiple && this._displayValue && this._input) {
+      // Copy the selected label to query so user can modify it
+      this._query = this._displayValue;
+      // Select all text after render
+      requestAnimationFrame(() => {
+        this._input?.select();
+      });
+    }
+
     if (!this._isOpen) {
       this._open();
     }
@@ -453,6 +687,19 @@ export class CTAutocomplete extends BaseElement {
         this._close();
         break;
 
+      case "Backspace":
+        // In single-select mode, if input is empty (showing selected label),
+        // clear the selection
+        if (!this.multiple && !this._query) {
+          const currentValue = this._getCurrentValue();
+          if (currentValue) {
+            e.preventDefault();
+            this._cellController.setValue("");
+            this._query = "";
+          }
+        }
+        break;
+
       case "Tab":
         this._close();
         break;
@@ -470,6 +717,7 @@ export class CTAutocomplete extends BaseElement {
 
   // Selection methods
   private _selectItem(item: AutocompleteItem) {
+    // Always emit ct-select for side effects
     this.emit("ct-select", {
       value: item.value,
       label: item.label || item.value,
@@ -477,6 +725,19 @@ export class CTAutocomplete extends BaseElement {
       isCustom: false,
     });
 
+    // Update value through cell controller
+    if (this.multiple) {
+      // Add to array
+      const current = (this._getCurrentValue() as readonly string[] | undefined) || [];
+      if (!current.includes(item.value)) {
+        this._cellController.setValue([...current, item.value]);
+      }
+    } else {
+      // Replace single value
+      this._cellController.setValue(item.value);
+    }
+
+    // Clear query for multi, keep empty for single (user can see there's no selection displayed)
     this._query = "";
     this._close();
   }
@@ -484,11 +745,26 @@ export class CTAutocomplete extends BaseElement {
   private _selectCustomValue() {
     if (!this._query.trim()) return;
 
+    const customValue = this._query.trim();
+
+    // Always emit ct-select for side effects
     this.emit("ct-select", {
-      value: this._query.trim(),
-      label: this._query.trim(),
+      value: customValue,
+      label: customValue,
       isCustom: true,
     });
+
+    // Update value through cell controller
+    if (this.multiple) {
+      // Add to array
+      const current = (this._getCurrentValue() as readonly string[] | undefined) || [];
+      if (!current.includes(customValue)) {
+        this._cellController.setValue([...current, customValue]);
+      }
+    } else {
+      // Replace single value
+      this._cellController.setValue(customValue);
+    }
 
     this._query = "";
     this._close();
@@ -496,12 +772,35 @@ export class CTAutocomplete extends BaseElement {
 
   private _selectHighlighted() {
     const filtered = this._filteredItems;
+    const alreadySelected = this._alreadySelectedItems;
+    // Order: filtered items → already-selected items → custom option
+    const alreadySelectedStartIndex = filtered.length;
+    const customOptionIndex = filtered.length + alreadySelected.length;
 
     if (this._highlightedIndex < filtered.length) {
+      // Regular selectable item
       this._selectItem(filtered[this._highlightedIndex]);
-    } else if (this._showCustomOption) {
+    } else if (this._highlightedIndex >= alreadySelectedStartIndex &&
+               this._highlightedIndex < customOptionIndex) {
+      // Already-selected item - remove it
+      const alreadySelectedIndex = this._highlightedIndex - alreadySelectedStartIndex;
+      this._removeItem(alreadySelected[alreadySelectedIndex]);
+    } else if (this._showCustomOption && this._highlightedIndex === customOptionIndex) {
+      // Custom value option (at the end)
       this._selectCustomValue();
     }
+  }
+
+  // Remove an item from the selected values (multi-select only)
+  private _removeItem(item: AutocompleteItem) {
+    if (!this.multiple) return;
+
+    const current = (this._getCurrentValue() as readonly string[] | undefined) || [];
+    const newValue = current.filter(v => v !== item.value);
+    this._cellController.setValue(newValue);
+
+    // Don't close - user might want to remove more or add new ones
+    this._query = "";
   }
 
   // Highlight navigation
@@ -543,6 +842,9 @@ export class CTAutocomplete extends BaseElement {
 
   private _close() {
     this._isOpen = false;
+    // Clear query so display reverts to selected value (in single mode)
+    // or empty (in multi mode)
+    this._query = "";
     this.emit("ct-close", {});
   }
 

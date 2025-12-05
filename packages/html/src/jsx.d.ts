@@ -3330,11 +3330,14 @@ interface CTCheckboxAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 interface CTAutocompleteAttributes<T> extends CTHTMLAttributes<T> {
+  "$value"?: CellLike<string | string[]>;
   "items": { value: string; label?: string; group?: string; searchAliases?: string[] }[];
   "placeholder"?: string;
   "maxVisible"?: number;
   "allowCustom"?: boolean;
+  "multiple"?: boolean;
   "disabled"?: boolean;
+  "onct-change"?: EventHandler<{ value: string | string[]; oldValue: string | string[] }>;
   "onct-select"?: EventHandler<{ value: string; label: string; group?: string; isCustom: boolean }>;
   "onct-open"?: EventHandler<any>;
   "onct-close"?: EventHandler<any>;
