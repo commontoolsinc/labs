@@ -107,12 +107,20 @@ function clickCtCheckbox(page: Page) {
   });
 }
 
-async function getFeatureStatus(page: Page): Promise<string | undefined> {
+async function getFeatureStatus(
+  page: Page,
+): Promise<string | undefined | null> {
   const featureStatus = await page.waitForSelector("#feature-status", {
     strategy: "pierce",
   });
-  const statusText = await featureStatus.evaluate((el: HTMLElement) =>
-    el.textContent
-  );
-  return statusText?.trim();
+  // This could throw due to lacking a box model to click on.
+  // Catch in lieu of handling time sensitivity.
+  try {
+    const statusText = await featureStatus.evaluate((el: HTMLElement) =>
+      el.textContent
+    );
+    return statusText?.trim();
+  } catch (_) {
+    return null;
+  }
 }
