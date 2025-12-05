@@ -494,11 +494,20 @@ export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
 export type OpaqueRef<T> = [T] extends [AnyBrandedCell<any>] ? T
   :
     & OpaqueCell<T>
-    & ([T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
-      : [T] extends [Array<infer U>] ? Array<OpaqueRef<U>>
-      : [T] extends [AnyBrandedCell<any>] ? T
-      : [T] extends [object] ? { [K in keyof T]: OpaqueRef<T[K]> }
-      : T);
+    & OpaqueRefInner<T>;
+
+// Helper type for OpaqueRef's inner property/array mapping
+// Handles nullable types by extracting the non-null part for mapping
+type OpaqueRefInner<T> =
+  [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
+  : [T] extends [Array<infer U>] ? Array<OpaqueRef<U>>
+  : [T] extends [AnyBrandedCell<any>] ? T
+  : [T] extends [object] ? { [K in keyof T]: OpaqueRef<T[K]> }
+  // For nullable types (T | null | undefined), extract and map the non-null object/array part
+  : [NonNullable<T>] extends [never] ? T
+  : [NonNullable<T>] extends [Array<infer U>] ? Array<OpaqueRef<U>>
+  : [NonNullable<T>] extends [object] ? { [K in keyof NonNullable<T>]: OpaqueRef<NonNullable<T>[K]> }
+  : T;
 
 // ============================================================================
 // CellLike and Opaque - Utility types for accepting cells
