@@ -124,7 +124,17 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     return {
         [UI]: (<div>
         {/* Triple || chain - first truthy wins */}
-        <span>{__ctHelpers.unless(__ctHelpers.derive({
+        <span>{__ctHelpers.unless({
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    type: "number"
+                }, {
+                    type: "string"
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 primary: {
@@ -145,7 +155,13 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
         }, ({ primary, secondary }) => primary.get().length || secondary.get().length), "no content")}</span>
 
         {/* Triple || with mixed types */}
-        <span>{__ctHelpers.unless(__ctHelpers.derive({
+        <span>{__ctHelpers.unless({
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 items: {

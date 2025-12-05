@@ -1108,7 +1108,16 @@ export default recipe({
                         }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: u, params: {} }) => (<li>{__ctHelpers.ifElse(u.active, __ctHelpers.derive({
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: u, params: {} }) => (<li>{__ctHelpers.ifElse({
+                type: "boolean",
+                asOpaque: true
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __ctHelpers.JSONSchema, u.active, __ctHelpers.derive({
                 type: "object",
                 properties: {
                     u: {
@@ -1152,7 +1161,15 @@ export default recipe({
         {/* Some/every with reactive predicates */}
         <p>
           Has adults:{" "}
-          {__ctHelpers.ifElse(__ctHelpers.derive({
+          {__ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Yes", "No"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -1193,7 +1210,15 @@ export default recipe({
                 minAge: state.minAge
             } }, ({ state }) => state.users.some((u) => u.age >= state.minAge)), "Yes", "No")}
         </p>
-        <p>All active: {__ctHelpers.ifElse(__ctHelpers.derive({
+        <p>All active: {__ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Yes", "No"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -1261,7 +1286,15 @@ export default recipe({
 
         {/* Method result in comparison */}
         <p>
-          Is long: {__ctHelpers.ifElse(__ctHelpers.derive({
+          Is long: {__ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Yes", "No"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {

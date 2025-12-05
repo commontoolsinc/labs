@@ -561,7 +561,16 @@ export default recipe({
         {/* Mixed depth accesses */}
         <p>
           Config summary: Dark mode{" "}
-          {__ctHelpers.ifElse(state.config.features.darkMode, "enabled", "disabled")} with{" "}
+          {__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["enabled", "disabled"]
+        } as const satisfies __ctHelpers.JSONSchema, state.config.features.darkMode, "enabled", "disabled")} with{" "}
           {state.config.theme.colors.primary} primary color
         </p>
 
@@ -604,7 +613,16 @@ export default recipe({
         <h3>Complex Expressions with Shared Bases</h3>
         {/* Conditional with multiple property accesses */}
         <p>
-          Status: {__ctHelpers.ifElse(state.user.settings.notifications, __ctHelpers.derive({
+          Status: {__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, state.user.settings.notifications, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -738,7 +756,16 @@ export default recipe({
         {/* Boolean expressions with multiple properties */}
         <p>
           Features:{" "}
-          {__ctHelpers.ifElse(__ctHelpers.derive({
+          {__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Full features", "Limited features"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -887,14 +914,113 @@ export default recipe({
         <p>
           Nested refs: {state.config.theme.colors.primary} in{" "}
           {state.config.theme.fonts.body} with{" "}
-          {__ctHelpers.ifElse(state.config.features.animations, "animations", "no animations")}
+          {__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["animations", "no animations"]
+        } as const satisfies __ctHelpers.JSONSchema, state.config.features.animations, "animations", "no animations")}
         </p>
 
         <h3>Extreme Parent Suppression Test</h3>
         {/* Using every level of a deep chain */}
         <p>
-          All levels: Root: {__ctHelpers.ifElse(state.deeply, "exists", "missing")}, Nested:{" "}
-          {__ctHelpers.ifElse(state.deeply.nested, "exists", "missing")}, Value:{" "}
+          All levels: Root: {__ctHelpers.ifElse({
+            type: "object",
+            properties: {
+                nested: {
+                    type: "object",
+                    properties: {
+                        structure: {
+                            type: "object",
+                            properties: {
+                                "with": {
+                                    type: "object",
+                                    properties: {
+                                        many: {
+                                            type: "object",
+                                            properties: {
+                                                levels: {
+                                                    type: "object",
+                                                    properties: {
+                                                        value: {
+                                                            type: "string"
+                                                        },
+                                                        count: {
+                                                            type: "number"
+                                                        }
+                                                    },
+                                                    required: ["value", "count"]
+                                                }
+                                            },
+                                            required: ["levels"]
+                                        }
+                                    },
+                                    required: ["many"]
+                                }
+                            },
+                            required: ["with"]
+                        }
+                    },
+                    required: ["structure"]
+                }
+            },
+            required: ["nested"],
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["exists", "missing"]
+        } as const satisfies __ctHelpers.JSONSchema, state.deeply, "exists", "missing")}, Nested:{" "}
+          {__ctHelpers.ifElse({
+            type: "object",
+            properties: {
+                structure: {
+                    type: "object",
+                    properties: {
+                        "with": {
+                            type: "object",
+                            properties: {
+                                many: {
+                                    type: "object",
+                                    properties: {
+                                        levels: {
+                                            type: "object",
+                                            properties: {
+                                                value: {
+                                                    type: "string"
+                                                },
+                                                count: {
+                                                    type: "number"
+                                                }
+                                            },
+                                            required: ["value", "count"]
+                                        }
+                                    },
+                                    required: ["levels"]
+                                }
+                            },
+                            required: ["many"]
+                        }
+                    },
+                    required: ["with"]
+                }
+            },
+            required: ["structure"],
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["exists", "missing"]
+        } as const satisfies __ctHelpers.JSONSchema, state.deeply.nested, "exists", "missing")}, Value:{" "}
           {state.deeply.nested.structure.with.many.levels.value}
         </p>
       </div>),

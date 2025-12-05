@@ -125,7 +125,19 @@ export default recipe({
     return {
         [NAME]: "test ternary with derive",
         [UI]: (<div>
-        {__ctHelpers.ifElse(__ctHelpers.derive({
+        {__ctHelpers.ifElse({
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    type: "number"
+                }, {
+                    type: "string"
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {

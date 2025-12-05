@@ -140,7 +140,17 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     return {
         [UI]: (<div>
         {/* ?? followed by || - different semantics */}
-        <span>Timeout: {__ctHelpers.unless(__ctHelpers.derive({
+        <span>Timeout: {__ctHelpers.unless({
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    type: "number"
+                }, {
+                    type: "string"
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 config: {
@@ -167,7 +177,13 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
         } as const satisfies __ctHelpers.JSONSchema, { config: config }, ({ config }) => (config.get().timeout ?? 30)), "disabled")}</span>
 
         {/* ?? followed by && */}
-        <span>{__ctHelpers.when(__ctHelpers.derive({
+        <span>{__ctHelpers.when({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": [false, "Will retry"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 config: {
@@ -195,7 +211,17 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
 
         {/* Mixed: ?? with && and || */}
         <span>
-          {__ctHelpers.unless(__ctHelpers.derive({
+          {__ctHelpers.unless({
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "boolean"
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 items: {
