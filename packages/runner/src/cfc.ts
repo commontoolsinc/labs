@@ -594,10 +594,18 @@ export class ContextualFlowControl {
         } else { // no additionalProperties field is the same as having one that is true
           cursor = true;
         }
-      } else if (cursor.type === "array" && cursor.items) {
+      } else if (cursor.type === "array") {
         const numericKeyValue = new Number(part).valueOf();
         if (Number.isInteger(numericKeyValue) && numericKeyValue >= 0) {
-          cursor = cursor.items;
+          if (
+            cursor.prefixItems && numericKeyValue < cursor.prefixItems.length
+          ) {
+            cursor = cursor.prefixItems[numericKeyValue];
+          } else if (cursor.items !== undefined) {
+            cursor = cursor.items;
+          } else { // default is true
+            cursor = true;
+          }
         } else {
           return false;
         }
@@ -675,12 +683,18 @@ export class ContextualFlowControl {
       return true;
     }
     return isObject(schema) &&
-      Object.keys(schema).every((k) => this.isInternalSchemaKey(k));
+      Object.keys(schema).every((k) =>
+        this.isInternalSchemaKey(k) || k === "default"
+      );
   }
 
   // We don't need to check ID and ID_FIELD, since they won't be included
   // in Object.keys return values.
   static isInternalSchemaKey(key: string): boolean {
     return key === "ifc" || key === "asCell" || key === "asStream";
+  }
+
+  static isFalseSchema(schema: JSONSchema): boolean {
+    return schema === false || (isObject(schema) && schema["not"] === true);
   }
 }

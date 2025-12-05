@@ -2054,7 +2054,7 @@ test(
     assert(write3.ok);
     const _c3 = Commit.toRevision(write3.ok);
 
-    // Check that with object, but no additionalProperties,
+    // With object, but empty properties and no additionalProperties,
     // we should not include doc2
     const schemaSelector: SchemaSelector = {
       [doc1]: {
@@ -2064,9 +2064,11 @@ test(
             schemaContext: {
               schema: {
                 "type": "object",
+                "properties": {},
               },
               rootSchema: {
                 "type": "object",
+                "properties": {},
               },
             },
           },

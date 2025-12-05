@@ -341,7 +341,7 @@ class MemoryProviderSession<
         });
       }
       case "/memory/transact": {
-        logger.info(
+        logger.debug(
           "server-transact",
           () => [
             "Received transaction:",
