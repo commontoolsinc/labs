@@ -292,7 +292,8 @@ export default recipe({
                                 type: "object",
                                 properties: {
                                     value: {
-                                        type: "number"
+                                        type: "number",
+                                        asOpaque: true
                                     }
                                 }
                             }
@@ -301,7 +302,13 @@ export default recipe({
                 },
                 required: ["item"]
             } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
+                anyOf: [{
+                        type: "number",
+                        "enum": [0]
+                    }, {
+                        type: "number",
+                        asOpaque: true
+                    }]
             } as const satisfies __ctHelpers.JSONSchema, { item: {
                     maybe: {
                         value: item.maybe?.value
