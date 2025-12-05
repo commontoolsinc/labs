@@ -131,13 +131,21 @@ export default recipe({
 } as const satisfies __ctHelpers.JSONSchema, ({ value, defaultValue }) => {
     // unless(condition, fallback) - returns condition if truthy, else fallback
     const result = unless({
-        type: "string",
+        anyOf: [{
+                type: "string"
+            }, {
+                type: "null"
+            }],
         asOpaque: true
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "string",
         asOpaque: true
     } as const satisfies __ctHelpers.JSONSchema, {
-        type: "string",
+        anyOf: [{
+                type: "string"
+            }, {
+                type: "null"
+            }],
         asOpaque: true
     } as const satisfies __ctHelpers.JSONSchema, value, defaultValue);
     return {
