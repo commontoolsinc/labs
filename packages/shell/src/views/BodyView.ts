@@ -45,10 +45,10 @@ export class XBodyView extends BaseView {
   rt?: RuntimeInternals;
 
   @property({ attribute: false })
-  activePattern?: CharmController;
+  activeCharm?: CharmController;
 
   @property({ attribute: false })
-  spaceRootPattern?: CharmController;
+  defaultCharm?: CharmController;
 
   @property()
   showShellCharmListView = false;
@@ -96,16 +96,16 @@ export class XBodyView extends BaseView {
       `;
     }
 
-    const mainContent = this.activePattern
+    const mainContent = this.activeCharm
       ? html`
-        <ct-charm slot="main" .charmId="${this.activePattern.id}">
-          <ct-render .cell="${this.activePattern.getCell()}"></ct-render>
+        <ct-charm slot="main" .charmId="${this.activeCharm.id}">
+          <ct-render .cell="${this.activeCharm.getCell()}"></ct-render>
         </ct-charm>
       `
       : null;
 
-    const sidebarCell = this.activePattern?.getCell().key("sidebarUI");
-    const fabCell = this.spaceRootPattern?.getCell().key("fabUI");
+    const sidebarCell = this.activeCharm?.getCell().key("sidebarUI");
+    const fabCell = this.defaultCharm?.getCell().key("fabUI");
 
     // Update sidebar content detection
     // TODO(seefeld): Fix possible race here where charm is already set, but

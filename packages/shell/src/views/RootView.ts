@@ -17,10 +17,9 @@ import { runtimeContext, spaceContext } from "@commontools/ui";
 import { provide } from "@lit/context";
 
 // The root element for the shell application.
-//
-// Derives `RuntimeInternals` for the application from its `AppState`.
-// `Command` mutates the app state, which can be fired as events
-// from children elements.
+// Handles processing `Command`s from children elements,
+// updating the `AppState`, and providing changes
+// to children elements.
 export class XRootView extends BaseView {
   static override styles = css`
     :host {

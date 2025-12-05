@@ -51,15 +51,16 @@ describe("ct-render integration test", () => {
       identity,
     });
 
-    await waitFor(async () => {
-      const counterResult = await page.waitForSelector("#counter-result", {
-        strategy: "pierce",
-      });
-      const initialText = await counterResult.evaluate((el: HTMLElement) =>
-        el.textContent
-      );
-      return initialText?.trim() === "Counter is the 0th number";
+    const counterResult = await page.waitForSelector("#counter-result", {
+      strategy: "pierce",
     });
+    assert(counterResult, "Should find counter-result element");
+
+    // Verify initial value is 0
+    const initialText = await counterResult.evaluate((el: HTMLElement) =>
+      el.textContent
+    );
+    assertEquals(initialText?.trim(), "Counter is the 0th number");
 
     // Verify via direct operations that the ct-render structure works
     const value = charm.result.get(["value"]);
@@ -106,16 +107,18 @@ describe("ct-render integration test", () => {
       identity,
     });
 
-    await waitFor(async () => {
-      const counterResult = await page.waitForSelector("#counter-result", {
-        strategy: "pierce",
-      });
-      const textAfterUpdate = await counterResult.evaluate((el: HTMLElement) =>
-        el.textContent
-      );
-      return textAfterUpdate?.trim() ===
-        "Counter is the 5th number";
+    // Check if the UI shows the updated value
+    const counterResult = await page.waitForSelector("#counter-result", {
+      strategy: "pierce",
     });
+    const textAfterUpdate = await counterResult.evaluate((el: HTMLElement) =>
+      el.textContent
+    );
+    assertEquals(
+      textAfterUpdate?.trim(),
+      "Counter is the 5th number",
+      "UI should show updated value from direct operation",
+    );
   });
 
   it("should verify only ONE counter display", async () => {
