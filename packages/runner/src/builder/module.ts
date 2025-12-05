@@ -10,6 +10,7 @@ import type {
   OpaqueRef,
   Schema,
   SchemaWithoutCell,
+  Stream,
   StripCell,
   toJSON,
 } from "./types.ts";
@@ -122,7 +123,7 @@ function handlerInternal<E, T>(
   );
 
   const module: Handler<T, E> & toJSON & {
-    bind: (inputs: Opaque<StripCell<T>>) => OpaqueRef<E>;
+    bind: (inputs: Opaque<StripCell<T>>) => Stream<E>;
   } = {
     type: "javascript",
     implementation: handler,
@@ -135,7 +136,7 @@ function handlerInternal<E, T>(
     ...(schema !== undefined ? { argumentSchema: schema } : {}),
   };
 
-  const factory = Object.assign((props: Opaque<StripCell<T>>): OpaqueRef<E> => {
+  const factory = Object.assign((props: Opaque<StripCell<T>>): Stream<E> => {
     const eventStream = stream<E>(eventSchema);
 
     // Set stream marker (cast to E as stream is typed for the events it accepts)
