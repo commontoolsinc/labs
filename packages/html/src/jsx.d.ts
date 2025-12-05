@@ -2868,6 +2868,7 @@ interface CTFileInputElement extends CTHTMLElement {}
 interface CTImageInputElement extends CTHTMLElement {}
 interface CTInputLegacyElement extends CTHTMLElement {}
 interface CTCheckboxElement extends CTHTMLElement {}
+interface CTAutocompleteElement extends CTHTMLElement {}
 interface CTSelectElement extends CTHTMLElement {}
 interface CTPickerElement extends CTHTMLElement {}
 interface CTToolsChipElement extends CTHTMLElement {}
@@ -3326,6 +3327,17 @@ interface CTCheckboxAttributes<T> extends CTHTMLAttributes<T> {
   "name"?: string;
   "value"?: string;
   "onct-change"?: EventHandler<any>;
+}
+
+interface CTAutocompleteAttributes<T> extends CTHTMLAttributes<T> {
+  "items": { value: string; label?: string; group?: string; searchAliases?: string[] }[];
+  "placeholder"?: string;
+  "max-visible"?: number;
+  "allow-custom"?: boolean;
+  "disabled"?: boolean;
+  "onct-select"?: EventHandler<{ value: string; label: string; group?: string; isCustom: boolean }>;
+  "onct-open"?: EventHandler<any>;
+  "onct-close"?: EventHandler<any>;
 }
 
 interface CTSelectAttributes<T> extends CTHTMLAttributes<T> {
@@ -3879,6 +3891,10 @@ declare global {
       "ct-checkbox": CTDOM.DetailedHTMLProps<
         CTCheckboxAttributes<CTCheckboxElement>,
         CTCheckboxElement
+      >;
+      "ct-autocomplete": CTDOM.DetailedHTMLProps<
+        CTAutocompleteAttributes<CTAutocompleteElement>,
+        CTAutocompleteElement
       >;
       "ct-select": CTDOM.DetailedHTMLProps<
         CTSelectAttributes<CTSelectElement>,
