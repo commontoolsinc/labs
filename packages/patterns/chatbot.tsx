@@ -167,7 +167,7 @@ export default pattern<ChatInput, ChatOutput>(
     }));
 
     const latest = computed(() => recentCharms[0]);
-    const latestName = computed(() => recentCharms[0]?.[NAME]);
+    const latestName = computed(() => recentCharms[0]?.[NAME] ?? "latest");
 
     const {
       addMessage,

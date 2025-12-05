@@ -734,7 +734,7 @@ export default recipe({
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string",
+            "enum": ["positive", "non-positive"],
             asOpaque: true
         } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
