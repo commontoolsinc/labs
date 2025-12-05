@@ -491,13 +491,13 @@ export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
  *
  * OpaqueRef<Cell<T>> unwraps to Cell<T>.
  */
-export type OpaqueRef<T> = T extends AnyBrandedCell<any> ? T
+export type OpaqueRef<T> = [T] extends [AnyBrandedCell<any>] ? T
   :
     & OpaqueCell<T>
-    & (T extends ArrayBuffer | ArrayBufferView | URL | Date ? T
-      : T extends Array<infer U> ? Array<OpaqueRef<U>>
-      : T extends AnyBrandedCell<any> ? T
-      : T extends object ? { [K in keyof T]: OpaqueRef<T[K]> }
+    & ([T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
+      : [T] extends [Array<infer U>] ? Array<OpaqueRef<U>>
+      : [T] extends [AnyBrandedCell<any>] ? T
+      : [T] extends [object] ? { [K in keyof T]: OpaqueRef<T[K]> }
       : T);
 
 // ============================================================================

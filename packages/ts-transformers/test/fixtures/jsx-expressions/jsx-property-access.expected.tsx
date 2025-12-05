@@ -623,26 +623,12 @@ export default recipe({
                                     type: "object",
                                     properties: {
                                         beta: {
-                                            anyOf: [{
-                                                    type: "boolean",
-                                                    "enum": [false],
-                                                    asOpaque: true
-                                                }, {
-                                                    type: "boolean",
-                                                    "enum": [true],
-                                                    asOpaque: true
-                                                }]
+                                            type: "boolean",
+                                            asOpaque: true
                                         },
                                         darkMode: {
-                                            anyOf: [{
-                                                    type: "boolean",
-                                                    "enum": [false],
-                                                    asOpaque: true
-                                                }, {
-                                                    type: "boolean",
-                                                    "enum": [true],
-                                                    asOpaque: true
-                                                }]
+                                            type: "boolean",
+                                            asOpaque: true
                                         }
                                     },
                                     required: ["beta", "darkMode"]
@@ -656,15 +642,8 @@ export default recipe({
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "boolean",
-                    "enum": [false],
-                    asOpaque: true
-                }, {
-                    type: "boolean",
-                    "enum": [true],
-                    asOpaque: true
-                }]
+            type: "boolean",
+            asOpaque: true
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 config: {
                     features: {
