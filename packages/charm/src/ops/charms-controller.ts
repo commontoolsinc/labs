@@ -29,14 +29,14 @@ export class CharmsController<T = unknown> {
     return this.#manager;
   }
 
-  async create(
+  async create<U = T>(
     program: RuntimeProgram | string,
     options: CreateCharmOptions = {},
     cause: string | undefined = undefined,
-  ): Promise<CharmController<T>> {
+  ): Promise<CharmController<U>> {
     this.disposeCheck();
     const recipe = await compileProgram(this.#manager, program);
-    const charm = await this.#manager.runPersistent<T>(
+    const charm = await this.#manager.runPersistent<U>(
       recipe,
       options.input,
       cause,
@@ -45,7 +45,7 @@ export class CharmsController<T = unknown> {
     );
     await this.#manager.runtime.idle();
     await this.#manager.synced();
-    return new CharmController<T>(this.#manager, charm);
+    return new CharmController<U>(this.#manager, charm);
   }
 
   async get<S extends JSONSchema = JSONSchema>(

@@ -5,14 +5,20 @@ import {
   RuntimeTelemetryEvent,
   RuntimeTelemetryMarkerResult,
 } from "@commontools/runner";
-import { charmId, CharmManager } from "@commontools/charm";
-import { CharmsController } from "@commontools/charm/ops";
+import {
+  charmId,
+  CharmManager,
+  NameSchema,
+  nameSchema,
+} from "@commontools/charm";
+import { CharmController, CharmsController } from "@commontools/charm/ops";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { navigate } from "./navigate.ts";
 import * as Inspector from "@commontools/runner/storage/inspector";
 import { setupIframe } from "./iframe-ctx.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { AppView } from "./app/view.ts";
+import * as PatternFactory from "./pattern-factory.ts";
 
 const logger = getLogger("shell.telemetry", {
   enabled: false,
@@ -34,15 +40,20 @@ export class RuntimeInternals extends EventTarget {
   #inspector: Inspector.Channel;
   #disposed = false;
   #space: string; // The MemorySpace DID
+  #spaceRootPattern?: CharmController<NameSchema>;
+  #spaceRootPatternType: PatternFactory.BuiltinPatternType;
+  #patternCache: Map<string, CharmController<NameSchema>> = new Map();
 
   private constructor(
     cc: CharmsController,
     telemetry: RuntimeTelemetry,
     space: string,
+    spaceRootPatternType: PatternFactory.BuiltinPatternType,
   ) {
     super();
     this.#cc = cc;
     this.#space = space;
+    this.#spaceRootPatternType = spaceRootPatternType;
     const runtimeId = this.#cc.manager().runtime.id;
     this.#inspector = new Inspector.Channel(
       runtimeId,
@@ -67,6 +78,43 @@ export class RuntimeInternals extends EventTarget {
 
   space(): string {
     return this.#space;
+  }
+
+  // Returns the space root pattern, creating it if it doesn't exist.
+  // The space root pattern type is determined at RuntimeInternals creation
+  // based on the view type (home vs space).
+  async getSpaceRootPattern(): Promise<CharmController<NameSchema>> {
+    this.#check();
+    if (this.#spaceRootPattern) {
+      return this.#spaceRootPattern;
+    }
+    const pattern = await PatternFactory.getOrCreate(
+      this.#cc,
+      this.#spaceRootPatternType,
+    );
+    this.#spaceRootPattern = pattern;
+    this.#patternCache.set(pattern.id, pattern);
+    // Track as recently accessed
+    await this.#cc.manager().trackRecentCharm(pattern.getCell());
+    return pattern;
+  }
+
+  // Returns a pattern by ID, starting it if requested.
+  // Patterns are cached by ID.
+  async getPattern(id: string): Promise<CharmController<NameSchema>> {
+    this.#check();
+    const cached = this.#patternCache.get(id);
+    if (cached) {
+      return cached;
+    }
+
+    const pattern = await this.#cc.get(id, true, nameSchema);
+
+    // Track as recently accessed
+    await this.#cc.manager().trackRecentCharm(pattern.getCell());
+
+    this.#patternCache.set(id, pattern);
+    return pattern;
   }
 
   async dispose() {
@@ -106,20 +154,24 @@ export class RuntimeInternals extends EventTarget {
   ): Promise<RuntimeInternals> {
     let session;
     let spaceName;
+    let spaceRootPatternType: PatternFactory.BuiltinPatternType;
     if ("builtin" in view) {
       switch (view.builtin) {
         case "home":
           session = await createSession({ identity, spaceDid: identity.did() });
           spaceName = "<home>";
+          spaceRootPatternType = "home";
           break;
       }
     } else if ("spaceName" in view) {
       session = await createSession({ identity, spaceName: view.spaceName });
       spaceName = view.spaceName;
+      spaceRootPatternType = "space-root";
     } else if ("spaceDid" in view) {
       session = await createSession({ identity, spaceDid: view.spaceDid });
+      spaceRootPatternType = "space-root";
     }
-    if (!session) {
+    if (!session || !spaceRootPatternType!) {
       throw new Error("Unexpected view provided.");
     }
 
@@ -234,6 +286,11 @@ export class RuntimeInternals extends EventTarget {
     charmManager = new CharmManager(session, runtime);
     await charmManager.synced();
     const cc = new CharmsController(charmManager);
-    return new RuntimeInternals(cc, telemetry, session.space);
+    return new RuntimeInternals(
+      cc,
+      telemetry,
+      session.space,
+      spaceRootPatternType,
+    );
   }
 }
