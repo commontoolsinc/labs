@@ -10,6 +10,7 @@ import {
   isFunctionLike,
   safeGetPropertyType,
 } from "../type-utils.ts";
+import { getCellWrapperInfo } from "../typescript/cell-brand.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { extractDocFromSymbolAndDecls, getDeclDocs } from "../doc-utils.ts";
 import { getLogger } from "@commontools/utils/logger";
@@ -19,6 +20,46 @@ const logger = getLogger("schema-generator.object", {
   enabled: true,
   level: "warn",
 });
+
+/**
+ * Check if a callable type (like ModuleFactory or HandlerFactory) returns a Stream.
+ * ModuleFactory<T, R> when called returns OpaqueRef<R>.
+ * If R is Stream<T>, we should generate { asStream: true } instead of skipping.
+ *
+ * Returns the schema definition for the stream if detected, undefined otherwise.
+ */
+function getStreamSchemaFromCallable(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): SchemaDefinition | undefined {
+  const callSignatures = type.getCallSignatures();
+  if (callSignatures.length === 0) return undefined;
+
+  // Get the return type of the first call signature
+  const callReturnType = callSignatures[0]!.getReturnType();
+
+  // Check if the return type is a Stream wrapper (OpaqueRef<Stream<T>> or Stream<T>)
+  const wrapperInfo = getCellWrapperInfo(callReturnType, checker);
+  if (wrapperInfo?.kind === "Stream") {
+    return { asStream: true };
+  }
+
+  // Also check if it's an OpaqueRef wrapping a Stream
+  if (wrapperInfo?.kind === "OpaqueRef") {
+    // Get the inner type of OpaqueRef
+    const typeRef = wrapperInfo.typeRef;
+    const typeArgs = checker.getTypeArguments(typeRef);
+    if (typeArgs.length > 0) {
+      const innerType = typeArgs[0]!;
+      const innerWrapperInfo = getCellWrapperInfo(innerType, checker);
+      if (innerWrapperInfo?.kind === "Stream") {
+        return { asStream: true };
+      }
+    }
+  }
+
+  return undefined;
+}
 
 /**
  * Check if a type is a union that includes undefined.
@@ -135,6 +176,17 @@ export class ObjectFormatter implements TypeFormatter {
       );
 
       if (isFunctionLike(resolvedPropType)) {
+        // Special case: ModuleFactory/HandlerFactory types that return Stream
+        // should generate { asStream: true } instead of being skipped
+        const streamSchema = getStreamSchemaFromCallable(
+          resolvedPropType,
+          checker,
+        );
+        if (streamSchema) {
+          // This is a handler/action factory that returns a Stream
+          required.push(propName);
+          properties[propName] = streamSchema;
+        }
         continue;
       }
 

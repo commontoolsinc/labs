@@ -1130,6 +1130,20 @@ export type HandlerFunction = {
 };
 
 /**
+ * ActionFunction creates a handler that doesn't use the event parameter.
+ *
+ * This is to handler as computed is to lift/derive:
+ * - User writes: action(() => count.set(count.get() + 1))
+ * - Transformer rewrites to: handler((_, { count }) => count.set(count.get() + 1))({ count })
+ *
+ * The transformer extracts closures and makes them explicit, just like how
+ * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
+ */
+export type ActionFunction = {
+  <T>(fn: (props: T) => void): ModuleFactory<StripCell<T>, Stream<void>>;
+};
+
+/**
  * DeriveFunction creates a reactive computation that transforms input values.
  *
  * Special overload ordering is critical for correct type inference:
@@ -1344,6 +1358,7 @@ export declare const recipe: RecipeFunction;
 export declare const patternTool: PatternToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
+export declare const action: ActionFunction;
 /** @deprecated Use compute() instead */
 export declare const derive: DeriveFunction;
 export declare const computed: ComputedFunction;

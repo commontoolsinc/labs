@@ -214,6 +214,17 @@ export class SchemaFactory {
   }
 
   /**
+   * Build a TypeNode for action's event parameter.
+   *
+   * Actions don't use the event parameter, so we return `never` type
+   * which generates `false` in JSON Schema (no valid value).
+   */
+  createActionEventSchema(): ts.TypeNode {
+    const { factory } = this.context;
+    return factory.createKeywordTypeNode(ts.SyntaxKind.NeverKeyword);
+  }
+
+  /**
    * Build a TypeNode for the handler event parameter and register it in TypeRegistry.
    */
   createHandlerEventSchema(

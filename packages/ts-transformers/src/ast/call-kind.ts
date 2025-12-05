@@ -48,6 +48,7 @@ const BUILDER_SYMBOL_NAMES = new Set([
   "recipe",
   "pattern",
   "handler",
+  "action",
   "lift",
   "computed",
   "render",
