@@ -6,10 +6,12 @@ the memory package, what we learned, and decisions made along the way.
 ## Executive Summary
 
 For a typical `setFact` operation with a 16KB payload:
+
 - Total time: ~664µs
 - ~71% spent in `refer()` calls (~470µs)
 - Of that, **only ~10% is actual SHA-256 hashing**
-- **90% of refer() time is structural overhead** (sorting, traversal, allocations)
+- **90% of refer() time is structural overhead** (sorting, traversal,
+  allocations)
 
 ## Background
 
@@ -50,16 +52,16 @@ refer(source) → toTree(source) → digest(tree) → Reference
 ```javascript
 // From merkle-reference map.js
 for (const [name, value] of entries) {
-  const key = builder.toTree(name)
-  const order = typeof name === 'string'
-    ? String.toUTF8(name)  // UTF-8 encode for sorting
-    : builder.digest(key)
+  const key = builder.toTree(name);
+  const order = typeof name === "string"
+    ? String.toUTF8(name) // UTF-8 encode for sorting
+    : builder.digest(key);
 
-  attributes.push({ order, key, value: builder.toTree(value) })
+  attributes.push({ order, key, value: builder.toTree(value) });
 }
 
 // EXPENSIVE: Sort all attributes by byte comparison
-return attributes.sort((left, right) => compare(left.order, right.order))
+return attributes.sort((left, right) => compare(left.order, right.order));
 ```
 
 **Key insight**: Every object requires UTF-8 encoding all keys + sorting them.
@@ -70,14 +72,14 @@ systems, but it's expensive.
 
 For a 16KB payload taking ~190µs:
 
-| Operation | Time | % | Notes |
-|-----------|------|---|-------|
-| Actual SHA-256 hashing | 10-20µs | 10% | Native crypto on ~16KB |
-| Key sorting (objects) | 40-50µs | 25% | UTF-8 encode + byte comparison |
-| Object traversal + WeakMap | 30-40µs | 20% | ~2µs per node × ~15-20 nodes |
-| UTF-8 encoding overhead | 20-30µs | 15% | TextEncoder on string keys |
-| Tree node allocations | 30-40µs | 20% | Arrays for branches |
-| Fold operation | 20-30µs | 10% | Binary tree reduction |
+| Operation                  | Time    | %   | Notes                          |
+| -------------------------- | ------- | --- | ------------------------------ |
+| Actual SHA-256 hashing     | 10-20µs | 10% | Native crypto on ~16KB         |
+| Key sorting (objects)      | 40-50µs | 25% | UTF-8 encode + byte comparison |
+| Object traversal + WeakMap | 30-40µs | 20% | ~2µs per node × ~15-20 nodes   |
+| UTF-8 encoding overhead    | 20-30µs | 15% | TextEncoder on string keys     |
+| Tree node allocations      | 30-40µs | 20% | Arrays for branches            |
+| Fold operation             | 20-30µs | 10% | Binary tree reduction          |
 
 **Key finding**: Only ~10% of time is actual hashing. The other ~90% is
 structural overhead required for deterministic merkle tree construction.
@@ -110,6 +112,7 @@ Transaction (8 keys) → args (1 key) → changes (1 key) → entity (1 key)
 ### Cost Per Object Level
 
 Each nested object requires:
+
 - WeakMap lookup (nodes): ~2µs
 - WeakMap lookup (digests): ~2µs
 - Sort operation: ~5-10µs (small), ~20-40µs (many keys)
@@ -121,18 +124,19 @@ For 7 nested objects: **~77-133µs just for structure overhead**
 
 ## setFact Operation Breakdown (~664µs)
 
-| Component | Time | % |
-|-----------|------|---|
-| refer(user assertion) | ~370µs | 56% |
-| refer(commit) | ~100µs | 15% |
-| intern(transaction) | ~60µs | 9% |
-| SQLite (3-4 INSERTs) | ~60-80µs | 9-12% |
-| JSON.stringify | ~8µs | 1% |
-| Other overhead | ~30-66µs | 5-10% |
+| Component             | Time     | %     |
+| --------------------- | -------- | ----- |
+| refer(user assertion) | ~370µs   | 56%   |
+| refer(commit)         | ~100µs   | 15%   |
+| intern(transaction)   | ~60µs    | 9%    |
+| SQLite (3-4 INSERTs)  | ~60-80µs | 9-12% |
+| JSON.stringify        | ~8µs     | 1%    |
+| Other overhead        | ~30-66µs | 5-10% |
 
 ### Why Two swap() Calls Per Transaction?
 
 Each `setFact` triggers two `swap()` calls:
+
 1. **User fact**: The actual assertion (~350-550µs)
 2. **Commit record**: Audit trail containing full transaction (~100-150µs)
 
@@ -155,12 +159,15 @@ tree traversal, object allocation), so the overall speedup is smaller than the
 raw hash speedup.
 
 **Environment-Specific Behavior**: The memory package uses conditional crypto:
-- **Browser environments** (shell): Uses `@noble/hashes` (pure JS, works everywhere)
+
+- **Browser environments** (shell): Uses `@noble/hashes` (pure JS, works
+  everywhere)
 - **Server environments** (toolshed, Node.js, Deno): Uses `node:crypto` for
   hardware-accelerated performance
 
-This is detected at module load time via `globalThis.document`/`globalThis.window`
-and uses dynamic import to avoid bundler issues with `node:crypto` in browsers.
+This is detected at module load time via
+`globalThis.document`/`globalThis.window` and uses dynamic import to avoid
+bundler issues with `node:crypto` in browsers.
 
 ### 2. merkle-reference Caches Sub-objects by Identity
 
@@ -208,23 +215,23 @@ In `swap()`, we compute hashes in a specific order to maximize cache hits:
 // including the datum (payload). By hashing the fact first, the subsequent
 // refer(datum) call in importDatum() becomes a ~300ns cache hit instead of a
 // ~50-100µs full hash computation.
-const fact = refer(source.assert).toString();  // Caches payload hash
-const datumRef = importDatum(session, is);     // Cache hit on payload!
+const fact = refer(source.assert).toString(); // Caches payload hash
+const datumRef = importDatum(session, is); // Cache hit on payload!
 ```
 
 ### 4. intern(transaction) is Beneficial
 
 The `intern(transaction)` call (~18µs) provides ~26% speedup on `refer(commit)`:
 
-| Scenario | refer(commit) | Total |
-|----------|---------------|-------|
-| Without intern | 116µs | 146µs |
-| With intern | 58µs | 108µs |
+| Scenario       | refer(commit) | Total |
+| -------------- | ------------- | ----- |
+| Without intern | 116µs         | 146µs |
+| With intern    | 58µs          | 108µs |
 
 **Mechanism**: Interning ensures all nested objects share identity. When
 `refer(assertion)` runs first, it caches all sub-object hashes. When
-`refer(commit)` runs, it hits those caches because the assertion objects
-inside the commit are the exact same instances.
+`refer(commit)` runs, it hits those caches because the assertion objects inside
+the commit are the exact same instances.
 
 ### 5. Tree Builder API
 
@@ -273,8 +280,8 @@ This added ~20µs overhead per call due to:
 merkle-reference's internal WeakMap is faster for repeated access to the same
 object, and for unique objects there's no cache benefit anyway.
 
-**However**: `unclaimedRef()` with a simple Map cache DOES work well because
-it caches the final Reference, not intermediate objects. This saves the entire
+**However**: `unclaimedRef()` with a simple Map cache DOES work well because it
+caches the final Reference, not intermediate objects. This saves the entire
 `refer()` call (~29µs) for repeated `{the, of}` combinations.
 
 ## Current Implementation
@@ -292,8 +299,7 @@ import * as Reference from "merkle-reference";
 let referImpl: <T>(source: T) => Reference.View<T> = Reference.refer;
 
 // In server environments, upgrade to node:crypto for better performance
-const isBrowser =
-  typeof globalThis.document !== "undefined" ||
+const isBrowser = typeof globalThis.document !== "undefined" ||
   typeof globalThis.window !== "undefined";
 
 if (!isBrowser) {
@@ -318,9 +324,12 @@ export const refer = <T>(source: T): Reference.View<T> => {
 ```
 
 **Key design points:**
-- Browser: Uses `Reference.refer()` directly (merkle-reference uses @noble/hashes)
+
+- Browser: Uses `Reference.refer()` directly (merkle-reference uses
+  @noble/hashes)
 - Server: Creates custom TreeBuilder with `node:crypto` for ~1.5-2x speedup
-- Dynamic import (`await import()`) prevents bundlers from resolving `node:crypto`
+- Dynamic import (`await import()`) prevents bundlers from resolving
+  `node:crypto`
 - Environment detection via `globalThis.document`/`globalThis.window`
 
 ### 2. Recursive object interning
@@ -341,8 +350,8 @@ export const intern = <T>(source: T): T => {
   const internedObj = Array.isArray(source)
     ? source.map((item) => intern(item))
     : Object.fromEntries(
-        Object.entries(source).map(([k, v]) => [k, intern(v)])
-      );
+      Object.entries(source).map(([k, v]) => [k, intern(v)]),
+    );
 
   const key = JSON.stringify(internedObj);
   const cached = internCache.get(key);
@@ -389,11 +398,11 @@ export const unclaimedRef = (
 
 ```typescript
 // Before
-prf: []  // New array each time
+prf: []; // New array each time
 
 // After
 const EMPTY_ARRAY = Object.freeze([]);
-prf: EMPTY_ARRAY  // Reuse, enables WeakMap cache hits
+prf: EMPTY_ARRAY; // Reuse, enables WeakMap cache hits
 ```
 
 ### Medium-Term (Requires Library Support)
@@ -405,7 +414,7 @@ If merkle-reference detected pre-sorted keys, we could skip sorting:
 ```typescript
 // Keys in alphabetical order
 return {
-  args: { changes },      // 'a' comes first
+  args: { changes }, // 'a' comes first
   cmd: "/memory/transact",
   exp: iat + ttl,
   iat,
@@ -428,76 +437,83 @@ return {
 #### 4. Flatten Changes Structure (~50-70µs savings, 26-37% faster)
 
 **Current** (4 levels):
+
 ```typescript
 { [of]: { [the]: { [cause]: { is } } } }
 ```
 
 **Proposed** (flat array):
+
 ```typescript
 [ { of, the, cause, is }, { of, the, cause, is }, ... ]
 ```
 
 **Benefits**:
+
 - Eliminates 2 object traversals (~40µs)
 - Arrays don't require key sorting (~20-30µs)
 - Simpler tree = fewer allocations (~10µs)
 
 **Tradeoffs**:
+
 - Breaking change to transaction format
 - Larger serialized size (repeated keys)
 - Less convenient for lookups
 
 #### 5. Skip Commit Records for Single-Fact Transactions (~100-150µs savings)
 
-Currently every transaction writes a commit record for audit trail.
-For single-fact transactions, this could be optional.
+Currently every transaction writes a commit record for audit trail. For
+single-fact transactions, this could be optional.
 
 **Tradeoff**: Loses transaction-level audit trail.
 
 ## Realistic Expectations
 
-| Optimization Level | Expected Time | Improvement |
-|-------------------|---------------|-------------|
-| Current | 664µs | baseline |
-| With immediate wins | ~640µs | 4% |
-| With all non-breaking | ~600µs | 10% |
-| With flattened Changes | ~540µs | 19% |
-| With skip commit | ~440µs | 34% |
+| Optimization Level     | Expected Time | Improvement |
+| ---------------------- | ------------- | ----------- |
+| Current                | 664µs         | baseline    |
+| With immediate wins    | ~640µs        | 4%          |
+| With all non-breaking  | ~600µs        | 10%         |
+| With flattened Changes | ~540µs        | 19%         |
+| With skip commit       | ~440µs        | 34%         |
 
 **Fundamental floor**: Object traversal + deterministic ordering will always
-consume ~100-120µs for nested structures. This is inherent to content-addressing.
+consume ~100-120µs for nested structures. This is inherent to
+content-addressing.
 
 ## Performance Results
 
 ### Core Operations (16KB payloads)
 
-| Operation | Time | Throughput |
-|-----------|------|------------|
-| get fact (single) | ~65µs | 15,000/s |
-| set fact (single) | ~664µs | 1,500/s |
-| update fact | ~756µs | 1,320/s |
-| retract fact | ~436µs | 2,300/s |
+| Operation         | Time   | Throughput |
+| ----------------- | ------ | ---------- |
+| get fact (single) | ~65µs  | 15,000/s   |
+| set fact (single) | ~664µs | 1,500/s    |
+| update fact       | ~756µs | 1,320/s    |
+| retract fact      | ~436µs | 2,300/s    |
 
 ### Component Breakdown
 
-| Component | Time | Notes |
-|-----------|------|-------|
-| Raw SQLite INSERT | 20-35µs | Hardware floor |
-| JSON.stringify 16KB | ~8µs | |
-| refer() on 16KB | ~190µs | Payload only |
-| refer() on assertion | ~470µs | Includes 16KB payload |
-| refer() small object | ~34µs | {the, of} pattern |
-| unclaimedRef() cache hit | ~0.4µs | Returns cached Reference |
-| intern() cache hit | <1µs | Returns canonical instance |
+| Component                | Time    | Notes                      |
+| ------------------------ | ------- | -------------------------- |
+| Raw SQLite INSERT        | 20-35µs | Hardware floor             |
+| JSON.stringify 16KB      | ~8µs    |                            |
+| refer() on 16KB          | ~190µs  | Payload only               |
+| refer() on assertion     | ~470µs  | Includes 16KB payload      |
+| refer() small object     | ~34µs   | {the, of} pattern          |
+| unclaimedRef() cache hit | ~0.4µs  | Returns cached Reference   |
+| intern() cache hit       | <1µs    | Returns canonical instance |
 
 ## Benchmarks Reference
 
 Run benchmarks with:
+
 ```bash
 deno task bench
 ```
 
 Key isolation benchmarks to watch:
+
 - `refer() on 16KB payload (isolation)`: ~190µs
 - `refer() on assertion (16KB is + metadata)`: ~470µs
 - `memoized: 3x refer() same payload (cache hits)`: ~24µs
@@ -508,6 +524,7 @@ Key isolation benchmarks to watch:
 ### Why Content-Addressing?
 
 merkle-reference provides:
+
 - Deduplication (same content = same hash)
 - Integrity verification
 - Distributed sync compatibility
@@ -517,8 +534,9 @@ merkle-reference provides:
 
 ### Deterministic Ordering Requirement
 
-For merkle trees to produce consistent hashes across different systems,
-object keys must be sorted deterministically. This is why:
+For merkle trees to produce consistent hashes across different systems, object
+keys must be sorted deterministically. This is why:
+
 - Every object incurs sorting cost
 - UTF-8 encoding needed for byte-comparison
 - This overhead is fundamental to the approach
@@ -538,7 +556,8 @@ object keys must be sorted deterministically. This is why:
 
 ## Files Reference
 
-- `reference.ts`: TreeBuilder with conditional crypto (noble/node:crypto), intern() function
+- `reference.ts`: TreeBuilder with conditional crypto (noble/node:crypto),
+  intern() function
 - `fact.ts`: Fact.assert(), unclaimedRef() caching
 - `space.ts`: swap(), commit(), transact() - core write path
 - `transaction.ts`: Transaction structure definition

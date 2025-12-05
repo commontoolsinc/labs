@@ -6,7 +6,7 @@ import {
 } from "@db/sqlite";
 
 import { COMMIT_LOG_TYPE, create as createCommit } from "./commit.ts";
-import { unclaimed, unclaimedRef } from "./fact.ts";
+import { unclaimedRef } from "./fact.ts";
 import { fromString, intern, refer } from "./reference.ts";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
@@ -911,7 +911,12 @@ const commit = <Space extends MemorySpace>(
   // 3. When swap() hashes payloads, those same objects are in commit.is.transaction
   // 4. refer(commit) can cache-hit on all sub-objects
   const internedTransaction = intern(transaction);
-  const commit = createCommit({ space: of, since, transaction: internedTransaction, cause });
+  const commit = createCommit({
+    space: of,
+    since,
+    transaction: internedTransaction,
+    cause,
+  });
 
   for (const fact of iterateTransaction(internedTransaction)) {
     swap(session, fact, commit.is);
