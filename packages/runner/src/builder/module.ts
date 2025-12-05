@@ -225,3 +225,26 @@ export function derive<In, Out>(...args: any[]): OpaqueRef<any> {
 // unsafe closures: like derive, but doesn't need any arguments
 export const computed: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>
   lift<any, T>(fn)(undefined);
+
+/**
+ * action: Creates a handler that doesn't use the event parameter.
+ *
+ * This is to handler as computed is to lift/derive:
+ * - User writes: action(() => count.set(count.get() + 1))
+ * - Transformer rewrites to: handler((_, { count }) => count.set(count.get() + 1))({ count })
+ *
+ * The transformer extracts closures and makes them explicit, just like how
+ * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
+ *
+ * @param fn - A function that receives captured state and performs side effects
+ * @returns A HandlerFactory that can be bound to state
+ */
+export function action<T>(
+  fn: (props: T) => void,
+): HandlerFactory<T, void>;
+export function action<T>(
+  fn: (props: T) => void,
+): HandlerFactory<T, void> {
+  // Wrap the action callback to match handler's (event, props) signature
+  return handler<void, T>((_, props) => fn(props));
+}
