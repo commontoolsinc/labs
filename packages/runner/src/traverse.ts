@@ -441,8 +441,10 @@ export abstract class BaseObjectTraverser<
    * If a cycle is detected, it will not traverse the cyclic element
    *
    * @param doc
-   * @param tracker
-   * @param schemaTracker
+   * @param tracker tracks values that have already been evaluated with a
+   *  schema, together with the cached result
+   * @param schemaTracker mapping from the space/id/type key to the set of
+   *  SchemaPathSelectors we've evaluated
    * @param defaultValue optional default value
    * @param itemLink optinal item link to use when creating links
    * @returns
@@ -1279,6 +1281,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       !deepEqual(docPath, selector.path.slice(0, docPath.length))
     ) {
       // There's a mismatch in the initial part, so this will not match
+      logger.debug("traverse", () => ["path mismatch", docPath, selector.path]);
       return undefined;
     } else { // valuePath length < selector.path.length
       const [nextDoc, nextSelector] = getAtPath(
@@ -1292,6 +1295,11 @@ export class SchemaObjectTraverser<V extends JSONValue>
         this.traverseCells,
       );
       if (nextDoc.value === undefined) {
+        logger.debug("traverse", () => [
+          "value is undefined",
+          docPath,
+          selector.path,
+        ]);
         return undefined;
       }
       if (!deepEqual(nextDoc.address.path, nextSelector!.path)) {
@@ -1359,6 +1367,10 @@ export class SchemaObjectTraverser<V extends JSONValue>
     // Handle any top-level $ref in the schema
     const resolved = this.resolveRefSchema(schemaContext);
     if (resolved === undefined) {
+      logger.warn(
+        "traverse",
+        () => ["Failed to resolve schema ref", schemaContext],
+      );
       return undefined;
     }
     schemaContext = resolved;
@@ -1396,12 +1408,20 @@ export class SchemaObjectTraverser<V extends JSONValue>
           }
         }
         // None of the anyOf patterns matched
+        logger.debug(
+          "traverse",
+          () => ["No matching anyOf", doc, sortedAnyOf],
+        );
         return undefined;
       } else if (schemaContext.schema.allOf) {
         let lastVal;
         const { allOf, ...restSchema } = schemaContext.schema;
         for (const optionSchema of allOf) {
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
+            logger.debug(
+              "traverse",
+              () => ["Encountered false in allOf", schemaContext],
+            );
             return undefined;
           }
           const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
@@ -1419,6 +1439,10 @@ export class SchemaObjectTraverser<V extends JSONValue>
             lastVal = val;
           } else {
             // One of the allOf patterns failed to match
+            logger.debug(
+              "traverse",
+              () => ["Failed entry in allOf", doc, optionSchema, schemaContext],
+            );
             return undefined;
           }
         }
@@ -1444,7 +1468,10 @@ export class SchemaObjectTraverser<V extends JSONValue>
         defaultValue,
         link,
       );
-    } else if (ContextualFlowControl.isFalseSchema(schemaContext.schema)) {
+    } else if (
+      ContextualFlowControl.isFalseSchema(schemaContext.schema) &&
+      !SchemaObjectTraverser.asCellOrStream(schemaContext.schema)
+    ) {
       // This value rejects all objects - just return
       return undefined;
     } else if (!isObject(schemaContext.schema)) {
@@ -1720,6 +1747,10 @@ export class SchemaObjectTraverser<V extends JSONValue>
         const val = this.traverseWithSelector(curDoc, curSelector);
         if (val === undefined) {
           // this array is invalid, since one or more items do not match the schema
+          logger.debug(
+            "traverse",
+            () => ["Item doesn't match array schema", curDoc, curSelector],
+          );
           return undefined;
         }
         arrayObj.push(val);
