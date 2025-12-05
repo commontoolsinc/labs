@@ -1,5 +1,5 @@
 import { JSONObject } from "@commontools/api";
-import { MIME } from "@commontools/memory/interface";
+import { MemorySpace, MIME } from "@commontools/memory/interface";
 import {
   JSONValue,
   SchemaPathSelector,
@@ -166,14 +166,14 @@ function runTest(objectManager: TestObjectManager) {
   objectManager.resetTraverseState();
   const managedTx = new ManagedStorageTransaction(objectManager);
   const tx = new ExtendedStorageTransaction(managedTx);
-  const traverser = new SchemaObjectTraverser(
-    tx,
-    selector,
-    "did:null:null",
-  );
+  const traverser = new SchemaObjectTraverser(tx, selector);
   const doc = objectManager.load(docAddress)!;
-  const factValue: IAttestation = {
-    address: { ...doc.address, path: [...doc.address.path, "value"] },
+  const factValue = {
+    address: {
+      ...doc.address,
+      space: "did:null:null" as MemorySpace,
+      path: [...doc.address.path, "value"],
+    },
     value: (doc.value as JSONObject).value,
   };
   traverser.traverse(factValue);

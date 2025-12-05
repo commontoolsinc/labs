@@ -56,6 +56,11 @@ const logger = getLogger("traverse", { enabled: true, level: "warn" });
 export type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 export type { SchemaPathSelector };
 
+// An IAttestation where the address is an IMemorySpaceAddress
+interface IMemorySpaceAttestation {
+  readonly address: IMemorySpaceAddress;
+  readonly value?: JSONValue;
+}
 /**
  * A data structure that maps keys to sets of values, allowing multiple values
  * to be associated with a single key without duplication.
@@ -403,16 +408,15 @@ class StandardObjectCreator implements IObjectCreator<JSONValue> {
  * The address must start with "value", or we won't be able to generate this link.
  */
 function getNormalizedLink(
-  address: IMemoryAddress,
-  space: MemorySpace,
+  address: IMemorySpaceAddress,
   schema: JSONSchema | undefined,
   rootSchema: JSONSchema | undefined,
 ): NormalizedFullLink {
   if (address.path.length === 0 || address.path[0] !== "value") {
     throw new Error("Unable to create link to non-value address");
   }
-  const { id, path, type } = address;
-  return { id, type, path: path.slice(1), space, schema, rootSchema };
+  const { space, id, path, type } = address;
+  return { space, id, type, path: path.slice(1), schema, rootSchema };
 }
 
 // Value traversed must be a DAG, though it may have aliases or cell links
@@ -427,7 +431,7 @@ export abstract class BaseObjectTraverser<
       new StandardObjectCreator(),
     protected traverseCells = true,
   ) {}
-  abstract traverse(doc: IAttestation): V | JSONValue | undefined;
+  abstract traverse(doc: IMemorySpaceAttestation): V | JSONValue | undefined;
   /**
    * Attempt to traverse the document as a directed acyclic graph.
    * This is the simplest form of traversal, where we include everything.
@@ -437,7 +441,6 @@ export abstract class BaseObjectTraverser<
    * If a cycle is detected, it will not traverse the cyclic element
    *
    * @param doc
-   * @param space
    * @param tracker
    * @param schemaTracker
    * @param defaultValue optional default value
@@ -445,8 +448,7 @@ export abstract class BaseObjectTraverser<
    * @returns
    */
   protected traverseDAG(
-    doc: IAttestation,
-    space: MemorySpace,
+    doc: IMemorySpaceAttestation,
     tracker: PointerCycleTracker,
     schemaTracker?: MapSet<string, SchemaPathSelector>,
     defaultValue?: JSONValue,
@@ -455,10 +457,7 @@ export abstract class BaseObjectTraverser<
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
-      return this.objectCreator.applyDefault(
-        { ...doc.address, space },
-        defaultValue,
-      );
+      return this.objectCreator.applyDefault(doc.address, defaultValue);
     } else if (isPrimitive(doc.value)) {
       return doc.value;
     } else if (Array.isArray(doc.value)) {
@@ -473,7 +472,7 @@ export abstract class BaseObjectTraverser<
             index < defaultValue.length
             ? defaultValue[index]
             : undefined;
-        let docItem: IAttestation = {
+        let docItem: IMemorySpaceAttestation = {
           address: {
             ...doc.address,
             path: [...doc.address.path, index.toString()],
@@ -489,13 +488,11 @@ export abstract class BaseObjectTraverser<
             [],
             tracker,
             this.cfc,
-            space,
           );
           docItem = next;
         }
         return this.traverseDAG(
           docItem,
-          space,
           tracker,
           schemaTracker,
           itemDefault,
@@ -507,7 +504,7 @@ export abstract class BaseObjectTraverser<
         newValue.push(v);
       }
       // Our link is based on the last link in the chain and not the first.
-      const newLink = getNormalizedLink(doc.address, space, true, true);
+      const newLink = getNormalizedLink(doc.address, true, true);
       return this.objectCreator.createObject(newLink, newValue);
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
@@ -519,7 +516,6 @@ export abstract class BaseObjectTraverser<
           [],
           tracker,
           this.cfc,
-          space,
           schemaTracker,
           DefaultSchemaSelector,
           this.traverseCells,
@@ -529,7 +525,6 @@ export abstract class BaseObjectTraverser<
         }
         return this.traverseDAG(
           newDoc,
-          space,
           tracker,
           schemaTracker,
           defaultValue,
@@ -550,7 +545,6 @@ export abstract class BaseObjectTraverser<
           };
           const val = this.traverseDAG(
             itemDoc,
-            space,
             tracker,
             schemaTracker,
             isObject(defaultValue) && !Array.isArray(defaultValue)
@@ -567,8 +561,7 @@ export abstract class BaseObjectTraverser<
           }
         }
         // Our link is based on the last link in the chain and not the first.
-        const newLink = itemLink ??
-          getNormalizedLink(doc.address, space, true, true);
+        const newLink = itemLink ?? getNormalizedLink(doc.address, true, true);
         return this.objectCreator.createObject(newLink, newValue);
       }
     } else {
@@ -590,7 +583,6 @@ export abstract class BaseObjectTraverser<
  * @param path - Property/index path to follow beyond doc.address.path
  * @param tracker - Prevents pointer cycles
  * @param cfc: ContextualFlowControl with classification rules
- * @param space: the memory space used for resolving pointers
  * @param schemaTracker: Tracks schema used for loaded docs
  * @param selector: The selector being used (its path is relative to doc's root)
  * @param includeSource: if true, we will include linked source as well as
@@ -602,15 +594,14 @@ export abstract class BaseObjectTraverser<
  */
 export function getAtPath(
   tx: IExtendedStorageTransaction,
-  doc: IAttestation,
+  doc: IMemorySpaceAttestation,
   path: readonly string[],
   tracker: PointerCycleTracker,
   cfc: ContextualFlowControl,
-  space: MemorySpace,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
   includeSource?: boolean,
-): [IAttestation, SchemaPathSelector | undefined] {
+): [IMemorySpaceAttestation, SchemaPathSelector | undefined] {
   let curDoc = doc;
   let remaining = [...path];
   while (isAnyCellLink(curDoc.value)) {
@@ -620,7 +611,6 @@ export function getAtPath(
       remaining,
       tracker,
       cfc,
-      space,
       schemaTracker,
       selector,
       includeSource,
@@ -663,7 +653,6 @@ export function getAtPath(
         remaining,
         tracker,
         cfc,
-        space,
         schemaTracker,
         selector,
         includeSource,
@@ -674,12 +663,26 @@ export function getAtPath(
   return [curDoc, selector];
 }
 
-function notFound(address: BaseMemoryAddress): IAttestation {
+function notFound(
+  address: IMemorySpaceAddress,
+): { address: IMemorySpaceAddress; value: JSONValue | undefined } {
   return {
     address: { ...address, path: [] },
     value: undefined,
   };
 }
+
+/**
+ * Get a string to use as a key for the specified address
+ *
+ * @param address an IMemorySpaceAddress
+ */
+function getTrackerKey(
+  address: IMemorySpaceAddress,
+): string {
+  return `${address.space}/${address.id}/${address.type}`;
+}
+
 /**
  * Resolves a pointer reference to its target value.
  *
@@ -688,7 +691,6 @@ function notFound(address: BaseMemoryAddress): IAttestation {
  * @param path - Property/index path to follow
  * @param tracker - Prevents infinite pointer cycles
  * @param cfc: ContextualFlowControl with classification rules
- * @param space: the space where this pointer was encountered
  * @param schemaTracker: Tracks schema to use for loaded docs
  * @param selector: SchemaPathSelector used to query the target doc
  * @param includeSource: if true, we will include linked source as well as
@@ -698,21 +700,28 @@ function notFound(address: BaseMemoryAddress): IAttestation {
  */
 function followPointer(
   tx: IExtendedStorageTransaction,
-  doc: IAttestation,
+  doc: IMemorySpaceAttestation,
   path: readonly string[],
   tracker: PointerCycleTracker,
   cfc: ContextualFlowControl,
-  space: MemorySpace,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
   includeSource?: boolean,
-): [IAttestation, SchemaPathSelector | undefined] {
-  const link = parseLink(doc.value)!;
+): [
+  IMemorySpaceAttestation,
+  SchemaPathSelector | undefined,
+] {
+  const link = parseLink(doc.value, doc.address)!;
   // We may access portions of the doc outside what we have in our doc
   // attestation, so set the target to the top level doc from the manager.
   const target: IMemorySpaceAddress = (link.id !== undefined)
-    ? { space, id: link.id, type: "application/json", path: [] }
-    : { space, ...doc.address, path: [] };
+    ? {
+      space: link.space,
+      id: link.id,
+      type: "application/json",
+      path: [],
+    }
+    : { ...doc.address, path: [] };
   // The link.path doesn't include the initial "value", so prepend it
   const targetPath = ["value", ...link.path as string[]];
   if (selector !== undefined) {
@@ -752,14 +761,16 @@ function followPointer(
     // We have a reference to a different doc, so track the dependency
     // and update our targetDoc
     if (schemaTracker !== undefined && selector !== undefined) {
-      schemaTracker.add(`${target.id}/${target.type}`, selector);
+      schemaTracker.add(getTrackerKey(target), selector);
     }
     // Load the sources/recipes recursively unless we're a retracted fact.
     if (valueEntry.value !== undefined && includeSource) {
       loadSource(
         tx,
-        valueEntry,
-        space,
+        {
+          address: target,
+          value: valueEntry.value,
+        },
         new Set<string>(),
         schemaTracker,
       );
@@ -787,7 +798,6 @@ function followPointer(
     [...targetPath, ...path] as string[],
     tracker,
     cfc,
-    space,
     schemaTracker,
     selector,
     includeSource,
@@ -798,12 +808,11 @@ function followPointer(
 // This will also load any recipes linked by the doc.
 export function loadSource(
   tx: IExtendedStorageTransaction,
-  valueEntry: IAttestation,
-  space: MemorySpace,
+  valueEntry: IMemorySpaceAttestation,
   cycleCheck: Set<string> = new Set<string>(),
   schemaTracker?: MapSet<string, SchemaPathSelector>,
 ) {
-  loadLinkedRecipe(tx, valueEntry, space, schemaTracker);
+  loadLinkedRecipe(tx, valueEntry, schemaTracker);
   if (!isObject(valueEntry.value)) {
     return;
   }
@@ -829,7 +838,7 @@ export function loadSource(
   }
   cycleCheck.add(shortId);
   const address: IMemorySpaceAddress = {
-    space,
+    space: valueEntry.address.space,
     id: `of:${shortId}`,
     type: "application/json",
     path: [],
@@ -842,9 +851,11 @@ export function loadSource(
     return;
   }
   if (schemaTracker !== undefined) {
-    schemaTracker.add(`${address.id}/${address.type}`, MinimalSchemaSelector);
+    schemaTracker.add(getTrackerKey(address), MinimalSchemaSelector);
   }
-  loadSource(tx, entry, space, cycleCheck, schemaTracker);
+  // We've lost the space from our address in the tx.read, so recreate
+  const fullEntry = { address: address, value: entry.value };
+  loadSource(tx, fullEntry, cycleCheck, schemaTracker);
 }
 
 // With unified traversal code, we don't need to worry about the server
@@ -1097,8 +1108,7 @@ export function combineSchema(
 // We don't recurse, since that's not required for recipe links
 function loadLinkedRecipe(
   tx: IExtendedStorageTransaction,
-  valueEntry: IAttestation,
-  space: MemorySpace,
+  valueEntry: IMemorySpaceAttestation,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
 ) {
   if (!isObject(valueEntry.value)) {
@@ -1117,9 +1127,9 @@ function loadLinkedRecipe(
   // Check for a spell link first, since this is more efficient
   // Older recipes will only have a $TYPE
   if ("spell" in value && isAnyCellLink(value["spell"])) {
-    const link = parseLink(value["spell"])!;
+    const link = parseLink(value["spell"], valueEntry.address)!;
     address = {
-      space,
+      space: link.space,
       id: link.id!,
       type: link.type! as MIME,
       path: [],
@@ -1129,7 +1139,7 @@ function loadLinkedRecipe(
     const entityId = refer({ causal: { recipeId, type: "recipe" } });
     const shortId = entityId.toJSON()["/"];
     address = {
-      space,
+      space: valueEntry.address.space,
       id: `of:${shortId}`,
       type: "application/json",
       path: [],
@@ -1146,7 +1156,7 @@ function loadLinkedRecipe(
     return;
   }
   if (schemaTracker !== undefined) {
-    schemaTracker.add(`${address.id}/${address.type}`, MinimalSchemaSelector);
+    schemaTracker.add(getTrackerKey(address), MinimalSchemaSelector);
   }
 }
 
@@ -1227,7 +1237,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
   constructor(
     tx: IExtendedStorageTransaction,
     private selector: SchemaPathSelector,
-    private space: MemorySpace,
     private tracker: PointerCycleTracker = new CompoundCycleTracker<
       Immutable<JSONValue>,
       SchemaContext | undefined
@@ -1243,11 +1252,10 @@ export class SchemaObjectTraverser<V extends JSONValue>
   }
 
   override traverse(
-    doc: IAttestation,
+    doc: IMemorySpaceAttestation,
     link?: NormalizedFullLink,
   ): V | JSONValue | undefined {
-    const key = `${doc.address.id}/${doc.address.type}`;
-    this.schemaTracker.add(key, this.selector);
+    this.schemaTracker.add(getTrackerKey(doc.address), this.selector);
     return this.traverseWithSelector(doc, this.selector, link);
   }
 
@@ -1258,7 +1266,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
   // Once we've gotten the path of our doc to match the path of our selector,
   // we can call traverseWithSchemaContext instead.
   traverseWithSelector(
-    doc: IAttestation,
+    doc: IMemorySpaceAttestation,
     selector: SchemaPathSelector,
     link?: NormalizedFullLink,
   ): V | JSONValue | undefined {
@@ -1279,7 +1287,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
         selector.path.slice(docPath.length),
         this.tracker,
         this.cfc,
-        this.space,
         this.schemaTracker,
         selector,
         this.traverseCells,
@@ -1345,7 +1352,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
    *  the schema
    */
   traverseWithSchemaContext(
-    doc: IAttestation,
+    doc: IMemorySpaceAttestation,
     schemaContext: Readonly<SchemaContext>,
     link?: NormalizedFullLink,
   ): V | JSONValue | undefined {
@@ -1432,7 +1439,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
       // Resolve the rest of the doc, and return
       return this.traverseDAG(
         doc,
-        this.space,
         this.tracker,
         this.schemaTracker,
         defaultValue,
@@ -1489,7 +1495,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
         // Our link is based on the last link in the chain and not the first.
         const newLink = link ?? getNormalizedLink(
           doc.address,
-          this.space,
           schemaObj,
           schemaContext.rootSchema,
         );
@@ -1521,7 +1526,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
         // Our link is based on the last link in the chain and not the first.
         const newLink = link ?? getNormalizedLink(
           doc.address,
-          this.space,
           schemaObj,
           schemaContext.rootSchema,
         );
@@ -1603,7 +1607,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
    *  elements failed to validate.
    */
   private traverseArrayWithSchema(
-    doc: IAttestation,
+    doc: IMemorySpaceAttestation,
     schemaContext: SchemaContext & { schema: JSONSchemaObj },
     _link?: NormalizedFullLink,
   ): (V | JSONValue)[] | undefined {
@@ -1617,7 +1621,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
         [index.toString()],
         schemaContext.rootSchema,
       );
-      let curDoc: IAttestation = {
+      let curDoc: IMemorySpaceAttestation = {
         address: {
           ...doc.address,
           path: [...doc.address.path, index.toString()],
@@ -1661,7 +1665,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
           [],
           this.tracker,
           this.cfc,
-          this.space,
           this.schemaTracker,
           curSelector,
           this.traverseCells,
@@ -1674,7 +1677,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
       ) {
         const elementLink = getNormalizedLink(
           curDoc.address,
-          this.space,
           curSelector.schemaContext!.schema,
           curSelector.schemaContext!.rootSchema,
         );
@@ -1703,10 +1705,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       ) {
         // This is redundant, since the getAtPath that happened earlier
         // already did this work, but I don't have easy access here.
-        const itemLink = parseLink(item, {
-          ...doc.address, // should trim path, but it doesn't matter
-          space: this.space,
-        });
+        const itemLink = parseLink(item, doc.address); // should trim path, but it doesn't matter
         // The link may not have the asCell flags, so pull that from itemSchema
         const elementLink = {
           ...itemLink,
@@ -1748,7 +1747,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
    * @returns An object with only the properties that matched the schema
    */
   private traverseObjectWithSchema(
-    doc: IAttestation,
+    doc: IMemorySpaceAttestation,
     schemaContext: SchemaContext & { schema: JSONSchemaObj },
     _link?: NormalizedFullLink,
   ): Record<string, JSONValue | V> | undefined {
@@ -1829,7 +1828,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
               ...doc.address,
               path: [...doc.address.path, propKey],
             },
-            this.space,
             propSchema,
             schemaContext.rootSchema,
           );
@@ -1874,7 +1872,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
   // This just has a schemaContext, since the doc.address.path should match
   // the selector.path.
   private traversePointerWithSchema(
-    doc: IAttestation,
+    doc: IMemorySpaceAttestation,
     schemaContext: SchemaContext,
     link?: NormalizedFullLink,
   ): JSONValue | V | undefined {
@@ -1882,7 +1880,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
     // information we have from the doc we're traversing.
     const baseLink = getNormalizedLink(
       doc.address,
-      this.space,
       schemaContext.schema,
       schemaContext.rootSchema,
     );
@@ -1915,7 +1912,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
       [],
       this.tracker,
       this.cfc,
-      this.space,
       this.schemaTracker,
       selector,
       this.traverseCells,
@@ -1943,7 +1939,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
   }
 
   private traversePrimitive(
-    doc: IAttestation,
+    doc: IMemorySpaceAttestation,
     schemaObj: JSONSchemaObj,
     rootSchema: JSONSchema,
   ): JSONValue | V | undefined {
@@ -1951,7 +1947,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
       return this.objectCreator.createObject(
         getNormalizedLink(
           doc.address,
-          this.space,
           schemaObj,
           rootSchema,
         ),
@@ -1999,13 +1994,12 @@ export class SchemaObjectTraverser<V extends JSONValue>
   }
 
   private applyDefault(
-    doc: IAttestation,
+    doc: IMemorySpaceAttestation,
     schema: JSONSchema,
   ): JSONValue | undefined {
     if (isObject(schema) && schema.default !== undefined) {
       const link = getNormalizedLink(
         doc.address,
-        this.space,
         schema,
         schema,
       );

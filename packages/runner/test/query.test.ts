@@ -128,13 +128,17 @@ describe("Query", () => {
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
       { path: ["value"], schemaContext: schemaContext },
-      "did:null:null",
       tracker,
       schemaTracker,
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
-      address: { id: assert2.of, type: assert2.the, path: ["value"] },
+      address: {
+        space: "did:null:null",
+        id: assert2.of,
+        type: assert2.the,
+        path: ["value"],
+      },
       value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(
@@ -215,13 +219,17 @@ describe("Query", () => {
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
       { path: ["value"], schemaContext: schemaContext },
-      "did:null:null",
       tracker,
       schemaTracker,
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
-      address: { id: assert2.of, type: assert2.the, path: ["value"] },
+      address: {
+        space: "did:null:null",
+        id: assert2.of,
+        type: assert2.the,
+        path: ["value"],
+      },
       value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(
@@ -295,13 +303,17 @@ describe("Query", () => {
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
       { path: ["value"], schemaContext: schemaContext },
-      "did:null:null",
       tracker,
       schemaTracker,
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
-      address: { id: assert1.of, type: assert1.the, path: ["value"] },
+      address: {
+        space: "did:null:null",
+        id: assert1.of,
+        type: assert1.the,
+        path: ["value"],
+      },
       value: assert1.is.value,
     });
     const selectorSet1 = schemaTracker.get(
@@ -402,13 +414,13 @@ describe("Query", () => {
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
       { path: ["value"], schemaContext },
-      "did:null:null",
       tracker,
       schemaTracker,
     );
 
     const result = traverser.traverse({
       address: {
+        space: "did:null:null",
         id: testCell1.sourceURI,
         type: "application/json",
         path: ["value"],
@@ -502,13 +514,17 @@ describe("Query", () => {
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
       selector,
-      "did:null:null",
       tracker,
       schemaTracker,
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
-      address: { id: assert2.of, type: assert2.the, path: ["value"] },
+      address: {
+        space: "did:null:null",
+        id: assert2.of,
+        type: assert2.the,
+        path: ["value"],
+      },
       value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(

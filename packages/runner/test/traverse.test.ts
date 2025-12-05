@@ -82,10 +82,10 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
     const traverser = new SchemaObjectTraverser(tx, {
       path: ["value"],
       schemaContext: { schema: true, rootSchema: true },
-    }, "did:null:null");
+    });
 
     const result = traverser.traverse({
-      address: { id: doc2Uri, type, path: ["value"] },
+      address: { space: "did:null:null", id: doc2Uri, type, path: ["value"] },
       value: doc2Value,
     });
 
@@ -150,10 +150,10 @@ describe("SchemaObjectTraverser array traversal", () => {
     const traverser = new SchemaObjectTraverser(tx, {
       path: ["value"],
       schemaContext: { schema, rootSchema: schema },
-    }, "did:null:null");
+    });
 
     const result = traverser.traverse({
-      address: { id: docUri, type, path: ["value"] },
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
 
@@ -192,10 +192,10 @@ describe("SchemaObjectTraverser array traversal", () => {
     const traverser = new SchemaObjectTraverser(tx, {
       path: ["value"],
       schemaContext: { schema, rootSchema: schema },
-    }, "did:null:null");
+    });
 
     const result = traverser.traverse({
-      address: { id: docUri, type, path: ["value"] },
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
 

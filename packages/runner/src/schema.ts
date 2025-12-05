@@ -420,8 +420,8 @@ export function validateAndTransform(
   }
 
   // Link paths don't include value, but doc address should
-  const { id, type, path } = ref;
-  const address = { id, type, path: ["value", ...path] };
+  const { space, id, type, path } = ref;
+  const address = { space, id, type, path: ["value", ...path] };
   const doc = { address, value: tx!.readValueOrThrow(ref) };
   // If we have a ref with a schema, use that; otherwise, use the link's schema
   const selector = {
@@ -436,7 +436,6 @@ export function validateAndTransform(
   const traverser = new SchemaObjectTraverser<any>(
     tx!,
     selector,
-    link.space,
     undefined,
     undefined,
     objectCreator,

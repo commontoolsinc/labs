@@ -54,6 +54,7 @@ import {
   toSelection,
 } from "./space.ts";
 import { ExtendedStorageTransaction } from "../runner/src/storage/extended-storage-transaction.ts";
+import { IMemorySpaceAddress } from "../runner/src/storage/interface.ts";
 
 export type * from "./interface.ts";
 
@@ -265,8 +266,8 @@ function loadFactsForDoc(
     const managedTx = new ManagedStorageTransaction(manager);
     const tx = new ExtendedStorageTransaction(managedTx);
     if (selector.schemaContext !== undefined) {
-      const factValue: IAttestation = {
-        address: fact.address,
+      const factValue: { address: IMemorySpaceAddress; value: JSONValue } = {
+        address: { ...fact.address, space: space },
         value: (fact.value as Immutable<JSONObject>),
       };
       if (fact.address.path.length > 0) {
@@ -278,7 +279,6 @@ function loadFactsForDoc(
         selector.path,
         tracker,
         cfc,
-        space,
         schemaTracker,
         selector,
       );
@@ -289,7 +289,6 @@ function loadFactsForDoc(
       const traverser = new SchemaObjectTraverser(
         tx,
         newSelector!,
-        space,
         tracker,
         schemaTracker,
       );
@@ -302,7 +301,13 @@ function loadFactsForDoc(
       manager.load(fact.address);
     }
     // Also load any source links and recipes
-    loadSource(tx, fact, space, new Set<string>(), schemaTracker);
+    const fullAddress = { ...fact.address, space: space };
+    loadSource(
+      tx,
+      { address: fullAddress, value: fact.value },
+      new Set<string>(),
+      schemaTracker,
+    );
   }
 }
 
