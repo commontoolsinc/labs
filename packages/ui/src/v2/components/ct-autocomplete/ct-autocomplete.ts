@@ -112,13 +112,9 @@ export class CTAutocomplete extends BaseElement {
         background-color: var(--ct-theme-color-surface, #f1f5f9);
       }
 
-      /* Dropdown styling */
+      /* Dropdown styling - uses fixed positioning to escape overflow:hidden containers */
       .dropdown {
-        position: absolute;
-        top: 100%;
-        left: 0;
-        right: 0;
-        margin-top: 4px;
+        position: fixed;
         background: var(--ct-theme-color-background, #ffffff);
         border: 1px solid var(--ct-theme-color-border, #e5e7eb);
         border-radius: var(
@@ -129,14 +125,7 @@ export class CTAutocomplete extends BaseElement {
           0 2px 4px -1px rgba(0, 0, 0, 0.06);
         max-height: calc(var(--max-visible, 8) * 2.5rem);
         overflow-y: auto;
-        z-index: 1000;
-      }
-
-      .dropdown.above {
-        top: auto;
-        bottom: 100%;
-        margin-top: 0;
-        margin-bottom: 4px;
+        z-index: 9999;
       }
 
       .dropdown.hidden {
@@ -211,7 +200,7 @@ export class CTAutocomplete extends BaseElement {
   @state() private _isOpen = false;
   @state() private _query = "";
   @state() private _highlightedIndex = 0;
-  @state() private _dropdownPosition: "below" | "above" = "below";
+  @state() private _dropdownStyle = "";
 
   // Element references
   private _input: HTMLInputElement | null = null;
@@ -235,12 +224,23 @@ export class CTAutocomplete extends BaseElement {
     super.connectedCallback();
     // Listen for clicks outside to close dropdown
     document.addEventListener("click", this._handleOutsideClick);
+    // Close dropdown on scroll/resize to avoid mispositioned dropdown
+    globalThis.addEventListener("scroll", this._handleScrollOrResize, true);
+    globalThis.addEventListener("resize", this._handleScrollOrResize);
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
     document.removeEventListener("click", this._handleOutsideClick);
+    globalThis.removeEventListener("scroll", this._handleScrollOrResize, true);
+    globalThis.removeEventListener("resize", this._handleScrollOrResize);
   }
+
+  private _handleScrollOrResize = () => {
+    if (this._isOpen) {
+      this._updateDropdownPosition();
+    }
+  };
 
   override firstUpdated() {
     this._input = this.shadowRoot?.querySelector("input") || null;
@@ -316,7 +316,6 @@ export class CTAutocomplete extends BaseElement {
     const dropdownClasses = {
       dropdown: true,
       hidden: !this._isOpen,
-      above: this._dropdownPosition === "above",
     };
 
     return html`
@@ -343,7 +342,7 @@ export class CTAutocomplete extends BaseElement {
           id="dropdown"
           class="${classMap(dropdownClasses)}"
           role="listbox"
-          style="--max-visible: ${this.maxVisible}"
+          style="${this._dropdownStyle}; --max-visible: ${this.maxVisible}"
         >
           ${this._renderDropdownContent()}
         </div>
@@ -516,6 +515,21 @@ export class CTAutocomplete extends BaseElement {
 
     this._highlightedIndex =
       (this._highlightedIndex + delta + total) % total;
+
+    // Scroll the highlighted option into view
+    this._scrollHighlightedIntoView();
+  }
+
+  private _scrollHighlightedIntoView() {
+    // Use requestAnimationFrame to ensure DOM has updated
+    requestAnimationFrame(() => {
+      const option = this.shadowRoot?.querySelector(
+        `#option-${this._highlightedIndex}`
+      );
+      if (option) {
+        option.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
+    });
   }
 
   // Open/close methods
@@ -534,7 +548,7 @@ export class CTAutocomplete extends BaseElement {
 
   // Dropdown positioning
   private _updateDropdownPosition() {
-    if (!this._input || !this._dropdown) return;
+    if (!this._input) return;
 
     const inputRect = this._input.getBoundingClientRect();
     const viewportHeight = globalThis.innerHeight;
@@ -546,12 +560,21 @@ export class CTAutocomplete extends BaseElement {
     const spaceBelow = viewportHeight - inputRect.bottom;
     const spaceAbove = inputRect.top;
 
+    // Calculate fixed position coordinates
+    const left = inputRect.left;
+    const width = inputRect.width;
+
     // Position above if not enough space below but enough above
+    let top: number;
     if (spaceBelow < dropdownHeight && spaceAbove > dropdownHeight) {
-      this._dropdownPosition = "above";
+      // Position above the input
+      top = inputRect.top - dropdownHeight - 4;
     } else {
-      this._dropdownPosition = "below";
+      // Position below the input
+      top = inputRect.bottom + 4;
     }
+
+    this._dropdownStyle = `top: ${top}px; left: ${left}px; width: ${width}px`;
   }
 
   // Public API
