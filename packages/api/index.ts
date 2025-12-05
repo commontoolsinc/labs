@@ -645,7 +645,7 @@ export type toJSON = {
 };
 
 export type Handler<T = any, R = any> = Module & {
-  with: (inputs: Opaque<StripCell<T>>) => OpaqueRef<R>;
+  with: (inputs: Opaque<StripCell<T>>) => Stream<R>;
 };
 
 export type NodeFactory<T, R> =
@@ -664,7 +664,7 @@ export type ModuleFactory<T, R> =
   & toJSON;
 
 export type HandlerFactory<T, R> =
-  & ((inputs: Opaque<StripCell<T>>) => OpaqueRef<R>)
+  & ((inputs: Opaque<StripCell<T>>) => Stream<R>)
   & Handler<T, R>
   & toJSON;
 
@@ -1140,7 +1140,7 @@ export type HandlerFunction = {
  * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
  */
 export type ActionFunction = {
-  <T>(fn: (props: T) => void): ModuleFactory<StripCell<T>, Stream<void>>;
+  <T>(fn: (props: T) => void): HandlerFactory<T, void>;
 };
 
 /**

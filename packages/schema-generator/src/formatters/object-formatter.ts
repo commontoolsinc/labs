@@ -22,13 +22,14 @@ const logger = getLogger("schema-generator.object", {
 });
 
 /**
- * Check if a callable type (like ModuleFactory or HandlerFactory) returns a Stream.
+ * Check if a callable type (like ModuleFactory or HandlerFactory) returns a wrapper type.
  * ModuleFactory<T, R> when called returns OpaqueRef<R>.
  * If R is Stream<T>, we should generate { asStream: true } instead of skipping.
+ * If R is Cell<T>, we should generate { asCell: true } instead of skipping.
  *
- * Returns the schema definition for the stream if detected, undefined otherwise.
+ * Returns the schema definition for the wrapper if detected, undefined otherwise.
  */
-function getStreamSchemaFromCallable(
+function getWrapperSchemaFromCallable(
   type: ts.Type,
   checker: ts.TypeChecker,
 ): SchemaDefinition | undefined {
@@ -38,13 +39,16 @@ function getStreamSchemaFromCallable(
   // Get the return type of the first call signature
   const callReturnType = callSignatures[0]!.getReturnType();
 
-  // Check if the return type is a Stream wrapper (OpaqueRef<Stream<T>> or Stream<T>)
+  // Check if the return type is a wrapper (Stream<T>, Cell<T>, or OpaqueRef<...>)
   const wrapperInfo = getCellWrapperInfo(callReturnType, checker);
   if (wrapperInfo?.kind === "Stream") {
     return { asStream: true };
   }
+  if (wrapperInfo?.kind === "Cell") {
+    return { asCell: true };
+  }
 
-  // Also check if it's an OpaqueRef wrapping a Stream
+  // Also check if it's an OpaqueRef wrapping a Stream or Cell
   if (wrapperInfo?.kind === "OpaqueRef") {
     // Get the inner type of OpaqueRef
     const typeRef = wrapperInfo.typeRef;
@@ -54,6 +58,9 @@ function getStreamSchemaFromCallable(
       const innerWrapperInfo = getCellWrapperInfo(innerType, checker);
       if (innerWrapperInfo?.kind === "Stream") {
         return { asStream: true };
+      }
+      if (innerWrapperInfo?.kind === "Cell") {
+        return { asCell: true };
       }
     }
   }
@@ -176,16 +183,16 @@ export class ObjectFormatter implements TypeFormatter {
       );
 
       if (isFunctionLike(resolvedPropType)) {
-        // Special case: ModuleFactory/HandlerFactory types that return Stream
-        // should generate { asStream: true } instead of being skipped
-        const streamSchema = getStreamSchemaFromCallable(
+        // Special case: ModuleFactory/HandlerFactory types that return Stream or Cell
+        // should generate { asStream: true } or { asCell: true } instead of being skipped
+        const wrapperSchema = getWrapperSchemaFromCallable(
           resolvedPropType,
           checker,
         );
-        if (streamSchema) {
-          // This is a handler/action factory that returns a Stream
+        if (wrapperSchema) {
+          // This is a factory that returns a wrapper type (Stream or Cell)
           required.push(propName);
-          properties[propName] = streamSchema;
+          properties[propName] = wrapperSchema;
         }
         continue;
       }
