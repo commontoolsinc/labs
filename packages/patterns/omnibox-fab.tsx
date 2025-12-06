@@ -5,9 +5,12 @@ import {
   handler,
   ifElse,
   NAME,
+  navigateTo,
   pattern,
   patternTool,
   UI,
+  when,
+  wish,
 } from "commontools";
 import Chatbot from "./chatbot.tsx";
 import {
@@ -42,6 +45,20 @@ const dismissPeek = handler<
   peekDismissedIndex.set(assistantMessageCount);
 });
 
+/** Wish for a #tag or a custom query with optional linked context. Automatically navigates to the result. */
+type WishToolParameters = { query: string; context?: Record<string, any> };
+
+const wishTool = pattern<WishToolParameters>(
+  ({ query, context }) => {
+    const wishResult = wish<any>({
+      query,
+      context,
+    });
+
+    return when(wishResult, navigateTo(wishResult));
+  },
+);
+
 export default pattern<OmniboxFABInput>(
   (_) => {
     const omnibot = Chatbot({
@@ -60,6 +77,7 @@ export default pattern<OmniboxFABInput>(
         fetchAndRunPattern: patternTool(fetchAndRunPattern),
         listPatternIndex: patternTool(listPatternIndex),
         navigateTo: patternTool(navigateToPattern),
+        wishAndNavigate: patternTool(wishTool),
       },
     });
 
