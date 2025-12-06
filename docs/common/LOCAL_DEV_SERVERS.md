@@ -106,6 +106,86 @@ curl http://localhost:8000/_health && curl http://localhost:5173
 kill $TOOLSHED_PID $SHELL_PID
 ```
 
+## Reliable Process Shutdown
+
+When PIDs weren't tracked or processes become orphaned, use port-based termination:
+
+### Force-Kill by Port
+
+```bash
+# Kill any process on port 8000 (Toolshed)
+lsof -ti :8000 | xargs kill -9 2>/dev/null
+
+# Kill any process on port 5173 (Shell)
+lsof -ti :5173 | xargs kill -9 2>/dev/null
+```
+
+### Verify Ports Are Free
+
+Always verify before restarting:
+
+```bash
+# Should return nothing if ports are free
+lsof -i :8000
+lsof -i :5173
+```
+
+### Complete Restart Workflow
+
+```bash
+# 1. Stop all processes on both ports
+lsof -ti :8000 | xargs kill -9 2>/dev/null
+lsof -ti :5173 | xargs kill -9 2>/dev/null
+
+# 2. Wait briefly for cleanup
+sleep 2
+
+# 3. Verify ports are free
+if lsof -i :8000 || lsof -i :5173; then
+  echo "ERROR: Ports still in use"
+  exit 1
+fi
+
+# 4. Start servers (in separate terminals or background)
+cd packages/toolshed && SHELL_URL=http://localhost:5173 deno task dev &
+TOOLSHED_PID=$!
+
+cd packages/shell && deno task dev-local &
+SHELL_PID=$!
+
+# 5. Wait for startup
+sleep 5
+
+# 6. Verify both are healthy
+curl -sf http://localhost:8000/_health > /dev/null && echo "Backend: OK" || echo "Backend: FAILED"
+curl -sf http://localhost:5173 > /dev/null && echo "Frontend: OK" || echo "Frontend: FAILED"
+```
+
+### Troubleshooting Stubborn Processes
+
+If `lsof -ti :PORT | xargs kill -9` doesn't work:
+
+1. **Check for multiple processes:**
+   ```bash
+   lsof -i :8000  # Lists all processes with details
+   ```
+
+2. **Kill by process name (nuclear option):**
+   ```bash
+   pkill -9 -f "deno task dev"
+   ```
+
+3. **Check for child processes:**
+   ```bash
+   pgrep -f deno | xargs ps -p
+   ```
+
+4. **Last resort - kill all deno processes:**
+   ```bash
+   pkill -9 -f deno
+   ```
+   ⚠️ This kills ALL deno processes, not just dev servers.
+
 ## Integration with Pattern Development
 
 When deploying patterns locally:
