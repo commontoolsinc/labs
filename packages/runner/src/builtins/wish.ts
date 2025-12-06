@@ -34,6 +34,8 @@ const favoriteListSchema = {
 import { getRecipeEnvironment } from "../env.ts";
 
 const WISH_TSX_PATH = getRecipeEnvironment().apiUrl + "api/patterns/wish.tsx";
+const SUGGESTION_TSX_PATH = getRecipeEnvironment().apiUrl +
+  "api/patterns/suggestion.tsx";
 
 class WishError extends Error {
   constructor(message: string) {
@@ -287,6 +289,32 @@ async function fetchWishPattern(
   }
 }
 
+// fetchSuggestionPattern runs at runtime scope, shared across all wish invocations
+let suggestionPatternFetchPromise: Promise<Recipe | undefined> | undefined;
+let suggestionPattern: Recipe | undefined;
+
+async function fetchSuggestionPattern(
+  runtime: IRuntime,
+): Promise<Recipe | undefined> {
+  try {
+    const program = await runtime.harness.resolve(
+      new HttpProgramResolver(SUGGESTION_TSX_PATH),
+    );
+
+    if (!program) {
+      throw new WishError("Can't load suggestion.tsx");
+    }
+    const pattern = await runtime.recipeManager.compileRecipe(program);
+
+    if (!pattern) throw new WishError("Can't compile suggestion.tsx");
+
+    return pattern;
+  } catch (e) {
+    console.error("Can't load suggestion.tsx", e);
+    return undefined;
+  }
+}
+
 function errorUI(message: string): VNode {
   return h("span", { style: "color: red" }, `⚠️ ${message}`);
 }
@@ -364,6 +392,62 @@ export function wish(
     return wishPatternResultCell;
   }
 
+  // Per-instance suggestion pattern result cell
+  let suggestionPatternInput:
+    | { situation: string; context: Record<string, any> }
+    | undefined;
+  let suggestionPatternResultCell: Cell<WishState<any>> | undefined;
+
+  function launchSuggestionPattern(
+    input: { situation: string; context: Record<string, any> },
+    providedTx?: IExtendedStorageTransaction,
+  ) {
+    suggestionPatternInput = input;
+
+    const tx = providedTx || runtime.edit();
+
+    if (!suggestionPatternResultCell) {
+      suggestionPatternResultCell = runtime.getCell(
+        parentCell.space,
+        { wish: { suggestionPattern: cause, situation: input.situation } },
+        undefined,
+        tx,
+      );
+
+      addCancel(() => runtime.runner.stop(suggestionPatternResultCell!));
+    }
+
+    if (!suggestionPattern) {
+      if (!suggestionPatternFetchPromise) {
+        suggestionPatternFetchPromise = fetchSuggestionPattern(runtime).then(
+          (pattern) => {
+            suggestionPattern = pattern;
+            return pattern;
+          },
+        );
+      }
+      suggestionPatternFetchPromise.then((pattern) => {
+        if (pattern) {
+          runtime.runSynced(
+            suggestionPatternResultCell!,
+            pattern,
+            suggestionPatternInput,
+          );
+        }
+      });
+    } else {
+      runtime.runSynced(
+        suggestionPatternResultCell,
+        suggestionPattern,
+        suggestionPatternInput,
+      );
+    }
+
+    if (!providedTx) tx.commit();
+
+    return suggestionPatternResultCell;
+  }
+
   // Wish action, reactive to changes in inputsCell and any cell we read during
   // initial resolution
   return (tx: IExtendedStorageTransaction) => {
@@ -393,7 +477,7 @@ export function wish(
       }
       return;
     } else if (typeof targetValue === "object") {
-      const { query, path, schema, context: _context, scope: _scope } =
+      const { query, path, schema, context, scope: _scope } =
         targetValue as WishParams;
 
       if (query === undefined || query === null || query === "") {
@@ -450,8 +534,14 @@ export function wish(
           );
         }
       } else {
-        // Otherwise it's a generic query and we need to launch the wish pattern
-        sendResult(tx, launchWishPattern(targetValue as WishParams, tx));
+        // Otherwise it's a generic query, instantiate suggestion.tsx
+        sendResult(
+          tx,
+          launchSuggestionPattern(
+            { situation: query, context: context ?? {} },
+            tx,
+          ),
+        );
       }
       return;
     } else {
