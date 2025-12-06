@@ -1,20 +1,17 @@
 import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
-
-import { AppView } from "../lib/app/mod.ts";
 import { BaseView, createDefaultAppState } from "./BaseView.ts";
 import { KeyStore } from "@commontools/identity";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { DebuggerController } from "../lib/debugger-controller.ts";
 import "./DebuggerView.ts";
-import { Task } from "@lit/task";
-import { CharmController, CharmsController } from "@commontools/charm/ops";
+import { Task, TaskStatus } from "@lit/task";
+import { CharmController } from "@commontools/charm/ops";
 import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
 import { NAME } from "@commontools/runner";
-import { type NameSchema, nameSchema } from "@commontools/charm";
+import { type NameSchema } from "@commontools/charm";
 import { updatePageTitle } from "../lib/navigate.ts";
 import { KeyboardController } from "../lib/keyboard-router.ts";
-import * as PatternFactory from "../lib/pattern-factory.ts";
 
 export class XAppView extends BaseView {
   static override styles = css`
@@ -52,7 +49,7 @@ export class XAppView extends BaseView {
   @property({ attribute: false })
   keyStore?: KeyStore;
 
-  @property({ attribute: false })
+  @state()
   charmTitle?: string;
 
   @property({ attribute: false })
@@ -85,43 +82,78 @@ export class XAppView extends BaseView {
     this.hasSidebarContent = event.detail.hasSidebarContent;
   };
 
-  // Do not make private, integration tests access this directly.
-  //
-  // This fetches the active pattern and space default pattern derived
-  // from the current view.
-  _activePatterns = new Task(this, {
+  // Fetches the space root pattern from the space.
+  _spaceRootPattern = new Task(this, {
+    task: async (
+      [rt],
+    ): Promise<
+      | CharmController<NameSchema>
+      | undefined
+    > => {
+      if (!rt) return;
+      return await rt.getSpaceRootPattern();
+    },
+    args: () => [this.rt],
+  });
+
+  // This fetches the selected pattern, the explicitly chosen pattern
+  // to render via URL e.g. `/space/someCharmId`.
+  _selectedPattern = new Task(this, {
     task: async (
       [app, rt],
     ): Promise<
-      | { activePattern: CharmController; defaultPattern: CharmController }
+      | CharmController<NameSchema>
       | undefined
     > => {
-      if (!rt) {
-        this.#setTitleSubscription();
-        return;
+      if (!rt) return;
+      if ("charmId" in app.view && app.view.charmId) {
+        return await rt.getPattern(app.view.charmId);
       }
-
-      const patterns = await viewToPatterns(
-        rt.cc(),
-        app.view,
-        this._activePatterns.value?.activePattern,
-      );
-      if (!patterns) {
-        this.#setTitleSubscription();
-        return;
-      }
-
-      // Record the charm as recently accessed so recents stay fresh.
-      await rt.cc().manager().trackRecentCharm(
-        patterns.activePattern.getCell(),
-      );
-      this.#setTitleSubscription(
-        patterns.activePattern as CharmController<NameSchema>,
-      );
-
-      return patterns;
     },
     args: () => [this.app, this.rt],
+  });
+
+  // This derives a space root pattern as well as an "active" (main)
+  // pattern for use in child views.
+  // This hybrid task intentionally only uses completed/fresh
+  // source patterns to avoid unsyncing state.
+  _patterns = new Task(this, {
+    task: function (
+      [
+        app,
+        spaceRootPatternValue,
+        spaceRootPatternStatus,
+        selectedPatternValue,
+        selectedPatternStatus,
+      ],
+    ): {
+      activePattern: CharmController<NameSchema> | undefined;
+      spaceRootPattern: CharmController<NameSchema> | undefined;
+    } {
+      const spaceRootPattern = spaceRootPatternStatus === TaskStatus.COMPLETE
+        ? spaceRootPatternValue
+        : undefined;
+      // The "active" pattern is the main pattern to be rendered.
+      // This may be the same as the space root pattern, unless we're
+      // in a view that specifies a different pattern to use.
+      const useSpaceRootAsActive = !("charmId" in app.view && app.view.charmId);
+      const activePattern = useSpaceRootAsActive
+        ? spaceRootPattern
+        : selectedPatternStatus === TaskStatus.COMPLETE
+        ? selectedPatternValue
+        : undefined;
+      return {
+        activePattern,
+        spaceRootPattern,
+      };
+    },
+    args: () => [
+      this.app,
+      this._spaceRootPattern.value,
+      this._spaceRootPattern.status,
+      this._selectedPattern.value,
+      this._selectedPattern.status,
+    ],
   });
 
   #setTitleSubscription(activeCharm?: CharmController<NameSchema>) {
@@ -174,31 +206,42 @@ export class XAppView extends BaseView {
     }
 
     // Update debugger visibility from app state
-    if (changedProperties.has("app") && this.app) {
+    if (changedProperties.has("app")) {
       this.debuggerController.setVisibility(
         this.app.config.showDebuggerView ?? false,
       );
     }
   }
 
+  // Always defer to the loaded active pattern for the ID,
+  // but until that loads, use an ID in the view if available.
+  private getActivePatternId(): string | undefined {
+    const activePattern = this._patterns.value?.activePattern;
+    if (activePattern?.id) return activePattern.id;
+    if ("charmId" in this.app.view && this.app.view.charmId) {
+      return this.app.view.charmId;
+    }
+  }
+
   override render() {
     const config = this.app.config ?? {};
-    const unauthenticated = html`
-      <x-login-view .keyStore="${this.keyStore}"></x-login-view>
-    `;
-    const patterns = this._activePatterns.value;
-    const activePattern = patterns?.activePattern;
-    const defaultPattern = patterns?.defaultPattern;
+    const { activePattern, spaceRootPattern } = this._patterns.value ?? {};
+    this.#setTitleSubscription(activePattern);
+
     const authenticated = html`
       <x-body-view
         .rt="${this.rt}"
-        .activeCharm="${activePattern}"
-        .defaultCharm="${defaultPattern}"
+        .activePattern="${activePattern}"
+        .spaceRootPattern="${spaceRootPattern}"
         .showShellCharmListView="${config.showShellCharmListView ?? false}"
         .showSidebar="${config.showSidebar ?? false}"
       ></x-body-view>
     `;
+    const unauthenticated = html`
+      <x-login-view .keyStore="${this.keyStore}"></x-login-view>
+    `;
 
+    const charmId = this.getActivePatternId();
     const spaceName = this.app && "spaceName" in this.app.view
       ? this.app.view.spaceName
       : undefined;
@@ -211,7 +254,7 @@ export class XAppView extends BaseView {
           .rt="${this.rt}"
           .keyStore="${this.keyStore}"
           .charmTitle="${this.charmTitle}"
-          .charmId="${activePattern?.id}"
+          .charmId="${charmId}"
           .showShellCharmListView="${config.showShellCharmListView ?? false}"
           .showDebuggerView="${config.showDebuggerView ?? false}"
           .showSidebar="${config.showSidebar ?? false}"
@@ -221,7 +264,7 @@ export class XAppView extends BaseView {
           ${content}
         </div>
       </div>
-      ${this.app?.identity
+      ${this.app.identity
         ? html`
           <x-debugger-view
             .visible="${this.debuggerController.isVisible()}"
@@ -235,51 +278,6 @@ export class XAppView extends BaseView {
         `
         : ""}
     `;
-  }
-}
-
-async function viewToPatterns(
-  cc: CharmsController,
-  view: AppView,
-  currentActive?: CharmController<unknown>,
-): Promise<
-  {
-    activePattern: CharmController<unknown>;
-    defaultPattern: CharmController<unknown>;
-  } | undefined
-> {
-  if ("builtin" in view) {
-    if (view.builtin !== "home") {
-      console.warn("Unsupported view type");
-      return;
-    }
-    const pattern = await PatternFactory.getOrCreate(cc, "home");
-    return { activePattern: pattern, defaultPattern: pattern };
-  } else if ("spaceDid" in view) {
-    console.warn("Unsupported view type");
-    return;
-  } else if ("spaceName" in view) {
-    const defaultPattern = await PatternFactory.getOrCreate(
-      cc,
-      "space-default",
-    );
-
-    let activePattern: CharmController<unknown> | undefined;
-    // If viewing a specific charm, use it as active; otherwise use default
-    if (view.charmId) {
-      if (currentActive && currentActive.id === view.charmId) {
-        activePattern = currentActive;
-      } else {
-        activePattern = await cc.get(
-          view.charmId,
-          true,
-          nameSchema,
-        );
-      }
-    } else {
-      activePattern = defaultPattern;
-    }
-    return { activePattern, defaultPattern };
   }
 }
 

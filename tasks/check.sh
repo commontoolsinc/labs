@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-DENO_VERSIONS_ALLOWED=("2.5.2" "2.4.5")
+DENO_VERSIONS_ALLOWED=("2.5.2")
 # This is more portable than parsing `deno --version`
 DENO_VERSION=$(echo "console.log(Deno.version.deno)" | deno run -)
 if [[ ! " ${DENO_VERSIONS_ALLOWED[@]} " =~ " ${DENO_VERSION} " ]]; then

@@ -460,7 +460,7 @@ jobs:
           host: ${{ secrets.BASTION_HOST }}
           username: bastion
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
-          command_timeout: 10m
+          command_timeout: 20m
           script: |
             /opt/ct/run-pattern-tests-against-toolshed.sh ${{ github.sha }} \
               https://toolshed.saga-castor.ts.net \

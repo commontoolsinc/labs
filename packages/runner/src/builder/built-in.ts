@@ -28,6 +28,48 @@ import type {
 import { isRecord } from "@commontools/utils/types";
 import { isCell } from "../cell.ts";
 
+/**
+ * Signature detection for ifElse/when/unless backward compatibility.
+ *
+ * These functions support two call signatures:
+ * - Legacy (no schemas): ifElse(condition, ifTrue, ifFalse)
+ * - With schemas: ifElse(condSchema, trueSchema, falseSchema, resultSchema, condition, ifTrue, ifFalse)
+ *
+ * We CANNOT use `arg !== undefined` to detect which signature was used because
+ * `undefined` is a valid VALUE in either signature. For example:
+ *   ifElse(pending, undefined, { result })  // Legacy: undefined is the ifTrue value
+ *
+ * When transformed with schema injection, this becomes:
+ *   ifElse(schema1, schema2, schema3, schema4, pending, undefined, { result })
+ *
+ * If we checked `ifTrue !== undefined`, we'd incorrectly detect the legacy signature
+ * and pass schemas as values, causing the runtime to hang.
+ *
+ * Instead, we use arguments.length which correctly distinguishes the signatures.
+ *
+ * If these signatures ever change, update the constants below and the corresponding tests.
+ */
+export const SIGNATURE_ARGS = {
+  ifElse: { legacy: 3, withSchemas: 7 },
+  when: { legacy: 2, withSchemas: 5 },
+  unless: { legacy: 2, withSchemas: 5 },
+} as const;
+
+/** Returns true if ifElse was called with schema arguments prepended */
+export function ifElseHasSchemas(argsLength: number): boolean {
+  return argsLength >= SIGNATURE_ARGS.ifElse.withSchemas;
+}
+
+/** Returns true if when was called with schema arguments prepended */
+export function whenHasSchemas(argsLength: number): boolean {
+  return argsLength >= SIGNATURE_ARGS.when.withSchemas;
+}
+
+/** Returns true if unless was called with schema arguments prepended */
+export function unlessHasSchemas(argsLength: number): boolean {
+  return argsLength >= SIGNATURE_ARGS.unless.withSchemas;
+}
+
 export const compileAndRun = createNodeFactory({
   type: "ref",
   implementation: "compileAndRun",
@@ -101,6 +143,7 @@ export const streamData = createNodeFactory({
 ) => OpaqueRef<{ pending: boolean; result: T; error: unknown }>;
 
 // ifElse with optional schema arguments (backward compatible)
+// See SIGNATURE_ARGS documentation above for why we use arguments.length
 export function ifElse<T = unknown, U = unknown, V = unknown>(
   conditionSchemaOrCondition: JSONSchema | Opaque<T>,
   ifTrueSchemaOrIfTrue: JSONSchema | Opaque<U>,
@@ -115,11 +158,7 @@ export function ifElse<T = unknown, U = unknown, V = unknown>(
     implementation: "ifElse",
   });
 
-  // Check if schemas were provided (7 args) or not (3 args)
-  if (
-    condition !== undefined && ifTrue !== undefined && ifFalse !== undefined
-  ) {
-    // New signature with schemas: ifElse(condSchema, trueSchema, falseSchema, resultSchema, cond, ifTrue, ifFalse)
+  if (ifElseHasSchemas(arguments.length)) {
     return ifElseFactory({
       conditionSchema: conditionSchemaOrCondition as JSONSchema,
       ifTrueSchema: ifTrueSchemaOrIfTrue as JSONSchema,
@@ -131,7 +170,7 @@ export function ifElse<T = unknown, U = unknown, V = unknown>(
     }) as OpaqueRef<U | V>;
   }
 
-  // Old signature without schemas: ifElse(cond, ifTrue, ifFalse)
+  // Legacy signature: ifElse(cond, ifTrue, ifFalse)
   return ifElseFactory({
     condition: conditionSchemaOrCondition,
     ifTrue: ifTrueSchemaOrIfTrue,
@@ -152,6 +191,7 @@ let ifElseFactory:
   | undefined;
 
 // when(condition, value) - returns value if condition is truthy, else condition
+// See SIGNATURE_ARGS documentation above for why we use arguments.length
 export function when<T = unknown, U = unknown>(
   conditionSchemaOrCondition: JSONSchema | Opaque<T>,
   valueSchemaOrValue: JSONSchema | Opaque<U>,
@@ -164,9 +204,7 @@ export function when<T = unknown, U = unknown>(
     implementation: "when",
   });
 
-  // Check if schemas were provided (5 args) or not (2 args)
-  if (condition !== undefined && value !== undefined) {
-    // New signature with schemas: when(condSchema, valueSchema, resultSchema, cond, value)
+  if (whenHasSchemas(arguments.length)) {
     return whenFactory({
       conditionSchema: conditionSchemaOrCondition as JSONSchema,
       valueSchema: valueSchemaOrValue as JSONSchema,
@@ -176,7 +214,7 @@ export function when<T = unknown, U = unknown>(
     }) as OpaqueRef<T | U>;
   }
 
-  // Old signature without schemas: when(cond, value)
+  // Legacy signature: when(cond, value)
   return whenFactory({
     condition: conditionSchemaOrCondition,
     value: valueSchemaOrValue,
@@ -194,6 +232,7 @@ let whenFactory:
   | undefined;
 
 // unless(condition, fallback) - returns condition if truthy, else fallback
+// See SIGNATURE_ARGS documentation above for why we use arguments.length
 export function unless<T = unknown, U = unknown>(
   conditionSchemaOrCondition: JSONSchema | Opaque<T>,
   fallbackSchemaOrFallback: JSONSchema | Opaque<U>,
@@ -206,9 +245,7 @@ export function unless<T = unknown, U = unknown>(
     implementation: "unless",
   });
 
-  // Check if schemas were provided (5 args) or not (2 args)
-  if (condition !== undefined && fallback !== undefined) {
-    // New signature with schemas: unless(condSchema, fallbackSchema, resultSchema, cond, fallback)
+  if (unlessHasSchemas(arguments.length)) {
     return unlessFactory({
       conditionSchema: conditionSchemaOrCondition as JSONSchema,
       fallbackSchema: fallbackSchemaOrFallback as JSONSchema,
@@ -218,7 +255,7 @@ export function unless<T = unknown, U = unknown>(
     }) as OpaqueRef<T | U>;
   }
 
-  // Old signature without schemas: unless(cond, fallback)
+  // Legacy signature: unless(cond, fallback)
   return unlessFactory({
     condition: conditionSchemaOrCondition,
     fallback: fallbackSchemaOrFallback,

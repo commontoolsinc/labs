@@ -1,4 +1,5 @@
 import * as Reference from "merkle-reference";
+import { isDeno } from "@commontools/utils/env";
 export * from "merkle-reference";
 
 // Don't know why deno does not seem to see there is a `fromString` so we just
@@ -8,41 +9,133 @@ export const fromString = Reference.fromString as (
 ) => Reference.View;
 
 /**
- * Bounded LRU cache for memoizing refer() results.
- * refer() is a pure function (same input → same output), so caching is safe.
- * We use JSON.stringify as the cache key since it's ~25x faster than refer().
+ * Refer function - uses merkle-reference's default in browsers (@noble/hashes),
+ * upgrades to node:crypto in server environments for ~1.5-2x speedup.
+ *
+ * Browser environments use merkle-reference's default (pure JS, works everywhere).
+ * Server environments (Node.js, Deno) use node:crypto when available.
  */
-const CACHE_MAX_SIZE = 1000;
-const referCache = new Map<string, Reference.View>();
+let referImpl: <T>(source: T) => Reference.View<T> = Reference.refer;
+
+// In Deno, try to use node:crypto for better performance
+if (isDeno()) {
+  try {
+    // Dynamic import to avoid bundler resolution in browsers
+    const nodeCrypto = await import("node:crypto");
+    const nodeSha256 = (payload: Uint8Array): Uint8Array => {
+      return nodeCrypto.createHash("sha256").update(payload).digest();
+    };
+    const treeBuilder = Reference.Tree.createBuilder(nodeSha256);
+    referImpl = <T>(source: T): Reference.View<T> => {
+      return treeBuilder.refer(source) as unknown as Reference.View<T>;
+    };
+  } catch {
+    // node:crypto not available, use merkle-reference's default
+  }
+}
 
 /**
- * Memoized version of refer() that caches results.
- * Provides significant speedup for repeated references to the same objects,
- * which is common in transaction processing where the same payload is
- * referenced multiple times (datum, assertion, commit log).
+ * Object interning cache: maps JSON content to a canonical object instance.
+ * Uses strong references with LRU eviction to ensure cache hits.
+ *
+ * Previously used WeakRef, but this caused cache misses because GC would
+ * collect interned objects between calls when no strong reference held them.
+ * This prevented merkle-reference's WeakMap from getting cache hits.
+ *
+ * With strong references + LRU eviction, interned objects stay alive long
+ * enough for refer() to benefit from merkle-reference's identity-based cache.
+ */
+const INTERN_CACHE_MAX_SIZE = 10000;
+const internCache = new Map<string, object>();
+
+/**
+ * WeakSet to track objects that are already interned (canonical instances).
+ * This allows O(1) early return for already-interned objects.
+ */
+const internedObjects = new WeakSet<object>();
+
+/**
+ * Recursively intern an object and all its nested objects.
+ * Returns a new object where all sub-objects are canonical instances,
+ * enabling merkle-reference's WeakMap cache to hit on shared sub-content.
+ *
+ * Example:
+ *   const obj1 = intern({ id: "uuid-1", content: { large: "data" } });
+ *   const obj2 = intern({ id: "uuid-2", content: { large: "data" } });
+ *   // obj1.content === obj2.content (same object instance)
+ *   // refer(obj1) then refer(obj2) will cache-hit on content
+ */
+export const intern = <T>(source: T): T => {
+  // Only intern objects (not primitives)
+  if (source === null || typeof source !== "object") {
+    return source;
+  }
+
+  // Fast path: if this object is already interned, return it immediately
+  if (internedObjects.has(source)) {
+    return source;
+  }
+
+  // Handle arrays
+  if (Array.isArray(source)) {
+    const internedArray = source.map((item) => intern(item));
+    const key = JSON.stringify(internedArray);
+    const cached = internCache.get(key);
+
+    if (cached !== undefined) {
+      // Move to end (most recently used) by re-inserting
+      internCache.delete(key);
+      internCache.set(key, cached);
+      return cached as T;
+    }
+
+    // Evict oldest entry if cache is full
+    if (internCache.size >= INTERN_CACHE_MAX_SIZE) {
+      const oldest = internCache.keys().next().value;
+      if (oldest !== undefined) internCache.delete(oldest);
+    }
+    internCache.set(key, internedArray);
+    internedObjects.add(internedArray);
+    return internedArray as T;
+  }
+
+  // Handle plain objects: recursively intern all values first
+  const internedObj: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(source)) {
+    internedObj[k] = intern(v);
+  }
+
+  const key = JSON.stringify(internedObj);
+  const cached = internCache.get(key);
+
+  if (cached !== undefined) {
+    // Move to end (most recently used) by re-inserting
+    internCache.delete(key);
+    internCache.set(key, cached);
+    return cached as T;
+  }
+
+  // Evict oldest entry if cache is full
+  if (internCache.size >= INTERN_CACHE_MAX_SIZE) {
+    const oldest = internCache.keys().next().value;
+    if (oldest !== undefined) internCache.delete(oldest);
+  }
+  // Store this object as the canonical instance
+  internCache.set(key, internedObj);
+  internedObjects.add(internedObj);
+
+  return internedObj as T;
+};
+
+/**
+ * Compute a merkle reference for the given source.
+ *
+ * In server environments, uses node:crypto SHA-256 (with hardware acceleration)
+ * for ~1.5-2x speedup. In browsers, uses merkle-reference's default (@noble/hashes).
+ *
+ * merkle-reference's internal WeakMap caches sub-objects by identity, so passing
+ * the same payload object to multiple assertions will benefit from caching.
  */
 export const refer = <T>(source: T): Reference.View<T> => {
-  const key = JSON.stringify(source);
-
-  let ref = referCache.get(key);
-  if (ref !== undefined) {
-    // Move to end (most recently used) by re-inserting
-    referCache.delete(key);
-    referCache.set(key, ref);
-    return ref as Reference.View<T>;
-  }
-
-  // Compute new reference
-  ref = Reference.refer(source);
-
-  // Evict oldest entry if at capacity
-  if (referCache.size >= CACHE_MAX_SIZE) {
-    const oldest = referCache.keys().next().value;
-    if (oldest !== undefined) {
-      referCache.delete(oldest);
-    }
-  }
-
-  referCache.set(key, ref);
-  return ref as Reference.View<T>;
+  return referImpl(source);
 };
