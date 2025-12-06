@@ -2,6 +2,7 @@ import { isObject, type Mutable } from "@commontools/utils/types";
 import type { SchemaContext } from "@commontools/memory/interface";
 
 import type {
+  ActionFunction,
   AsCell,
   AsComparableCell,
   AsOpaqueCell,
@@ -234,6 +235,7 @@ export interface BuilderFunctionsAndConstants {
   // Module creation
   lift: LiftFunction;
   handler: HandlerFunction;
+  action: ActionFunction;
   derive: DeriveFunction;
   computed: ComputedFunction;
 
