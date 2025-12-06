@@ -5,6 +5,8 @@ import { fetchProgram } from "./fetch-program.ts";
 import { streamData } from "./stream-data.ts";
 import { generateObject, generateText, llm } from "./llm.ts";
 import { ifElse } from "./if-else.ts";
+import { when } from "./when.ts";
+import { unless } from "./unless.ts";
 import type { IRuntime } from "../runtime.ts";
 import { compileAndRun } from "./compile-and-run.ts";
 import { navigateTo } from "./navigate-to.ts";
@@ -29,6 +31,8 @@ export function registerBuiltins(runtime: IRuntime) {
   moduleRegistry.addModuleByRef("llm", raw(llm));
   moduleRegistry.addModuleByRef("llmDialog", raw(llmDialog));
   moduleRegistry.addModuleByRef("ifElse", raw(ifElse));
+  moduleRegistry.addModuleByRef("when", raw(when));
+  moduleRegistry.addModuleByRef("unless", raw(unless));
   moduleRegistry.addModuleByRef("compileAndRun", raw(compileAndRun));
   moduleRegistry.addModuleByRef(
     "generateObject",

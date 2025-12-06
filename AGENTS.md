@@ -52,3 +52,5 @@ If you are developing runtime code, read the following documentation:
   practices
 - `docs/common/UI_TESTING.md` - How to work with shadow dom in our integration
   tests
+- `docs/common/LOCAL_DEV_SERVERS.md` - **CRITICAL**: How to start local dev
+  servers correctly (use `dev-local` for shell, not `dev`)

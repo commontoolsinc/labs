@@ -25,6 +25,7 @@ export {
   inferReturnType,
   inferWidenedTypeFromExpression,
   isAnyOrUnknownType,
+  registerSyntheticCallType,
   typeToSchemaTypeNode,
   typeToTypeNode,
   unwrapOpaqueLikeType,

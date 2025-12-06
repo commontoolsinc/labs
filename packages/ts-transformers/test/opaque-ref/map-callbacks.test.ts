@@ -75,9 +75,22 @@ describe("OpaqueRef map callbacks", () => {
             } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)`,
     );
     // element[NAME] || defaultName should now use unless helper wrapping schema-based derive
+    // Note: unless now has schema arguments prepended, so derive is no longer immediately after unless(
     assertStringIncludes(
       output,
-      "__ctHelpers.unless(__ctHelpers.derive(",
+      "__ctHelpers.unless(",
+    );
+    // The derive call for the charm[NAME] condition is present within the unless call
+    // This specific pattern ensures the derive is for the unless condition, not another derive
+    assertStringIncludes(
+      output,
+      `__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    charm: true
+                },
+                required: ["charm"]
+            } as const satisfies __ctHelpers.JSONSchema`,
     );
     assertStringIncludes(
       output,

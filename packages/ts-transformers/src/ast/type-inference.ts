@@ -33,6 +33,47 @@ export function widenLiteralType(
   type: ts.Type,
   checker: ts.TypeChecker,
 ): ts.Type {
+  // Handle union types by widening each member and deduplicating
+  if (type.isUnion()) {
+    // Special case: pure boolean union (true | false) should remain as-is
+    // The schema generator has special handling to convert this to {type: "boolean"}
+    const isPureBooleanUnion = type.types.length === 2 &&
+      type.types.every((m) => (m.flags & ts.TypeFlags.BooleanLiteral) !== 0);
+    if (isPureBooleanUnion) {
+      return type;
+    }
+
+    const widenedMembers = type.types.map((member) =>
+      widenLiteralType(member, checker)
+    );
+
+    // Deduplicate by comparing type IDs (handles cases like string literals → string)
+    const seen = new Set<number>();
+    const unique: ts.Type[] = [];
+    for (const t of widenedMembers) {
+      // Use type identity to deduplicate
+      const id = (t as { id?: number }).id ?? -1;
+      if (!seen.has(id)) {
+        seen.add(id);
+        unique.push(t);
+      }
+    }
+
+    // If we reduced to a single type, return it directly
+    if (unique.length === 1) {
+      return unique[0]!;
+    }
+
+    // Otherwise create a new union from unique types
+    const getUnionType = (checker as ts.TypeChecker & {
+      getUnionType?: (types: readonly ts.Type[]) => ts.Type;
+    }).getUnionType;
+    if (getUnionType) {
+      return getUnionType(unique);
+    }
+    return type;
+  }
+
   // Number literal → number
   if (type.flags & ts.TypeFlags.NumberLiteral) {
     return checker.getNumberType();
@@ -347,8 +388,24 @@ export function registerDeriveCallType(
   }
 
   if (typeToRegister) {
-    typeRegistry.set(deriveCall, typeToRegister);
+    registerSyntheticCallType(deriveCall, typeToRegister, typeRegistry);
   }
+}
+
+/**
+ * Register the result type for a synthetic call (derive, ifElse, when, unless, etc.) in the TypeRegistry.
+ * This enables schema injection to find the correct result type for the call.
+ *
+ * @param call The synthetic call node
+ * @param resultType The result type to register
+ * @param typeRegistry The type registry to update
+ */
+export function registerSyntheticCallType(
+  call: ts.CallExpression,
+  resultType: ts.Type,
+  typeRegistry: WeakMap<ts.Node, ts.Type>,
+): void {
+  typeRegistry.set(call, resultType);
 }
 
 /**

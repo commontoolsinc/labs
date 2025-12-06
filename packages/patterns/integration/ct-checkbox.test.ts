@@ -1,9 +1,7 @@
-import { env } from "@commontools/integration";
-import { sleep } from "@commontools/utils/sleep";
+import { env, Page, waitFor } from "@commontools/integration";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
-import { assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
 import { CharmsController } from "@commontools/charm/ops";
 import { ANYONE_USER } from "@commontools/memory/acl";
@@ -66,50 +64,63 @@ testComponents.forEach(({ name, file }) => {
 
     it("should show disabled content initially", async () => {
       const page = shell.page();
-
-      const featureStatus = await page.waitForSelector("#feature-status", {
-        strategy: "pierce",
+      await waitFor(async () => {
+        const statusText = await getFeatureStatus(page);
+        return statusText === "⚠ Feature is disabled";
       });
-      const statusText = await featureStatus.evaluate((el: HTMLElement) =>
-        el.textContent
-      );
-      assertEquals(statusText?.trim(), "⚠ Feature is disabled");
     });
 
     it("should toggle to enabled content when checkbox is clicked", async () => {
       const page = shell.page();
 
-      const checkbox = await page.waitForSelector("ct-checkbox", {
-        strategy: "pierce",
+      await clickCtCheckbox(page);
+      await waitFor(async () => {
+        const statusText = await getFeatureStatus(page);
+        return statusText === "✓ Feature is enabled!";
       });
-      await checkbox.click();
-      await sleep(500);
-
-      const featureStatus = await page.$("#feature-status", {
-        strategy: "pierce",
-      });
-      const statusText = await featureStatus?.evaluate((el: HTMLElement) =>
-        el.textContent
-      );
-      assertEquals(statusText?.trim(), "✓ Feature is enabled!");
     });
 
     it("should toggle back to disabled content when checkbox is clicked again", async () => {
       const page = shell.page();
-
-      const checkbox = await page.$("ct-checkbox", {
-        strategy: "pierce",
+      await clickCtCheckbox(page);
+      await waitFor(async () => {
+        const statusText = await getFeatureStatus(page);
+        return statusText === "⚠ Feature is disabled";
       });
-      await checkbox?.click();
-      await sleep(1000);
-
-      const featureStatus = await page.$("#feature-status", {
-        strategy: "pierce",
-      });
-      const statusText = await featureStatus?.evaluate((el: HTMLElement) =>
-        el.textContent
-      );
-      assertEquals(statusText?.trim(), "⚠ Feature is disabled");
     });
   });
 });
+
+function clickCtCheckbox(page: Page) {
+  return waitFor(async () => {
+    const checkbox = await page.waitForSelector("ct-checkbox", {
+      strategy: "pierce",
+    });
+    // This could throw due to lacking a box model to click on.
+    // Catch in lieu of handling time sensitivity.
+    try {
+      await checkbox.click();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  });
+}
+
+async function getFeatureStatus(
+  page: Page,
+): Promise<string | undefined | null> {
+  const featureStatus = await page.waitForSelector("#feature-status", {
+    strategy: "pierce",
+  });
+  // This could throw due to lacking a box model to click on.
+  // Catch in lieu of handling time sensitivity.
+  try {
+    const statusText = await featureStatus.evaluate((el: HTMLElement) =>
+      el.textContent
+    );
+    return statusText?.trim();
+  } catch (_) {
+    return null;
+  }
+}

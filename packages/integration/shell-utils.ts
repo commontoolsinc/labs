@@ -54,11 +54,20 @@ export async function login(page: Page, identity: Identity): Promise<void> {
   );
 }
 
+export interface ShellIntegrationConfig {
+  pipeConsole?: boolean;
+}
+
 export class ShellIntegration {
   #browser?: Browser;
   #page?: Page;
   #exceptions: Array<string> = [];
   #errorLogs: Array<string> = [];
+  #config: ShellIntegrationConfig;
+
+  constructor(config: ShellIntegrationConfig = {}) {
+    this.#config = config;
+  }
 
   bindLifecycle() {
     beforeAll(this.#beforeAll);
@@ -161,7 +170,9 @@ export class ShellIntegration {
       if (e.detail.type === "error") {
         this.#errorLogs.push(e.detail.text);
       }
-      pipeConsole(e);
+      if (this.#config.pipeConsole) {
+        pipeConsole(e);
+      }
     });
     this.#page.addEventListener("dialog", dismissDialogs);
     this.#page.addEventListener("pageerror", (e: PageErrorEvent) => {

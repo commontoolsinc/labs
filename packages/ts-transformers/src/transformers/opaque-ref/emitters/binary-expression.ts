@@ -7,7 +7,10 @@ import {
   filterRelevantDataFlows,
 } from "../helpers.ts";
 import { createUnlessCall, createWhenCall } from "../../builtins/ifelse.ts";
-import { selectDataFlowsReferencedIn } from "../../../ast/mod.ts";
+import {
+  registerSyntheticCallType,
+  selectDataFlowsReferencedIn,
+} from "../../../ast/mod.ts";
 import { isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 
 export const emitBinaryExpression: Emitter = ({
@@ -50,12 +53,25 @@ export const emitBinaryExpression: Emitter = ({
       // Create when(predicate, value)
       // This is equivalent to: ifElse(predicate, value, predicate)
       // Preserves && semantics where falsy values are returned as-is
-      return createWhenCall({
+      const whenCall = createWhenCall({
         condition: predicate,
         value,
         factory: context.factory,
         ctHelpers: context.ctHelpers,
       });
+
+      // Register the result type for schema injection
+      // The result type is the union of condition and value types (from the original && expression)
+      if (context.options.typeRegistry) {
+        const resultType = context.checker.getTypeAtLocation(expression);
+        registerSyntheticCallType(
+          whenCall,
+          resultType,
+          context.options.typeRegistry,
+        );
+      }
+
+      return whenCall;
     }
   }
 
@@ -89,12 +105,25 @@ export const emitBinaryExpression: Emitter = ({
       // Create unless(condition, value)
       // This is equivalent to: ifElse(condition, condition, value)
       // Preserves || semantics where truthy values are returned as-is
-      return createUnlessCall({
+      const unlessCall = createUnlessCall({
         condition,
         value,
         factory: context.factory,
         ctHelpers: context.ctHelpers,
       });
+
+      // Register the result type for schema injection
+      // The result type is the union of condition and fallback types (from the original || expression)
+      if (context.options.typeRegistry) {
+        const resultType = context.checker.getTypeAtLocation(expression);
+        registerSyntheticCallType(
+          unlessCall,
+          resultType,
+          context.options.typeRegistry,
+        );
+      }
+
+      return unlessCall;
     }
   }
 
