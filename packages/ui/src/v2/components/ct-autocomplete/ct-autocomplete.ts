@@ -676,10 +676,11 @@ export class CTAutocomplete extends BaseElement {
         break;
 
       case "Enter":
-        e.preventDefault();
         if (this._isOpen) {
+          e.preventDefault();
           this._selectHighlighted();
         }
+        // If dropdown is closed, don't prevent default - allow form submission
         break;
 
       case "Escape":
