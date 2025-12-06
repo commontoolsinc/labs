@@ -86,5 +86,7 @@ export function stream<T>(
   schema?: JSONSchema,
 ): Stream<T> {
   // The runtime creates a Stream cell, but opaqueRefWithCell is typed to return OpaqueRef
-  return opaqueRefWithCell<T>(undefined, schema, "stream") as unknown as Stream<T>;
+  return opaqueRefWithCell<T>(undefined, schema, "stream") as unknown as Stream<
+    T
+  >;
 }
