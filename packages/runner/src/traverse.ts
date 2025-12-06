@@ -122,6 +122,17 @@ export const MinimalSchemaSelector = {
   schemaContext: { schema: false, rootSchema: false },
 } as const;
 
+/**
+ * Check if we crossed document boundaries (cross-document link)
+ * vs intra-document reference ($alias stays in same doc)
+ */
+function isCrossDocumentLink(
+  sourceDoc: IAttestation,
+  targetDoc: IAttestation,
+): boolean {
+  return targetDoc.address.id !== sourceDoc.address.id;
+}
+
 export class CycleTracker<K> {
   private partial: Set<K>;
   private expectCycles: boolean;
@@ -150,51 +161,160 @@ export class CycleTracker<K> {
 }
 
 /**
- * Cycle tracker for more complex objects with multiple parts.
+ * Cycle tracker using object identity for memoization.
  *
- * This will not work correctly if the key is modified after being added.
+ * Uses a two-tier tracking strategy:
+ * 1. WeakMap for cycle detection (inProgress) - uses object identity
+ * 2. WeakMap for result caching (completed) - stores result REFERENCES
  *
- * This will do an identity check on the partial key and a deepEqual check on
- * the ExtraKey.
+ * Memory efficient because:
+ * - WeakMap keys are object references (auto garbage collected)
+ * - Cached results are references to existing objects, not copies
+ * - Schema keys are cached to avoid repeated JSON.stringify calls
  */
+
+/**
+ * Extended Disposable that can cache traversal results.
+ * Used to return either a cached result or a way to cache a new result.
+ */
+interface DisposableWithCache extends Disposable {
+  cached?: unknown;
+  setCachedResult?: (result: unknown) => void;
+}
+
 export class CompoundCycleTracker<PartialKey, ExtraKey> {
-  private partial: Map<PartialKey, ExtraKey[]>;
-  constructor() {
-    this.partial = new Map<PartialKey, ExtraKey[]>();
+  // Track objects currently being traversed (for cycle detection)
+  // Key: input object, Value: schema context (for cycle detection with same schema)
+  private inProgress = new WeakMap<object, Set<string>>();
+  // Cache completed traversals: input object + schema -> result reference
+  private completed = new WeakMap<object, Map<string, unknown>>();
+  // Cache stringified schema keys to avoid duplicate strings
+  private schemaKeyCache = new WeakMap<object, string>();
+
+  // Get or create a cached schema key string
+  private getSchemaKey(schema: ExtraKey): string {
+    if (typeof schema === "object" && schema !== null) {
+      const cached = this.schemaKeyCache.get(schema as object);
+      if (cached !== undefined) return cached;
+
+      const key = JSON.stringify(schema);
+      this.schemaKeyCache.set(schema as object, key);
+      return key;
+    }
+    return JSON.stringify(schema);
   }
+
   include(
     partialKey: PartialKey,
-    extraKey: ExtraKey,
-    context?: unknown,
-  ): Disposable | null {
-    let existing = this.partial.get(partialKey);
-    if (existing === undefined) {
-      existing = [];
-      this.partial.set(partialKey, existing);
+    _extraKey: ExtraKey,
+    _context?: unknown,
+  ): DisposableWithCache | null {
+    // Only cache objects (primitives don't need caching - they're cheap)
+    if (typeof partialKey !== "object" || partialKey === null) {
+      return { [Symbol.dispose]: () => {} };
     }
-    if (existing.some((item) => deepEqual(item, extraKey))) {
-      return null;
+
+    const obj = partialKey as object;
+    const schemaKey = this.getSchemaKey(_extraKey);
+
+    // Check completed cache - return cached result reference
+    const completedSchemas = this.completed.get(obj);
+    if (completedSchemas?.has(schemaKey)) {
+      const cached = completedSchemas.get(schemaKey);
+      return { cached, [Symbol.dispose]: () => {} };
     }
-    existing.push(extraKey);
+
+    // Check in-progress (cycle detection)
+    const inProgressSchemas = this.inProgress.get(obj);
+    if (inProgressSchemas?.has(schemaKey)) {
+      return null; // Cycle detected
+    }
+
+    // First visit - mark as in-progress
+    if (!this.inProgress.has(obj)) {
+      this.inProgress.set(obj, new Set());
+    }
+    this.inProgress.get(obj)!.add(schemaKey);
+
     return {
+      setCachedResult: (result: unknown) => {
+        // Cache the result REFERENCE (not a copy)
+        if (!this.completed.has(obj)) {
+          this.completed.set(obj, new Map());
+        }
+        this.completed.get(obj)!.set(schemaKey, result);
+      },
       [Symbol.dispose]: () => {
-        const entries = this.partial.get(partialKey)!;
-        const index = entries.indexOf(extraKey);
-        if (index === -1) {
-          logger.error("traverse-error", () => [
-            "Failed to dispose of missing key",
-            extraKey,
-            context,
-          ]);
-          return;
-        }
-        if (entries.length === 0) {
-          this.partial.delete(partialKey);
-        } else {
-          entries.splice(index, 1);
-        }
+        this.inProgress.get(obj)?.delete(schemaKey);
       },
     };
+  }
+
+  /**
+   * Check if we've already traversed this document.
+   * Uses string key for cross-document tracking.
+   */
+  includeDocument(
+    docId: string,
+    path: readonly string[],
+    _schemaContext: unknown,
+  ): { setCachedResult: (result: unknown) => void; cached?: unknown } | null {
+    // For cycle detection, we only need doc+path - schema doesn't matter
+    // If we're currently traversing this doc+path, don't start again
+    const key = `${docId}|${path.join("/")}`;
+    return this.includeWithStringKey(key);
+  }
+
+  // String-keyed tracking for cross-document links
+  // Tracks both in-progress (for cycle detection) and completed (for memoization)
+  private stringKeyInProgress = new Set<string>();
+  private stringKeyCompleted = new Map<string, unknown>();
+
+  private includeWithStringKey(
+    key: string,
+  ): { setCachedResult: (result: unknown) => void; cached?: unknown } | null {
+    // Check completed cache first - return cached result
+    if (this.stringKeyCompleted.has(key)) {
+      return {
+        cached: this.stringKeyCompleted.get(key),
+        setCachedResult: () => {}, // No-op for completed
+      };
+    }
+
+    // Check in-progress (cycle detection)
+    if (this.stringKeyInProgress.has(key)) {
+      return null; // Cycle
+    }
+
+    // First visit - mark in-progress
+    this.stringKeyInProgress.add(key);
+
+    return {
+      setCachedResult: (result: unknown) => {
+        this.stringKeyInProgress.delete(key);
+        this.stringKeyCompleted.set(key, result); // Cache the result
+      },
+    };
+  }
+
+  private makeKey(
+    partialKey: PartialKey,
+    extraKey: ExtraKey,
+    context: unknown,
+  ): string {
+    // Use address from context for stable key (context is IAttestation)
+    const ctx = context as
+      | { address?: { id: string; type: string; path: readonly string[] } }
+      | undefined;
+    if (ctx?.address) {
+      const addr = ctx.address;
+      // Key format: docId|docType|path|schemaContext
+      return `${addr.id}|${addr.type}|${addr.path.join("/")}|${
+        JSON.stringify(extraKey)
+      }`;
+    }
+    // Fallback to JSON serialization if no address available
+    return JSON.stringify([partialKey, extraKey]);
   }
 }
 
@@ -298,7 +418,11 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
       if (t === null) {
         return null;
       }
-      return doc.value.map((item, index) =>
+      // Return cached result if available
+      if ("cached" in t) {
+        return t.cached as Immutable<JSONValue>;
+      }
+      const result = doc.value.map((item, index) =>
         this.traverseDAG(
           {
             ...doc,
@@ -312,6 +436,11 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
           schemaTracker,
         )
       ) as Immutable<JSONValue>[];
+      // Cache the result reference
+      if ("setCachedResult" in t && t.setCachedResult) {
+        t.setCachedResult(result);
+      }
+      return result;
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isAnyCellLink(doc.value)) {
@@ -327,13 +456,38 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
         if (newDoc.value === undefined) {
           return null;
         }
+
+        if (isCrossDocumentLink(doc, newDoc)) {
+          // Use document-level tracking to avoid diamond problem
+          const tracker_result = tracker.includeDocument(
+            newDoc.address.id,
+            newDoc.address.path,
+            SchemaAll,
+          );
+          if (tracker_result === null) {
+            return null; // cycle detected
+          }
+          // Return cached result if available
+          if ("cached" in tracker_result) {
+            return tracker_result.cached as Immutable<JSONValue>;
+          }
+          // First visit - traverse and mark complete
+          const result = this.traverseDAG(newDoc, tracker, schemaTracker);
+          tracker_result.setCachedResult(result);
+          return result;
+        }
+        // Intra-document reference ($alias) - always re-traverse
         return this.traverseDAG(newDoc, tracker, schemaTracker);
       } else {
         using t = tracker.include(doc.value, SchemaAll, doc);
         if (t === null) {
           return null;
         }
-        return Object.fromEntries(
+        // Return cached result if available
+        if ("cached" in t) {
+          return t.cached as Immutable<JSONValue>;
+        }
+        const result = Object.fromEntries(
           Object.entries(doc.value as JSONObject).map(([k, value]) => [
             k,
             this.traverseDAG(
@@ -347,6 +501,11 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
             ),
           ]),
         ) as Immutable<JSONValue>;
+        // Cache the result reference
+        if ("setCachedResult" in t && t.setCachedResult) {
+          t.setCachedResult(result);
+        }
+        return result;
       }
     } else {
       logger.error(
@@ -997,6 +1156,28 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
     if (t === null) {
       return null;
     }
+
+    if (isCrossDocumentLink(doc, newDoc)) {
+      // Use document-level tracking to avoid diamond problem
+      const tracker_result = this.tracker.includeDocument(
+        newDoc.address.id,
+        newDoc.address.path,
+        newSelector?.schemaContext,
+      );
+      if (tracker_result === null) {
+        return null; // cycle detected
+      }
+      // Return cached result if available
+      if ("cached" in tracker_result) {
+        return tracker_result.cached as Immutable<JSONValue>;
+      }
+      // First visit - traverse and mark complete
+      const result = this.traverseWithSelector(newDoc, newSelector!);
+      tracker_result.setCachedResult(result);
+      return result;
+    }
+
+    // Intra-document reference ($alias) - always re-traverse
     return this.traverseWithSelector(newDoc, newSelector!);
   }
 }
