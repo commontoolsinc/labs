@@ -198,13 +198,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             required: ["user"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().age > 18), __ctHelpers.unless({
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().age > 18), __ctHelpers.derive({
             type: "object",
             properties: {
                 user: {
@@ -224,21 +218,11 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             required: ["user"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name), "Anonymous Adult"))}</span>
+        } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name || "Anonymous Adult"))}</span>
 
         {/* Complex: (a && b) || (c && d) */}
         <span>
-          {__ctHelpers.unless({
-            anyOf: [{
-                    type: "string"
-                }, {
-                    type: "boolean"
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+          {__ctHelpers.derive({
             type: "object",
             properties: {
                 user: {
@@ -257,14 +241,10 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             },
             required: ["user"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "string"
-                }, {
-                    type: "boolean",
-                    "enum": [false]
-                }]
+            type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { user: user }, ({ user }) => (user.get().name.length > 0 && `Hello ${user.get().name}`) ||
-            (user.get().age > 0 && `Age: ${user.get().age}`)), "Unknown user")}
+            (user.get().age > 0 && `Age: ${user.get().age}`) ||
+            "Unknown user")}
         </span>
       </div>),
     };
