@@ -883,7 +883,8 @@ export class XDebuggerView extends LitElement {
     if (!this.searchText) return true;
 
     const searchLower = this.searchText.toLowerCase();
-    const markerStr = JSON.stringify(marker).toLowerCase();
+    // Use truncated stringify to avoid serializing huge objects on every search
+    const markerStr = this.safeJsonStringify(marker, 5000).toLowerCase();
     return markerStr.includes(searchLower);
   }
 
@@ -1027,7 +1028,7 @@ export class XDebuggerView extends LitElement {
                 ? value.toString()
                 : typeof value === "number"
                 ? value.toString()
-                : JSON.stringify(value)}</span>
+                : this.safeJsonStringify(value, 100)}</span>
             </div>
           `);
         }
@@ -1046,11 +1047,86 @@ export class XDebuggerView extends LitElement {
     }
 
     // For objects/arrays, truncate JSON representation
-    const json = JSON.stringify(value);
-    if (json.length > 60) {
-      return json.slice(0, 57) + "...";
-    }
+    const json = this.safeJsonStringify(value, 60);
     return json;
+  }
+
+  /**
+   * Safely stringify a value with size limits to prevent context blowout.
+   * Truncates large strings, arrays, and objects.
+   */
+  private safeJsonStringify(
+    value: unknown,
+    maxLength: number,
+    indent?: number,
+  ): string {
+    const truncatedValue = this.truncateValue(value, 3); // Max depth 3
+    try {
+      const json = JSON.stringify(truncatedValue, null, indent);
+      if (json.length > maxLength) {
+        return json.slice(0, maxLength - 3) + "...";
+      }
+      return json;
+    } catch {
+      return "[Unable to serialize]";
+    }
+  }
+
+  /**
+   * Recursively truncate a value to prevent huge objects from being serialized.
+   * Replaces functions, large strings, large arrays, and deep objects with summaries.
+   */
+  private truncateValue(value: unknown, maxDepth: number): unknown {
+    if (maxDepth <= 0) {
+      return "[...]";
+    }
+
+    if (value === null || value === undefined) {
+      return value;
+    }
+
+    if (typeof value === "function") {
+      return `[Function: ${value.name || "anonymous"}]`;
+    }
+
+    if (typeof value === "string") {
+      if (value.length > 200) {
+        return value.slice(0, 197) + "...";
+      }
+      return value;
+    }
+
+    if (typeof value === "number" || typeof value === "boolean") {
+      return value;
+    }
+
+    if (Array.isArray(value)) {
+      if (value.length > 10) {
+        return [
+          ...value.slice(0, 5).map((v) => this.truncateValue(v, maxDepth - 1)),
+          `[... ${value.length - 5} more items]`,
+        ];
+      }
+      return value.map((v) => this.truncateValue(v, maxDepth - 1));
+    }
+
+    if (typeof value === "object") {
+      const obj = value as Record<string, unknown>;
+      const keys = Object.keys(obj);
+
+      // Skip huge objects entirely (likely cell values or function metadata)
+      if (keys.length > 20) {
+        return `[Object with ${keys.length} keys]`;
+      }
+
+      const result: Record<string, unknown> = {};
+      for (const key of keys) {
+        result[key] = this.truncateValue(obj[key], maxDepth - 1);
+      }
+      return result;
+    }
+
+    return String(value);
   }
 
   private getCellLabel(
@@ -1190,15 +1266,16 @@ export class XDebuggerView extends LitElement {
                       <button
                         type="button"
                         class="json-control-btn"
+                        title="Copy full untruncated JSON to clipboard"
                         @click="${(e: Event) => {
                           e.stopPropagation();
                           this.copyJson(marker);
                         }}"
                       >
-                        Copy
+                        Copy Full
                       </button>
                     </div>
-                    <pre>${JSON.stringify(marker, null, 2)}</pre>
+                    <pre>${this.safeJsonStringify(marker, 10000, 2)}</pre>
                   </div>
                 `
                 : ""}
