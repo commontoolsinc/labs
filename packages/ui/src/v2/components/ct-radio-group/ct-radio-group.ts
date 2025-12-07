@@ -1,49 +1,60 @@
 /**
  * @component ct-radio-group
- * @description Container for managing multiple radio buttons with keyboard navigation support
+ * @description Container for managing multiple radio buttons with keyboard navigation support.
+ * Supports both declarative items array and slotted ct-radio elements.
  *
  * @tag ct-radio-group
  *
- * @attribute {string} name - The name for all radio buttons in the group (required)
+ * @attribute {string} name - The name for all radio buttons in the group
  * @attribute {string} value - The currently selected radio button value
  * @attribute {boolean} disabled - Whether all radio buttons in the group are disabled
+ * @attribute {string} orientation - Layout orientation: "vertical" (default) or "horizontal"
+ *
+ * @property {RadioItem[]} items - Array of items to render as radio buttons (alternative to slotted ct-radio elements)
+ * @property {Cell<unknown>|unknown} value - Selected value - supports both Cell and plain values for bidirectional binding
  *
  * @event {CustomEvent} ct-change - Fired when the selected radio changes
  * @event-detail {Object} detail - Event detail object
- * @event-detail {string} detail.value - The value of the newly selected radio
+ * @event-detail {unknown} detail.value - The value of the newly selected radio
  *
- * @slot default - Container for ct-radio elements
+ * @slot default - Container for ct-radio elements (used when items prop is not provided)
  *
  * @csspart group - The radio group container element
+ * @csspart item - Individual radio item container (when using items prop)
+ * @csspart radio - The radio button element (when using items prop)
+ * @csspart label - The label element (when using items prop)
  *
  * @example
  * ```html
- * <!-- Basic radio group -->
+ * <!-- Simple usage with items array (recommended) -->
+ * <ct-radio-group
+ *   items='[{"label":"Small","value":"small"},{"label":"Medium","value":"medium"},{"label":"Large","value":"large"}]'
+ *   value="medium"
+ * ></ct-radio-group>
+ *
+ * <!-- With bidirectional binding in patterns -->
+ * <ct-radio-group
+ *   $value={selectedSize}
+ *   .items=${[
+ *     { label: "Small", value: "small" },
+ *     { label: "Medium", value: "medium" },
+ *     { label: "Large", value: "large" },
+ *   ]}
+ *   orientation="horizontal"
+ * />
+ *
+ * <!-- Using slotted ct-radio elements (for custom rendering) -->
  * <ct-radio-group name="size" value="medium">
  *   <ct-radio value="small">Small</ct-radio>
  *   <ct-radio value="medium">Medium</ct-radio>
  *   <ct-radio value="large">Large</ct-radio>
  * </ct-radio-group>
- *
- * <!-- Disabled radio group -->
- * <ct-radio-group name="options" disabled>
- *   <ct-radio value="option1">Option 1</ct-radio>
- *   <ct-radio value="option2">Option 2</ct-radio>
- * </ct-radio-group>
- *
- * <!-- Listen for changes -->
- * <script>
- *   const radioGroup = document.querySelector('ct-radio-group');
- *   radioGroup.addEventListener('ct-change', (e) => {
- *     console.log('Selected:', e.detail.value);
- *   });
- * </script>
  * ```
  *
  * @accessibility
  * - Uses role="radiogroup" for proper screen reader support
- * - Keyboard navigation with arrow keys (Up/Down, Left/Right)
- * - Manages focus and selection state for child radio buttons
+ * - Keyboard navigation with arrow keys (Up/Down for vertical, Left/Right for horizontal)
+ * - Manages focus and selection state for radio buttons
  * - Automatically assigns group name to child radios if not specified
  *
  * @methods
@@ -52,28 +63,82 @@
  * - clear() - Clear the selection
  */
 
-import { html, PropertyValues, unsafeCSS } from "lit";
+import { html, nothing, PropertyValues, unsafeCSS } from "lit";
+import { property } from "lit/decorators.js";
+import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import { radioGroupStyles } from "./styles.ts";
+import { type Cell, areLinksSame } from "@commontools/runner";
+import { createCellController } from "../../core/cell-controller.ts";
+import {
+  applyThemeToElement,
+  type CTTheme,
+  defaultTheme,
+  themeContext,
+} from "../theme-context.ts";
+
+/**
+ * Represents a single radio option item
+ */
+export interface RadioItem {
+  /** Text shown to the user */
+  label: string;
+  /** Value returned when this option is selected */
+  value: unknown;
+  /** Disabled state for this option */
+  disabled?: boolean;
+}
+
+export type RadioGroupOrientation = "vertical" | "horizontal";
 
 export class CTRadioGroup extends BaseElement {
   static override styles = unsafeCSS(radioGroupStyles);
 
+  /* ---------- Cell controller for value binding ---------- */
+  private _cellController = createCellController<unknown>(this, {
+    timing: { strategy: "immediate" }, // Radio changes should be immediate
+    onChange: (newValue, oldValue) => {
+      // Sync selection to DOM (for slotted radios)
+      this.updateRadioSelection();
+
+      // Emit change events
+      this.emit("ct-change", {
+        value: newValue,
+        oldValue,
+        items: this.items,
+      });
+
+      this.emit("change", {
+        value: newValue,
+        oldValue,
+        items: this.items,
+      });
+    },
+  });
+
   static override properties = {
     name: { type: String },
-    value: { type: String },
     disabled: { type: Boolean, reflect: true },
+    orientation: { type: String, reflect: true },
+
+    // Non-attribute properties
+    items: { attribute: false },
+    value: { attribute: false },
   };
 
   declare name: string;
-  declare value: string;
   declare disabled: boolean;
+  declare orientation: RadioGroupOrientation;
+  declare items: RadioItem[];
+  declare value: Cell<unknown> | unknown;
 
   constructor() {
     super();
     this.name = "";
-    this.value = "";
     this.disabled = false;
+    this.orientation = "vertical";
+    this.items = [];
+    this.value = undefined;
   }
 
   override connectedCallback() {
@@ -81,7 +146,7 @@ export class CTRadioGroup extends BaseElement {
     // Set ARIA attributes
     this.setAttribute("role", "radiogroup");
 
-    // Add event listeners
+    // Add event listeners for slotted ct-radio elements
     this.addEventListener("radio-click", this.handleRadioClick);
     this.addEventListener("keydown", this.handleKeydown);
   }
@@ -93,35 +158,146 @@ export class CTRadioGroup extends BaseElement {
     this.removeEventListener("keydown", this.handleKeydown);
   }
 
+  // Theme consumption
+  @consume({ context: themeContext, subscribe: true })
+  @property({ attribute: false })
+  declare theme?: CTTheme;
+
   override firstUpdated() {
+    // Initialize cell controller binding
+    this._cellController.bind(this.value);
+
+    // Update slotted radios if present
     this.updateRadioNames();
     this.updateRadioSelection();
     this.updateRadioDisabled();
+
+    // Apply theme on first render
+    applyThemeToElement(this, this.theme ?? defaultTheme);
+  }
+
+  override willUpdate(changedProperties: Map<string, unknown>) {
+    super.willUpdate(changedProperties);
+
+    // If the value property itself changed (e.g., switched to a different cell)
+    if (changedProperties.has("value")) {
+      this._cellController.bind(this.value);
+    }
   }
 
   override updated(changedProperties: PropertyValues) {
     if (changedProperties.has("name")) {
       this.updateRadioNames();
     }
-    if (changedProperties.has("value")) {
-      const oldValue = changedProperties.get("value") as string;
+    if (changedProperties.has("value") || changedProperties.has("items")) {
       this.updateRadioSelection();
-      if (oldValue !== this.value) {
-        this.emit("ct-change", { value: this.value });
-      }
     }
     if (changedProperties.has("disabled")) {
       this.updateRadioDisabled();
     }
+    if (changedProperties.has("theme")) {
+      applyThemeToElement(this, this.theme ?? defaultTheme);
+    }
   }
 
   override render() {
+    // If items are provided, render them directly
+    if (this.items && this.items.length > 0) {
+      return html`
+        <div class="radio-group" part="group">
+          ${this.items.map((item, index) => this._renderItem(item, index))}
+        </div>
+      `;
+    }
+
+    // Otherwise, use slot for ct-radio children
     return html`
       <div class="radio-group" part="group">
         <slot @slotchange="${this.handleSlotChange}"></slot>
       </div>
     `;
   }
+
+  private _renderItem(item: RadioItem, index: number) {
+    const currentValue = this.getCurrentValue();
+    const isChecked = areLinksSame(currentValue, item.value);
+    const isDisabled = this.disabled || item.disabled;
+    const itemId = `radio-${this.name || "group"}-${index}`;
+
+    return html`
+      <label
+        class="radio-item ${isChecked ? "checked" : ""} ${isDisabled ? "disabled" : ""}"
+        part="item"
+        for="${itemId}"
+      >
+        <input
+          type="radio"
+          id="${itemId}"
+          name="${this.name || `radio-group-${this._uniqueId}`}"
+          .checked="${isChecked}"
+          ?disabled="${isDisabled}"
+          @change="${() => this._handleItemChange(item)}"
+          @keydown="${this._handleItemKeydown}"
+          part="radio"
+        />
+        <span class="radio-indicator" part="indicator">
+          <span class="radio-dot"></span>
+        </span>
+        <span class="radio-label" part="label">${item.label}</span>
+      </label>
+    `;
+  }
+
+  private _uniqueId = Math.random().toString(36).substring(2, 9);
+
+  private _handleItemChange(item: RadioItem) {
+    if (this.disabled || item.disabled) return;
+    this._cellController.setValue(item.value);
+  }
+
+  private _handleItemKeydown = (event: KeyboardEvent) => {
+    const inputs = Array.from(
+      this.shadowRoot?.querySelectorAll('input[type="radio"]') || [],
+    ) as HTMLInputElement[];
+    const enabledInputs = inputs.filter((input) => !input.disabled);
+
+    if (enabledInputs.length === 0) return;
+
+    const currentIndex = enabledInputs.findIndex(
+      (input) => input === event.target,
+    );
+    let nextIndex = currentIndex;
+
+    const isHorizontal = this.orientation === "horizontal";
+    const nextKey = isHorizontal ? "ArrowRight" : "ArrowDown";
+    const prevKey = isHorizontal ? "ArrowLeft" : "ArrowUp";
+
+    switch (event.key) {
+      case nextKey:
+      case (isHorizontal ? "ArrowDown" : "ArrowRight"):
+        event.preventDefault();
+        nextIndex =
+          currentIndex === -1 ? 0 : (currentIndex + 1) % enabledInputs.length;
+        break;
+      case prevKey:
+      case (isHorizontal ? "ArrowUp" : "ArrowLeft"):
+        event.preventDefault();
+        nextIndex =
+          currentIndex === -1
+            ? enabledInputs.length - 1
+            : (currentIndex - 1 + enabledInputs.length) % enabledInputs.length;
+        break;
+      default:
+        return;
+    }
+
+    // Focus and select the next radio
+    const nextInput = enabledInputs[nextIndex];
+    if (nextInput) {
+      nextInput.focus();
+      nextInput.click();
+    }
+  };
 
   private handleSlotChange = () => {
     this.updateRadioNames();
@@ -146,9 +322,12 @@ export class CTRadioGroup extends BaseElement {
 
   private updateRadioSelection(): void {
     const radios = this.getRadios();
+    const currentValue = this.getCurrentValue();
+
     radios.forEach((radio) => {
       const radioValue = radio.getAttribute("value");
-      if (radioValue === this.value) {
+      const isSelected = areLinksSame(radioValue, currentValue);
+      if (isSelected) {
         radio.setAttribute("checked", "");
         (radio as any).checked = true;
       } else {
@@ -176,37 +355,44 @@ export class CTRadioGroup extends BaseElement {
     const radio = customEvent.detail.radio;
 
     if (radio && radio.getAttribute("value")) {
-      this.value = radio.getAttribute("value");
+      this._cellController.setValue(radio.getAttribute("value"));
     }
   };
 
   private handleKeydown = (event: KeyboardEvent): void => {
+    // Only handle for slotted radios
+    if (this.items && this.items.length > 0) return;
+
     const radios = Array.from(this.getRadios()) as HTMLElement[];
-    const enabledRadios = radios.filter((radio) =>
-      !radio.hasAttribute("disabled")
+    const enabledRadios = radios.filter(
+      (radio) => !radio.hasAttribute("disabled"),
     );
 
     if (enabledRadios.length === 0) return;
 
-    const currentIndex = enabledRadios.findIndex((radio) =>
-      radio === document.activeElement
+    const currentIndex = enabledRadios.findIndex(
+      (radio) => radio === document.activeElement,
     );
     let nextIndex = currentIndex;
 
+    const isHorizontal = this.orientation === "horizontal";
+    const nextKey = isHorizontal ? "ArrowRight" : "ArrowDown";
+    const prevKey = isHorizontal ? "ArrowLeft" : "ArrowUp";
+
     switch (event.key) {
-      case "ArrowDown":
-      case "ArrowRight":
+      case nextKey:
+      case (isHorizontal ? "ArrowDown" : "ArrowRight"):
         event.preventDefault();
-        nextIndex = currentIndex === -1
-          ? 0
-          : (currentIndex + 1) % enabledRadios.length;
+        nextIndex =
+          currentIndex === -1 ? 0 : (currentIndex + 1) % enabledRadios.length;
         break;
-      case "ArrowUp":
-      case "ArrowLeft":
+      case prevKey:
+      case (isHorizontal ? "ArrowUp" : "ArrowLeft"):
         event.preventDefault();
-        nextIndex = currentIndex === -1
-          ? enabledRadios.length - 1
-          : (currentIndex - 1 + enabledRadios.length) % enabledRadios.length;
+        nextIndex =
+          currentIndex === -1
+            ? enabledRadios.length - 1
+            : (currentIndex - 1 + enabledRadios.length) % enabledRadios.length;
         break;
       default:
         return;
@@ -222,24 +408,31 @@ export class CTRadioGroup extends BaseElement {
   };
 
   /**
+   * Get the current value from the cell controller
+   */
+  private getCurrentValue(): unknown {
+    return this._cellController.getValue();
+  }
+
+  /**
    * Get the currently selected radio value
    */
-  getValue(): string {
-    return this.value;
+  getValue(): unknown {
+    return this.getCurrentValue();
   }
 
   /**
    * Set the selected radio by value
    */
-  setValue(value: string): void {
-    this.value = value;
+  setValue(value: unknown): void {
+    this._cellController.setValue(value);
   }
 
   /**
    * Clear the selection
    */
   clear(): void {
-    this.value = "";
+    this._cellController.setValue(undefined);
   }
 }
 
