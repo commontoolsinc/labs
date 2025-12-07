@@ -1,4 +1,5 @@
 import {
+  type HashtagQuery,
   type VNode,
   type WishParams,
   type WishState,
@@ -74,6 +75,37 @@ type ParsedWishTarget = {
   key: "/" | WishTag;
   path: string[];
 };
+
+type ParsedHashtagQuery = {
+  tags: WishTag[];
+  mode: "and" | "or";
+  path: string[];
+};
+
+/**
+ * Type guard to check if a query is a HashtagQuery object
+ */
+function isHashtagQuery(query: unknown): query is HashtagQuery {
+  if (typeof query !== "object" || query === null) return false;
+  const q = query as Record<string, unknown>;
+  if ("and" in q && Array.isArray(q.and)) return true;
+  if ("or" in q && Array.isArray(q.or)) return true;
+  return false;
+}
+
+/**
+ * Parse a HashtagQuery into tags array and mode
+ */
+function parseHashtagQuery(
+  query: HashtagQuery,
+  path?: string[],
+): ParsedHashtagQuery {
+  if ("and" in query) {
+    return { tags: query.and, mode: "and", path: path ?? [] };
+  } else {
+    return { tags: query.or, mode: "or", path: path ?? [] };
+  }
+}
 
 function parseWishTarget(target: string): ParsedWishTarget {
   const trimmed = target.trim();
@@ -261,6 +293,60 @@ function resolveBase(
   }
 }
 
+/**
+ * Resolve a HashtagQuery (AND/OR of multiple tags) against favorites.
+ */
+function resolveHashtagQuery(
+  parsed: ParsedHashtagQuery,
+  ctx: WishContext,
+): BaseResolution[] {
+  const userDID = ctx.runtime.userIdentityDID;
+  if (!userDID) {
+    throw new WishError(
+      "User identity DID not available for favorites search",
+    );
+  }
+
+  const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+  const favoritesCell = homeSpaceCell.key("favorites").asSchema(
+    favoriteListSchema,
+  );
+  const favorites = favoritesCell.get() || [];
+
+  // Normalize search terms to lowercase
+  const searchTerms = parsed.tags.map((t) => t.toLowerCase());
+
+  // Filter favorites based on AND/OR mode
+  const matches = favorites.filter((entry) => {
+    // Extract all hashtags from the tag field
+    const hashtags = new Set(
+      [...(entry.tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [])].map(
+        (m) => m[0],
+      ),
+    );
+
+    if (parsed.mode === "and") {
+      // AND: ALL search terms must be present
+      return searchTerms.every((term) => hashtags.has(term));
+    } else {
+      // OR: ANY search term must be present
+      return searchTerms.some((term) => hashtags.has(term));
+    }
+  });
+
+  if (matches.length === 0) {
+    const modeLabel = parsed.mode.toUpperCase();
+    throw new WishError(
+      `No favorite found matching ${modeLabel}(${searchTerms.join(", ")})`,
+    );
+  }
+
+  return matches.map((match) => ({
+    cell: match.cell,
+    pathPrefix: parsed.path,
+  }));
+}
+
 // fetchWishPattern runs at runtime scope, shared across all wish invocations
 let wishPatternFetchPromise: Promise<Recipe | undefined> | undefined;
 let wishPattern: Recipe | undefined;
@@ -407,8 +493,50 @@ export function wish(
         return;
       }
 
+      // Handle HashtagQuery objects ({ and: [...] } or { or: [...] })
+      if (isHashtagQuery(query)) {
+        try {
+          const parsed = parseHashtagQuery(query, path);
+          const ctx: WishContext = { runtime, tx, parentCell };
+          const baseResolutions = resolveHashtagQuery(parsed, ctx);
+          const resultCells = baseResolutions.map((baseResolution) => {
+            const combinedPath = baseResolution.pathPrefix
+              ? [...baseResolution.pathPrefix, ...(path ?? [])]
+              : path ?? [];
+            const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
+            return schema ? resolvedCell.asSchema(schema) : resolvedCell;
+          });
+          if (resultCells.length === 1) {
+            sendResult(tx, {
+              result: resultCells[0],
+              [UI]: cellLinkUI(resultCells[0]),
+            });
+          } else {
+            sendResult(
+              tx,
+              launchWishPattern({
+                ...targetValue as WishParams,
+                candidates: resultCells,
+              }, tx),
+            );
+          }
+        } catch (e) {
+          const errorMsg = e instanceof WishError ? e.message : String(e);
+          sendResult(
+            tx,
+            { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<
+              any
+            >,
+          );
+        }
+        return;
+      }
+
       // If the query is a path or a hash tag, resolve it directly
-      if (query.startsWith("/") || /^#[a-zA-Z0-9-]+$/.test(query)) {
+      if (
+        typeof query === "string" &&
+        (query.startsWith("/") || /^#[a-zA-Z0-9-]+$/.test(query))
+      ) {
         try {
           const parsed: ParsedWishTarget = {
             key: query as WishTag,

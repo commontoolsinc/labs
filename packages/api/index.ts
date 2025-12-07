@@ -1270,10 +1270,19 @@ export type CompileAndRunFunction = <T = any, S = any>(
 
 export type WishTag = `/${string}` | `#${string}`;
 
+/**
+ * Query for multiple hashtags with explicit AND/OR logic.
+ * - `{ and: ["#tag1", "#tag2"] }` - matches items with ALL specified tags
+ * - `{ or: ["#tag1", "#tag2"] }` - matches items with ANY of the specified tags
+ */
+export type HashtagQuery =
+  | { and: WishTag[] }
+  | { or: WishTag[] };
+
 export type DID = `did:${string}:${string}`;
 
 export type WishParams = {
-  query: WishTag | string;
+  query: WishTag | string | HashtagQuery;
   path?: string[];
   context?: Record<string, any>;
   schema?: JSONSchema;

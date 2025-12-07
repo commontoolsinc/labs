@@ -1082,6 +1082,140 @@ describe("wish built-in", () => {
       expect(taggedItem).toEqual({ name: "Item with #myTag" });
     });
 
+    it("resolves AND hashtag query - matches items with ALL specified tags", async () => {
+      // Setup: Favorites with various tag combinations
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const favoritesCell = homeSpaceCell.key("favorites");
+
+      const item1 = runtime.getCell(userIdentity.did(), "and-item-1", undefined, tx);
+      item1.set({ name: "Has both tags" });
+
+      const item2 = runtime.getCell(userIdentity.did(), "and-item-2", undefined, tx);
+      item2.set({ name: "Has only tag1" });
+
+      const item3 = runtime.getCell(userIdentity.did(), "and-item-3", undefined, tx);
+      item3.set({ name: "Has only tag2" });
+
+      const item4 = runtime.getCell(userIdentity.did(), "and-item-4", undefined, tx);
+      item4.set({ name: "Has neither" });
+
+      favoritesCell.set([
+        { cell: item1, tag: "#tag1 #tag2 #extra" },
+        { cell: item2, tag: "#tag1 only" },
+        { cell: item3, tag: "#tag2 only" },
+        { cell: item4, tag: "no tags here" },
+      ]);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: Query with AND - must have BOTH #tag1 AND #tag2
+      const wishRecipe = recipe("wish AND hashtags", () => {
+        return { matched: wish({ query: { and: ["#tag1", "#tag2"] } }) };
+      });
+
+      const resultCell = runtime.getCell<{
+        matched?: { result?: unknown };
+      }>(
+        patternSpace.did(),
+        "wish-and-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Verify: Only item1 matches (has both tags)
+      const matched = result.key("matched").get()?.result;
+      expect(matched).toEqual({ name: "Has both tags" });
+    });
+
+    it("resolves OR hashtag query - matches items with ANY specified tag", async () => {
+      // Setup: Favorites with one item that matches one of the OR tags
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const favoritesCell = homeSpaceCell.key("favorites");
+
+      const item1 = runtime.getCell(userIdentity.did(), "or-item-1", undefined, tx);
+      item1.set({ name: "Has tag2 only" });
+
+      const item2 = runtime.getCell(userIdentity.did(), "or-item-2", undefined, tx);
+      item2.set({ name: "Has neither" });
+
+      favoritesCell.set([
+        { cell: item1, tag: "#tag2 #other" },
+        { cell: item2, tag: "no relevant tags" },
+      ]);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: Query with OR - must have #tag1 OR #tag2 (only tag2 is present)
+      const wishRecipe = recipe("wish OR hashtags", () => {
+        return { matched: wish({ query: { or: ["#tag1", "#tag2"] } }) };
+      });
+
+      const resultCell = runtime.getCell<{
+        matched?: { result?: unknown };
+      }>(
+        patternSpace.did(),
+        "wish-or-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Verify: Single match found via OR (item1 has #tag2)
+      const matched = result.key("matched").get()?.result;
+      expect(matched).toEqual({ name: "Has tag2 only" });
+    });
+
+    it("returns error for AND query with no matches", async () => {
+      // Setup: Favorites without the required tag combination
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const favoritesCell = homeSpaceCell.key("favorites");
+
+      const item1 = runtime.getCell(userIdentity.did(), "nomatch-item-1", undefined, tx);
+      item1.set({ name: "Has only one tag" });
+
+      favoritesCell.set([
+        { cell: item1, tag: "#tag1 only" },
+      ]);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: Query with AND that won't match anything
+      const wishRecipe = recipe("wish AND no match", () => {
+        return { matched: wish({ query: { and: ["#tag1", "#nonexistent"] } }) };
+      });
+
+      const resultCell = runtime.getCell<{
+        matched?: { result?: unknown; error?: string };
+      }>(
+        patternSpace.did(),
+        "wish-and-nomatch-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Verify: Error is returned
+      const matchedState = result.key("matched").get();
+      expect(matchedState?.error).toBeDefined();
+      expect(matchedState?.error).toContain("AND");
+    });
+
     it("starts charm automatically when accessed via cross-space wish", async () => {
       // Setup 1: Create a simple counter recipe/charm
       const counterRecipe = recipe<{ count: number }>("counter charm", () => {
