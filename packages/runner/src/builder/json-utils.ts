@@ -45,7 +45,7 @@ export function toJSONWithLegacyAliases(
     // Verify that opaque refs are not in a parent frame
     if (frame !== getTopFrame()) {
       throw new Error(
-        `Cell with parent cell not found in current frame. Should have been converted to a shadow ref.`,
+        `Cell with parent cell not found in current frame. Likely a closure that should have been transformed.`,
       );
     }
 
