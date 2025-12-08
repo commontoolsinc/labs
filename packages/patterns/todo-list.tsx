@@ -1,6 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, derive, NAME, pattern, UI } from "commontools";
-import Suggestion from "./suggestion.tsx";
+import { Cell, Default, NAME, pattern, UI, wish } from "commontools";
 
 interface TodoItem {
   title: string;
@@ -16,13 +15,6 @@ interface Output {
 }
 
 export default pattern<Input, Output>(({ items }) => {
-  // AI suggestion based on current todos
-  const suggestion = Suggestion({
-    situation:
-      "Based on my todo list, use a pattern to help me. For sub-tasks and additional tasks, use a todo list.",
-    context: { items },
-  });
-
   return {
     [NAME]: "Todo with Suggestions",
     [UI]: (
@@ -43,6 +35,12 @@ export default pattern<Input, Output>(({ items }) => {
         {/* Todo items with per-item suggestions */}
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           {items.map((item) => {
+            // AI suggestion based on current todos
+            const wishResult = wish({
+              query: item.title,
+              context: { item, items },
+            });
+
             return (
               <div
                 style={{
@@ -63,7 +61,7 @@ export default pattern<Input, Output>(({ items }) => {
                         ? { textDecoration: "line-through", opacity: 0.6 }
                         : {}}
                     >
-                      {item.title}
+                      <ct-textarea $value={item.title} />
                     </span>
                   </ct-checkbox>
                   <ct-button
@@ -80,31 +78,17 @@ export default pattern<Input, Output>(({ items }) => {
                     ×
                   </ct-button>
                 </div>
+
+                <details open>
+                  <summary>AI Suggestion</summary>
+                  {wishResult}
+                </details>
               </div>
             );
           })}
         </div>
-
-        {/* AI Suggestion */}
-        <ct-cell-context $cell={suggestion} label="AI Suggestion">
-          <div
-            style={{
-              marginTop: "16px",
-              padding: "12px",
-              backgroundColor: "#f5f5f5",
-              borderRadius: "8px",
-            }}
-          >
-            <h3>AI Suggestion</h3>
-            {derive(suggestion, (s) =>
-              s?.result ?? (
-                <span style={{ opacity: 0.6 }}>Getting suggestion...</span>
-              ))}
-          </div>
-        </ct-cell-context>
       </div>
     ),
     items,
-    suggestion,
   };
 });

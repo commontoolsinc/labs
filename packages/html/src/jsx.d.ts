@@ -2864,6 +2864,7 @@ interface CTListElement extends CTHTMLElement {}
 interface CTListItemElement extends CTHTMLElement {}
 interface CTLoaderElement extends CTHTMLElement {}
 interface CTInputElement extends CTHTMLElement {}
+interface CTTextAreaElement extends CTHTMLElement {}
 interface CTFileInputElement extends CTHTMLElement {}
 interface CTImageInputElement extends CTHTMLElement {}
 interface CTInputLegacyElement extends CTHTMLElement {}
@@ -3259,6 +3260,47 @@ interface CTInputAttributes<T> extends CTHTMLAttributes<T> {
   "onct-keydown"?: any;
   "onct-submit"?: any;
   "onct-invalid"?: any;
+}
+
+interface CTTextAreaAttributes<T> extends CTHTMLAttributes<T> {
+  "$value"?: CellLike<string>;
+  "value"?: CellLike<string> | string;
+  "placeholder"?: string;
+  "disabled"?: boolean;
+  "readonly"?: boolean;
+  "error"?: boolean;
+  "name"?: string;
+  "required"?: boolean;
+  "autofocus"?: boolean;
+  "rows"?: number;
+  "cols"?: number;
+  "maxlength"?: string;
+  "minlength"?: string;
+  "wrap"?: string;
+  "spellcheck"?: boolean;
+  "autocomplete"?: string;
+  "resize"?: string;
+  "auto-resize"?: boolean;
+  "timing-strategy"?: "immediate" | "debounce" | "throttle" | "blur";
+  "timing-delay"?: number;
+  "onct-input"?: EventHandler<
+    { value: string; oldValue: string; name: string }
+  >;
+  "onct-change"?: EventHandler<
+    { value: string; oldValue: string; name: string }
+  >;
+  "onct-focus"?: EventHandler<{ value: string; name: string }>;
+  "onct-blur"?: EventHandler<{ value: string; name: string }>;
+  "onct-keydown"?: EventHandler<{
+    key: string;
+    value: string;
+    shiftKey: boolean;
+    ctrlKey: boolean;
+    metaKey: boolean;
+    altKey: boolean;
+    name: string;
+  }>;
+  "onct-submit"?: EventHandler<{ value: string; name: string }>;
 }
 
 interface CTInputLegacyAttributes<T> extends CTHTMLAttributes<T> {
@@ -3904,6 +3946,10 @@ declare global {
       "ct-input": CTDOM.DetailedHTMLProps<
         CTInputAttributes<CTInputElement>,
         CTInputElement
+      >;
+      "ct-textarea": CTDOM.DetailedHTMLProps<
+        CTTextAreaAttributes<CTTextAreaElement>,
+        CTTextAreaElement
       >;
       "ct-file-input": CTDOM.DetailedHTMLProps<
         CTFileInputAttributes<CTFileInputElement>,
