@@ -164,10 +164,21 @@ export class CTDropZone extends BaseElement {
       // Emit leave event before drop (dropping is a form of leaving)
       this.emit("ct-drag-leave", {});
 
-      // Emit drop event
+      // Get drop zone bounding rect for position calculation in handler
+      const dropZoneRect = this.getBoundingClientRect();
+
+      // Emit drop event with pointer coordinates and drop zone rect
       this.emit("ct-drop", {
         sourceCell: dragState.cell,
         type: dragState.type,
+        pointerX: dragState.pointerX,
+        pointerY: dragState.pointerY,
+        dropZoneRect: {
+          left: dropZoneRect.left,
+          top: dropZoneRect.top,
+          width: dropZoneRect.width,
+          height: dropZoneRect.height,
+        },
       });
     }
   }
