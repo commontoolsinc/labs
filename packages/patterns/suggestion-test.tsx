@@ -32,7 +32,7 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
           <h2>Note</h2>
           <ct-cell-context $cell={suggestion2} label="Note Suggestion">
             {derive(suggestion2, (s) => {
-              return s?.result ?? "waiting..";
+              return s?.result ?? "waiting...";
             })}
           </ct-cell-context>
         </div>
