@@ -70,7 +70,7 @@ export default pattern<Record<string, never>>((_) => {
                   <strong>Query:</strong> {entry.query}
                 </div>
                 <div style="color: gray; font-size: 0.9em;">
-                  {derive(entry, (e) => formatAge(e.timestamp))}
+                  {derive(entry.timestamp, (ts) => formatAge(ts))}
                 </div>
               </div>
 
