@@ -348,6 +348,8 @@ function loadFactsForDoc(
       // If we didn't provide a schema context, we still want the selected
       // object in our manager, so load it directly.
       manager.load(fact.address);
+      // Also track it in schemaTracker so incremental updates can find it
+      schemaTracker.add(manager.toKey(fact.address), selector);
     }
     // Also load any source links and recipes
     loadSource(manager, fact, new Set<string>(), schemaTracker);
