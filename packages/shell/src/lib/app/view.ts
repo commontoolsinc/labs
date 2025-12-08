@@ -46,7 +46,6 @@ export function appViewToUrlPath(view: AppView): `/${string}` {
       ? `/${view.spaceName}/${view.charmId}`
       : `/${view.spaceName}`;
   } else if ("spaceDid" in view) {
-    // did routes not yet supported
     return "charmId" in view
       ? `/${view.spaceDid}/${view.charmId}`
       : `/${view.spaceDid}`;
@@ -59,10 +58,12 @@ export function urlToAppView(url: URL): AppView {
   segments.shift(); // shift off the pathnames' prefix "/";
   const [first, charmId] = [segments[0], segments[1]];
 
-  if (charmId) {
-    return { spaceName: first, charmId };
-  } else if (first) {
-    return { spaceName: first };
+  if (!first) {
+    return { builtin: "home" };
   }
-  return { builtin: "home" };
+  if (isDID(first)) {
+    return charmId ? { spaceDid: first, charmId } : { spaceDid: first };
+  } else {
+    return charmId ? { spaceName: first, charmId } : { spaceName: first };
+  }
 }

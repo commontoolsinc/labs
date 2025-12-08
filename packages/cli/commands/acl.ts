@@ -121,6 +121,6 @@ function parseSpaceOptions(
   return {
     apiUrl: new URL(apiUrl),
     identityPath: identity,
-    spaceName: space,
+    space: space,
   };
 }

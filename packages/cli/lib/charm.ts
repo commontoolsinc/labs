@@ -1,4 +1,4 @@
-import { createSession, Session } from "@commontools/identity";
+import { createSession, isDID, Session } from "@commontools/identity";
 import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
 import {
@@ -32,11 +32,12 @@ export interface CharmConfig extends SpaceConfig {
 }
 
 async function makeSession(config: SpaceConfig): Promise<Session> {
-  if (config.space.startsWith("did:key")) {
-    throw new Error("DID key spaces not yet supported.");
-  }
   const identity = await loadIdentity(config.identity);
-  return createSession({ identity, spaceName: config.space });
+  if (isDID(config.space)) {
+    return createSession({ identity, spaceDid: config.space });
+  } else {
+    return createSession({ identity, spaceName: config.space });
+  }
 }
 
 export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
