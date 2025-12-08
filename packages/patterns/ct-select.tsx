@@ -41,6 +41,20 @@ export default recipe<Input, Result>(
           </ct-card>
 
           <ct-card>
+            <h4>
+              <code>ct-autocomplete</code>
+            </h4>
+            <ct-autocomplete
+              items={[
+                { label: "Option 1", value: "opt_1" },
+                { label: "Option 2", value: "opt_2" },
+                { label: "Option 3", value: "opt_3" },
+              ]}
+              $value={selected}
+            />
+          </ct-card>
+
+          <ct-card>
             <h4>Numeric Values</h4>
             <p>Values can be any type, not just strings</p>
             <ct-select
