@@ -619,15 +619,18 @@ export function wish(
         const state = suggestionPatternResultCell?.get();
         if (state?.result && !state?.error) {
           suggestionRecordedToIndex = true;
-          // Record to wish index asynchronously (don't block)
-          recordToWishIndex(
-            runtime,
-            query,
-            state.result,
-            SUGGESTION_TSX_PATH,
-          ).catch((e) => {
-            console.warn("Failed to record suggestion to wish index:", e);
-          });
+          // Defer recording to avoid transaction conflicts
+          // The sink might fire during an active transaction
+          setTimeout(() => {
+            recordToWishIndex(
+              runtime,
+              query,
+              state.result,
+              SUGGESTION_TSX_PATH,
+            ).catch((e) => {
+              console.warn("Failed to record suggestion to wish index:", e);
+            });
+          }, 0);
         }
       });
     }
