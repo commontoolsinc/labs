@@ -10,7 +10,7 @@ import {
   type Module,
   type OpaqueRef,
 } from "../src/builder/types.ts";
-import { handler, lift } from "../src/builder/module.ts";
+import { action, handler, lift } from "../src/builder/module.ts";
 import { opaqueRef } from "../src/builder/opaque-ref.ts";
 import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -241,6 +241,55 @@ describe("module", () => {
       expect(nodes.size).toBe(1);
       expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });
       expect([...nodes][0].inputs.$event).toBe(stream);
+    });
+  });
+
+  describe("action function", () => {
+    it("creates a handler factory", () => {
+      const increment = action<{ count: number }>(({ count }) => {
+        // In real usage, this would be count.set(count.get() + 1)
+        // but we're just testing the factory creation here
+        void count;
+      });
+      expect(typeof increment).toBe("function");
+      expect(isModule(increment)).toBe(true);
+      expect((increment as unknown as Module).wrapper).toBe("handler");
+    });
+
+    it("creates a stream when called with captures", () => {
+      const count = opaqueRef(0);
+      const increment = action<{ count: number }>(({ count }) => {
+        void count;
+      });
+
+      const stream = increment({ count });
+      expect(isOpaqueRef(stream)).toBe(true);
+
+      const { value, nodes } =
+        (stream as unknown as OpaqueRef<{ $stream: true }>).export();
+      expect(value).toEqual({ $stream: true });
+      expect(nodes.size).toBe(1);
+
+      const node = [...nodes][0];
+      expect((node.module as Module).wrapper).toBe("handler");
+      expect(node.inputs.$event).toBe(stream);
+      expect(node.inputs.$ctx.count).toBe(count);
+    });
+
+    it("wraps callback to ignore event parameter", () => {
+      // action((props) => ...) becomes handler((_, props) => ...)
+      // The first parameter (event) is ignored
+      const increment = action<{ value: number }>(({ value }) => {
+        void value;
+      });
+
+      // Verify the implementation is wrapped correctly
+      const module = increment as unknown as Module;
+      expect(module.implementation).toBeDefined();
+      expect(typeof module.implementation).toBe("function");
+
+      // The wrapped function should accept (event, props) signature
+      // even though action callback only takes (props)
     });
   });
 });

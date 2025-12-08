@@ -247,5 +247,6 @@ export function action<T>(
   fn: (props: T) => void,
 ): HandlerFactory<T, void> {
   // Wrap the action callback to match handler's (event, props) signature
-  return handler<void, T>((_, props) => fn(props));
+  // The { proxy: true } option tells handler to accept schema-less callbacks
+  return handler<void, T>((_, props) => fn(props), { proxy: true });
 }
