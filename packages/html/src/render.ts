@@ -369,6 +369,64 @@ const bindChildren = (
   };
 };
 
+/**
+ * Bind a style prop that may contain reactive nested values (via aliases/proxies).
+ * Uses cell.key() to get sub-cells for each style property, ensuring each
+ * nested alias is properly subscribed to for reactivity.
+ */
+const bindReactiveStyle = (
+  element: HTMLElement,
+  styleCell: Cell<Record<string, unknown>>,
+  options: RenderOptions,
+): Cancel => {
+  const setProperty = options.setProp ?? setProp;
+  const [cancel, addCancel] = useCancelGroup();
+
+  // Track current resolved values for each style property
+  const resolvedStyle: Record<string, unknown> = {};
+  // Track which keys we've seen and set up subscriptions for
+  const subscribedKeys = new Set<string>();
+
+  // Helper to update the element's style attribute with all resolved values
+  const updateStyle = () => {
+    setProperty(element, "style", { ...resolvedStyle });
+  };
+
+  // Set up a subscription to the style object itself to detect new keys
+  const cancelStructure = effect(styleCell, (styleObj) => {
+    if (!isRecord(styleObj)) {
+      // Style is a string or other non-object value, just set it
+      setProperty(element, "style", styleObj);
+      return;
+    }
+
+    // For each key in the style object, set up a subscription via cell.key()
+    for (const styleKey of Object.keys(styleObj)) {
+      if (!subscribedKeys.has(styleKey)) {
+        subscribedKeys.add(styleKey);
+        // Get a sub-cell for this specific style property
+        const keyCell = styleCell.key(styleKey);
+        const cancelKey = effect(keyCell, (value) => {
+          resolvedStyle[styleKey] = value;
+          updateStyle();
+        });
+        addCancel(cancelKey);
+      }
+    }
+
+    // Remove keys that are no longer in the style object
+    for (const oldKey of subscribedKeys) {
+      if (!(oldKey in styleObj)) {
+        delete resolvedStyle[oldKey];
+        subscribedKeys.delete(oldKey);
+      }
+    }
+  });
+  addCancel(cancelStructure);
+
+  return cancel;
+};
+
 const bindProps = (
   element: HTMLElement,
   props: Props,
@@ -395,6 +453,11 @@ const bindProps = (
         // e.g. passing a cell itself instead of its value.
         const key = propKey.slice(1);
         setProperty(element, key, propValue);
+      } else if (propKey === "style") {
+        // Special handling for style props with nested reactive values
+        // We need to subscribe to each nested property individually
+        const cancelStyle = bindReactiveStyle(element, propValue, options);
+        addCancel(cancelStyle);
       } else {
         const cancel = effect(propValue, (replacement) => {
           logger.debug("render", "prop update", propKey, replacement);
