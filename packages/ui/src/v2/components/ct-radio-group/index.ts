@@ -6,4 +6,4 @@ if (!customElements.get("ct-radio-group")) {
 }
 
 export { CTRadioGroup, radioGroupStyles };
-export type { RadioItem, RadioGroupOrientation } from "./ct-radio-group.ts";
+export type { RadioGroupOrientation, RadioItem } from "./ct-radio-group.ts";

@@ -63,12 +63,12 @@
  * - clear() - Clear the selection
  */
 
-import { html, nothing, PropertyValues, unsafeCSS } from "lit";
+import { html, PropertyValues, unsafeCSS } from "lit";
 import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import { radioGroupStyles } from "./styles.ts";
-import { type Cell, areLinksSame } from "@commontools/runner";
+import { areLinksSame, type Cell } from "@commontools/runner";
 import { createCellController } from "../../core/cell-controller.ts";
 import {
   applyThemeToElement,
@@ -226,7 +226,9 @@ export class CTRadioGroup extends BaseElement {
 
     return html`
       <label
-        class="radio-item ${isChecked ? "checked" : ""} ${isDisabled ? "disabled" : ""}"
+        class="radio-item ${isChecked ? "checked" : ""} ${isDisabled
+          ? "disabled"
+          : ""}"
         part="item"
         for="${itemId}"
       >
@@ -276,16 +278,16 @@ export class CTRadioGroup extends BaseElement {
       case nextKey:
       case (isHorizontal ? "ArrowDown" : "ArrowRight"):
         event.preventDefault();
-        nextIndex =
-          currentIndex === -1 ? 0 : (currentIndex + 1) % enabledInputs.length;
+        nextIndex = currentIndex === -1
+          ? 0
+          : (currentIndex + 1) % enabledInputs.length;
         break;
       case prevKey:
       case (isHorizontal ? "ArrowUp" : "ArrowLeft"):
         event.preventDefault();
-        nextIndex =
-          currentIndex === -1
-            ? enabledInputs.length - 1
-            : (currentIndex - 1 + enabledInputs.length) % enabledInputs.length;
+        nextIndex = currentIndex === -1
+          ? enabledInputs.length - 1
+          : (currentIndex - 1 + enabledInputs.length) % enabledInputs.length;
         break;
       default:
         return;
@@ -383,16 +385,16 @@ export class CTRadioGroup extends BaseElement {
       case nextKey:
       case (isHorizontal ? "ArrowDown" : "ArrowRight"):
         event.preventDefault();
-        nextIndex =
-          currentIndex === -1 ? 0 : (currentIndex + 1) % enabledRadios.length;
+        nextIndex = currentIndex === -1
+          ? 0
+          : (currentIndex + 1) % enabledRadios.length;
         break;
       case prevKey:
       case (isHorizontal ? "ArrowUp" : "ArrowLeft"):
         event.preventDefault();
-        nextIndex =
-          currentIndex === -1
-            ? enabledRadios.length - 1
-            : (currentIndex - 1 + enabledRadios.length) % enabledRadios.length;
+        nextIndex = currentIndex === -1
+          ? enabledRadios.length - 1
+          : (currentIndex - 1 + enabledRadios.length) % enabledRadios.length;
         break;
       default:
         return;

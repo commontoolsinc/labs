@@ -55,7 +55,9 @@ export default recipe<Input, Result>(
           </ct-card>
 
           <ct-card>
-            <h4><code>ct-radio-group</code></h4>
+            <h4>
+              <code>ct-radio-group</code>
+            </h4>
             <ct-radio-group
               $value={selected}
               items={[
