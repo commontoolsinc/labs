@@ -665,8 +665,8 @@ class MemoryProviderSession<
     const changedDocs = new Set<string>();
     for (const fact of SelectionBuilder.iterate(transaction.args.changes)) {
       if (fact.value !== true) {
-        // Format matches what schemaTracker uses: "id\0type"
-        changedDocs.add(`${fact.of}\0${fact.the}`);
+        // Format matches what schemaTracker uses: "id/type" (from BaseObjectManager.toKey)
+        changedDocs.add(`${fact.of}/${fact.the}`);
       }
     }
     return changedDocs;
@@ -728,11 +728,13 @@ class MemoryProviderSession<
       }
       processedPairs.add(pairKey);
 
-      // Parse docKey back to id and type
-      const [docId, docType] = docKey.split("\0");
-      if (!docId || !docType) {
+      // Parse docKey back to id and type (format is "id/type" from BaseObjectManager.toKey)
+      const slashIndex = docKey.lastIndexOf("/");
+      if (slashIndex === -1) {
         continue;
       }
+      const docId = docKey.slice(0, slashIndex);
+      const docType = docKey.slice(slashIndex + 1);
 
       // Evaluate this document with the schema to find its current links
       const links = evaluateDocumentLinks(
