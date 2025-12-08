@@ -602,26 +602,36 @@ class MemoryProviderSession<
       space,
     );
     if (mountResult.error) {
-      logger.warn(
-        "incremental-mount-error",
-        () => [
-          "Failed to mount space for incremental update:",
-          mountResult.error,
-        ],
-      );
       // Fall back to full re-query for all subscriptions
-      return this.getSchemaSubscriptionMatchesFallback(transaction);
+      //return this.getSchemaSubscriptionMatchesFallback(transaction);
     }
     const spaceSession = mountResult.ok as unknown as SpaceSession<Space>;
 
     for (const [id, subscription] of this.schemaChannels) {
+      // Use the original Subscription.match to check if this subscription should be notified
+      if (!Subscription.match(transaction, subscription.watchedObjects)) {
+        continue;
+      }
+
       // Find changed docs that are in this subscription's schemaTracker
       const affectedDocs = this.findAffectedDocs(
         changedDocs,
         subscription.schemaTracker,
       );
 
+      // If no affected docs found via schemaTracker but watchedObjects matched,
+      // fall back to full re-query for this subscription
       if (affectedDocs.length === 0) {
+        // Process this subscription with fallback logic
+        const fallbackResult = await this.processSingleSubscriptionFallback(
+          subscription,
+          space,
+          schemaMatches,
+        );
+        if (fallbackResult) {
+          lastId = id;
+          maxSince = Math.max(maxSince, subscription.since);
+        }
         continue;
       }
 
@@ -736,6 +746,26 @@ class MemoryProviderSession<
       const docId = docKey.slice(0, slashIndex);
       const docType = docKey.slice(slashIndex + 1);
 
+      // Load the fact for this document to include in results
+      const fact = selectFact(spaceSession, {
+        of: docId as `${string}:${string}`,
+        the: docType as `${string}/${string}`,
+      });
+
+      if (!fact || fact.is === undefined) {
+        // Document doesn't exist yet - skip
+        continue;
+      }
+
+      const address = this.formatAddress(space, fact);
+      newFacts.set(address, {
+        of: fact.of,
+        the: fact.the,
+        cause: causeFromString(fact.cause),
+        is: fact.is,
+        since: fact.since,
+      });
+
       // Evaluate this document with the schema to find its current links
       const links = evaluateDocumentLinks(
         spaceSession,
@@ -744,42 +774,70 @@ class MemoryProviderSession<
         classification,
       );
 
-      if (links === null) {
-        // Document not found or retracted - skip (conservative approach)
-        continue;
-      }
-
-      // Load the fact for this document to include in results
-      const fact = selectFact(spaceSession, {
-        of: docId as `${string}:${string}`,
-        the: docType as `${string}/${string}`,
-      });
-      if (fact && fact.is !== undefined) {
-        const address = this.formatAddress(space, fact);
-        newFacts.set(address, {
-          of: fact.of,
-          the: fact.the,
-          cause: causeFromString(fact.cause),
-          is: fact.is,
-          since: fact.since,
-        });
-      }
-
       // Find new links: targets in links that aren't already in subscription.schemaTracker
-      for (const [targetDocKey, targetSchemas] of links) {
-        for (const targetSchema of targetSchemas) {
-          if (
-            !subscription.schemaTracker.hasValue(targetDocKey, targetSchema)
-          ) {
-            // New link discovered - add to pending and track it
-            pendingPairs.push({ docKey: targetDocKey, schema: targetSchema });
-            subscription.schemaTracker.add(targetDocKey, targetSchema);
+      if (links !== null) {
+        for (const [targetDocKey, targetSchemas] of links) {
+          for (const targetSchema of targetSchemas) {
+            if (
+              !subscription.schemaTracker.hasValue(targetDocKey, targetSchema)
+            ) {
+              // New link discovered - add to pending and track it
+              pendingPairs.push({ docKey: targetDocKey, schema: targetSchema });
+              subscription.schemaTracker.add(targetDocKey, targetSchema);
+            }
           }
         }
       }
     }
 
     return { newFacts };
+  }
+
+  /**
+   * Process a single subscription using full re-query fallback.
+   * Used when schemaTracker is empty but watchedObjects match.
+   * Returns true if facts were found, false otherwise.
+   */
+  private async processSingleSubscriptionFallback<Space extends MemorySpace>(
+    subscription: SchemaSubscription,
+    space: Space,
+    schemaMatches: Map<string, Revision<Fact>>,
+  ): Promise<boolean> {
+    // Re-run our original query, but not as a subscription
+    const newArgs = { ...subscription.invocation.args, subscribe: false };
+    const newInvocation = { ...subscription.invocation, args: newArgs };
+    const result = await Memory.querySchemaWithTracker(
+      this.memory as Memory.Memory,
+      newInvocation,
+    );
+    if (result.error) {
+      console.warn("Encountered querySchema error", result.error);
+      return false;
+    }
+    const factSelection = result.ok!.selection[space];
+    const factVersions = [...FactModule.iterate(factSelection)];
+    const includedFacts = new Map(
+      factVersions.map((fv) => [this.formatAddress(space, fv), fv]),
+    );
+    const since = factVersions.reduce(
+      (acc, cur, _i) => cur.since > acc ? cur.since : acc,
+      -1,
+    );
+    const newFacts = includedFacts.entries().filter(
+      ([address, factVersion]) =>
+        factVersion.since > subscription.since ||
+        !subscription.watchedObjects.has(address),
+    );
+    for (const [address, factVersion] of newFacts) {
+      schemaMatches.set(address, factVersion);
+    }
+    subscription.watchedObjects = new Set(includedFacts.keys());
+    subscription.since = since;
+    // Update schemaTracker with new tracker from query
+    if (result.ok!.schemaTracker) {
+      subscription.schemaTracker = result.ok!.schemaTracker;
+    }
+    return factVersions.length > 0;
   }
 
   /**
@@ -796,38 +854,15 @@ class MemoryProviderSession<
 
     for (const [id, subscription] of this.schemaChannels) {
       if (Subscription.match(transaction, subscription.watchedObjects)) {
-        // Re-run our original query, but not as a subscription
-        const newArgs = { ...subscription.invocation.args, subscribe: false };
-        const newInvocation = { ...subscription.invocation, args: newArgs };
-        const result = await Memory.querySchema(
-          this.memory as Memory.Memory,
-          newInvocation,
+        const hadFacts = await this.processSingleSubscriptionFallback(
+          subscription,
+          space,
+          schemaMatches,
         );
-        if (result.error) {
-          console.warn("Encountered querySchema error", result.error);
-          continue;
+        if (hadFacts) {
+          lastId = id;
+          maxSince = Math.max(maxSince, subscription.since);
         }
-        const factSelection = result.ok![space];
-        const factVersions = [...FactModule.iterate(factSelection)];
-        const includedFacts = new Map(
-          factVersions.map((fv) => [this.formatAddress(space, fv), fv]),
-        );
-        const since = factVersions.reduce(
-          (acc, cur, _i) => cur.since > acc ? cur.since : acc,
-          -1,
-        );
-        const newFacts = includedFacts.entries().filter(
-          ([address, factVersion]) =>
-            factVersion.since > subscription.since ||
-            !subscription.watchedObjects.has(address),
-        );
-        for (const [address, factVersion] of newFacts) {
-          schemaMatches.set(address, factVersion);
-        }
-        subscription.watchedObjects = new Set(includedFacts.keys());
-        subscription.since = since;
-        lastId = id;
-        maxSince = since > maxSince ? since : maxSince;
       }
     }
     return [lastId, maxSince, [...schemaMatches.values()]];

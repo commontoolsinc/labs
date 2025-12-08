@@ -176,6 +176,7 @@ export const selectSchema = <Space extends MemorySpace>(
 
   const includedFacts: FactSelection = {}; // we'll store all the raw facts we accesed here
   // First, collect all the potentially relevant facts (without dereferencing pointers)
+  let totalMatchingFacts = 0;
   for (
     const selectorEntry of iterateSelector(selectSchema, DefaultSchemaSelector)
   ) {
@@ -187,6 +188,7 @@ export const selectSchema = <Space extends MemorySpace>(
     };
     const matchingFacts = getMatchingFacts(session, factSelector);
     for (const entry of matchingFacts) {
+      totalMatchingFacts++;
       // The top level facts we accessed should be included
       addToSelection(includedFacts, entry, entry.cause, entry.since);
 
@@ -242,10 +244,18 @@ export const selectSchema = <Space extends MemorySpace>(
   ) {
     if (
       factSelector.of !== SelectAllString &&
-      factSelector.the !== SelectAllString &&
-      !getRevision(includedFacts, factSelector.of, factSelector.the)
+      factSelector.the !== SelectAllString
     ) {
-      setEmptyObj(includedFacts, factSelector.of, factSelector.the);
+      // Track all specifically-queried entities in schemaTracker so incremental
+      // updates can detect changes to them, even if they don't have data yet
+      const docKey = `${factSelector.of}/${factSelector.the}`;
+      if (!schemaTracker.has(docKey)) {
+        schemaTracker.add(docKey, factSelector.value);
+      }
+
+      if (!getRevision(includedFacts, factSelector.of, factSelector.the)) {
+        setEmptyObj(includedFacts, factSelector.of, factSelector.the);
+      }
     }
   }
   const endTime = performance.timeOrigin + performance.now();
@@ -316,6 +326,13 @@ function loadFactsForDoc(
   cfc: ContextualFlowControl,
   schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
+  // Track all facts regardless of their value type
+  // This ensures watchedObjects and schemaTracker stay in sync
+  const factKey = manager.toKey(fact.address);
+  if (!schemaTracker.has(factKey)) {
+    schemaTracker.add(factKey, selector);
+  }
+
   if (isObject(fact.value)) {
     if (selector.schemaContext !== undefined) {
       const factValue: IAttestation = {
