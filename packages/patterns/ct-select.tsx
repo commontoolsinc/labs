@@ -55,6 +55,21 @@ export default recipe<Input, Result>(
           </ct-card>
 
           <ct-card>
+            <h4>
+              <code>ct-radio-group</code>
+            </h4>
+            <ct-radio-group
+              $value={selected}
+              items={[
+                { label: "Option 1", value: "opt_1" },
+                { label: "Option 2", value: "opt_2" },
+                { label: "Option 3", value: "opt_3" },
+              ]}
+              orientation="horizontal"
+            />
+          </ct-card>
+
+          <ct-card>
             <h4>Numeric Values</h4>
             <p>Values can be any type, not just strings</p>
             <ct-select

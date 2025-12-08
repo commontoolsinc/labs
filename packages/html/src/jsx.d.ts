@@ -2870,6 +2870,7 @@ interface CTInputLegacyElement extends CTHTMLElement {}
 interface CTCheckboxElement extends CTHTMLElement {}
 interface CTAutocompleteElement extends CTHTMLElement {}
 interface CTSelectElement extends CTHTMLElement {}
+interface CTRadioGroupElement extends CTHTMLElement {}
 interface CTPickerElement extends CTHTMLElement {}
 interface CTToolsChipElement extends CTHTMLElement {}
 interface CTHeadingElement extends CTHTMLElement {}
@@ -3358,6 +3359,18 @@ interface CTSelectAttributes<T> extends CTHTMLAttributes<T> {
   "multiple"?: boolean;
   "onct-change"?: EventHandler<
     { items: { label: string; value: any }[]; value: any | any[] }
+  >;
+}
+
+interface CTRadioGroupAttributes<T> extends CTHTMLAttributes<T> {
+  "$value"?: CellLike<any>;
+  "value"?: any;
+  "items"?: { label: string; value: any; disabled?: boolean }[];
+  "name"?: string;
+  "disabled"?: boolean;
+  "orientation"?: "vertical" | "horizontal";
+  "onct-change"?: EventHandler<
+    { items: { label: string; value: any }[]; value: any; oldValue: any }
   >;
 }
 
@@ -3911,6 +3924,10 @@ declare global {
       "ct-select": CTDOM.DetailedHTMLProps<
         CTSelectAttributes<CTSelectElement>,
         CTSelectElement
+      >;
+      "ct-radio-group": CTDOM.DetailedHTMLProps<
+        CTRadioGroupAttributes<CTRadioGroupElement>,
+        CTRadioGroupElement
       >;
       "ct-picker": CTDOM.DetailedHTMLProps<
         CTPickerAttributes<CTPickerElement>,
