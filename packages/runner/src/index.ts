@@ -6,6 +6,7 @@ export type {
   HomeSpaceCellContents,
   RuntimeOptions,
   SpaceCellContents,
+  WishIndexEntry,
 } from "./runtime.ts";
 export * from "./interface.ts";
 export { raw } from "./module.ts";
