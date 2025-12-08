@@ -41,7 +41,9 @@ export default recipe<Input, Result>(
           </ct-card>
 
           <ct-card>
-            <h4><code>ct-autocomplete</code></h4>
+            <h4>
+              <code>ct-autocomplete</code>
+            </h4>
             <ct-autocomplete
               items={[
                 { label: "Option 1", value: "opt_1" },
