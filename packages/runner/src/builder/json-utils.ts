@@ -69,10 +69,8 @@ export function toJSONWithLegacyAliases(
   // If we encounter a link, it's from a nested recipe.
   if (isLegacyAlias(value)) {
     const alias = (value as LegacyAlias).$alias;
-    // If this was a shadow ref, i.e. a closed over reference, see whether
-    // we're now at the level that it should be resolved to the actual cell.
-    // (i.e. we're generating the recipe from which the closed over reference
-    // was captured)
+    // If this was a shadow ref, i.e. a nested recipe, see whether we're now at
+    // the level that it should be resolved to the actual cell.
     if (!("cell" in alias) || typeof alias.cell === "number") {
       // If we encounter an existing alias and it isn't an absolute reference
       // with a cell id, then increase the nesting level.
