@@ -1,6 +1,6 @@
 /// <cts-enable />
 import { Cell, Default, derive, NAME, pattern, UI } from "commontools";
-import { Suggestion } from "./suggestion.tsx";
+import Suggestion from "./suggestion.tsx";
 
 interface TodoItem {
   title: string;
@@ -97,7 +97,7 @@ export default pattern<Input, Output>(({ items }) => {
           >
             <h3>AI Suggestion</h3>
             {derive(suggestion, (s) =>
-              s?.cell ?? (
+              s?.result ?? (
                 <span style={{ opacity: 0.6 }}>Getting suggestion...</span>
               ))}
           </div>

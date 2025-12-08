@@ -222,8 +222,13 @@ export const fetchAndRunPattern = recipe<FetchAndRunPatternInput>(
       fetchProgram({ url });
 
     // Use derive to safely handle when program is undefined/pending
+    // Filter out undefined elements to handle race condition where array proxy
+    // pre-allocates with undefined before populating elements
     const compileParams = derive(program, (p) => ({
-      files: p?.files ?? [],
+      files: (p?.files ?? []).filter(
+        (f): f is { name: string; contents: string } =>
+          f !== undefined && f !== null && typeof f.name === "string",
+      ),
       main: p?.main ?? "",
       input: args,
     }));
