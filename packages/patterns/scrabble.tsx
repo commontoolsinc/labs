@@ -600,7 +600,7 @@ interface ScrabbleInput {
   placed: Default<PlacedTile[], typeof defaultPlaced>;
   committed: Default<PlacedTile[], typeof defaultCommitted>;
   bag: Default<Letter[], typeof defaultBag>;
-  message: Default<string, "Drag tiles from your rack to the board.">;
+  message: Default<string, "Click New Game to begin">;
   score: Default<number, 0>; // Total accumulated score
   lastTurnScore: Default<number, 0>; // Score from most recent turn
 }
@@ -1262,182 +1262,188 @@ export default pattern<ScrabbleInput, ScrabbleOutput>(
               padding: "8px 16px",
               backgroundColor: "#1a3009",
               borderRadius: "8px",
+              maxWidth: "540px",
+              margin: "0 auto 16px auto",
             }}
           >
             <div style={{ fontSize: "24px", fontWeight: "bold" }}>SCRABBLE</div>
-            <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-              <div
-                style={{
-                  fontSize: "20px",
-                  fontWeight: "bold",
-                  color: "#ffd700",
-                }}
-              >
-                Score: {score}
-              </div>
-              <div style={{ fontSize: "12px", color: "#aaa" }}>
-                Bag: {bagCount}
-              </div>
-            </div>
-          </div>
-
-          {/* Message */}
-          <div
-            style={{
-              padding: "8px 16px",
-              marginBottom: "16px",
-              backgroundColor: "#1a3009",
-              borderRadius: "4px",
-              textAlign: "center",
-            }}
-          >
-            {message}
+            <button
+              type="button"
+              onClick={newGame({
+                rack,
+                placed,
+                committed,
+                bag,
+                message,
+                score,
+                lastTurnScore,
+              })}
+              style={{
+                padding: "6px 16px",
+                backgroundColor: "#2d5016",
+                color: "#c5e1a5",
+                border: "1px solid #4a7c23",
+                borderRadius: "4px",
+                fontSize: "14px",
+                fontWeight: "bold",
+                cursor: "pointer",
+              }}
+            >
+              New Game
+            </button>
           </div>
 
           {/* Board - ONE drop zone covering entire board */}
-          <ct-drop-zone
-            accept="letter,board-tile"
-            onct-drop={dropOnBoard({ rack, placed, committed, message })}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              marginBottom: "16px",
+            }}
           >
-            <div
-              style={{
-                display: "inline-block",
-                padding: "8px",
-                backgroundColor: "#1a3009",
-                borderRadius: "8px",
-                marginBottom: "16px",
-              }}
+            <ct-drop-zone
+              accept="letter,board-tile"
+              onct-drop={dropOnBoard({ rack, placed, committed, message })}
             >
-              {/* Board container with relative positioning for overlay */}
-              <div style={{ position: "relative" }}>
-                {/* Grid of board cells */}
-                <div
-                  data-board-grid="true"
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      `repeat(${BOARD_SIZE}, ${CELL_SIZE}px)`,
-                    gap: "2px",
-                  }}
-                >
-                  {boardCells.map((cell) => {
-                    const colors = BONUS_COLORS[cell.bonus];
-                    const label = BONUS_LABELS[cell.bonus];
-                    return (
-                      <div
-                        style={{
-                          width: `${CELL_SIZE}px`,
-                          height: `${CELL_SIZE}px`,
-                          boxSizing: "border-box",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          backgroundColor: colors.bg,
-                          color: colors.text,
-                          border: "1px solid #8b7355",
-                          borderRadius: "3px",
-                          fontSize: "10px",
-                          fontWeight: "bold",
-                        }}
-                      >
-                        <span>{label}</span>
-                      </div>
-                    );
-                  })}
+              <div
+                style={{
+                  display: "inline-block",
+                  padding: "8px",
+                  backgroundColor: "#1a3009",
+                  borderRadius: "8px",
+                }}
+              >
+                {/* Board container with relative positioning for overlay */}
+                <div style={{ position: "relative" }}>
+                  {/* Grid of board cells */}
+                  <div
+                    data-board-grid="true"
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        `repeat(${BOARD_SIZE}, ${CELL_SIZE}px)`,
+                      gap: "2px",
+                    }}
+                  >
+                    {boardCells.map((cell) => {
+                      const colors = BONUS_COLORS[cell.bonus];
+                      const label = BONUS_LABELS[cell.bonus];
+                      return (
+                        <div
+                          style={{
+                            width: `${CELL_SIZE}px`,
+                            height: `${CELL_SIZE}px`,
+                            boxSizing: "border-box",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            backgroundColor: colors.bg,
+                            color: colors.text,
+                            border: "1px solid #8b7355",
+                            borderRadius: "3px",
+                            fontSize: "10px",
+                            fontWeight: "bold",
+                          }}
+                        >
+                          <span>{label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* Committed tiles - NOT draggable, slightly darker background */}
+                  {/* Using pre-computed styleLeft/styleTop/displayChar/showPoints */}
+                  {committedTiles.map((tile, index) => (
+                    <div
+                      key={index}
+                      data-tile-id={tile.letter.id}
+                      data-row={tile.row}
+                      data-col={tile.col}
+                      style={{
+                        position: "absolute",
+                        left: tile.styleLeft,
+                        top: tile.styleTop,
+                        width: `${CELL_SIZE}px`,
+                        height: `${CELL_SIZE}px`,
+                        boxSizing: "border-box",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: "#e0d4b8",
+                        color: "#333",
+                        border: "2px solid #6b5a45",
+                        borderRadius: "3px",
+                        fontSize: "18px",
+                        fontWeight: "bold",
+                        cursor: "default",
+                        userSelect: "none",
+                      }}
+                    >
+                      <span>{tile.displayChar}</span>
+                      {tile.showPoints && (
+                        <span
+                          style={{
+                            position: "absolute",
+                            bottom: "2px",
+                            right: "3px",
+                            fontSize: "8px",
+                          }}
+                        >
+                          {tile.letter.points}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                  {/* Placed tiles (this turn) - draggable */}
+                  {/* Using pre-computed styleLeft/styleTop/displayChar/showPoints */}
+                  {placedTiles.map((tile, index) => (
+                    <div
+                      key={index + 1000}
+                      style={{
+                        position: "absolute",
+                        left: tile.styleLeft,
+                        top: tile.styleTop,
+                      }}
+                    >
+                      <ct-drag-source $cell={tile.letter} type="board-tile">
+                        <div
+                          style={{
+                            width: `${CELL_SIZE}px`,
+                            height: `${CELL_SIZE}px`,
+                            boxSizing: "border-box",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            backgroundColor: "#f5e6c8",
+                            color: "#333",
+                            border: "1px solid #8b7355",
+                            borderRadius: "3px",
+                            fontSize: "18px",
+                            fontWeight: "bold",
+                            cursor: "grab",
+                            userSelect: "none",
+                          }}
+                        >
+                          <span>{tile.displayChar}</span>
+                          {tile.showPoints && (
+                            <span
+                              style={{
+                                position: "absolute",
+                                bottom: "2px",
+                                right: "3px",
+                                fontSize: "8px",
+                              }}
+                            >
+                              {tile.letter.points}
+                            </span>
+                          )}
+                        </div>
+                      </ct-drag-source>
+                    </div>
+                  ))}
                 </div>
-                {/* Committed tiles - NOT draggable, slightly darker background */}
-                {/* Using pre-computed styleLeft/styleTop/displayChar/showPoints */}
-                {committedTiles.map((tile, index) => (
-                  <div
-                    key={index}
-                    data-tile-id={tile.letter.id}
-                    data-row={tile.row}
-                    data-col={tile.col}
-                    style={{
-                      position: "absolute",
-                      left: tile.styleLeft,
-                      top: tile.styleTop,
-                      width: `${CELL_SIZE}px`,
-                      height: `${CELL_SIZE}px`,
-                      boxSizing: "border-box",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      backgroundColor: "#e0d4b8",
-                      color: "#333",
-                      border: "2px solid #6b5a45",
-                      borderRadius: "3px",
-                      fontSize: "18px",
-                      fontWeight: "bold",
-                      cursor: "default",
-                      userSelect: "none",
-                    }}
-                  >
-                    <span>{tile.displayChar}</span>
-                    {tile.showPoints && (
-                      <span
-                        style={{
-                          position: "absolute",
-                          bottom: "2px",
-                          right: "3px",
-                          fontSize: "8px",
-                        }}
-                      >
-                        {tile.letter.points}
-                      </span>
-                    )}
-                  </div>
-                ))}
-                {/* Placed tiles (this turn) - draggable */}
-                {/* Using pre-computed styleLeft/styleTop/displayChar/showPoints */}
-                {placedTiles.map((tile, index) => (
-                  <div
-                    key={index + 1000}
-                    style={{
-                      position: "absolute",
-                      left: tile.styleLeft,
-                      top: tile.styleTop,
-                    }}
-                  >
-                    <ct-drag-source $cell={tile.letter} type="board-tile">
-                      <div
-                        style={{
-                          width: `${CELL_SIZE}px`,
-                          height: `${CELL_SIZE}px`,
-                          boxSizing: "border-box",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          backgroundColor: "#f5e6c8",
-                          color: "#333",
-                          border: "1px solid #8b7355",
-                          borderRadius: "3px",
-                          fontSize: "18px",
-                          fontWeight: "bold",
-                          cursor: "grab",
-                          userSelect: "none",
-                        }}
-                      >
-                        <span>{tile.displayChar}</span>
-                        {tile.showPoints && (
-                          <span
-                            style={{
-                              position: "absolute",
-                              bottom: "2px",
-                              right: "3px",
-                              fontSize: "8px",
-                            }}
-                          >
-                            {tile.letter.points}
-                          </span>
-                        )}
-                      </div>
-                    </ct-drag-source>
-                  </div>
-                ))}
               </div>
-            </div>
-          </ct-drop-zone>
+            </ct-drop-zone>
+          </div>
 
           {/* Rack with return drop zone */}
           <div
@@ -1446,6 +1452,8 @@ export default pattern<ScrabbleInput, ScrabbleOutput>(
               backgroundColor: "#8b4513",
               borderRadius: "8px",
               marginBottom: "16px",
+              maxWidth: "540px",
+              margin: "0 auto 16px auto",
             }}
           >
             <div
@@ -1457,8 +1465,20 @@ export default pattern<ScrabbleInput, ScrabbleOutput>(
               }}
             >
               <span style={{ fontWeight: "bold" }}>
-                Your Rack ({rackCount} tiles):
+                Your Rack ({rackCount})
               </span>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "16px",
+                  alignItems: "center",
+                }}
+              >
+                <span style={{ color: "#ffd700", fontWeight: "bold" }}>
+                  Score: {score}
+                </span>
+                <span style={{ color: "#aaa" }}>Bag: {bagCount}</span>
+              </div>
               <button
                 type="button"
                 onClick={submitTurn({
@@ -1482,7 +1502,7 @@ export default pattern<ScrabbleInput, ScrabbleOutput>(
                   boxShadow: "2px 2px 4px rgba(0,0,0,0.3)",
                 }}
               >
-                Done
+                Submit
               </button>
             </div>
             <ct-drop-zone
@@ -1541,33 +1561,42 @@ export default pattern<ScrabbleInput, ScrabbleOutput>(
                 ))}
               </div>
             </ct-drop-zone>
-          </div>
-
-          {/* Controls */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              gap: "8px",
-              marginBottom: "16px",
-            }}
-          >
-            <ct-button onClick={clearBoard({ rack, placed, message })}>
-              Clear Board
-            </ct-button>
-            <ct-button
-              onClick={newGame({
-                rack,
-                placed,
-                committed,
-                bag,
-                message,
-                score,
-                lastTurnScore,
-              })}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                marginTop: "8px",
+              }}
             >
-              New Game
-            </ct-button>
+              <button
+                type="button"
+                onClick={clearBoard({ rack, placed, message })}
+                style={{
+                  padding: "6px 16px",
+                  backgroundColor: "#6b3410",
+                  color: "#f5e6c8",
+                  border: "1px solid #9a5d2e",
+                  borderRadius: "4px",
+                  fontSize: "12px",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                }}
+              >
+                Clear Board
+              </button>
+            </div>
+            {/* Message */}
+            <div
+              style={{
+                marginTop: "8px",
+                fontSize: "13px",
+                color: "#f5e6c8",
+                fontStyle: "italic",
+                textAlign: "center",
+              }}
+            >
+              {message}
+            </div>
           </div>
 
           {/* Instructions */}
@@ -1578,6 +1607,8 @@ export default pattern<ScrabbleInput, ScrabbleOutput>(
               borderRadius: "4px",
               fontSize: "12px",
               lineHeight: "1.5",
+              maxWidth: "540px",
+              margin: "0 auto",
             }}
           >
             <strong>How to play:</strong>
@@ -1587,7 +1618,7 @@ export default pattern<ScrabbleInput, ScrabbleOutput>(
             lowercase)<br />
             3. Drag tiles from board back to rack to return them<br />
             4. Drag tiles within rack to reorder them<br />
-            5. Click "Done" when finished placing tiles
+            5. Click "Submit" when finished placing tiles
           </div>
         </div>
       ),
