@@ -95,7 +95,7 @@ export class Runner implements IRunner {
           // copy keys, since we'll mutate the collection while iterating
           const cacheKeys = [...this.resultRecipeCache.keys()];
           cacheKeys.filter((key) => key.startsWith(`${notification.space}/`))
-            .forEach(this.resultRecipeCache.delete);
+            .forEach((key) => this.resultRecipeCache.delete(key));
         }
         return { done: false };
       },
