@@ -36,13 +36,17 @@ import {
 } from "./interface.ts";
 import * as SelectionBuilder from "./selection.ts";
 import * as Memory from "./memory.ts";
-import { refer } from "./reference.ts";
-import { redactCommitData, selectFact } from "./space.ts";
+import { refer, fromString as causeFromString } from "./reference.ts";
+import { redactCommitData, selectFact, type Session as SpaceSession } from "./space.ts";
+import { evaluateDocumentLinks } from "./space-schema.ts";
 import * as Subscription from "./subscription.ts";
 import * as FactModule from "./fact.ts";
 import { setRevision } from "@commontools/memory/selection";
 import { getLogger } from "@commontools/utils/logger";
 import { ACL_TYPE, isACL } from "./acl.ts";
+import { MapSet } from "@commontools/runner/traverse";
+import { deepEqual } from "@commontools/runner";
+import type { SchemaPathSelector } from "./consumer.ts";
 
 const logger = getLogger("memory-provider", {
   enabled: true,
@@ -147,6 +151,10 @@ export class SchemaSubscription {
     public invocation: SchemaQuery,
     public watchedObjects: Set<string>,
     public since: number = -1,
+    // Track which docs were scanned with which schemas for incremental updates
+    public schemaTracker: MapSet<string, SchemaPathSelector> = new MapSet(
+      deepEqual,
+    ),
   ) {}
 }
 
@@ -319,12 +327,42 @@ class MemoryProviderSession<
         });
       }
       case "/memory/graph/query": {
-        const result = await this.memory.querySchema(invocation);
-        // We maintain subscriptions at this level, but really need more data from the query response
-        if (invocation.args.subscribe && result.ok !== undefined) {
-          this.addSchemaSubscription(of, invocation, result.ok);
+        // Use querySchemaWithTracker when subscribing to capture the schemaTracker
+        // for incremental updates on subsequent commits
+        if (invocation.args.subscribe) {
+          const trackerResult = await Memory.querySchemaWithTracker(
+            this.memory as Memory.Memory,
+            invocation,
+          );
+          if ("error" in trackerResult) {
+            return this.perform({
+              the: "task/return",
+              of,
+              is: trackerResult,
+            });
+          }
+          const { selection, schemaTracker } = trackerResult.ok;
+          this.addSchemaSubscription(of, invocation, selection, schemaTracker);
           this.memory.subscribe(this);
+
+          // Filter out any known results
+          if (invocation.args.excludeSent) {
+            const space = invocation.sub;
+            const factSelection = selection[space];
+            const factVersions = [...FactModule.iterate(factSelection)];
+            selection[space] = this.toSelection(
+              this.filterKnownFacts(factVersions),
+            );
+          }
+          return this.perform({
+            the: "task/return",
+            of,
+            is: { ok: selection },
+          });
         }
+
+        // Non-subscribing queries use the regular querySchema
+        const result = await this.memory.querySchema(invocation);
         // Filter out any known results
         if (result.ok !== undefined && invocation.args.excludeSent) {
           const space = invocation.sub;
@@ -507,6 +545,7 @@ class MemoryProviderSession<
     of: JobId,
     invocation: SchemaQuery<Space>,
     result: Selection<Space>,
+    schemaTracker?: MapSet<string, SchemaPathSelector>,
   ) {
     const space = invocation.sub;
     const factSelection = result[space];
@@ -522,27 +561,232 @@ class MemoryProviderSession<
       invocation,
       includedFacts,
       since,
+      schemaTracker ?? new MapSet(deepEqual),
     );
     this.schemaChannels.set(of, subscription);
   }
 
+  /**
+   * Incrementally find schema subscription matches after a transaction.
+   * Instead of re-running the full query for each subscription, we:
+   * 1. Find which changed docs are tracked by each subscription's schemaTracker
+   * 2. Re-evaluate just those docs with their schemas to find new links
+   * 3. Follow any new links that weren't already tracked
+   */
   private async getSchemaSubscriptionMatches<Space extends MemorySpace>(
     transaction: Transaction<Space>,
   ): Promise<[JobId | undefined, number, Revision<Fact>[]]> {
     const schemaMatches = new Map<string, Revision<Fact>>();
     const space = transaction.sub;
     let maxSince = -1;
-    let lastId;
-    // Eventually, we should support multiple spaces, but currently the since handling is per-space
-    // Our websockets are also per-space, so there's larger issues involved.
+    let lastId: JobId | undefined;
+
+    // Early exit if no schema subscriptions
+    if (this.schemaChannels.size === 0) {
+      return [undefined, -1, []];
+    }
+
+    // Extract changed document keys from transaction
+    const changedDocs = this.extractChangedDocKeys(transaction);
+    if (changedDocs.size === 0) {
+      return [undefined, -1, []];
+    }
+
+    // Get access to the space session for evaluating documents
+    const mountResult = await Memory.mount(
+      this.memory as Memory.Memory,
+      space,
+    );
+    if (mountResult.error) {
+      logger.warn(
+        "incremental-mount-error",
+        () => ["Failed to mount space for incremental update:", mountResult.error],
+      );
+      // Fall back to full re-query for all subscriptions
+      return this.getSchemaSubscriptionMatchesFallback(transaction);
+    }
+    const spaceSession = mountResult.ok as unknown as SpaceSession<Space>;
+
     for (const [id, subscription] of this.schemaChannels) {
-      if (
-        Subscription.match(transaction, subscription.watchedObjects)
-      ) {
+      // Find changed docs that are in this subscription's schemaTracker
+      const affectedDocs = this.findAffectedDocs(
+        changedDocs,
+        subscription.schemaTracker,
+      );
+
+      if (affectedDocs.length === 0) {
+        continue;
+      }
+
+      // Process affected docs incrementally
+      const result = this.processIncrementalUpdate(
+        spaceSession,
+        subscription,
+        affectedDocs,
+        space,
+      );
+
+      // Collect new facts
+      for (const [address, factVersion] of result.newFacts) {
+        if (
+          factVersion.since > subscription.since ||
+          !subscription.watchedObjects.has(address)
+        ) {
+          schemaMatches.set(address, factVersion);
+          subscription.watchedObjects.add(address);
+          if (factVersion.since > subscription.since) {
+            subscription.since = factVersion.since;
+          }
+        }
+      }
+
+      if (result.newFacts.size > 0) {
+        lastId = id;
+        maxSince = Math.max(maxSince, subscription.since);
+      }
+    }
+
+    return [lastId, maxSince, [...schemaMatches.values()]];
+  }
+
+  /**
+   * Extract document keys (id/type format) from a transaction's changes.
+   */
+  private extractChangedDocKeys<Space extends MemorySpace>(
+    transaction: Transaction<Space>,
+  ): Set<string> {
+    const changedDocs = new Set<string>();
+    for (const fact of SelectionBuilder.iterate(transaction.args.changes)) {
+      if (fact.value !== true) {
+        // Format matches what schemaTracker uses: "id\0type"
+        changedDocs.add(`${fact.of}\0${fact.the}`);
+      }
+    }
+    return changedDocs;
+  }
+
+  /**
+   * Find docs in changedDocs that are tracked by the subscription's schemaTracker.
+   * Returns list of (docKey, schemas) pairs.
+   */
+  private findAffectedDocs(
+    changedDocs: Set<string>,
+    schemaTracker: MapSet<string, SchemaPathSelector>,
+  ): Array<{ docKey: string; schemas: Set<SchemaPathSelector> }> {
+    const affected: Array<{ docKey: string; schemas: Set<SchemaPathSelector> }> =
+      [];
+    for (const docKey of changedDocs) {
+      const schemas = schemaTracker.get(docKey);
+      if (schemas && schemas.size > 0) {
+        affected.push({ docKey, schemas: new Set(schemas) });
+      }
+    }
+    return affected;
+  }
+
+  /**
+   * Process incremental update for a subscription given affected docs.
+   * Re-evaluates each affected doc with its schemas and follows new links.
+   */
+  private processIncrementalUpdate<Space extends MemorySpace>(
+    spaceSession: SpaceSession<Space>,
+    subscription: SchemaSubscription,
+    affectedDocs: Array<{ docKey: string; schemas: Set<SchemaPathSelector> }>,
+    space: Space,
+  ): { newFacts: Map<string, Revision<Fact>> } {
+    const newFacts = new Map<string, Revision<Fact>>();
+    const classification = subscription.invocation.args.classification;
+
+    // Queue of (docKey, schema) pairs to process
+    const pendingPairs: Array<{ docKey: string; schema: SchemaPathSelector }> =
+      [];
+
+    // Initialize with affected docs and their schemas
+    for (const { docKey, schemas } of affectedDocs) {
+      for (const schema of schemas) {
+        pendingPairs.push({ docKey, schema });
+      }
+    }
+
+    // Process pending pairs - may grow as we discover new links
+    const processedPairs = new Set<string>();
+    while (pendingPairs.length > 0) {
+      const { docKey, schema } = pendingPairs.pop()!;
+      const pairKey = `${docKey}|${JSON.stringify(schema)}`;
+
+      // Skip if already processed
+      if (processedPairs.has(pairKey)) {
+        continue;
+      }
+      processedPairs.add(pairKey);
+
+      // Parse docKey back to id and type
+      const [docId, docType] = docKey.split("\0");
+      if (!docId || !docType) {
+        continue;
+      }
+
+      // Evaluate this document with the schema to find its current links
+      const links = evaluateDocumentLinks(
+        spaceSession,
+        { id: docId, type: docType },
+        schema,
+        classification,
+      );
+
+      if (links === null) {
+        // Document not found or retracted - skip (conservative approach)
+        continue;
+      }
+
+      // Load the fact for this document to include in results
+      const fact = selectFact(spaceSession, {
+        of: docId as `${string}:${string}`,
+        the: docType as `${string}/${string}`,
+      });
+      if (fact && fact.is !== undefined) {
+        const address = this.formatAddress(space, fact);
+        newFacts.set(address, {
+          of: fact.of,
+          the: fact.the,
+          cause: causeFromString(fact.cause),
+          is: fact.is,
+          since: fact.since,
+        });
+      }
+
+      // Find new links: targets in links that aren't already in subscription.schemaTracker
+      for (const [targetDocKey, targetSchemas] of links) {
+        for (const targetSchema of targetSchemas) {
+          if (!subscription.schemaTracker.hasValue(targetDocKey, targetSchema)) {
+            // New link discovered - add to pending and track it
+            pendingPairs.push({ docKey: targetDocKey, schema: targetSchema });
+            subscription.schemaTracker.add(targetDocKey, targetSchema);
+          }
+        }
+      }
+    }
+
+    return { newFacts };
+  }
+
+  /**
+   * Fallback to full re-query for all subscriptions (original behavior).
+   * Used when incremental update cannot proceed (e.g., mount failure).
+   */
+  private async getSchemaSubscriptionMatchesFallback<Space extends MemorySpace>(
+    transaction: Transaction<Space>,
+  ): Promise<[JobId | undefined, number, Revision<Fact>[]]> {
+    const schemaMatches = new Map<string, Revision<Fact>>();
+    const space = transaction.sub;
+    let maxSince = -1;
+    let lastId: JobId | undefined;
+
+    for (const [id, subscription] of this.schemaChannels) {
+      if (Subscription.match(transaction, subscription.watchedObjects)) {
         // Re-run our original query, but not as a subscription
         const newArgs = { ...subscription.invocation.args, subscribe: false };
         const newInvocation = { ...subscription.invocation, args: newArgs };
-        // We need to bypass the perform queue to avoid a deadlock
         const result = await Memory.querySchema(
           this.memory as Memory.Memory,
           newInvocation,
@@ -560,17 +804,14 @@ class MemoryProviderSession<
           (acc, cur, _i) => cur.since > acc ? cur.since : acc,
           -1,
         );
-        // We only need to include the facts that are newer than our query
-        const newFacts = includedFacts.entries().filter((
-          [address, factVersion],
-        ) =>
-          factVersion.since > subscription.since ||
-          !subscription.watchedObjects.has(address)
+        const newFacts = includedFacts.entries().filter(
+          ([address, factVersion]) =>
+            factVersion.since > subscription.since ||
+            !subscription.watchedObjects.has(address),
         );
         for (const [address, factVersion] of newFacts) {
           schemaMatches.set(address, factVersion);
         }
-        // Update our subscription
         subscription.watchedObjects = new Set(includedFacts.keys());
         subscription.since = since;
         lastId = id;

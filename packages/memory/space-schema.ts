@@ -27,6 +27,7 @@ import type {
   Entity,
   FactSelection,
   MemorySpace,
+  MIME,
   SchemaQuery,
 } from "./interface.ts";
 import { SelectAllString } from "./schema.ts";
@@ -151,10 +152,15 @@ export class ServerObjectManager extends BaseObjectManager<
   }
 }
 
+export interface SelectSchemaResult {
+  facts: FactSelection;
+  schemaTracker: MapSet<string, SchemaPathSelector>;
+}
+
 export const selectSchema = <Space extends MemorySpace>(
   session: SpaceStoreSession<Space>,
   { selectSchema, since, classification }: SchemaQuery["args"],
-): FactSelection => {
+): SelectSchemaResult => {
   const startTime = performance.timeOrigin + performance.now();
 
   const providedClassifications = new Set<string>(classification);
@@ -247,8 +253,58 @@ export const selectSchema = <Space extends MemorySpace>(
     logger.info("slow-select", () => ["Slow selectSchema:", selectSchema]);
   }
 
-  return includedFacts;
+  return { facts: includedFacts, schemaTracker };
 };
+
+/**
+ * Evaluates a single document with a schema and returns the links it contains.
+ * Used for incremental subscription updates - when a document changes, we re-evaluate
+ * just that document to find what links it now has.
+ *
+ * @param session - The space store session
+ * @param docAddress - The document to evaluate (id and type)
+ * @param schema - The schema to apply
+ * @param classification - Classification claims for access control
+ * @returns A MapSet of target document addresses to their schemas, or null if doc not found
+ */
+export function evaluateDocumentLinks<Space extends MemorySpace>(
+  session: SpaceStoreSession<Space>,
+  docAddress: { id: string; type: string },
+  schema: SchemaPathSelector,
+  classification?: string[],
+): MapSet<string, SchemaPathSelector> | null {
+  const providedClassifications = new Set<string>(classification);
+  const manager = new ServerObjectManager(session, providedClassifications);
+  const tracker = new CompoundCycleTracker<
+    Immutable<JSONValue>,
+    SchemaContext | undefined
+  >();
+  const cfc = new ContextualFlowControl();
+  const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
+
+  // Load the document
+  const address = {
+    id: docAddress.id as Entity,
+    type: docAddress.type as MIME,
+    path: [] as string[],
+  };
+  const fact = manager.load(address);
+  if (fact === null || fact.value === undefined) {
+    return null;
+  }
+
+  // Create the IAttestation with cause/since (we don't need these for link evaluation)
+  const attestation: IAttestation & { cause: CauseString; since: number } = {
+    ...fact,
+    cause: "" as CauseString, // Not needed for link evaluation
+    since: 0,
+  };
+
+  // Run the schema traversal to populate schemaTracker with links
+  loadFactsForDoc(manager, attestation, schema, tracker, cfc, schemaTracker);
+
+  return schemaTracker;
+}
 
 // The fact passed in is the IAttestation for the top level 'is', so path
 // is empty.

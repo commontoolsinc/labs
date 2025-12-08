@@ -168,6 +168,35 @@ export const querySchema = async (session: Session, query: SchemaQuery) => {
   });
 };
 
+/**
+ * Internal variant of querySchema that also returns the schemaTracker.
+ * Used by provider.ts for incremental subscription updates.
+ */
+export const querySchemaWithTracker = async (
+  session: Session,
+  query: SchemaQuery,
+) => {
+  return await traceAsync("memory.querySchemaWithTracker", async (span) => {
+    addMemoryAttributes(span, {
+      operation: "querySchemaWithTracker",
+      space: query.sub,
+    });
+
+    const { ok: space, error } = await mount(session, query.sub);
+    if (error) {
+      span.setAttribute("mount.status", "error");
+      return { error };
+    }
+
+    span.setAttribute("mount.status", "success");
+    // Cast is safe: the Space class implements both SpaceSession and Session<Subject>
+    return Space.querySchemaWithTracker(
+      space as unknown as Space.Session<typeof query.sub>,
+      query,
+    );
+  });
+};
+
 export const transact = async (session: Session, transaction: Transaction) => {
   return await traceAsync("memory.transact", async (span) => {
     addMemoryAttributes(span, {
