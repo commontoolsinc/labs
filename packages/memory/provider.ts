@@ -36,8 +36,12 @@ import {
 } from "./interface.ts";
 import * as SelectionBuilder from "./selection.ts";
 import * as Memory from "./memory.ts";
-import { refer, fromString as causeFromString } from "./reference.ts";
-import { redactCommitData, selectFact, type Session as SpaceSession } from "./space.ts";
+import { fromString as causeFromString, refer } from "./reference.ts";
+import {
+  redactCommitData,
+  selectFact,
+  type Session as SpaceSession,
+} from "./space.ts";
 import { evaluateDocumentLinks } from "./space-schema.ts";
 import * as Subscription from "./subscription.ts";
 import * as FactModule from "./fact.ts";
@@ -600,7 +604,10 @@ class MemoryProviderSession<
     if (mountResult.error) {
       logger.warn(
         "incremental-mount-error",
-        () => ["Failed to mount space for incremental update:", mountResult.error],
+        () => [
+          "Failed to mount space for incremental update:",
+          mountResult.error,
+        ],
       );
       // Fall back to full re-query for all subscriptions
       return this.getSchemaSubscriptionMatchesFallback(transaction);
@@ -673,8 +680,9 @@ class MemoryProviderSession<
     changedDocs: Set<string>,
     schemaTracker: MapSet<string, SchemaPathSelector>,
   ): Array<{ docKey: string; schemas: Set<SchemaPathSelector> }> {
-    const affected: Array<{ docKey: string; schemas: Set<SchemaPathSelector> }> =
-      [];
+    const affected: Array<
+      { docKey: string; schemas: Set<SchemaPathSelector> }
+    > = [];
     for (const docKey of changedDocs) {
       const schemas = schemaTracker.get(docKey);
       if (schemas && schemas.size > 0) {
@@ -758,7 +766,9 @@ class MemoryProviderSession<
       // Find new links: targets in links that aren't already in subscription.schemaTracker
       for (const [targetDocKey, targetSchemas] of links) {
         for (const targetSchema of targetSchemas) {
-          if (!subscription.schemaTracker.hasValue(targetDocKey, targetSchema)) {
+          if (
+            !subscription.schemaTracker.hasValue(targetDocKey, targetSchema)
+          ) {
             // New link discovered - add to pending and track it
             pendingPairs.push({ docKey: targetDocKey, schema: targetSchema });
             subscription.schemaTracker.add(targetDocKey, targetSchema);

@@ -1085,7 +1085,10 @@ export const querySchemaWithTracker = <Space extends MemorySpace>(
   session: Session<Space>,
   command: SchemaQuery<Space>,
 ): Result<
-  { selection: Selection<Space>; schemaTracker: SelectSchemaResult["schemaTracker"] },
+  {
+    selection: Selection<Space>;
+    schemaTracker: SelectSchemaResult["schemaTracker"];
+  },
   AuthorizationError | QueryError
 > => {
   return traceSync("space.querySchemaWithTracker", (span) => {
