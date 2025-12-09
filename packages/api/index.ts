@@ -492,6 +492,8 @@ export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
  * OpaqueRef<Cell<T>> unwraps to Cell<T>.
  */
 export type OpaqueRef<T> = [T] extends [AnyBrandedCell<any>] ? T
+  // Handle intersection types like OpaqueCell<X> & Y - extract the OpaqueCell part
+  : T extends AnyBrandedCell<any> ? T
   :
     & OpaqueCell<T>
     & OpaqueRefInner<T>;
@@ -502,6 +504,8 @@ type OpaqueRefInner<T> = [T] extends
   [ArrayBuffer | ArrayBufferView | URL | Date] ? T
   : [T] extends [Array<infer U>] ? Array<OpaqueRef<U>>
   : [T] extends [AnyBrandedCell<any>] ? T
+  // Handle intersection types like OpaqueCell<X> & Y - don't wrap again
+  : T extends AnyBrandedCell<any> ? T
   : [T] extends [object] ? { [K in keyof T]: OpaqueRef<T[K]> }
   // For nullable types (T | null | undefined), extract and map the non-null object/array part
   : [NonNullable<T>] extends [never] ? T
