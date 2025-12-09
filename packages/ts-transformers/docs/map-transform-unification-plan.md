@@ -358,6 +358,90 @@ items.mapWithPattern((item) =>
 from both PRs that a fresh implementation may be cleaner than trying to
 merge/rebase.
 
+## Key Discovery: Type-Based Approach May Be Simpler
+
+### The Type Checker Can Resolve Synthetic Call Types
+
+During investigation, we discovered that the TypeScript type checker CAN resolve
+types for synthetic derive calls created by the transformer. This is because our
+synthetic derives have **explicit return type annotations** on the callback:
+
+```typescript
+// Synthetic derive created by OpaqueRefJSXTransformer
+(__ctHelpers.derive({...}, (): __ctHelpers.OpaqueCell<Assignment[]> & ... => ...))
+```
+
+Debug output confirmed:
+
+```
+[DEBUG] .map() on "(__ctHelpers.derive({...}...)" (ParenthesizedExpression)
+[DEBUG]   checker type: OpaqueCell<Assignment[]> & ...
+[DEBUG]   registry type: undefined
+```
+
+The checker returns `OpaqueCell<Assignment[]>` even for synthetic nodes!
+
+### The Principled Type-Based Approach
+
+**Core insight**: The type system already encodes the runtime semantics:
+
+1. **Derive callback params**: The derive signature is
+   `derive<T>(input: OpaqueRef<T>, fn: (unwrapped: T) => R)`. Inside the
+   callback, params have type `T`, NOT `OpaqueRef<T>`.
+
+2. **Method chains preserve types**: `prefs.filter(...)` where `prefs: T[]`
+   returns `T[]` (plain array).
+
+3. **Derive results**: `derive(...)` returns `OpaqueRef<R>`.
+
+4. **mapWithPattern callback params**: Params stay opaque (`OpaqueRef<T>`).
+
+**Therefore**: We can simplify to a single type check:
+
+```typescript
+function shouldTransformMap(mapCall, context): boolean {
+  const mapTarget = mapCall.expression.expression;
+  const targetType = getTypeAtLocationWithFallback(mapTarget, ...);
+
+  if (!targetType) return false;
+
+  // Transform iff the target is a cell-like type (has CELL_BRAND)
+  return isOpaqueRefType(targetType, context.checker);
+}
+```
+
+**Why this works for all scenarios:**
+
+| Scenario                                             | Target Type          | isOpaqueRefType | Transform? |
+| ---------------------------------------------------- | -------------------- | --------------- | ---------- |
+| `state.items.map(...)`                               | `OpaqueCell<Item[]>` | true            | YES        |
+| `derive(items, (arr) => arr.map(...))`               | `Item[]` (unwrapped) | false           | NO         |
+| `derive(items, (arr) => arr.filter(...).map(...))`   | `Item[]`             | false           | NO         |
+| `derive(...).map(...)`                               | `OpaqueCell<R>`      | true            | YES        |
+| `items.mapWithPattern((item) => item.tags.map(...))` | `OpaqueCell<Tag[]>`  | true            | YES        |
+
+### Implications
+
+1. **No need for origin tracking**: The type checker already knows whether a
+   value is wrapped or unwrapped.
+
+2. **No need for call-kind detection**: We don't need to hard-code "derive",
+   "array-map", etc. Just check the type.
+
+3. **No need for `isInsideDeriveCallback`**: The type tells us everything.
+
+4. **Simpler code**: Replace ~200 lines of origin tracking with ~10 lines of
+   type checking.
+
+### Remaining Investigation
+
+Need to verify:
+
+1. Does `isOpaqueRefType` correctly return `false` for `(OpaqueCell<T>)[]`
+   (array of cells) vs `true` for `OpaqueCell<T[]>` (cell of array)?
+2. Are there edge cases where the type checker fails to resolve the type?
+3. Does the typeRegistry workaround interfere with this approach?
+
 ## Open Questions
 
 1. **Should `findRootIdentifier` be extracted to a shared utility?** It exists
@@ -374,6 +458,9 @@ merge/rebase.
    `getItems().filter(...).map(...)` - the origin is a call expression, not an
    identifier. Current approach would return `undefined` and not skip
    transformation. Is this correct?
+
+5. **Can we fully replace origin tracking with type checking?** See "Key
+   Discovery" section above.
 
 ## References
 
