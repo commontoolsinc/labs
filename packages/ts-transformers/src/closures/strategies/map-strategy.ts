@@ -206,123 +206,29 @@ export function buildCapturePropertyAssignments(
 }
 
 /**
- * Get the root identifier from an expression.
- * For example: `a.alternatives.length` -> `a`
- *              `foo` -> `foo`
- *              `arr[0].bar` -> `arr`
+ * Check if a node is inside a mapWithPattern callback.
+ *
+ * mapWithPattern callbacks are recipe boundaries - everything inside should
+ * be treated as "pattern mode" code where maps need transformation, regardless
+ * of any inner derives created by ternary→ifElse transformation.
  */
-function getRootIdentifier(expr: ts.Expression): ts.Identifier | undefined {
-  let current = expr;
-  while (true) {
-    if (ts.isIdentifier(current)) {
-      return current;
-    }
-    if (ts.isPropertyAccessExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isElementAccessExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isParenthesizedExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    return undefined;
-  }
-}
-
-/**
- * Get parameter names from a callback function.
- */
-function getCallbackParameterNames(
-  callback: ts.ArrowFunction | ts.FunctionExpression,
-): Set<string> {
-  const names = new Set<string>();
-  for (const param of callback.parameters) {
-    collectBindingNames(param.name, names);
-  }
-  return names;
-}
-
-/**
- * Collect all identifier names from a binding pattern.
- */
-function collectBindingNames(
-  name: ts.BindingName,
-  names: Set<string>,
-): void {
-  if (ts.isIdentifier(name)) {
-    names.add(name.text);
-  } else if (ts.isObjectBindingPattern(name)) {
-    for (const element of name.elements) {
-      collectBindingNames(element.name, names);
-    }
-  } else if (ts.isArrayBindingPattern(name)) {
-    for (const element of name.elements) {
-      if (ts.isBindingElement(element)) {
-        collectBindingNames(element.name, names);
-      }
-    }
-  }
-}
-
-/**
- * Check if a callback is from a mapWithPattern call.
- */
-function isMapWithPatternCallback(
-  callback: ts.ArrowFunction | ts.FunctionExpression,
+function isInsideMapWithPatternCallback(
+  node: ts.Node,
   checker: ts.TypeChecker,
 ): boolean {
-  if (!callback.parent || !ts.isCallExpression(callback.parent)) {
-    return false;
-  }
-  const callKind = detectCallKind(callback.parent, checker);
-  return callKind?.kind === "array-map";
-}
-
-/**
- * Check if the map target's root identifier comes from a mapWithPattern
- * element parameter somewhere in the ancestor chain.
- *
- * When we have nested structures like:
- *   assumptions.mapWithPattern(({ element: a }) => {
- *     a.alternatives.map(...)  // This should be transformed
- *   })
- *
- * The `a` variable is the element from mapWithPattern, and its properties
- * (like `a.alternatives`) are still opaque refs that should be transformed.
- */
-function isRootFromMapWithPatternElement(
-  mapTarget: ts.Expression,
-  mapCall: ts.CallExpression,
-  checker: ts.TypeChecker,
-): boolean {
-  const rootId = getRootIdentifier(mapTarget);
-  if (!rootId) return false;
-
-  // Walk up the AST looking for mapWithPattern callbacks
-  let node: ts.Node = mapCall;
-  while (node.parent) {
-    if (
-      ts.isArrowFunction(node.parent) || ts.isFunctionExpression(node.parent)
-    ) {
-      const callback = node.parent;
-      if (isMapWithPatternCallback(callback, checker)) {
-        // Check if the root identifier matches the element parameter
-        // mapWithPattern callbacks have signature: ({ element, params }) => ...
-        // or with destructuring: ({ element: a, params }) => ...
-        const paramNames = getCallbackParameterNames(callback);
-        if (paramNames.has(rootId.text)) {
-          // The root identifier is from a mapWithPattern element parameter
+  let current: ts.Node | undefined = node.parent;
+  while (current) {
+    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      const callback = current;
+      if (callback.parent && ts.isCallExpression(callback.parent)) {
+        const callKind = detectCallKind(callback.parent, checker);
+        if (callKind?.kind === "array-map") {
           return true;
         }
       }
     }
-    node = node.parent;
+    current = current.parent;
   }
-
   return false;
 }
 
@@ -331,9 +237,10 @@ function isRootFromMapWithPatternElement(
  * that is actually captured and unwrapped by the derive.
  * Returns true if we should skip transformation due to OpaqueRef unwrapping.
  *
- * The key insight is that derive only unwraps OpaqueRefs that are passed as
- * captures. If the map target's root comes from a mapWithPattern element
- * parameter, it's NOT unwrapped by the derive and should still be transformed.
+ * Key insight: If we're inside a mapWithPattern callback, we're in "pattern mode"
+ * and should always transform, regardless of any inner derives. The derives
+ * created by ternary→ifElse are implementation details that don't change the
+ * fact that we're in a recipe boundary.
  */
 function isInsideDeriveWithOpaqueRef(
   mapCall: ts.CallExpression,
@@ -341,6 +248,12 @@ function isInsideDeriveWithOpaqueRef(
 ): boolean {
   const { checker } = context;
   const typeRegistry = context.options.typeRegistry;
+
+  // If we're inside a mapWithPattern callback, we're in "pattern mode"
+  // and should transform maps regardless of any inner derives.
+  if (isInsideMapWithPatternCallback(mapCall, checker)) {
+    return false;
+  }
 
   let node: ts.Node = mapCall;
   while (node.parent) {
@@ -378,17 +291,6 @@ function isInsideDeriveWithOpaqueRef(
             // Only skip transformation for non-Cell OpaqueRefs
             // Cell<T[]>.map() should still transform even inside derive
             if (kind !== "cell") {
-              // Special case: If the map target's root comes from a
-              // mapWithPattern element parameter, it's still opaque and
-              // should be transformed, even though we're inside a derive.
-              if (
-                isRootFromMapWithPatternElement(mapTarget, mapCall, checker)
-              ) {
-                // Continue looking at outer callbacks - there might be
-                // other derives that would prevent transformation.
-                node = node.parent;
-                continue;
-              }
               return true;
             }
           }
