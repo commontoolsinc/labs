@@ -381,7 +381,9 @@ function isInsideDeriveWithOpaqueRef(
               // Special case: If the map target's root comes from a
               // mapWithPattern element parameter, it's still opaque and
               // should be transformed, even though we're inside a derive.
-              if (isRootFromMapWithPatternElement(mapTarget, mapCall, checker)) {
+              if (
+                isRootFromMapWithPatternElement(mapTarget, mapCall, checker)
+              ) {
                 // Continue looking at outer callbacks - there might be
                 // other derives that would prevent transformation.
                 node = node.parent;
