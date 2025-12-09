@@ -1130,6 +1130,66 @@ describe("asCell", () => {
     expect(values).toEqual([42, 300]); // Got called again
   });
 
+  it("should trigger sink when linked cell changes and is read during callback", async () => {
+    // This test verifies that cell reads happening DURING the sink callback
+    // are properly tracked for reactivity. The fix moves txToReactivityLog()
+    // to after the callback so that reads like JSON.stringify traversing
+    // through linked cells are captured in the subscription.
+
+    // Create an inner cell that will be linked to
+    const innerCell = runtime.getCell<{ value: string }>(
+      space,
+      "sink-callback-reads-inner",
+      undefined,
+      tx,
+    );
+    innerCell.set({ value: "initial" });
+
+    // Create a container cell with schema: true (no validation, raw access)
+    // that contains a link to the inner cell
+    const containerCell = runtime.getCell<{ nested: unknown }>(
+      space,
+      "sink-callback-reads-container",
+      true, // schema: true means no schema validation
+      tx,
+    );
+    containerCell.setRaw({
+      nested: innerCell.getAsLink(),
+    });
+
+    tx.commit();
+    tx = runtime.edit();
+
+    // Track callback invocations - use JSON.stringify to force reading
+    // through the link during the callback
+    const callbackResults: string[] = [];
+    const cancel = containerCell.sink((value) => {
+      // This read through the linked cell happens DURING the callback.
+      // Before the fix, this read wasn't tracked, so changes to innerCell
+      // wouldn't trigger this sink to re-run.
+      const serialized = JSON.stringify(value);
+      callbackResults.push(serialized);
+    });
+
+    // Should have been called once with initial value
+    expect(callbackResults.length).toBe(1);
+    expect(callbackResults[0]).toContain("initial");
+
+    // Now update the inner cell
+    innerCell.withTx(tx).set({ value: "updated" });
+    tx.commit();
+    tx = runtime.edit();
+
+    await runtime.idle();
+
+    // The sink should have been triggered again because we read through
+    // the link during the callback
+    expect(callbackResults.length).toBe(2);
+    expect(callbackResults[1]).toContain("updated");
+
+    cancel();
+  });
+
   it("behaves correctly when setting a cell to itself", () => {
     const c = runtime.getCell<{ a: number }>(
       space,
