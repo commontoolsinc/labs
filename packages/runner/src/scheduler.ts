@@ -34,6 +34,7 @@ import {
   sortAndCompactPaths,
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
+import { ensureCharmRunning } from "./ensure-charm-running.ts";
 
 const logger = getLogger("scheduler", {
   enabled: false,
@@ -337,9 +338,13 @@ export class Scheduler implements IScheduler {
     event: any,
     retries: number = DEFAULT_RETRIES_FOR_EVENTS,
     onCommit?: (tx: IExtendedStorageTransaction) => void,
+    doNotLoadCharmIfNotRunning: boolean = false,
   ): void {
+    let handlerFound = false;
+
     for (const [link, handler] of this.eventHandlers) {
       if (areNormalizedLinksSame(link, eventLink)) {
+        handlerFound = true;
         this.queueExecution();
         this.eventQueue.push({
           action: (tx: IExtendedStorageTransaction) => handler(tx, event),
@@ -347,6 +352,20 @@ export class Scheduler implements IScheduler {
           onCommit,
         });
       }
+    }
+
+    // If no handler was found, try to start the charm that should handle this event
+    if (!handlerFound && !doNotLoadCharmIfNotRunning) {
+      // Use an async IIFE to handle the async operation without blocking
+      (async () => {
+        const started = await ensureCharmRunning(this.runtime, eventLink);
+        if (started) {
+          // Charm was started, re-queue the event. Don't trigger loading again
+          // if this didn't result in registering a handler, as trying again
+          // won't change this.
+          this.queueEvent(eventLink, event, retries, onCommit, true);
+        }
+      })();
     }
   }
 
