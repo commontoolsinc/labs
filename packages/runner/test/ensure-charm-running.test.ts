@@ -337,90 +337,284 @@ describe("queueEvent with auto-start", () => {
     await storageManager?.close();
   });
 
-  it("should not retry indefinitely when charm does not register handler", async () => {
-    // This tests the infinite loop protection in the scheduler
-    // Create a recipe that does NOT have an event handler for the stream we'll send to
+  it("should start charm when event sent to result cell path, but not retry if no handler", async () => {
+    // Create a recipe with a reactive lift (to prove it starts) but NO event handler
+    let liftRunCount = 0;
+
     const recipe: Recipe = {
       argumentSchema: {
         type: "object",
-        properties: { value: { type: "number" } },
+        properties: {
+          value: { type: "number" },
+        },
       },
       resultSchema: {
         type: "object",
-        properties: { doubled: { type: "number" } },
+        properties: {
+          doubled: { type: "number" },
+          events: { type: "object" },
+        },
+      },
+      initial: {
+        internal: {
+          events: { $stream: true },
+        },
       },
       result: {
         doubled: { $alias: { path: ["internal", "doubled"] } },
+        events: { $alias: { path: ["internal", "events"] } },
       },
       nodes: [
         {
+          // This lift will run when the charm starts, proving the charm started
           module: {
             type: "javascript",
-            implementation: (value: number) => value * 2,
+            implementation: (value: number) => {
+              liftRunCount++;
+              return value * 2;
+            },
           },
           inputs: { $alias: { path: ["argument", "value"] } },
           outputs: { $alias: { path: ["internal", "doubled"] } },
+        },
+        // Note: NO handler node for events - this is intentional
+      ],
+    };
+
+    const recipeId = runtime.recipeManager.registerRecipe(recipe);
+
+    // Create result cell
+    const resultCell = runtime.getCell(
+      space,
+      "no-handler-start-test-result",
+      undefined,
+      tx,
+    );
+
+    // Create process cell
+    const processCell = runtime.getCell(
+      space,
+      "no-handler-start-test-process",
+      undefined,
+      tx,
+    );
+
+    // Set up result cell - events points to internal/events in process cell
+    resultCell.set({
+      doubled: {
+        $alias: { path: ["internal", "doubled"], cell: processCell.entityId },
+      },
+      events: {
+        $alias: { path: ["internal", "events"], cell: processCell.entityId },
+      },
+    });
+    resultCell.setSourceCell(processCell);
+
+    // Set up process cell - internal.events must be set to $stream: true
+    // (both in recipe.initial and directly on the cell)
+    processCell.set({
+      [TYPE]: recipeId,
+      argument: { value: 5 },
+      resultRef: resultCell.getAsLink({ base: processCell }),
+      internal: {
+        events: { $stream: true },
+      },
+    });
+
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Verify charm is not running yet
+    expect(liftRunCount).toBe(0);
+
+    // Send an event to the result cell's events path
+    // ensureCharmRunning will:
+    // 1. Get cell at resultCell (with path removed)
+    // 2. Follow getSourceCell() to find processCell
+    // 3. Find TYPE and resultRef in processCell
+    // 4. Start the charm
+    const eventsLink = resultCell.key("events").getAsNormalizedFullLink();
+    runtime.scheduler.queueEvent(eventsLink, { type: "click" });
+
+    // Wait for processing
+    await runtime.idle();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await runtime.idle();
+
+    // The charm should have been started (lift ran)
+    expect(liftRunCount).toBe(1);
+
+    // The result should show the lift's output
+    expect(resultCell.getAsQueryResult()).toMatchObject({ doubled: 10 });
+
+    // Send another event - should NOT cause another start attempt
+    // (infinite loop protection prevents re-trying for same cell)
+    runtime.scheduler.queueEvent(eventsLink, { type: "click" });
+
+    await runtime.idle();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await runtime.idle();
+
+    // Lift should still only have run once (no re-start attempt)
+    expect(liftRunCount).toBe(1);
+  });
+
+  it("should start charm and process event when handler is defined", async () => {
+    // Create a recipe with a handler that reads from the stream
+    let liftRunCount = 0;
+    let handlerRunCount = 0;
+    const receivedEvents: any[] = [];
+
+    const recipe: Recipe = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          value: { type: "number" },
+        },
+      },
+      resultSchema: {
+        type: "object",
+        properties: {
+          doubled: { type: "number" },
+          events: { type: "object" },
+          eventCount: { type: "number" },
+        },
+      },
+      initial: {
+        internal: {
+          events: { $stream: true },
+          eventCount: 0,
+        },
+      },
+      result: {
+        doubled: { $alias: { path: ["internal", "doubled"] } },
+        events: { $alias: { path: ["internal", "events"] } },
+        eventCount: { $alias: { path: ["internal", "eventCount"] } },
+      },
+      nodes: [
+        {
+          // This lift will run when the charm starts
+          module: {
+            type: "javascript",
+            implementation: (value: number) => {
+              liftRunCount++;
+              return value * 2;
+            },
+          },
+          inputs: { $alias: { path: ["argument", "value"] } },
+          outputs: { $alias: { path: ["internal", "doubled"] } },
+        },
+        {
+          // Handler that reads from the stream
+          module: {
+            type: "javascript",
+            wrapper: "handler",
+            implementation: (event: any, ctx: { eventCount: number }) => {
+              handlerRunCount++;
+              receivedEvents.push(event);
+              ctx.eventCount = (ctx.eventCount || 0) + 1;
+            },
+          },
+          inputs: {
+            $event: { $alias: { path: ["internal", "events"] } },
+            $ctx: {
+              eventCount: { $alias: { path: ["internal", "eventCount"] } },
+            },
+          },
+          outputs: {
+            eventCount: { $alias: { path: ["internal", "eventCount"] } },
+          },
         },
       ],
     };
 
     const recipeId = runtime.recipeManager.registerRecipe(recipe);
 
-    // Create the charm structure
+    // Create result cell
     const resultCell = runtime.getCell(
       space,
-      "no-handler-loop-test-result",
+      "with-handler-start-test-result",
       undefined,
       tx,
     );
 
+    // Create process cell
     const processCell = runtime.getCell(
       space,
-      "no-handler-loop-test-process",
+      "with-handler-start-test-process",
       undefined,
       tx,
     );
 
-    // Create a separate event stream cell that the recipe doesn't handle
-    const eventStreamCell = runtime.getCell<{ $stream: true }>(
-      space,
-      "no-handler-loop-test-event-stream",
-      undefined,
-      tx,
-    );
-    eventStreamCell.set({ $stream: true });
-
+    // Set up result cell
     resultCell.set({
       doubled: {
         $alias: { path: ["internal", "doubled"], cell: processCell.entityId },
       },
+      events: {
+        $alias: { path: ["internal", "events"], cell: processCell.entityId },
+      },
+      eventCount: {
+        $alias: {
+          path: ["internal", "eventCount"],
+          cell: processCell.entityId,
+        },
+      },
     });
     resultCell.setSourceCell(processCell);
 
+    // Set up process cell - internal.events must be set to $stream: true
+    // (both in recipe.initial and directly on the cell)
     processCell.set({
       [TYPE]: recipeId,
       argument: { value: 5 },
       resultRef: resultCell.getAsLink({ base: processCell }),
-      internal: {},
+      internal: {
+        events: { $stream: true },
+        eventCount: 0,
+      },
     });
 
     await tx.commit();
     tx = runtime.edit();
 
-    // Send an event to the event stream
-    // This will try to start a charm, but eventStreamCell is not associated
-    // with the charm we set up (it's orphaned). Should not infinite loop.
-    runtime.scheduler.queueEvent(
-      eventStreamCell.getAsNormalizedFullLink(),
-      { type: "click" },
-    );
+    // Verify charm is not running yet
+    expect(liftRunCount).toBe(0);
+    expect(handlerRunCount).toBe(0);
 
-    // Wait for processing - should complete without hanging
+    // Send an event - should start charm and process the event
+    // The handler is registered for the internal/events path on process cell
+    const eventsLink = processCell.key("internal").key("events")
+      .getAsNormalizedFullLink();
+    runtime.scheduler.queueEvent(eventsLink, { type: "click", x: 10 });
+
+    // Wait for processing
     await runtime.idle();
     await new Promise((resolve) => setTimeout(resolve, 100));
     await runtime.idle();
 
-    // If we get here, the infinite loop protection worked
-    expect(true).toBe(true);
+    // The charm should have been started
+    expect(liftRunCount).toBe(1);
+
+    // The handler should have been called
+    expect(handlerRunCount).toBe(1);
+    expect(receivedEvents).toEqual([{ type: "click", x: 10 }]);
+
+    // Send another event - handler should be called again
+    runtime.scheduler.queueEvent(eventsLink, { type: "click", x: 20 });
+
+    await runtime.idle();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await runtime.idle();
+
+    // Handler should have run twice now
+    expect(handlerRunCount).toBe(2);
+    expect(receivedEvents).toEqual([
+      { type: "click", x: 10 },
+      { type: "click", x: 20 },
+    ]);
+
+    // Lift should still only have run once (charm only started once)
+    expect(liftRunCount).toBe(1);
   });
 });
