@@ -289,6 +289,82 @@ describe("ensureCharmRunning", () => {
     expect(startCount).toBe(1);
   });
 
+  it("should restart a stopped charm when called again", async () => {
+    // Create a simple recipe that tracks how many times it starts
+    let startCount = 0;
+    const recipe: Recipe = {
+      argumentSchema: { type: "object" },
+      resultSchema: { type: "object" },
+      result: {},
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: () => {
+              startCount++;
+            },
+          },
+          inputs: {},
+          outputs: {},
+        },
+      ],
+    };
+
+    const recipeId = runtime.recipeManager.registerRecipe(recipe);
+
+    const resultCell = runtime.getCell(
+      space,
+      "restart-after-stop-test-result",
+      undefined,
+      tx,
+    );
+
+    const processCell = runtime.getCell(
+      space,
+      "restart-after-stop-test-process",
+      undefined,
+      tx,
+    );
+
+    resultCell.set({});
+    resultCell.setSourceCell(processCell);
+
+    processCell.set({
+      [TYPE]: recipeId,
+      argument: {},
+      resultRef: resultCell.getAsLink({ base: processCell }),
+      internal: {},
+    });
+
+    await tx.commit();
+    tx = runtime.edit();
+
+    // First call should start the charm
+    const result1 = await ensureCharmRunning(
+      runtime,
+      resultCell.getAsNormalizedFullLink(),
+    );
+    expect(result1).toBe(true);
+
+    await runtime.idle();
+    expect(startCount).toBe(1);
+
+    // Stop the charm
+    runtime.runner.stop(resultCell);
+
+    // Call again - should restart the charm since it was stopped
+    const result2 = await ensureCharmRunning(
+      runtime,
+      resultCell.getAsNormalizedFullLink(),
+    );
+    expect(result2).toBe(true);
+
+    await runtime.idle();
+
+    // The charm's lift should have run twice now (once for each start)
+    expect(startCount).toBe(2);
+  });
+
   it("should handle events for cells without associated charms gracefully", async () => {
     // Create a cell that has no charm structure
     const orphanCell = runtime.getCell<{ $stream: true }>(
