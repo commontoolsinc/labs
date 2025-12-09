@@ -338,6 +338,7 @@ export class Scheduler implements IScheduler {
     event: any,
     retries: number = DEFAULT_RETRIES_FOR_EVENTS,
     onCommit?: (tx: IExtendedStorageTransaction) => void,
+    doNotLoadCharmIfNotRunning: boolean = false,
   ): void {
     let handlerFound = false;
 
@@ -354,14 +355,15 @@ export class Scheduler implements IScheduler {
     }
 
     // If no handler was found, try to start the charm that should handle this event
-    if (!handlerFound) {
+    if (!handlerFound && !doNotLoadCharmIfNotRunning) {
       // Use an async IIFE to handle the async operation without blocking
       (async () => {
         const started = await ensureCharmRunning(this.runtime, eventLink);
         if (started) {
-          // Charm was started, re-queue the event
-          // The infinite loop protection is handled inside ensureCharmRunning
-          this.queueEvent(eventLink, event, retries, onCommit);
+          // Charm was started, re-queue the event. Don't trigger loading again
+          // if this didn't result in registering a handler, as trying again
+          // won't change this.
+          this.queueEvent(eventLink, event, retries, onCommit, true);
         }
       })();
     }
