@@ -739,7 +739,9 @@ class MemoryProviderSession<
       processedPairs.add(pairKey);
 
       // Parse docKey back to id and type (format is "id/type" from BaseObjectManager.toKey)
-      const slashIndex = docKey.lastIndexOf("/");
+      // Note: type can contain slashes (e.g., "application/json"), so we split on the FIRST slash
+      // The id is always in the form "of:HASH" which doesn't contain slashes
+      const slashIndex = docKey.indexOf("/");
       if (slashIndex === -1) {
         continue;
       }
