@@ -25,14 +25,14 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
           <h2>Counter</h2>
           <ct-cell-context $cell={suggestion} label="Counter Suggestion">
             {derive(suggestion, (s) => {
-              return s?.result ?? "waiting...";
+              return s?.result as string ?? "waiting...";
             })}
           </ct-cell-context>
 
           <h2>Note</h2>
           <ct-cell-context $cell={suggestion2} label="Note Suggestion">
             {derive(suggestion2, (s) => {
-              return s?.result ?? "waiting...";
+              return s?.result as string ?? "waiting...";
             })}
           </ct-cell-context>
         </div>

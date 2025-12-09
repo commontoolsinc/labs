@@ -9,6 +9,7 @@ import {
   pattern,
   patternTool,
   UI,
+  type VNode,
   when,
   wish,
 } from "commontools";
@@ -192,12 +193,12 @@ export default pattern<OmniboxFABInput>(
                   </ct-cell-context>
                 </div>
               </div>,
-              null,
+              "",
             )}
 
             {/* Prompt input - always at bottom */}
             <div style="padding: 0.5rem; flex-shrink: 0;">
-              {omnibot.ui.promptInput}
+              {omnibot.ui.promptInput as VNode}
             </div>
           </div>
         </ct-fab>

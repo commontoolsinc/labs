@@ -491,6 +491,9 @@ export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
  *
  * OpaqueRef<Cell<T>> unwraps to Cell<T>.
  */
+
+export type OpaqueRef<T> = T;
+/*
 export type OpaqueRef<T> = [T] extends [AnyBrandedCell<any>] ? T
   :
     & OpaqueCell<T>
@@ -509,6 +512,7 @@ type OpaqueRefInner<T> = [T] extends
   : [NonNullable<T>] extends [object]
     ? { [K in keyof NonNullable<T>]: OpaqueRef<NonNullable<T>[K]> }
   : T;
+  */
 
 // ============================================================================
 // CellLike and Opaque - Utility types for accepting cells
@@ -520,7 +524,7 @@ type OpaqueRefInner<T> = [T] extends
  *
  * Note: This is primarily used for type constraints that require a cell.
  */
-export type CellLike<T> = AnyBrandedCell<MaybeCellWrapped<T>> & {
+export type CellLike<T> = MaybeCellWrapped<T> & {
   [CELL_LIKE]?: unknown;
 };
 type MaybeCellWrapped<T> =
@@ -553,7 +557,7 @@ export type Opaque<T> =
   | T
   // We have to list them explicitly so Typescript can unwrap them. Doesn't seem
   // to work if we just say AnyBrandedCell<T>
-  | OpaqueRef<T>
+  //| OpaqueRef<T>
   | AnyCell<T>
   | AnyBrandedCell<T>
   | OpaqueCell<T>

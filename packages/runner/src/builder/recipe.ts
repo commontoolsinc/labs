@@ -48,7 +48,7 @@ export const pattern: PatternFunction = (
 ) => {
   const frame = pushFrame();
 
-  const inputs = opaqueRef(undefined, argumentSchema);
+  const inputs = opaqueRef<any>(undefined, argumentSchema);
 
   const outputs = fn!(inputs);
 
@@ -147,7 +147,7 @@ export function recipe<T, R>(
   // values.
   const frame = pushFrame();
 
-  const inputs = opaqueRef(
+  const inputs = opaqueRef<any>(
     undefined,
     typeof argumentSchema === "string"
       ? undefined
@@ -174,7 +174,7 @@ export function recipeFromFrame<T, R>(
   resultSchema: JSONSchema | undefined,
   fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
 ): RecipeFactory<T, R> {
-  const inputs = opaqueRef(
+  const inputs = opaqueRef<any>(
     undefined,
     typeof argumentSchema === "string"
       ? undefined

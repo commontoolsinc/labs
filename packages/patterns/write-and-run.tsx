@@ -66,7 +66,7 @@ interface Input {
 }
 
 interface Output {
-  prompt: Cell<string>;
+  prompt: string;
 }
 
 const updatePrompt = handler<

@@ -1189,7 +1189,7 @@ export default pattern<ScrabbleInput, ScrabbleOutput>(
     }
 
     const committedTiles = computed((): TileWithStyles[] => {
-      const raw = committed.get ? committed.get() : committed;
+      const raw = committed;
       const tiles = JSON.parse(JSON.stringify(raw)) as PlacedTile[];
       return tiles.map((t) => ({
         ...t,
@@ -1203,7 +1203,7 @@ export default pattern<ScrabbleInput, ScrabbleOutput>(
     });
 
     const placedTiles = computed((): TileWithStyles[] => {
-      const raw = placed.get ? placed.get() : placed;
+      const raw = placed;
       const tiles = JSON.parse(JSON.stringify(raw)) as PlacedTile[];
       return tiles.map((t) => ({
         ...t,
@@ -1223,7 +1223,7 @@ export default pattern<ScrabbleInput, ScrabbleOutput>(
     }
 
     const rackTiles = computed((): RackTileWithDisplay[] => {
-      const raw = rack.get ? rack.get() : rack;
+      const raw = rack;
       const tiles = JSON.parse(JSON.stringify(raw)) as Letter[];
       return tiles.map((t) => ({
         ...t,
