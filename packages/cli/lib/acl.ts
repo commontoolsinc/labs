@@ -1,4 +1,4 @@
-import { createSession, Session } from "@commontools/identity";
+import { createSession, isDID, Session } from "@commontools/identity";
 import { loadIdentity } from "./identity.ts";
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
@@ -13,17 +13,21 @@ import { ACLManager } from "@commontools/charm/ops";
 export interface SpaceConfig {
   apiUrl: URL;
   identityPath: string;
-  spaceName: string;
+  space: string;
 }
 
 // Create an identity and session from configuration.
 async function loadSession(config: SpaceConfig): Promise<Session> {
   const identity = await loadIdentity(config.identityPath);
-  const session = await createSession({
-    identity,
-    spaceName: config.spaceName,
-  });
-  return session;
+  return isDID(config.space)
+    ? createSession({
+      identity,
+      spaceDid: config.space,
+    })
+    : createSession({
+      identity,
+      spaceName: config.space,
+    });
 }
 
 // Creates a Runtime instance for ACL operations

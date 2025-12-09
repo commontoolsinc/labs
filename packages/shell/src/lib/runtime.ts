@@ -1,4 +1,4 @@
-import { createSession, Identity } from "@commontools/identity";
+import { createSession, DID, Identity } from "@commontools/identity";
 import {
   Runtime,
   RuntimeTelemetry,
@@ -40,20 +40,20 @@ export class RuntimeInternals extends EventTarget {
   #inspector: Inspector.Channel;
   #disposed = false;
   #space: string; // The MemorySpace DID
-  #spaceRootPattern?: CharmController<NameSchema>;
-  #spaceRootPatternType: PatternFactory.BuiltinPatternType;
-  #patternCache: Map<string, CharmController<NameSchema>> = new Map();
+  #spaceRootPatternId?: string;
+  #isHomeSpace: boolean;
+  #patternCache: PatternCache;
 
   private constructor(
     cc: CharmsController,
     telemetry: RuntimeTelemetry,
     space: string,
-    spaceRootPatternType: PatternFactory.BuiltinPatternType,
+    isHomeSpace: boolean,
   ) {
     super();
     this.#cc = cc;
     this.#space = space;
-    this.#spaceRootPatternType = spaceRootPatternType;
+    this.#isHomeSpace = isHomeSpace;
     const runtimeId = this.#cc.manager().runtime.id;
     this.#inspector = new Inspector.Channel(
       runtimeId,
@@ -62,6 +62,7 @@ export class RuntimeInternals extends EventTarget {
     this.#telemetry = telemetry;
     this.#telemetry.addEventListener("telemetry", this.#onTelemetry);
     this.#telemetryMarkers = [];
+    this.#patternCache = new PatternCache(this.#cc);
   }
 
   telemetry(): RuntimeTelemetryMarkerResult[] {
@@ -85,35 +86,27 @@ export class RuntimeInternals extends EventTarget {
   // based on the view type (home vs space).
   async getSpaceRootPattern(): Promise<CharmController<NameSchema>> {
     this.#check();
-    if (this.#spaceRootPattern) {
-      return this.#spaceRootPattern;
+    if (this.#spaceRootPatternId) {
+      return this.getPattern(this.#spaceRootPatternId);
     }
     const pattern = await PatternFactory.getOrCreate(
       this.#cc,
-      this.#spaceRootPatternType,
+      this.#isHomeSpace ? "home" : "space-root",
     );
-    this.#spaceRootPattern = pattern;
-    this.#patternCache.set(pattern.id, pattern);
-    // Track as recently accessed
-    await this.#cc.manager().trackRecentCharm(pattern.getCell());
+    this.#spaceRootPatternId = pattern.id;
+    await this.#patternCache.add(pattern);
     return pattern;
   }
 
-  // Returns a pattern by ID, starting it if requested.
-  // Patterns are cached by ID.
   async getPattern(id: string): Promise<CharmController<NameSchema>> {
     this.#check();
-    const cached = this.#patternCache.get(id);
+    const cached = await this.#patternCache.get(id);
     if (cached) {
       return cached;
     }
 
     const pattern = await this.#cc.get(id, true, nameSchema);
-
-    // Track as recently accessed
-    await this.#cc.manager().trackRecentCharm(pattern.getCell());
-
-    this.#patternCache.set(id, pattern);
+    await this.#patternCache.add(pattern);
     return pattern;
   }
 
@@ -154,24 +147,22 @@ export class RuntimeInternals extends EventTarget {
   ): Promise<RuntimeInternals> {
     let session;
     let spaceName;
-    let spaceRootPatternType: PatternFactory.BuiltinPatternType;
+    let isHomeSpace = false;
     if ("builtin" in view) {
       switch (view.builtin) {
         case "home":
           session = await createSession({ identity, spaceDid: identity.did() });
           spaceName = "<home>";
-          spaceRootPatternType = "home";
+          isHomeSpace = true;
           break;
       }
     } else if ("spaceName" in view) {
       session = await createSession({ identity, spaceName: view.spaceName });
       spaceName = view.spaceName;
-      spaceRootPatternType = "space-root";
     } else if ("spaceDid" in view) {
       session = await createSession({ identity, spaceDid: view.spaceDid });
-      spaceRootPatternType = "space-root";
     }
-    if (!session || !spaceRootPatternType!) {
+    if (!session) {
       throw new Error("Unexpected view provided.");
     }
 
@@ -214,15 +205,10 @@ export class RuntimeInternals extends EventTarget {
         if (!id) {
           throw new Error(`Could not navigate to cell that is not a charm.`);
         }
-
-        // NOTE(jake): Eventually, once we're doing multi-space navigation, we
-        // will need to replace this charmManager.getSpaceName() with a call to
-        // some sort of address book / dns-style server, OR just navigate to the
-        // DID.
-
-        // Get the space name for navigation until we support
-        // DID spaces from the shell.
-        const spaceName = charmManager.getSpaceName();
+        const navigateCallback = createNavCallback(
+          session.space,
+          charmManager.getSpaceName(),
+        );
 
         // Await storage being synced, at least for now, as the page fully
         // reloads. Once we have in-page navigation with reloading, we don't
@@ -246,25 +232,10 @@ export class RuntimeInternals extends EventTarget {
             await charmManager.add([target]);
           }
 
-          if (!spaceName) {
-            throw new Error(
-              "Does not yet support navigating to a charm within a space loaded by DID.",
-            );
-          }
-          // Use the human-readable space name from CharmManager instead of DID
-          navigate({
-            spaceName,
-            charmId: id,
-          });
+          navigateCallback(id);
         }).catch((err) => {
           console.error("[navigateCallback] Error during storage sync:", err);
-
-          if (spaceName) {
-            navigate({
-              spaceName,
-              charmId: id,
-            });
-          }
+          navigateCallback(id);
         });
       },
     });
@@ -290,7 +261,43 @@ export class RuntimeInternals extends EventTarget {
       cc,
       telemetry,
       session.space,
-      spaceRootPatternType,
+      isHomeSpace,
     );
   }
+}
+
+// Caches patterns, and updates recent charms data upon access.
+class PatternCache {
+  private cache: Map<string, CharmController<NameSchema>> = new Map();
+  private cc: CharmsController;
+
+  constructor(cc: CharmsController) {
+    this.cc = cc;
+  }
+
+  async add(pattern: CharmController<NameSchema>) {
+    this.cache.set(pattern.id, pattern);
+    await this.cc.manager().trackRecentCharm(pattern.getCell());
+  }
+
+  async get(id: string): Promise<CharmController<NameSchema> | undefined> {
+    const cached = this.cache.get(id);
+    if (cached) {
+      await this.cc.manager().trackRecentCharm(cached.getCell());
+      return cached;
+    }
+  }
+}
+
+function createNavCallback(spaceDid: DID, spaceName?: string) {
+  return (id: string) => {
+    if (spaceName) {
+      navigate({
+        spaceName,
+        charmId: id,
+      });
+    } else {
+      navigate({ spaceDid, charmId: id });
+    }
+  };
 }
