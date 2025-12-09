@@ -10,24 +10,11 @@ const logger = getLogger("ensure-charm-running", {
 });
 
 /**
- * Tracks storage locations where we've already attempted to start a charm.
- * This prevents infinite loops when:
- * 1. An event is sent to a storage location
- * 2. We try to start the charm
- * 3. The charm doesn't register a handler for that event
- * 4. The event would be re-queued forever
- */
-const startAttemptedForCell = new Set<string>();
-
-/**
- * Creates a unique key for a storage location to track start attempts.
- */
-function cellLinkKey(link: NormalizedFullLink): string {
-  return `${link.space}/${link.id}/${link.path.join("/")}`;
-}
-
-/**
  * Ensures the charm responsible for a given storage location is running.
+ *
+ * Note: We don't track which charms we've already started because calling
+ * runtime.runSynced() on an already-running charm is idempotent - it simply
+ * returns without doing anything. This keeps the code simple and stateless.
  *
  * This function traverses the source cell chain to find the root process cell,
  * then starts the charm if it's not already running.
@@ -48,19 +35,6 @@ export async function ensureCharmRunning(
   runtime: IRuntime,
   cellLink: NormalizedFullLink,
 ): Promise<boolean> {
-  const key = cellLinkKey(cellLink);
-
-  // Check if we've already attempted to start a charm for this event
-  if (startAttemptedForCell.has(key)) {
-    logger.debug("ensure-charm", () => [
-      `Already attempted to start charm for ${key}, skipping`,
-    ]);
-    return false;
-  }
-
-  // Mark that we're attempting to start for this event
-  startAttemptedForCell.add(key);
-
   try {
     const tx = runtime.edit();
 

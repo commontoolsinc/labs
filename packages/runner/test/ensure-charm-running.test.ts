@@ -218,7 +218,7 @@ describe("ensureCharmRunning", () => {
     expect(recipeRan).toBe(true);
   });
 
-  it("should not attempt to start twice for same cell (infinite loop protection)", async () => {
+  it("should be idempotent - calling multiple times is safe", async () => {
     // Create a simple recipe
     let startCount = 0;
     const recipe: Recipe = {
@@ -243,14 +243,14 @@ describe("ensureCharmRunning", () => {
 
     const resultCell = runtime.getCell(
       space,
-      "no-double-start-test-result",
+      "idempotent-start-test-result",
       undefined,
       tx,
     );
 
     const processCell = runtime.getCell(
       space,
-      "no-double-start-test-process",
+      "idempotent-start-test-process",
       undefined,
       tx,
     );
@@ -268,7 +268,7 @@ describe("ensureCharmRunning", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    // First call should return true
+    // First call should return true (charm started)
     const result1 = await ensureCharmRunning(
       runtime,
       resultCell.getAsNormalizedFullLink(),
@@ -277,14 +277,15 @@ describe("ensureCharmRunning", () => {
 
     await runtime.idle();
 
-    // Second call to same cell should return false (already attempted)
+    // Second call should also return true - ensureCharmRunning doesn't track
+    // previous calls because runtime.runSynced() is idempotent for already-running charms
     const result2 = await ensureCharmRunning(
       runtime,
       resultCell.getAsNormalizedFullLink(),
     );
-    expect(result2).toBe(false);
+    expect(result2).toBe(true);
 
-    // The charm should only have been started once
+    // The charm's lift should only have run once because runSynced is idempotent
     expect(startCount).toBe(1);
   });
 
@@ -447,15 +448,15 @@ describe("queueEvent with auto-start", () => {
     // The result should show the lift's output
     expect(resultCell.getAsQueryResult()).toMatchObject({ doubled: 10 });
 
-    // Send another event - should NOT cause another start attempt
-    // (infinite loop protection prevents re-trying for same cell)
+    // Send another event - ensureCharmRunning may be called again but
+    // runSynced is idempotent so the charm won't restart
     runtime.scheduler.queueEvent(eventsLink, { type: "click" });
 
     await runtime.idle();
     await new Promise((resolve) => setTimeout(resolve, 50));
     await runtime.idle();
 
-    // Lift should still only have run once (no re-start attempt)
+    // Lift should still only have run once because runSynced is idempotent
     expect(liftRunCount).toBe(1);
   });
 
