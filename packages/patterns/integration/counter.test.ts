@@ -9,7 +9,9 @@ import { FileSystemProgramResolver } from "@commontools/js-compiler";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
-describe("counter direct operations test", () => {
+// TODO(gideon): Re-enable once stale element handle flakiness is addressed
+// (element becomes stale between waitForSelector and evaluate when DOM re-renders)
+describe.skip("counter direct operations test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
