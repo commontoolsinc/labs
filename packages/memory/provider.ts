@@ -153,12 +153,15 @@ class MemoryProvider<
 export class SchemaSubscription {
   constructor(
     public invocation: SchemaQuery,
-    public watchedObjects: Set<string>,
     public since: number = -1,
     // Track which docs were scanned with which schemas for incremental updates
     public schemaTracker: MapSet<string, SchemaPathSelector> = new MapSet(
       deepEqual,
     ),
+    // True if this is a wildcard query (of: "_") that can't use incremental updates
+    public isWildcardQuery: boolean = false,
+    // Track which docs have been sent to the client (by address format)
+    public sentDocs: Set<string> = new Set(),
   ) {}
 }
 
@@ -554,28 +557,96 @@ class MemoryProviderSession<
     const space = invocation.sub;
     const factSelection = result[space];
     const factVersions = [...FactModule.iterate(factSelection)];
-    const includedFacts = new Set(
-      factVersions.map((fv) => this.formatAddress(space, fv)),
-    );
     const since = factVersions.reduce(
       (acc, cur, _i) => cur.since > acc ? cur.since : acc,
       -1,
     );
+
+    // Check if this is a wildcard query (of: "_")
+    // Wildcard queries can't benefit from incremental updates via schemaTracker
+    const isWildcardQuery = this.isWildcardQuery(invocation);
+
+    // Track which docs were sent in the initial query result
+    const sentDocs = new Set(
+      factVersions.map((fv) => this.formatAddress(space, fv)),
+    );
+
     const subscription = new SchemaSubscription(
       invocation,
-      includedFacts,
       since,
       schemaTracker ?? new MapSet(deepEqual),
+      isWildcardQuery,
+      sentDocs,
     );
     this.schemaChannels.set(of, subscription);
   }
 
   /**
+   * Check if a schema query contains any wildcard selectors (of: "_").
+   * Wildcard queries match based on type rather than specific document IDs.
+   */
+  private isWildcardQuery<Space extends MemorySpace>(
+    invocation: SchemaQuery<Space>,
+  ): boolean {
+    const selectSchema = invocation.args.selectSchema;
+    for (const of of Object.keys(selectSchema)) {
+      if (of === "_") return true;
+    }
+    return false;
+  }
+
+  /**
+   * For wildcard queries, find changed docs that match the type pattern.
+   * Returns affected docs with the schema from the wildcard selector.
+   */
+  private findAffectedDocsForWildcard<Space extends MemorySpace>(
+    changedDocs: Set<string>,
+    invocation: SchemaQuery<Space>,
+  ): Array<{ docKey: string; schemas: Set<SchemaPathSelector> }> {
+    const affected: Array<
+      { docKey: string; schemas: Set<SchemaPathSelector> }
+    > = [];
+    const selectSchema = invocation.args.selectSchema;
+
+    // Get the wildcard selector's type patterns
+    const wildcardSelector = selectSchema["_"];
+    if (!wildcardSelector) return affected;
+
+    // Build a map of type -> schemas for matching
+    const typeSchemas = new Map<string, Set<SchemaPathSelector>>();
+    for (const [the, causes] of Object.entries(wildcardSelector)) {
+      const schemas = new Set<SchemaPathSelector>();
+      for (const schema of Object.values(causes)) {
+        schemas.add(schema as SchemaPathSelector);
+      }
+      if (schemas.size > 0) {
+        typeSchemas.set(the, schemas);
+      }
+    }
+
+    // Match changed docs against type patterns
+    for (const docKey of changedDocs) {
+      const slashIndex = docKey.indexOf("/");
+      if (slashIndex === -1) continue;
+      const docType = docKey.slice(slashIndex + 1);
+
+      // Check if this type matches a wildcard pattern
+      const schemas = typeSchemas.get(docType) ?? typeSchemas.get("_");
+      if (schemas && schemas.size > 0) {
+        affected.push({ docKey, schemas: new Set(schemas) });
+      }
+    }
+
+    return affected;
+  }
+
+  /**
    * Incrementally find schema subscription matches after a transaction.
-   * Instead of re-running the full query for each subscription, we:
-   * 1. Find which changed docs are tracked by each subscription's schemaTracker
-   * 2. Re-evaluate just those docs with their schemas to find new links
-   * 3. Follow any new links that weren't already tracked
+   *
+   * For wildcard queries (of: "_"): Match changed docs against type pattern.
+   * For specific document queries: Use schemaTracker to find affected docs.
+   *
+   * Both paths then incrementally update by following links.
    */
   private async getSchemaSubscriptionMatches<Space extends MemorySpace>(
     transaction: Transaction<Space>,
@@ -602,36 +673,18 @@ class MemoryProviderSession<
       space,
     );
     if (mountResult.error) {
-      // Fall back to full re-query for all subscriptions
-      //return this.getSchemaSubscriptionMatchesFallback(transaction);
+      throw new Error(`Failed to mount space ${space}: ${mountResult.error}`);
     }
     const spaceSession = mountResult.ok as unknown as SpaceSession<Space>;
 
     for (const [id, subscription] of this.schemaChannels) {
-      // Use the original Subscription.match to check if this subscription should be notified
-      if (!Subscription.match(transaction, subscription.watchedObjects)) {
-        continue;
-      }
+      // Find affected docs - method depends on query type
+      const affectedDocs = subscription.isWildcardQuery
+        ? this.findAffectedDocsForWildcard(changedDocs, subscription.invocation)
+        : this.findAffectedDocs(changedDocs, subscription.schemaTracker);
 
-      // Find changed docs that are in this subscription's schemaTracker
-      const affectedDocs = this.findAffectedDocs(
-        changedDocs,
-        subscription.schemaTracker,
-      );
-
-      // If no affected docs found via schemaTracker but watchedObjects matched,
-      // fall back to full re-query for this subscription
+      // No affected docs means this subscription doesn't care about these changes
       if (affectedDocs.length === 0) {
-        // Process this subscription with fallback logic
-        const fallbackResult = await this.processSingleSubscriptionFallback(
-          subscription,
-          space,
-          schemaMatches,
-        );
-        if (fallbackResult) {
-          lastId = id;
-          maxSince = Math.max(maxSince, subscription.since);
-        }
         continue;
       }
 
@@ -643,21 +696,23 @@ class MemoryProviderSession<
         space,
       );
 
-      // Collect new facts
+      // Collect facts that are either newer or haven't been sent yet
+      let hasNewFacts = false;
       for (const [address, factVersion] of result.newFacts) {
-        if (
-          factVersion.since > subscription.since ||
-          !subscription.watchedObjects.has(address)
-        ) {
+        const isNewer = factVersion.since > subscription.since;
+        const notSentYet = !subscription.sentDocs.has(address);
+
+        if (isNewer || notSentYet) {
           schemaMatches.set(address, factVersion);
-          subscription.watchedObjects.add(address);
-          if (factVersion.since > subscription.since) {
+          subscription.sentDocs.add(address);
+          hasNewFacts = true;
+          if (isNewer) {
             subscription.since = factVersion.since;
           }
         }
       }
 
-      if (result.newFacts.size > 0) {
+      if (hasNewFacts) {
         lastId = id;
         maxSince = Math.max(maxSince, subscription.since);
       }
@@ -793,81 +848,6 @@ class MemoryProviderSession<
     }
 
     return { newFacts };
-  }
-
-  /**
-   * Process a single subscription using full re-query fallback.
-   * Used when schemaTracker is empty but watchedObjects match.
-   * Returns true if facts were found, false otherwise.
-   */
-  private async processSingleSubscriptionFallback<Space extends MemorySpace>(
-    subscription: SchemaSubscription,
-    space: Space,
-    schemaMatches: Map<string, Revision<Fact>>,
-  ): Promise<boolean> {
-    // Re-run our original query, but not as a subscription
-    const newArgs = { ...subscription.invocation.args, subscribe: false };
-    const newInvocation = { ...subscription.invocation, args: newArgs };
-    const result = await Memory.querySchemaWithTracker(
-      this.memory as Memory.Memory,
-      newInvocation,
-    );
-    if (result.error) {
-      console.warn("Encountered querySchema error", result.error);
-      return false;
-    }
-    const factSelection = result.ok!.selection[space];
-    const factVersions = [...FactModule.iterate(factSelection)];
-    const includedFacts = new Map(
-      factVersions.map((fv) => [this.formatAddress(space, fv), fv]),
-    );
-    const since = factVersions.reduce(
-      (acc, cur, _i) => cur.since > acc ? cur.since : acc,
-      -1,
-    );
-    const newFacts = includedFacts.entries().filter(
-      ([address, factVersion]) =>
-        factVersion.since > subscription.since ||
-        !subscription.watchedObjects.has(address),
-    );
-    for (const [address, factVersion] of newFacts) {
-      schemaMatches.set(address, factVersion);
-    }
-    subscription.watchedObjects = new Set(includedFacts.keys());
-    subscription.since = since;
-    // Update schemaTracker with new tracker from query
-    if (result.ok!.schemaTracker) {
-      subscription.schemaTracker = result.ok!.schemaTracker;
-    }
-    return factVersions.length > 0;
-  }
-
-  /**
-   * Fallback to full re-query for all subscriptions (original behavior).
-   * Used when incremental update cannot proceed (e.g., mount failure).
-   */
-  private async getSchemaSubscriptionMatchesFallback<Space extends MemorySpace>(
-    transaction: Transaction<Space>,
-  ): Promise<[JobId | undefined, number, Revision<Fact>[]]> {
-    const schemaMatches = new Map<string, Revision<Fact>>();
-    const space = transaction.sub;
-    let maxSince = -1;
-    let lastId: JobId | undefined;
-
-    for (const [id, subscription] of this.schemaChannels) {
-      if (Subscription.match(transaction, subscription.watchedObjects)) {
-        const hadFacts = await this.processSingleSubscriptionFallback(
-          subscription,
-          space,
-          schemaMatches,
-        );
-        if (hadFacts) {
-          lastId = id;
-          maxSince = Math.max(maxSince, subscription.since);
-        }
-      }
-    }
-    return [lastId, maxSince, [...schemaMatches.values()]];
   }
 
   private async getAcl(space: MemorySpace): Promise<ACL | undefined> {
