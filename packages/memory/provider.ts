@@ -782,16 +782,35 @@ class MemoryProviderSession<
     }
 
     // Process pending pairs - may grow as we discover new links
+    // Track processed (docKey, schema) pairs to avoid redundant work
     const processedPairs = new Set<string>();
+    // Also track how many times each doc has been processed (regardless of schema)
+    // to detect growing path cycles like A -> A/foo -> A/foo/foo
+    const docProcessCount = new Map<string, number>();
+    const MAX_DOC_VISITS = 100; // Limit visits per doc to catch growing cycles
+
     while (pendingPairs.length > 0) {
       const { docKey, schema } = pendingPairs.pop()!;
       const pairKey = `${docKey}|${JSON.stringify(schema)}`;
 
-      // Skip if already processed
+      // Skip if already processed this exact pair
       if (processedPairs.has(pairKey)) {
         continue;
       }
       processedPairs.add(pairKey);
+
+      // Check if we've visited this doc too many times (growing path cycle)
+      const visitCount = (docProcessCount.get(docKey) ?? 0) + 1;
+      if (visitCount > MAX_DOC_VISITS) {
+        logger.warn(
+          "incremental-update-cycle",
+          () => [
+            `Document ${docKey} visited ${visitCount} times, possible growing path cycle`,
+          ],
+        );
+        continue;
+      }
+      docProcessCount.set(docKey, visitCount);
 
       // Parse docKey back to id and type (format is "id/type" from BaseObjectManager.toKey)
       // Note: type can contain slashes (e.g., "application/json"), so we split on the FIRST slash
