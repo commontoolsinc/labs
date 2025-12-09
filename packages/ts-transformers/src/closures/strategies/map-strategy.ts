@@ -235,108 +235,265 @@ function getMethodChainOrigin(mapTarget: ts.Expression): ts.Expression {
 }
 
 /**
- * Check if an expression is a parameter of the given callback function.
- * Handles both simple parameters (x) and destructured parameters ({a, b}).
+ * Find the root identifier of an expression.
+ * For example: item.tags -> item, items[0].name -> items
  */
-function isCallbackParameter(
-  expr: ts.Expression,
-  callback: ts.ArrowFunction | ts.FunctionExpression,
+function findRootIdentifier(expr: ts.Expression): ts.Identifier | undefined {
+  let current: ts.Expression = expr;
+  while (true) {
+    if (ts.isIdentifier(current)) return current;
+    if (ts.isPropertyAccessExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isElementAccessExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (
+      ts.isParenthesizedExpression(current) ||
+      ts.isAsExpression(current) ||
+      ts.isTypeAssertionExpression(current) ||
+      ts.isNonNullExpression(current)
+    ) {
+      current = current.expression;
+      continue;
+    }
+    // For call expressions, we can't determine the root identifier
+    // (e.g., getItems().filter(...).map(...))
+    return undefined;
+  }
+}
+
+/**
+ * Check if a declaration is a function parameter or a binding element within a parameter.
+ * This handles both simple params like `(x)` and destructured params like `({ x, y })`.
+ */
+function isParameterOrBindingElement(
+  declaration: ts.Declaration,
 ): boolean {
-  if (!ts.isIdentifier(expr)) {
-    return false;
-  }
-
-  const name = expr.text;
-
-  for (const param of callback.parameters) {
-    // Simple parameter: (items) => ...
-    if (ts.isIdentifier(param.name) && param.name.text === name) {
-      return true;
-    }
-
-    // Destructured parameter: ({ items, other }) => ...
-    if (ts.isObjectBindingPattern(param.name)) {
-      for (const element of param.name.elements) {
-        if (ts.isIdentifier(element.name) && element.name.text === name) {
-          return true;
-        }
+  if (ts.isParameter(declaration)) return true;
+  if (ts.isBindingElement(declaration)) {
+    // Check if this binding element is part of a parameter's binding pattern
+    let current: ts.Node | undefined = declaration.parent;
+    while (current) {
+      if (ts.isParameter(current)) return true;
+      if (
+        ts.isObjectBindingPattern(current) || ts.isArrayBindingPattern(current)
+      ) {
+        current = current.parent;
+        continue;
       }
+      break;
     }
   }
-
   return false;
 }
 
 /**
- * Check if map call is inside a derive/computed callback with a non-Cell OpaqueRef.
- * Returns true if we should skip transformation due to OpaqueRef unwrapping.
+ * Trace a symbol to find what kind of callback defined it as a parameter.
+ * Returns the innermost callback boundary that defines this value.
  *
- * This now handles method chains like .filter().map() by walking back to the origin
- * and checking if the origin is a derive callback parameter (which is unwrapped).
+ * This is the key to unified handling of both:
+ * - Nested maps inside mapWithPattern (Berni's case) -> returns "array-map"
+ * - Filter-map chains inside derive (my case) -> returns "derive"
  */
-function isInsideDeriveWithOpaqueRef(
+function getDefiningCallKind(
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+): "array-map" | "derive" | "builder" | undefined {
+  const declarations = symbol.getDeclarations();
+  if (!declarations) return undefined;
+
+  for (const declaration of declarations) {
+    // Handle both direct parameters and binding elements in destructured parameters
+    if (!isParameterOrBindingElement(declaration)) continue;
+
+    // Find the containing function
+    let functionNode: ts.Node | undefined = declaration.parent;
+    while (functionNode && !ts.isFunctionLike(functionNode)) {
+      functionNode = functionNode.parent;
+    }
+    if (!functionNode) continue;
+
+    // Find the call expression this function is an argument to
+    let candidate: ts.Node | undefined = functionNode.parent;
+    while (candidate && !ts.isCallExpression(candidate)) {
+      candidate = candidate.parent;
+    }
+    if (!candidate || !ts.isCallExpression(candidate)) continue;
+
+    const callKind = detectCallKind(candidate, checker);
+    if (callKind?.kind === "array-map") {
+      return "array-map";
+    }
+    if (callKind?.kind === "derive") {
+      return "derive";
+    }
+    if (
+      callKind?.kind === "builder" &&
+      callKind.builderName === "computed"
+    ) {
+      // computed() is similar to derive() - it unwraps its callback params
+      return "derive";
+    }
+    if (callKind?.kind === "builder") {
+      return "builder";
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Check if we're inside a derive/computed callback.
+ * This is used to detect when captured values will be unwrapped.
+ */
+function isInsideDeriveCallback(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+): boolean {
+  let current: ts.Node | undefined = node.parent;
+  while (current) {
+    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      const callback = current;
+      if (callback.parent && ts.isCallExpression(callback.parent)) {
+        const callKind = detectCallKind(callback.parent, checker);
+        const isDeriveOrComputed = callKind?.kind === "derive" ||
+          (callKind?.kind === "builder" && callKind.builderName === "computed");
+        if (isDeriveOrComputed) {
+          return true;
+        }
+      }
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+/**
+ * Determine if a .map() call should skip transformation based on value-origin tracking.
+ *
+ * This unified approach handles:
+ * 1. Nested maps inside mapWithPattern (where values are still opaque) -> TRANSFORM
+ * 2. Filter-map chains inside derive (where values are unwrapped) -> DON'T TRANSFORM
+ * 3. Captured values inside derive (where OpaqueRef values are unwrapped) -> DON'T TRANSFORM
+ *
+ * The key insight is tracing where the .map() target value originated:
+ * - If from array-map (mapWithPattern) param -> still opaque -> TRANSFORM
+ * - If from derive param + method chain -> plain JS array -> DON'T TRANSFORM
+ * - If from derive param directly -> check Cell vs OpaqueRef type
+ * - If from builder param BUT inside derive -> captured value unwrapped -> check type
+ */
+function shouldSkipMapTransformation(
   mapCall: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
   const { checker } = context;
   const typeRegistry = context.options.typeRegistry;
 
-  let node: ts.Node = mapCall;
-  while (node.parent) {
-    if (
-      ts.isArrowFunction(node.parent) || ts.isFunctionExpression(node.parent)
-    ) {
-      const callback = node.parent;
-      // Check if this callback's parent is a derive call
-      if (callback.parent && ts.isCallExpression(callback.parent)) {
-        const deriveCall = callback.parent;
-        const callKind = detectCallKind(deriveCall, checker);
+  if (!ts.isPropertyAccessExpression(mapCall.expression)) {
+    return false;
+  }
 
-        // Check if this is a derive or computed call
-        // Note: Even though ComputedTransformer runs first, callback nodes are reused,
-        // so parent pointers may still point to the original 'computed' call
-        const isDeriveOrComputed = callKind?.kind === "derive" ||
-          (callKind?.kind === "builder" && callKind.builderName === "computed");
+  const mapTarget = mapCall.expression.expression;
 
-        if (
-          isDeriveOrComputed &&
-          ts.isPropertyAccessExpression(mapCall.expression)
-        ) {
-          // We're inside a derive callback - check if target is Cell or OpaqueRef
-          const mapTarget = mapCall.expression.expression;
+  // Walk method chains to find origin (e.g., prefs.filter(...).map(...) -> prefs)
+  const origin = getMethodChainOrigin(mapTarget);
+  const hasMethodChain = origin !== mapTarget;
 
-          // Walk back through method chains to find the origin
-          // e.g., prefs.filter(...).map(...) -> prefs
-          const origin = getMethodChainOrigin(mapTarget);
-
-          // If there's a method chain (origin differs from target), and the origin
-          // is a callback parameter, the .filter()/.slice()/etc. result is a plain
-          // JS array and should NOT be transformed to mapWithPattern.
-          // Note: We only apply this for method chains, not direct parameter access,
-          // because Cell<T[]> parameters should still be transformed.
-          if (origin !== mapTarget && isCallbackParameter(origin, callback)) {
-            return true;
-          }
-
-          const targetType = getTypeAtLocationWithFallback(
-            mapTarget,
-            checker,
-            typeRegistry,
-            context.options.logger,
-          );
-
-          if (targetType && isOpaqueRefType(targetType, checker)) {
-            const kind = getCellKind(targetType, checker);
-            // Only skip transformation for non-Cell OpaqueRefs
-            // Cell<T[]>.map() should still transform even inside derive
-            if (kind !== "cell") {
-              return true;
-            }
-          }
-        }
-      }
+  // Find root identifier of the origin
+  const rootId = findRootIdentifier(origin);
+  if (!rootId) {
+    // Can't determine root (e.g., getItems().filter(...).map(...) or derive(...).map(...))
+    // Only apply type-based skip if we're inside a derive callback
+    // (where captured values get unwrapped)
+    if (isInsideDeriveCallback(mapCall, checker)) {
+      return shouldSkipBasedOnType(mapTarget, checker, typeRegistry, context);
     }
-    node = node.parent;
+    // Not inside derive - allow transformation (derive(...).map() should transform)
+    return false;
+  }
+
+  // Get the symbol for the root identifier
+  const rootSymbol = checker.getSymbolAtLocation(rootId);
+  if (!rootSymbol) {
+    // Same logic: only skip if inside derive callback
+    if (isInsideDeriveCallback(mapCall, checker)) {
+      return shouldSkipBasedOnType(mapTarget, checker, typeRegistry, context);
+    }
+    return false;
+  }
+
+  // Find what kind of callback defined this identifier as a parameter
+  const definingKind = getDefiningCallKind(rootSymbol, checker);
+
+  if (definingKind === "array-map") {
+    // Value originated from mapWithPattern callback param -> still opaque at runtime
+    // ALWAYS transform, regardless of any surrounding derives
+    return false;
+  }
+
+  if (definingKind === "derive") {
+    // Value originated from derive callback param -> unwrapped at runtime
+    if (hasMethodChain) {
+      // Method chain on unwrapped array produces plain JS array
+      // DON'T transform - plain arrays don't have mapWithPattern
+      return true;
+    }
+
+    // Direct map on derive param - check Cell vs OpaqueRef type
+    // Cell<T[]>.map() should transform, OpaqueRef<T[]>.map() should not
+    return shouldSkipBasedOnType(mapTarget, checker, typeRegistry, context);
+  }
+
+  if (definingKind === "builder") {
+    // Value from builder (recipe/pattern/handler) param - these are OpaqueRef
+    // BUT if we're inside a derive callback, this value will be captured and unwrapped
+    if (isInsideDeriveCallback(mapCall, checker)) {
+      // Inside derive - captured values are unwrapped
+      // Check type to determine if Cell (still needs transform) or OpaqueRef (skip)
+      return shouldSkipBasedOnType(mapTarget, checker, typeRegistry, context);
+    }
+    // Not inside derive - builder params are still opaque, transform
+    return false;
+  }
+
+  // Couldn't determine origin from callback parameter
+  // Only apply type-based skip if we're inside a derive callback
+  // (where captured values get unwrapped)
+  if (isInsideDeriveCallback(mapCall, checker)) {
+    return shouldSkipBasedOnType(mapTarget, checker, typeRegistry, context);
+  }
+
+  // Not inside derive and can't determine origin - don't skip, allow transformation
+  return false;
+}
+
+/**
+ * Type-based fallback for determining if map transformation should be skipped.
+ * Used when value-origin tracking can't determine the source.
+ */
+function shouldSkipBasedOnType(
+  mapTarget: ts.Expression,
+  checker: ts.TypeChecker,
+  typeRegistry: WeakMap<ts.Node, ts.Type> | undefined,
+  context: TransformationContext,
+): boolean {
+  const targetType = getTypeAtLocationWithFallback(
+    mapTarget,
+    checker,
+    typeRegistry,
+    context.options.logger,
+  );
+
+  if (targetType && isOpaqueRefType(targetType, checker)) {
+    const kind = getCellKind(targetType, checker);
+    // Only skip transformation for non-Cell OpaqueRefs
+    // Cell<T[]>.map() should still transform even inside derive
+    if (kind !== "cell") {
+      return true;
+    }
   }
 
   return false;
@@ -344,21 +501,18 @@ function isInsideDeriveWithOpaqueRef(
 
 /**
  * Check if a map call should be transformed to mapWithPattern.
- * Returns false if the map will end up inside a derive (where the array is unwrapped).
  *
- * This happens when the map is nested inside a larger expression with opaque refs,
- * e.g., `list.length > 0 && list.map(...)` becomes `derive(list, list => ...)`
- *
- * Special case: Inside derive callbacks, Cell<T[]>.map() should still be transformed,
- * but OpaqueRef<T[]>.map() should not (OpaqueRefs are unwrapped in derive).
+ * Uses value-origin tracking to determine if the .map() target:
+ * - Originated from mapWithPattern callback -> still opaque -> TRANSFORM
+ * - Originated from derive callback + method chain -> plain JS array -> DON'T TRANSFORM
+ * - Originated from derive callback directly -> check Cell vs OpaqueRef type
  */
 function shouldTransformMap(
   mapCall: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
-  // Early exit: Don't transform if inside derive with non-Cell OpaqueRef
-  const insideDeriveWithOpaque = isInsideDeriveWithOpaqueRef(mapCall, context);
-  if (insideDeriveWithOpaque) {
+  // Use value-origin tracking to determine if we should skip transformation
+  if (shouldSkipMapTransformation(mapCall, context)) {
     return false;
   }
 
