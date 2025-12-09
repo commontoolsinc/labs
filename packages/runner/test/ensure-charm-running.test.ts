@@ -188,7 +188,9 @@ describe("ensureCharmRunning", () => {
 
     // Set up the structure
     resultCell.set({
-      doubled: { $alias: { path: ["internal", "doubled"], cell: processCell.entityId } },
+      doubled: {
+        $alias: { path: ["internal", "doubled"], cell: processCell.entityId },
+      },
     });
     resultCell.setSourceCell(processCell);
 
@@ -389,7 +391,9 @@ describe("queueEvent with auto-start", () => {
     eventStreamCell.set({ $stream: true });
 
     resultCell.set({
-      doubled: { $alias: { path: ["internal", "doubled"], cell: processCell.entityId } },
+      doubled: {
+        $alias: { path: ["internal", "doubled"], cell: processCell.entityId },
+      },
     });
     resultCell.setSourceCell(processCell);
 
