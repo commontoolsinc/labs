@@ -206,8 +206,73 @@ export function buildCapturePropertyAssignments(
 }
 
 /**
+ * Walk back through array method chains to find the origin expression.
+ * For example: items.filter(...).slice(...).map(...) -> items
+ */
+function getMethodChainOrigin(mapTarget: ts.Expression): ts.Expression {
+  const arrayMethods = [
+    "filter",
+    "slice",
+    "concat",
+    "reverse",
+    "sort",
+    "flat",
+    "flatMap",
+  ];
+
+  let current: ts.Expression = mapTarget;
+
+  // Walk back through call chain to find the origin
+  while (
+    ts.isCallExpression(current) &&
+    ts.isPropertyAccessExpression(current.expression) &&
+    arrayMethods.includes(current.expression.name.text)
+  ) {
+    current = current.expression.expression;
+  }
+
+  return current;
+}
+
+/**
+ * Check if an expression is a parameter of the given callback function.
+ * Handles both simple parameters (x) and destructured parameters ({a, b}).
+ */
+function isCallbackParameter(
+  expr: ts.Expression,
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+): boolean {
+  if (!ts.isIdentifier(expr)) {
+    return false;
+  }
+
+  const name = expr.text;
+
+  for (const param of callback.parameters) {
+    // Simple parameter: (items) => ...
+    if (ts.isIdentifier(param.name) && param.name.text === name) {
+      return true;
+    }
+
+    // Destructured parameter: ({ items, other }) => ...
+    if (ts.isObjectBindingPattern(param.name)) {
+      for (const element of param.name.elements) {
+        if (ts.isIdentifier(element.name) && element.name.text === name) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
  * Check if map call is inside a derive/computed callback with a non-Cell OpaqueRef.
  * Returns true if we should skip transformation due to OpaqueRef unwrapping.
+ *
+ * This now handles method chains like .filter().map() by walking back to the origin
+ * and checking if the origin is a derive callback parameter (which is unwrapped).
  */
 function isInsideDeriveWithOpaqueRef(
   mapCall: ts.CallExpression,
@@ -239,6 +304,19 @@ function isInsideDeriveWithOpaqueRef(
         ) {
           // We're inside a derive callback - check if target is Cell or OpaqueRef
           const mapTarget = mapCall.expression.expression;
+
+          // Walk back through method chains to find the origin
+          // e.g., prefs.filter(...).map(...) -> prefs
+          const origin = getMethodChainOrigin(mapTarget);
+
+          // If there's a method chain (origin differs from target), and the origin
+          // is a callback parameter, the .filter()/.slice()/etc. result is a plain
+          // JS array and should NOT be transformed to mapWithPattern.
+          // Note: We only apply this for method chains, not direct parameter access,
+          // because Cell<T[]> parameters should still be transformed.
+          if (origin !== mapTarget && isCallbackParameter(origin, callback)) {
+            return true;
+          }
 
           const targetType = getTypeAtLocationWithFallback(
             mapTarget,
