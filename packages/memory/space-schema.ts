@@ -176,7 +176,6 @@ export const selectSchema = <Space extends MemorySpace>(
 
   const includedFacts: FactSelection = {}; // we'll store all the raw facts we accesed here
   // First, collect all the potentially relevant facts (without dereferencing pointers)
-  let totalMatchingFacts = 0;
   for (
     const selectorEntry of iterateSelector(selectSchema, DefaultSchemaSelector)
   ) {
@@ -188,7 +187,6 @@ export const selectSchema = <Space extends MemorySpace>(
     };
     const matchingFacts = getMatchingFacts(session, factSelector);
     for (const entry of matchingFacts) {
-      totalMatchingFacts++;
       // The top level facts we accessed should be included
       addToSelection(includedFacts, entry, entry.cause, entry.since);
 
