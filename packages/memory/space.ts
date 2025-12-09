@@ -55,7 +55,7 @@ import {
 } from "./selection.ts";
 import { SelectAllString } from "./schema.ts";
 import * as Error from "./error.ts";
-import { selectSchema } from "./space-schema.ts";
+import { selectSchema, type SelectSchemaResult } from "./space-schema.ts";
 import { JSONValue } from "@commontools/runner";
 import { isObject } from "../utils/src/types.ts";
 export type * from "./interface.ts";
@@ -1049,18 +1049,70 @@ export const querySchema = <Space extends MemorySpace>(
     }
 
     try {
-      const result = session.store.transaction(selectSchema)(
+      const { facts } = session.store.transaction(selectSchema)(
         session,
         command.args,
       );
 
-      const entities = Object.keys(result || {}).length;
+      const entities = Object.keys(facts || {}).length;
       span.setAttribute("querySchema.result_entity_count", entities);
 
       return {
         ok: {
-          [command.sub]: result,
+          [command.sub]: facts,
         } as Selection<Space>,
+      };
+    } catch (error) {
+      if ((error as Error)?.name === "AuthorizationError") {
+        return { error: error as AuthorizationError };
+      }
+      return {
+        error: Error.query(
+          command.sub,
+          command.args.selectSchema,
+          error as SqliteError,
+        ),
+      };
+    }
+  });
+};
+
+/**
+ * Internal variant of querySchema that also returns the schemaTracker.
+ * Used by provider.ts for incremental subscription updates.
+ */
+export const querySchemaWithTracker = <Space extends MemorySpace>(
+  session: Session<Space>,
+  command: SchemaQuery<Space>,
+): Result<
+  {
+    selection: Selection<Space>;
+    schemaTracker: SelectSchemaResult["schemaTracker"];
+  },
+  AuthorizationError | QueryError
+> => {
+  return traceSync("space.querySchemaWithTracker", (span) => {
+    addMemoryAttributes(span, {
+      operation: "querySchemaWithTracker",
+      space: session.subject,
+    });
+
+    try {
+      const { facts, schemaTracker } = session.store.transaction(selectSchema)(
+        session,
+        command.args,
+      );
+
+      const entities = Object.keys(facts || {}).length;
+      span.setAttribute("querySchema.result_entity_count", entities);
+
+      return {
+        ok: {
+          selection: {
+            [command.sub]: facts,
+          } as Selection<Space>,
+          schemaTracker,
+        },
       };
     } catch (error) {
       if ((error as Error)?.name === "AuthorizationError") {
