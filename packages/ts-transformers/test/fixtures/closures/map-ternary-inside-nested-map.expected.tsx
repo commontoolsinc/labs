@@ -651,7 +651,43 @@ export default pattern(({ items, showInactive }) => {
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { showInactive } }) => (<div>
-              <strong>{item.label}</strong>
+              {/* Ternary in outer map, outside inner map - should also be ifElse */}
+              <strong>{__ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+            type: "object",
+            properties: {
+                item: {
+                    type: "object",
+                    properties: {
+                        tags: {
+                            type: "object",
+                            properties: {
+                                length: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["length"]
+                        }
+                    },
+                    required: ["tags"]
+                }
+            },
+            required: ["item"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { item: {
+                tags: {
+                    length: item.tags.length
+                }
+            } }, ({ item }) => item.tags.length > 0), item.label, "No tags")}</strong>
               <ul>
                 {item.tags.mapWithPattern(__ctHelpers.recipe({
                 type: "object",

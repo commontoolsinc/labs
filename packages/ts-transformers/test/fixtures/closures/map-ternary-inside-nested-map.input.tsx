@@ -35,7 +35,8 @@ export default pattern<PatternInput>(({ items, showInactive }) => {
         {hasItems ? (
           items.map((item) => (
             <div>
-              <strong>{item.label}</strong>
+              {/* Ternary in outer map, outside inner map - should also be ifElse */}
+              <strong>{item.tags.length > 0 ? item.label : "No tags"}</strong>
               <ul>
                 {item.tags.map((tag) => (
                   <li>
