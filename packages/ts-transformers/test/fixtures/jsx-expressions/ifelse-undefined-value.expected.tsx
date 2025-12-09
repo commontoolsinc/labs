@@ -125,60 +125,37 @@ export default recipe({
         type: "object",
         properties: {
             result: {
-                $ref: "#/$defs/OpaqueCell"
-            }
-        },
-        required: ["result"],
-        $defs: {
-            OpaqueCell: {
                 asOpaque: true
             }
-        }
+        },
+        required: ["result"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "object",
         properties: {
             result: {
-                $ref: "#/$defs/OpaqueCell"
+                asOpaque: true
             }
         },
         required: ["result"],
-        asOpaque: true,
-        $defs: {
-            OpaqueCell: {
-                asOpaque: true
-            }
-        }
+        asOpaque: true
     } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
         type: "object",
         properties: {
             pending: {
-                anyOf: [{
-                        type: "boolean",
-                        "enum": [false],
-                        asOpaque: true
-                    }, {
-                        type: "boolean",
-                        "enum": [true],
-                        asOpaque: true
-                    }]
+                type: "boolean",
+                asOpaque: true
             },
             result: {
-                $ref: "#/$defs/OpaqueCell"
-            }
-        },
-        required: ["pending", "result"],
-        $defs: {
-            OpaqueCell: {
                 asOpaque: true
             }
-        }
+        },
+        required: ["pending", "result"]
     } as const satisfies __ctHelpers.JSONSchema, {
         anyOf: [{
                 type: "boolean",
                 "enum": [false]
             }, {
                 type: "boolean",
-                "enum": [true],
                 asOpaque: true
             }]
     } as const satisfies __ctHelpers.JSONSchema, {
@@ -192,42 +169,27 @@ export default recipe({
         type: "object",
         properties: {
             data: {
-                $ref: "#/$defs/OpaqueCell"
-            }
-        },
-        required: ["data"],
-        $defs: {
-            OpaqueCell: {
                 asOpaque: true
             }
-        }
+        },
+        required: ["data"]
     } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
         type: "object",
         properties: {
             data: {
-                $ref: "#/$defs/OpaqueCell"
+                asOpaque: true
             }
         },
         required: ["data"],
-        asOpaque: true,
-        $defs: {
-            OpaqueCell: {
-                asOpaque: true
-            }
-        }
+        asOpaque: true
     } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
         type: "object",
         properties: {
             result: {
-                $ref: "#/$defs/OpaqueCell"
-            }
-        },
-        required: ["result"],
-        $defs: {
-            OpaqueCell: {
                 asOpaque: true
             }
-        }
+        },
+        required: ["result"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "boolean"
     } as const satisfies __ctHelpers.JSONSchema, { result: result }, ({ result }) => !!result), { data: result }, undefined);

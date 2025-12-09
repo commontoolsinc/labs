@@ -386,15 +386,8 @@ export default recipe({
             type: "object",
             properties: {
                 showHistory: {
-                    anyOf: [{
-                            type: "boolean",
-                            "enum": [false],
-                            asOpaque: true
-                        }, {
-                            type: "boolean",
-                            "enum": [true],
-                            asOpaque: true
-                        }]
+                    type: "boolean",
+                    asOpaque: true
                 },
                 messageCount: {
                     type: "number",

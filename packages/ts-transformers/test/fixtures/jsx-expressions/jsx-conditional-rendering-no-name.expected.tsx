@@ -308,15 +308,8 @@ export default recipe({
                     type: "object",
                     properties: {
                         isPremium: {
-                            anyOf: [{
-                                    type: "boolean",
-                                    "enum": [false],
-                                    asOpaque: true
-                                }, {
-                                    type: "boolean",
-                                    "enum": [true],
-                                    asOpaque: true
-                                }]
+                            type: "boolean",
+                            asOpaque: true
                         }
                     },
                     required: ["isPremium"]
@@ -399,26 +392,12 @@ export default recipe({
                     type: "object",
                     properties: {
                         isActive: {
-                            anyOf: [{
-                                    type: "boolean",
-                                    "enum": [false],
-                                    asOpaque: true
-                                }, {
-                                    type: "boolean",
-                                    "enum": [true],
-                                    asOpaque: true
-                                }]
+                            type: "boolean",
+                            asOpaque: true
                         },
                         hasPermission: {
-                            anyOf: [{
-                                    type: "boolean",
-                                    "enum": [false],
-                                    asOpaque: true
-                                }, {
-                                    type: "boolean",
-                                    "enum": [true],
-                                    asOpaque: true
-                                }]
+                            type: "boolean",
+                            asOpaque: true
                         }
                     },
                     required: ["isActive", "hasPermission"]
@@ -426,15 +405,8 @@ export default recipe({
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "boolean",
-                    "enum": [false],
-                    asOpaque: true
-                }, {
-                    type: "boolean",
-                    "enum": [true],
-                    asOpaque: true
-                }]
+            type: "boolean",
+            asOpaque: true
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 isActive: state.isActive,
                 hasPermission: state.hasPermission
@@ -486,15 +458,8 @@ export default recipe({
                     type: "object",
                     properties: {
                         isPremium: {
-                            anyOf: [{
-                                    type: "boolean",
-                                    "enum": [false],
-                                    asOpaque: true
-                                }, {
-                                    type: "boolean",
-                                    "enum": [true],
-                                    asOpaque: true
-                                }]
+                            type: "boolean",
+                            asOpaque: true
                         },
                         score: {
                             type: "number",
