@@ -1277,10 +1277,10 @@ function subscribeToReferencedDocs<T>(
     link,
     true,
   );
-  const log = txToReactivityLog(tx);
 
   // Call the callback once with initial value.
   let cleanup: Cancel | undefined | void = callback(value);
+  const log = txToReactivityLog(tx);
 
   // Technically unnecessary since we don't expect/allow callbacks to sink to
   // write to other cells, and we retry by design anyway below when read data
