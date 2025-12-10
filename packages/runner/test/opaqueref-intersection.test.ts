@@ -9,8 +9,9 @@
  *   is not assignable to type 'NormalizedItem'.
  *   Types of property 'group' are incompatible.
  *
- * The fix adds `T extends AnyBrandedCell<any>` checks to OpaqueRef and
- * OpaqueRefInner to handle intersection types correctly.
+ * The fix adds `[NonNullable<T>] extends [AnyBrandedCell<any>]` check to
+ * OpaqueRefInner to handle nullable intersection types correctly without
+ * causing distribution over union types (which would lose null/undefined).
  *
  * NOTE: This is a type-level test. The assertions at runtime are trivial;
  * the real test is that this file compiles successfully.
