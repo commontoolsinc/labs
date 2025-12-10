@@ -4,7 +4,8 @@
 import * as htmlparser2 from "htmlparser2";
 import * as domhandler from "domhandler";
 import * as domserializer from "dom-serializer";
-import { RenderOptions, styleObjectToCssString } from "./render.ts";
+import { RenderOptions } from "./render.ts";
+import { styleObjectToCssString } from "./render-utils.ts";
 
 function renderOptionsFromDoc(document: globalThis.Document): RenderOptions {
   return {

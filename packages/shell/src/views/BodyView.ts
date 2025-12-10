@@ -2,9 +2,9 @@ import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { Task } from "@lit/task";
 import { BaseView } from "./BaseView.ts";
-import { RuntimeInternals } from "../lib/runtime.ts";
-import { CharmController } from "@commontools/charm/ops";
+import { CharmHandle, RuntimeInternals } from "../lib/runtime.ts";
 import "../components/OmniLayout.ts";
+import { isCellHandle } from "@commontools/runtime-client";
 
 export class XBodyView extends BaseView {
   static override styles = css`
@@ -45,10 +45,10 @@ export class XBodyView extends BaseView {
   rt?: RuntimeInternals;
 
   @property({ attribute: false })
-  activePattern?: CharmController;
+  activePattern?: CharmHandle;
 
   @property({ attribute: false })
-  spaceRootPattern?: CharmController;
+  spaceRootPattern?: CharmHandle;
 
   @property()
   showShellCharmListView = false;
@@ -63,15 +63,36 @@ export class XBodyView extends BaseView {
     task: async ([rt]) => {
       if (!rt) return undefined;
 
-      const manager = rt.cc().manager();
-      await manager.synced();
-      return rt.cc().getAllCharms();
+      await rt.synced();
+      // Get charms list via RuntimeClient
+      const charmsListCell = await rt.getCharmsListCell();
+      await charmsListCell.sync();
+
+      // Convert to CharmHandle array for compatibility
+      const charmsList = charmsListCell.get() as any[];
+      if (!charmsList) return [];
+
+      // We need to fetch each charm to create handles
+      const handles: CharmHandle[] = [];
+      for (const charmData of charmsList) {
+        const id = isCellHandle(charmData) ? charmData.id() : charmData?.$ID;
+        if (id) {
+          const charm = await rt.getPattern(id) as CharmHandle<unknown>;
+          if (charm) {
+            handles.push(charm);
+          }
+        }
+      }
+      return handles;
     },
     args: () => [this.rt],
   });
 
   override render() {
     const charms = this._charms.value;
+    const spaceName = this.rt?.spaceName();
+    const spaceDid = this.rt?.space();
+    /*
     if (!charms) {
       return html`
         <div class="content">
@@ -79,10 +100,9 @@ export class XBodyView extends BaseView {
         </div>
       `;
     }
+    */
 
     if (this.showShellCharmListView) {
-      const spaceName = this.rt?.cc().manager().getSpaceName();
-      const spaceDid = this.rt?.cc().manager().getSpace();
       return html`
         <div class="content">
           <x-charm-list-view
@@ -104,14 +124,15 @@ export class XBodyView extends BaseView {
       `
       : null;
 
-    const sidebarCell = this.activePattern?.getCell().key("sidebarUI");
-    const fabCell = this.spaceRootPattern?.getCell().key("fabUI");
+    const sidebarCell = undefined; //this.activePattern?.getCell().key("sidebarUI" as never);
+    const fabCell = undefined; //this.spaceRootPattern?.getCell().key("fabUI" as never);
 
     // Update sidebar content detection
     // TODO(seefeld): Fix possible race here where charm is already set, but
     // sidebar isn't loaded yet, which will now eventually render the sidebar,
     // but not the button to hide it.
-    const hasSidebarContent = !!sidebarCell?.get();
+    // TODO(runtime-worker-refactor)
+    const hasSidebarContent = false; //!!sidebarCell?.get();
     if (this.hasSidebarContent !== hasSidebarContent) {
       this.hasSidebarContent = hasSidebarContent;
       // Notify parent of sidebar content changes

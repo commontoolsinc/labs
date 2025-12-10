@@ -33,7 +33,11 @@ export {
   isCellResult as isQueryResult,
   isCellResultForDereferencing as isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
-export { effect } from "./reactivity.ts";
+export {
+  effect,
+  isSubscriptionCell as isSinkableCell,
+  type SubscriptionCell as SinkableCell,
+} from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export {
   Console,

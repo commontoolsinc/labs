@@ -1,7 +1,7 @@
 import { css, html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { createCellController } from "../../core/cell-controller.ts";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
 import "../ct-render/ct-render.ts";
 
 /**
@@ -16,8 +16,8 @@ import "../ct-render/ct-render.ts";
  * @attr {boolean} disabled - Whether the picker is disabled
  * @attr {string} min-height - Minimum height for the picker area (default: 200px)
  *
- * @prop {Cell<any[]>} items - Array of Cells with [UI] to render in stack
- * @prop {Cell<number>} selectedIndex - Two-way bound cell for current selection index
+ * @prop {CellHandle<any[]>} items - Array of Cells with [UI] to render in stack
+ * @prop {CellHandle<number>} selectedIndex - Two-way bound cell for current selection index
  *
  * @fires ct-change - Fired when selection changes: { index, value, items }
  * @fires ct-focus - Fired when picker gains focus
@@ -250,8 +250,8 @@ export class CTPicker extends BaseElement {
             disabled: { type: Boolean, reflect: true },
           };
 
-          declare items: Cell<any[]>;
-          declare selectedIndex: Cell<number>;
+          declare items: CellHandle<any[]>;
+          declare selectedIndex: CellHandle<number>;
           declare minHeight: string;
           declare disabled: boolean;
 

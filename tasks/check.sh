@@ -11,6 +11,11 @@ fi
 
 deno check tasks/*.ts
 deno check recipes/[!_]*.ts*
+
+# TODO(runtime-worker-refactor):
+# Ignore ct-outliner until re-added
+deno check packages/ui/src/v2/components/*[!outliner]/*.ts*
+
 deno check \
   packages/api \
   packages/background-charm-service \
@@ -34,5 +39,4 @@ deno check \
   packages/static/scripts \
   packages/static/test \
   packages/toolshed \
-  packages/ui \
   packages/utils

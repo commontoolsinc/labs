@@ -9,7 +9,7 @@ import {
   mergeWithDefaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import { type Cell, isCell } from "@commontools/runner";
+import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
 
 /**
  * ct-theme — Provides a theme to a subtree and applies CSS vars.
@@ -70,9 +70,9 @@ export class CTThemeProvider extends BaseElement {
     // Subscribe to top-level cell properties to refresh CSS vars on change
     for (const key of Object.keys(t)) {
       const val = (t as any)[key];
-      if (isCell && isCell(val)) {
-        const cellVal = val as Cell<any>;
-        const off = cellVal.sink(() => this._recomputeAndApply());
+      if (isCellHandle(val)) {
+        const cellVal = val as CellHandle<any>;
+        const off = cellVal.subscribe(() => this._recomputeAndApply());
         this.#unsubs.push(off);
       }
     }

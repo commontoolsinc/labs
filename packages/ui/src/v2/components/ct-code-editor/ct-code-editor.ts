@@ -26,7 +26,11 @@ import {
   ViewPlugin,
   ViewUpdate,
 } from "@codemirror/view";
-import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
+import {
+  type CellHandle,
+  isCellHandle,
+  NAME,
+} from "@commontools/runtime-client";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 import { Mentionable, MentionableArray } from "../../core/mentionable.ts";
@@ -75,14 +79,14 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  *
  * @element ct-code-editor
  *
- * @attr {string|Cell<string>} value - Editor content (supports both plain string and Cell<string>)
+ * @attr {string|CellHandle<string>} value - Editor content (supports both plain string and CellHandle<string>)
  * @attr {string} language - MIME type for syntax highlighting
  * @attr {boolean} disabled - Whether the editor is disabled
  * @attr {boolean} readonly - Whether the editor is read-only
  * @attr {string} placeholder - Placeholder text when empty
  * @attr {string} timingStrategy - Input timing strategy: "immediate" | "debounce" | "throttle" | "blur"
  * @attr {number} timingDelay - Delay in milliseconds for debounce/throttle (default: 500)
- * @attr {Cell<MentionableArray>} mentionable - Cell of mentionable items for @/@[[ completion
+ * @attr {CellHandle<MentionableArray>} mentionable - Cell of mentionable items for @/@[[ completion
  * @attr {Array} mentioned - Optional Cell of live Charms mentioned in content
  * @attr {boolean} wordWrap - Enable soft line wrapping (default: true)
  * @attr {boolean} lineNumbers - Show line numbers gutter (default: false)
@@ -126,7 +130,7 @@ export class CTCodeEditor extends BaseElement {
     theme: { type: String, reflect: true },
   };
 
-  declare value: Cell<string> | string;
+  declare value: CellHandle<string> | string;
   declare language: MimeType;
   declare disabled: boolean;
   declare readonly: boolean;
@@ -136,9 +140,9 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Mentionable items for @ completion.
    */
-  declare mentionable?: Cell<MentionableArray> | null;
-  declare mentioned?: Cell<MentionableArray>;
-  declare pattern: Cell<string>;
+  declare mentionable?: CellHandle<MentionableArray> | null;
+  declare mentioned?: CellHandle<MentionableArray>;
+  declare pattern: CellHandle<string>;
   declare wordWrap: boolean;
   declare lineNumbers: boolean;
   declare maxLineWidth?: number;
@@ -218,8 +222,7 @@ export class CTCodeEditor extends BaseElement {
 
       // Build options from existing mentionable items
       const options: Completion[] = mentionable.map((charm) => {
-        const charmIdObj = getEntityId(charm.resolveAsCell());
-        const charmId = charmIdObj?.["/"] || "";
+        const charmId = charm.id();
         const charmName = charm.key(NAME).get() || "";
         const insertText = `${charmName} (${charmId})`;
         return {
@@ -269,7 +272,7 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Get filtered mentionable items based on query
    */
-  private getFilteredMentionable(query: string): Cell<Mentionable>[] {
+  private getFilteredMentionable(query: string): CellHandle<Mentionable>[] {
     const mentionableCell = this._getMentionableCell();
     if (!mentionableCell) {
       return [];
@@ -278,7 +281,7 @@ export class CTCodeEditor extends BaseElement {
     const rawMentionable = mentionableCell.get();
     const mentionableData = Array.isArray(rawMentionable)
       ? rawMentionable as MentionableArray
-      : isCell(rawMentionable)
+      : isCellHandle(rawMentionable)
       ? ((rawMentionable.get() ?? []) as MentionableArray)
       : [];
 
@@ -287,7 +290,7 @@ export class CTCodeEditor extends BaseElement {
     }
 
     const queryLower = query.toLowerCase();
-    const matches: Cell<Mentionable>[] = [];
+    const matches: CellHandle<Mentionable>[] = [];
 
     for (let i = 0; i < mentionableData.length; i++) {
       const mention = mentionableData[i];
@@ -297,7 +300,7 @@ export class CTCodeEditor extends BaseElement {
           ?.toLowerCase()
           ?.includes(queryLower)
       ) {
-        matches.push(mentionableCell.key(i) as Cell<Mentionable>);
+        matches.push(mentionableCell.key(i) as CellHandle<Mentionable>);
       }
     }
 
@@ -347,48 +350,14 @@ export class CTCodeEditor extends BaseElement {
         // Extract ID from "Name (id)" format
         const idMatch = backlinkText.match(/\(([^)]+)\)$/);
         const backlinkId = idMatch ? idMatch[1] : undefined;
-
-        // If we have a valid ID, navigate directly using getCellFromEntityId.
-        // This bypasses the mentionable array and eliminates a race condition
-        // where findCharmById returns null because the array hasn't synced yet
-        // (common when clicking a backlink immediately after creating it).
-        if (backlinkId) {
-          const runtime = this.pattern?.runtime ??
-            this.mentionable?.runtime ??
-            this.mentioned?.runtime;
-          const space = this.pattern?.space ??
-            this.mentionable?.space ??
-            this.mentioned?.space;
-
-          if (runtime && space) {
-            // Get cell directly by entity ID - no array search needed
-            const charmCell = runtime.getCellFromEntityId(space, {
-              "/": backlinkId,
-            });
-
-            // Use navigateCallback (same pattern as ct-cell-link)
-            if (runtime.navigateCallback) {
-              runtime.navigateCallback(charmCell);
-            }
-
-            this.emit("backlink-click", {
-              id: backlinkId,
-              text: backlinkText,
-              charm: charmCell,
-            });
-            return true;
-          } else {
-            // Log warning instead of silent failure
-            console.warn(
-              "[ct-code-editor] Cannot navigate to backlink: runtime or space unavailable",
-            );
-            this.emit("backlink-click", {
-              id: backlinkId,
-              text: backlinkText,
-              charm: null,
-            });
-            return true;
-          }
+        const charm = backlinkId ? this.findCharmById(backlinkId) : null;
+        if (charm) {
+          this.emit("backlink-click", {
+            id: backlinkId,
+            text: backlinkText,
+            charm,
+          });
+          return true;
         }
 
         // Only create new backlink if there's NO ID (text-only like [[Name]])
@@ -406,21 +375,12 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Create a backlink from pattern
    */
-  private createBacklinkFromPattern(
+  private async createBacklinkFromPattern(
     backlinkText: string,
     navigate: boolean,
-  ): void {
+  ): Promise<void> {
     try {
-      const rt = this.pattern.runtime;
-      const tx = rt.edit();
-      const spaceName = this.pattern.space;
-      // ensure the cause is unique
-      const result = rt.getCell<any>(
-        spaceName,
-        { note: this.value, title: backlinkText },
-      );
-
-      // parse + start the recipe + link the inputs
+      const rt = this.pattern.runtime();
       const pattern = JSON.parse(this.pattern.get());
       // Provide mentionable list so the pattern can wire backlinks immediately
       const inputs: Record<string, unknown> = {
@@ -428,16 +388,16 @@ export class CTCodeEditor extends BaseElement {
         content: "",
       };
 
-      rt.run(tx, pattern, inputs, result);
-
-      // let the pattern know about the new backlink
-      tx.commit();
-
-      const charmId = getEntityId(result.resolveAsCell());
+      const response = await rt.createCharmFromString(pattern, inputs);
+      if (!response) {
+        throw new Error("Could not create charm.");
+      }
+      const { cell: _, result } = response;
+      const charmId = result.id();
 
       // Insert the ID into the text if we have an editor
       if (this._editorView && charmId) {
-        this._insertBacklinkId(backlinkText, charmId["/"], navigate);
+        this._insertBacklinkId(backlinkText, charmId, navigate);
       }
 
       this.emit("backlink-create", {
@@ -502,14 +462,14 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Find a charm by ID in the mentionable list
    */
-  private findCharmById(id: string): Cell<Mentionable> | null {
+  private findCharmById(id: string): CellHandle<Mentionable> | null {
     const mentionableCell = this._getMentionableCell();
     if (!mentionableCell) return null;
 
     const rawMentionable = mentionableCell.get();
     const mentionableData = Array.isArray(rawMentionable)
       ? rawMentionable as MentionableArray
-      : isCell(rawMentionable)
+      : isCellHandle(rawMentionable)
       ? ((rawMentionable.get() ?? []) as MentionableArray)
       : [];
 
@@ -518,12 +478,8 @@ export class CTCodeEditor extends BaseElement {
     for (let i = 0; i < mentionableData.length; i++) {
       const charmValue = mentionableData[i];
       if (!charmValue) continue;
-      const charmCell = mentionableCell.key(i) as Cell<Mentionable>;
-
-      // getEntityId now properly dereferences cells with paths, so we get
-      // the charm's intrinsic ID whether we call it on the cell or the value
-      const charmIdObj = getEntityId(charmCell.resolveAsCell());
-      const charmId = charmIdObj?.["/"] || "";
+      const charmCell = mentionableCell.key(i) as CellHandle<Mentionable>;
+      const charmId = charmCell.id();
       if (charmId === id) {
         return charmCell;
       }
@@ -632,10 +588,10 @@ export class CTCodeEditor extends BaseElement {
     this._cellController["options"].triggerUpdate = false; // Disable default updates
 
     // Set up our own Cell subscription that calls both update methods
-    if (this._cellController.isCell()) {
+    if (this._cellController.hasCell()) {
       const cell = this._cellController.getCell();
       if (cell) {
-        const unsubscribe = cell.sink(() => {
+        const unsubscribe = cell.subscribe(() => {
           // First update the editor content
           this._updateEditorFromCellValue();
           // Then trigger component update if originally enabled
@@ -660,7 +616,7 @@ export class CTCodeEditor extends BaseElement {
 
     const mentionableCell = this._getMentionableCell();
     if (!mentionableCell) return;
-    const unsubscribe = mentionableCell.sink(() => {
+    const unsubscribe = mentionableCell.subscribe(() => {
       this._updateMentionedFromContent();
     });
     this._mentionableUnsub = unsubscribe;
@@ -982,14 +938,20 @@ export class CTCodeEditor extends BaseElement {
     const rawMentioned = this.mentioned.get();
     const currentSource = Array.isArray(rawMentioned)
       ? rawMentioned
-      : isCell(rawMentioned)
+      : isCellHandle(rawMentioned)
       ? ((rawMentioned.get() ?? []) as MentionableArray)
       : [];
 
-    const current: Mentionable[] = currentSource.filter((
+    const _current: Mentionable[] = currentSource.filter((
       value,
     ): value is Mentionable => Boolean(value));
 
+    // TODO(runtime-worker-refactor): Need to
+    // disambiguate between getting `T[]` versus
+    // `CellHandle<T>[]`.
+    const curIds = new Set();
+    const newIds = new Set();
+    /*
     const curIds = new Set(
       current
         .map((c) => getEntityId(c)?.["/"])
@@ -1000,7 +962,7 @@ export class CTCodeEditor extends BaseElement {
         .map((c) => getEntityId(c)?.["/"])
         .filter((id): id is string => typeof id === "string"),
     );
-
+    */
     if (curIds.size === newIds.size) {
       let same = true;
       for (const id of newIds) {
@@ -1012,9 +974,7 @@ export class CTCodeEditor extends BaseElement {
       if (same) return; // No change
     }
 
-    const tx = this.mentioned.runtime.edit();
-    this.mentioned.withTx(tx).set(newMentioned);
-    tx.commit();
+    this.mentioned.set(newMentioned);
   }
 
   /**
@@ -1049,7 +1009,7 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Resolve the active mentionable cell.
    */
-  private _getMentionableCell(): Cell<MentionableArray> | null {
+  private _getMentionableCell(): CellHandle<MentionableArray> | null {
     return this.mentionable ?? null;
   }
 }

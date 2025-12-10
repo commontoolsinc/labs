@@ -2,16 +2,14 @@ import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseView, createDefaultAppState } from "./BaseView.ts";
 import { KeyStore } from "@commontools/identity";
-import { RuntimeInternals } from "../lib/runtime.ts";
+import { CharmHandle, RuntimeInternals } from "../lib/runtime.ts";
 import { DebuggerController } from "../lib/debugger-controller.ts";
-import "./DebuggerView.ts";
 import { Task, TaskStatus } from "@lit/task";
-import { CharmController } from "@commontools/charm/ops";
 import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
-import { NAME } from "@commontools/runner";
 import { type NameSchema } from "@commontools/runner/schemas";
-import { updatePageTitle } from "../lib/navigate.ts";
+import { updatePageTitle } from "../../shared/mod.ts";
 import { KeyboardController } from "../lib/keyboard-router.ts";
+import { NAME } from "@commontools/runtime-client";
 
 export class XAppView extends BaseView {
   static override styles = css`
@@ -53,7 +51,7 @@ export class XAppView extends BaseView {
   charmTitle?: string;
 
   @property({ attribute: false })
-  private titleSubscription?: CellEventTarget<string | undefined>;
+  private titleSubscription?: CellEventTarget<string>;
 
   @state()
   private hasSidebarContent = false;
@@ -87,7 +85,7 @@ export class XAppView extends BaseView {
     task: async (
       [rt],
     ): Promise<
-      | CharmController<NameSchema>
+      | CharmHandle<NameSchema>
       | undefined
     > => {
       if (!rt) return;
@@ -107,7 +105,7 @@ export class XAppView extends BaseView {
     task: async (
       [app, rt],
     ): Promise<
-      | CharmController<NameSchema>
+      | CharmHandle<NameSchema>
       | undefined
     > => {
       if (!rt) return;
@@ -132,8 +130,8 @@ export class XAppView extends BaseView {
         selectedPatternStatus,
       ],
     ): {
-      activePattern: CharmController<NameSchema> | undefined;
-      spaceRootPattern: CharmController<NameSchema> | undefined;
+      activePattern: CharmHandle<NameSchema> | undefined;
+      spaceRootPattern: CharmHandle<NameSchema> | undefined;
     } {
       const spaceRootPattern = spaceRootPatternStatus === TaskStatus.COMPLETE
         ? spaceRootPatternValue
@@ -161,7 +159,7 @@ export class XAppView extends BaseView {
     ],
   });
 
-  #setTitleSubscription(activeCharm?: CharmController<NameSchema>) {
+  #setTitleSubscription(activeCharm?: CharmHandle<NameSchema>) {
     if (!activeCharm) {
       if (this.titleSubscription) {
         this.titleSubscription.removeEventListener(
@@ -174,9 +172,20 @@ export class XAppView extends BaseView {
         ? this.app.view.spaceName
         : "Common Tools";
     } else {
-      const cell = activeCharm.getCell();
-      this.titleSubscription = new CellEventTarget(cell.key(NAME));
-      this.charmTitle = cell.key(NAME).get();
+      const cell = activeCharm.getCell().key(NAME);
+      if (
+        this.titleSubscription && cell.equals(this.titleSubscription.cell())
+      ) {
+        return;
+      }
+      // Note: CellProxy.key() returns a CellProxy, which should work with CellEventTarget
+      this.titleSubscription = new CellEventTarget(cell);
+      try {
+        this.charmTitle = cell.get();
+      } catch {
+        // Cell not synced yet
+        this.charmTitle = undefined;
+      }
     }
   }
 

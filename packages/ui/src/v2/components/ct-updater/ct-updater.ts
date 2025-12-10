@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { CTCharm } from "../ct-charm/ct-charm.ts";
-import { Cell } from "@commontools/runner";
+import { CellHandle } from "@commontools/runtime-client";
 
 /**
  * CTUpdater - Button component for registering charms for background updates
@@ -92,7 +92,7 @@ export class CTUpdater extends BaseElement {
     integration: { type: String },
   };
 
-  declare state: Cell<any>;
+  declare state: CellHandle<any>;
   declare integration: string;
   private updateState: "idle" | "pending" | "success" | "error" = "idle";
 

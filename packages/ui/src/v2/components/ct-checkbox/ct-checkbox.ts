@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
 import { createBooleanCellController } from "../../core/cell-controller.ts";
 
 /**
@@ -9,7 +9,7 @@ import { createBooleanCellController } from "../../core/cell-controller.ts";
  *
  * @element ct-checkbox
  *
- * @attr {boolean|Cell<boolean>} checked - Whether the checkbox is checked (supports both plain boolean and Cell<boolean>)
+ * @attr {boolean|CellHandle<boolean>} checked - Whether the checkbox is checked (supports both plain boolean and CellHandle<boolean>)
  * @attr {boolean} disabled - Whether the checkbox is disabled
  * @attr {string} name - Name attribute for form submission
  * @attr {string} value - Value attribute for form submission
@@ -165,7 +165,7 @@ export class CTCheckbox extends BaseElement {
       value: { type: String },
     };
 
-    declare checked: Cell<boolean> | boolean;
+    declare checked: CellHandle<boolean> | boolean;
     declare disabled: boolean;
     declare indeterminate: boolean;
     declare name: string;

@@ -16,7 +16,7 @@ import {
   saveCredential,
   type StoredCredential,
 } from "../lib/credentials.ts";
-import { ROOT_KEY } from "../lib/app/controller.ts";
+import { ROOT_KEY } from "../../shared/mod.ts";
 
 type AuthFlow = "register" | "login";
 

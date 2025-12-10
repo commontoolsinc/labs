@@ -11,7 +11,7 @@
  * @attribute {string} orientation - Layout orientation: "vertical" (default) or "horizontal"
  *
  * @property {RadioItem[]} items - Array of items to render as radio buttons (alternative to slotted ct-radio elements)
- * @property {Cell<unknown>|unknown} value - Selected value - supports both Cell and plain values for bidirectional binding
+ * @property {CellHandle<unknown>|unknown} value - Selected value - supports both Cell and plain values for bidirectional binding
  *
  * @event {CustomEvent} ct-change - Fired when the selected radio changes
  * @event-detail {Object} detail - Event detail object
@@ -68,7 +68,7 @@ import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import { radioGroupStyles } from "./styles.ts";
-import { areLinksSame, type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import {
   applyThemeToElement,
@@ -130,7 +130,7 @@ export class CTRadioGroup extends BaseElement {
   declare disabled: boolean;
   declare orientation: RadioGroupOrientation;
   declare items: RadioItem[];
-  declare value: Cell<unknown> | unknown;
+  declare value: CellHandle<unknown> | unknown;
 
   constructor() {
     super();
@@ -439,3 +439,9 @@ export class CTRadioGroup extends BaseElement {
 }
 
 globalThis.customElements.define("ct-radio-group", CTRadioGroup);
+
+// @TODO(runtime-worker-refactor)
+// needs typed, not sure what these are
+function areLinksSame(_a: any, _b: any): boolean {
+  return false;
+}

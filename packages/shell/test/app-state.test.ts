@@ -5,7 +5,7 @@ import {
   AppStateSerialized,
   deserialize,
   serialize,
-} from "../src/lib/app/mod.ts";
+} from "@commontools/shell/shared";
 import { Identity, serializeKeyPairRaw } from "@commontools/identity";
 import { assert } from "@std/assert";
 

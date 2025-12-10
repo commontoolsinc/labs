@@ -1,5 +1,8 @@
 import { createContext } from "@lit/context";
-import type { MemorySpace, Runtime } from "@commontools/runner";
+import type { RuntimeClient } from "@commontools/runtime-client";
+import { DID } from "@commontools/identity";
 
-export const runtimeContext = createContext<Runtime | undefined>("runtime");
-export const spaceContext = createContext<MemorySpace | undefined>("space");
+export const runtimeContext = createContext<RuntimeClient | undefined>(
+  "runtime",
+);
+export const spaceContext = createContext<DID | undefined>("space");
