@@ -253,7 +253,7 @@ export default recipe({
                 matrix: state.matrix,
                 row: state.row,
                 col: state.col
-            } }, ({ state }) => state.matrix[state.row][state.col])}</p>
+            } }, ({ state }) => state.matrix[state.row]![state.col])}</p>
 
         {/* Triple nested access */}
         <p>Deep nested: {__ctHelpers.derive({
@@ -300,7 +300,7 @@ export default recipe({
                     index: state.nested.index
                 },
                 row: state.row
-            } }, ({ state }) => state.nested.arrays[state.nested.index][state.row])}</p>
+            } }, ({ state }) => state.nested.arrays[state.nested.index]![state.row])}</p>
 
         <h3>Multiple References to Same Array</h3>
         {/* Same array accessed multiple times with different indices */}
@@ -355,7 +355,7 @@ export default recipe({
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 arr: state.arr
-            } }, ({ state }) => state.arr[0] + state.arr[state.arr.length - 1])}</p>
+            } }, ({ state }) => state.arr[0]! + state.arr[state.arr.length - 1]!)}</p>
 
         <h3>Computed Indices</h3>
         {/* Index from multiple state values */}
@@ -505,7 +505,7 @@ export default recipe({
                 users: state.users,
                 selectedUser: state.selectedUser,
                 selectedScore: state.selectedScore
-            } }, ({ state }) => state.users[state.selectedUser].scores[state.selectedScore])}
+            } }, ({ state }) => state.users[state.selectedUser]!.scores[state.selectedScore])!}
         </p>
 
         {/* Using one array element as index for another */}
@@ -540,7 +540,7 @@ export default recipe({
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items,
                 indices: state.indices
-            } }, ({ state }) => state.items[state.indices[0]])}</p>
+            } }, ({ state }) => state.items[state.indices[0]!])}</p>
 
         {/* Array element used as index for same array */}
         <p>Self reference: {__ctHelpers.derive({
@@ -566,7 +566,7 @@ export default recipe({
             asOpaque: true
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 arr: state.arr
-            } }, ({ state }) => state.arr[state.arr[0]])}</p>
+            } }, ({ state }) => state.arr[state.arr[0]!])}</p>
 
         <h3>Mixed Property and Element Access</h3>
         {/* Property access followed by element access with computed index */}
@@ -608,7 +608,7 @@ export default recipe({
                     arrays: state.nested.arrays,
                     index: state.nested.index
                 }
-            } }, ({ state }) => state.nested.arrays[state.nested.index].length)}</p>
+            } }, ({ state }) => state.nested.arrays[state.nested.index]!.length)}</p>
 
         {/* Element access followed by property access */}
         <p>User name length: {__ctHelpers.derive({
@@ -650,7 +650,7 @@ export default recipe({
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 users: state.users,
                 selectedUser: state.selectedUser
-            } }, ({ state }) => state.users[state.selectedUser].name.length)}</p>
+            } }, ({ state }) => state.users[state.selectedUser]!.name.length)}</p>
 
         <h3>Element Access in Conditions</h3>
         {/* Element access in ternary */}
@@ -694,7 +694,7 @@ export default recipe({
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 arr: state.arr,
                 a: state.a
-            } }, ({ state }) => state.arr[state.a] > 10), __ctHelpers.derive({
+            } }, ({ state }) => state.arr[state.a]! > 10), __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -722,7 +722,7 @@ export default recipe({
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items,
                 b: state.b
-            } }, ({ state }) => state.items[state.b]), state.items[0])}
+            } }, ({ state }) => state.items[state.b]!), state.items[0]!)}
         </p>
 
         {/* Element access in boolean expression */}
@@ -771,7 +771,7 @@ export default recipe({
                 matrix: state.matrix,
                 row: state.row,
                 col: state.col
-            } }, ({ state }) => state.matrix[state.row][state.col] > 0), "positive", "non-positive")}
+            } }, ({ state }) => state.matrix[state.row]![state.col]! > 0), "positive", "non-positive")}
         </p>
 
         <h3>Element Access with Operators</h3>
@@ -808,7 +808,7 @@ export default recipe({
                 arr: state.arr,
                 a: state.a,
                 b: state.b
-            } }, ({ state }) => state.arr[state.a] * state.arr[state.b])}</p>
+            } }, ({ state }) => state.arr[state.a]! * state.arr[state.b]!)}</p>
 
         {/* Element access with string concatenation */}
         <p>Concat: {__ctHelpers.derive({
@@ -841,7 +841,7 @@ export default recipe({
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items,
                 indices: state.indices
-            } }, ({ state }) => state.items[0] + " - " + state.items[state.indices[0]])}</p>
+            } }, ({ state }) => state.items[0]! + " - " + state.items[state.indices[0]!]!)}</p>
 
         {/* Multiple element accesses in single expression */}
         <p>Sum: {__ctHelpers.derive({
@@ -866,7 +866,7 @@ export default recipe({
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 arr: state.arr
-            } }, ({ state }) => state.arr[0] + state.arr[1] + state.arr[2])}</p>
+            } }, ({ state }) => state.arr[0]! + state.arr[1]! + state.arr[2]!)}</p>
       </div>),
     };
 });

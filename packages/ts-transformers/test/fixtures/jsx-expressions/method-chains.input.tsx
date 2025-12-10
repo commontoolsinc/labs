@@ -105,7 +105,7 @@ export default recipe<State>("MethodChains", (state) => {
         <h3>Methods on Computed Values</h3>
         {/* Method on binary expression result */}
         <p>
-          Formatted price: {(state.prices[0] * (1 - state.discount)).toFixed(2)}
+          Formatted price: {(state.prices[0]! * (1 - state.discount)).toFixed(2)}
         </p>
 
         {/* Method on conditional result */}

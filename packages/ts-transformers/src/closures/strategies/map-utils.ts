@@ -256,7 +256,7 @@ function createDerivedAliasExpression(
   elementIdentifier: ts.Identifier,
   context: TransformationContext,
 ): ts.Expression {
-  const { factory, ctHelpers, tsContext } = context;
+  const { factory, ctHelpers, tsContext, checker } = context;
   const keyIdent = factory.createIdentifier(info.keyIdentifier.text);
 
   const accessBase = createCaptureAccessExpression(
@@ -270,6 +270,17 @@ function createDerivedAliasExpression(
     accessBase,
     keyIdent,
   );
+
+  // Register the type of the synthetic elementAccess in typeRegistry.
+  // The type comes from info.symbol which was captured from the original
+  // binding element. Without this registration, createDeriveCall cannot
+  // determine the correct result type for the synthetic derive.
+  if (context.options.typeRegistry && info.symbol) {
+    const symbolType = checker.getTypeOfSymbol(info.symbol);
+    if (symbolType) {
+      context.options.typeRegistry.set(elementAccess, symbolType);
+    }
+  }
 
   const elementRef = factory.createIdentifier(elementIdentifier.text);
 

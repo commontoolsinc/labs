@@ -5,7 +5,10 @@ import {
   Transformer,
 } from "../core/mod.ts";
 import { createSchemaTransformerV2 } from "@commontools/schema-generator";
-import { visitEachChildWithJsx } from "../ast/mod.ts";
+import {
+  getTypeFromTypeNodeWithFallback,
+  visitEachChildWithJsx,
+} from "../ast/mod.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 
 let schemaTransformer: ReturnType<typeof createSchemaTransformerV2> | undefined;
@@ -24,14 +27,18 @@ export class SchemaGeneratorTransformer extends Transformer {
       if (isToSchemaNode(node)) {
         const typeArg = node.typeArguments[0]!;
 
-        // First check if we have a registered Type for this node
+        // First check if we have a registered Type for this node or the typeArg
         // (from schema-injection when synthetic TypeNodes were created)
         let type: ts.Type;
         if (typeRegistry && typeRegistry.has(node)) {
           type = typeRegistry.get(node)!;
         } else {
-          // Fall back to getting Type from TypeNode
-          type = checker.getTypeFromTypeNode(typeArg);
+          // Use fallback to handle synthetic TypeNodes that may be in the registry
+          type = getTypeFromTypeNodeWithFallback(
+            typeArg,
+            checker,
+            typeRegistry,
+          );
         }
 
         if (logger) {

@@ -19,6 +19,7 @@ export {
   visitEachChildWithJsx,
 } from "./utils.ts";
 export {
+  getTypeFromTypeNodeWithFallback,
   getTypeReferenceArgument,
   inferContextualType,
   inferParameterType,

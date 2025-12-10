@@ -1,6 +1,10 @@
 import ts from "typescript";
 import { CTHelpers } from "../../core/ct-helpers.ts";
-import { getExpressionText } from "../../ast/mod.ts";
+import {
+  getExpressionText,
+  getTypeAtLocationWithFallback,
+  unwrapOpaqueLikeType,
+} from "../../ast/mod.ts";
 import {
   buildHierarchicalParamsValue,
   groupCapturesByRoot,
@@ -20,19 +24,41 @@ import {
 import { registerDeriveCallType } from "../../ast/type-inference.ts";
 import type { TransformationContext } from "../../core/mod.ts";
 
+/**
+ * Replace OpaqueRef expressions with parameter identifiers in the callback body.
+ * Also registers the new identifiers with their UNWRAPPED types in the typeRegistry,
+ * so that type-based checks inside the derive callback see the correct types.
+ */
 function replaceOpaqueRefsWithParams(
   expression: ts.Expression,
   refToParamName: Map<ts.Expression, string>,
   factory: ts.NodeFactory,
-  context: ts.TransformationContext,
+  tsContext: ts.TransformationContext,
+  checker: ts.TypeChecker | undefined,
+  typeRegistry: WeakMap<ts.Node, ts.Type> | undefined,
 ): ts.Expression {
   const visit = (node: ts.Node): ts.Node => {
     for (const [ref, paramName] of refToParamName) {
       if (node === ref) {
-        return factory.createIdentifier(paramName);
+        const newIdentifier = factory.createIdentifier(paramName);
+
+        // Register the new identifier with its UNWRAPPED type.
+        // The ref has type OpaqueRef<T>, but inside the derive callback
+        // the parameter has type T (unwrapped).
+        if (checker && typeRegistry) {
+          const refType = checker.getTypeAtLocation(ref);
+          if (refType) {
+            const unwrappedType = unwrapOpaqueLikeType(refType, checker);
+            if (unwrappedType) {
+              typeRegistry.set(newIdentifier, unwrappedType);
+            }
+          }
+        }
+
+        return newIdentifier;
       }
     }
-    return ts.visitEachChild(node, visit, context);
+    return ts.visitEachChild(node, visit, tsContext);
   };
   return visit(expression) as ts.Expression;
 }
@@ -190,6 +216,8 @@ export function createDeriveCall(
     refToParamName,
     factory,
     tsContext,
+    context.checker,
+    context.options.typeRegistry,
   );
 
   const arrowFunction = factory.createArrowFunction(
@@ -279,7 +307,18 @@ function buildResultTypeNode(
   const { factory, checker } = context;
 
   // Try to get the type of the result expression
-  const resultType = checker.getTypeAtLocation(expression);
+  // Use getTypeAtLocationWithFallback to handle synthetic nodes that may have
+  // their type registered from earlier transformation stages
+  const resultType = getTypeAtLocationWithFallback(
+    expression,
+    checker,
+    context.options.typeRegistry,
+  );
+
+  // If we couldn't get a type, fallback to unknown
+  if (!resultType) {
+    return factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+  }
 
   // Convert to TypeNode, preserving Cell<T> if present
   const resultTypeNode = checker.typeToTypeNode(

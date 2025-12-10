@@ -21,7 +21,7 @@ export default recipe<State>("ElementAccessSimple", (state) => {
         <p>Last: {state.items[state.items.length - 1]}</p>
 
         {/* Double indexing */}
-        <p>Matrix: {state.matrix[state.row][state.col]}</p>
+        <p>Matrix: {state.matrix[state.row]![state.col]}</p>
       </div>
     ),
   };

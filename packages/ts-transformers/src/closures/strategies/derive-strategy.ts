@@ -1,8 +1,13 @@
 import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
-import { detectCallKind, isFunctionLikeExpression } from "../../ast/mod.ts";
+import {
+  detectCallKind,
+  isFunctionLikeExpression,
+  unwrapOpaqueLikeType,
+} from "../../ast/mod.ts";
 import { registerDeriveCallType } from "../../ast/type-inference.ts";
+import { getCellKind } from "../../transformers/opaque-ref/opaque-ref.ts";
 import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
@@ -12,6 +17,64 @@ import {
 import { CaptureCollector } from "../capture-collector.ts";
 import { RecipeBuilder } from "../utils/recipe-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
+
+/**
+ * Pre-register unwrapped types for captured identifiers in a callback body.
+ * This allows nested transformations (like map -> mapWithPattern decisions)
+ * to see the correct unwrapped types for captured variables.
+ *
+ * Inside a derive callback:
+ * - OpaqueRef<T> captures become T parameters (unwrapped)
+ * - Cell<T> captures remain Cell<T> (NOT unwrapped)
+ *
+ * We register this before the visitor runs so decisions are made correctly.
+ */
+function preRegisterCaptureTypes(
+  body: ts.ConciseBody,
+  captureExpressions: Set<ts.Expression>,
+  checker: ts.TypeChecker,
+  typeRegistry: WeakMap<ts.Node, ts.Type> | undefined,
+): void {
+  if (!typeRegistry) return;
+
+  // Build map: capture name -> type to register
+  // Only unwrap OpaqueRef types (kind === "opaque"), not Cell types
+  const captureTypes = new Map<string, ts.Type>();
+  for (const expr of captureExpressions) {
+    if (ts.isIdentifier(expr)) {
+      const exprType = checker.getTypeAtLocation(expr);
+      if (exprType) {
+        const kind = getCellKind(exprType, checker);
+
+        // Only unwrap if it's an OpaqueRef (kind === "opaque")
+        // Cell and Stream types should NOT be unwrapped
+        if (kind === "opaque") {
+          const unwrapped = unwrapOpaqueLikeType(exprType, checker);
+          if (unwrapped && unwrapped !== exprType) {
+            captureTypes.set(expr.text, unwrapped);
+          }
+        }
+        // For Cell/Stream types, we don't register anything - let TypeScript's natural type be used
+      }
+    }
+    // NOTE: Property access captures like state.items are handled separately
+  }
+
+  if (captureTypes.size === 0) return;
+
+  // Walk the body and register unwrapped types for all matching identifiers
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node)) {
+      const unwrappedType = captureTypes.get(node.text);
+      if (unwrappedType) {
+        typeRegistry.set(node, unwrappedType);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(body);
+}
 
 export class DeriveStrategy implements ClosureTransformationStrategy {
   canTransform(
@@ -163,22 +226,54 @@ function buildDeriveInputObject(
  * Rewrite the callback body to use renamed capture identifiers.
  * For example, if `multiplier` was renamed to `multiplier_1`, replace all
  * references to the captured `multiplier` with `multiplier_1`.
+ *
+ * Also registers the new identifiers with their UNWRAPPED types in typeRegistry,
+ * so type-based checks inside the derive callback see the correct types.
  */
 function rewriteCaptureReferences(
   body: ts.ConciseBody,
   captureNameMap: Map<string, string>,
+  captureExpressions: Set<ts.Expression>,
   factory: ts.NodeFactory,
+  checker: ts.TypeChecker | undefined,
+  typeRegistry: WeakMap<ts.Node, ts.Type> | undefined,
 ): ts.ConciseBody {
-  // Build a reverse map: original capture name -> list of renamed names that should be substituted
-  const substitutions = new Map<string, string>();
-  for (const [originalName, renamedName] of captureNameMap) {
-    if (originalName !== renamedName) {
-      substitutions.set(originalName, renamedName);
+  // Build a map: identifier name -> unwrapped type
+  // We need to register all capture references (not just renamed ones) with unwrapped types
+  const captureTypes = new Map<string, ts.Type>();
+  if (checker) {
+    for (const expr of captureExpressions) {
+      // Get the root identifier name from the expression
+      let rootName: string | undefined;
+      if (ts.isIdentifier(expr)) {
+        rootName = expr.text;
+      } else if (ts.isPropertyAccessExpression(expr)) {
+        // For property access like `state.items`, we want to register `items`
+        // but the capture tree uses the full path
+        // For now, skip these - they get handled separately
+        continue;
+      }
+
+      if (rootName) {
+        const exprType = checker.getTypeAtLocation(expr);
+        if (exprType) {
+          const unwrapped = unwrapOpaqueLikeType(exprType, checker);
+          if (unwrapped) {
+            captureTypes.set(rootName, unwrapped);
+          }
+        }
+      }
     }
   }
 
+  // Build a map: original name -> renamed name (for all captures, not just renamed)
+  const substitutions = new Map<string, string>();
+  for (const [originalName, renamedName] of captureNameMap) {
+    substitutions.set(originalName, renamedName);
+  }
+
   if (substitutions.size === 0) {
-    return body; // No substitutions needed
+    return body; // No captures to substitute
   }
 
   const visitor = (node: ts.Node, parent?: ts.Node): ts.Node => {
@@ -187,10 +282,16 @@ function rewriteCaptureReferences(
     if (ts.isShorthandPropertyAssignment(node)) {
       const substituteName = substitutions.get(node.name.text);
       if (substituteName) {
+        const newIdentifier = factory.createIdentifier(substituteName);
+        // Register with unwrapped type
+        const unwrappedType = captureTypes.get(node.name.text);
+        if (unwrappedType && typeRegistry) {
+          typeRegistry.set(newIdentifier, unwrappedType);
+        }
         // Expand shorthand into full property assignment
         return factory.createPropertyAssignment(
           node.name, // Property name stays the same
-          factory.createIdentifier(substituteName), // Value uses renamed identifier
+          newIdentifier, // Value uses renamed identifier
         );
       }
       // No substitution needed, keep as shorthand
@@ -213,7 +314,13 @@ function rewriteCaptureReferences(
 
       const substituteName = substitutions.get(node.text);
       if (substituteName) {
-        return factory.createIdentifier(substituteName);
+        const newIdentifier = factory.createIdentifier(substituteName);
+        // Register with unwrapped type
+        const unwrappedType = captureTypes.get(node.text);
+        if (unwrappedType && typeRegistry) {
+          typeRegistry.set(newIdentifier, unwrappedType);
+        }
+        return newIdentifier;
       }
     }
 
@@ -257,6 +364,16 @@ export function transformDeriveCall(
     // No captures - no transformation needed
     return undefined;
   }
+
+  // Pre-register unwrapped types for captured identifiers BEFORE the visitor runs.
+  // This allows nested transformations (like map -> mapWithPattern) to see the
+  // correct unwrapped types for captured variables inside this derive callback.
+  preRegisterCaptureTypes(
+    callback.body,
+    captureExpressions,
+    checker,
+    options.typeRegistry,
+  );
 
   // Recursively transform the callback body first
   const transformedBody = ts.visitNode(
@@ -313,10 +430,14 @@ export function transformDeriveCall(
   );
 
   // Rewrite the body to use renamed capture identifiers
+  // Also registers new identifiers with unwrapped types for correct type inference
   const rewrittenBody = rewriteCaptureReferences(
     transformedBody,
     captureNameMap,
+    captureExpressions,
     factory,
+    checker,
+    options.typeRegistry,
   );
 
   // Initialize RecipeBuilder

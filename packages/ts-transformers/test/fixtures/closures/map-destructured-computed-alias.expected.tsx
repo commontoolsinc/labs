@@ -274,7 +274,10 @@ export default recipe({
                         __ct_val_key: true
                     },
                     required: ["element", "__ct_val_key"]
-                } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number",
+                    asOpaque: true
+                } as const satisfies __ctHelpers.JSONSchema, {
                     element: element,
                     __ct_val_key: __ct_val_key
                 }, ({ element, __ct_val_key }) => element[__ct_val_key]);
