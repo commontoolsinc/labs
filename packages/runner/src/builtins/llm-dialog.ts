@@ -628,7 +628,7 @@ function flattenTools(
  * (description, inputSchema, internal) and excludes handler which may have
  * circular references.
  */
-function toolsHaveChanged(
+function _toolsHaveChanged(
   newTools: Record<string, any>,
   oldTools: Record<string, any> | undefined,
 ): boolean {
