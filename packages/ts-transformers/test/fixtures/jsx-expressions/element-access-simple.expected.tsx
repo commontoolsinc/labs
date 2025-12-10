@@ -240,7 +240,7 @@ export default recipe({
                 matrix: state.matrix,
                 row: state.row,
                 col: state.col
-            } }, ({ state }) => state.matrix[state.row][state.col])}</p>
+            } }, ({ state }) => state.matrix[state.row]![state.col])}</p>
       </div>),
     };
 });

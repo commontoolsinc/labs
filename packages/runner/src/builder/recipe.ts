@@ -50,18 +50,21 @@ export const pattern: PatternFunction = (
 
   const inputs = opaqueRef(undefined, argumentSchema);
 
-  const outputs = fn!(inputs);
+  let result: RecipeFactory<any, any>;
+  try {
+    const outputs = fn!(inputs);
 
-  applyInputIfcToOutput(inputs, outputs);
+    applyInputIfcToOutput(inputs, outputs);
 
-  const result = factoryFromRecipe(
-    argumentSchema,
-    resultSchema,
-    inputs,
-    outputs,
-  );
-
-  popFrame(frame);
+    result = factoryFromRecipe(
+      argumentSchema,
+      resultSchema,
+      inputs,
+      outputs,
+    );
+  } finally {
+    popFrame(frame);
+  }
 
   return result;
 };
@@ -154,17 +157,21 @@ export function recipe<T, R>(
       : argumentSchema as JSONSchema | undefined,
   );
 
-  const outputs = fn!(inputs);
+  let result;
+  try {
+    const outputs = fn!(inputs);
 
-  applyInputIfcToOutput(inputs, outputs);
+    applyInputIfcToOutput(inputs, outputs);
 
-  const result = factoryFromRecipe<T, R>(
-    argumentSchema as string | JSONSchema | undefined,
-    resultSchema as JSONSchema | undefined,
-    inputs,
-    outputs,
-  );
-  popFrame(frame);
+    result = factoryFromRecipe<T, R>(
+      argumentSchema as string | JSONSchema | undefined,
+      resultSchema as JSONSchema | undefined,
+      inputs,
+      outputs,
+    );
+  } finally {
+    popFrame(frame);
+  }
   return result;
 }
 

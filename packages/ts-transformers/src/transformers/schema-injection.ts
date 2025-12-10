@@ -3,6 +3,7 @@ import ts from "typescript";
 import {
   detectCallKind,
   getTypeAtLocationWithFallback,
+  getTypeFromTypeNodeWithFallback,
   inferContextualType,
   inferParameterType,
   inferReturnType,
@@ -68,6 +69,7 @@ function collectFunctionSchemaTypeNodes(
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   fallbackArgType?: ts.Type,
+  typeRegistry?: TypeRegistry,
 ): {
   argument?: ts.TypeNode;
   argumentType?: ts.Type; // Store the Type for registry
@@ -94,8 +96,12 @@ function collectFunctionSchemaTypeNodes(
   } else if (parameter?.type) {
     // Use original TypeNode from source - preserves all type information!
     argumentNode = parameter.type;
-    // Also get the Type for registry (in case it's needed)
-    argumentType = checker.getTypeFromTypeNode(parameter.type);
+    // Also get the Type for registry - use fallback for synthetic TypeNodes
+    argumentType = getTypeFromTypeNodeWithFallback(
+      parameter.type,
+      checker,
+      typeRegistry,
+    );
   } else {
     // Need to infer - get type and convert to TypeNode
     const paramType = inferParameterType(
@@ -103,6 +109,7 @@ function collectFunctionSchemaTypeNodes(
       signature,
       checker,
       fallbackArgType,
+      typeRegistry,
     );
     if (paramType && !isAnyOrUnknownType(paramType)) {
       argumentType = paramType; // Store for registry
@@ -118,8 +125,12 @@ function collectFunctionSchemaTypeNodes(
   if (fn.type) {
     // Explicit return type annotation - use it directly!
     resultNode = fn.type;
-    // Also get the Type for registry (in case it's needed)
-    resultType = checker.getTypeFromTypeNode(fn.type);
+    // Also get the Type for registry - use fallback for synthetic TypeNodes
+    resultType = getTypeFromTypeNodeWithFallback(
+      fn.type,
+      checker,
+      typeRegistry,
+    );
   } else {
     // Need to infer return type
     const returnType = inferReturnType(fn, signature, checker);
@@ -469,6 +480,8 @@ function handleBuilderSchemaInjection(
       builderFunction,
       checker,
       sourceFile,
+      undefined,
+      typeRegistry,
     );
     resultTypeNode = inferred.result ??
       factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
@@ -494,6 +507,8 @@ function handleBuilderSchemaInjection(
         builderFunction,
         checker,
         sourceFile,
+        undefined,
+        typeRegistry,
       );
       resultTypeNode = inferred.result ??
         factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
@@ -518,6 +533,8 @@ function handleBuilderSchemaInjection(
         builderFunction,
         checker,
         sourceFile,
+        undefined,
+        typeRegistry,
       );
 
       inputTypeNode = inferred.argument ??
@@ -639,6 +656,8 @@ export class SchemaInjectionTransformer extends Transformer {
               handlerFn,
               checker,
               sourceFile,
+              undefined,
+              typeRegistry,
             );
 
             // Event type: use inferred or fallback to never/unknown refinement
@@ -761,6 +780,7 @@ export class SchemaInjectionTransformer extends Transformer {
               checker,
               sourceFile,
               argumentType,
+              typeRegistry,
             );
             // Use inferred type or fallback to never/unknown refinement
             argNode = inferred.argument ??
@@ -773,6 +793,8 @@ export class SchemaInjectionTransformer extends Transformer {
             callback,
             checker,
             sourceFile,
+            undefined,
+            typeRegistry,
           );
 
           // Always transform - use unknown for missing types
@@ -848,6 +870,8 @@ export class SchemaInjectionTransformer extends Transformer {
             callback,
             checker,
             sourceFile,
+            undefined,
+            typeRegistry,
           );
 
           // For argument: use inferred type or apply never/unknown refinement

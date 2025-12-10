@@ -1,12 +1,8 @@
 import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
+import { isOpaqueRefType } from "../../transformers/opaque-ref/opaque-ref.ts";
 import {
-  getCellKind,
-  isOpaqueRefType,
-} from "../../transformers/opaque-ref/opaque-ref.ts";
-import {
-  detectCallKind,
   getTypeAtLocationWithFallback,
   isFunctionLikeExpression,
 } from "../../ast/mod.ts";
@@ -93,13 +89,35 @@ function hasArrayTypeArgument(
 }
 
 /**
+ * Check if an expression is a derive call (synthetic or user-written).
+ * derive() always returns OpaqueRef<T> at runtime, but we register the
+ * unwrapped callback return type in the type registry. This helper lets
+ * us detect derive calls syntactically to work around that limitation.
+ */
+function isDeriveCall(expr: ts.Expression): boolean {
+  if (!ts.isCallExpression(expr)) return false;
+
+  const callee = expr.expression;
+
+  // Check for `derive(...)` direct call
+  if (ts.isIdentifier(callee) && callee.text === "derive") {
+    return true;
+  }
+
+  // Check for `__ctHelpers.derive(...)` qualified call
+  if (
+    ts.isPropertyAccessExpression(callee) &&
+    callee.name.text === "derive"
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Checks if this is an OpaqueRef<T[]> or Cell<T[]> map call.
  * Only transforms map calls on reactive arrays (OpaqueRef/Cell), not plain arrays.
- *
- * Also handles method chains like state.items.filter(...).map(...) where:
- * - The filter returns OpaqueRef<T>[] (array of OpaqueRefs)
- * - But the origin is OpaqueRef<T[]> (OpaqueRef of array)
- * - We transform it because JSX transformer will wrap intermediate calls in derive
  */
 export function isOpaqueRefArrayMapCall(
   node: ts.CallExpression,
@@ -114,6 +132,13 @@ export function isOpaqueRefArrayMapCall(
   // Get the type of the target (what we're calling .map on)
   const target = node.expression.expression;
 
+  // Special case: derive() always returns OpaqueRef<T> at runtime.
+  // We can't register OpaqueRef<T> in the type registry (only the unwrapped T),
+  // so detect derive calls syntactically.
+  if (isDeriveCall(target)) {
+    return true;
+  }
+
   const targetType = getTypeAtLocationWithFallback(
     target,
     checker,
@@ -124,65 +149,9 @@ export function isOpaqueRefArrayMapCall(
     return false;
   }
 
-  // Special case: If target is a derive call, always treat .map() as needing transformation
-  // Rationale: derive() returns OpaqueRef<T> where T is the callback's return type.
-  // For synthetic derive calls, we can't construct the OpaqueRef<T> wrapper type to register,
-  // so we register the callback's return type instead. This means type-based detection
-  // (isOpaqueRefType + hasArrayTypeArgument) won't recognize it, so we explicitly check
-  // for derive calls. Since derive() always returns opaque values, if we're calling .map()
-  // on it, it must be an array at runtime (otherwise the code would crash), so we should
-  // transform to mapWithPattern.
-  if (ts.isCallExpression(target)) {
-    const callKind = detectCallKind(target, checker);
-    if (callKind?.kind === "derive") {
-      return true;
-    }
-  }
-
-  // Check direct case: target is OpaqueRef<T[]> or Cell<T[]>
-  if (
-    isOpaqueRefType(targetType, checker) &&
-    hasArrayTypeArgument(targetType, checker)
-  ) {
-    return true;
-  }
-
-  // Check method chain case: x.filter(...).map(...) where x is OpaqueRef<T[]>
-  // Array methods that return arrays and might appear before .map()
-  const arrayMethods = [
-    "filter",
-    "slice",
-    "concat",
-    "reverse",
-    "sort",
-    "flat",
-    "flatMap",
-  ];
-
-  let current: ts.Expression = target;
-
-  // Walk back through call chain to find the origin
-  while (
-    ts.isCallExpression(current) &&
-    ts.isPropertyAccessExpression(current.expression) &&
-    arrayMethods.includes(current.expression.name.text)
-  ) {
-    current = current.expression.expression;
-  }
-
-  // Check if origin is OpaqueRef<T[]> or Cell<T[]>
-  const originType = getTypeAtLocationWithFallback(
-    current,
-    checker,
-    typeRegistry,
-    logger,
-  );
-  if (!originType) {
-    return false;
-  }
-
-  return isOpaqueRefType(originType, checker) &&
-    hasArrayTypeArgument(originType, checker);
+  // Type-based check: target is OpaqueRef<T[]> or Cell<T[]>
+  return isOpaqueRefType(targetType, checker) &&
+    hasArrayTypeArgument(targetType, checker);
 }
 
 /**
@@ -206,85 +175,41 @@ export function buildCapturePropertyAssignments(
 }
 
 /**
- * Check if map call is inside a derive/computed callback with a non-Cell OpaqueRef.
- * Returns true if we should skip transformation due to OpaqueRef unwrapping.
- */
-function isInsideDeriveWithOpaqueRef(
-  mapCall: ts.CallExpression,
-  context: TransformationContext,
-): boolean {
-  const { checker } = context;
-  const typeRegistry = context.options.typeRegistry;
-
-  let node: ts.Node = mapCall;
-  while (node.parent) {
-    if (
-      ts.isArrowFunction(node.parent) || ts.isFunctionExpression(node.parent)
-    ) {
-      const callback = node.parent;
-      // Check if this callback's parent is a derive call
-      if (callback.parent && ts.isCallExpression(callback.parent)) {
-        const deriveCall = callback.parent;
-        const callKind = detectCallKind(deriveCall, checker);
-
-        // Check if this is a derive or computed call
-        // Note: Even though ComputedTransformer runs first, callback nodes are reused,
-        // so parent pointers may still point to the original 'computed' call
-        const isDeriveOrComputed = callKind?.kind === "derive" ||
-          (callKind?.kind === "builder" && callKind.builderName === "computed");
-
-        if (
-          isDeriveOrComputed &&
-          ts.isPropertyAccessExpression(mapCall.expression)
-        ) {
-          // We're inside a derive callback - check if target is Cell or OpaqueRef
-          const mapTarget = mapCall.expression.expression;
-
-          const targetType = getTypeAtLocationWithFallback(
-            mapTarget,
-            checker,
-            typeRegistry,
-            context.options.logger,
-          );
-
-          if (targetType && isOpaqueRefType(targetType, checker)) {
-            const kind = getCellKind(targetType, checker);
-            // Only skip transformation for non-Cell OpaqueRefs
-            // Cell<T[]>.map() should still transform even inside derive
-            if (kind !== "cell") {
-              return true;
-            }
-          }
-        }
-      }
-    }
-    node = node.parent;
-  }
-
-  return false;
-}
-
-/**
  * Check if a map call should be transformed to mapWithPattern.
- * Returns false if the map will end up inside a derive (where the array is unwrapped).
  *
- * This happens when the map is nested inside a larger expression with opaque refs,
- * e.g., `list.length > 0 && list.map(...)` becomes `derive(list, list => ...)`
+ * Type-based approach with one special case:
+ * 1. derive() calls always return OpaqueRef at runtime -> TRANSFORM
+ * 2. Otherwise, transform iff the target has an opaque type -> TRANSFORM
  *
- * Special case: Inside derive callbacks, Cell<T[]>.map() should still be transformed,
- * but OpaqueRef<T[]>.map() should not (OpaqueRefs are unwrapped in derive).
+ * The derive special case exists because we register the unwrapped callback
+ * return type in the type registry (not OpaqueRef<T>), so type-based detection
+ * doesn't work for derive results.
  */
 function shouldTransformMap(
   mapCall: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
-  // Early exit: Don't transform if inside derive with non-Cell OpaqueRef
-  const insideDeriveWithOpaque = isInsideDeriveWithOpaqueRef(mapCall, context);
-  if (insideDeriveWithOpaque) {
-    return false;
+  if (!ts.isPropertyAccessExpression(mapCall.expression)) return false;
+
+  const mapTarget = mapCall.expression.expression;
+
+  // Special case: derive() always returns OpaqueRef at runtime
+  if (isDeriveCall(mapTarget)) {
+    return true;
   }
 
-  return true;
+  // Get the type of the map target from registry (preferred) or checker
+  const targetType = getTypeAtLocationWithFallback(
+    mapTarget,
+    context.checker,
+    context.options.typeRegistry,
+    context.options.logger,
+  );
+
+  if (!targetType) return false;
+
+  // Transform iff the target is a cell-like type
+  return isOpaqueRefType(targetType, context.checker);
 }
 
 /**

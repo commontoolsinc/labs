@@ -875,7 +875,7 @@ export default recipe({
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 prices: state.prices,
                 discount: state.discount
-            } }, ({ state }) => (state.prices[0] * (1 - state.discount)).toFixed(2))}
+            } }, ({ state }) => (state.prices[0]! * (1 - state.discount)).toFixed(2))}
         </p>
 
         {/* Method on conditional result */}

@@ -1,11 +1,17 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
-let keyCounter = 0;
-function nextKey() {
-    return `value-${keyCounter++}`;
+import { derive, recipe, UI } from "commontools";
+interface SubItem {
+    id: number;
+    name: string;
+    active: boolean;
+}
+interface Item {
+    id: number;
+    title: string;
+    subItems: SubItem[];
 }
 interface State {
-    items: Array<Record<string, number>>;
+    items: Item[];
 }
 export default recipe({
     type: "object",
@@ -13,15 +19,46 @@ export default recipe({
         items: {
             type: "array",
             items: {
-                type: "object",
-                properties: {},
-                additionalProperties: {
-                    type: "number"
-                }
+                $ref: "#/$defs/Item"
             }
         }
     },
-    required: ["items"]
+    required: ["items"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                title: {
+                    type: "string"
+                },
+                subItems: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/SubItem"
+                    }
+                }
+            },
+            required: ["id", "title", "subItems"]
+        },
+        SubItem: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                name: {
+                    type: "string"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["id", "name", "active"]
+        }
+    }
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -131,22 +168,58 @@ export default recipe({
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
+        {/* Edge case: explicit derive inside mapWithPattern with method chain.
+                The inner .filter().map() should NOT be transformed because:
+                - subs is a derive callback parameter (unwrapped at runtime)
+                - .filter() returns a plain JS array
+                - Plain arrays don't have .mapWithPattern() */}
         {state.items.mapWithPattern(__ctHelpers.recipe({
                 type: "object",
                 properties: {
                     element: {
-                        type: "object",
-                        properties: {},
-                        additionalProperties: {
-                            type: "number"
-                        }
+                        $ref: "#/$defs/Item"
                     },
                     params: {
                         type: "object",
                         properties: {}
                     }
                 },
-                required: ["element", "params"]
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            title: {
+                                type: "string"
+                            },
+                            subItems: {
+                                type: "array",
+                                items: {
+                                    $ref: "#/$defs/SubItem"
+                                }
+                            }
+                        },
+                        required: ["id", "title", "subItems"]
+                    },
+                    SubItem: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            },
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["id", "name", "active"]
+                    }
+                }
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "object",
                 properties: {
@@ -244,24 +317,40 @@ export default recipe({
                         }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => {
-                const __ct_amount_key = nextKey();
-                const amount = __ctHelpers.derive({
-                    type: "object",
-                    properties: {
-                        element: true,
-                        __ct_amount_key: true
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => (<div>
+            <h2>{item.title}</h2>
+            <p>
+              Active items:{" "}
+              {derive({
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/SubItem"
                     },
-                    required: ["element", "__ct_amount_key"]
+                    $defs: {
+                        SubItem: {
+                            type: "object",
+                            properties: {
+                                id: {
+                                    type: "number"
+                                },
+                                name: {
+                                    type: "string"
+                                },
+                                active: {
+                                    type: "boolean"
+                                }
+                            },
+                            required: ["id", "name", "active"]
+                        }
+                    }
                 } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "number",
-                    asOpaque: true
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    element: element,
-                    __ct_amount_key: __ct_amount_key
-                }, ({ element, __ct_amount_key }) => element[__ct_amount_key]);
-                return (<span>{amount}</span>);
-            }), {})}
+                    type: "string"
+                } as const satisfies __ctHelpers.JSONSchema, item.subItems, (subs) => subs
+                    .filter((s) => s.active)
+                    .map((s) => s.name)
+                    .join(", "))}
+            </p>
+          </div>)), {})}
       </div>),
     };
 });
@@ -269,3 +358,4 @@ export default recipe({
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+
