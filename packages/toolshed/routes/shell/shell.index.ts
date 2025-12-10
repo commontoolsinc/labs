@@ -132,23 +132,19 @@ if (COMPILED) {
 
   // Handle root-level resources that shell app requests
   router.get("/DEV_SOCKET.js", async (_) => {
-    const response = await fetch(`${SHELL_URL}/DEV_SOCKET.js`);
-    return response;
+    return await fetch(`${SHELL_URL}/DEV_SOCKET.js`);
   });
 
   router.get("/scripts/*", async (c) => {
-    const response = await fetch(`${SHELL_URL}${c.req.path}`);
-    return response;
+    return await fetch(`${SHELL_URL}${c.req.path}`);
   });
 
   router.get("/styles/*", async (c) => {
-    const response = await fetch(`${SHELL_URL}${c.req.path}`);
-    return response;
+    return await fetch(`${SHELL_URL}${c.req.path}`);
   });
 
   router.get("/assets/*", async (c) => {
-    const response = await fetch(`${SHELL_URL}${c.req.path}`);
-    return response;
+    return await fetch(`${SHELL_URL}${c.req.path}`);
   });
 
   router.get("/*", async (c) => {
