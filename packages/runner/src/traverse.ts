@@ -315,6 +315,17 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isAnyCellLink(doc.value)) {
+        // Check if target doc is already tracked BEFORE calling getAtPath,
+        // since getAtPath/followPointer will add it to schemaTracker
+        let alreadyTracked = false;
+        if (schemaTracker !== undefined) {
+          const link = parseLink(doc.value);
+          if (link?.id !== undefined) {
+            const targetKey = `${link.id}/application/json`;
+            alreadyTracked = schemaTracker.has(targetKey);
+          }
+        }
+
         const [newDoc, _] = getAtPath(
           this.manager,
           doc,
@@ -327,19 +338,10 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
         if (newDoc.value === undefined) {
           return null;
         }
-        // If following a pointer led to a different document that's already
-        // tracked, skip re-traversing it. Note: followPointer (called by
-        // getAtPath above) already added this doc to schemaTracker with
-        // DefaultSchemaSelector, so we just check if it was already there.
-        if (
-          schemaTracker !== undefined &&
-          doc.address.id !== newDoc.address.id
-        ) {
-          const newKey = this.manager.toKey(newDoc.address);
-          if (schemaTracker.has(newKey)) {
-            // Already tracked this doc - skip re-traverse
-            return null;
-          }
+        // If the target doc was already tracked before this traversal,
+        // skip re-traversing it (followPointer already loaded and tracked it)
+        if (alreadyTracked && doc.address.id !== newDoc.address.id) {
+          return null;
         }
         return this.traverseDAG(newDoc, tracker, schemaTracker);
       } else {
