@@ -54,10 +54,8 @@ describe("list-operations simple test", () => {
     await page.waitForSelector("#main-list", { strategy: "pierce" });
 
     // Click reset to populate with initial data
-    const resetBtn = await page.waitForSelector("#reset-demo", {
-      strategy: "pierce",
-    });
-    await resetBtn.click();
+    // Use waitFor with try/catch to handle unstable box model during page settling
+    await clickButton(page, "#reset-demo");
 
     // Wait for the reset operation to complete by checking the text content
     await waitFor(async () => {
@@ -66,10 +64,7 @@ describe("list-operations simple test", () => {
     });
 
     // Test delete first item
-    const deleteFirstBtn = await page.waitForSelector("#delete-first", {
-      strategy: "pierce",
-    });
-    await deleteFirstBtn.click();
+    await clickButton(page, "#delete-first");
 
     // Wait for delete to complete
     await waitFor(async () => {
@@ -84,10 +79,7 @@ describe("list-operations simple test", () => {
     );
 
     // Test insert at start
-    const insertStartBtn = await page.waitForSelector("#insert-start", {
-      strategy: "pierce",
-    });
-    await insertStartBtn.click();
+    await clickButton(page, "#insert-start");
 
     // Wait for insert to complete
     await waitFor(async () => {
@@ -102,10 +94,7 @@ describe("list-operations simple test", () => {
     );
 
     // Test one more operation: delete-last to see if it works
-    const deleteLastBtn = await page.waitForSelector("#delete-last", {
-      strategy: "pierce",
-    });
-    await deleteLastBtn.click();
+    await clickButton(page, "#delete-last");
 
     await waitFor(async () => {
       const text = await getMainListText(page);
@@ -134,4 +123,19 @@ async function getMainListText(page: Page): Promise<string | null> {
   } catch (_) {
     return null;
   }
+}
+
+// Clicks a button, retrying if the element lacks a stable box model.
+// This handles timing issues where the element is found but the page
+// is still settling (re-renders, layout shifts, hydration).
+function clickButton(page: Page, selector: string): Promise<void> {
+  return waitFor(async () => {
+    const btn = await page.waitForSelector(selector, { strategy: "pierce" });
+    try {
+      await btn.click();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  });
 }
