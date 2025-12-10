@@ -327,12 +327,16 @@ function loadFactsForDoc(
   cfc: ContextualFlowControl,
   schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
-  // Track all facts regardless of their value type
-  // This ensures watchedObjects and schemaTracker stay in sync
   const factKey = manager.toKey(fact.address);
-  if (!schemaTracker.has(factKey)) {
-    schemaTracker.add(factKey, selector);
+
+  // If this doc+schema pair is already tracked, we've already traversed its links
+  // so we can skip the entire traversal (early termination optimization)
+  if (schemaTracker.hasValue(factKey, selector)) {
+    return;
   }
+
+  // Track this doc+schema pair
+  schemaTracker.add(factKey, selector);
 
   if (isObject(fact.value)) {
     if (selector.schemaContext !== undefined) {
@@ -366,8 +370,7 @@ function loadFactsForDoc(
       // If we didn't provide a schema context, we still want the selected
       // object in our manager, so load it directly.
       manager.load(fact.address);
-      // Also track it in schemaTracker so incremental updates can find it
-      schemaTracker.add(manager.toKey(fact.address), selector);
+      // Note: already tracked at top of function
     }
     // Also load any source links and recipes
     loadSource(manager, fact, new Set<string>(), schemaTracker);
