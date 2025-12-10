@@ -853,27 +853,20 @@ class MemoryProviderSession<
       });
 
       // Evaluate this document with the schema to find its current links
-      const links = evaluateDocumentLinks(
+      // Pass sharedSchemaTracker - it will be mutated with newly discovered links,
+      // and will skip traversing into already-tracked (doc, schema) pairs
+      evaluateDocumentLinks(
         spaceSession,
         { id: docId, type: docType },
         schema,
         classification,
+        this.sharedSchemaTracker,
       );
-
-      // Find new links: targets in links that aren't already in sharedSchemaTracker
-      if (links !== null) {
-        for (const [targetDocKey, targetSchemas] of links) {
-          for (const targetSchema of targetSchemas) {
-            if (
-              !this.sharedSchemaTracker.hasValue(targetDocKey, targetSchema)
-            ) {
-              // New link discovered - add to pending and track it
-              pendingPairs.push({ docKey: targetDocKey, schema: targetSchema });
-              this.sharedSchemaTracker.add(targetDocKey, targetSchema);
-            }
-          }
-        }
-      }
+      // Note: evaluateDocumentLinks adds new links to sharedSchemaTracker.
+      // We don't need to explicitly add them to pendingPairs here because
+      // the early termination in loadFactsForDoc means we won't re-traverse
+      // already-tracked docs. The sharedSchemaTracker itself becomes the
+      // source of truth for what needs incremental updates on future commits.
     }
 
     return { newFacts };

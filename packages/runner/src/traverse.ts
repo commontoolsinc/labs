@@ -327,6 +327,20 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
         if (newDoc.value === undefined) {
           return null;
         }
+        // If following a pointer led to a different document that's already
+        // tracked, skip re-traversing it. Note: followPointer (called by
+        // getAtPath above) already added this doc to schemaTracker with
+        // DefaultSchemaSelector, so we just check if it was already there.
+        if (
+          schemaTracker !== undefined &&
+          doc.address.id !== newDoc.address.id
+        ) {
+          const newKey = this.manager.toKey(newDoc.address);
+          if (schemaTracker.has(newKey)) {
+            // Already tracked this doc - skip re-traverse
+            return null;
+          }
+        }
         return this.traverseDAG(newDoc, tracker, schemaTracker);
       } else {
         using t = tracker.include(doc.value, SchemaAll, doc);

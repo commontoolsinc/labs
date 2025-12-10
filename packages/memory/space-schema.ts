@@ -283,6 +283,7 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
   docAddress: { id: string; type: string },
   schema: SchemaPathSelector,
   classification?: string[],
+  existingSchemaTracker?: MapSet<string, SchemaPathSelector>,
 ): MapSet<string, SchemaPathSelector> | null {
   const providedClassifications = new Set<string>(classification);
   const manager = new ServerObjectManager(session, providedClassifications);
@@ -291,7 +292,9 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
     SchemaContext | undefined
   >();
   const cfc = new ContextualFlowControl();
-  const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
+  // Use existing tracker if provided - enables early termination for already-tracked docs
+  const schemaTracker = existingSchemaTracker ??
+    new MapSet<string, SchemaPathSelector>(deepEqual);
 
   // Load the document
   const address = {
