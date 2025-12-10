@@ -27,7 +27,13 @@ export {
   summarizeTransaction,
   type TransactionSummary,
 } from "./storage/transaction-summary.ts";
-export { convertCellsToLinks, isCell, isStream } from "./cell.ts";
+export {
+  CELL_MARKER,
+  convertCellsToLinks,
+  isCell,
+  isCellLike,
+  isStream,
+} from "./cell.ts";
 export {
   getCellOrThrow,
   isCellResult as isQueryResult,

@@ -1,11 +1,11 @@
-import type { Cell } from "@commontools/runner";
+import type { RemoteCell } from "@commontools/runner/worker";
 
 /**
  * State information for an active drag operation.
  */
 export interface DragState {
-  /** The Cell being dragged */
-  cell: Cell;
+  /** The RemoteCell being dragged */
+  cell: RemoteCell;
   /** Optional type identifier for filtering drop zones */
   type?: string;
   /** The source element that initiated the drag */

@@ -7,6 +7,7 @@ import {
   type IExtendedStorageTransaction,
   Runtime,
 } from "@commontools/runner";
+import { type RemoteCell } from "@commontools/runner/worker";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import * as assert from "./assert.ts";
 import { Identity } from "@commontools/identity";
@@ -167,7 +168,7 @@ describe("recipes with HTML", () => {
 
     const root = document.getElementById("root")!;
     const cell = result.key(UI);
-    render(root, cell, renderOptions);
+    render(root, cell as unknown as RemoteCell<VNode>, renderOptions);
     assert.equal(root.innerHTML, "<div><div>test</div></div>");
   });
 
@@ -277,7 +278,11 @@ describe("recipes with HTML", () => {
     await runtime.idle();
 
     const root = document.getElementById("root")!;
-    render(root, cell1.key("ui"), renderOptions);
+    render(
+      root,
+      cell1.key("ui") as unknown as RemoteCell<VNode>,
+      renderOptions,
+    );
 
     // Should detect the cycle and render placeholder, not infinite loop
     // MockDoc doesn't properly reflect textContent/title in innerHTML,

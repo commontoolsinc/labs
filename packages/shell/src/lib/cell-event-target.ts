@@ -1,4 +1,5 @@
-import { Cancel, Cell } from "@commontools/runner";
+import { Cancel } from "@commontools/runner";
+import { RemoteCell } from "@commontools/runner/worker";
 import { assert } from "@std/assert";
 
 export class CellUpdateEvent<T> extends CustomEvent<T> {
@@ -7,16 +8,20 @@ export class CellUpdateEvent<T> extends CustomEvent<T> {
   }
 }
 
-// Wraps a `Cell` as an `EventTarget`, firing `"update"`
+// Wraps a `RemoteCell` as an `EventTarget`, firing `"update"`
 // events when the cell's sink callback is fired.
 export class CellEventTarget<T> extends EventTarget {
-  #cell: Cell<T>;
+  #cell: RemoteCell<T>;
   #cancel?: Cancel;
   #subscribers = 0;
 
-  constructor(cell: Cell<T>) {
+  constructor(cell: RemoteCell<T>) {
     super();
     this.#cell = cell;
+  }
+
+  cell() {
+    return this.#cell;
   }
 
   #isEnabled(): boolean {

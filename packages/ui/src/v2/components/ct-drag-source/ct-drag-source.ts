@@ -8,7 +8,7 @@ import {
 } from "../../core/drag-state.ts";
 import { render } from "@commontools/html";
 import { UI } from "@commontools/runner";
-import type { Cell } from "@commontools/runner";
+import type { RemoteCell } from "@commontools/runner/worker";
 import "../ct-cell-context/ct-cell-context.ts";
 import "../ct-cell-link/ct-cell-link.ts";
 
@@ -20,17 +20,17 @@ import "../ct-cell-link/ct-cell-link.ts";
  *
  * @element ct-drag-source
  *
- * @property {Cell} cell - Required: the cell being dragged
+ * @property {RemoteCell} cell - Required: the cell being dragged
  * @property {string} type - Optional: type identifier for filtering drop zones
  * @property {boolean} disabled - Disable dragging
  *
- * @fires ct-drag-start - Fired when drag starts with { cell: Cell }
- * @fires ct-drag-end - Fired when drag ends with { cell: Cell, dropped: boolean }
+ * @fires ct-drag-start - Fired when drag starts with { cell: RemoteCell }
+ * @fires ct-drag-end - Fired when drag ends with { cell: RemoteCell, dropped: boolean }
  *
  * @slot - Default slot for draggable content
  *
  * @example
- * <ct-drag-source .cell=${myCell} type="item">
+ * <ct-drag-source .cell=${myRemoteCell} type="item">
  *   <div>Drag me!</div>
  * </ct-drag-source>
  */
@@ -59,7 +59,7 @@ export class CTDragSource extends BaseElement {
   ];
 
   @property({ attribute: false })
-  cell?: Cell;
+  cell?: RemoteCell;
 
   @property({ type: String })
   type?: string;

@@ -87,6 +87,13 @@ let mapFactory: NodeFactory<any, any> | undefined;
 const cellNodes = new WeakMap<OpaqueCell<unknown>, Set<NodeRef>>();
 
 /**
+ * Symbol used to identify cell-like objects for duck typing.
+ * Objects with this symbol set to true are treated as cells.
+ * Declared early so CellImpl can use it.
+ */
+export const CELL_MARKER = Symbol.for("common:cell");
+
+/**
  * Module augmentation for runtime-specific cell methods.
  * These augmentations add implementation details specific to the runner runtime.
  */
@@ -285,6 +292,9 @@ interface CauseContainer {
  * streams.
  */
 export class CellImpl<T> implements ICell<T>, IStreamable<T> {
+  // Mark CellImpl instances as cell-like for duck typing
+  readonly [CELL_MARKER] = true;
+
   private readOnlyReason: string | undefined;
 
   // Stream-specific fields
@@ -1463,6 +1473,31 @@ export function isAnyCell(value: any): value is AnyCell<any> {
  */
 export function isStream<T = any>(value: any): value is Stream<T> {
   return (value instanceof CellImpl && (value as any).isStream?.());
+}
+
+/**
+ * Duck-type check if a value behaves like a cell.
+ * This allows RemoteCell and other cell-like objects to be used with effect().
+ *
+ * A cell-like object must have:
+ * - Either the CELL_MARKER symbol set to true, OR
+ * - get(), sink(), and key() methods
+ *
+ * @param value - The value to check
+ * @returns True if the value implements the cell interface
+ */
+export function isCellLike(value: any): value is ICell<any> {
+  if (value == null) return false;
+
+  // Check for marker symbol (fast path for known cell types)
+  if (value[CELL_MARKER] === true) return true;
+
+  // Duck-type check for cell interface
+  return (
+    typeof value.get === "function" &&
+    typeof value.sink === "function" &&
+    typeof value.key === "function"
+  );
 }
 
 export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
