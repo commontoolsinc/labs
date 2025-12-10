@@ -46,7 +46,6 @@ state.items.mapWithPattern(
 
 ```bash
 deno task test              # Run all tests
-deno task test:closure      # Run closure transformation tests
 deno task check             # Type-check sources
 deno task fmt               # Format code
 deno task lint              # Lint code
