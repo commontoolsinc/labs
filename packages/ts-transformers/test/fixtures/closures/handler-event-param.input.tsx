@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, recipe, UI } from "commontools";
+import { Cell, pattern, UI } from "commontools";
 
 interface State {
   selectedValue: Cell<string>;
@@ -8,7 +8,7 @@ interface State {
 
 // Test typed event handler: ct-select has onct-change?: EventHandler<{ items: ...; value: ... }>
 // The handler receives { detail: { items: [...], value: ... } }
-export default recipe<State>("SelectTracker", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <ct-select
