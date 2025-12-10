@@ -348,8 +348,8 @@ class MemoryProviderSession<
               is: trackerResult,
             });
           }
-          const { selection, schemaTracker } = trackerResult.ok;
-          this.addSchemaSubscription(of, invocation, selection, schemaTracker);
+          const { selection } = trackerResult.ok;
+          this.addSchemaSubscription(of, invocation, selection);
           this.memory.subscribe(this);
 
           // Filter out any known results
@@ -552,20 +552,10 @@ class MemoryProviderSession<
     of: JobId,
     invocation: SchemaQuery<Space>,
     _result: Selection<Space>,
-    schemaTracker?: MapSet<string, SchemaPathSelector>,
   ) {
     // Check if this is a wildcard query (of: "_")
     // Wildcard queries can't benefit from incremental updates via schemaTracker
     const isWildcardQuery = this.isWildcardQuery(invocation);
-
-    // Merge incoming schemaTracker into the shared session-level tracker
-    if (schemaTracker) {
-      for (const [docKey, schemas] of schemaTracker) {
-        for (const schema of schemas) {
-          this.sharedSchemaTracker.add(docKey, schema);
-        }
-      }
-    }
 
     const subscription = new SchemaSubscription(
       invocation,
@@ -778,6 +768,7 @@ class MemoryProviderSession<
   ): { newFacts: Map<string, Revision<Fact>> } {
     const newFacts = new Map<string, Revision<Fact>>();
     // Note: classification is not used here since we're processing across all subscriptions
+    // TODO(ubik2,seefeld): Make this a per-session classification
     const classification = undefined;
 
     // Queue of (docKey, schema) pairs to process
