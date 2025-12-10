@@ -243,8 +243,13 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number",
-            asOpaque: true
+            anyOf: [{
+                    type: "number",
+                    "enum": [0]
+                }, {
+                    type: "number",
+                    asOpaque: true
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items,
                 selectedIndex: state.selectedIndex
