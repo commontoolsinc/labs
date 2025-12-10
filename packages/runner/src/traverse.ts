@@ -1103,7 +1103,10 @@ export function combineSchema(
     // this isn't great, but at least grab the flags from parent schema
     // Merge $defs from the two schema, with parent taking priority
     const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
-    return mergeSchemaFlags(parentSchema, { ...linkSchema, $defs: mergedDefs });
+    return mergeSchemaFlags(parentSchema, {
+      ...linkSchema,
+      ...(Object.keys(mergedDefs).length > 0 ? { $defs: mergedDefs } : {}),
+    });
   }
   return linkSchema;
 }

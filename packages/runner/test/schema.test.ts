@@ -424,13 +424,11 @@ describe("Schema Support", () => {
 
       await runtime.idle();
 
-      // We used to mark root as read, but we no longer do that.
-      // expect(rootValues).toEqual([
-      //   "root",
-      //   "cancelled",
-      //   "root",
-      // ]);
-      expect(rootValues).toEqual(["root"]);
+      expect(rootValues).toEqual([
+        "root",
+        "cancelled",
+        "root",
+      ]);
 
       // Change unrelated value should update root, but not the other cells
       root.withTx(tx).key("value").set("root - updated");
@@ -440,6 +438,8 @@ describe("Schema Support", () => {
       await runtime.idle();
 
       expect(rootValues).toEqual([
+        "root",
+        "cancelled",
         "root",
         "cancelled",
         "root - updated",
@@ -460,6 +460,8 @@ describe("Schema Support", () => {
       await runtime.idle();
 
       expect(rootValues).toEqualIgnoringSymbols([
+        "root",
+        "cancelled",
         "root",
         "cancelled",
         "root - updated",
@@ -514,6 +516,8 @@ describe("Schema Support", () => {
         "third - updated",
       ]);
       expect(rootValues).toEqualIgnoringSymbols([
+        "root",
+        "cancelled",
         "root",
         "cancelled",
         "root - updated",
