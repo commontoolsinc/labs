@@ -1793,6 +1793,9 @@ export function llmDialog(
     // cell as it's the only way to get to requestId, here we are passing it
     // around on the side.
 
+    // Removing flatted tool support for now, just used in UI and too expensive
+    // to recalucalte on every context change
+    /*
     // Update flattened tools whenever tools change
     const toolsCell = inputs.key("tools");
     // Ensure reactivity: register a read of tools with this tx
@@ -1806,25 +1809,7 @@ export function llmDialog(
     if (hasChanged) {
       result.withTx(tx).key("flattenedTools").set(flattened as any);
     }
-
-    // Update merged pinnedCells whenever context or internal pinnedCells change
-    const contextCells = inputs.key("context").withTx(tx).get() ?? {};
-    const toolPinnedCells = pinnedCells.withTx(tx).get() ?? [];
-
-    // Convert context cells to PinnedCell format
-    const contextAsPinnedCells: PinnedCell[] = Object.entries(contextCells).map(
-      ([name, cell]) => {
-        const link = cell.resolveAsCell().getAsNormalizedFullLink();
-        const path = createLLMFriendlyLink(link);
-        return { name, path };
-      },
-    );
-
-    // Merge context cells and tool-pinned cells
-    const mergedPinnedCells = [...contextAsPinnedCells, ...toolPinnedCells];
-
-    // Write to result cell
-    result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
+    */
 
     if (
       (!result.withTx(tx).key("pending").get() ||
@@ -1857,7 +1842,27 @@ function startRequest(
     Record<string, Schema<typeof LLMToolSchema>>
   >;
 
-  // No need to flatten here; UI handles flattened tools reactively
+  // Update merged pinnedCells in case context or internal pinnedCells changed
+  const contextCells = inputs.key("context").withTx(tx).get() ?? {};
+  const toolPinnedCells = pinnedCells.withTx(tx).get() ?? [];
+
+  const contextAsPinnedCells: PinnedCell[] = Object.entries(contextCells)
+    // Convert context cells to PinnedCell format
+    .map(
+      ([name, cell]) => {
+        const link = cell.resolveAsCell().getAsNormalizedFullLink();
+        const path = createLLMFriendlyLink(link);
+        return { name, path };
+      },
+    )
+    // Remove pinned cells that are already in the context
+    .filter(({ path }) => !toolPinnedCells.some((cell) => cell.path === path));
+
+  // Merge context cells and tool-pinned cells
+  const mergedPinnedCells = [...contextAsPinnedCells, ...toolPinnedCells];
+
+  // Write to result cell
+  pinnedCells.withTx(tx).set(mergedPinnedCells as any);
 
   const toolCatalog = buildToolCatalog(toolsCell);
 
