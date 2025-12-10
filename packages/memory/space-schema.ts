@@ -160,6 +160,7 @@ export interface SelectSchemaResult {
 export const selectSchema = <Space extends MemorySpace>(
   session: SpaceStoreSession<Space>,
   { selectSchema, since, classification }: SchemaQuery["args"],
+  existingSchemaTracker?: MapSet<string, SchemaPathSelector>,
 ): SelectSchemaResult => {
   const startTime = performance.timeOrigin + performance.now();
 
@@ -172,7 +173,9 @@ export const selectSchema = <Space extends MemorySpace>(
     SchemaContext | undefined
   >();
   const cfc = new ContextualFlowControl();
-  const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
+  // Use existing tracker if provided, otherwise create new one
+  const schemaTracker = existingSchemaTracker ??
+    new MapSet<string, SchemaPathSelector>(deepEqual);
 
   const includedFacts: FactSelection = {}; // we'll store all the raw facts we accesed here
   // First, collect all the potentially relevant facts (without dereferencing pointers)
