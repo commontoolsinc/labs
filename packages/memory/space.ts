@@ -56,6 +56,7 @@ import {
 import { SelectAllString } from "./schema.ts";
 import * as Error from "./error.ts";
 import { selectSchema, type SelectSchemaResult } from "./space-schema.ts";
+export type { SelectSchemaResult } from "./space-schema.ts";
 import { JSONValue } from "@commontools/runner";
 import { isObject } from "../utils/src/types.ts";
 export type * from "./interface.ts";
@@ -1084,6 +1085,7 @@ export const querySchema = <Space extends MemorySpace>(
 export const querySchemaWithTracker = <Space extends MemorySpace>(
   session: Session<Space>,
   command: SchemaQuery<Space>,
+  existingSchemaTracker?: SelectSchemaResult["schemaTracker"],
 ): Result<
   {
     selection: Selection<Space>;
@@ -1101,6 +1103,7 @@ export const querySchemaWithTracker = <Space extends MemorySpace>(
       const { facts, schemaTracker } = session.store.transaction(selectSchema)(
         session,
         command.args,
+        existingSchemaTracker,
       );
 
       const entities = Object.keys(facts || {}).length;

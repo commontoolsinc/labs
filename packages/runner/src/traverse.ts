@@ -289,7 +289,7 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
   protected traverseDAG(
     doc: IAttestation,
     tracker: PointerCycleTracker,
-    schemaTracker?: MapSet<string, SchemaPathSelector>,
+    schemaTracker: MapSet<string, SchemaPathSelector>,
   ): Immutable<JSONValue> | undefined {
     if (isPrimitive(doc.value)) {
       return doc.value;
@@ -315,6 +315,18 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isAnyCellLink(doc.value)) {
+        // Check if target doc is already tracked BEFORE calling getAtPath,
+        // since getAtPath/followPointer will add it to schemaTracker
+        let alreadyTracked = false;
+        const link = parseLink(doc.value);
+        if (link?.id !== undefined) {
+          const targetKey = `${link.id}/${link.type ?? "application/json"}`;
+          alreadyTracked = schemaTracker.hasValue(targetKey, {
+            path: link.path,
+            schemaContext: SchemaAll,
+          });
+        }
+
         const [newDoc, _] = getAtPath(
           this.manager,
           doc,
@@ -325,6 +337,11 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
           DefaultSchemaSelector,
         );
         if (newDoc.value === undefined) {
+          return null;
+        }
+        // If the target doc was already tracked before this traversal,
+        // skip re-traversing it (followPointer already loaded and tracked it)
+        if (alreadyTracked && doc.address.id !== newDoc.address.id) {
           return null;
         }
         return this.traverseDAG(newDoc, tracker, schemaTracker);
@@ -380,7 +397,7 @@ export function getAtPath<S extends BaseMemoryAddress>(
   path: readonly string[],
   tracker: PointerCycleTracker,
   cfc: ContextualFlowControl,
-  schemaTracker?: MapSet<string, SchemaPathSelector>,
+  schemaTracker: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
 ): [IAttestation, SchemaPathSelector | undefined] {
   let curDoc = doc;
@@ -467,7 +484,7 @@ function followPointer<S extends BaseMemoryAddress>(
   path: readonly string[],
   tracker: PointerCycleTracker,
   cfc: ContextualFlowControl,
-  schemaTracker?: MapSet<string, SchemaPathSelector>,
+  schemaTracker: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
 ): [IAttestation, SchemaPathSelector | undefined] {
   const link = parseLink(doc.value)!;
@@ -504,7 +521,7 @@ function followPointer<S extends BaseMemoryAddress>(
   if (link.id !== undefined) {
     // We have a reference to a different doc, so track the dependency
     // and update our targetDoc
-    if (schemaTracker !== undefined && selector !== undefined) {
+    if (selector !== undefined) {
       schemaTracker.add(manager.toKey(target), selector);
     }
     // Load the sources/recipes recursively unless we're a retracted fact.
@@ -550,7 +567,7 @@ export function loadSource<S extends BaseMemoryAddress>(
   manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
   valueEntry: IAttestation,
   cycleCheck: Set<string> = new Set<string>(),
-  schemaTracker?: MapSet<string, SchemaPathSelector>,
+  schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
   loadLinkedRecipe(manager, valueEntry, schemaTracker);
   if (!isObject(valueEntry.value)) {
@@ -593,7 +610,7 @@ export function loadSource<S extends BaseMemoryAddress>(
 function loadLinkedRecipe<S extends BaseMemoryAddress>(
   manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
   valueEntry: IAttestation,
-  schemaTracker?: MapSet<string, SchemaPathSelector>,
+  schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
   if (!isObject(valueEntry.value)) {
     return;
@@ -625,9 +642,7 @@ function loadLinkedRecipe<S extends BaseMemoryAddress>(
   if (entry === null || entry.value === undefined) {
     return;
   }
-  if (schemaTracker !== undefined) {
-    schemaTracker.add(manager.toKey(address), MinimalSchemaSelector);
-  }
+  schemaTracker.add(manager.toKey(address), MinimalSchemaSelector);
 }
 
 // docPath is where we found the pointer and are doing this work. It does not
