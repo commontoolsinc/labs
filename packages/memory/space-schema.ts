@@ -247,7 +247,8 @@ export const selectSchema = <Space extends MemorySpace>(
     ) {
       // Track all specifically-queried entities in schemaTracker so incremental
       // updates can detect changes to them, even if they don't have data yet
-      const docKey = `${factSelector.of}/${factSelector.the}`;
+      const docKey =
+        `${session.subject}/${factSelector.of}/${factSelector.the}`;
       if (!schemaTracker.has(docKey)) {
         schemaTracker.add(docKey, factSelector.value);
       }
@@ -272,14 +273,14 @@ export const selectSchema = <Space extends MemorySpace>(
  *
  * @param session - The space store session
  * @param docAddress - The document to evaluate (id and type)
- * @param schema - The schema to apply
+ * @param schemaSelector - The schema to apply
  * @param classification - Classification claims for access control
  * @returns A MapSet of target document addresses to their schemas, or null if doc not found
  */
 export function evaluateDocumentLinks<Space extends MemorySpace>(
   session: SpaceStoreSession<Space>,
   docAddress: { id: string; type: string },
-  schema: SchemaPathSelector,
+  schemaSelector: SchemaPathSelector,
   classification?: string[],
 ): MapSet<string, SchemaPathSelector> | null {
   const providedClassifications = new Set<string>(classification);
@@ -295,7 +296,6 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
   const address = {
     id: docAddress.id as Entity,
     type: docAddress.type as MIME,
-    path: [] as string[],
   };
   const fact = manager.load(address);
   if (fact === null || fact.value === undefined) {
@@ -309,8 +309,24 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
     since: 0,
   };
 
+  // These selectorEntry objects in SchemaQuery have their path relative
+  // to the value, but our traversal wants them to be relative to the
+  // fact.is, so adjust the paths.
+  const selector = {
+    ...schemaSelector,
+    path: ["value", ...schemaSelector.path],
+  };
+
   // Run the schema traversal to populate schemaTracker with links
-  loadFactsForDoc(manager, attestation, schema, tracker, cfc, schemaTracker);
+  loadFactsForDoc(
+    manager,
+    attestation,
+    selector,
+    tracker,
+    cfc,
+    session.subject,
+    schemaTracker,
+  );
 
   return schemaTracker;
 }
@@ -328,7 +344,7 @@ function loadFactsForDoc(
 ) {
   // Track all facts regardless of their value type
   // This ensures watchedObjects and schemaTracker stay in sync
-  const factKey = manager.toKey(fact.address);
+  const factKey = `${space}/${fact.address.id}/${fact.address.type}`;
   if (!schemaTracker.has(factKey)) {
     schemaTracker.add(factKey, selector);
   }
@@ -371,7 +387,8 @@ function loadFactsForDoc(
       // object in our manager, so load it directly.
       manager.load(fact.address);
       // Also track it in schemaTracker so incremental updates can find it
-      schemaTracker.add(manager.toKey(fact.address), selector);
+      const factKey = `${space}/${fact.address.id}/${fact.address.type}`;
+      schemaTracker.add(factKey, selector);
     }
     // Also load any source links and recipes
     const fullAddress = { ...fact.address, space: space };
