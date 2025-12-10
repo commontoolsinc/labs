@@ -1130,17 +1130,17 @@ export type HandlerFunction = {
 };
 
 /**
- * ActionFunction creates a handler that doesn't use the event parameter.
+ * ActionFunction creates a handler that doesn't use the state parameter.
  *
  * This is to handler as computed is to lift/derive:
- * - User writes: action(() => count.set(count.get() + 1))
- * - Transformer rewrites to: handler((_, { count }) => count.set(count.get() + 1))({ count })
+ * - User writes: action((e) => count.set(e.data))
+ * - Transformer rewrites to: handler((e, { count }) => count.set(e.data))({ count })
  *
  * The transformer extracts closures and makes them explicit, just like how
  * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
  */
 export type ActionFunction = {
-  <T>(fn: (props: T) => void): HandlerFactory<T, void>;
+  <T>(fn: (event: T) => void): HandlerFactory<T, void>;
 };
 
 /**

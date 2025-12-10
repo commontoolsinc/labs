@@ -191,7 +191,16 @@ export class ObjectFormatter implements TypeFormatter {
         );
         if (wrapperSchema) {
           // This is a factory that returns a wrapper type (Stream or Cell)
-          required.push(propName);
+          // Respect the same optional detection logic as regular properties
+          const hasOptionalFlag = (prop.flags & ts.SymbolFlags.Optional) !== 0;
+          const hasUndefinedUnion = isUnionWithUndefined(resolvedPropType);
+          const isDefaultWithUndefinedInner = isDefaultNodeWithUndefined(
+            propTypeNode,
+            checker,
+          );
+          const isOptional = hasOptionalFlag || hasUndefinedUnion ||
+            isDefaultWithUndefinedInner;
+          if (!isOptional) required.push(propName);
           properties[propName] = wrapperSchema;
         }
         continue;

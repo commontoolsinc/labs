@@ -228,25 +228,29 @@ export const computed: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>
   lift<any, T>(fn)(undefined);
 
 /**
- * action: Creates a handler that doesn't use the event parameter.
+ * action: Creates a handler that doesn't use the state parameter.
  *
  * This is to handler as computed is to lift/derive:
- * - User writes: action(() => count.set(count.get() + 1))
- * - Transformer rewrites to: handler((_, { count }) => count.set(count.get() + 1))({ count })
+ * - User writes: action((e) => count.set(e.data))
+ * - Transformer rewrites to: handler((e, { count }) => count.set(e.data))({ count })
  *
  * The transformer extracts closures and makes them explicit, just like how
  * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
  *
- * @param fn - A function that receives captured state and performs side effects
- * @returns A HandlerFactory that can be bound to state
+ * NOTE: This function should never be called directly at runtime because the
+ * CTS transformer rewrites action() calls to handler() calls. If this function
+ * is reached, it means CTS is not enabled.
+ *
+ * @param _event - A function that receives an event and performs side effects
+ * @throws Error if called directly (CTS must be enabled for action() to work)
  */
 export function action<T>(
-  fn: (props: T) => void,
+  _event: (event: T) => void,
 ): HandlerFactory<T, void>;
 export function action<T>(
-  fn: (props: T) => void,
+  _event: (event: T) => void,
 ): HandlerFactory<T, void> {
-  // Wrap the action callback to match handler's (event, props) signature
-  // The { proxy: true } option tells handler to accept schema-less callbacks
-  return handler<void, T>((_, props) => fn(props), { proxy: true });
+  throw new Error(
+    "action() must be used with CTS enabled - add /// <cts-enable /> to your file",
+  );
 }
