@@ -248,7 +248,8 @@ describe("runRecipe", () => {
     });
     await runtime.idle();
     expect(result.getAsQueryResult()).toEqual({ result: undefined });
-    expect(ran).toBe(true);
+    // We don't run the action if the arguments fail to validate
+    expect(ran).toBe(false);
   });
 
   it("should handle nested recipes", async () => {

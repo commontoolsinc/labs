@@ -1103,7 +1103,15 @@ export class Runner implements IRunner {
             ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
             : inputsCell.getAsQueryResult([], tx);
 
-          const result = fn(argument);
+          if (argument === undefined) {
+            logger.debug(
+              "action",
+              "action argument is undefined (potential schema mismatch) -- not running",
+              module.argumentSchema,
+              inputsCell.getRaw(),
+            );
+          }
+          const result = argument !== undefined ? fn(argument) : undefined;
 
           const postRun = (result: any) => {
             if (containsOpaqueRef(result) || frame.opaqueRefs.size > 0) {

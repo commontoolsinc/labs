@@ -1077,8 +1077,8 @@ export function combineSchema(
     return {
       type: "object",
       properties: mergedSchemaProperties,
-      ...parentRest,
       ...linkRest,
+      ...parentRest,
     };
   } else if (
     (isObject(linkSchema) && linkSchema.type === "array") &&
@@ -1101,7 +1101,9 @@ export function combineSchema(
     });
   } else if (isObject(linkSchema) && isObject(parentSchema)) {
     // this isn't great, but at least grab the flags from parent schema
-    return mergeSchemaFlags(parentSchema, linkSchema);
+    // Merge $defs from the two schema, with parent taking priority
+    const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
+    return mergeSchemaFlags(parentSchema, { ...linkSchema, $defs: mergedDefs });
   }
   return linkSchema;
 }
