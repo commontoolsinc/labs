@@ -113,7 +113,15 @@ export default pattern((state) => {
                 value: state.value
             } }, ({ state }) => state.value * 2)}
           <br />
-          Status: {__ctHelpers.ifElse(__ctHelpers.derive({
+          Status: {__ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["High", "Low"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {

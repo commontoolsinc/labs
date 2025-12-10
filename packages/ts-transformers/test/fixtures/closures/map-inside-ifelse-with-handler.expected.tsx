@@ -182,7 +182,263 @@ export default recipe({
     // The handler closure should work correctly with the map iterator variable
     return {
         [UI]: (<div>
-          {ifElse(hasItems, <div>
+          {ifElse({
+                type: "boolean",
+                asOpaque: true
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "object",
+                properties: {
+                    type: {
+                        type: "string"
+                    },
+                    name: {
+                        type: "string"
+                    },
+                    props: {
+                        $ref: "#/$defs/Props"
+                    },
+                    children: {
+                        $ref: "#/$defs/RenderNode"
+                    },
+                    $UI: {
+                        $ref: "#/$defs/VNode"
+                    }
+                },
+                required: ["type", "name", "props"],
+                $defs: {
+                    VNode: {
+                        type: "object",
+                        properties: {
+                            type: {
+                                type: "string"
+                            },
+                            name: {
+                                type: "string"
+                            },
+                            props: {
+                                $ref: "#/$defs/Props"
+                            },
+                            children: {
+                                $ref: "#/$defs/RenderNode"
+                            },
+                            $UI: {
+                                $ref: "#/$defs/VNode"
+                            }
+                        },
+                        required: ["type", "name", "props"]
+                    },
+                    RenderNode: {
+                        anyOf: [{
+                                type: "string"
+                            }, {
+                                type: "number"
+                            }, {
+                                type: "boolean"
+                            }, {
+                                $ref: "#/$defs/VNode"
+                            }, {
+                                type: "object",
+                                properties: {}
+                            }, {
+                                type: "array",
+                                items: {
+                                    $ref: "#/$defs/RenderNode"
+                                }
+                            }]
+                    },
+                    Props: {
+                        type: "object",
+                        properties: {},
+                        additionalProperties: {
+                            anyOf: [{
+                                    type: "string"
+                                }, {
+                                    type: "number"
+                                }, {
+                                    type: "boolean"
+                                }, {
+                                    type: "object",
+                                    additionalProperties: true
+                                }, {
+                                    type: "array",
+                                    items: true
+                                }, {}, {
+                                    type: "null"
+                                }]
+                        }
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "object",
+                properties: {
+                    type: {
+                        type: "string"
+                    },
+                    name: {
+                        type: "string"
+                    },
+                    props: {
+                        $ref: "#/$defs/Props"
+                    },
+                    children: {
+                        $ref: "#/$defs/RenderNode"
+                    },
+                    $UI: {
+                        $ref: "#/$defs/VNode"
+                    }
+                },
+                required: ["type", "name", "props"],
+                $defs: {
+                    VNode: {
+                        type: "object",
+                        properties: {
+                            type: {
+                                type: "string"
+                            },
+                            name: {
+                                type: "string"
+                            },
+                            props: {
+                                $ref: "#/$defs/Props"
+                            },
+                            children: {
+                                $ref: "#/$defs/RenderNode"
+                            },
+                            $UI: {
+                                $ref: "#/$defs/VNode"
+                            }
+                        },
+                        required: ["type", "name", "props"]
+                    },
+                    RenderNode: {
+                        anyOf: [{
+                                type: "string"
+                            }, {
+                                type: "number"
+                            }, {
+                                type: "boolean"
+                            }, {
+                                $ref: "#/$defs/VNode"
+                            }, {
+                                type: "object",
+                                properties: {}
+                            }, {
+                                type: "array",
+                                items: {
+                                    $ref: "#/$defs/RenderNode"
+                                }
+                            }]
+                    },
+                    Props: {
+                        type: "object",
+                        properties: {},
+                        additionalProperties: {
+                            anyOf: [{
+                                    type: "string"
+                                }, {
+                                    type: "number"
+                                }, {
+                                    type: "boolean"
+                                }, {
+                                    type: "object",
+                                    additionalProperties: true
+                                }, {
+                                    type: "array",
+                                    items: true
+                                }, {}, {
+                                    type: "null"
+                                }]
+                        }
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, {
+                $ref: "#/$defs/Element",
+                asOpaque: true,
+                $defs: {
+                    Element: {
+                        type: "object",
+                        properties: {
+                            type: {
+                                type: "string"
+                            },
+                            name: {
+                                type: "string"
+                            },
+                            props: {
+                                $ref: "#/$defs/Props"
+                            },
+                            children: {
+                                $ref: "#/$defs/RenderNode"
+                            },
+                            $UI: {
+                                $ref: "#/$defs/VNode"
+                            }
+                        },
+                        required: ["type", "name", "props"]
+                    },
+                    VNode: {
+                        type: "object",
+                        properties: {
+                            type: {
+                                type: "string"
+                            },
+                            name: {
+                                type: "string"
+                            },
+                            props: {
+                                $ref: "#/$defs/Props"
+                            },
+                            children: {
+                                $ref: "#/$defs/RenderNode"
+                            },
+                            $UI: {
+                                $ref: "#/$defs/VNode"
+                            }
+                        },
+                        required: ["type", "name", "props"]
+                    },
+                    RenderNode: {
+                        anyOf: [{
+                                type: "string"
+                            }, {
+                                type: "number"
+                            }, {
+                                type: "boolean"
+                            }, {
+                                $ref: "#/$defs/VNode"
+                            }, {
+                                type: "object",
+                                properties: {}
+                            }, {
+                                type: "array",
+                                items: {
+                                    $ref: "#/$defs/RenderNode"
+                                }
+                            }]
+                    },
+                    Props: {
+                        type: "object",
+                        properties: {},
+                        additionalProperties: {
+                            anyOf: [{
+                                    type: "string"
+                                }, {
+                                    type: "number"
+                                }, {
+                                    type: "boolean"
+                                }, {
+                                    type: "object",
+                                    additionalProperties: true
+                                }, {
+                                    type: "array",
+                                    items: true
+                                }, {}, {
+                                    type: "null"
+                                }]
+                        }
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, hasItems, <div>
               {items.mapWithPattern(__ctHelpers.recipe({
                     type: "object",
                     properties: {

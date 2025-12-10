@@ -2864,11 +2864,14 @@ interface CTListElement extends CTHTMLElement {}
 interface CTListItemElement extends CTHTMLElement {}
 interface CTLoaderElement extends CTHTMLElement {}
 interface CTInputElement extends CTHTMLElement {}
+interface CTTextAreaElement extends CTHTMLElement {}
 interface CTFileInputElement extends CTHTMLElement {}
 interface CTImageInputElement extends CTHTMLElement {}
 interface CTInputLegacyElement extends CTHTMLElement {}
 interface CTCheckboxElement extends CTHTMLElement {}
+interface CTAutocompleteElement extends CTHTMLElement {}
 interface CTSelectElement extends CTHTMLElement {}
+interface CTRadioGroupElement extends CTHTMLElement {}
 interface CTPickerElement extends CTHTMLElement {}
 interface CTToolsChipElement extends CTHTMLElement {}
 interface CTHeadingElement extends CTHTMLElement {}
@@ -3259,6 +3262,47 @@ interface CTInputAttributes<T> extends CTHTMLAttributes<T> {
   "onct-invalid"?: any;
 }
 
+interface CTTextAreaAttributes<T> extends CTHTMLAttributes<T> {
+  "$value"?: CellLike<string>;
+  "value"?: CellLike<string> | string;
+  "placeholder"?: string;
+  "disabled"?: boolean;
+  "readonly"?: boolean;
+  "error"?: boolean;
+  "name"?: string;
+  "required"?: boolean;
+  "autofocus"?: boolean;
+  "rows"?: number;
+  "cols"?: number;
+  "maxlength"?: string;
+  "minlength"?: string;
+  "wrap"?: string;
+  "spellcheck"?: boolean;
+  "autocomplete"?: string;
+  "resize"?: string;
+  "auto-resize"?: boolean;
+  "timing-strategy"?: "immediate" | "debounce" | "throttle" | "blur";
+  "timing-delay"?: number;
+  "onct-input"?: EventHandler<
+    { value: string; oldValue: string; name: string }
+  >;
+  "onct-change"?: EventHandler<
+    { value: string; oldValue: string; name: string }
+  >;
+  "onct-focus"?: EventHandler<{ value: string; name: string }>;
+  "onct-blur"?: EventHandler<{ value: string; name: string }>;
+  "onct-keydown"?: EventHandler<{
+    key: string;
+    value: string;
+    shiftKey: boolean;
+    ctrlKey: boolean;
+    metaKey: boolean;
+    altKey: boolean;
+    name: string;
+  }>;
+  "onct-submit"?: EventHandler<{ value: string; name: string }>;
+}
+
 interface CTInputLegacyAttributes<T> extends CTHTMLAttributes<T> {
   "value"?: CellLike<string>;
   "placeholder"?: string;
@@ -3328,12 +3372,47 @@ interface CTCheckboxAttributes<T> extends CTHTMLAttributes<T> {
   "onct-change"?: EventHandler<any>;
 }
 
+interface CTAutocompleteAttributes<T> extends CTHTMLAttributes<T> {
+  "$value"?: CellLike<string | string[]>;
+  "items": {
+    value: string;
+    label?: string;
+    group?: string;
+    searchAliases?: string[];
+  }[];
+  "placeholder"?: string;
+  "maxVisible"?: number;
+  "allowCustom"?: boolean;
+  "multiple"?: boolean;
+  "disabled"?: boolean;
+  "onct-change"?: EventHandler<
+    { value: string | string[]; oldValue: string | string[] }
+  >;
+  "onct-select"?: EventHandler<
+    { value: string; label: string; group?: string; isCustom: boolean }
+  >;
+  "onct-open"?: EventHandler<any>;
+  "onct-close"?: EventHandler<any>;
+}
+
 interface CTSelectAttributes<T> extends CTHTMLAttributes<T> {
   "$value": CellLike<any | any[]>;
   "items": { label: string; value: any }[];
   "multiple"?: boolean;
   "onct-change"?: EventHandler<
     { items: { label: string; value: any }[]; value: any | any[] }
+  >;
+}
+
+interface CTRadioGroupAttributes<T> extends CTHTMLAttributes<T> {
+  "$value"?: CellLike<any>;
+  "value"?: any;
+  "items"?: { label: string; value: any; disabled?: boolean }[];
+  "name"?: string;
+  "disabled"?: boolean;
+  "orientation"?: "vertical" | "horizontal";
+  "onct-change"?: EventHandler<
+    { items: { label: string; value: any }[]; value: any; oldValue: any }
   >;
 }
 
@@ -3868,6 +3947,10 @@ declare global {
         CTInputAttributes<CTInputElement>,
         CTInputElement
       >;
+      "ct-textarea": CTDOM.DetailedHTMLProps<
+        CTTextAreaAttributes<CTTextAreaElement>,
+        CTTextAreaElement
+      >;
       "ct-file-input": CTDOM.DetailedHTMLProps<
         CTFileInputAttributes<CTFileInputElement>,
         CTFileInputElement
@@ -3880,9 +3963,17 @@ declare global {
         CTCheckboxAttributes<CTCheckboxElement>,
         CTCheckboxElement
       >;
+      "ct-autocomplete": CTDOM.DetailedHTMLProps<
+        CTAutocompleteAttributes<CTAutocompleteElement>,
+        CTAutocompleteElement
+      >;
       "ct-select": CTDOM.DetailedHTMLProps<
         CTSelectAttributes<CTSelectElement>,
         CTSelectElement
+      >;
+      "ct-radio-group": CTDOM.DetailedHTMLProps<
+        CTRadioGroupAttributes<CTRadioGroupElement>,
+        CTRadioGroupElement
       >;
       "ct-picker": CTDOM.DetailedHTMLProps<
         CTPickerAttributes<CTPickerElement>,

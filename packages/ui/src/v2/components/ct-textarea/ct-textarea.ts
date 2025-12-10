@@ -9,14 +9,18 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
+import { type Cell } from "@commontools/runner";
+import { createStringCellController } from "../../core/cell-controller.ts";
+
+export type TimingStrategy = "immediate" | "debounce" | "throttle" | "blur";
 
 /**
- * CTTextarea - Multi-line text input with support for auto-resize and various states
+ * CTTextarea - Multi-line text input with support for auto-resize, various states, and reactive data binding
  *
  * @element ct-textarea
  *
  * @attr {string} placeholder - Placeholder text
- * @attr {string} value - Textarea value
+ * @attr {string|Cell<string>} value - Textarea value (supports both plain string and Cell<string>)
  * @attr {boolean} disabled - Whether the textarea is disabled
  * @attr {boolean} readonly - Whether the textarea is read-only
  * @attr {boolean} required - Whether the textarea is required
@@ -25,12 +29,26 @@ import {
  * @attr {number} cols - Number of visible text columns
  * @attr {number} maxlength - Maximum number of characters allowed
  * @attr {boolean} auto-resize - Whether the textarea automatically resizes to fit content
+ * @attr {string} timingStrategy - Input timing strategy: "immediate" | "debounce" | "throttle" | "blur"
+ * @attr {number} timingDelay - Delay in milliseconds for debounce/throttle (default: 300)
  *
- * @fires ct-input - Fired on input with detail: { value, name }
- * @fires ct-change - Fired on change with detail: { value, name }
+ * @fires ct-input - Fired on input with detail: { value, oldValue, name }
+ * @fires ct-change - Fired on change with detail: { value, oldValue, name }
+ * @fires ct-focus - Fired on focus with detail: { value, name }
+ * @fires ct-blur - Fired on blur with detail: { value, name }
+ * @fires ct-keydown - Fired on keydown with detail: { key, value, shiftKey, ctrlKey, metaKey, altKey, name }
+ * @fires ct-submit - Fired on Ctrl/Cmd+Enter with detail: { value, name }
  *
  * @example
  * <ct-textarea rows="4" placeholder="Enter message" auto-resize></ct-textarea>
+ *
+ * @example
+ * <!-- With Cell binding for two-way reactive updates -->
+ * <ct-textarea .value="${myCell}" placeholder="Type here..."></ct-textarea>
+ *
+ * @example
+ * <!-- Debounced input - waits 500ms after user stops typing -->
+ * <ct-textarea timingStrategy="debounce" timingDelay="500" placeholder="Search..."></ct-textarea>
  */
 
 export class CTTextarea extends BaseElement {
@@ -52,9 +70,11 @@ export class CTTextarea extends BaseElement {
     autocomplete: { type: String },
     resize: { type: String },
     autoResize: { type: Boolean, attribute: "auto-resize" },
+    timingStrategy: { type: String, attribute: "timing-strategy" },
+    timingDelay: { type: Number, attribute: "timing-delay" },
   };
   declare placeholder: string;
-  declare value: string;
+  declare value: Cell<string> | string;
   declare disabled: boolean;
   declare readonly: boolean;
   declare error: boolean;
@@ -70,6 +90,8 @@ export class CTTextarea extends BaseElement {
   declare autocomplete: string;
   declare resize: string;
   declare autoResize: boolean;
+  declare timingStrategy: TimingStrategy;
+  declare timingDelay: number;
 
   static override styles = css`
     :host {
@@ -257,8 +279,13 @@ export class CTTextarea extends BaseElement {
       declare theme?: CTTheme;
 
       // Cache + initial setup
-
       private _textarea: HTMLTextAreaElement | null = null;
+      private _cellController = createStringCellController(this, {
+        timing: {
+          strategy: "debounce",
+          delay: 300,
+        },
+      });
 
       constructor() {
         super();
@@ -279,6 +306,16 @@ export class CTTextarea extends BaseElement {
         this.autocomplete = "off";
         this.resize = "vertical";
         this.autoResize = false;
+        this.timingStrategy = "debounce";
+        this.timingDelay = 300;
+      }
+
+      private getValue(): string {
+        return this._cellController.getValue();
+      }
+
+      private setValue(newValue: string): void {
+        this._cellController.setValue(newValue);
       }
 
       get textarea(): HTMLTextAreaElement | null {
@@ -298,6 +335,15 @@ export class CTTextarea extends BaseElement {
           | HTMLTextAreaElement
           | null;
 
+        // Bind the initial value to the cell controller
+        this._cellController.bind(this.value);
+
+        // Update timing options to match current properties
+        this._cellController.updateTimingOptions({
+          strategy: this.timingStrategy,
+          delay: this.timingDelay,
+        });
+
         // Apply theme on mount
         applyThemeToElement(this, this.theme ?? defaultTheme);
 
@@ -316,6 +362,22 @@ export class CTTextarea extends BaseElement {
         changedProperties: Map<string | number | symbol, unknown>,
       ) {
         super.updated(changedProperties);
+
+        if (changedProperties.has("value")) {
+          // Bind the new value (Cell or plain) to the controller
+          this._cellController.bind(this.value);
+        }
+
+        // Update timing options if they changed
+        if (
+          changedProperties.has("timingStrategy") ||
+          changedProperties.has("timingDelay")
+        ) {
+          this._cellController.updateTimingOptions({
+            strategy: this.timingStrategy,
+            delay: this.timingDelay,
+          });
+        }
 
         if (changedProperties.has("theme")) {
           applyThemeToElement(this, this.theme ?? defaultTheme);
@@ -348,7 +410,7 @@ export class CTTextarea extends BaseElement {
             class="${this.error ? "error" : ""}"
             style="${resizeStyle}"
             placeholder="${ifDefined(this.placeholder || undefined)}"
-            .value="${this.value}"
+            .value="${this.getValue()}"
             ?disabled="${this.disabled}"
             ?readonly="${this.readonly}"
             ?required="${this.required}"
@@ -372,8 +434,8 @@ export class CTTextarea extends BaseElement {
 
       private _handleInput(event: Event) {
         const textarea = event.target as HTMLTextAreaElement;
-        const oldValue = this.value;
-        this.value = textarea.value;
+        const oldValue = this.getValue();
+        this.setValue(textarea.value);
 
         // Auto-resize if enabled
         if (this.autoResize) {
@@ -384,47 +446,54 @@ export class CTTextarea extends BaseElement {
         this.emit("ct-input", {
           value: textarea.value,
           oldValue,
+          name: this.name,
         });
       }
 
       private _handleChange(event: Event) {
         const textarea = event.target as HTMLTextAreaElement;
-        const oldValue = this.value;
-        this.value = textarea.value;
+        const oldValue = this.getValue();
 
         // Emit custom change event
         this.emit("ct-change", {
           value: textarea.value,
           oldValue,
+          name: this.name,
         });
       }
 
       private _handleFocus(_event: Event) {
+        this._cellController.onFocus();
         this.emit("ct-focus", {
-          value: this.value,
+          value: this.getValue(),
+          name: this.name,
         });
       }
 
       private _handleBlur(_event: Event) {
+        this._cellController.onBlur();
         this.emit("ct-blur", {
-          value: this.value,
+          value: this.getValue(),
+          name: this.name,
         });
       }
 
       private _handleKeyDown(event: KeyboardEvent) {
         this.emit("ct-keydown", {
           key: event.key,
-          value: this.value,
+          value: this.getValue(),
           shiftKey: event.shiftKey,
           ctrlKey: event.ctrlKey,
           metaKey: event.metaKey,
           altKey: event.altKey,
+          name: this.name,
         });
 
         // Special handling for Enter key with modifiers
         if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
           this.emit("ct-submit", {
-            value: this.value,
+            value: this.getValue(),
+            name: this.name,
           });
         }
       }

@@ -734,6 +734,7 @@ export class CommonToolsFormatter implements TypeFormatter {
   /**
    * Return a single schema or wrap multiple schemas in anyOf.
    * Handles empty array by returning true (any value is valid).
+   * Deduplicates identical schemas before wrapping.
    */
   private maybeWrapInAnyOf(schemas: SchemaDefinition[]): SchemaDefinition {
     if (schemas.length === 0) {
@@ -741,7 +742,21 @@ export class CommonToolsFormatter implements TypeFormatter {
     } else if (schemas.length === 1) {
       return schemas[0]!;
     } else {
-      return { anyOf: schemas };
+      // Deduplicate identical schemas
+      const seen = new Set<string>();
+      const unique: SchemaDefinition[] = [];
+      for (const schema of schemas) {
+        const key = JSON.stringify(schema);
+        if (!seen.has(key)) {
+          seen.add(key);
+          unique.push(schema);
+        }
+      }
+
+      if (unique.length === 1) {
+        return unique[0]!;
+      }
+      return { anyOf: unique };
     }
   }
 

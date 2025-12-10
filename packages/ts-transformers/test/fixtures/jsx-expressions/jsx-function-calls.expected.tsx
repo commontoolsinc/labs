@@ -380,7 +380,15 @@ export default recipe({
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 text: state.text
             } }, ({ state }) => state.text.replace("old", "new"))}</p>
-        <p>Includes: {__ctHelpers.ifElse(__ctHelpers.derive({
+        <p>Includes: {__ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Yes", "No"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -400,7 +408,15 @@ export default recipe({
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 text: state.text
             } }, ({ state }) => state.text.includes("test")), "Yes", "No")}</p>
-        <p>Starts with: {__ctHelpers.ifElse(__ctHelpers.derive({
+        <p>Starts with: {__ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Yes", "No"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {

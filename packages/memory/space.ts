@@ -6,8 +6,8 @@ import {
 } from "@db/sqlite";
 
 import { COMMIT_LOG_TYPE, create as createCommit } from "./commit.ts";
-import { unclaimed } from "./fact.ts";
-import { fromString, refer } from "./reference.ts";
+import { unclaimedRef } from "./fact.ts";
+import { fromString, intern, refer } from "./reference.ts";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
   Assert,
@@ -55,7 +55,7 @@ import {
 } from "./selection.ts";
 import { SelectAllString } from "./schema.ts";
 import * as Error from "./error.ts";
-import { selectSchema } from "./space-schema.ts";
+import { selectSchema, type SelectSchemaResult } from "./space-schema.ts";
 import { JSONValue } from "@commontools/runner";
 import { isObject } from "../utils/src/types.ts";
 export type * from "./interface.ts";
@@ -133,6 +133,22 @@ JOIN
   datum ON datum.this = fact.'is';
 
 COMMIT;
+`;
+
+// Pragmas applied to every database connection
+const PRAGMAS = `
+  PRAGMA journal_mode=WAL;
+  PRAGMA synchronous=NORMAL;
+  PRAGMA busy_timeout=5000;
+  PRAGMA cache_size=-64000;
+  PRAGMA temp_store=MEMORY;
+  PRAGMA mmap_size=268435456;
+  PRAGMA foreign_keys=ON;
+`;
+
+// Must be set before database has any content (new DBs only)
+const NEW_DB_PRAGMAS = `
+  PRAGMA page_size=32768;
 `;
 
 const IMPORT_DATUM =
@@ -411,6 +427,7 @@ export const connect = async <Subject extends MemorySpace>({
       database = await new Database(address ?? ":memory:", {
         create: false,
       });
+      database.exec(PRAGMAS);
       database.exec(PREPARE);
       const session = new Space(subject as Subject, database);
       return { ok: session };
@@ -446,6 +463,8 @@ export const open = async <Subject extends MemorySpace>({
       database = await new Database(address ?? ":memory:", {
         create: true,
       });
+      database.exec(NEW_DB_PRAGMAS);
+      database.exec(PRAGMAS);
       database.exec(PREPARE);
       const session = new Space(subject as Subject, database);
       return { ok: session };
@@ -505,7 +524,7 @@ const recall = <Space extends MemorySpace>(
       of,
       cause: row.cause
         ? (fromString(row.cause) as Reference<Assertion>)
-        : refer(unclaimed({ the, of })),
+        : unclaimedRef({ the, of }),
       since: row.since,
       fact: row.fact, // Include stored hash to avoid recomputing with refer()
     };
@@ -585,7 +604,7 @@ const getFact = <Space extends MemorySpace>(
     of: row.of as URI,
     cause: row.cause
       ? (fromString(row.cause) as Reference<Assertion>)
-      : refer(unclaimed(row as FactAddress)),
+      : unclaimedRef(row as FactAddress),
     since: row.since,
   };
   if (row.is) {
@@ -646,7 +665,7 @@ const toFact = function (row: StateRow): SelectedFact {
     of: row.of as URI,
     cause: row.cause
       ? row.cause as CauseString
-      : refer(unclaimed(row as FactAddress)).toString() as CauseString,
+      : unclaimedRef(row as FactAddress).toString() as CauseString,
     is: row.is ? JSON.parse(row.is) as JSONValue : undefined,
     since: row.since,
   };
@@ -760,26 +779,30 @@ const swap = <Space extends MemorySpace>(
     ? [source.retract, source.retract.cause]
     : [source.claim, source.claim.fact];
   const cause = expect.toString();
-  const base = refer(unclaimed({ the, of })).toString();
+  const base = unclaimedRef({ the, of }).toString();
   const expected = cause === base ? null : (expect as Reference<Fact>);
-
-  // IMPORTANT: Import datum BEFORE computing fact reference. The fact hash
-  // includes the datum as a sub-object, and merkle-reference caches sub-objects
-  // by identity during traversal. By hashing the datum first, we ensure the
-  // subsequent refer(assertion) call hits the cache for the payload (~2-4x faster).
-  let datumRef: string | undefined;
-  if (source.assert || source.retract) {
-    datumRef = importDatum(session, is);
-  }
 
   // Derive the merkle reference to the fact that memory will have after
   // successful update. If we have an assertion or retraction we derive fact
   // from it, but if it is a confirmation `cause` is the fact itself.
+  //
+  // IMPORTANT: Compute fact hash BEFORE importing datum. When refer() traverses
+  // the assertion/retraction, it computes and caches the hash of all sub-objects
+  // including the datum (payload). By hashing the fact first, the subsequent
+  // refer(datum) call in importDatum() becomes a ~300ns cache hit instead of a
+  // ~50-100µs full hash computation. This saves ~25% on refer() time.
   const fact = source.assert
     ? refer(source.assert).toString()
     : source.retract
     ? refer(source.retract).toString()
     : source.claim.fact.toString();
+
+  // Import datum AFTER computing fact reference - the datum hash is now cached
+  // from the fact traversal above, making this a fast cache hit.
+  let datumRef: string | undefined;
+  if (source.assert || source.retract) {
+    datumRef = importDatum(session, is);
+  }
 
   // If this is an assertion we need to insert fact referencing the datum.
   let imported = 0;
@@ -880,11 +903,22 @@ const commit = <Space extends MemorySpace>(
       (JSON.parse(row.is as string) as CommitData).since + 1,
       fromString(row.fact) as Reference<Assertion>,
     ]
-    : [0, refer(unclaimed({ the, of }))];
+    : [0, unclaimedRef({ the, of })];
 
-  const commit = createCommit({ space: of, since, transaction, cause });
+  // Intern the transaction first so that:
+  // 1. createCommit() will reuse this exact transaction object (via WeakSet fast path)
+  // 2. iterateTransaction() uses the same objects that are in commit.is.transaction
+  // 3. When swap() hashes payloads, those same objects are in commit.is.transaction
+  // 4. refer(commit) can cache-hit on all sub-objects
+  const internedTransaction = intern(transaction);
+  const commit = createCommit({
+    space: of,
+    since,
+    transaction: internedTransaction,
+    cause,
+  });
 
-  for (const fact of iterateTransaction(transaction)) {
+  for (const fact of iterateTransaction(internedTransaction)) {
     swap(session, fact, commit.is);
   }
 
@@ -1015,18 +1049,70 @@ export const querySchema = <Space extends MemorySpace>(
     }
 
     try {
-      const result = session.store.transaction(selectSchema)(
+      const { facts } = session.store.transaction(selectSchema)(
         session,
         command.args,
       );
 
-      const entities = Object.keys(result || {}).length;
+      const entities = Object.keys(facts || {}).length;
       span.setAttribute("querySchema.result_entity_count", entities);
 
       return {
         ok: {
-          [command.sub]: result,
+          [command.sub]: facts,
         } as Selection<Space>,
+      };
+    } catch (error) {
+      if ((error as Error)?.name === "AuthorizationError") {
+        return { error: error as AuthorizationError };
+      }
+      return {
+        error: Error.query(
+          command.sub,
+          command.args.selectSchema,
+          error as SqliteError,
+        ),
+      };
+    }
+  });
+};
+
+/**
+ * Internal variant of querySchema that also returns the schemaTracker.
+ * Used by provider.ts for incremental subscription updates.
+ */
+export const querySchemaWithTracker = <Space extends MemorySpace>(
+  session: Session<Space>,
+  command: SchemaQuery<Space>,
+): Result<
+  {
+    selection: Selection<Space>;
+    schemaTracker: SelectSchemaResult["schemaTracker"];
+  },
+  AuthorizationError | QueryError
+> => {
+  return traceSync("space.querySchemaWithTracker", (span) => {
+    addMemoryAttributes(span, {
+      operation: "querySchemaWithTracker",
+      space: session.subject,
+    });
+
+    try {
+      const { facts, schemaTracker } = session.store.transaction(selectSchema)(
+        session,
+        command.args,
+      );
+
+      const entities = Object.keys(facts || {}).length;
+      span.setAttribute("querySchema.result_entity_count", entities);
+
+      return {
+        ok: {
+          selection: {
+            [command.sub]: facts,
+          } as Selection<Space>,
+          schemaTracker,
+        },
       };
     } catch (error) {
       if ((error as Error)?.name === "AuthorizationError") {

@@ -243,7 +243,16 @@ export default recipe({
         <h3>Basic Property Access</h3>
         <h1>{state.user.name}</h1>
         <p>Age: {state.user.age}</p>
-        <p>Active: {__ctHelpers.ifElse(state.user.active, "Yes", "No")}</p>
+        <p>Active: {__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Yes", "No"]
+        } as const satisfies __ctHelpers.JSONSchema, state.user.active, "Yes", "No")}</p>
 
         <h3>Nested Property Access</h3>
         <p>Bio: {state.user.profile.bio}</p>
@@ -251,7 +260,16 @@ export default recipe({
         <p>Theme: {state.user.profile.settings.theme}</p>
         <p>
           Notifications:{" "}
-          {__ctHelpers.ifElse(state.user.profile.settings.notifications, "On", "Off")}
+          {__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["On", "Off"]
+        } as const satisfies __ctHelpers.JSONSchema, state.user.profile.settings.notifications, "On", "Off")}
         </p>
 
         <h3>Property Access with Operations</h3>
@@ -314,7 +332,15 @@ export default recipe({
             } }, ({ state }) => state.user.name.toUpperCase())}</p>
         <p>
           Location includes city:{" "}
-          {__ctHelpers.ifElse(__ctHelpers.derive({
+          {__ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Yes", "No"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -480,7 +506,16 @@ export default recipe({
           Styled text
         </p>
         <div style={{
-            backgroundColor: __ctHelpers.ifElse(state.config.features.darkMode, "#333", "#fff"),
+            backgroundColor: __ctHelpers.ifElse({
+                type: "boolean",
+                asOpaque: true
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __ctHelpers.JSONSchema, {
+                "enum": ["#333", "#fff"]
+            } as const satisfies __ctHelpers.JSONSchema, state.config.features.darkMode, "#333", "#fff"),
             borderColor: state.config.theme.secondaryColor,
         }}>
           Theme-aware box
@@ -566,7 +601,16 @@ export default recipe({
             } }, ({ state }) => state.config.theme.fontSize + 2)}px</p>
         <p>
           Has beta and dark mode:{" "}
-          {__ctHelpers.ifElse(__ctHelpers.derive({
+          {__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["Yes", "No"]
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -579,26 +623,12 @@ export default recipe({
                                     type: "object",
                                     properties: {
                                         beta: {
-                                            anyOf: [{
-                                                    type: "boolean",
-                                                    "enum": [false],
-                                                    asOpaque: true
-                                                }, {
-                                                    type: "boolean",
-                                                    "enum": [true],
-                                                    asOpaque: true
-                                                }]
+                                            type: "boolean",
+                                            asOpaque: true
                                         },
                                         darkMode: {
-                                            anyOf: [{
-                                                    type: "boolean",
-                                                    "enum": [false],
-                                                    asOpaque: true
-                                                }, {
-                                                    type: "boolean",
-                                                    "enum": [true],
-                                                    asOpaque: true
-                                                }]
+                                            type: "boolean",
+                                            asOpaque: true
                                         }
                                     },
                                     required: ["beta", "darkMode"]
@@ -612,15 +642,8 @@ export default recipe({
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "boolean",
-                    "enum": [false],
-                    asOpaque: true
-                }, {
-                    type: "boolean",
-                    "enum": [true],
-                    asOpaque: true
-                }]
+            type: "boolean",
+            asOpaque: true
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 config: {
                     features: {

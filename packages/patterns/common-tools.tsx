@@ -11,6 +11,7 @@ import {
   ifElse,
   navigateTo,
   recipe,
+  wish,
 } from "commontools";
 
 ///// COMMON TOOLS (get it?) ////
@@ -222,8 +223,13 @@ export const fetchAndRunPattern = recipe<FetchAndRunPatternInput>(
       fetchProgram({ url });
 
     // Use derive to safely handle when program is undefined/pending
+    // Filter out undefined elements to handle race condition where array proxy
+    // pre-allocates with undefined before populating elements
     const compileParams = derive(program, (p) => ({
-      files: p?.files ?? [],
+      files: (p?.files ?? []).filter(
+        (f): f is { name: string; contents: string } =>
+          f !== undefined && f !== null && typeof f.name === "string",
+      ),
       main: p?.main ?? "",
       input: args,
     }));
@@ -265,8 +271,12 @@ type ListPatternIndexInput = Record<string, never>;
 
 export const listPatternIndex = recipe<ListPatternIndexInput>(
   ({ _ }) => {
+    const patternIndexUrl = wish<{ url: string }>({ query: "#pattern-index" });
+
     const { pending, result } = fetchData({
-      url: "/api/patterns/index.md",
+      url: computed(() =>
+        patternIndexUrl.result.url ?? "/api/patterns/index.md"
+      ),
       mode: "text",
     });
     return ifElse(computed(() => pending || !result), undefined, { result });

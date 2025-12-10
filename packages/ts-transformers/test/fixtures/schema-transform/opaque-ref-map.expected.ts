@@ -49,15 +49,8 @@ export default recipe({
                         asOpaque: true
                     },
                     done: {
-                        anyOf: [{
-                                type: "boolean",
-                                "enum": [false],
-                                asOpaque: true
-                            }, {
-                                type: "boolean",
-                                "enum": [true],
-                                asOpaque: true
-                            }]
+                        type: "boolean",
+                        asOpaque: true
                     },
                     position: {
                         type: "number",
@@ -140,15 +133,8 @@ export default recipe({
                 asOpaque: true
             },
             done: {
-                anyOf: [{
-                        type: "boolean",
-                        "enum": [false],
-                        asOpaque: true
-                    }, {
-                        type: "boolean",
-                        "enum": [true],
-                        asOpaque: true
-                    }]
+                type: "boolean",
+                asOpaque: true
             },
             position: {
                 type: "number",

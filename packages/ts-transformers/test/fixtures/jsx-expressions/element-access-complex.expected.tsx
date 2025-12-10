@@ -656,7 +656,18 @@ export default recipe({
         {/* Element access in ternary */}
         <p>
           Conditional:{" "}
-          {__ctHelpers.ifElse(__ctHelpers.derive({
+          {__ctHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -716,7 +727,16 @@ export default recipe({
 
         {/* Element access in boolean expression */}
         <p>
-          Has value: {ifElse(__ctHelpers.derive({
+          Has value: {ifElse({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            "enum": ["positive", "non-positive"],
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {

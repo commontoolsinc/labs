@@ -27,9 +27,62 @@ interface FetchCacheEntry {
   state: FetchState;
 }
 
+// Full schema for cache structure to ensure proper validation when reading back
+// from storage. Without this, nested arrays may have undefined elements due to
+// incomplete schema-based transformation.
 const cacheSchema = {
   type: "object",
   default: {},
+  additionalProperties: {
+    type: "object",
+    properties: {
+      inputHash: { type: "string" },
+      state: {
+        anyOf: [
+          { type: "object", properties: { type: { const: "idle" } } },
+          {
+            type: "object",
+            properties: {
+              type: { const: "fetching" },
+              requestId: { type: "string" },
+              startTime: { type: "number" },
+            },
+          },
+          {
+            type: "object",
+            properties: {
+              type: { const: "success" },
+              data: {
+                type: "object",
+                properties: {
+                  files: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        name: { type: "string" },
+                        contents: { type: "string" },
+                      },
+                      required: ["name", "contents"],
+                    },
+                  },
+                  main: { type: "string" },
+                },
+                required: ["files", "main"],
+              },
+            },
+          },
+          {
+            type: "object",
+            properties: {
+              type: { const: "error" },
+              message: { type: "string" },
+            },
+          },
+        ],
+      },
+    },
+  },
 } as const satisfies JSONSchema;
 
 /**

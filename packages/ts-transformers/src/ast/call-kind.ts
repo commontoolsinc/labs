@@ -48,6 +48,7 @@ const BUILDER_SYMBOL_NAMES = new Set([
   "recipe",
   "pattern",
   "handler",
+  "action",
   "lift",
   "computed",
   "render",
@@ -78,6 +79,8 @@ const CELL_FOR_NAMES = new Set(["for"]);
 
 export type CallKind =
   | { kind: "ifElse"; symbol?: ts.Symbol }
+  | { kind: "when"; symbol?: ts.Symbol }
+  | { kind: "unless"; symbol?: ts.Symbol }
   | { kind: "builder"; symbol?: ts.Symbol; builderName: string }
   | { kind: "array-map"; symbol?: ts.Symbol }
   | { kind: "derive"; symbol?: ts.Symbol }
@@ -110,6 +113,12 @@ function resolveExpressionKind(
     }
     if (name === "ifElse") {
       return { kind: "ifElse" };
+    }
+    if (name === "when") {
+      return { kind: "when" };
+    }
+    if (name === "unless") {
+      return { kind: "unless" };
     }
     if (name === "cell") {
       return { kind: "cell-factory", factoryName: "cell" };
@@ -158,6 +167,12 @@ function resolveExpressionKind(
     }
     if (name === "ifElse") {
       return { kind: "ifElse" };
+    }
+    if (name === "when") {
+      return { kind: "when" };
+    }
+    if (name === "unless") {
+      return { kind: "unless" };
     }
     if (name === "wish") {
       return { kind: "wish" };
@@ -248,6 +263,14 @@ function resolveSymbolKind(
     return { kind: "ifElse", symbol: resolved };
   }
 
+  if (name === "when" && isCommonToolsSymbol(resolved)) {
+    return { kind: "when", symbol: resolved };
+  }
+
+  if (name === "unless" && isCommonToolsSymbol(resolved)) {
+    return { kind: "unless", symbol: resolved };
+  }
+
   if (name === "derive" && isCommonToolsSymbol(resolved)) {
     return { kind: "derive", symbol: resolved };
   }
@@ -271,6 +294,14 @@ function resolveSymbolKind(
   // Name-based fallback (see module documentation for rationale)
   if (name === "ifElse") {
     return { kind: "ifElse", symbol: resolved };
+  }
+
+  if (name === "when") {
+    return { kind: "when", symbol: resolved };
+  }
+
+  if (name === "unless") {
+    return { kind: "unless", symbol: resolved };
   }
 
   if (name === "derive") {

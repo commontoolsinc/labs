@@ -491,14 +491,26 @@ export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
  *
  * OpaqueRef<Cell<T>> unwraps to Cell<T>.
  */
-export type OpaqueRef<T> = T extends AnyBrandedCell<any> ? T
+export type OpaqueRef<T> = [T] extends [AnyBrandedCell<any>] ? T
   :
     & OpaqueCell<T>
-    & (T extends ArrayBuffer | ArrayBufferView | URL | Date ? T
-      : T extends Array<infer U> ? Array<OpaqueRef<U>>
-      : T extends AnyBrandedCell<any> ? T
-      : T extends object ? { [K in keyof T]: OpaqueRef<T[K]> }
-      : T);
+    & OpaqueRefInner<T>;
+
+// Helper type for OpaqueRef's inner property/array mapping
+// Handles nullable types by extracting the non-null part for mapping
+type OpaqueRefInner<T> = [T] extends
+  [ArrayBuffer | ArrayBufferView | URL | Date] ? T
+  : [T] extends [Array<infer U>] ? Array<OpaqueRef<U>>
+  : [T] extends [AnyBrandedCell<any>] ? T
+  : [T] extends [object] ? { [K in keyof T]: OpaqueRef<T[K]> }
+  // For nullable types (T | null | undefined), extract and map the non-null part
+  : [NonNullable<T>] extends [never] ? T
+  // Handle nullable branded cells (e.g., (OpaqueCell<X> & X) | undefined) - don't wrap
+  : [NonNullable<T>] extends [AnyBrandedCell<any>] ? T
+  : [NonNullable<T>] extends [Array<infer U>] ? Array<OpaqueRef<U>>
+  : [NonNullable<T>] extends [object]
+    ? { [K in keyof NonNullable<T>]: OpaqueRef<NonNullable<T>[K]> }
+  : T;
 
 // ============================================================================
 // CellLike and Opaque - Utility types for accepting cells
@@ -645,7 +657,7 @@ export type toJSON = {
 };
 
 export type Handler<T = any, R = any> = Module & {
-  with: (inputs: Opaque<StripCell<T>>) => OpaqueRef<R>;
+  with: (inputs: Opaque<StripCell<T>>) => Stream<R>;
 };
 
 export type NodeFactory<T, R> =
@@ -664,7 +676,7 @@ export type ModuleFactory<T, R> =
   & toJSON;
 
 export type HandlerFactory<T, R> =
-  & ((inputs: Opaque<StripCell<T>>) => OpaqueRef<R>)
+  & ((inputs: Opaque<StripCell<T>>) => Stream<R>)
   & Handler<T, R>
   & toJSON;
 
@@ -1130,6 +1142,20 @@ export type HandlerFunction = {
 };
 
 /**
+ * ActionFunction creates a handler that doesn't use the state parameter.
+ *
+ * This is to handler as computed is to lift/derive:
+ * - User writes: action((e) => count.set(e.data))
+ * - Transformer rewrites to: handler((e, { count }) => count.set(e.data))({ count })
+ *
+ * The transformer extracts closures and makes them explicit, just like how
+ * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
+ */
+export type ActionFunction = {
+  <T>(fn: (event: T) => void): HandlerFactory<T, void>;
+};
+
+/**
  * DeriveFunction creates a reactive computation that transforms input values.
  *
  * Special overload ordering is critical for correct type inference:
@@ -1203,7 +1229,7 @@ export type WhenFunction = <T = any, U = any>(
 
 export type UnlessFunction = <T = any, U = any>(
   condition: Opaque<T>,
-  value: Opaque<U>,
+  fallback: Opaque<U>,
 ) => OpaqueRef<T | U>;
 
 /** @deprecated Use generateText() or generateObject() instead */
@@ -1344,6 +1370,7 @@ export declare const recipe: RecipeFunction;
 export declare const patternTool: PatternToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
+export declare const action: ActionFunction;
 /** @deprecated Use compute() instead */
 export declare const derive: DeriveFunction;
 export declare const computed: ComputedFunction;
