@@ -11,6 +11,7 @@ import {
   ifElse,
   navigateTo,
   recipe,
+  wish,
 } from "commontools";
 
 ///// COMMON TOOLS (get it?) ////
@@ -270,8 +271,12 @@ type ListPatternIndexInput = Record<string, never>;
 
 export const listPatternIndex = recipe<ListPatternIndexInput>(
   ({ _ }) => {
+    const patternIndexUrl = wish<{ url: string }>({ query: "#pattern-index" });
+
     const { pending, result } = fetchData({
-      url: "/api/patterns/index.md",
+      url: computed(() =>
+        patternIndexUrl.result.url ?? "/api/patterns/index.md"
+      ),
       mode: "text",
     });
     return ifElse(computed(() => pending || !result), undefined, { result });
