@@ -153,10 +153,6 @@ class MemoryProvider<
 export class SchemaSubscription {
   constructor(
     public invocation: SchemaQuery,
-    // Track which docs were scanned with which schemas for incremental updates
-    public schemaTracker: MapSet<string, SchemaPathSelector> = new MapSet(
-      deepEqual,
-    ),
     // True if this is a wildcard query (of: "_") that can't use incremental updates
     public isWildcardQuery: boolean = false,
   ) {}
@@ -176,6 +172,10 @@ class MemoryProviderSession<
   schemaChannels: Map<JobId, SchemaSubscription> = new Map();
   // Mapping from fact key to since value of the last fact sent to the client
   lastRevision: Map<string, number> = new Map();
+  // Shared schema tracker for all subscriptions - tracks which docs were scanned with which schemas
+  sharedSchemaTracker: MapSet<string, SchemaPathSelector> = new MapSet(
+    deepEqual,
+  );
 
   constructor(
     public memory: MemorySession,
@@ -334,9 +334,12 @@ class MemoryProviderSession<
         // Use querySchemaWithTracker when subscribing to capture the schemaTracker
         // for incremental updates on subsequent commits
         if (invocation.args.subscribe) {
+          // Pass existing sharedSchemaTracker to enable early termination when
+          // traversing into docs that are already tracked by other subscriptions
           const trackerResult = await Memory.querySchemaWithTracker(
             this.memory as Memory.Memory,
             invocation,
+            this.sharedSchemaTracker,
           );
           if ("error" in trackerResult) {
             return this.perform({
@@ -555,9 +558,17 @@ class MemoryProviderSession<
     // Wildcard queries can't benefit from incremental updates via schemaTracker
     const isWildcardQuery = this.isWildcardQuery(invocation);
 
+    // Merge incoming schemaTracker into the shared session-level tracker
+    if (schemaTracker) {
+      for (const [docKey, schemas] of schemaTracker) {
+        for (const schema of schemas) {
+          this.sharedSchemaTracker.add(docKey, schema);
+        }
+      }
+    }
+
     const subscription = new SchemaSubscription(
       invocation,
-      schemaTracker ?? new MapSet(deepEqual),
       isWildcardQuery,
     );
     this.schemaChannels.set(of, subscription);
@@ -661,37 +672,58 @@ class MemoryProviderSession<
     }
     const spaceSession = mountResult.ok as unknown as SpaceSession<Space>;
 
+    // First, find affected docs using the shared schemaTracker (for non-wildcard)
+    const sharedAffectedDocs = this.findAffectedDocs(
+      changedDocs,
+      this.sharedSchemaTracker,
+    );
+
+    // Also collect affected docs from wildcard queries
+    const wildcardAffectedDocs: Array<
+      { docKey: string; schemas: Set<SchemaPathSelector> }
+    > = [];
     for (const [id, subscription] of this.schemaChannels) {
-      // Find affected docs - method depends on query type
-      const affectedDocs = subscription.isWildcardQuery
-        ? this.findAffectedDocsForWildcard(changedDocs, subscription.invocation)
-        : this.findAffectedDocs(changedDocs, subscription.schemaTracker);
-
-      // No affected docs means this subscription doesn't care about these changes
-      if (affectedDocs.length === 0) {
-        continue;
-      }
-
-      // Process affected docs incrementally
-      const result = this.processIncrementalUpdate(
-        spaceSession,
-        subscription,
-        affectedDocs,
-        space,
-      );
-
-      // Collect facts that are newer than what we've sent on this session
-      // Note: we don't update lastRevision here - that happens in filterKnownFacts
-      // when facts are actually sent to the client
-      for (const [_address, factVersion] of result.newFacts) {
-        const factKey = this.toKey(factVersion);
-        const previousSince = this.lastRevision.get(factKey);
-
-        if (previousSince === undefined || previousSince < factVersion.since) {
-          schemaMatches.set(factKey, factVersion);
-          lastId = id;
-          maxSince = Math.max(maxSince, factVersion.since);
+      if (subscription.isWildcardQuery) {
+        const docs = this.findAffectedDocsForWildcard(
+          changedDocs,
+          subscription.invocation,
+        );
+        for (const doc of docs) {
+          wildcardAffectedDocs.push(doc);
         }
+        if (docs.length > 0) {
+          lastId = id;
+        }
+      } else if (sharedAffectedDocs.length > 0) {
+        // Non-wildcard subscription cares about shared tracker changes
+        lastId = id;
+      }
+    }
+
+    // Combine all affected docs (deduplication happens in processIncrementalUpdate)
+    const allAffectedDocs = [...sharedAffectedDocs, ...wildcardAffectedDocs];
+
+    if (allAffectedDocs.length === 0) {
+      return [undefined, -1, []];
+    }
+
+    // Process all affected docs incrementally using the shared tracker
+    const result = this.processIncrementalUpdate(
+      spaceSession,
+      allAffectedDocs,
+      space,
+    );
+
+    // Collect facts that are newer than what we've sent on this session
+    // Note: we don't update lastRevision here - that happens in filterKnownFacts
+    // when facts are actually sent to the client
+    for (const [_address, factVersion] of result.newFacts) {
+      const factKey = this.toKey(factVersion);
+      const previousSince = this.lastRevision.get(factKey);
+
+      if (previousSince === undefined || previousSince < factVersion.since) {
+        schemaMatches.set(factKey, factVersion);
+        maxSince = Math.max(maxSince, factVersion.since);
       }
     }
 
@@ -735,17 +767,18 @@ class MemoryProviderSession<
   }
 
   /**
-   * Process incremental update for a subscription given affected docs.
+   * Process incremental update given affected docs.
    * Re-evaluates each affected doc with its schemas and follows new links.
+   * Uses the shared schemaTracker to track discovered links.
    */
   private processIncrementalUpdate<Space extends MemorySpace>(
     spaceSession: SpaceSession<Space>,
-    subscription: SchemaSubscription,
     affectedDocs: Array<{ docKey: string; schemas: Set<SchemaPathSelector> }>,
     space: Space,
   ): { newFacts: Map<string, Revision<Fact>> } {
     const newFacts = new Map<string, Revision<Fact>>();
-    const classification = subscription.invocation.args.classification;
+    // Note: classification is not used here since we're processing across all subscriptions
+    const classification = undefined;
 
     // Queue of (docKey, schema) pairs to process
     const pendingPairs: Array<{ docKey: string; schema: SchemaPathSelector }> =
@@ -827,16 +860,16 @@ class MemoryProviderSession<
         classification,
       );
 
-      // Find new links: targets in links that aren't already in subscription.schemaTracker
+      // Find new links: targets in links that aren't already in sharedSchemaTracker
       if (links !== null) {
         for (const [targetDocKey, targetSchemas] of links) {
           for (const targetSchema of targetSchemas) {
             if (
-              !subscription.schemaTracker.hasValue(targetDocKey, targetSchema)
+              !this.sharedSchemaTracker.hasValue(targetDocKey, targetSchema)
             ) {
               // New link discovered - add to pending and track it
               pendingPairs.push({ docKey: targetDocKey, schema: targetSchema });
-              subscription.schemaTracker.add(targetDocKey, targetSchema);
+              this.sharedSchemaTracker.add(targetDocKey, targetSchema);
             }
           }
         }
