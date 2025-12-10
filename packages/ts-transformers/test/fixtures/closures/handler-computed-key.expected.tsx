@@ -144,7 +144,7 @@ export default recipe({
                 }
             },
             required: ["recordMap"]
-        } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { recordMap }) => recordMap[nextKey()].set(counter))({
+        } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { recordMap }) => recordMap[nextKey()]!.set(counter))({
             recordMap: recordMap
         })}>
         Step

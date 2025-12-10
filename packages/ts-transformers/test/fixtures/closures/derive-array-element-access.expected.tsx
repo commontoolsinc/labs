@@ -25,7 +25,7 @@ export default function TestDerive() {
     } as const satisfies __ctHelpers.JSONSchema, {
         value,
         factors: factors
-    }, ({ value: v, factors }) => v.get() * factors[1]);
+    }, ({ value: v, factors }) => v.get() * factors[1]!);
     return result;
 }
 // @ts-ignore: Internals

@@ -15,7 +15,7 @@ export default recipe<State>("Records", (state) => {
   const recordMap = state.records;
   return {
     [UI]: (
-      <button type="button" onClick={() => recordMap[nextKey()].set(counter)}>
+      <button type="button" onClick={() => recordMap[nextKey()]!.set(counter)}>
         Step
       </button>
     ),

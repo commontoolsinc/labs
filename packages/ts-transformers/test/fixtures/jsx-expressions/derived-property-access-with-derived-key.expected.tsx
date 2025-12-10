@@ -344,7 +344,7 @@ export default recipe({
             if (!groups[assignment.aisle]) {
                 groups[assignment.aisle] = [];
             }
-            groups[assignment.aisle].push(assignment);
+            groups[assignment.aisle]!.push(assignment);
         }
         return groups;
     });
@@ -638,7 +638,7 @@ export default recipe({
             } as const satisfies __ctHelpers.JSONSchema, {
                 groupedByAisle: groupedByAisle,
                 aisleName: aisleName
-            }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName] ?? [])).mapWithPattern(__ctHelpers.recipe({
+            }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName]! ?? [])).mapWithPattern(__ctHelpers.recipe({
                 type: "object",
                 properties: {
                     element: {
