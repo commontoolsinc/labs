@@ -4,8 +4,10 @@ const PRODUCTION = !!Deno.env.get("PRODUCTION");
 const ENVIRONMENT = PRODUCTION ? "production" : "development";
 
 const config: Config = {
-  entry: "src/index.ts",
-  out: "scripts/index.js",
+  entries: [
+    { in: "src/index.ts", out: "scripts/index" },
+    { in: "src/worker.ts", out: "scripts/worker" },
+  ],
   outDir: "dist",
   hostname: "127.0.0.1",
   port: 5173,

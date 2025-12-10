@@ -32,3 +32,4 @@ if (ENVIRONMENT !== "production") {
 await app.initializeKeys();
 
 const _navigation = new Navigation(app);
+(globalThis as any).worker = new Worker("./scripts/worker.js");
