@@ -4,6 +4,7 @@ import {
   type Opaque,
   type OpaqueRef,
   type SchemaWithoutCell,
+  type Stream,
 } from "./types.ts";
 import { getTopFrame } from "./recipe.ts";
 import { createCell } from "../cell.ts";
@@ -83,6 +84,9 @@ export function opaqueRef<T>(
 
 export function stream<T>(
   schema?: JSONSchema,
-): OpaqueRef<T> {
-  return opaqueRefWithCell<T>(undefined, schema, "stream");
+): Stream<T> {
+  // The runtime creates a Stream cell, but opaqueRefWithCell is typed to return OpaqueRef
+  return opaqueRefWithCell<T>(undefined, schema, "stream") as unknown as Stream<
+    T
+  >;
 }
