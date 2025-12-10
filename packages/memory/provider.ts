@@ -153,15 +153,12 @@ class MemoryProvider<
 export class SchemaSubscription {
   constructor(
     public invocation: SchemaQuery,
-    public since: number = -1,
     // Track which docs were scanned with which schemas for incremental updates
     public schemaTracker: MapSet<string, SchemaPathSelector> = new MapSet(
       deepEqual,
     ),
     // True if this is a wildcard query (of: "_") that can't use incremental updates
     public isWildcardQuery: boolean = false,
-    // Track which docs have been sent to the client (by address format)
-    public sentDocs: Set<string> = new Set(),
   ) {}
 }
 
@@ -551,34 +548,21 @@ class MemoryProviderSession<
   private addSchemaSubscription<Space extends MemorySpace>(
     of: JobId,
     invocation: SchemaQuery<Space>,
-    result: Selection<Space>,
+    _result: Selection<Space>,
     schemaTracker?: MapSet<string, SchemaPathSelector>,
   ) {
-    const space = invocation.sub;
-    const factSelection = result[space];
-    const factVersions = [...FactModule.iterate(factSelection)];
-    const since = factVersions.reduce(
-      (acc, cur, _i) => cur.since > acc ? cur.since : acc,
-      -1,
-    );
-
     // Check if this is a wildcard query (of: "_")
     // Wildcard queries can't benefit from incremental updates via schemaTracker
     const isWildcardQuery = this.isWildcardQuery(invocation);
 
-    // Track which docs were sent in the initial query result
-    const sentDocs = new Set(
-      factVersions.map((fv) => this.formatAddress(space, fv)),
-    );
-
     const subscription = new SchemaSubscription(
       invocation,
-      since,
       schemaTracker ?? new MapSet(deepEqual),
       isWildcardQuery,
-      sentDocs,
     );
     this.schemaChannels.set(of, subscription);
+    // Note: lastRevision is updated by filterKnownFacts when excludeSent is used,
+    // and by getSchemaSubscriptionMatches for subsequent updates
   }
 
   /**
@@ -696,25 +680,18 @@ class MemoryProviderSession<
         space,
       );
 
-      // Collect facts that are either newer or haven't been sent yet
-      let hasNewFacts = false;
-      for (const [address, factVersion] of result.newFacts) {
-        const isNewer = factVersion.since > subscription.since;
-        const notSentYet = !subscription.sentDocs.has(address);
+      // Collect facts that are newer than what we've sent on this session
+      // Note: we don't update lastRevision here - that happens in filterKnownFacts
+      // when facts are actually sent to the client
+      for (const [_address, factVersion] of result.newFacts) {
+        const factKey = this.toKey(factVersion);
+        const previousSince = this.lastRevision.get(factKey);
 
-        if (isNewer || notSentYet) {
-          schemaMatches.set(address, factVersion);
-          subscription.sentDocs.add(address);
-          hasNewFacts = true;
-          if (isNewer) {
-            subscription.since = factVersion.since;
-          }
+        if (previousSince === undefined || previousSince < factVersion.since) {
+          schemaMatches.set(factKey, factVersion);
+          lastId = id;
+          maxSince = Math.max(maxSince, factVersion.since);
         }
-      }
-
-      if (hasNewFacts) {
-        lastId = id;
-        maxSince = Math.max(maxSince, subscription.since);
       }
     }
 
