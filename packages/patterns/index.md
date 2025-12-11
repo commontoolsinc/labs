@@ -32,7 +32,7 @@ A todo list with AI suggestions.
 ### Input Schema
 
 ```ts
-interface Input { }
+interface Input {}
 ```
 
 ### Result Schema
