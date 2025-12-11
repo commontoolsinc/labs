@@ -1,3 +1,5 @@
+<!-- @reviewed 2025-12-10 docs-rationalization -->
+
 Charms can be favorites and added to your [[HOME_SPACE]]. These charms can be accessed from _any_ space, via this list.
 
 # Accessing the Favorites list
@@ -5,11 +7,11 @@ Charms can be favorites and added to your [[HOME_SPACE]]. These charms can be ac
 You can `wish` for the favorites list itself (see `favorites-manager.tsx` for a full example):
 
 ```tsx
-type Favorite = { cell: Cell<{ [NAME]?: string }>; description: string };
-const wishResult = wish<Array<Favorite>>({ tag: "#favorites" });
+type Favorite = { cell: Cell<{ [NAME]?: string }>; tag: string };
+const wishResult = wish<Array<Favorite>>({ query: "#favorites" });
 ```
 
-The `description` field contains the serialized `resultSchema` of the charm pointed to by `cell`. This is useful, because the description can contain tags as hints to the `wish` system.
+The `tag` field contains the serialized `resultSchema` of the charm pointed to by `cell`. This is automatically populated when adding a favorite and is used for tag-based searching in the wish system.
 
 # Wishing for A Specific Charm
 
@@ -32,7 +34,7 @@ type Output = {
 Later, I wish for "#note" and discover the first matching item in the list.
 
 ```tsx
-const wishResult = wish<{ content: string }>({ tag: "#note" });
+const wishResult = wish<{ content: string }>({ query: "#note" });
 ```
 
 # Intended Usage

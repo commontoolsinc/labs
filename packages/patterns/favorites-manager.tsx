@@ -1,4 +1,10 @@
 /// <cts-enable />
+/**
+ * Favorites Manager pattern.
+ * Referenced in: docs/common/FAVORITES.md
+ *
+ * @reviewed 2025-12-10 docs-rationalization
+ */
 import { Cell, handler, NAME, pattern, UI, wish } from "commontools";
 
 type Favorite = { cell: Cell<{ [NAME]?: string }>; tag: string };

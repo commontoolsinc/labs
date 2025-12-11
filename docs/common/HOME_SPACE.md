@@ -1,3 +1,5 @@
+<!-- @reviewed 2025-12-10 docs-rationalization -->
+
 # Home Space and User Identity
 
 ## Overview
@@ -76,9 +78,9 @@ const runtime = new Runtime({
 ### ACL Initialization
 
 The home space requires special ACL handling since there's no separate space
-identity to delegate from. When `userIdentity.did() === space`, the system
-recognizes this as a home space and initializes ACLs using the user's identity
-directly.
+identity to delegate from. When `space === runtime.userIdentityDID`, the
+CharmManager detects this as a home space and uses `runtime.getHomeSpaceCell()`
+which applies the `homeSpaceCellSchema` for proper favorites support.
 
-See `packages/runner/src/storage/cache.ts` `requestACLInit()` for
-implementation.
+See `packages/charm/src/manager.ts` (home space detection) and
+`packages/runner/src/runtime.ts` `getHomeSpaceCell()` for implementation.

@@ -1,3 +1,5 @@
+<!-- @reviewed 2025-12-10 docs-rationalization -->
+
 # Testing Shadow DOM Components with Astral
 
 ## The Problem
@@ -43,12 +45,25 @@ strategy**.
    });
    ```
 
-3. **Ensure components are fully loaded**
+3. **Use ShellIntegration for setup**
    ```typescript
-   await page.goto(url);
-   await page.applyConsoleFormatter(); // Important for CommonTools shell
-   await shell.login(); // Ensures proper auth state
-   await sleep(500); // Wait for components to render
+   const shell = new ShellIntegration();
+   shell.bindLifecycle(); // Sets up beforeAll/afterAll hooks
+
+   // shell.goto() handles navigation, applyConsoleFormatter, and login
+   await shell.goto({
+     frontendUrl: FRONTEND_URL,
+     view: { spaceName: SPACE_NAME, charmId },
+     identity,
+   });
+
+   // Use waitFor() for reliable async assertions (not sleep!)
+   await waitFor(async () => {
+     const element = await page.waitForSelector("[data-ct-input]", {
+       strategy: "pierce"
+     });
+     return element !== null;
+   });
    ```
 
 ## Why This Works
@@ -76,25 +91,71 @@ const path = ["x-root", "#shadow-root", "ct-input", "#shadow-root", "input"];
 ## Example Test
 
 ```typescript
-it("should interact with shadow DOM components", async () => {
-  const { page } = shell.get();
+import { env, waitFor } from "@commontools/integration";
+import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
+import { Identity } from "@commontools/identity";
+import { CharmsController } from "@commontools/charm/ops";
 
-  // Setup
-  await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
-  await page.applyConsoleFormatter();
-  await shell.login();
-  await sleep(500); // Let components render
+const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
-  // Find and interact with elements using data attributes
-  const input = await page.$("[data-ct-input]", { strategy: "pierce" });
-  await input.type("Hello World");
+describe("shadow DOM component test", () => {
+  const shell = new ShellIntegration();
+  shell.bindLifecycle();
 
-  const button = await page.$("[data-ct-button]", { strategy: "pierce" });
-  await button.click();
+  let identity: Identity;
+  let cc: CharmsController;
+  let charmId: string;
 
-  // Verify results
-  const result = await page.$("#result", { strategy: "pierce" });
-  assert(result, "Should find result element");
+  beforeAll(async () => {
+    identity = await Identity.generate({ implementation: "noble" });
+    cc = await CharmsController.initialize({
+      spaceName: SPACE_NAME,
+      apiUrl: new URL(API_URL),
+      identity: identity,
+    });
+    const charm = await cc.create(yourPatternCode, { start: true });
+    charmId = charm.id;
+  });
+
+  afterAll(async () => {
+    if (cc) await cc.dispose();
+  });
+
+  it("should interact with shadow DOM components", async () => {
+    const page = shell.page();
+
+    // Setup: shell.goto() handles navigation, applyConsoleFormatter, and login
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: { spaceName: SPACE_NAME, charmId },
+      identity,
+    });
+
+    // Use waitFor() for reliable async assertions
+    await waitFor(async () => {
+      const input = await page.waitForSelector("[data-ct-input]", {
+        strategy: "pierce",
+      });
+      await input.type("Hello World");
+      return true;
+    });
+
+    // Click button
+    const button = await page.waitForSelector("[data-ct-button]", {
+      strategy: "pierce",
+    });
+    await button.click();
+
+    // Verify results with waitFor
+    await waitFor(async () => {
+      const result = await page.waitForSelector("#result", {
+        strategy: "pierce",
+      });
+      const text = await result.evaluate((el: HTMLElement) => el.textContent);
+      return text?.includes("Hello World");
+    });
+  });
 });
 ```
 

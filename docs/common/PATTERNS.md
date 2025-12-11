@@ -1,3 +1,5 @@
+<!-- @reviewed 2025-12-10 docs-rationalization -->
+
 # Common Patterns
 
 This guide demonstrates common patterns for building patterns, organized by complexity. Each pattern builds on concepts from previous sections.
@@ -487,7 +489,7 @@ const filteredItems = computed(() => {
 | Simple property access | Inline: `obj[prop]` |
 | Null coalescing | Inline: `(arr ?? [])` |
 | Used multiple times | Variable |
-| Complex transformation | Variable with `derive` or `lift` |
+| Complex transformation | Variable with `computed` or `lift` |
 
 ## Performance Tips
 
