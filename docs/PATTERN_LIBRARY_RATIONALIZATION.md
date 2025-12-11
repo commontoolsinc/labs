@@ -19,6 +19,12 @@ Rationalize the fragmented pattern library and documentation to enable Claude-dr
 - Standardized: `recipe`→`pattern`, `derive`→`computed`, `llm()`→`generateText()`/`generateObject()`
 - All docs tagged with `@reviewed 2025-12-10 docs-rationalization`
 
+### Documentation Tone Cleanup (2025-12-11)
+- Reviewed all docs/common/ files for excessive severity markers
+- Removed "⚠️ CRITICAL", excessive "IMPORTANT", "Critical:" markers
+- Softened "Rule:" statements to friendlier guidelines
+- Goal: ~1-2 critical items per doc max, everything else normal weight
+
 ### Pattern-Dev Skill
 - Fixed stale doc references (removed RECIPES.md, HANDLERS.md)
 - Updated to correct doc structure
@@ -41,13 +47,13 @@ Rationalize the fragmented pattern library and documentation to enable Claude-dr
 
 From `community-patterns/community-docs/blessed/`:
 
-| Topic | Target Doc | Priority |
-|-------|------------|----------|
-| Idempotent side effects in computed/lift | CELLS_AND_REACTIVITY.md | HIGH |
-| ifElse executes BOTH branches | PATTERNS.md | HIGH |
-| Cell.equals() vs manual IDs (don't use IDs) | CELLS_AND_REACTIVITY.md | MEDIUM |
-| Cross-charm Stream invocation via wish() | CHARM_LINKING.md | MEDIUM |
-| ct.render forces charm execution | CHARM_LINKING.md | MEDIUM |
+| Topic | Target Doc | Priority | Status |
+|-------|------------|----------|--------|
+| Idempotent side effects in computed/lift | CELLS_AND_REACTIVITY.md | HIGH | TODO |
+| ifElse executes BOTH branches | PATTERNS.md | HIGH | TODO |
+| Cell.equals() vs manual IDs (don't use IDs) | CELLS_AND_REACTIVITY.md | MEDIUM | **BLOCKED** - see alias bug below |
+| Cross-charm Stream invocation via wish() | CHARM_LINKING.md | MEDIUM | **DONE** (2025-12-11) |
+| ct.render forces charm execution | CHARM_LINKING.md | MEDIUM | **DONE** (2025-12-11) |
 
 ### Phase 2: Superstition Validation
 
@@ -128,7 +134,7 @@ Manual testing of claims from `community-patterns/community-docs/blessed/`:
 | "Never use await in handlers" | handlers.md | **VERIFIED** | await blocks UI; fetchData pattern keeps UI responsive. Test: `packages/patterns/blessed-verification/test-await-in-handler.tsx` |
 | "Idempotent side effects in computed" | reactivity.md | **VERIFIED** | Non-idempotent side effects cause thrashing (hit 101 iteration limit). Test: `packages/patterns/blessed-verification/test-idempotent-side-effects.tsx` |
 | "ifElse executes BOTH branches" | reactivity.md | **VERIFIED** | Both branch computeds run on every condition change, even the hidden one. Test: `packages/patterns/blessed-verification/test-ifelse-both-branches.tsx` |
-| "Cell.equals() vs manual IDs" | reactivity.md | **BLOCKED** | Runtime bug in mapWithPattern cell closure handling. Repro: `packages/patterns/repro-mapwithpattern-cell-closure.tsx` |
+| "Cell.equals() vs manual IDs" | reactivity.md | **BLOCKED** | (1) Closure bug in `.map()` callbacks still exists. (2) Workaround attempt uncovered **alias bug** - see below. Repros: `packages/patterns/repro-mapwithpattern-cell-closure.tsx`, `packages/patterns/blessed-verification/minimal-alias-bug.tsx` |
 | Cross-charm Stream via wish() | cross-charm.md | **VERIFIED WITH CORRECTIONS** | Streams ARE invocable via `.send({})` on the Cell. Blessed doc's "auto-unwrap" explanation is wrong - no unwrapping happens. See `docs/BLESSED_VERIFICATION_NOTES.md`. Test: `packages/patterns/blessed-verification/test-cross-charm-*.tsx` |
 | ct.render forces charm execution | cross-charm.md | **VERIFIED** | Wished charms only execute when rendered with `<ct-render $cell={...} />`. Test: `packages/patterns/blessed-verification/test-cross-charm-*.tsx` |
 
@@ -152,7 +158,28 @@ During testing of the idempotent side effects claim, we discovered a potential f
 
 ## Follow-up Investigations (Not Yet Undertaken)
 
-### 1. Inline Handler asOpaque Bug
+### 1. Array Element Alias Bug (NEW - 2025-12-11)
+
+**Issue:** When you call `cell.set(array.get()[index])`, the runtime sees a `toCell` symbol on the array element and creates a **bidirectional alias** instead of copying the data. Future `.set()` calls on that cell write through to the original array element, causing data corruption.
+
+**Repro:** `packages/patterns/blessed-verification/minimal-alias-bug.tsx`
+
+**Steps to reproduce:**
+1. Add 3 items to array (A, B, C)
+2. `selectedItem.set(items.get()[0])` - selects A, creates alias
+3. `selectedItem.set(items.get()[1])` - writes B's data INTO items[0]!
+4. Array is now [B, B, C] instead of [A, B, C]
+
+**Root cause hypothesis:** `validateAndTransform()` in schema.ts adds a `toCell` symbol to objects returned from `.get()`. When `.set()` sees this symbol via `isCellResultForDereferencing()`, it creates a link instead of copying. The link is bidirectional - subsequent writes go through it.
+
+**Impact:** This blocks the "Cell.equals() vs manual IDs" pattern - any attempt to set `selectedItem` to an array element causes corruption.
+
+**To investigate:**
+- Should `.set()` copy data instead of creating alias when value has `toCell` symbol?
+- Is there an explicit API for "copy" vs "alias" behavior?
+- Is this intentional behavior that needs documentation?
+
+### 2. Inline Handler asOpaque Bug
 
 **Issue:** Inline arrow functions used as onClick handlers that capture pattern inputs get `asOpaque: true` instead of `asCell: true` in the transformed schema. This prevents mutation of the captured value.
 
@@ -165,7 +192,7 @@ During testing of the idempotent side effects claim, we discovered a potential f
 
 **Workaround:** Use explicit `handler<unknown, { field: Cell<T> }>()` with typed state parameter.
 
-### 2. mapWithPattern Cell Closure Bug
+### 3. mapWithPattern Cell Closure Bug
 
 **Issue:** Cells captured from outer scope in `.map()` callbacks fail at runtime with "Cannot create cell link: space is required". The transformer correctly passes cells through params, but runtime doesn't hydrate them with space context.
 
@@ -175,7 +202,7 @@ During testing of the idempotent side effects claim, we discovered a potential f
 - Is this a runtime hydration issue or a transformer issue?
 - Should captured cells be handled differently than local cells in mapWithPattern?
 
-### 3. Rename "charm" to "pattern" in ct CLI
+### 4. Rename "charm" to "pattern" in ct CLI
 
 **Issue:** The ct CLI uses `ct charm` subcommands, but we've standardized on "pattern" terminology in docs. This creates confusion.
 

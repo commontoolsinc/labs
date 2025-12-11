@@ -61,7 +61,7 @@ OPERATOR_PASS="implicit trust" API_URL="http://localhost:8000" deno task start
 
 ### Restarting Servers
 
-**Critical: After making edits to runtime code, you MUST restart the shell server.**
+After making edits to runtime code, restart the shell server.
 
 ## Testing
 

@@ -11,7 +11,7 @@ CommonTools provides two functions for LLM integration:
 - **`generateText`** - Generate free-form text responses
 - **`generateObject`** - Generate structured data matching a TypeScript type
 
-**Important:** These functions can **only be called from within a pattern body**, not from handlers or `computed()` functions.
+These functions can only be called from within a pattern body, not from handlers or `computed()` functions.
 
 ## generateText - Free-form Text Generation
 
@@ -134,22 +134,22 @@ export default pattern<Input>(({ emails }) => {
 
 Use `generateObject` for structured data that matches a TypeScript type. **The system automatically infers the JSON schema from your TypeScript type parameter.**
 
-### ⚠️ CRITICAL: Schema Root Must Be Object Type
+### Schema Root Must Be Object Type
 
-**The schema root MUST be `type: "object"`, NOT `type: "array"`.** This is an OpenAI API requirement.
+The schema root must be an object, not an array (OpenAI API requirement).
 
 ```typescript
-// ❌ WRONG - Array at root will fail with HTTP 400
-generateObject<CalendarEntry[]>({...})  // Error: "schema must be 'type: object'"
+// ❌ Array at root fails
+generateObject<CalendarEntry[]>({...})  // HTTP 400 error
 
-// ✅ CORRECT - Wrap array in object property
+// ✅ Wrap array in object
 interface CalendarResponse {
   entries: CalendarEntry[];
 }
-generateObject<CalendarResponse>({...})  // Works!
+generateObject<CalendarResponse>({...})  // Works
 ```
 
-**Rule:** If you need an array, wrap it in an object with a property. Access with `result.entries`.
+If you need an array, wrap it in an object property and access with `result.entries`.
 
 ### Basic Usage with Type Inference
 
@@ -317,7 +317,7 @@ interface TodoItem {
   estimatedMinutes: number;
 }
 
-// ⚠️ Must wrap array in object
+// Wrap array in object
 interface TodoListResponse {
   todos: TodoItem[];
 }

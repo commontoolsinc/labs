@@ -129,7 +129,7 @@ const addItem = handler<
 });
 ```
 
-**Rule:** Never use `OpaqueRef<>` in handler signatures. Always use `Cell<T[]>`.
+Don't use `OpaqueRef<>` in handler signatures. Use `Cell<T[]>` instead.
 
 ### Cell<T[]> vs Cell<Array<Cell<T>>>
 
@@ -356,7 +356,7 @@ const addItem = handler((_, { items, itemTitle }) => {
 });
 ```
 
-**Rule:** Never access DOM directly. Use cells for all state management.
+Don't access DOM directly. Use cells for state management.
 
 ### Calling LLM Functions from Handlers
 
@@ -392,7 +392,7 @@ export default pattern(({ item }) => {
 });
 ```
 
-**Rule:** `generateText()` and `generateObject()` can only be called from pattern bodies, not handlers or `computed()`. See [LLM.md](LLM.md) for usage details.
+`generateText()` and `generateObject()` can only be called from pattern bodies, not handlers or `computed()`. See [LLM.md](LLM.md) for details.
 
 ### Using await in Handlers
 
@@ -439,7 +439,7 @@ export default pattern(({ searchQuery }) => {
 });
 ```
 
-**Rule:** Handlers should be synchronous state changes. Use `fetchData` for async operations. The framework will eventually disallow `await` in handlers.
+Handlers should be synchronous state changes. Use `fetchData` for async operations.
 
 ### Using if Statements in Data Transformations
 

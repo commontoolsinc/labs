@@ -311,3 +311,62 @@ deno task ct charm inspect --identity KEY --api-url URL --space SPACE CHARM_ID
 4. **UI Update**: Target pattern re-renders with new data automatically
 
 No polling. No manual refresh. Pure reactive data flow.
+
+---
+
+## Cross-Charm Communication via wish()
+
+For dynamic charm discovery (rather than explicit linking), use the `wish()` function to find charms by tag.
+
+### Prerequisites for wish()
+
+1. **Tags in JSDoc on Output type**: Tags like `#mytag` must appear in a JSDoc comment directly on the Output interface:
+
+```typescript
+/** A #note charm for storing text */
+interface Output {
+  content: string;
+  editContent: Stream<{ value: string }>;
+}
+```
+
+2. **Charm must be favorited**: `wish({ query: "#tag" })` searches the favorites list, not all charms in the space. The target charm must be favorited first.
+
+### Invoking Streams on Wished Charms
+
+When you wish for a charm that exposes a Stream, the stream arrives as a Cell wrapping a `{ $stream: true }` marker. To invoke it:
+
+```typescript
+const wishResult = wish<{ editContent: Stream<void> }>({ query: "#note" });
+
+// In a handler
+const invokeStream = handler<unknown, { stream: Stream<void> }>(
+  (_event, state) => {
+    const streamCell = state.stream as any;
+    const inner = streamCell.get();
+    if (inner && inner.$stream) {
+      streamCell.send({});  // Call .send() on the Cell itself
+    }
+  }
+);
+```
+
+**Event data requirements:**
+- Must be an object (runtime calls `event.preventDefault()`)
+- Can include data properties: `streamCell.send({ key: "value" })`
+- Cannot include functions (fails serialization)
+
+### Forcing Wished Charms to Execute
+
+Wished charms are referenced but not active until rendered. Use `<ct-render>` to force execution:
+
+```typescript
+const wishResult = wish<{ content: string }>({ query: "#note" });
+
+// This forces the wished charm to execute and respond to stream invocations
+{wishResult.result && <ct-render $cell={wishResult.result} />}
+```
+
+Without rendering, the charm won't respond to stream invocations.
+
+See `packages/patterns/blessed-verification/test-cross-charm-*.tsx` for working examples.
