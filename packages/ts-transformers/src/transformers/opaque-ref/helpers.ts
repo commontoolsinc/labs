@@ -247,11 +247,14 @@ export function createComputedCallForExpression(
 ): ts.Expression | undefined {
   if (plan.entries.length === 0) return undefined;
 
-  // Don't wrap expressions that are already derive or computed calls
+  // Don't wrap expressions that are already derive, computed, when, or unless calls
+  // These are already reactive and wrapping them would create unnecessary nesting
   if (ts.isCallExpression(expression)) {
     const callKind = detectCallKind(expression, context.checker);
     if (
       callKind?.kind === "derive" ||
+      callKind?.kind === "when" ||
+      callKind?.kind === "unless" ||
       (callKind?.kind === "builder" && callKind.builderName === "computed")
     ) {
       return undefined;

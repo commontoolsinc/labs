@@ -13,6 +13,20 @@ import {
 } from "../../../ast/mod.ts";
 import { isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 
+/**
+ * Check if an expression is JSX (element, fragment, or self-closing).
+ * Also handles parenthesized JSX like `(<div>...</div>)`.
+ */
+function isJsxExpression(expr: ts.Expression): boolean {
+  // Unwrap parentheses
+  while (ts.isParenthesizedExpression(expr)) {
+    expr = expr.expression;
+  }
+  return ts.isJsxElement(expr) ||
+    ts.isJsxFragment(expr) ||
+    ts.isJsxSelfClosingElement(expr);
+}
+
 export const emitBinaryExpression: Emitter = ({
   expression,
   dataFlows,
@@ -24,37 +38,58 @@ export const emitBinaryExpression: Emitter = ({
   if (dataFlows.all.length === 0) return undefined;
 
   // Optimize && operator: convert to when instead of wrapping entire expression in derive
-  // Example: foo.length > 0 && <div>...</div>
-  // Becomes: when(derive(foo, foo => foo.length > 0), <div>...</div>)
+  // Example: showPanel && <Panel/>
+  // Becomes: when(showPanel, <Panel/>) or when(derive(condition), <Panel/>)
+  //
+  // The when/unless optimization is beneficial when the right side (value) is expensive
+  // to construct, like JSX. This allows short-circuit evaluation to skip constructing
+  // the value when the condition is falsy.
+  //
+  // If the right side is simple (not JSX, no reactive deps), using when/unless is just
+  // overhead - better to wrap the whole expression in derive.
   if (expression.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
     const leftDataFlows = selectDataFlowsReferencedIn(
       dataFlows,
       expression.left,
     );
+    const rightDataFlows = selectDataFlowsReferencedIn(
+      dataFlows,
+      expression.right,
+    );
 
-    const shouldDeriveLeft = leftDataFlows.length > 0 &&
-      !isSimpleOpaqueRefAccess(expression.left, context.checker);
+    // Check if right side is "expensive" - JSX or has reactive dependencies that need derive
+    const rightIsJsx = isJsxExpression(expression.right);
+    const rightNeedsDerive = rightDataFlows.length > 0 &&
+      !isSimpleOpaqueRefAccess(expression.right, context.checker);
+    const rightIsExpensive = rightIsJsx || rightNeedsDerive;
 
-    // Only apply when optimization if left side has opaque refs (needs computed)
-    // Right side is handled by rewriteChildren which processes any opaque refs appropriately
-    if (shouldDeriveLeft) {
-      const plan = createBindingPlan(leftDataFlows);
-      const computedPredicate = createComputedCallForExpression(
-        expression.left,
-        plan,
-        context,
-      );
-      // If we couldn't create a computed call, fall back to original expression
-      const predicate = computedPredicate ?? expression.left;
+    // Only use when optimization if right side is expensive
+    if (rightIsExpensive) {
+      // Process left side - derive if it has reactive deps, otherwise pass as-is
+      let condition: ts.Expression = expression.left;
+      if (leftDataFlows.length > 0) {
+        if (!isSimpleOpaqueRefAccess(expression.left, context.checker)) {
+          const plan = createBindingPlan(leftDataFlows);
+          const computedCondition = createComputedCallForExpression(
+            expression.left,
+            plan,
+            context,
+          );
+          if (computedCondition) {
+            condition = computedCondition;
+          }
+        }
+        // If it's a simple opaque ref, pass it directly (no derive needed)
+      }
 
-      // Process right side - rewrite children but don't wrap whole thing in derive
+      // Process right side - rewrite children to handle nested opaque refs
       const value = rewriteChildren(expression.right) || expression.right;
 
-      // Create when(predicate, value)
-      // This is equivalent to: ifElse(predicate, value, predicate)
+      // Create when(condition, value)
+      // This is equivalent to: ifElse(condition, value, condition)
       // Preserves && semantics where falsy values are returned as-is
       const whenCall = createWhenCall({
-        condition: predicate,
+        condition,
         value,
         factory: context.factory,
         ctHelpers: context.ctHelpers,
@@ -76,30 +111,46 @@ export const emitBinaryExpression: Emitter = ({
   }
 
   // Optimize || operator: convert to unless instead of wrapping entire expression in derive
-  // Example: fallbackValue || <div>...</div>
-  // Becomes: unless(derive(fallbackValue, v => v), <div>...</div>)
+  // Example: value || <Fallback/>
+  // Becomes: unless(value, <Fallback/>) or unless(derive(condition), <Fallback/>)
+  //
+  // Same rationale as &&: only beneficial when right side is expensive.
   if (expression.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
     const leftDataFlows = selectDataFlowsReferencedIn(
       dataFlows,
       expression.left,
     );
+    const rightDataFlows = selectDataFlowsReferencedIn(
+      dataFlows,
+      expression.right,
+    );
 
-    const shouldDeriveLeft = leftDataFlows.length > 0 &&
-      !isSimpleOpaqueRefAccess(expression.left, context.checker);
+    // Check if right side is "expensive" - JSX or has reactive dependencies that need derive
+    const rightIsJsx = isJsxExpression(expression.right);
+    const rightNeedsDerive = rightDataFlows.length > 0 &&
+      !isSimpleOpaqueRefAccess(expression.right, context.checker);
+    const rightIsExpensive = rightIsJsx || rightNeedsDerive;
 
-    // Only apply unless optimization if left side has opaque refs (needs computed)
-    // Right side is handled by rewriteChildren which processes any opaque refs appropriately
-    if (shouldDeriveLeft) {
-      const plan = createBindingPlan(leftDataFlows);
-      const computedCondition = createComputedCallForExpression(
-        expression.left,
-        plan,
-        context,
-      );
-      // If we couldn't create a computed call, fall back to original expression
-      const condition = computedCondition ?? expression.left;
+    // Only use unless optimization if right side is expensive
+    if (rightIsExpensive) {
+      // Process left side - derive if it has reactive deps, otherwise pass as-is
+      let condition: ts.Expression = expression.left;
+      if (leftDataFlows.length > 0) {
+        if (!isSimpleOpaqueRefAccess(expression.left, context.checker)) {
+          const plan = createBindingPlan(leftDataFlows);
+          const computedCondition = createComputedCallForExpression(
+            expression.left,
+            plan,
+            context,
+          );
+          if (computedCondition) {
+            condition = computedCondition;
+          }
+        }
+        // If it's a simple opaque ref, pass it directly (no derive needed)
+      }
 
-      // Process right side - rewrite children but don't wrap whole thing in derive
+      // Process right side - rewrite children to handle nested opaque refs
       const value = rewriteChildren(expression.right) || expression.right;
 
       // Create unless(condition, value)
