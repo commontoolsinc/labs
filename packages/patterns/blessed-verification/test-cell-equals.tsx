@@ -49,7 +49,8 @@ interface TestCellEqualsInput {
 
 interface TestCellEqualsOutput extends TestCellEqualsInput {}
 
-// Handler to add a new item at the start of the list
+// Handler to add a new item at the END of the list
+// (Adding at end keeps indices stable for existing items)
 const addItem = handler<unknown, { items: Cell<Item[]> }>(
   (_, { items }) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -57,24 +58,31 @@ const addItem = handler<unknown, { items: Cell<Item[]> }>(
       title: `Item ${timestamp}`,
       description: `Created at ${timestamp}`,
     };
-    items.set([newItem, ...items.get()]);
+    items.push(newItem);
   },
 );
 
-// Handler to select an item (or deselect if already selected)
+// Handler to select an item by index (or deselect if already selected)
+// We use index because the workaround pre-computes items in a computed(),
+// which gives us plain values instead of cell references.
 const selectItem = handler<
   unknown,
-  { selectedItem: Cell<Item | null>; item: Cell<Item> }
+  { selectedItem: Cell<Item | null>; items: Cell<Item[]>; index: number }
 >(
-  (_, { selectedItem, item }) => {
+  (_, { selectedItem, items, index }) => {
     const current = selectedItem.get();
+    const targetItem = items.get()[index];
+    if (!targetItem) return;
+
     // Use Cell.equals() to check if this item is already selected
-    if (current && Cell.equals(current, item)) {
+    // This tests the core claim: Cell.equals() can identify items
+    // without needing manual IDs
+    if (current && Cell.equals(current, targetItem)) {
       // Deselect if clicking the same item
       selectedItem.set(null);
     } else {
       // Select the clicked item
-      selectedItem.set(item.get());
+      selectedItem.set(targetItem);
     }
   },
 );
@@ -105,6 +113,18 @@ export default pattern<TestCellEqualsInput, TestCellEqualsOutput>(
     const selectedTitle = computed(() => {
       const selected = selectedItem.get();
       return selected ? selected.title : "";
+    });
+
+    // WORKAROUND: Pre-compute selection state outside the map callback
+    // This avoids the "Cannot create cell link: space is required" bug
+    // that occurs when closing over cells inside .map() callbacks
+    const itemsWithSelection = computed(() => {
+      const selected = selectedItem.get();
+      return items.get().map((item, index) => ({
+        item,
+        index,
+        isSelected: selected !== null && Cell.equals(selected, item),
+      }));
     });
 
     return {
@@ -153,36 +173,30 @@ export default pattern<TestCellEqualsInput, TestCellEqualsOutput>(
             </div>,
           )}
 
-          {/* Items list */}
+          {/* Items list - using pre-computed selection state */}
           <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-            {items.map((item) => {
-              // Use Cell.equals() to determine if this item is selected
-              const selected = selectedItem.get();
-              const isSelected = selected !== null && Cell.equals(selected, item);
-
-              return (
-                <div
-                  onClick={selectItem({ selectedItem, item })}
-                  style={{
-                    padding: "0.75rem",
-                    background: isSelected ? "#c8e6c9" : "#f9f9f9",
-                    borderRadius: "4px",
-                    border: isSelected
-                      ? "2px solid #4caf50"
-                      : "1px solid #ddd",
-                    cursor: "pointer",
-                    transition: "all 0.2s",
-                  }}
-                >
-                  <div style={{ fontWeight: isSelected ? "bold" : "normal" }}>
-                    {item.title}
-                  </div>
-                  <div style={{ fontSize: "0.85rem", color: "#666" }}>
-                    {item.description}
-                  </div>
+            {itemsWithSelection.map((entry) => (
+              <div
+                onClick={selectItem({ selectedItem, items, index: entry.index })}
+                style={{
+                  padding: "0.75rem",
+                  background: entry.isSelected ? "#c8e6c9" : "#f9f9f9",
+                  borderRadius: "4px",
+                  border: entry.isSelected
+                    ? "2px solid #4caf50"
+                    : "1px solid #ddd",
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                }}
+              >
+                <div style={{ fontWeight: entry.isSelected ? "bold" : "normal" }}>
+                  {entry.item.title}
                 </div>
-              );
-            })}
+                <div style={{ fontSize: "0.85rem", color: "#666" }}>
+                  {entry.item.description}
+                </div>
+              </div>
+            ))}
           </div>
 
           {/* Show count */}

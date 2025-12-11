@@ -6,9 +6,9 @@ This guide demonstrates common patterns for building patterns, organized by comp
 
 ## Core Principles
 
-### ⚠️ CRITICAL: Never Directly Access Cell Data in Pattern Body
+### Don't Access Cell Data Directly in the Pattern Body
 
-**You cannot read or manipulate cell data directly in the pattern body.** Always use `computed()` for data transformations.
+Use `computed()` for data transformations. Direct iteration won't work:
 
 ```typescript
 // ❌ WRONG - Direct data access
@@ -643,7 +643,7 @@ These are the most frequent mistakes developers make when building patterns:
 </ct-hstack>
 ```
 
-**Rule:** HTML elements use object styles, custom elements use string styles. See "Styling: String vs Object Syntax" in `COMPONENTS.md` for details.
+HTML elements use object styles, custom elements use string styles. See `COMPONENTS.md` for details.
 
 #### 2. Using handler() Instead of Inline Handlers or Bidirectional Binding
 
@@ -712,7 +712,7 @@ const addItem = handler<
 >(/* ... */);
 ```
 
-**Rule:** Always use `Cell<T[]>` in handler parameters. The Cell wraps the entire array. You can make the elements cells as well, e.g. to access `.equals`, `.set`, `.update`, etc. directly
+Use `Cell<T[]>` in handler parameters. You can also use `Cell<Array<Cell<T>>>` when you need `.equals()` or other Cell methods on individual elements.
 
 ## Testing Patterns and Development Workflow
 
@@ -973,7 +973,7 @@ export default pattern(({ entries }) => {
 });
 ```
 
-**Rule:** NEVER directly read or iterate cell data in pattern body. Always use `computed()`.
+Wrap data transformations in `computed()`.
 
 ### Pitfall 2: Creating Cells Without Cell.of()
 
@@ -1001,7 +1001,7 @@ return {
 onClick={handler({ myData })}
 ```
 
-**Rule:** Use `Cell.of()` when creating NEW cells in pattern body or return values. Input cells are already cells.
+Use `Cell.of()` when creating new cells in the pattern body. Input parameters are already cells.
 
 ### Pitfall 3: Accessing Cells in Template Strings
 
@@ -1027,7 +1027,7 @@ const generateWithSeed = () => {
 };
 ```
 
-**Rule:** Can't close over cells in strings/functions. Use `computed()` or `.get()` in handlers.
+You can't close over cells in template strings. Use `computed()` or `.get()` in handlers.
 
 ### Pitfall 4: HTML Event Attribute Names
 
@@ -1047,7 +1047,7 @@ const generateWithSeed = () => {
 <div onMouseEnter={handler}>    // ✅ Works
 ```
 
-**Rule:** JSX uses camelCase for all event handlers (onClick, onChange, onInput, onMouseEnter, etc.)
+JSX uses camelCase for event handlers: `onClick`, `onChange`, `onInput`, etc.
 
 ### Pitfall 5: Plain Arrays in Return Values
 
@@ -1075,7 +1075,7 @@ export default pattern(({ inputData }) => {
 });
 ```
 
-**Rule:** Output values should be cells if you want them reactive and mutable.
+Output values should be cells if you want them mutable.
 
 ### Pitfall 6: Forgetting computed() for Filters/Sorts
 
@@ -1092,7 +1092,7 @@ const activeItems = computed(() => items.filter(item => !item.done));
 {activeItems.map(item => ...)}  // Updates reactively!
 ```
 
-**Rule:** Any data transformation (filter, sort, group, etc.) needs `computed()` outside JSX.
+Data transformations (filter, sort, group) need `computed()` outside JSX.
 
 ### Pitfall 7: Using Ternary for Conditional Rendering
 
@@ -1113,7 +1113,9 @@ const activeItems = computed(() => items.filter(item => !item.done));
 <span style={item.done ? { textDecoration: "line-through" } : {}}>  // ✅ This is fine
 ```
 
-**Rule:** Use `ifElse()` for conditional rendering, not ternaries.
+Use `ifElse()` for conditional rendering, not ternaries.
+
+**Note:** `ifElse()` evaluates both branches on every condition change (the scheduler is push-based). For expensive operations, gate them inside a `computed()` that checks the condition first.
 
 ### Quick Reference: Common Fixes
 

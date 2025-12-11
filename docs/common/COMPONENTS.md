@@ -389,7 +389,7 @@ const handleChange = handler<
 
 ## ct-select
 
-The `ct-select` component creates a dropdown selector. **Important:** It uses an `items` attribute with an array of `{ label, value }` objects, **not** HTML `<option>` elements.
+The `ct-select` component creates a dropdown selector. It uses an `items` attribute with an array of `{ label, value }` objects (not HTML `<option>` elements).
 
 ```tsx
 type CategoryInput = {
@@ -650,9 +650,9 @@ export default pattern(({ items }) => {
 });
 ```
 
-## Critical: Use $cell not charm
+## Use $cell, not charm
 
-This is the most common mistake when using ct-render:
+Common mistake when using ct-render:
 
 ```tsx
 // ❌ WRONG - Using charm attribute doesn't work
