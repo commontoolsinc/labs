@@ -26,7 +26,6 @@ Rationalize the fragmented pattern library and documentation to enable Claude-dr
 
 ### Handler Rules (from blessed docs)
 - Added to DEBUGGING.md:
-  - Define handlers outside pattern function (avoids closure bugs)
   - Never use await in handlers (use fetchData instead)
 
 ### Working Examples
@@ -93,3 +92,13 @@ for f in docs/common/*.md; do
   grep -q "@reviewed" "$f" || echo "$f"
 done
 ```
+
+---
+
+## Updates Needed in Blessed Docs
+
+These items in `community-patterns/community-docs/blessed/` were found to be outdated or incorrect:
+
+| File | Topic | Issue |
+|------|-------|-------|
+| `handlers.md` | "Define handlers outside pattern function" | **OUTDATED** - The closures transformer now handles this correctly. Tested and confirmed handlers inside patterns work fine. |

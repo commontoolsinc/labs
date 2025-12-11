@@ -419,50 +419,6 @@ export default pattern(({ item }) => {
 
 **Rule:** `generateText()` and `generateObject()` can only be called from pattern bodies, not handlers or `computed()`. See [LLM.md](LLM.md) for usage details.
 
-### Handler Defined Inside Pattern Function
-
-**Error:** Subtle reactivity bugs, stale values in handlers
-
-❌ **Problem:** Handlers defined inside the pattern can close over stale reactive values
-
-```typescript
-export const pattern = ({ items }) => {
-  const count = computed(() => items.get().length);
-
-  // ❌ DANGEROUS: Defined inside pattern, may capture stale `count`
-  const handleAdd = handler((_, { items }) => {
-    console.log("Count was:", count.get()); // May be stale!
-    items.push("new");
-  });
-
-  return <button onClick={handleAdd({ items })}>Add</button>;
-};
-```
-
-✅ **Solution:** Define handlers OUTSIDE the pattern function
-
-```typescript
-// ✅ CORRECT: Handler defined outside, cannot close over reactive values
-const handleAdd = handler<unknown, { items: Cell<string[]> }>(
-  (_, { items }) => {
-    items.push("new");
-  }
-);
-
-export default pattern(({ items }) => {
-  const count = computed(() => items.get().length);
-
-  return (
-    <div>
-      <span>Count: {count}</span>
-      <button onClick={handleAdd({ items })}>Add</button>
-    </div>
-  );
-});
-```
-
-**Rule:** Always define handlers outside the pattern function. They should only access what's explicitly passed via arguments.
-
 ### Using await in Handlers
 
 **Error:** UI freezes, blocked interactions
