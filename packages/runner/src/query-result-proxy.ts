@@ -6,7 +6,7 @@ import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type Cell, createCell } from "./cell.ts";
-import { type IRuntime } from "./runtime.ts";
+import { type Runtime } from "./runtime.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { toURI } from "./uri-utils.ts";
 
@@ -75,7 +75,7 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
 };
 
 export function createQueryResultProxy<T>(
-  runtime: IRuntime,
+  runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   depth: number = 0,
@@ -324,7 +324,7 @@ type ProxyForArrayValue = {
 const originalIndex = Symbol("original index");
 
 const createProxyForArrayValue = (
-  runtime: IRuntime,
+  runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,
   source: number,
   link: NormalizedFullLink,

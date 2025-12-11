@@ -2,7 +2,7 @@ import { type JSONSchema, type Recipe } from "../builder/types.ts";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type AddCancel } from "../cancel.ts";
-import type { IRuntime } from "../runtime.ts";
+import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
 /**
@@ -42,7 +42,7 @@ export function map(
   addCancel: AddCancel,
   cause: any,
   parentCell: Cell<any>,
-  runtime: IRuntime, // Runtime will be injected by the registration function
+  runtime: Runtime, // Runtime will be injected by the registration function
 ): Action {
   // Tracks up to where in the source array we've handled entries. Right now we
   // start at zero, even though in principle the result doc above could have

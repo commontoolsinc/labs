@@ -8,7 +8,7 @@ import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
-import { type IRuntime } from "./runtime.ts";
+import { type Runtime } from "./runtime.ts";
 import {
   createDataCellURI,
   type NormalizedFullLink,
@@ -107,7 +107,7 @@ export function resolveSchema(
  * For `required` objects and arrays assume {} and [] as default value.
  */
 export function processDefaultValue(
-  runtime: IRuntime,
+  runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   defaultValue: any,
@@ -306,7 +306,7 @@ function mergeDefaults(
 
 function annotateWithBackToCellSymbols(
   value: any,
-  runtime: IRuntime,
+  runtime: Runtime,
   link: NormalizedFullLink,
   tx: IExtendedStorageTransaction | undefined,
 ) {
@@ -326,7 +326,7 @@ function annotateWithBackToCellSymbols(
 }
 
 export function validateAndTransform(
-  runtime: IRuntime,
+  runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   synced: boolean = false,

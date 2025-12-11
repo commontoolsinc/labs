@@ -1,6 +1,6 @@
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
-import type { IRuntime } from "../runtime.ts";
+import type { Runtime } from "../runtime.ts";
 import { getRecipeEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Schema } from "../builder/types.ts";
@@ -32,7 +32,7 @@ export function fetchData(
   addCancel: (cancel: () => void) => void,
   cause: Cell<any>[],
   parentCell: Cell<any>,
-  runtime: IRuntime, // Runtime will be injected by the registration function
+  runtime: Runtime, // Runtime will be injected by the registration function
 ): Action {
   let cellsInitialized = false;
   let pending: Cell<boolean>;
@@ -251,7 +251,7 @@ export function fetchData(
 }
 
 async function startFetch(
-  runtime: IRuntime,
+  runtime: Runtime,
   inputsCell: Cell<{
     url: string;
     mode?: "text" | "json";

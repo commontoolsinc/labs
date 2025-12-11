@@ -155,20 +155,6 @@ export const homeSpaceCellSchema: JSONSchema = {
 } as JSONSchema;
 
 export interface IRuntime {
-  readonly id: string;
-  readonly scheduler: IScheduler;
-  readonly recipeManager: IRecipeManager;
-  readonly moduleRegistry: IModuleRegistry;
-  readonly harness: Engine;
-  readonly runner: IRunner;
-  readonly navigateCallback?: NavigateCallback;
-  readonly cfc: ContextualFlowControl;
-  readonly staticCache: StaticCache;
-  readonly storageManager: IStorageManager;
-  readonly telemetry: RuntimeTelemetry;
-  /** The user's identity DID, derived from storageManager.as.did() */
-  readonly userIdentityDID: DID;
-
   idle(): Promise<void>;
   dispose(): Promise<void>;
 
@@ -291,7 +277,7 @@ export interface IRuntime {
 }
 
 export interface IScheduler {
-  readonly runtime: IRuntime;
+  readonly runtime: Runtime;
   idle(): Promise<void>;
   subscribe(
     action: Action,
@@ -312,7 +298,7 @@ export interface IScheduler {
 }
 
 export interface IRecipeManager {
-  readonly runtime: IRuntime;
+  readonly runtime: Runtime;
   recipeById(id: string): any;
   registerRecipe(recipe: any, src?: string | RuntimeProgram): string;
   loadRecipe(
@@ -344,14 +330,14 @@ export interface IRecipeManager {
 }
 
 export interface IModuleRegistry {
-  readonly runtime: IRuntime;
+  readonly runtime: Runtime;
   addModuleByRef(ref: string, module: Module): void;
   getModule(ref: string): Module;
   clear(): void;
 }
 
 export interface IRunner {
-  readonly runtime: IRuntime;
+  readonly runtime: Runtime;
 
   setup<T, R>(
     tx: IExtendedStorageTransaction | undefined,

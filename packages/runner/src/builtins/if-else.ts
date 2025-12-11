@@ -1,6 +1,6 @@
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
-import { type IRuntime } from "../runtime.ts";
+import { type Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
 export function ifElse(
@@ -9,7 +9,7 @@ export function ifElse(
   _addCancel: (cancel: () => void) => void,
   cause: Cell<any>[],
   parentCell: Cell<any>,
-  runtime: IRuntime, // Runtime will be injected by the registration function
+  runtime: Runtime, // Runtime will be injected by the registration function
 ): Action {
   return (tx: IExtendedStorageTransaction) => {
     const result = runtime.getCell<any>(

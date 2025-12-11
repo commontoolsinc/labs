@@ -1,6 +1,6 @@
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
-import { type IRuntime } from "../runtime.ts";
+import { type Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
 export function navigateTo(
@@ -9,7 +9,7 @@ export function navigateTo(
   _addCancel: (cancel: () => void) => void,
   cause: Cell<any>[],
   parentCell: Cell<any>,
-  runtime: IRuntime,
+  runtime: Runtime,
 ): Action {
   let isInitialized = false;
   let navigated = false;

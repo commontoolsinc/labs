@@ -16,7 +16,7 @@ import {
 } from "./types.ts";
 import { getTopFrame } from "./recipe.ts";
 import { deepEqual } from "../path-utils.ts";
-import { IRuntime } from "../runtime.ts";
+import { Runtime } from "../runtime.ts";
 import { parseLink, sanitizeSchemaForLinks } from "../link-utils.ts";
 import {
   getCellOrThrow,
@@ -127,7 +127,7 @@ export function toJSONWithLegacyAliases(
 export function createJsonSchema(
   example: any,
   addDefaults = false,
-  runtime?: IRuntime,
+  runtime?: Runtime,
 ): JSONSchemaMutable {
   const seen = new Map<string, JSONSchemaMutable>();
 

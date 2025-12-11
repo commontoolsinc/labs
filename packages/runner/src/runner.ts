@@ -46,7 +46,7 @@ import { deepEqual } from "./path-utils.ts";
 import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { LINK_V1_TAG, SigilLink } from "./sigil-types.ts";
-import type { IRunner, IRuntime } from "./runtime.ts";
+import type { IRunner, Runtime } from "./runtime.ts";
 import type {
   IExtendedStorageTransaction,
   IStorageSubscription,
@@ -68,7 +68,7 @@ export class Runner implements IRunner {
   // recipes as strings
   private resultRecipeCache = new Map<`${MemorySpace}/${URI}`, string>();
 
-  constructor(readonly runtime: IRuntime) {
+  constructor(readonly runtime: Runtime) {
     this.runtime.storageManager.subscribe(this.createStorageSubscription());
   }
 

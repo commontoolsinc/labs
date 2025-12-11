@@ -12,8 +12,8 @@ import type {
   ConsoleHandler,
   ErrorHandler,
   ErrorWithContext,
-  IRuntime,
   IScheduler,
+  Runtime,
 } from "./runtime.ts";
 import {
   areNormalizedLinksSame,
@@ -121,7 +121,7 @@ export class Scheduler implements IScheduler {
   }
 
   constructor(
-    readonly runtime: IRuntime,
+    readonly runtime: Runtime,
     consoleHandler?: ConsoleHandler,
     errorHandlers?: ErrorHandler[],
   ) {
