@@ -780,6 +780,10 @@ class MemoryProviderSession<
       for (const schema of schemas) {
         pendingPairs.push({ docKey, schema });
       }
+      // Remove these docs from our cached schemaTracker results, so we will
+      // re-evaluate them. We've run them before, but we may get different
+      // results when we run them with the new data, so re-run them.
+      this.sharedSchemaTracker.delete(docKey);
     }
 
     // Process pending pairs - may grow as we discover new links
