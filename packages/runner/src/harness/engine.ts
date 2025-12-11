@@ -18,7 +18,7 @@ import {
 import { UnsafeEvalIsolate, UnsafeEvalRuntime } from "./eval-runtime.ts";
 import { CommonToolsTransformerPipeline } from "@commontools/ts-transformers";
 import * as RuntimeModules from "./runtime-modules.ts";
-import { IRuntime } from "../runtime.ts";
+import { Runtime } from "../runtime.ts";
 import * as merkleReference from "merkle-reference";
 import { StaticCache } from "@commontools/static";
 import { pretransformProgram } from "./pretransform.ts";
@@ -88,9 +88,9 @@ interface Internals {
 
 export class Engine extends EventTarget implements Harness {
   private internals: Internals | undefined;
-  private ctRuntime: IRuntime;
+  private ctRuntime: Runtime;
 
-  constructor(ctRuntime: IRuntime) {
+  constructor(ctRuntime: Runtime) {
     super();
     this.ctRuntime = ctRuntime;
     // We install our console shim globally so that it can be referenced

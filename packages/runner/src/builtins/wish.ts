@@ -8,7 +8,7 @@ import { h } from "@commontools/html";
 import { HttpProgramResolver } from "@commontools/js-compiler";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
-import type { IRuntime } from "../runtime.ts";
+import type { Runtime } from "../runtime.ts";
 import type {
   IExtendedStorageTransaction,
   MemorySpace,
@@ -55,7 +55,7 @@ const WISH_TARGETS: Partial<Record<WishTag, WishResolution>> = {
 
 function resolveWishTarget(
   resolution: WishResolution,
-  runtime: IRuntime,
+  runtime: Runtime,
   space: MemorySpace,
   tx: IExtendedStorageTransaction,
 ): Cell<any> {
@@ -103,7 +103,7 @@ function parseWishTarget(target: string): ParsedWishTarget {
 }
 
 type WishContext = {
-  runtime: IRuntime;
+  runtime: Runtime;
   tx: IExtendedStorageTransaction;
   parentCell: Cell<any>;
   spaceCell?: Cell<unknown>;
@@ -268,7 +268,7 @@ let wishPatternFetchPromise: Promise<Recipe | undefined> | undefined;
 let wishPattern: Recipe | undefined;
 
 async function fetchWishPattern(
-  runtime: IRuntime,
+  runtime: Runtime,
 ): Promise<Recipe | undefined> {
   try {
     const program = await runtime.harness.resolve(
@@ -294,7 +294,7 @@ let suggestionPatternFetchPromise: Promise<Recipe | undefined> | undefined;
 let suggestionPattern: Recipe | undefined;
 
 async function fetchSuggestionPattern(
-  runtime: IRuntime,
+  runtime: Runtime,
 ): Promise<Recipe | undefined> {
   try {
     const program = await runtime.harness.resolve(
@@ -346,7 +346,7 @@ export function wish(
   addCancel: (cancel: () => void) => void,
   cause: Cell<any>[],
   parentCell: Cell<any>,
-  runtime: IRuntime,
+  runtime: Runtime,
 ): Action {
   // Per-instance wish pattern loading.
   let wishPatternInput: WishParams | undefined;

@@ -2,7 +2,7 @@ import { getLogger } from "@commontools/utils/logger";
 import { TYPE } from "./builder/types.ts";
 import type { Cell } from "./cell.ts";
 import { type NormalizedFullLink, parseLink } from "./link-utils.ts";
-import type { IRuntime } from "./runtime.ts";
+import type { Runtime } from "./runtime.ts";
 
 const logger = getLogger("ensure-charm-running", {
   enabled: false,
@@ -32,7 +32,7 @@ const logger = getLogger("ensure-charm-running", {
  * @returns Promise<boolean> - true if a charm was started, false otherwise
  */
 export async function ensureCharmRunning(
-  runtime: IRuntime,
+  runtime: Runtime,
   cellLink: NormalizedFullLink,
 ): Promise<boolean> {
   try {

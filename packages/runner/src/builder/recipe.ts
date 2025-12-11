@@ -35,7 +35,7 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
-import { IRuntime } from "../runtime.ts";
+import { Runtime } from "../runtime.ts";
 import {
   IExtendedStorageTransaction,
   MemorySpace,
@@ -404,7 +404,7 @@ export function pushFrameFromCause(
   props: {
     unsafe_binding?: UnsafeBinding;
     inHandler?: boolean;
-    runtime?: IRuntime;
+    runtime?: Runtime;
     tx?: IExtendedStorageTransaction;
     space?: MemorySpace;
   },

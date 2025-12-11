@@ -25,7 +25,7 @@ import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { isCell, isStream } from "../cell.ts";
 import { ID, NAME, type Recipe } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
-import type { IRuntime } from "../runtime.ts";
+import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { formatTransactionSummary } from "../storage/transaction-summary.ts";
 import {
@@ -235,7 +235,7 @@ function traverseAndSerialize(
  * @returns The cellified value
  */
 function traverseAndCellify(
-  runtime: IRuntime,
+  runtime: Runtime,
   space: MemorySpace,
   value: unknown,
 ): unknown {
@@ -539,7 +539,7 @@ function extractRunArguments(input: unknown): Record<string, any> {
  */
 function flattenTools(
   toolsCell: Cell<any>,
-  _runtime?: IRuntime,
+  _runtime?: Runtime,
 ): Record<
   string,
   {
@@ -762,7 +762,7 @@ function buildToolCatalog(
  * This is appended to the system prompt so the LLM has immediate context.
  */
 function buildAvailableCellsDocumentation(
-  runtime: IRuntime,
+  runtime: Runtime,
   space: MemorySpace,
   context: Record<string, Cell<any>> | undefined,
   pinnedCells: Cell<PinnedCell[]>,
@@ -925,7 +925,7 @@ type ResolvedToolCall =
   };
 
 function resolveToolCall(
-  runtime: IRuntime,
+  runtime: Runtime,
   space: MemorySpace,
   toolCallPart: BuiltInLLMToolCallPart,
   catalog: ToolCatalog,
@@ -1151,7 +1151,7 @@ type ToolCallExecutionResult = {
 };
 
 async function executeToolCalls(
-  runtime: IRuntime,
+  runtime: Runtime,
   space: MemorySpace,
   toolCatalog: ToolCatalog,
   toolCallParts: BuiltInLLMToolCallPart[],
@@ -1254,7 +1254,7 @@ export const llmToolExecutionHelpers = {
  * @returns true if the action was performed, false otherwise
  */
 async function safelyPerformUpdate(
-  runtime: IRuntime,
+  runtime: Runtime,
   pending: Cell<boolean>,
   internal: Cell<Schema<typeof internalSchema>>,
   requestId: string,
@@ -1283,7 +1283,7 @@ async function safelyPerformUpdate(
  * Handles the pin tool call.
  */
 function handlePin(
-  runtime: IRuntime,
+  runtime: Runtime,
   resolved: ResolvedToolCall & { type: "pin" },
   pinnedCells: Cell<PinnedCell[]>,
 ): { type: string; value: any } {
@@ -1313,7 +1313,7 @@ function handlePin(
  * Handles the unpin tool call.
  */
 function handleUnpin(
-  runtime: IRuntime,
+  runtime: Runtime,
   resolved: ResolvedToolCall & { type: "unpin" },
   pinnedCells: Cell<PinnedCell[]>,
 ): { type: string; value: any } {
@@ -1374,7 +1374,7 @@ function handleRead(
  * Handles the update Argument tool call.
  */
 function handleUpdateArgument(
-  runtime: IRuntime,
+  runtime: Runtime,
   resolved: ResolvedToolCall & { type: "updateArgument" },
 ): { type: string; value: any } {
   const cell = resolved.cellRef;
@@ -1419,7 +1419,7 @@ function handleUpdateArgument(
  * Handles the invoke tool call (both pattern and handler execution).
  */
 async function handleInvoke(
-  runtime: IRuntime,
+  runtime: Runtime,
   space: MemorySpace,
   resolved: ResolvedToolCall,
 ): Promise<{ type: string; value: any }> {
@@ -1556,7 +1556,7 @@ async function handleInvoke(
  * @returns Promise that resolves to the tool execution result
  */
 async function invokeToolCall(
-  runtime: IRuntime,
+  runtime: Runtime,
   space: MemorySpace,
   resolved: ResolvedToolCall,
   _catalog?: ToolCatalog,
@@ -1612,7 +1612,7 @@ export function llmDialog(
   addCancel: (cancel: () => void) => void,
   cause: any,
   parentCell: Cell<any>,
-  runtime: IRuntime, // Runtime will be injected by the registration function
+  runtime: Runtime, // Runtime will be injected by the registration function
 ): Action {
   const inputs = inputsCell.asSchema(LLMParamsSchema);
 
@@ -1840,7 +1840,7 @@ export function llmDialog(
 
 function startRequest(
   tx: IExtendedStorageTransaction,
-  runtime: IRuntime,
+  runtime: Runtime,
   space: MemorySpace,
   cause: any,
   inputs: Cell<Schema<typeof LLMParamsSchema>>,

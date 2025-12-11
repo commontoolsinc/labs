@@ -2,7 +2,7 @@ import { type BuiltInCompileAndRunParams } from "commontools";
 import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
-import type { IRuntime } from "../runtime.ts";
+import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Program } from "@commontools/js-compiler";
 import { CompilerError } from "@commontools/js-compiler/typescript";
@@ -31,7 +31,7 @@ export function compileAndRun(
   addCancel: (cancel: () => void) => void,
   cause: any,
   parentCell: Cell<any>,
-  runtime: IRuntime,
+  runtime: Runtime,
 ): Action {
   let requestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
