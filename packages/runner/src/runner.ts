@@ -46,7 +46,7 @@ import { deepEqual } from "./path-utils.ts";
 import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { LINK_V1_TAG, SigilLink } from "./sigil-types.ts";
-import type { IRunner, Runtime } from "./runtime.ts";
+import type { Runtime } from "./runtime.ts";
 import type {
   IExtendedStorageTransaction,
   IStorageSubscription,
@@ -60,7 +60,7 @@ import { isCellResult } from "./query-result-proxy.ts";
 
 const logger = getLogger("runner");
 
-export class Runner implements IRunner {
+export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
   private functionCache = new FunctionCache();

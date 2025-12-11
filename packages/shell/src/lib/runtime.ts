@@ -191,7 +191,7 @@ export class RuntimeInternals extends EventTarget {
         console.error(error);
       }],
       telemetry,
-      consoleHandler: (metadata, method, args) => {
+      consoleHandler: ({ metadata, method, args }) => {
         // Handle console messages depending on charm context.
         // This is essentially the same as the default handling currently,
         // but adding this here for future use.

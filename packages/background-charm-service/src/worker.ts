@@ -2,7 +2,7 @@ import { CharmManager } from "@commontools/charm";
 import {
   Cell,
   type ConsoleHandler,
-  ConsoleMethod,
+  type ConsoleMessage,
   type ErrorHandler,
   type ErrorWithContext,
   isStream,
@@ -52,11 +52,10 @@ const console = {
 };
 // Console handler that will be passed to Runtime
 const consoleHandler: ConsoleHandler = (
-  metadata:
-    | { charmId?: string; recipeId?: string; space?: string }
-    | undefined,
-  _method: ConsoleMethod,
-  args: unknown[],
+  {
+    metadata,
+    args,
+  }: ConsoleMessage,
 ) => {
   if (!spaceId) {
     // Shouldn't happen.
