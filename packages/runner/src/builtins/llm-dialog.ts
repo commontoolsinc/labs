@@ -1896,7 +1896,9 @@ export function llmDialog(
       // Only write if the output actually changed
       const currentFlattened = result.withTx(tx).key("flattenedTools").get();
       if (toolsHaveChanged(cachedFlattenedTools, currentFlattened)) {
-        result.withTx(tx).key("flattenedTools").set(cachedFlattenedTools as any);
+        result.withTx(tx).key("flattenedTools").set(
+          cachedFlattenedTools as any,
+        );
       }
     }
 
