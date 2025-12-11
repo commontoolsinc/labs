@@ -7,7 +7,7 @@ interface TodoItem {
 }
 
 interface Input {
-  items: Cell<TodoItem[]>;
+  items: Cell<Default<TodoItem[], []>>;
 }
 
 interface Output {
