@@ -32,19 +32,17 @@ A todo list with AI suggestions.
 ### Input Schema
 
 ```ts
-interface TodoItem {
-  title: string;
-  done: Default<boolean, false>;
-}
-
-interface Input {
-  items: Cell<TodoItem[]>;
-}
+interface Input { }
 ```
 
 ### Result Schema
 
 ```ts
+interface TodoItem {
+  title: string;
+  done: Default<boolean, false>;
+}
+
 interface Output {
   items: Cell<TodoItem[]>;
 }
