@@ -1,5 +1,5 @@
 import { refer } from "merkle-reference";
-import { SchemaAll } from "@commontools/memory/schema";
+import { SchemaAll, SchemaNone } from "@commontools/memory/schema";
 import { MIME } from "@commontools/memory/interface";
 import { JSONSchemaObj } from "@commontools/api";
 // TODO(@ubik2): Ideally this would use the following, but rollup has issues
@@ -147,6 +147,9 @@ export class MapSet<K, V> {
   }
 }
 
+// These two are in the form that they come from the client
+// In our tracking structures, their paths should start with
+// "value", but that happens later
 export const DefaultSchemaSelector = {
   path: [],
   schemaContext: { schema: true, rootSchema: true },
@@ -452,7 +455,7 @@ export abstract class BaseObjectTraverser<
   protected traverseDAG(
     doc: IMemorySpaceAttestation,
     tracker: PointerCycleTracker,
-    schemaTracker?: MapSet<string, SchemaPathSelector>,
+    schemaTracker: MapSet<string, SchemaPathSelector>,
     defaultValue?: JSONValue,
     itemLink?: NormalizedFullLink,
   ): JSONValue | undefined {
@@ -490,6 +493,7 @@ export abstract class BaseObjectTraverser<
             [],
             tracker,
             this.cfc,
+            schemaTracker,
           );
           docItem = next;
         }
@@ -511,7 +515,24 @@ export abstract class BaseObjectTraverser<
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isAnyCellLink(doc.value)) {
-        // FIXME: A cell link with a schema needs to go back into traverseSchema behavior
+        // FIXME(@ubik2): A cell link with a schema should go back into traverseSchema behavior
+        // Check if target doc is already tracked BEFORE calling getAtPath,
+        // since getAtPath/followPointer will add it to schemaTracker
+        let alreadyTracked = false;
+        // If the link didn't have a space, make sure we add one
+        const link = {
+          space: doc.address.space,
+          type: "application/json",
+          ...parseLink(doc.value),
+        };
+        if (link.id !== undefined) {
+          const targetKey = `${link.space}/${link.id}/${link.type}`;
+          alreadyTracked = schemaTracker.hasValue(targetKey, {
+            path: ["value", ...link.path],
+            schemaContext: SchemaAll,
+          });
+        }
+
         const [newDoc, _] = getAtPath(
           this.tx,
           doc,
@@ -523,6 +544,17 @@ export abstract class BaseObjectTraverser<
           this.traverseCells,
         );
         if (newDoc.value === undefined) {
+          return null;
+        }
+        // If the target doc was already tracked before this traversal,
+        // skip re-traversing it (followPointer already loaded and tracked it)
+        // We can only do this in the querySchema version.
+        // For validateAndTransform, we need the returned value, so we can't
+        // optmize this out. We can tell based on traverseCells.
+        if (
+          this.traverseCells && alreadyTracked &&
+          doc.address.id !== newDoc.address.id
+        ) {
           return null;
         }
         return this.traverseDAG(
@@ -600,7 +632,7 @@ export function getAtPath(
   path: readonly string[],
   tracker: PointerCycleTracker,
   cfc: ContextualFlowControl,
-  schemaTracker?: MapSet<string, SchemaPathSelector>,
+  schemaTracker: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
   includeSource?: boolean,
 ): [IMemorySpaceAttestation, SchemaPathSelector | undefined] {
@@ -706,7 +738,7 @@ function followPointer(
   path: readonly string[],
   tracker: PointerCycleTracker,
   cfc: ContextualFlowControl,
-  schemaTracker?: MapSet<string, SchemaPathSelector>,
+  schemaTracker: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
   includeSource?: boolean,
 ): [
@@ -762,7 +794,7 @@ function followPointer(
   if (link.id !== undefined) {
     // We have a reference to a different doc, so track the dependency
     // and update our targetDoc
-    if (schemaTracker !== undefined && selector !== undefined) {
+    if (selector !== undefined) {
       schemaTracker.add(getTrackerKey(target), selector);
     }
     // Load the sources/recipes recursively unless we're a retracted fact.
@@ -812,7 +844,7 @@ export function loadSource(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
   cycleCheck: Set<string> = new Set<string>(),
-  schemaTracker?: MapSet<string, SchemaPathSelector>,
+  schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
   loadLinkedRecipe(tx, valueEntry, schemaTracker);
   if (!isObject(valueEntry.value)) {
@@ -852,9 +884,10 @@ export function loadSource(
   if (error || entry === null || entry.value === undefined) {
     return;
   }
-  if (schemaTracker !== undefined) {
-    schemaTracker.add(getTrackerKey(address), MinimalSchemaSelector);
-  }
+  schemaTracker.add(getTrackerKey(address), {
+    path: [],
+    schemaContext: SchemaNone,
+  });
   // We've lost the space from our address in the tx.read, so recreate
   const fullEntry = { address: address, value: entry.value };
   loadSource(tx, fullEntry, cycleCheck, schemaTracker);
@@ -1116,7 +1149,7 @@ export function combineSchema(
 function loadLinkedRecipe(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
-  schemaTracker?: MapSet<string, SchemaPathSelector>,
+  schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
   if (!isObject(valueEntry.value)) {
     return;
@@ -1162,9 +1195,10 @@ function loadLinkedRecipe(
   if (entry === null || entry.value === undefined) {
     return;
   }
-  if (schemaTracker !== undefined) {
-    schemaTracker.add(getTrackerKey(address), MinimalSchemaSelector);
-  }
+  schemaTracker.add(getTrackerKey(address), {
+    path: [],
+    schemaContext: SchemaNone,
+  });
 }
 
 // docPath is where we found the pointer and are doing this work. It does not

@@ -1,11 +1,16 @@
 import { join } from "@std/path/join";
 import { type TsconfigRaw } from "esbuild";
 
-export interface Config {
+export interface EntryPoint {
   // JS entry from root
-  entry: string;
+  in: string;
   // JS output from `outDir`
   out: string;
+}
+
+export interface Config {
+  // Entry points to build
+  entries: EntryPoint[];
   // Output directory from root to place build artifacts.
   // Defaults to "dist".
   outDir: string;
@@ -51,9 +56,13 @@ export interface ESBuildConfig {
   >;
 }
 
-export class ResolvedConfig {
-  entry: string;
+export interface ResolvedEntryPoint {
+  in: string;
   out: string;
+}
+
+export class ResolvedConfig {
+  entries: ResolvedEntryPoint[];
   outDir: string;
   hostname: string;
   port: number;
@@ -77,9 +86,11 @@ export class ResolvedConfig {
   cwd: string;
   constructor(partial: Config, cwd = Deno.cwd()) {
     this.cwd = cwd;
-    this.entry = join(cwd, partial.entry);
     this.outDir = join(cwd, partial.outDir ?? "dist");
-    this.out = join(this.outDir, partial.out);
+    this.entries = partial.entries.map(({ in: entry, out }) => ({
+      in: join(cwd, entry),
+      out: join(this.outDir, out),
+    }));
     this.publicDir = join(cwd, partial?.publicDir ?? "public");
     this.watchDir = join(cwd, partial?.watchDir ?? "src");
     this.hostname = partial?.hostname ?? "127.0.0.1";

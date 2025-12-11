@@ -171,10 +171,15 @@ export const querySchema = async (session: Session, query: SchemaQuery) => {
 /**
  * Internal variant of querySchema that also returns the schemaTracker.
  * Used by provider.ts for incremental subscription updates.
+ *
+ * @param existingSchemaTracker - Optional existing tracker to reuse. When provided,
+ * the query will skip traversing docs that are already tracked with the same schema,
+ * providing early termination for overlapping subscriptions.
  */
 export const querySchemaWithTracker = async (
   session: Session,
   query: SchemaQuery,
+  existingSchemaTracker?: Space.SelectSchemaResult["schemaTracker"],
 ) => {
   return await traceAsync("memory.querySchemaWithTracker", async (span) => {
     addMemoryAttributes(span, {
@@ -193,6 +198,7 @@ export const querySchemaWithTracker = async (
     return Space.querySchemaWithTracker(
       space as unknown as Space.Session<typeof query.sub>,
       query,
+      existingSchemaTracker,
     );
   });
 };

@@ -41,7 +41,11 @@ import {
 } from "./query-result-proxy.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
-import { ignoreReadForScheduling, txToReactivityLog } from "./scheduler.ts";
+import {
+  type Action,
+  ignoreReadForScheduling,
+  txToReactivityLog,
+} from "./scheduler.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import {
   processDefaultValue,
@@ -1263,24 +1267,9 @@ function subscribeToReferencedDocs<T>(
   runtime: IRuntime,
   link: NormalizedFullLink,
 ): Cancel {
-  // Get the value once to determine all the docs that need to be subscribed to.
-  const tx = runtime.edit();
-  const value = validateAndTransform(
-    runtime,
-    tx,
-    link,
-  );
+  let cleanup: Cancel | undefined | void;
 
-  // Call the callback once with initial value.
-  let cleanup: Cancel | undefined | void = callback(value);
-  const log = txToReactivityLog(tx);
-
-  // Technically unnecessary since we don't expect/allow callbacks to sink to
-  // write to other cells, and we retry by design anyway below when read data
-  // changed. But ideally we enforce read-only as well.
-  tx.commit();
-
-  const cancel = runtime.scheduler.subscribe((tx) => {
+  const action: Action = (tx) => {
     if (isCancel(cleanup)) cleanup();
 
     // Using a new transaction for child cells, as we're only interested in
@@ -1297,7 +1286,20 @@ function subscribeToReferencedDocs<T>(
     // we add a retry? So far all sinks are read-only, so they get re-triggered
     // on changes already.
     extraTx.commit();
-  }, log);
+  };
+
+  // Call action once immediately, which also defines what docs need to be
+  // subscribed to.
+  const tx = runtime.edit();
+  action(tx);
+  const log = txToReactivityLog(tx);
+
+  // Technically unnecessary since we don't expect/allow callbacks to sink to
+  // write to other cells, and we retry by design anyway below when read data
+  // changed. But ideally we enforce read-only as well.
+  tx.commit();
+
+  const cancel = runtime.scheduler.subscribe(action, log);
 
   return () => {
     cancel();

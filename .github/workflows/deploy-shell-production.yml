@@ -27,6 +27,7 @@ jobs:
         run: deno task production
         env:
           API_URL: ${{ secrets.CLUSTERDUCK_SHELL_API_URL }}
+          COMMIT_SHA: ${{ github.sha }}
 
       - name: 🔑 Authenticate to Google Cloud
         uses: google-github-actions/auth@v1

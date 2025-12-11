@@ -31,7 +31,7 @@ import type {
   MIME,
   SchemaQuery,
 } from "./interface.ts";
-import { SelectAllString } from "./schema.ts";
+import { SchemaNone, SelectAllString } from "./schema.ts";
 import {
   getChange,
   getRevision,
@@ -154,6 +154,7 @@ export interface SelectSchemaResult {
 export const selectSchema = <Space extends MemorySpace>(
   session: SpaceStoreSession<Space>,
   { selectSchema, since, classification }: SchemaQuery["args"],
+  existingSchemaTracker?: MapSet<string, SchemaPathSelector>,
 ): SelectSchemaResult => {
   const startTime = performance.timeOrigin + performance.now();
 
@@ -166,10 +167,13 @@ export const selectSchema = <Space extends MemorySpace>(
     SchemaContext | undefined
   >();
   const cfc = new ContextualFlowControl();
-  const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
+  // Use existing tracker if provided, otherwise create new one
+  const schemaTracker = existingSchemaTracker ??
+    new MapSet<string, SchemaPathSelector>(deepEqual);
 
   const includedFacts: FactSelection = {}; // we'll store all the raw facts we accesed here
   // First, collect all the potentially relevant facts (without dereferencing pointers)
+  // The value in these selectorEntry objects doesn't have the "value" in path yet.
   for (
     const selectorEntry of iterateSelector(selectSchema, DefaultSchemaSelector)
   ) {
@@ -249,9 +253,14 @@ export const selectSchema = <Space extends MemorySpace>(
       // updates can detect changes to them, even if they don't have data yet
       const docKey =
         `${session.subject}/${factSelector.of}/${factSelector.the}`;
-      if (!schemaTracker.has(docKey)) {
-        schemaTracker.add(docKey, factSelector.value);
-      }
+      // These selectorEntry objects in SchemaQuery have their path relative
+      // to the value, but our traversal wants them to be relative to the
+      // fact.is, so adjust the paths.
+      const selector = {
+        ...factSelector.value,
+        path: ["value", ...factSelector.value.path],
+      };
+      schemaTracker.add(docKey, selector);
 
       if (!getRevision(includedFacts, factSelector.of, factSelector.the)) {
         setEmptyObj(includedFacts, factSelector.of, factSelector.the);
@@ -282,6 +291,7 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
   docAddress: { id: string; type: string },
   schemaSelector: SchemaPathSelector,
   classification?: string[],
+  existingSchemaTracker?: MapSet<string, SchemaPathSelector>,
 ): MapSet<string, SchemaPathSelector> | null {
   const providedClassifications = new Set<string>(classification);
   const manager = new ServerObjectManager(session, providedClassifications);
@@ -290,7 +300,9 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
     SchemaContext | undefined
   >();
   const cfc = new ContextualFlowControl();
-  const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
+  // Use existing tracker if provided - enables early termination for already-tracked docs
+  const schemaTracker = existingSchemaTracker ??
+    new MapSet<string, SchemaPathSelector>(deepEqual);
 
   // Load the document
   const address = {
@@ -333,6 +345,7 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
 
 // The fact passed in is the IAttestation for the top level 'is', so path
 // is empty.
+// The selector should typically have a path starting with value
 function loadFactsForDoc(
   manager: ServerObjectManager,
   fact: IAttestation,
@@ -342,17 +355,26 @@ function loadFactsForDoc(
   space: MemorySpace,
   schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
-  // Track all facts regardless of their value type
-  // This ensures watchedObjects and schemaTracker stay in sync
-  const factKey = `${space}/${fact.address.id}/${fact.address.type}`;
-  if (!schemaTracker.has(factKey)) {
-    schemaTracker.add(factKey, selector);
+  // A query without a schema context is the same as a query with the minimal schema
+  // This will match the specified document, but no linked documents
+  if (selector.schemaContext === undefined) {
+    selector = { ...selector, schemaContext: SchemaNone };
   }
+
+  // If this doc+schema pair is already tracked, we've already traversed its links
+  // so we can skip the entire traversal (early termination optimization)
+  const factKey = `${space}/${fact.address.id}/${fact.address.type}`;
+  if (schemaTracker.hasValue(factKey, selector)) {
+    return;
+  }
+
+  // Track this doc+schema pair
+  schemaTracker.add(factKey, selector);
 
   if (isObject(fact.value)) {
     const managedTx = new ManagedStorageTransaction(manager);
     const tx = new ExtendedStorageTransaction(managedTx);
-    if (selector.schemaContext !== undefined) {
+    if (!deepEqual(selector.schemaContext, SchemaNone)) {
       const factValue: { address: IMemorySpaceAddress; value: JSONValue } = {
         address: { ...fact.address, space: space },
         value: (fact.value as Immutable<JSONObject>),
@@ -386,9 +408,6 @@ function loadFactsForDoc(
       // If we didn't provide a schema context, we still want the selected
       // object in our manager, so load it directly.
       manager.load(fact.address);
-      // Also track it in schemaTracker so incremental updates can find it
-      const factKey = `${space}/${fact.address.id}/${fact.address.type}`;
-      schemaTracker.add(factKey, selector);
     }
     // Also load any source links and recipes
     const fullAddress = { ...fact.address, space: space };
