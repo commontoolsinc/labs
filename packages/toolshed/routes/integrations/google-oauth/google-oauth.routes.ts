@@ -122,16 +122,15 @@ export const refresh = createRoute({
         "application/json": {
           schema: z
             .object({
-              authCellId: z
+              refreshToken: z
                 .string()
                 .describe(
-                  "The authentication cell ID containing the refresh token",
+                  "The refresh token to use for obtaining new access tokens",
                 ),
             })
             .openapi({
               example: {
-                authCellId:
-                  '{"/" : {"link-v0.1" : {"id" : "of:bafe...", "space" : "did:key:bafe...", "path" : ["path", "to", "value"]}}}',
+                refreshToken: "1//0abc123...",
               },
             }),
         },
