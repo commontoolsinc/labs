@@ -2,28 +2,34 @@ import { css } from "lit";
 
 export const styles = css`
   :host {
-    display: block;
+    display: flex;
+    flex-direction: column;
     width: 100%;
     height: 100%;
     min-height: 200px;
-    position: relative;
   }
 
   .code-editor {
-    display: block;
-    height: 100%;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
     width: 100%;
-    position: relative;
   }
 
   .cm-editor {
-    height: 100%;
+    flex: 1;
+    min-height: 0;
     width: 100%;
     border: 1px solid var(--ct-theme-color-border, #e5e7eb);
     border-radius: var(--ct-theme-border-radius, 0.375rem);
+    display: flex;
+    flex-direction: column;
   }
 
   .cm-scroller {
+    flex: 1;
+    min-height: 0;
     overflow: auto;
   }
 
