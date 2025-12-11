@@ -2,49 +2,27 @@
 /**
  * Test Pattern: Cross-Charm Stream Client
  *
- * This pattern tests two claims about cross-charm interaction:
+ * VERIFIED CLAIMS:
  *
- * CLAIM 1: Cross-Charm Stream Invocation via wish()
- * - Streams from wished charms appear as opaque objects with $stream marker
- * - To invoke them, pass to a handler that declares Stream<T> in its signature
- * - Framework "unwraps" the opaque stream into a callable one
+ * 1. Cross-Charm Stream Invocation via wish() - WORKS (with corrections to blessed doc)
+ *    - Streams from wished charms appear as Cells wrapping { $stream: true } marker
+ *    - Call .send(eventData) on the Cell itself (NOT on an "unwrapped" stream)
+ *    - The blessed doc's "auto-unwrap via Stream<T> signature" explanation is WRONG
+ *    - Event must be an object (runtime calls preventDefault), can have data props but NO functions
  *
- * CLAIM 2: ct.render Forces Charm Execution
- * - Just wishing for a charm doesn't make it run
- * - Use ct.render() to force the charm to execute
- * - Even in a hidden div, ct.render makes the charm active
+ * 2. ct.render Forces Charm Execution - VERIFIED
+ *    - Just wishing for a charm doesn't make it run
+ *    - Use <ct-render $cell={...} /> to force execution
  *
- * MANUAL TESTING INSTRUCTIONS:
+ * PREREQUISITES DISCOVERED:
+ *    - Wish tags must be in JSDoc on Output type (not file-level comments)
+ *    - wish({ query: "#tag" }) searches FAVORITES only - charm must be favorited first
  *
- * Step 1: Deploy the server charm first
- *   deno task ct charm new --identity ~/labs/tony.key --api-url http://localhost:8000 \
- *     --space test packages/patterns/test-cross-charm-server.tsx
- *
- * Step 2: Deploy this client charm
- *   deno task ct charm new --identity ~/labs/tony.key --api-url http://localhost:8000 \
- *     --space test packages/patterns/test-cross-charm-client.tsx
- *
- * Step 3: Open the space in browser
- *   http://localhost:8000/test
- *
- * Step 4: Test Claim 2 (ct.render Forces Execution)
- *   - Initially, mode is "Wish Only (no ct.render)"
- *   - Check server charm - it should NOT be executing yet (no UI updates)
- *   - Click "Toggle Mode" button
- *   - Now mode is "Wish + ct.render"
- *   - Check server charm - it should NOW be executing (UI should appear/update)
- *   - This confirms ct.render() forces charm execution
- *
- * Step 5: Test Claim 1 (Stream Invocation)
- *   - Click "Invoke Server Stream" button
- *   - Check the server charm - counter should increment
- *   - Check the client charm - it should show "Last invocation successful"
- *   - Click multiple times to verify each invocation increments the counter
- *   - This confirms streams can be invoked across charms
- *
- * EXPECTED BEHAVIOR:
- * - Claim 1: Each click of "Invoke Server Stream" increments the server's counter
- * - Claim 2: Server charm only executes when ct.render is active (mode B)
+ * TESTING:
+ *    1. Deploy server charm first, favorite it
+ *    2. Deploy this client charm
+ *    3. Toggle to Mode B (ct.render active)
+ *    4. Click "Invoke Server Stream" - server counter should increment
  */
 import { Cell, Default, NAME, pattern, Stream, UI, wish, derive, handler } from "commontools";
 import ct from "commontools";
@@ -66,9 +44,9 @@ interface Output {
   invocationCount: number;
 }
 
-// Handler that attempts to invoke a stream from the wished charm
-// The claim is that when you pass an opaque stream to a handler that declares Stream<T>
-// in its signature, the framework unwraps it and makes it callable
+// Handler that invokes a stream from the wished charm
+// KEY FINDING: Despite blessed doc claims, Stream<T> in signature does NOT auto-unwrap.
+// The stream comes through as a Cell wrapping { $stream: true }. Call .send({}) on the Cell.
 const invokeServerStream = handler<
   unknown,
   {
@@ -78,18 +56,31 @@ const invokeServerStream = handler<
   }
 >((_event, state) => {
   try {
-    // Test Claim 1: Can we invoke a stream from a wished charm?
-    // The stream should be unwrapped by the framework when declared as Stream<T> in the signature
-    // At compile time this shows as an error, but the claim is it should work at runtime
-    (state.stream as any)();
+    // Stream arrives as a Cell, not an unwrapped callable stream
+    const streamCell = state.stream as any;
+    const innerValue = streamCell.get ? streamCell.get() : streamCell;
 
-    const count = state.invocationCount.get() + 1;
-    state.invocationCount.set(count);
-    state.lastInvocationStatus.set(`Successful (invoked ${count} times)`);
+    if (innerValue && innerValue.$stream) {
+      // Cell contains { $stream: true } marker - call .send() on the Cell itself
+      // Event must be object (runtime calls preventDefault), can have data props, NO functions
+      streamCell.send({});  // Could also be { someData: "value" }
+      const count = state.invocationCount.get() + 1;
+      state.invocationCount.set(count);
+      state.lastInvocationStatus.set(`Success! Server counter should increment (invoked ${count} times)`);
+    } else {
+      state.lastInvocationStatus.set(`Stream not found or invalid: ${JSON.stringify(innerValue)}`);
+    }
   } catch (error) {
     state.lastInvocationStatus.set(`Failed: ${error}`);
   }
 });
+
+// Handler for toggling the render mode
+const toggleMode = handler<unknown, { useCtRender: Cell<boolean> }>(
+  (_event, { useCtRender }) => {
+    useCtRender.set(!useCtRender.get());
+  }
+);
 
 export default pattern<Input, Output>(({ useCtRender, lastInvocationStatus, invocationCount }) => {
   // Wish for the server charm by tag
@@ -123,9 +114,7 @@ export default pattern<Input, Output>(({ useCtRender, lastInvocationStatus, invo
             </strong>
           </div>
           <ct-button
-            onClick={() => {
-              useCtRender.set(!useCtRender.get());
-            }}
+            onClick={toggleMode({ useCtRender })}
             style="margin-top: 8px;"
           >
             Toggle Mode

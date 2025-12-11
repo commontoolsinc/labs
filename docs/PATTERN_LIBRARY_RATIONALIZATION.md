@@ -69,15 +69,17 @@ Review `community-patterns/community-docs/superstitions/` (~60 observations):
 
 ## Key Resources
 
-### Canonical Locations
-- **Patterns:** `labs/packages/patterns/`
-- **Official Docs:** `labs/docs/common/`
-- **Skills:** `labs/.claude/skills/pattern-dev/`, `labs/.claude/skills/ct/`
+### Canonical Locations (this repo: `labs/`)
+- **Patterns:** `packages/patterns/`
+- **Official Docs:** `docs/common/`
+- **Skills:** `.claude/skills/pattern-dev/`, `.claude/skills/ct/`
 
-### Community Knowledge
-- **Blessed (author-approved):** `community-patterns/community-docs/blessed/`
-- **Folk Wisdom (validated):** `community-patterns/community-docs/folk_wisdom/`
-- **Superstitions (unvalidated):** `community-patterns/community-docs/superstitions/`
+### Community Knowledge (peer repo: `community-patterns/`)
+- **Blessed (author-approved):** `community-docs/blessed/`
+- **Folk Wisdom (validated):** `community-docs/folk_wisdom/`
+- **Superstitions (unvalidated):** `community-docs/superstitions/`
+
+**Note:** `community-patterns` is a sibling repo at `../community-patterns/` relative to `labs/`.
 
 ---
 
@@ -95,6 +97,16 @@ done
 
 ---
 
+## Documentation Gaps Found
+
+| Topic | Issue | Target Doc |
+|-------|-------|------------|
+| Wish tags must be in JSDoc on Output type | Not clearly documented - tags like `#mytag` must appear in a JSDoc comment on the Output interface/type, not in file-level comments | CHARM_LINKING.md or new WISH.md |
+| Wish searches favorites, not all charms | `wish({ query: "#tag" })` searches **favorites list**, not all charms in the space. Charm must be favorited first to be discoverable. | CHARM_LINKING.md or FAVORITES.md |
+| Cross-charm stream invocation mechanism | Streams from wished charms come as Cells wrapping `{ $stream: true }` marker. To invoke: call `.send(eventData)` on the Cell itself. Event must be object (runtime calls `preventDefault`), can have data properties, NO functions. | CHARM_LINKING.md |
+
+---
+
 ## Updates Needed in Blessed Docs
 
 These items in `community-patterns/community-docs/blessed/` were found to be outdated or incorrect:
@@ -102,3 +114,72 @@ These items in `community-patterns/community-docs/blessed/` were found to be out
 | File | Topic | Issue |
 |------|-------|-------|
 | `handlers.md` | "Define handlers outside pattern function" | **OUTDATED** - The closures transformer now handles this correctly. Tested and confirmed handlers inside patterns work fine. |
+| `cross-charm.md` | "Framework unwraps opaque stream into callable one" | **MISLEADING** - The blessed doc claims declaring `Stream<T>` in handler signature causes framework to "unwrap" the opaque stream. This is incorrect. The stream stays as a Cell; it works because Cell has `.send()` method that dispatches when contents have `$stream` marker. The code example works but the explanation of WHY it works is wrong. |
+| `cross-charm.md` | Missing prerequisites for wish() | **INCOMPLETE** - Doc doesn't mention: (1) tags must be in JSDoc on Output type, (2) wish searches favorites only - charm must be favorited first, (3) event must be object (not undefined), no functions in event data. |
+
+---
+
+## Blessed Claims Verification Results
+
+Manual testing of claims from `community-patterns/community-docs/blessed/`:
+
+| Claim | Source | Result | Notes |
+|-------|--------|--------|-------|
+| "Never use await in handlers" | handlers.md | **VERIFIED** | await blocks UI; fetchData pattern keeps UI responsive. Test: `packages/patterns/blessed-verification/test-await-in-handler.tsx` |
+| "Idempotent side effects in computed" | reactivity.md | **VERIFIED** | Non-idempotent side effects cause thrashing (hit 101 iteration limit). Test: `packages/patterns/blessed-verification/test-idempotent-side-effects.tsx` |
+| "ifElse executes BOTH branches" | reactivity.md | **VERIFIED** | Both branch computeds run on every condition change, even the hidden one. Test: `packages/patterns/blessed-verification/test-ifelse-both-branches.tsx` |
+| "Cell.equals() vs manual IDs" | reactivity.md | **BLOCKED** | Runtime bug in mapWithPattern cell closure handling. Repro: `packages/patterns/repro-mapwithpattern-cell-closure.tsx` |
+| Cross-charm Stream via wish() | cross-charm.md | **VERIFIED WITH CORRECTIONS** | Streams ARE invocable via `.send({})` on the Cell. Blessed doc's "auto-unwrap" explanation is wrong - no unwrapping happens. See `docs/BLESSED_VERIFICATION_NOTES.md`. Test: `packages/patterns/blessed-verification/test-cross-charm-*.tsx` |
+| ct.render forces charm execution | cross-charm.md | **VERIFIED** | Wished charms only execute when rendered with `<ct-render $cell={...} />`. Test: `packages/patterns/blessed-verification/test-cross-charm-*.tsx` |
+
+---
+
+## Questions for Follow-up (Ask Manager)
+
+### Idempotency Footgun
+
+During testing of the idempotent side effects claim, we discovered a potential footgun:
+
+**Issue:** Non-idempotent side effects in `computed()` can cause the scheduler to thrash until it hits the 101-iteration safety limit. This happens silently - no warning, just stops executing.
+
+**Questions:**
+1. Is there a way to detect/warn about non-idempotent side effects at compile time or with better runtime errors?
+2. Should the 101-iteration limit produce a more descriptive error message pointing to the likely cause?
+3. Is there documentation about what "idempotent" means in this context that we should reference?
+4. Should we add a lint rule or transformer check for common non-idempotent patterns (like `array.push()` or `set([...arr, item])` in computed)?
+
+---
+
+## Follow-up Investigations (Not Yet Undertaken)
+
+### 1. Inline Handler asOpaque Bug
+
+**Issue:** Inline arrow functions used as onClick handlers that capture pattern inputs get `asOpaque: true` instead of `asCell: true` in the transformed schema. This prevents mutation of the captured value.
+
+**Repro:** `packages/patterns/repro-inline-handler-asopaque.tsx`
+
+**To investigate:**
+- Is this intentional (read-only by default) or a transformer bug?
+- Can the transformer infer mutation intent from usage (e.g., seeing `.set()` calls)?
+- Should there be a way to annotate inline handlers for write access?
+
+**Workaround:** Use explicit `handler<unknown, { field: Cell<T> }>()` with typed state parameter.
+
+### 2. mapWithPattern Cell Closure Bug
+
+**Issue:** Cells captured from outer scope in `.map()` callbacks fail at runtime with "Cannot create cell link: space is required". The transformer correctly passes cells through params, but runtime doesn't hydrate them with space context.
+
+**Repro:** `packages/patterns/repro-mapwithpattern-cell-closure.tsx` (on main branch)
+
+**To investigate:**
+- Is this a runtime hydration issue or a transformer issue?
+- Should captured cells be handled differently than local cells in mapWithPattern?
+
+### 3. Rename "charm" to "pattern" in ct CLI
+
+**Issue:** The ct CLI uses `ct charm` subcommands, but we've standardized on "pattern" terminology in docs. This creates confusion.
+
+**To consider:**
+- Rename `ct charm` to `ct pattern` for consistency
+- Or add `ct pattern` as an alias
+- Update all docs/skills to use consistent terminology
