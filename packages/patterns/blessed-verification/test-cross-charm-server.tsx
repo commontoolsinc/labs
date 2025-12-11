@@ -2,10 +2,13 @@
 /**
  * Test Pattern: Cross-Charm Stream Server
  *
- * This pattern exposes a Stream that increments a counter when invoked.
- * It's designed to be wished for and invoked by test-cross-charm-client.tsx
+ * Exposes a Stream that increments a counter when invoked from another charm.
+ * Used with test-cross-charm-client.tsx to verify cross-charm stream invocation.
  *
- * Tag: #cross-charm-test-server
+ * IMPORTANT: The #cross-charm-test-server tag is in the JSDoc on the Output
+ * interface below (not here) - that's where wish() looks for tags.
+ *
+ * SETUP: After deploying, you must FAVORITE this charm for wish() to find it.
  */
 import { Cell, Default, NAME, pattern, Stream, UI, handler } from "commontools";
 
@@ -17,6 +20,7 @@ interface Input {
   invocationLog: Default<string[], []>;
 }
 
+/** A #cross-charm-test-server that exposes a stream for testing cross-charm invocation. */
 interface Output {
   counter: number;
   invocationLog: string[];

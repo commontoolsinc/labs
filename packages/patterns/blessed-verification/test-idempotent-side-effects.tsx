@@ -24,7 +24,7 @@
  * - Non-idempotent: Each run adds a new element, changing the array, triggering another run
  * - Idempotent: Check-before-write ensures no actual change after first run, system settles
  */
-import { Cell, Default, NAME, pattern, UI, computed, ifElse } from "commontools";
+import { Cell, Default, NAME, pattern, UI, computed, ifElse, handler } from "commontools";
 
 interface TestInput {
   // Trigger value that we can change to force re-computation
@@ -38,6 +38,12 @@ interface TestOutput {
   nonIdempotentData: unknown[];
   idempotentData: Record<string, unknown>;
 }
+
+const incrementTrigger = handler<unknown, { triggerCount: Cell<number> }>(
+  (_args, state) => {
+    state.triggerCount.set(state.triggerCount.get() + 1);
+  }
+);
 
 export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
   // Shared state for tracking
@@ -57,18 +63,25 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
   // NON-IDEMPOTENT APPROACH: Append to array on every run
   // This causes thrashing - the computed keeps running forever because
   // it modifies the array, which triggers another run, which modifies again, etc.
+  // NOTE: Only triggers when triggerCount > 0 to avoid thrashing on initial load
   const nonIdempotentComputed = computed(() => {
     // Read the trigger to create a dependency
     const trigger = triggerCount;
 
-    // NON-IDEMPOTENT SIDE EFFECT: Always append
-    const current = nonIdempotentArray.get();
-    nonIdempotentArray.set([...current, { trigger, timestamp: Date.now() }]);
+    // Only run side effect after user clicks (triggerCount > 0)
+    // This prevents thrashing during initial load
+    if (trigger > 0) {
+      // NON-IDEMPOTENT SIDE EFFECT: Always append
+      const current = nonIdempotentArray.get();
+      nonIdempotentArray.set([...current, { trigger, timestamp: Date.now() }]);
 
-    // Increment counter to show how many times this ran
-    nonIdempotentCounter.set(nonIdempotentCounter.get() + 1);
+      // Increment counter to show how many times this ran
+      nonIdempotentCounter.set(nonIdempotentCounter.get() + 1);
+    }
 
-    return `Non-idempotent computed ran ${nonIdempotentCounter.get()} times`;
+    return nonIdempotentCounter.get() > 0
+      ? `Non-idempotent computed ran ${nonIdempotentCounter.get()} times`
+      : "Click trigger to start";
   });
 
   // IDEMPOTENT APPROACH: Check-before-write with deterministic keys
@@ -78,22 +91,27 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
     // Read the trigger to create a dependency
     const trigger = triggerCount;
 
-    // IDEMPOTENT SIDE EFFECT: Only write if key doesn't exist
-    const current = idempotentMap.get();
-    const key = `trigger-${trigger}`; // Deterministic key based on input
+    // Only run side effect after user clicks (triggerCount > 0)
+    if (trigger > 0) {
+      // IDEMPOTENT SIDE EFFECT: Only write if key doesn't exist
+      const current = idempotentMap.get();
+      const key = `trigger-${trigger}`; // Deterministic key based on input
 
-    // Check before write - idempotent!
-    if (!(key in current)) {
-      idempotentMap.set({
-        ...current,
-        [key]: { trigger, timestamp: Date.now() }
-      });
+      // Check before write - idempotent!
+      if (!(key in current)) {
+        idempotentMap.set({
+          ...current,
+          [key]: { trigger, timestamp: Date.now() }
+        });
+      }
+
+      // Increment counter to show how many times this ran
+      idempotentCounter.set(idempotentCounter.get() + 1);
     }
 
-    // Increment counter to show how many times this ran
-    idempotentCounter.set(idempotentCounter.get() + 1);
-
-    return `Idempotent computed ran ${idempotentCounter.get()} times`;
+    return idempotentCounter.get() > 0
+      ? `Idempotent computed ran ${idempotentCounter.get()} times`
+      : "Click trigger to start";
   });
 
   return {
@@ -105,10 +123,7 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
         <div style={{ marginBottom: "20px", padding: "10px", backgroundColor: "#f0f0f0", borderRadius: "5px" }}>
           <p><strong>Trigger Count:</strong> {triggerCount}</p>
           <ct-button
-            onClick={() => {
-              const mutableTrigger = triggerCount as unknown as Cell<number>;
-              mutableTrigger.set(mutableTrigger.get() + 1);
-            }}
+            onClick={incrementTrigger({ triggerCount })}
             style={{ padding: "10px 20px", fontSize: "16px" }}
           >
             Trigger Re-computation

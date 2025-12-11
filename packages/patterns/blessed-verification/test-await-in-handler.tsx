@@ -74,20 +74,22 @@ const testWithAwait = handler<
   }
 });
 
-// Handler WITHOUT await (triggers fetchData by changing URL)
-const testWithFetchData = handler<
+// Handler WITHOUT await (triggers reactive flow by changing state)
+// This demonstrates the correct pattern: handler is synchronous,
+// async work happens in the reactive layer via fetchData
+const testWithoutAwait = handler<
   unknown,
   {
-    fetchUrl: Cell<string>;
+    fetchTrigger: Cell<number>;
     fetchCount: Cell<number>;
   }
 >((_args, state) => {
   // Increment counter to show how many times this was triggered
   state.fetchCount.set(state.fetchCount.get() + 1);
 
-  // Trigger a fetch by updating the URL with a timestamp
-  const timestamp = Date.now();
-  state.fetchUrl.set(`https://httpbin.org/delay/3?t=${timestamp}`);
+  // Trigger by updating a cell - handler returns IMMEDIATELY
+  // The actual async work happens in fetchData in the pattern body
+  state.fetchTrigger.set(Date.now());
 });
 
 // Simple counter increment to test UI responsiveness
@@ -104,7 +106,7 @@ const resetAll = handler<
     awaitStatus: Cell<string>;
     awaitResult: Cell<string>;
     awaitCount: Cell<number>;
-    fetchUrl: Cell<string>;
+    fetchTrigger: Cell<number>;
     fetchCount: Cell<number>;
     counter: Cell<number>;
   }
@@ -112,7 +114,7 @@ const resetAll = handler<
   state.awaitStatus.set("Ready");
   state.awaitResult.set("");
   state.awaitCount.set(0);
-  state.fetchUrl.set("");
+  state.fetchTrigger.set(0);
   state.fetchCount.set(0);
   state.counter.set(0);
 });
@@ -123,8 +125,8 @@ interface PatternState {
   awaitResult: Default<string, "">;
   awaitCount: Default<number, 0>;
 
-  // State for fetchData test
-  fetchUrl: Default<string, "">;
+  // State for reactive/fetchData test
+  fetchTrigger: Default<number, 0>;
   fetchCount: Default<number, 0>;
 
   // Interactive counter to test responsiveness
@@ -132,18 +134,23 @@ interface PatternState {
 }
 
 export default recipe<PatternState>("Await in Handlers Test", (state) => {
-  // Use fetchData when fetchUrl is set
+  // Build URL reactively from trigger - uses local /_health endpoint with delay
+  const fetchUrl = derive(state.fetchTrigger, (trigger) =>
+    trigger ? `/_health?delay=3000&_=${trigger}` : "",
+  );
+
+  // fetchData runs in the reactive layer - doesn't block the handler
   const fetchDataResult = fetchData<Record<string, unknown>>({
-    url: state.fetchUrl || "",
+    url: fetchUrl,
     mode: "json",
   });
 
   const fetchStatus = derive(
-    [fetchDataResult.pending, fetchDataResult.error, state.fetchUrl],
-    ([pending, error, url]) => {
+    [fetchDataResult.pending, fetchDataResult.error, state.fetchTrigger],
+    ([pending, error, trigger]) => {
       if (pending) return "Fetching...";
       if (error) return "Error";
-      if (url) return "Completed";
+      if (trigger) return "Completed";
       return "Ready";
     },
   );
@@ -152,7 +159,7 @@ export default recipe<PatternState>("Await in Handlers Test", (state) => {
     [fetchDataResult.error, fetchDataResult.result, state.fetchCount],
     ([error, result, count]) => {
       if (error) return String(error);
-      if (result) return `Completed after ~3000ms (${count} triggers)`;
+      if (result) return `Fetched successfully (${count} triggers)`;
       return "(none)";
     },
   );
@@ -163,20 +170,29 @@ export default recipe<PatternState>("Await in Handlers Test", (state) => {
       <div style="padding: 20px; font-family: system-ui;">
         <h2>Test: Does await Block UI in Handlers?</h2>
 
+        {/* All buttons together for quick clicking */}
         <div style="background: #f0f0f0; padding: 15px; margin: 20px 0; border-radius: 8px;">
-          <h3>Interactive Counter (Test UI Responsiveness)</h3>
-          <p style="margin: 10px 0;">
-            Click this counter WHILE an operation is running to test if UI is
-            blocked:
-          </p>
-          <div style="display: flex; align-items: center; gap: 15px;">
-            <ct-button id="increment-counter" onClick={incrementCounter(state)}>
-              Click Me! (Counter: {state.counter})
+          <h3 style="margin-top: 0;">Test Buttons (click test, then spam counter)</h3>
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <ct-button id="test-with-await" onClick={testWithAwait(state)}>
+              WITH await (3s)
             </ct-button>
-            <span style="font-size: 14px; color: #666;">
-              If blocked, this button won't respond during operations
-            </span>
+            <ct-button
+              id="test-without-await"
+              onClick={testWithoutAwait(state)}
+            >
+              WITHOUT await (3s)
+            </ct-button>
+            <ct-button id="increment-counter" onClick={incrementCounter(state)}>
+              Counter: {state.counter}
+            </ct-button>
+            <ct-button id="reset-all" onClick={resetAll(state)}>
+              Reset
+            </ct-button>
           </div>
+          <p style="margin: 10px 0 0 0; font-size: 13px; color: #666;">
+            Click a test button, then immediately spam the Counter button to test responsiveness
+          </p>
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">
@@ -184,10 +200,6 @@ export default recipe<PatternState>("Await in Handlers Test", (state) => {
             <h3 style="margin-top: 0; color: #ff6b6b;">
               Test 1: WITH await (Supposedly Bad)
             </h3>
-
-            <ct-button id="test-with-await" onClick={testWithAwait(state)}>
-              Test WITH await (3s delay)
-            </ct-button>
 
             <div style="margin: 15px 0;">
               <div style="margin: 8px 0;">
@@ -211,9 +223,7 @@ export default recipe<PatternState>("Await in Handlers Test", (state) => {
             </div>
 
             <div style="background: #fff3cd; padding: 10px; border-radius: 4px; font-size: 13px; margin-top: 10px;">
-              <strong>Test:</strong> Click the button, then immediately try to
-              increment the counter above. Can you click it while "Awaiting..."
-              is displayed?
+              <strong>Expected:</strong> Counter button unresponsive while "Awaiting..."
             </div>
           </div>
 
@@ -221,13 +231,6 @@ export default recipe<PatternState>("Await in Handlers Test", (state) => {
             <h3 style="margin-top: 0; color: #4CAF50;">
               Test 2: WITHOUT await (Supposedly Good)
             </h3>
-
-            <ct-button
-              id="test-with-fetchdata"
-              onClick={testWithFetchData(state)}
-            >
-              Test WITHOUT await (3s delay)
-            </ct-button>
 
             <div style="margin: 15px 0;">
               <div style="margin: 8px 0;">
@@ -251,17 +254,9 @@ export default recipe<PatternState>("Await in Handlers Test", (state) => {
             </div>
 
             <div style="background: #d4edda; padding: 10px; border-radius: 4px; font-size: 13px; margin-top: 10px;">
-              <strong>Test:</strong> Click the button, then immediately try to
-              increment the counter above. Can you click it while "Fetching..."
-              is displayed?
+              <strong>Expected:</strong> Counter button works while "Fetching..."
             </div>
           </div>
-        </div>
-
-        <div style="margin: 20px 0;">
-          <ct-button id="reset-all" onClick={resetAll(state)}>
-            Reset All
-          </ct-button>
         </div>
 
         <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 20px 0;">
