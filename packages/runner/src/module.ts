@@ -3,10 +3,10 @@ import { Module, type ModuleFactory } from "./builder/types.ts";
 import type { Cell } from "./cell.ts";
 import type { Action } from "./scheduler.ts";
 import type { AddCancel } from "./cancel.ts";
-import type { IModuleRegistry, Runtime } from "./runtime.ts";
+import type { Runtime } from "./runtime.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 
-export class ModuleRegistry implements IModuleRegistry {
+export class ModuleRegistry {
   private moduleMap = new Map<string, Module>();
   readonly runtime: Runtime;
 

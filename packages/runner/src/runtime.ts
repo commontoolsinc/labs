@@ -12,9 +12,8 @@ import type {
   Recipe,
   Schema,
 } from "./builder/types.ts";
-import type { RecipeEnvironment } from "./builder/env.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { setRecipeEnvironment } from "./builder/env.ts";
+import { RecipeEnvironment, setRecipeEnvironment } from "./builder/env.ts";
 import type {
   CommitError,
   DID,
@@ -24,26 +23,18 @@ import type {
   MemorySpace,
 } from "./storage/interface.ts";
 import { type Cell, createCell } from "./cell.ts";
-import { createRef, type EntityId } from "./create-ref.ts";
-import type { Cancel } from "./cancel.ts";
-import {
-  type Action,
-  type EventHandler,
-  type ReactivityLog,
-  Scheduler,
-} from "./scheduler.ts";
-import type { RuntimeProgram } from "./harness/types.ts";
+import { createRef, EntityId } from "./create-ref.ts";
+import { Action, Scheduler } from "./scheduler.ts";
 import { Engine } from "./harness/index.ts";
-import { ConsoleMethod } from "./harness/console.ts";
 import {
-  type CellLink,
+  CellLink,
   isLink,
   isNormalizedFullLink,
   type NormalizedFullLink,
-  type NormalizedLink,
+  NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
-import { RecipeManager, RecipeMeta } from "./recipe-manager.ts";
+import { RecipeManager } from "./recipe-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
@@ -52,6 +43,7 @@ import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commontools/utils/env";
 import { popFrame, pushFrame } from "./builder/recipe.ts";
 import type { Frame } from "./builder/types.ts";
+import type { ConsoleMessage } from "./interface.ts";
 
 // @ts-ignore - This is temporary to debug integration test
 Error.stackTraceLimit = 500;
@@ -59,6 +51,10 @@ Error.stackTraceLimit = 500;
 export const DEFAULT_MAX_RETRIES = 5;
 
 export type { IExtendedStorageTransaction, IStorageProvider, MemorySpace };
+
+export type ConsoleHandler = (
+  message: ConsoleMessage,
+) => any[];
 
 export type ErrorWithContext = Error & {
   action: Action;
@@ -68,36 +64,8 @@ export type ErrorWithContext = Error & {
   spellId: string | undefined;
 };
 
-export type ConsoleHandler = (
-  metadata: { charmId?: string; recipeId?: string; space?: string } | undefined,
-  method: ConsoleMethod,
-  args: any[],
-) => any[];
 export type ErrorHandler = (error: ErrorWithContext) => void;
-
 export type NavigateCallback = (target: Cell<any>) => void;
-
-export interface CharmMetadata {
-  name?: string;
-  description?: string;
-  version?: string;
-  [key: string]: any;
-}
-
-export interface SpaceCellContents {
-  allCharms: Cell<never>[];
-  recentCharms: Cell<never>[];
-  defaultPattern: Cell<never>;
-}
-
-/**
- * Contents of the home space cell (where space DID = user identity DID).
- * Home space contains user-specific data like favorites that persists across all spaces.
- * See docs/common/HOME_SPACE.md for more details.
- */
-export interface HomeSpaceCellContents extends SpaceCellContents {
-  favorites: Cell<{ cell: Cell<unknown>; tag: string }[]>;
-}
 
 export interface RuntimeOptions {
   apiUrl: URL;
@@ -154,225 +122,19 @@ export const homeSpaceCellSchema: JSONSchema = {
   },
 } as JSONSchema;
 
-export interface IRuntime {
-  idle(): Promise<void>;
-  dispose(): Promise<void>;
-
-  // Storage transaction method
-  edit(): IExtendedStorageTransaction;
-  editWithRetry<T = void>(
-    fn: (tx: IExtendedStorageTransaction) => T,
-    maxRetries?: number,
-  ): Promise<
-    { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
-  >;
-  readTx(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction;
-
-  // Cell factory methods
-  getCell<S extends JSONSchema = JSONSchema>(
-    space: MemorySpace,
-    cause: any,
-    schema: S,
-    tx?: IExtendedStorageTransaction,
-  ): Cell<Schema<S>>;
-  getCell<T>(
-    space: MemorySpace,
-    cause: any,
-    schema?: JSONSchema,
-    tx?: IExtendedStorageTransaction,
-  ): Cell<T>;
-
-  // Cell factory methods
-  getSpaceCell<T = SpaceCellContents>(
-    space: MemorySpace,
-    schema?: undefined,
-    tx?: IExtendedStorageTransaction,
-  ): Cell<T>;
-  getSpaceCell<S extends JSONSchema = JSONSchema>(
-    space: MemorySpace,
-    schema: S,
-    tx?: IExtendedStorageTransaction,
-  ): Cell<Schema<S>>;
-  getSpaceCell<T>(
-    space: MemorySpace,
-    schema?: JSONSchema,
-    tx?: IExtendedStorageTransaction,
-  ): Cell<T>;
-
-  getCellFromEntityId<S extends JSONSchema = JSONSchema>(
-    space: MemorySpace,
-    entityId: EntityId,
-    path: readonly PropertyKey[],
-    schema: S,
-    tx?: IExtendedStorageTransaction,
-  ): Cell<Schema<S>>;
-  getCellFromEntityId<T>(
-    space: MemorySpace,
-    entityId: EntityId,
-    path?: readonly PropertyKey[],
-    schema?: JSONSchema,
-    tx?: IExtendedStorageTransaction,
-  ): Cell<T>;
-
-  getCellFromLink<S extends JSONSchema = JSONSchema>(
-    cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
-    schema: S,
-    tx?: IExtendedStorageTransaction,
-  ): Cell<Schema<S>>;
-  getCellFromLink<T>(
-    cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
-    schema?: JSONSchema,
-    tx?: IExtendedStorageTransaction,
-  ): Cell<T>;
-
-  getImmutableCell<S extends JSONSchema = JSONSchema>(
-    space: MemorySpace,
-    data: any,
-    schema: S,
-    tx?: IExtendedStorageTransaction,
-  ): Cell<Schema<S>>;
-  getImmutableCell<T>(
-    space: MemorySpace,
-    data: T,
-    schema?: JSONSchema,
-    tx?: IExtendedStorageTransaction,
-  ): Cell<T>;
-
-  // Home space helper (space where space DID = user identity DID)
-  getHomeSpaceCell(
-    tx?: IExtendedStorageTransaction,
-  ): Cell<HomeSpaceCellContents>;
-
-  // Convenience methods that delegate to the runner
-  setup<T, R>(
-    tx: IExtendedStorageTransaction,
-    recipeFactory: NodeFactory<T, R>,
-    argument: T,
-    resultCell: Cell<R>,
-  ): Promise<Cell<R>>;
-  setup<T, R = any>(
-    tx: IExtendedStorageTransaction | undefined,
-    recipe: Recipe | Module | undefined,
-    argument: T,
-    resultCell: Cell<R>,
-  ): Promise<Cell<R>>;
-  run<T, R>(
-    tx: IExtendedStorageTransaction,
-    recipeFactory: NodeFactory<T, R>,
-    argument: T,
-    resultCell: Cell<R>,
-  ): Cell<R>;
-  run<T, R = any>(
-    tx: IExtendedStorageTransaction | undefined,
-    recipe: Recipe | Module | undefined,
-    argument: T,
-    resultCell: Cell<R>,
-  ): Cell<R>;
-  runSynced(
-    resultCell: Cell<any>,
-    recipe: Recipe | Module,
-    inputs?: any,
-  ): any;
-  start<T = any>(resultCell: Cell<T>): void;
+export interface SpaceCellContents {
+  allCharms: Cell<never>[];
+  recentCharms: Cell<never>[];
+  defaultPattern: Cell<never>;
 }
 
-export interface IScheduler {
-  readonly runtime: Runtime;
-  idle(): Promise<void>;
-  subscribe(
-    action: Action,
-    log: ReactivityLog,
-    scheduleImmediately?: boolean,
-  ): Cancel;
-  unsubscribe(action: Action): void;
-  onConsole(fn: ConsoleHandler): void;
-  onError(fn: ErrorHandler): void;
-  queueEvent(
-    eventRef: NormalizedFullLink,
-    event: any,
-    retries?: number,
-    onCommit?: (tx: IExtendedStorageTransaction) => void,
-  ): void;
-  addEventHandler(handler: EventHandler, ref: NormalizedFullLink): Cancel;
-  runningPromise: Promise<unknown> | undefined;
-}
-
-export interface IRecipeManager {
-  readonly runtime: Runtime;
-  recipeById(id: string): any;
-  registerRecipe(recipe: any, src?: string | RuntimeProgram): string;
-  loadRecipe(
-    id: string,
-    space?: MemorySpace,
-    tx?: IExtendedStorageTransaction,
-  ): Promise<Recipe>;
-  compileRecipe(input: string | RuntimeProgram): Promise<Recipe>;
-  loadRecipeMeta(recipeId: string, space: MemorySpace): Promise<RecipeMeta>;
-  getRecipeMeta(input: any): RecipeMeta;
-  saveRecipe(
-    params: {
-      recipeId: string;
-      space: MemorySpace;
-    },
-    tx?: IExtendedStorageTransaction,
-  ): boolean;
-  saveAndSyncRecipe(
-    params: {
-      recipeId: string;
-      space: MemorySpace;
-    },
-    tx?: IExtendedStorageTransaction,
-  ): Promise<void>;
-  setRecipeMetaFields(
-    recipeId: string,
-    fields: Partial<RecipeMeta>,
-  ): Promise<void>;
-}
-
-export interface IModuleRegistry {
-  readonly runtime: Runtime;
-  addModuleByRef(ref: string, module: Module): void;
-  getModule(ref: string): Module;
-  clear(): void;
-}
-
-export interface IRunner {
-  readonly runtime: Runtime;
-
-  setup<T, R>(
-    tx: IExtendedStorageTransaction | undefined,
-    recipeFactory: NodeFactory<T, R>,
-    argument: T,
-    resultCell: Cell<R>,
-  ): Promise<Cell<R>>;
-  setup<T, R = any>(
-    tx: IExtendedStorageTransaction | undefined,
-    recipe: Recipe | Module | undefined,
-    argument: T,
-    resultCell: Cell<R>,
-  ): Promise<Cell<R>>;
-
-  run<T, R>(
-    tx: IExtendedStorageTransaction | undefined,
-    recipeFactory: NodeFactory<T, R>,
-    argument: T,
-    resultCell: Cell<R>,
-  ): Cell<R>;
-  run<T, R = any>(
-    tx: IExtendedStorageTransaction | undefined,
-    recipe: Recipe | Module | undefined,
-    argument: T,
-    resultCell: Cell<R>,
-  ): Cell<R>;
-
-  runSynced(
-    resultCell: Cell<any>,
-    recipe: Recipe | Module,
-    inputs?: any,
-  ): any;
-  start<T = any>(resultCell: Cell<T>): void;
-  stop<T>(resultCell: Cell<T>): void;
-  stopAll(): void;
+/**
+ * Contents of the home space cell (where space DID = user identity DID).
+ * Home space contains user-specific data like favorites that persists across all spaces.
+ * See docs/common/HOME_SPACE.md for more details.
+ */
+export interface HomeSpaceCellContents extends SpaceCellContents {
+  favorites: Cell<{ cell: Cell<unknown>; tag: string }[]>;
 }
 
 /**
@@ -395,13 +157,13 @@ export interface IRunner {
  * const recipe = await runtime.recipeManager.compileRecipe(source);
  * ```
  */
-export class Runtime implements IRuntime {
+export class Runtime {
   readonly id: string;
-  readonly scheduler: IScheduler;
-  readonly recipeManager: IRecipeManager;
-  readonly moduleRegistry: IModuleRegistry;
+  readonly scheduler: Scheduler;
+  readonly recipeManager: RecipeManager;
+  readonly moduleRegistry: ModuleRegistry;
   readonly harness: Engine;
-  readonly runner: IRunner;
+  readonly runner: Runner;
   readonly navigateCallback?: NavigateCallback;
   readonly cfc: ContextualFlowControl;
   readonly staticCache: StaticCache;
