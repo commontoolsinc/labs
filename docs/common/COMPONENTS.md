@@ -1,3 +1,5 @@
+<!-- @reviewed 2025-12-10 docs-rationalization -->
+
 # ct-button
 
 A styled button component matching the regular `button` API. You can use inline handlers or the `handler()` function.
@@ -59,7 +61,7 @@ const MyPattern = pattern<Input>(({ count }) => {
 
 Notice how handlers are bound to the cell from the input schema _in_ the VDOM declaration? That's partial application of the state, the rest of the state (the actual event) comes through as the (unused) `_event` in the handler. This way you can merge the discrete updates from events with the reactive cells that are always changing values.
 
-(For even more detail, see `HANDLERS.md`)
+(For more on when to use handlers vs bidirectional binding, see `PATTERNS.md`)
 
 ## Bidirectional Binding with $ Prefix
 
@@ -192,6 +194,62 @@ const validatedValue = computed(() => {
 ```
 
 This approach separates concerns: bidirectional binding handles the UI sync, while computed handles validation logic.
+
+## Removing Items from Arrays with Cell.equals()
+
+When removing items from an array, you need to find the item's index. **Do not compare cells directly** - use `Cell.equals()` for correct identity comparison:
+
+```tsx
+import { Cell, handler, OpaqueRef } from "commontools";
+
+interface Item {
+  title: string;
+  done: boolean;
+}
+
+// Handler to remove an item from a list
+const removeItem = handler<
+  unknown,
+  { items: Cell<Item[]>; item: OpaqueRef<Item> }
+>((_event, { items, item }) => {
+  const current = items.get();
+  const index = current.findIndex((el) => Cell.equals(item, el));
+  if (index >= 0) {
+    items.set(current.toSpliced(index, 1));
+  }
+});
+
+// Usage in UI
+{items.map((item) => (
+  <div>
+    <span>{item.title}</span>
+    <ct-button onClick={removeItem({ items, item })}>Remove</ct-button>
+  </div>
+))}
+```
+
+### Why Cell.equals()?
+
+When you `.map()` over an array, each item becomes an `OpaqueRef<Item>`. These references have internal identity that simple `===` comparison won't match correctly. `Cell.equals()` compares the underlying cell identity:
+
+```tsx
+// ❌ WRONG - Direct comparison doesn't work reliably
+const index = current.findIndex((el) => el === item);
+
+// ✅ CORRECT - Cell.equals() compares cell identity
+const index = current.findIndex((el) => Cell.equals(item, el));
+```
+
+### Alternative: Instance .equals() Method
+
+When your array is typed as `Cell<Array<Cell<Item>>>` (cells of cells), items have an instance `.equals()` method:
+
+```tsx
+// With Cell<Array<Cell<Item>>> typing
+const index = current.findIndex((el) => el.equals(item));
+```
+
+See `packages/patterns/todo-list.tsx` and `packages/patterns/list-operations.tsx` for complete working examples.
 
 ## Styling: String vs Object Syntax
 
@@ -437,7 +495,7 @@ type ListSchema = { items: Cell<CtListItem[]> };
 const MyPattern = pattern(({ items }: ListSchema) => {
   return {
     [UI]: <div>
-      <ct-list $items={items} editable={false} />
+      <ct-list $value={items} editable={false} />
     </div>,
     items,
   };
@@ -514,7 +572,7 @@ This example also demonstrates verbose specification of more complex types.
 ```tsx
 import {
   h,
-  derive,
+  computed,
   handler,
   ifElse,
   NAME,

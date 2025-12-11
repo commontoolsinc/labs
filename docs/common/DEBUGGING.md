@@ -1,3 +1,5 @@
+<!-- @reviewed 2025-12-10 docs-rationalization -->
+
 # Pattern Debugging Guide
 
 This guide consolidates common errors, debugging workflows, and troubleshooting tips for CommonTools pattern development.
@@ -417,6 +419,97 @@ export default pattern(({ item }) => {
 
 **Rule:** `generateText()` and `generateObject()` can only be called from pattern bodies, not handlers or `computed()`. See [LLM.md](LLM.md) for usage details.
 
+### Handler Defined Inside Pattern Function
+
+**Error:** Subtle reactivity bugs, stale values in handlers
+
+❌ **Problem:** Handlers defined inside the pattern can close over stale reactive values
+
+```typescript
+export const pattern = ({ items }) => {
+  const count = computed(() => items.get().length);
+
+  // ❌ DANGEROUS: Defined inside pattern, may capture stale `count`
+  const handleAdd = handler((_, { items }) => {
+    console.log("Count was:", count.get()); // May be stale!
+    items.push("new");
+  });
+
+  return <button onClick={handleAdd({ items })}>Add</button>;
+};
+```
+
+✅ **Solution:** Define handlers OUTSIDE the pattern function
+
+```typescript
+// ✅ CORRECT: Handler defined outside, cannot close over reactive values
+const handleAdd = handler<unknown, { items: Cell<string[]> }>(
+  (_, { items }) => {
+    items.push("new");
+  }
+);
+
+export default pattern(({ items }) => {
+  const count = computed(() => items.get().length);
+
+  return (
+    <div>
+      <span>Count: {count}</span>
+      <button onClick={handleAdd({ items })}>Add</button>
+    </div>
+  );
+});
+```
+
+**Rule:** Always define handlers outside the pattern function. They should only access what's explicitly passed via arguments.
+
+### Using await in Handlers
+
+**Error:** UI freezes, blocked interactions
+
+❌ **Problem:** Using `await` in handlers blocks the entire UI
+
+```typescript
+const handleFetch = handler(async (_, { url, result }) => {
+  const response = await fetch(url.get());  // BLOCKS UI!
+  const data = await response.json();        // BLOCKS UI!
+  result.set(data);
+});
+```
+
+✅ **Solution:** Use `fetchData` for async operations
+
+```typescript
+export default pattern(({ searchQuery }) => {
+  // Async fetch is reactive - doesn't block
+  const searchUrl = computed(() =>
+    searchQuery.get() ? `/api/search?q=${encodeURIComponent(searchQuery.get())}` : ""
+  );
+  const { result, error, loading } = fetchData({ url: searchUrl });
+
+  // Handler just triggers fetch by changing the query
+  const handleSearch = handler<
+    { detail: { message: string } },
+    { searchQuery: Cell<string> }
+  >(({ detail }, { searchQuery }) => {
+    searchQuery.set(detail.message);
+  });
+
+  return {
+    [UI]: (
+      <div>
+        {loading && <span>Loading...</span>}
+        {error && <span>Error: {error}</span>}
+        {result && <Results data={result} />}
+        <ct-message-input onct-send={handleSearch({ searchQuery })} />
+      </div>
+    ),
+  };
+});
+```
+
+**Rule:** Handlers should be synchronous state changes. Use `fetchData` for async operations. The framework will eventually disallow `await` in handlers.
+
 ### Using if Statements in Data Transformations
 
 **Error:** Conditional logic doesn't work in transformations
@@ -466,7 +559,15 @@ Match your error to the relevant guide:
 - **Component questions** → [COMPONENTS.md](COMPONENTS.md)
 - **Pattern examples** → [PATTERNS.md](PATTERNS.md)
 
-### Step 3: Inspect Deployed Charm
+### Step 3: Debug Intermediate Values
+
+For debugging intermediate cell values without flooding the console:
+
+- **Use `<ct-cell-context>`** - See [CELL_CONTEXT.md](CELL_CONTEXT.md) for on-demand inspection
+- Hold **Alt** and hover over a cell context region to access debugging toolbar
+- Better than `console.log` because inspection is conditional (watch/unwatch on demand)
+
+### Step 4: Inspect Deployed Charm
 
 If code compiles but doesn't work as expected:
 

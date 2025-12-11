@@ -1,3 +1,5 @@
+<!-- @reviewed 2025-12-10 docs-rationalization -->
+
 # Charm Linking Guide for CommonTools Patterns
 
 ## Overview
@@ -215,145 +217,15 @@ Both charms appear in the space. Changes to the source charm's data automaticall
 
 ## Part 4: Complete Working Example
 
-### Source Charm: `gpa-stats-source.tsx`
+Working examples are available in the patterns directory:
 
-```typescript
-/// <cts-enable />
-import { Cell, Default, NAME, pattern, UI, lift, handler } from "commontools";
+- **Source Charm**: [`packages/patterns/gpa-stats-source.tsx`](../../packages/patterns/gpa-stats-source.tsx)
+- **Consumer Charm**: [`packages/patterns/gpa-stats-reader.tsx`](../../packages/patterns/gpa-stats-reader.tsx)
 
-interface Stats {
-  average: number;
-  count: number;
-  min: number;
-  max: number;
-}
-
-/** GPA Stats Source */
-interface Input {
-  name: Default<string, "gpa-source-v1">;
-  rawData: Default<string, "">;
-}
-
-interface Output {
-  name: string;
-  rawData: string;
-  gpaStats: Stats | null;
-}
-
-const parseGpas = lift((raw: string): number[] => {
-  if (!raw.trim()) return [];
-  return raw.split("\n")
-    .map(line => parseFloat(line.trim()))
-    .filter(n => !isNaN(n));
-});
-
-const calculateStats = lift((values: number[]): Stats | null => {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const sum = sorted.reduce((a, b) => a + b, 0);
-  return {
-    average: sum / sorted.length,
-    count: sorted.length,
-    min: sorted[0],
-    max: sorted[sorted.length - 1],
-  };
-});
-
-const updateData = handler<
-  { target: { value: string } },
-  { rawData: Cell<string> }
->((event, { rawData }) => {
-  rawData.set(event.target.value);
-});
-
-export default pattern<Input, Output>(({ name, rawData }) => {
-  const gpas = parseGpas(rawData);
-  const gpaStats = calculateStats(gpas);
-
-  return {
-    [NAME]: "GPA Source",
-    [UI]: (
-      <div style={{ padding: "16px" }}>
-        <h2>GPA Data Entry</h2>
-        <textarea
-          value={rawData}
-          onChange={updateData({ rawData })}
-          placeholder="Enter GPAs, one per line..."
-          rows={8}
-          style={{ width: "100%", fontFamily: "monospace" }}
-        />
-      </div>
-    ),
-    name,
-    rawData,
-    gpaStats,  // Exposed for linking
-  };
-});
-```
-
-### Consumer Charm: `gpa-stats-reader.tsx`
-
-```typescript
-/// <cts-enable />
-import { Default, NAME, pattern, UI, lift } from "commontools";
-
-interface Stats {
-  average: number;
-  count: number;
-  min: number;
-  max: number;
-}
-
-/** GPA Stats Reader */
-interface Input {
-  name: Default<string, "gpa-reader-v1">;
-  gpaStats: Default<Stats | null, null>;
-}
-
-const fmt = lift((n: number | undefined) =>
-  n !== undefined ? n.toFixed(2) : "—"
-);
-const getAvg = lift((s: Stats | null) => s?.average);
-const getMin = lift((s: Stats | null) => s?.min);
-const getMax = lift((s: Stats | null) => s?.max);
-const getCount = lift((s: Stats | null) => s?.count ?? 0);
-
-export default pattern<Input, Input>(({ name, gpaStats }) => {
-  return {
-    [NAME]: "GPA Reader",
-    [UI]: (
-      <div style={{ padding: "16px", background: "#f0f8ff" }}>
-        <h2>GPA Statistics (Linked)</h2>
-        <table>
-          <tbody>
-            <tr>
-              <td><strong>Count:</strong></td>
-              <td>{getCount(gpaStats)}</td>
-            </tr>
-            <tr>
-              <td><strong>Average:</strong></td>
-              <td>{fmt(getAvg(gpaStats))}</td>
-            </tr>
-            <tr>
-              <td><strong>Min:</strong></td>
-              <td>{fmt(getMin(gpaStats))}</td>
-            </tr>
-            <tr>
-              <td><strong>Max:</strong></td>
-              <td>{fmt(getMax(gpaStats))}</td>
-            </tr>
-          </tbody>
-        </table>
-        <p style={{ fontSize: "12px", color: "#666", marginTop: "16px" }}>
-          Data updates automatically when source changes.
-        </p>
-      </div>
-    ),
-    name,
-    gpaStats,
-  };
-});
-```
+These patterns demonstrate:
+- Source charm exposing computed `gpaStats` for linking
+- Consumer charm receiving linked data via `Default<Stats | null, null>`
+- Reactive updates flowing automatically when source data changes
 
 ### Deployment Script
 

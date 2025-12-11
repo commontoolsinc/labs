@@ -1,3 +1,5 @@
+<!-- @reviewed 2025-12-10 docs-rationalization -->
+
 # Pattern Development & Deployment Guide
 
 This guide covers building, debugging, and deploying patterns using the CommonTools framework.
@@ -91,7 +93,7 @@ See [DEBUGGING.md](DEBUGGING.md) for comprehensive debugging guide with quick er
 
 - DOM access (use cells instead)
 - Conditionals in JSX (use `ifElse()`)
-- Calling `llm()` from handlers (only works in pattern body)
+- Calling `generateText()`/`generateObject()` from handlers (only works in pattern body)
 
 **Reactivity Issues:**
 

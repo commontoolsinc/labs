@@ -1,3 +1,5 @@
+<!-- @reviewed 2025-12-10 docs-rationalization -->
+
 # Types and Schemas Guide
 
 This guide explains CommonTools' type system, including when to use `Cell<>`,

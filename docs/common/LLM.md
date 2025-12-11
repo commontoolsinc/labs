@@ -1,3 +1,5 @@
+<!-- @reviewed 2025-12-10 docs-rationalization -->
+
 # LLM Integration Guide
 
 This guide covers using language models within CommonTools patterns with `generateText` and `generateObject`.
@@ -231,6 +233,22 @@ generateObject<T>({
 ```
 
 **Note:** No `schema` parameter needed! The schema is inferred from the type parameter `<T>`.
+
+### How Schema Inference Works
+
+The `/// <cts-enable />` directive at the top of your file enables the CommonTools TypeScript transformer. When you write:
+
+```typescript
+generateObject<ProductIdea>({ prompt: "..." })
+```
+
+The transformer automatically injects the schema parameter at compile-time:
+
+```typescript
+generateObject<ProductIdea>({ prompt: "...", schema: { type: "object", properties: { ... } } })
+```
+
+**If you get a "schema is required" error**, check that your file starts with `/// <cts-enable />`.
 
 ### Example: Contact Extractor
 
