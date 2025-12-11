@@ -56,6 +56,38 @@ alias ct="deno task ct"
 
 ## Prerequisites and Setup
 
+### Local Development Servers
+
+For local development, use the scripts in `scripts/`:
+
+```bash
+# Start both servers (backend + frontend)
+./scripts/start-local-dev.sh
+
+# Stop servers
+./scripts/stop-local-dev.sh
+
+# Restart (with optional cache clear)
+./scripts/restart-local-dev.sh
+./scripts/restart-local-dev.sh --clear-cache
+./scripts/restart-local-dev.sh --force  # Kill existing processes first
+```
+
+**Local URLs:**
+- **Backend API**: `http://localhost:8000` (use with `-a` flag)
+- **Frontend/Shell**: `http://localhost:5173` (access spaces in browser)
+- **Logs**: `packages/shell/local-dev-shell.log`, `packages/toolshed/local-dev-toolshed.log`
+
+**Example local deployment:**
+```bash
+deno task ct charm new path/to/pattern.tsx \
+  -i claude.key -a http://localhost:8000 -s my-space
+
+# Then open: http://localhost:5173/my-space
+```
+
+See `docs/common/LOCAL_DEV_SERVERS.md` for detailed troubleshooting.
+
 ### Identity Management
 
 Check for existing identity:
