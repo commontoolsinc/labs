@@ -226,6 +226,68 @@ function traverseAndSerialize(
 }
 
 /**
+ * Simplified traversal for LLM documentation purposes.
+ * Unlike traverseAndSerialize, this doesn't do schema-guided traversal,
+ * making it much faster for large objects. It simply converts any cells
+ * to links and handles cycles.
+ *
+ * Use this for building context documentation where schema-guided
+ * "any" detection isn't critical.
+ */
+function traverseAndSerializeSimple(
+  value: unknown,
+  seen: Set<unknown> = new Set(),
+): unknown {
+  if (!isRecord(value)) return value;
+
+  // Turn cells into a link, unless they are data: URIs and traverse instead
+  if (isCell(value)) {
+    const link = value.resolveAsCell().getAsNormalizedFullLink();
+    if (link.id.startsWith("data:")) {
+      return traverseAndSerializeSimple(value.get(), seen);
+    } else {
+      return { "@link": encodeJsonPointer(["", link.id, ...link.path]) };
+    }
+  }
+
+  // Handle cycles - if we've seen this value, try to map to a cell link
+  if (seen.has(value)) {
+    if (isCellResultForDereferencing(value)) {
+      return traverseAndSerializeSimple(getCellOrThrow(value), seen);
+    } else {
+      throw new Error(
+        "Cannot serialize a value that has already been seen and cannot be mapped to a cell.",
+      );
+    }
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.map((v) => {
+      let result = traverseAndSerializeSimple(v, seen);
+      // Decorate array entries with links that point to underlying cells
+      if (isRecord(result) && isCellResultForDereferencing(v)) {
+        const link = getCellOrThrow(v).resolveAsCell()
+          .getAsNormalizedFullLink();
+        if (!link.id.startsWith("data:")) {
+          result = {
+            "@arrayEntry": encodeJsonPointer(["", link.id, ...link.path]),
+            ...result,
+          };
+        }
+      }
+      return result;
+    });
+  } else {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map((
+        [key, val],
+      ) => [key, traverseAndSerializeSimple(val, seen)]),
+    );
+  }
+}
+
+/**
  * Traverses a value and converts any of our LLM friendly JSON link object
  * format cells mentioned to actual cells.
  *
@@ -268,7 +330,35 @@ const resultSchema = {
     pending: { type: "boolean", default: false },
     addMessage: { ...LLMMessageSchema, asStream: true },
     cancelGeneration: { asStream: true },
-    flattenedTools: { type: "object", default: {} },
+    flattenedTools: {
+      type: "object",
+      additionalProperties: {
+        type: "object",
+        properties: {
+          description: { type: "string" },
+          inputSchema: { type: "object" },
+          handler: { asStream: true },
+          pattern: {
+            type: "object",
+            properties: {
+              argumentSchema: { type: "object" },
+              resultSchema: { type: "object" },
+            },
+            required: ["argumentSchema", "resultSchema"],
+          },
+          internal: {
+            type: "object",
+            properties: {
+              kind: { type: "string" },
+              path: { type: "array", items: { type: "string" } },
+              charmName: { type: "string" },
+              handle: { type: "string" },
+            },
+          },
+        },
+      },
+      default: {},
+    },
     pinnedCells: {
       type: "array",
       items: {
@@ -787,11 +877,8 @@ function buildAvailableCellsDocumentation(
 
         try {
           const value = resolvedCell.get();
-          const serialized = traverseAndSerialize(
-            value,
-            schemaInfo?.schema,
-            schemaInfo?.rootSchema,
-          );
+          // Use simplified traversal for LLM docs - much faster, no schema navigation
+          const serialized = traverseAndSerializeSimple(value);
 
           let valueJson = JSON.stringify(serialized, null, 2);
 
@@ -852,11 +939,8 @@ function buildAvailableCellsDocumentation(
       // Add current value
       try {
         const value = resolvedCell.get();
-        const serialized = traverseAndSerialize(
-          value,
-          schemaInfo?.schema,
-          schemaInfo?.rootSchema,
-        );
+        // Use simplified traversal for LLM docs - much faster, no schema navigation
+        const serialized = traverseAndSerializeSimple(value);
 
         let valueJson = JSON.stringify(serialized, null, 2);
 
@@ -1633,6 +1717,10 @@ export function llmDialog(
   let requestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
 
+  // Cache for flattenTools to avoid recomputation on every reactive tick
+  let previousToolsHash: string | undefined = undefined;
+  let cachedFlattenedTools: Record<string, any> | undefined = undefined;
+
   // This is called when the recipe containing this node is being stopped.
   addCancel(() => {
     // Abort the request if it's still pending.
@@ -1793,18 +1881,22 @@ export function llmDialog(
     // cell as it's the only way to get to requestId, here we are passing it
     // around on the side.
 
-    // Update flattened tools whenever tools change
+    // Update flattened tools only when tools actually change
     const toolsCell = inputs.key("tools");
-    // Ensure reactivity: register a read of tools with this tx
-    toolsCell.withTx(tx).get();
-    const flattened = flattenTools(toolsCell, runtime);
+    const tools = toolsCell.withTx(tx).get(); // Still reactive
 
-    // Only write if changed to avoid concurrent write conflicts
-    const currentFlattened = result.withTx(tx).key("flattenedTools").get();
-    const hasChanged = toolsHaveChanged(flattened, currentFlattened);
+    // Compute lightweight hash to detect changes (keys only, not full values)
+    const toolsHash = JSON.stringify(Object.keys(tools ?? {}).sort());
 
-    if (hasChanged) {
-      result.withTx(tx).key("flattenedTools").set(flattened as any);
+    if (toolsHash !== previousToolsHash || !cachedFlattenedTools) {
+      previousToolsHash = toolsHash;
+      cachedFlattenedTools = flattenTools(toolsCell, runtime);
+
+      // Only write if the output actually changed
+      const currentFlattened = result.withTx(tx).key("flattenedTools").get();
+      if (toolsHaveChanged(cachedFlattenedTools, currentFlattened)) {
+        result.withTx(tx).key("flattenedTools").set(cachedFlattenedTools as any);
+      }
     }
 
     // Update merged pinnedCells whenever context or internal pinnedCells change
