@@ -410,24 +410,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => (<div>
-                {__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["name"]
-                    }
-                },
-                required: ["item"]
-            } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { item: {
-                    name: item.name
-                } }, ({ item }) => __ctHelpers.when({
+                {__ctHelpers.when({
                 type: "string",
                 asOpaque: true
             } as const satisfies __ctHelpers.JSONSchema, {
@@ -596,7 +579,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                         }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, item.name, <span>{item.name}</span>))}
+            } as const satisfies __ctHelpers.JSONSchema, item.name, <span>{item.name}</span>)}
               </div>)), {})}
           </div>)}
       </div>),
