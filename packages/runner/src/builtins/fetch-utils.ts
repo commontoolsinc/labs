@@ -1,6 +1,6 @@
 import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
-import type { IRuntime } from "../runtime.ts";
+import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { JSONSchema, Schema } from "../builder/types.ts";
 
@@ -39,7 +39,7 @@ export function computeInputHash<T extends Record<string, any>>(
  * the invariant that result/error are undefined while pending.
  */
 export async function tryClaimMutex<T extends Record<string, any>>(
-  runtime: IRuntime,
+  runtime: Runtime,
   inputsCell: Cell<T>,
   pending: Cell<boolean>,
   _result: Cell<any>,
@@ -89,7 +89,7 @@ export async function tryClaimMutex<T extends Record<string, any>>(
  * to write the result as long as the inputs are still the same.
  */
 export async function tryWriteResult<T extends Record<string, any>>(
-  runtime: IRuntime,
+  runtime: Runtime,
   internal: Cell<Schema<typeof internalSchema>>,
   inputsCell: Cell<T>,
   expectedHash: string,

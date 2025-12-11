@@ -7,7 +7,7 @@ import {
   unsafe_originalRecipe,
 } from "./builder/types.ts";
 import { Cell } from "./cell.ts";
-import type { IRecipeManager, IRuntime, MemorySpace } from "./runtime.ts";
+import type { IRecipeManager, MemorySpace, Runtime } from "./runtime.ts";
 import { createRef } from "./create-ref.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
@@ -58,7 +58,7 @@ export class RecipeManager implements IRecipeManager {
   // Pending metadata set before the meta cell exists (e.g., spec, parents)
   private pendingMetaById = new Map<string, Partial<RecipeMeta>>();
 
-  constructor(readonly runtime: IRuntime) {}
+  constructor(readonly runtime: Runtime) {}
 
   private getRecipeMetaCell(
     { recipeId, space }: { recipeId: string; space: MemorySpace },
