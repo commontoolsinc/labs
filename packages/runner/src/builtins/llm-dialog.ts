@@ -131,6 +131,9 @@ function buildMinimalSchemaFromValue(charm: Cell<any>): JSONSchema | undefined {
   return undefined;
 }
 
+// Shared CFC instance for traverseAndSerialize - stateless after construction
+const sharedCFC = new ContextualFlowControl();
+
 /**
  * Traverses a value and serializes any cells mentioned to our LLM-friendly JSON
  * link object format.
@@ -184,12 +187,10 @@ function traverseAndSerialize(
   }
   seen.add(value);
 
-  const cfc = new ContextualFlowControl();
-
   if (Array.isArray(value)) {
     return value.map((v, index) => {
       const linkSchema = schema !== undefined
-        ? cfc.schemaAtPath(schema, [index.toString()], rootSchema)
+        ? sharedCFC.schemaAtPath(schema, [index.toString()], rootSchema)
         : undefined;
       let result = traverseAndSerialize(v, linkSchema, rootSchema, seen);
       // Decorate array entries with links that point to underlying cells, if
@@ -215,7 +216,7 @@ function traverseAndSerialize(
         traverseAndSerialize(
           value,
           schema !== undefined
-            ? cfc.schemaAtPath(schema, [key], rootSchema)
+            ? sharedCFC.schemaAtPath(schema, [key], rootSchema)
             : undefined,
           rootSchema,
           seen,
