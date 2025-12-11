@@ -24,20 +24,15 @@ import {
 } from "commontools";
 
 import ScrabbleGame, {
-  AllPlaced,
-  AllRacks,
   createTileBag,
   drawTilesFromBag,
-  GameEvent,
   getInitials,
   getRandomColor,
-  Letter,
   MAX_PLAYERS,
   parseAllPlacedJson,
   parseAllRacksJson,
   parseGameEventsJson,
   parsePlayersJson,
-  PlacedTile,
   Player,
 } from "./scrabble-game.tsx";
 

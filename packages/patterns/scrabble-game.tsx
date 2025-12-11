@@ -1151,7 +1151,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
 
     // Board version for forcing re-render (changes when boardJson length changes)
     // IMPORTANT: derive() may pass a Cell proxy instead of the value - need to unwrap
-    const boardVersion = derive(boardJson, (input: any) => {
+    const _boardVersion = derive(boardJson, (input: any) => {
       const actualInput =
         typeof input === "object" && input && typeof input.get === "function"
           ? input.get()
