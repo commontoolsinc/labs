@@ -39,6 +39,8 @@ describe("recipes with HTML", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
+    // Use push mode for HTML recipe tests
+    runtime.scheduler.disablePullMode();
 
     tx = runtime.edit();
 

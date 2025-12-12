@@ -42,6 +42,8 @@ describe("Recipe Runner", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
+    // Use push mode for recipe tests
+    runtime.scheduler.disablePullMode();
 
     tx = runtime.edit();
 

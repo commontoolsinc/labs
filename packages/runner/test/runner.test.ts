@@ -29,6 +29,8 @@ describe("runRecipe", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
+    // Use push mode for recipe tests
+    runtime.scheduler.disablePullMode();
   });
 
   afterEach(async () => {
@@ -806,6 +808,8 @@ describe("setup/start", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
+    // Use push mode for setup/start tests
+    runtime.scheduler.disablePullMode();
   });
 
   afterEach(async () => {
