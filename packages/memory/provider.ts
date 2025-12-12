@@ -771,59 +771,38 @@ class MemoryProviderSession<
     // TODO(ubik2,seefeld): Make this a per-session classification
     const classification = undefined;
 
-    // Queue of (docKey, schema) pairs to process
-    const pendingPairs: Array<{ docKey: string; schema: SchemaPathSelector }> =
-      [];
+    // Collect all unique docKeys that need to be fetched
+    // Start with the initially affected docs
+    const docsToFetch = new Set<string>(affectedDocs.map((d) => d.docKey));
 
-    // Initialize with affected docs and their schemas
+    // Evaluate each affected doc with each of its schemas
+    // evaluateDocumentLinks does a full traversal and finds all linked documents
     for (const { docKey, schemas } of affectedDocs) {
+      const { docId, docType } = this.parseDocKey(docKey);
+      if (docId === null) continue;
+
       for (const schema of schemas) {
-        pendingPairs.push({ docKey, schema });
+        const result = evaluateDocumentLinks(
+          spaceSession,
+          { id: docId, type: docType },
+          schema,
+          classification,
+          this.sharedSchemaTracker,
+        );
+        // Collect newly discovered docs to fetch
+        if (result !== null) {
+          for (const { docKey: newDocKey } of result.newLinks) {
+            docsToFetch.add(newDocKey);
+          }
+        }
       }
     }
 
-    // Process pending pairs - may grow as we discover new links
-    // Track processed (docKey, schema) pairs to avoid redundant work
-    const processedPairs = new Set<string>();
-    // Also track how many times each doc has been processed (regardless of schema)
-    // to detect growing path cycles like A -> A/foo -> A/foo/foo
-    const docProcessCount = new Map<string, number>();
-    const MAX_DOC_VISITS = 100; // Limit visits per doc to catch growing cycles
+    // Fetch each unique doc once and add to results
+    for (const docKey of docsToFetch) {
+      const { docId, docType } = this.parseDocKey(docKey);
+      if (docId === null) continue;
 
-    while (pendingPairs.length > 0) {
-      const { docKey, schema } = pendingPairs.pop()!;
-      const pairKey = `${docKey}|${JSON.stringify(schema)}`;
-
-      // Skip if already processed this exact pair
-      if (processedPairs.has(pairKey)) {
-        continue;
-      }
-      processedPairs.add(pairKey);
-
-      // Check if we've visited this doc too many times (growing path cycle)
-      const visitCount = (docProcessCount.get(docKey) ?? 0) + 1;
-      if (visitCount > MAX_DOC_VISITS) {
-        logger.warn(
-          "incremental-update-cycle",
-          () => [
-            `Document ${docKey} visited ${visitCount} times, possible growing path cycle`,
-          ],
-        );
-        continue;
-      }
-      docProcessCount.set(docKey, visitCount);
-
-      // Parse docKey back to id and type (format is "id/type" from BaseObjectManager.toKey)
-      // Note: type can contain slashes (e.g., "application/json"), so we split on the FIRST slash
-      // The id is always in the form "of:HASH" which doesn't contain slashes
-      const slashIndex = docKey.indexOf("/");
-      if (slashIndex === -1) {
-        continue;
-      }
-      const docId = docKey.slice(0, slashIndex);
-      const docType = docKey.slice(slashIndex + 1);
-
-      // Load the fact for this document to include in results
       const fact = selectFact(spaceSession, {
         of: docId as `${string}:${string}`,
         the: docType as `${string}/${string}`,
@@ -842,25 +821,23 @@ class MemoryProviderSession<
         is: fact.is,
         since: fact.since,
       });
-
-      // Evaluate this document with the schema to find its current links
-      // Pass sharedSchemaTracker - it will be mutated with newly discovered links,
-      // and will skip traversing into already-tracked (doc, schema) pairs
-      evaluateDocumentLinks(
-        spaceSession,
-        { id: docId, type: docType },
-        schema,
-        classification,
-        this.sharedSchemaTracker,
-      );
-      // Note: evaluateDocumentLinks adds new links to sharedSchemaTracker.
-      // We don't need to explicitly add them to pendingPairs here because
-      // the early termination in loadFactsForDoc means we won't re-traverse
-      // already-tracked docs. The sharedSchemaTracker itself becomes the
-      // source of truth for what needs incremental updates on future commits.
     }
 
     return { newFacts };
+  }
+
+  /** Parse docKey (format "id/type") back to id and type */
+  private parseDocKey(docKey: string): { docId: string | null; docType: string } {
+    // Note: type can contain slashes (e.g., "application/json"), so we split on the FIRST slash
+    // The id is always in the form "of:HASH" which doesn't contain slashes
+    const slashIndex = docKey.indexOf("/");
+    if (slashIndex === -1) {
+      return { docId: null, docType: "" };
+    }
+    return {
+      docId: docKey.slice(0, slashIndex),
+      docType: docKey.slice(slashIndex + 1),
+    };
   }
 
   private async getAcl(space: MemorySpace): Promise<ACL | undefined> {

@@ -568,8 +568,9 @@ export function loadSource<S extends BaseMemoryAddress>(
   valueEntry: IAttestation,
   cycleCheck: Set<string> = new Set<string>(),
   schemaTracker: MapSet<string, SchemaPathSelector>,
+  newLinks?: Array<{ docKey: string; schema: SchemaPathSelector }>,
 ) {
-  loadLinkedRecipe(manager, valueEntry, schemaTracker);
+  loadLinkedRecipe(manager, valueEntry, schemaTracker, newLinks);
   if (!isObject(valueEntry.value)) {
     return;
   }
@@ -600,9 +601,15 @@ export function loadSource<S extends BaseMemoryAddress>(
     return;
   }
   if (schemaTracker !== undefined) {
-    schemaTracker.add(manager.toKey(address), MinimalSchemaSelector);
+    const docKey = manager.toKey(address);
+    if (!schemaTracker.hasValue(docKey, MinimalSchemaSelector)) {
+      schemaTracker.add(docKey, MinimalSchemaSelector);
+      if (newLinks !== undefined) {
+        newLinks.push({ docKey, schema: MinimalSchemaSelector });
+      }
+    }
   }
-  loadSource(manager, entry, cycleCheck, schemaTracker);
+  loadSource(manager, entry, cycleCheck, schemaTracker, newLinks);
 }
 
 // Load the linked recipe from the doc ()
@@ -611,6 +618,7 @@ function loadLinkedRecipe<S extends BaseMemoryAddress>(
   manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
   valueEntry: IAttestation,
   schemaTracker: MapSet<string, SchemaPathSelector>,
+  newLinks?: Array<{ docKey: string; schema: SchemaPathSelector }>,
 ) {
   if (!isObject(valueEntry.value)) {
     return;
@@ -642,7 +650,13 @@ function loadLinkedRecipe<S extends BaseMemoryAddress>(
   if (entry === null || entry.value === undefined) {
     return;
   }
-  schemaTracker.add(manager.toKey(address), MinimalSchemaSelector);
+  const docKey = manager.toKey(address);
+  if (!schemaTracker.hasValue(docKey, MinimalSchemaSelector)) {
+    schemaTracker.add(docKey, MinimalSchemaSelector);
+    if (newLinks !== undefined) {
+      newLinks.push({ docKey, schema: MinimalSchemaSelector });
+    }
+  }
 }
 
 // docPath is where we found the pointer and are doing this work. It does not
@@ -730,6 +744,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
       string,
       SchemaPathSelector
     >(deepEqual),
+    private newLinks?: Array<{ docKey: string; schema: SchemaPathSelector }>,
   ) {
     super(manager);
   }
@@ -737,8 +752,18 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
   override traverse(
     doc: IAttestation,
   ): Immutable<OptJSONValue> {
-    this.schemaTracker.add(this.manager.toKey(doc.address), this.selector);
+    this.trackNewLink(this.manager.toKey(doc.address), this.selector);
     return this.traverseWithSelector(doc, this.selector);
+  }
+
+  /** Add to schemaTracker and record as newly discovered if not already tracked */
+  private trackNewLink(docKey: string, schema: SchemaPathSelector): void {
+    if (!this.schemaTracker.hasValue(docKey, schema)) {
+      this.schemaTracker.add(docKey, schema);
+      if (this.newLinks !== undefined) {
+        this.newLinks.push({ docKey, schema });
+      }
+    }
   }
 
   // Traverse the specified doc with the selector.

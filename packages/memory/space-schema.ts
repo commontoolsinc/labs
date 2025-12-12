@@ -267,6 +267,12 @@ export const selectSchema = <Space extends MemorySpace>(
   return { facts: includedFacts, schemaTracker };
 };
 
+export interface EvaluateLinksResult {
+  schemaTracker: MapSet<string, SchemaPathSelector>;
+  /** Newly discovered doc+schema pairs that weren't already in the tracker */
+  newLinks: Array<{ docKey: string; schema: SchemaPathSelector }>;
+}
+
 /**
  * Evaluates a single document with a schema and returns the links it contains.
  * Used for incremental subscription updates - when a document changes, we re-evaluate
@@ -276,7 +282,7 @@ export const selectSchema = <Space extends MemorySpace>(
  * @param docAddress - The document to evaluate (id and type)
  * @param schema - The schema to apply
  * @param classification - Classification claims for access control
- * @returns A MapSet of target document addresses to their schemas, or null if doc not found
+ * @returns An object with the schemaTracker and newly discovered links, or null if doc not found
  */
 export function evaluateDocumentLinks<Space extends MemorySpace>(
   session: SpaceStoreSession<Space>,
@@ -284,7 +290,7 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
   schema: SchemaPathSelector,
   classification?: string[],
   existingSchemaTracker?: MapSet<string, SchemaPathSelector>,
-): MapSet<string, SchemaPathSelector> | null {
+): EvaluateLinksResult | null {
   const providedClassifications = new Set<string>(classification);
   const manager = new ServerObjectManager(session, providedClassifications);
   const tracker = new CompoundCycleTracker<
@@ -295,6 +301,9 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
   // Use existing tracker if provided - enables early termination for already-tracked docs
   const schemaTracker = existingSchemaTracker ??
     new MapSet<string, SchemaPathSelector>(deepEqual);
+
+  // Collect newly discovered links during traversal
+  const newLinks: Array<{ docKey: string; schema: SchemaPathSelector }> = [];
 
   // Load the document
   const address = {
@@ -315,9 +324,17 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
   };
 
   // Run the schema traversal to populate schemaTracker with links
-  loadFactsForDoc(manager, attestation, schema, tracker, cfc, schemaTracker);
+  loadFactsForDoc(
+    manager,
+    attestation,
+    schema,
+    tracker,
+    cfc,
+    schemaTracker,
+    newLinks,
+  );
 
-  return schemaTracker;
+  return { schemaTracker, newLinks };
 }
 
 // The fact passed in is the IAttestation for the top level 'is', so path
@@ -329,6 +346,7 @@ function loadFactsForDoc(
   tracker: PointerCycleTracker,
   cfc: ContextualFlowControl,
   schemaTracker: MapSet<string, SchemaPathSelector>,
+  newLinks?: Array<{ docKey: string; schema: SchemaPathSelector }>,
 ) {
   const factKey = manager.toKey(fact.address);
 
@@ -338,8 +356,11 @@ function loadFactsForDoc(
     return;
   }
 
-  // Track this doc+schema pair
+  // Track this doc+schema pair and record it as newly discovered
   schemaTracker.add(factKey, selector);
+  if (newLinks !== undefined) {
+    newLinks.push({ docKey: factKey, schema: selector });
+  }
 
   if (isObject(fact.value)) {
     if (selector.schemaContext !== undefined) {
@@ -360,11 +381,13 @@ function loadFactsForDoc(
         return;
       }
       // We've provided a schema context for this, so traverse it
+      // Pass newLinks to collect any newly discovered docs during traversal
       const traverser = new SchemaObjectTraverser(
         manager,
         newSelector!,
         tracker,
         schemaTracker,
+        newLinks,
       );
       // We don't actually use the return value here, but we've built up
       // a list of all the documents we need to watch.
@@ -376,7 +399,7 @@ function loadFactsForDoc(
       // Note: already tracked at top of function
     }
     // Also load any source links and recipes
-    loadSource(manager, fact, new Set<string>(), schemaTracker);
+    loadSource(manager, fact, new Set<string>(), schemaTracker, newLinks);
   }
 }
 
