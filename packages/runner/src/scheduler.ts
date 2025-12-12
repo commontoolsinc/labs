@@ -119,7 +119,7 @@ export class Scheduler {
   // Track which actions are effects persistently (survives unsubscribe/re-subscribe)
   private isEffectAction = new WeakMap<Action, boolean>();
   private dirty = new Set<Action>();
-  private pullMode = true;
+  private pullMode = false;
 
   // Compute time tracking for cycle-aware scheduling
   private actionStats = new WeakMap<Action, ActionStats>();

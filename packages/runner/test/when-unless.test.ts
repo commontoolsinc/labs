@@ -25,8 +25,6 @@ describe("when and unless built-in functions", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-    // Use push mode for when/unless tests
-    runtime.scheduler.disablePullMode();
 
     tx = runtime.edit();
 
@@ -63,9 +61,9 @@ describe("when and unless built-in functions", () => {
         resultCell,
       );
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: "success" });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: "success" });
     });
 
     it("returns falsy condition when condition is false", async () => {
@@ -90,9 +88,9 @@ describe("when and unless built-in functions", () => {
         resultCell,
       );
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: false });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: false });
     });
 
     it("returns value when condition is truthy number (1)", async () => {
@@ -112,9 +110,9 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(tx, testRecipe, { condition: 42 }, resultCell);
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: "has value" });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: "has value" });
     });
 
     it("returns 0 when condition is 0 (falsy)", async () => {
@@ -134,9 +132,9 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(tx, testRecipe, { condition: 0 }, resultCell);
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: 0 });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: 0 });
     });
 
     it("returns empty string when condition is empty string (falsy)", async () => {
@@ -156,9 +154,9 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(tx, testRecipe, { condition: "" }, resultCell);
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: "" });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: "" });
     });
 
     it("returns value when condition is non-empty string (truthy)", async () => {
@@ -183,9 +181,9 @@ describe("when and unless built-in functions", () => {
         resultCell,
       );
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: "found" });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: "found" });
     });
 
     it("works with derived condition", async () => {
@@ -206,9 +204,9 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(tx, testRecipe, { count: 5 }, resultCell);
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: "positive" });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: "positive" });
     });
 
     it("works with derived condition returning false", async () => {
@@ -229,9 +227,9 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(tx, testRecipe, { count: -3 }, resultCell);
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: false });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: false });
     });
   });
 
@@ -258,9 +256,9 @@ describe("when and unless built-in functions", () => {
         resultCell,
       );
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: true });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: true });
     });
 
     it("returns fallback value when condition is false", async () => {
@@ -285,9 +283,9 @@ describe("when and unless built-in functions", () => {
         resultCell,
       );
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: "fallback" });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: "fallback" });
     });
 
     it("returns truthy number as-is", async () => {
@@ -307,9 +305,9 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(tx, testRecipe, { condition: 42 }, resultCell);
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: 42 });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: 42 });
     });
 
     it("returns fallback when condition is 0 (falsy)", async () => {
@@ -329,9 +327,9 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(tx, testRecipe, { condition: 0 }, resultCell);
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: 999 });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: 999 });
     });
 
     it("returns truthy string as-is", async () => {
@@ -356,9 +354,9 @@ describe("when and unless built-in functions", () => {
         resultCell,
       );
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: "hello" });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: "hello" });
     });
 
     it("returns fallback when condition is empty string (falsy)", async () => {
@@ -378,9 +376,9 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(tx, testRecipe, { condition: "" }, resultCell);
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: "default" });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: "default" });
     });
 
     it("works with derived condition", async () => {
@@ -401,9 +399,9 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(tx, testRecipe, { name: "Alice" }, resultCell);
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: "Alice" });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: "Alice" });
     });
 
     it("works with derived condition returning empty", async () => {
@@ -424,9 +422,9 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(tx, testRecipe, { name: "" }, resultCell);
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: "Anonymous" });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: "Anonymous" });
     });
   });
 
@@ -456,9 +454,9 @@ describe("when and unless built-in functions", () => {
         resultCell1,
       );
       tx.commit();
-      await runtime.idle();
 
-      expect(result1.getAsQueryResult()).toMatchObject({ result: "hello" });
+      const value = await result1.pull();
+      expect(value).toMatchObject({ result: "hello" });
     });
 
     it("chain when followed by unless returns fallback when first is false", async () => {
@@ -484,9 +482,9 @@ describe("when and unless built-in functions", () => {
         resultCell,
       );
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: "no data" });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: "no data" });
     });
 
     it("multiple when clauses (a && b && c pattern)", async () => {
@@ -514,9 +512,9 @@ describe("when and unless built-in functions", () => {
         resultCell1,
       );
       tx.commit();
-      await runtime.idle();
 
-      expect(result1.getAsQueryResult()).toMatchObject({ result: "all true" });
+      const value = await result1.pull();
+      expect(value).toMatchObject({ result: "all true" });
     });
 
     it("multiple when returns false when first condition is false", async () => {
@@ -542,9 +540,9 @@ describe("when and unless built-in functions", () => {
         resultCell,
       );
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: false });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: false });
     });
 
     it("multiple unless clauses (a || b || c pattern)", async () => {
@@ -572,9 +570,9 @@ describe("when and unless built-in functions", () => {
         resultCell1,
       );
       tx.commit();
-      await runtime.idle();
 
-      expect(result1.getAsQueryResult()).toMatchObject({ result: "first" });
+      const value = await result1.pull();
+      expect(value).toMatchObject({ result: "first" });
     });
 
     it("multiple unless falls through to second when first is falsy", async () => {
@@ -600,9 +598,9 @@ describe("when and unless built-in functions", () => {
         resultCell,
       );
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: "second" });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: "second" });
     });
 
     it("multiple unless falls through to default when all are falsy", async () => {
@@ -623,9 +621,9 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(tx, testRecipe, { a: "", b: "" }, resultCell);
       tx.commit();
-      await runtime.idle();
 
-      expect(result.getAsQueryResult()).toMatchObject({ result: "default" });
+      const value = await result.pull();
+      expect(value).toMatchObject({ result: "default" });
     });
   });
 });
