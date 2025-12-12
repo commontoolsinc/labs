@@ -471,9 +471,6 @@ class MemoryProviderSession<
         redactedData.transaction,
       );
 
-      // Filter facts once - filterKnownFacts has a side effect of updating lastRevision
-      const filteredFacts = this.filterKnownFacts(schemaFacts);
-
       // Send commits with revisions to commit log subscriptions
       // The client's startSynchronization() reads revisions to update its heap
       const commitJobIds: InvocationURL<Reference<Subscribe>>[] = [];
@@ -489,7 +486,7 @@ class MemoryProviderSession<
           commit: {
             [item.of]: { [item.the]: { [item.cause]: { is: redactedData } } },
           } as Commit<Space>,
-          revisions: filteredFacts,
+          revisions: this.filterKnownFacts(schemaFacts),
         };
 
         for (const id of commitJobIds) {
