@@ -698,18 +698,17 @@ export const selectFact = function <Space extends MemorySpace>(
   { the, of, since }: { the: MIME; of: URI; since?: number },
 ): SelectedFact | undefined {
   const stmt = getPreparedStatement(store, "export", EXPORT);
-  for (
-    const row of stmt.iter({
-      the: the,
-      of: of,
-      cause: null,
-      is: null,
-      since: since ?? null,
-    }) as Iterable<StateRow>
-  ) {
-    return toFact(row);
-  }
-  return undefined;
+  // Use get() instead of iter() to avoid leaving an active iterator
+  // when we only need the first row. Active iterators cause
+  // "cannot commit transaction - SQL statements in progress" errors.
+  const row = stmt.get({
+    the: the,
+    of: of,
+    cause: null,
+    is: null,
+    since: since ?? null,
+  }) as StateRow | undefined;
+  return row ? toFact(row) : undefined;
 };
 
 /**
@@ -984,7 +983,13 @@ export const transact = <Space extends MemorySpace>(
       span.setAttribute("memory.has_changes", true);
     }
 
-    return execute(session.store.transaction(commit), session, transaction);
+    // Use IMMEDIATE transaction to acquire write lock at start, reducing
+    // lock contention with external processes like litestream
+    return execute(
+      session.store.transaction(commit).immediate,
+      session,
+      transaction,
+    );
   });
 };
 
