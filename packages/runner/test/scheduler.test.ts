@@ -30,6 +30,8 @@ describe("scheduler", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
+    // Use push mode for basic scheduler tests (tests push-mode behavior)
+    runtime.scheduler.disablePullMode();
     tx = runtime.edit();
   });
 
@@ -543,6 +545,8 @@ describe("event handling", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
+    // Use push mode for event handling tests
+    runtime.scheduler.disablePullMode();
     tx = runtime.edit();
   });
 
@@ -827,6 +831,8 @@ describe("reactive retries", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
+    // Use push mode for reactive retry tests
+    runtime.scheduler.disablePullMode();
     tx = runtime.edit();
   });
 
@@ -1511,7 +1517,8 @@ describe("pull-based scheduling", () => {
   });
 
   it("should have unchanged behavior with pullMode = false", async () => {
-    // Verify push mode is the default
+    // Explicitly set push mode for this test
+    runtime.scheduler.disablePullMode();
     expect(runtime.scheduler.isPullModeEnabled()).toBe(false);
 
     const source = runtime.getCell<number>(
@@ -1759,6 +1766,8 @@ describe("cycle-aware convergence", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
+    // Use push mode for cycle-aware convergence tests
+    runtime.scheduler.disablePullMode();
     tx = runtime.edit();
   });
 

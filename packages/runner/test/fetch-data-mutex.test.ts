@@ -25,6 +25,8 @@ describe("fetch-data mutex mechanism", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
+    // Use push mode for fetch-data tests
+    runtime.scheduler.disablePullMode();
     tx = runtime.edit();
 
     const { commontools } = createBuilder();
