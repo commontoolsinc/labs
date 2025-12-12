@@ -12,8 +12,7 @@ import type {
   ConsoleHandler,
   ErrorHandler,
   ErrorWithContext,
-  IRuntime,
-  IScheduler,
+  Runtime,
 } from "./runtime.ts";
 import {
   areNormalizedLinksSame,
@@ -82,7 +81,7 @@ const MAX_ITERATIONS_PER_RUN = 100;
 const DEFAULT_RETRIES_FOR_EVENTS = 5;
 const MAX_RETRIES_FOR_REACTIVE = 10;
 
-export class Scheduler implements IScheduler {
+export class Scheduler {
   private eventQueue: {
     action: Action;
     retriesLeft: number;
@@ -121,14 +120,14 @@ export class Scheduler implements IScheduler {
   }
 
   constructor(
-    readonly runtime: IRuntime,
+    readonly runtime: Runtime,
     consoleHandler?: ConsoleHandler,
     errorHandlers?: ErrorHandler[],
   ) {
     this.consoleHandler = consoleHandler ||
-      function (_metadata, _method, args) {
+      function (data) {
         // Default console handler returns arguments unaffected.
-        return args;
+        return data.args;
       };
 
     if (errorHandlers) {
@@ -144,7 +143,7 @@ export class Scheduler implements IScheduler {
       // called within the runtime.
       const { method, args } = e as ConsoleEvent;
       const metadata = getCharmMetadataFromFrame();
-      const result = this.consoleHandler(metadata, method, args);
+      const result = this.consoleHandler({ metadata, method, args });
       console[method].apply(console, result);
     });
   }

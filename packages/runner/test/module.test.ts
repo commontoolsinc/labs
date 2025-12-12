@@ -10,7 +10,7 @@ import {
   type Module,
   type OpaqueRef,
 } from "../src/builder/types.ts";
-import { handler, lift } from "../src/builder/module.ts";
+import { action, handler, lift } from "../src/builder/module.ts";
 import { opaqueRef } from "../src/builder/opaque-ref.ts";
 import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -241,6 +241,18 @@ describe("module", () => {
       expect(nodes.size).toBe(1);
       expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });
       expect([...nodes][0].inputs.$event).toBe(stream);
+    });
+  });
+
+  describe("action function", () => {
+    it("throws error when called without CTS enabled", () => {
+      // action() should only be used with CTS enabled, which rewrites it to handler()
+      // When called directly at runtime (without CTS), it should throw an error
+      expect(() => {
+        action<{ data: string }>(({ data }) => {
+          void data;
+        });
+      }).toThrow("action() must be used with CTS enabled");
     });
   });
 });

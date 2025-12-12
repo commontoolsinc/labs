@@ -120,7 +120,12 @@ const _updateTags = handler({
 export { userHandler };
 export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
-    properties: {}
+    properties: {
+        userHandler: {
+            asStream: true
+        }
+    },
+    required: ["userHandler"]
 } as const satisfies __ctHelpers.JSONSchema, () => {
     return { userHandler };
 });

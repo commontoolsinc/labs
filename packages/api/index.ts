@@ -503,8 +503,10 @@ type OpaqueRefInner<T> = [T] extends
   : [T] extends [Array<infer U>] ? Array<OpaqueRef<U>>
   : [T] extends [AnyBrandedCell<any>] ? T
   : [T] extends [object] ? { [K in keyof T]: OpaqueRef<T[K]> }
-  // For nullable types (T | null | undefined), extract and map the non-null object/array part
+  // For nullable types (T | null | undefined), extract and map the non-null part
   : [NonNullable<T>] extends [never] ? T
+  // Handle nullable branded cells (e.g., (OpaqueCell<X> & X) | undefined) - don't wrap
+  : [NonNullable<T>] extends [AnyBrandedCell<any>] ? T
   : [NonNullable<T>] extends [Array<infer U>] ? Array<OpaqueRef<U>>
   : [NonNullable<T>] extends [object]
     ? { [K in keyof NonNullable<T>]: OpaqueRef<NonNullable<T>[K]> }
@@ -655,7 +657,7 @@ export type toJSON = {
 };
 
 export type Handler<T = any, R = any> = Module & {
-  with: (inputs: Opaque<StripCell<T>>) => OpaqueRef<R>;
+  with: (inputs: Opaque<StripCell<T>>) => Stream<R>;
 };
 
 export type NodeFactory<T, R> =
@@ -674,7 +676,7 @@ export type ModuleFactory<T, R> =
   & toJSON;
 
 export type HandlerFactory<T, R> =
-  & ((inputs: Opaque<StripCell<T>>) => OpaqueRef<R>)
+  & ((inputs: Opaque<StripCell<T>>) => Stream<R>)
   & Handler<T, R>
   & toJSON;
 
@@ -793,6 +795,8 @@ export type JSONSchemaObj = {
   readonly [ID_FIELD]?: unknown;
   // makes it so that your handler gets a Cell object for that property. So you can call .set()/.update()/.push()/etc on it.
   readonly asCell?: boolean;
+  // marks values that are OpaqueRef - tracked reactive references
+  readonly asOpaque?: boolean;
   // streams are what handler returns. if you pass that to another handler/lift and declare it as asSteam, you can call .send on it
   readonly asStream?: boolean;
   // temporarily used to assign labels like "confidential"
@@ -1140,6 +1144,20 @@ export type HandlerFunction = {
 };
 
 /**
+ * ActionFunction creates a handler that doesn't use the state parameter.
+ *
+ * This is to handler as computed is to lift/derive:
+ * - User writes: action((e) => count.set(e.data))
+ * - Transformer rewrites to: handler((e, { count }) => count.set(e.data))({ count })
+ *
+ * The transformer extracts closures and makes them explicit, just like how
+ * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
+ */
+export type ActionFunction = {
+  <T>(fn: (event: T) => void): HandlerFactory<T, void>;
+};
+
+/**
  * DeriveFunction creates a reactive computation that transforms input values.
  *
  * Special overload ordering is critical for correct type inference:
@@ -1354,6 +1372,7 @@ export declare const recipe: RecipeFunction;
 export declare const patternTool: PatternToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
+export declare const action: ActionFunction;
 /** @deprecated Use compute() instead */
 export declare const derive: DeriveFunction;
 export declare const computed: ComputedFunction;

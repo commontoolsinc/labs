@@ -10,6 +10,7 @@ import type {
   OpaqueRef,
   Schema,
   SchemaWithoutCell,
+  Stream,
   StripCell,
   toJSON,
 } from "./types.ts";
@@ -122,7 +123,7 @@ function handlerInternal<E, T>(
   );
 
   const module: Handler<T, E> & toJSON & {
-    bind: (inputs: Opaque<StripCell<T>>) => OpaqueRef<E>;
+    bind: (inputs: Opaque<StripCell<T>>) => Stream<E>;
   } = {
     type: "javascript",
     implementation: handler,
@@ -135,7 +136,7 @@ function handlerInternal<E, T>(
     ...(schema !== undefined ? { argumentSchema: schema } : {}),
   };
 
-  const factory = Object.assign((props: Opaque<StripCell<T>>): OpaqueRef<E> => {
+  const factory = Object.assign((props: Opaque<StripCell<T>>): Stream<E> => {
     const eventStream = stream<E>(eventSchema);
 
     // Set stream marker (cast to E as stream is typed for the events it accepts)
@@ -225,3 +226,31 @@ export function derive<In, Out>(...args: any[]): OpaqueRef<any> {
 // unsafe closures: like derive, but doesn't need any arguments
 export const computed: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>
   lift<any, T>(fn)(undefined);
+
+/**
+ * action: Creates a handler that doesn't use the state parameter.
+ *
+ * This is to handler as computed is to lift/derive:
+ * - User writes: action((e) => count.set(e.data))
+ * - Transformer rewrites to: handler((e, { count }) => count.set(e.data))({ count })
+ *
+ * The transformer extracts closures and makes them explicit, just like how
+ * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
+ *
+ * NOTE: This function should never be called directly at runtime because the
+ * CTS transformer rewrites action() calls to handler() calls. If this function
+ * is reached, it means CTS is not enabled.
+ *
+ * @param _event - A function that receives an event and performs side effects
+ * @throws Error if called directly (CTS must be enabled for action() to work)
+ */
+export function action<T>(
+  _event: (event: T) => void,
+): HandlerFactory<T, void>;
+export function action<T>(
+  _event: (event: T) => void,
+): HandlerFactory<T, void> {
+  throw new Error(
+    "action() must be used with CTS enabled - add /// <cts-enable /> to your file",
+  );
+}

@@ -41,7 +41,11 @@ import {
 } from "./query-result-proxy.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
-import { ignoreReadForScheduling, txToReactivityLog } from "./scheduler.ts";
+import {
+  type Action,
+  ignoreReadForScheduling,
+  txToReactivityLog,
+} from "./scheduler.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import {
   processDefaultValue,
@@ -58,7 +62,7 @@ import {
   type URI,
 } from "./sigil-types.ts";
 import { areLinksSame, isLink } from "./link-utils.ts";
-import type { IRuntime } from "./runtime.ts";
+import type { Runtime } from "./runtime.ts";
 import {
   createSigilLinkFromParsedLink,
   findAndInlineDataURILinks,
@@ -183,7 +187,7 @@ declare module "@commontools/api" {
       boundTarget?: (...args: unknown[]) => unknown,
     ): OpaqueRef<T>;
     toJSON(): LegacyJSONCellLink | null;
-    runtime: IRuntime;
+    runtime: Runtime;
     tx: IExtendedStorageTransaction | undefined;
     schema?: JSONSchema;
     rootSchema?: JSONSchema;
@@ -244,7 +248,7 @@ const cellMethods = new Set<keyof ICell<unknown>>([
 ]);
 
 export function createCell<T>(
-  runtime: IRuntime,
+  runtime: Runtime,
   link?: NormalizedLink,
   tx?: IExtendedStorageTransaction,
   synced = false,
@@ -300,7 +304,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   private _kind: CellKind;
 
   constructor(
-    public readonly runtime: IRuntime,
+    public readonly runtime: Runtime,
     public readonly tx: IExtendedStorageTransaction | undefined,
     link?: NormalizedLink,
     private synced: boolean = false,
@@ -1266,28 +1270,12 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 
 function subscribeToReferencedDocs<T>(
   callback: (value: T) => Cancel | undefined | void,
-  runtime: IRuntime,
+  runtime: Runtime,
   link: NormalizedFullLink,
 ): Cancel {
-  // Get the value once to determine all the docs that need to be subscribed to.
-  const tx = runtime.edit();
-  const value = validateAndTransform(
-    runtime,
-    tx,
-    link,
-    true,
-  );
-  const log = txToReactivityLog(tx);
+  let cleanup: Cancel | undefined | void;
 
-  // Call the callback once with initial value.
-  let cleanup: Cancel | undefined | void = callback(value);
-
-  // Technically unnecessary since we don't expect/allow callbacks to sink to
-  // write to other cells, and we retry by design anyway below when read data
-  // changed. But ideally we enforce read-only as well.
-  tx.commit();
-
-  const cancel = runtime.scheduler.subscribe((tx) => {
+  const action: Action = (tx) => {
     if (isCancel(cleanup)) cleanup();
 
     // Using a new transaction for child cells, as we're only interested in
@@ -1304,7 +1292,20 @@ function subscribeToReferencedDocs<T>(
     // we add a retry? So far all sinks are read-only, so they get re-triggered
     // on changes already.
     extraTx.commit();
-  }, log);
+  };
+
+  // Call action once immediately, which also defines what docs need to be
+  // subscribed to.
+  const tx = runtime.edit();
+  action(tx);
+  const log = txToReactivityLog(tx);
+
+  // Technically unnecessary since we don't expect/allow callbacks to sink to
+  // write to other cells, and we retry by design anyway below when read data
+  // changed. But ideally we enforce read-only as well.
+  tx.commit();
+
+  const cancel = runtime.scheduler.subscribe(action, log);
 
   return () => {
     cancel();

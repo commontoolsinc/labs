@@ -10,6 +10,7 @@ import {
   isFunctionLike,
   safeGetPropertyType,
 } from "../type-utils.ts";
+import { getCellWrapperInfo } from "../typescript/cell-brand.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { extractDocFromSymbolAndDecls, getDeclDocs } from "../doc-utils.ts";
 import { getLogger } from "@commontools/utils/logger";
@@ -19,6 +20,53 @@ const logger = getLogger("schema-generator.object", {
   enabled: true,
   level: "warn",
 });
+
+/**
+ * Check if a callable type (like ModuleFactory or HandlerFactory) returns a wrapper type.
+ * ModuleFactory<T, R> when called returns OpaqueRef<R>.
+ * If R is Stream<T>, we should generate { asStream: true } instead of skipping.
+ * If R is Cell<T>, we should generate { asCell: true } instead of skipping.
+ *
+ * Returns the schema definition for the wrapper if detected, undefined otherwise.
+ */
+function getWrapperSchemaFromCallable(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): SchemaDefinition | undefined {
+  const callSignatures = type.getCallSignatures();
+  if (callSignatures.length === 0) return undefined;
+
+  // Get the return type of the first call signature
+  const callReturnType = callSignatures[0]!.getReturnType();
+
+  // Check if the return type is a wrapper (Stream<T>, Cell<T>, or OpaqueRef<...>)
+  const wrapperInfo = getCellWrapperInfo(callReturnType, checker);
+  if (wrapperInfo?.kind === "Stream") {
+    return { asStream: true };
+  }
+  if (wrapperInfo?.kind === "Cell") {
+    return { asCell: true };
+  }
+
+  // Also check if it's an OpaqueRef wrapping a Stream or Cell
+  if (wrapperInfo?.kind === "OpaqueRef") {
+    // Get the inner type of OpaqueRef
+    const typeRef = wrapperInfo.typeRef;
+    const typeArgs = checker.getTypeArguments(typeRef);
+    if (typeArgs.length > 0) {
+      const innerType = typeArgs[0]!;
+      const innerWrapperInfo = getCellWrapperInfo(innerType, checker);
+      if (innerWrapperInfo?.kind === "Stream") {
+        return { asStream: true };
+      }
+      if (innerWrapperInfo?.kind === "Cell") {
+        return { asCell: true };
+      }
+    }
+  }
+
+  return undefined;
+}
 
 /**
  * Check if a type is a union that includes undefined.
@@ -135,6 +183,26 @@ export class ObjectFormatter implements TypeFormatter {
       );
 
       if (isFunctionLike(resolvedPropType)) {
+        // Special case: ModuleFactory/HandlerFactory types that return Stream or Cell
+        // should generate { asStream: true } or { asCell: true } instead of being skipped
+        const wrapperSchema = getWrapperSchemaFromCallable(
+          resolvedPropType,
+          checker,
+        );
+        if (wrapperSchema) {
+          // This is a factory that returns a wrapper type (Stream or Cell)
+          // Respect the same optional detection logic as regular properties
+          const hasOptionalFlag = (prop.flags & ts.SymbolFlags.Optional) !== 0;
+          const hasUndefinedUnion = isUnionWithUndefined(resolvedPropType);
+          const isDefaultWithUndefinedInner = isDefaultNodeWithUndefined(
+            propTypeNode,
+            checker,
+          );
+          const isOptional = hasOptionalFlag || hasUndefinedUnion ||
+            isDefaultWithUndefinedInner;
+          if (!isOptional) required.push(propName);
+          properties[propName] = wrapperSchema;
+        }
         continue;
       }
 

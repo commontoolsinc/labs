@@ -2,6 +2,7 @@ import { isObject, type Mutable } from "@commontools/utils/types";
 import type { SchemaContext } from "@commontools/memory/interface";
 
 import type {
+  ActionFunction,
   AsCell,
   AsComparableCell,
   AsOpaqueCell,
@@ -53,7 +54,7 @@ import {
   type MemorySpace,
 } from "../storage/interface.ts";
 import { type RuntimeProgram } from "../harness/types.ts";
-import { type IRuntime } from "../runtime.ts";
+import { type Runtime } from "../runtime.ts";
 
 // Define runtime constants here - actual runtime values
 export const ID: typeof IDSymbol = Symbol("ID, unique to the context") as any;
@@ -216,7 +217,7 @@ export type Frame = {
   parent?: Frame;
   cause?: unknown;
   generatedIdCounter: number;
-  runtime?: IRuntime;
+  runtime?: Runtime;
   tx?: IExtendedStorageTransaction;
   space?: MemorySpace;
   inHandler?: boolean;
@@ -234,6 +235,7 @@ export interface BuilderFunctionsAndConstants {
   // Module creation
   lift: LiftFunction;
   handler: HandlerFunction;
+  action: ActionFunction;
   derive: DeriveFunction;
   computed: ComputedFunction;
 

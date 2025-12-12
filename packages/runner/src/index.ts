@@ -1,13 +1,13 @@
-export { homeSpaceCellSchema, Runtime, spaceCellSchema } from "./runtime.ts";
+export { Runtime } from "./runtime.ts";
 export type {
-  CharmMetadata,
   ConsoleHandler,
   ErrorHandler,
   ErrorWithContext as RuntimeErrorWithContext,
-  IRuntime,
+  HomeSpaceCellContents,
   RuntimeOptions,
   SpaceCellContents,
 } from "./runtime.ts";
+export * from "./interface.ts";
 export { raw } from "./module.ts";
 export type { Cell, Stream } from "./cell.ts";
 export type { NormalizedLink } from "./link-utils.ts";

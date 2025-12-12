@@ -3,7 +3,7 @@ import { property, state } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import "../ct-chip/ct-chip.ts";
-import type { Cell, IRuntime, MemorySpace } from "@commontools/runner";
+import type { Cell, MemorySpace, Runtime } from "@commontools/runner";
 import { NAME } from "@commontools/runner";
 import { parseLLMFriendlyLink } from "@commontools/runner";
 import { runtimeContext, spaceContext } from "../../runtime-context.ts";
@@ -47,7 +47,7 @@ export class CTCellLink extends BaseElement {
 
   @consume({ context: runtimeContext, subscribe: true })
   @property({ attribute: false })
-  runtime?: IRuntime;
+  runtime?: Runtime;
 
   @consume({ context: spaceContext, subscribe: true })
   @property({ attribute: false })

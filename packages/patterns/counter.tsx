@@ -6,6 +6,7 @@ interface RecipeState {
   value: Default<number, 0>;
 }
 
+/** The output of a #counter */
 interface RecipeOutput {
   value: Default<number, 0>;
   increment: Stream<void>;

@@ -42,7 +42,9 @@ export class Builder extends EventTarget {
   async build() {
     const startTime = performance.now();
     console.log(
-      `${yellow("🔨")} ${dim("Building")} ${blue(this.manifest.entry)}...`,
+      `${yellow("🔨")} ${dim("Building")} ${
+        this.manifest.entries.map((e) => blue(e.in)).join(", ")
+      }...`,
     );
 
     try {
@@ -50,13 +52,10 @@ export class Builder extends EventTarget {
         define: resolveDefines(this.manifest),
         sourcemap: this.manifest.esbuild.sourcemap,
         minify: this.manifest.esbuild.minify,
-        entryPoints: [this.manifest.entry],
-        outfile: this.manifest.out,
+        entryPoints: this.manifest.entries,
+        outdir: this.manifest.outDir,
         external: this.manifest.esbuild.external,
         supported: this.manifest.esbuild.supported,
-        // Explicitly compile decorators, as this what Jumble->Vite
-        // does, and no browsers currently support (any form of) decorators,
-        // and if we're bundling, we're probably running in a browser.
         tsconfigRaw: this.manifest.esbuild.tsconfigRaw,
         logOverride: this.manifest.esbuild.logOverride,
       };
@@ -67,27 +66,26 @@ export class Builder extends EventTarget {
 
       const result = await build(config);
 
-      // Calculate build time
-      const buildTime = Math.round(performance.now() - startTime);
+      for (const output of result.outputFiles ?? []) {
+        const fileInfo = await Deno.stat(output.path);
+        const fileSize = formatFileSize(fileInfo.size);
 
-      // Get output file size
-      const fileInfo = await Deno.stat(this.manifest.out);
-      const fileSize = formatFileSize(fileInfo.size);
-
-      console.log(
-        `   ${green("✓")} ${dim("Built")} ${blue(this.manifest.out)} ${
-          dim(`(${fileSize})`)
-        } ${green(`in ${buildTime}ms`)}`,
-      );
-
+        console.log(
+          `   ${green("✓")} ${dim("Built")} ${blue(output.path)} ${
+            dim(`(${fileSize})`)
+          }`,
+        );
+      }
       if (this.manifest.esbuild.metafile && result.metafile) {
         await Deno.writeTextFile(
           this.manifest.esbuild.metafile,
           JSON.stringify(result.metafile),
         );
-
         console.log(await esbuild.analyzeMetafile(result.metafile));
       }
+
+      const buildTime = Math.round(performance.now() - startTime);
+      console.log(`   ${dim(`Total build time: ${buildTime}ms`)}`);
       this.dispatchEvent(new CustomEvent("build"));
     } catch (error) {
       const buildTime = Math.round(performance.now() - startTime);

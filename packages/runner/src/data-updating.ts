@@ -22,7 +22,7 @@ import {
   type IReadOptions,
   type JSONValue,
 } from "./storage/interface.ts";
-import { type IRuntime } from "./runtime.ts";
+import { type Runtime } from "./runtime.ts";
 import { toURI } from "./uri-utils.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
@@ -46,7 +46,7 @@ const diffLogger = getLogger("normalizeAndDiff", {
  * @returns Whether any changes were made.
  */
 export function diffAndUpdate(
-  runtime: IRuntime,
+  runtime: Runtime,
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   newValue: unknown,
@@ -96,7 +96,7 @@ type ChangeSet = {
  * @returns An array of changes that should be written.
  */
 export function normalizeAndDiff(
-  runtime: IRuntime,
+  runtime: Runtime,
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   newValue: unknown,

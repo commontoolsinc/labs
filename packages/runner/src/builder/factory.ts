@@ -23,7 +23,7 @@ import {
 } from "./types.ts";
 import { h } from "@commontools/html";
 import { pattern, recipe } from "./recipe.ts";
-import { byRef, computed, derive, handler, lift } from "./module.ts";
+import { action, byRef, computed, derive, handler, lift } from "./module.ts";
 import {
   compileAndRun,
   fetchData,
@@ -84,6 +84,7 @@ export const createBuilder = (): {
       // Module creation
       lift,
       handler,
+      action,
       derive,
       computed,
 

@@ -3,14 +3,14 @@ import { Module, type ModuleFactory } from "./builder/types.ts";
 import type { Cell } from "./cell.ts";
 import type { Action } from "./scheduler.ts";
 import type { AddCancel } from "./cancel.ts";
-import type { IModuleRegistry, IRuntime } from "./runtime.ts";
+import type { Runtime } from "./runtime.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 
-export class ModuleRegistry implements IModuleRegistry {
+export class ModuleRegistry {
   private moduleMap = new Map<string, Module>();
-  readonly runtime: IRuntime;
+  readonly runtime: Runtime;
 
-  constructor(runtime: IRuntime) {
+  constructor(runtime: Runtime) {
     this.runtime = runtime;
   }
 
@@ -40,7 +40,7 @@ export function raw<T, R>(
     addCancel: AddCancel,
     cause: any,
     parentCell: Cell<any>,
-    runtime: IRuntime,
+    runtime: Runtime,
   ) => Action,
 ): ModuleFactory<T, R> {
   return createNodeFactory({

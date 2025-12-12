@@ -1,4 +1,4 @@
-import { type Cell, type IRuntime } from "@commontools/runner";
+import { type Cell, type Runtime } from "@commontools/runner";
 import { type FavoriteList, favoriteListSchema } from "./manager.ts";
 
 /**
@@ -35,7 +35,7 @@ function filterOutCell(
  * Get the favorites cell from the home space (singleton across all spaces).
  * See docs/common/HOME_SPACE.md for more details.
  */
-export function getHomeFavorites(runtime: IRuntime): Cell<FavoriteList> {
+export function getHomeFavorites(runtime: Runtime): Cell<FavoriteList> {
   return runtime.getHomeSpaceCell().key("favorites").asSchema(
     favoriteListSchema,
   );
@@ -45,7 +45,7 @@ export function getHomeFavorites(runtime: IRuntime): Cell<FavoriteList> {
  * Add a charm to the user's favorites (in home space)
  */
 export async function addFavorite(
-  runtime: IRuntime,
+  runtime: Runtime,
   charm: Cell<unknown>,
 ): Promise<void> {
   const favorites = getHomeFavorites(runtime);
@@ -76,7 +76,7 @@ export async function addFavorite(
  * @returns true if the charm was removed, false if it wasn't in favorites or tx failed
  */
 export async function removeFavorite(
-  runtime: IRuntime,
+  runtime: Runtime,
   charm: Cell<unknown>,
 ): Promise<boolean> {
   const favorites = getHomeFavorites(runtime);
@@ -99,7 +99,7 @@ export async function removeFavorite(
 /**
  * Check if a charm is in the user's favorites (in home space)
  */
-export function isFavorite(runtime: IRuntime, charm: Cell<unknown>): boolean {
+export function isFavorite(runtime: Runtime, charm: Cell<unknown>): boolean {
   try {
     const resolvedCharm = charm.resolveAsCell();
     const favorites = getHomeFavorites(runtime);

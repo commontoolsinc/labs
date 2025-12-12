@@ -138,6 +138,7 @@ export function inferParameterType(
   signature: ts.Signature,
   checker: ts.TypeChecker,
   fallbackType?: ts.Type,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
 ): ts.Type | undefined {
   // If no parameter but signature has parameters, try to get from signature
   if (!parameter) {
@@ -157,8 +158,13 @@ export function inferParameterType(
   }
 
   // If explicit type annotation exists, use it
+  // Use fallback to handle synthetic TypeNodes that may be in the registry
   if (parameter.type) {
-    const explicitType = checker.getTypeFromTypeNode(parameter.type);
+    const explicitType = getTypeFromTypeNodeWithFallback(
+      parameter.type,
+      checker,
+      typeRegistry,
+    );
     return explicitType;
   }
 
@@ -247,6 +253,18 @@ export function unwrapOpaqueLikeType(
   }
 
   if (type.isIntersection()) {
+    // For OpaqueRef<T> = OpaqueCell<T> & OpaqueRefInner<T>, we want to extract T
+    // Look for an OpaqueCell<T> part and extract its type argument
+    for (const part of type.types) {
+      if (isOpaqueRefType(part, checker)) {
+        const inner = getTypeReferenceArgument(part);
+        if (inner) {
+          // Recursively unwrap in case T itself contains OpaqueRef types
+          return unwrapOpaqueLikeType(inner, checker, seen) ?? inner;
+        }
+      }
+    }
+    // No OpaqueCell found, try recursively unwrapping each part
     const intersection = (checker as ts.TypeChecker & {
       getIntersectionType?: (types: readonly ts.Type[]) => ts.Type;
     }).getIntersectionType;
@@ -300,7 +318,12 @@ export function tryExplicitParameterType(
 ): { typeNode: ts.TypeNode; type: ts.Type } | null {
   if (!param?.type) return null;
 
-  const annotationType = checker.getTypeFromTypeNode(param.type);
+  // Use fallback to handle synthetic TypeNodes that may be in the registry
+  const annotationType = getTypeFromTypeNodeWithFallback(
+    param.type,
+    checker,
+    typeRegistry,
+  );
 
   if (annotationType.flags & ts.TypeFlags.Any) return null;
 
