@@ -95,6 +95,17 @@ export class Scheduler {
   private triggers = new Map<SpaceAndURI, Map<Action, SortedAndCompactPaths>>();
   private retries = new WeakMap<Action, number>();
 
+  // Phase 1: Effect/computation tracking for pull-based scheduling
+  private effects = new Set<Action>();
+  private computations = new Set<Action>();
+  private dependents = new WeakMap<Action, Set<Action>>();
+  // Track which actions are effects persistently (survives unsubscribe/re-subscribe)
+  private isEffectAction = new WeakMap<Action, boolean>();
+
+  // Phase 2: Pull-based scheduling
+  private dirty = new Set<Action>();
+  private pullMode = false;
+
   private idlePromises: (() => void)[] = [];
   private loopCounter = new WeakMap<Action, number>();
   private errorHandlers = new Set<ErrorHandler>();
@@ -151,13 +162,40 @@ export class Scheduler {
   subscribe(
     action: Action,
     log: ReactivityLog,
-    scheduleImmediately: boolean = false,
+    options: {
+      scheduleImmediately?: boolean;
+      isEffect?: boolean;
+    } | boolean = {},
   ): Cancel {
+    // Support legacy boolean signature for backwards compatibility
+    const opts = typeof options === "boolean"
+      ? { scheduleImmediately: options }
+      : options;
+    const { scheduleImmediately = false, isEffect = false } = opts;
+
     const reads = this.setDependencies(action, log);
+
+    // Track action type for pull-based scheduling
+    // Once an action is marked as an effect, it stays an effect (persists across re-subscriptions)
+    if (isEffect) {
+      this.isEffectAction.set(action, true);
+    }
+
+    // Use the persistent effect status for tracking
+    if (this.isEffectAction.get(action)) {
+      this.effects.add(action);
+      this.computations.delete(action);
+    } else {
+      this.computations.add(action);
+      this.effects.delete(action);
+    }
+
+    // Update reverse dependency graph
+    this.updateDependents(action, log);
 
     logger.debug(
       "schedule",
-      () => ["Subscribing to action:", action, reads, scheduleImmediately],
+      () => ["Subscribing to action:", action, reads, scheduleImmediately, isEffect ? "effect" : "computation"],
     );
 
     if (scheduleImmediately) {
@@ -212,6 +250,9 @@ export class Scheduler {
     this.cancels.delete(action);
     this.dependencies.delete(action);
     this.pending.delete(action);
+    // Clean up effect/computation tracking
+    this.effects.delete(action);
+    this.computations.delete(action);
   }
 
   async run(action: Action): Promise<any> {
@@ -222,10 +263,22 @@ export class Scheduler {
 
     logger.debug("schedule-run-start", () => [
       `[RUN] Starting action: ${action.name || "anonymous"}`,
+      `Pull mode: ${this.pullMode}`,
     ]);
 
     if (this.runningPromise) await this.runningPromise;
 
+    // In pull mode, pull dirty dependencies before running effects
+    if (this.pullMode && this.effects.has(action)) {
+      // Use a temporary transaction just to pass to pullDependencies
+      // (computations create their own transactions and commit them)
+      const tempTx = this.runtime.edit();
+      await this.pullDependencies(action, tempTx);
+      // Don't commit tempTx - it was just for context
+    }
+
+    // Create a fresh transaction for the effect after dependencies are pulled
+    // This ensures the effect sees the committed writes from computations
     const tx = this.runtime.edit();
 
     let result: any;
@@ -455,9 +508,25 @@ export class Scheduler {
                     change.address.path.join("/")
                   }`,
                   `Action name: ${action.name || "anonymous"}`,
+                  `Mode: ${this.pullMode ? "pull" : "push"}`,
+                  `Type: ${this.effects.has(action) ? "effect" : "computation"}`,
                 ]);
-                this.queueExecution();
-                this.pending.add(action);
+
+                if (this.pullMode) {
+                  // Pull mode: only schedule effects, mark computations as dirty
+                  if (this.effects.has(action)) {
+                    this.queueExecution();
+                    this.pending.add(action);
+                  } else {
+                    // Mark computation as dirty and schedule affected effects
+                    this.markDirty(action);
+                    this.scheduleAffectedEffects(action);
+                  }
+                } else {
+                  // Push mode: existing behavior - schedule all triggered actions
+                  this.queueExecution();
+                  this.pending.add(action);
+                }
               }
             } else {
               logger.debug("schedule", () => [
@@ -485,6 +554,339 @@ export class Scheduler {
     const writes = sortAndCompactPaths(log.writes);
     this.dependencies.set(action, { reads, writes });
     return reads;
+  }
+
+  /**
+   * Updates the reverse dependency graph (dependents map).
+   * For each action that writes to paths this action reads, add this action as a dependent.
+   */
+  private updateDependents(action: Action, log: ReactivityLog): void {
+    const reads = log.reads;
+
+    // For each read of the new action, find other actions that write to it
+    for (const read of reads) {
+      // Check all registered actions (via triggers) for ones that write to this read
+      for (const [_spaceAndURI, actionPaths] of this.triggers) {
+        for (const [otherAction] of actionPaths) {
+          if (otherAction === action) continue;
+
+          const otherLog = this.dependencies.get(otherAction);
+          if (!otherLog) continue;
+
+          // Check if otherAction writes to this entity we're reading
+          for (const write of otherLog.writes) {
+            if (
+              read.space === write.space &&
+              read.id === write.id &&
+              arraysOverlap(write.path, read.path)
+            ) {
+              // otherAction writes → this action reads, so this action depends on otherAction
+              let deps = this.dependents.get(otherAction);
+              if (!deps) {
+                deps = new Set();
+                this.dependents.set(otherAction, deps);
+              }
+              deps.add(action);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Returns diagnostic statistics about the scheduler state.
+   * Useful for debugging and monitoring pull-based scheduling behavior.
+   */
+  getStats(): { effects: number; computations: number; pending: number } {
+    return {
+      effects: this.effects.size,
+      computations: this.computations.size,
+      pending: this.pending.size,
+    };
+  }
+
+  /**
+   * Returns whether an action is registered as an effect.
+   */
+  isEffect(action: Action): boolean {
+    return this.effects.has(action);
+  }
+
+  /**
+   * Returns whether an action is registered as a computation.
+   */
+  isComputation(action: Action): boolean {
+    return this.computations.has(action);
+  }
+
+  /**
+   * Returns the set of actions that depend on this action's output.
+   */
+  getDependents(action: Action): Set<Action> {
+    return this.dependents.get(action) ?? new Set();
+  }
+
+  // ============================================================
+  // Phase 2: Pull-based scheduling methods
+  // ============================================================
+
+  /**
+   * Enables pull-based scheduling mode.
+   * In pull mode, only effects are scheduled; computations are marked dirty
+   * and pulled on demand when effects need their values.
+   */
+  enablePullMode(): void {
+    this.pullMode = true;
+  }
+
+  /**
+   * Disables pull-based scheduling mode (returns to push mode).
+   */
+  disablePullMode(): void {
+    this.pullMode = false;
+    // Clear dirty set when switching back to push mode
+    this.dirty.clear();
+  }
+
+  /**
+   * Returns whether pull mode is enabled.
+   */
+  isPullModeEnabled(): boolean {
+    return this.pullMode;
+  }
+
+  /**
+   * Marks an action as dirty and propagates to all dependents transitively.
+   */
+  private markDirty(action: Action): void {
+    if (this.dirty.has(action)) return; // Already dirty, avoid infinite recursion
+
+    this.dirty.add(action);
+
+    // Propagate to dependents transitively
+    const deps = this.dependents.get(action);
+    if (deps) {
+      for (const dependent of deps) {
+        this.markDirty(dependent);
+      }
+    }
+  }
+
+  /**
+   * Returns whether an action is marked as dirty.
+   */
+  isDirty(action: Action): boolean {
+    return this.dirty.has(action);
+  }
+
+  /**
+   * Clears the dirty flag for an action.
+   */
+  private clearDirty(action: Action): void {
+    this.dirty.delete(action);
+  }
+
+  /**
+   * Finds and schedules all effects that transitively depend on the given computation.
+   */
+  private scheduleAffectedEffects(computation: Action): void {
+    const visited = new Set<Action>();
+    const toSchedule: Action[] = [];
+
+    const findEffects = (action: Action) => {
+      if (visited.has(action)) return;
+      visited.add(action);
+
+      if (this.effects.has(action)) {
+        toSchedule.push(action);
+      }
+
+      const deps = this.dependents.get(action);
+      if (deps) {
+        for (const dependent of deps) {
+          findEffects(dependent);
+        }
+      }
+    };
+
+    findEffects(computation);
+
+    for (const effect of toSchedule) {
+      this.queueExecution();
+      this.pending.add(effect);
+    }
+  }
+
+  /**
+   * Pulls all dirty dependencies for an action before running it.
+   * This ensures the action sees consistent, up-to-date values.
+   * @param action The action to pull dependencies for
+   * @param tx The transaction to run computations in (so they share the same snapshot)
+   */
+  private async pullDependencies(
+    action: Action,
+    tx: IExtendedStorageTransaction,
+  ): Promise<void> {
+    const log = this.dependencies.get(action);
+    if (!log) return;
+
+    // Find all dirty computations that write to paths this action reads
+    const dirtyDeps: Action[] = [];
+
+    // Iterate through all dirty computations to find those that write
+    // to entities this action reads
+    for (const computation of this.dirty) {
+      if (computation === action) continue;
+      if (!this.computations.has(computation)) continue;
+
+      const computationLog = this.dependencies.get(computation);
+      if (!computationLog) continue;
+
+      // Check if this computation writes to something the action reads
+      // Match at document level (space/id) - path-level matching can be too strict
+      for (const write of computationLog.writes) {
+        let found = false;
+        for (const read of log.reads) {
+          if (write.space === read.space && write.id === read.id) {
+            // Same document - consider it a dependency
+            if (!dirtyDeps.includes(computation)) {
+              dirtyDeps.push(computation);
+            }
+            found = true;
+            break;
+          }
+        }
+        if (found) break;
+      }
+    }
+
+    // Topologically sort the dirty dependencies
+    const sorted = this.topologicalSortDirty(dirtyDeps);
+
+    // Run each dirty computation in the same transaction
+    for (const computation of sorted) {
+      await this.runComputation(computation, tx);
+    }
+  }
+
+  /**
+   * Topologically sorts a set of dirty computations based on their dependencies.
+   */
+  private topologicalSortDirty(actions: Action[]): Action[] {
+    if (actions.length <= 1) return actions;
+
+    const actionSet = new Set(actions);
+    const graph = new Map<Action, Set<Action>>();
+    const inDegree = new Map<Action, number>();
+
+    // Initialize
+    for (const action of actions) {
+      graph.set(action, new Set());
+      inDegree.set(action, 0);
+    }
+
+    // Build dependency edges within the dirty set
+    for (const actionA of actions) {
+      const logA = this.dependencies.get(actionA);
+      if (!logA) continue;
+
+      for (const write of logA.writes) {
+        for (const actionB of actions) {
+          if (actionA === actionB) continue;
+
+          const logB = this.dependencies.get(actionB);
+          if (!logB) continue;
+
+          // Check if actionB reads what actionA writes
+          for (const read of logB.reads) {
+            if (
+              read.space === write.space &&
+              read.id === write.id &&
+              arraysOverlap(write.path, read.path)
+            ) {
+              const neighbors = graph.get(actionA)!;
+              if (!neighbors.has(actionB)) {
+                neighbors.add(actionB);
+                inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // Kahn's algorithm
+    const queue: Action[] = [];
+    const result: Action[] = [];
+
+    for (const [action, degree] of inDegree) {
+      if (degree === 0) queue.push(action);
+    }
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      result.push(current);
+
+      for (const neighbor of graph.get(current) || []) {
+        const newDegree = (inDegree.get(neighbor) || 0) - 1;
+        inDegree.set(neighbor, newDegree);
+        if (newDegree === 0) queue.push(neighbor);
+      }
+    }
+
+    // Handle any remaining actions (cycles)
+    for (const action of actions) {
+      if (!result.includes(action)) {
+        result.push(action);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Runs a computation as part of the pull mechanism.
+   * Recursively pulls dependencies first, then runs the computation.
+   * @param computation The computation to run
+   * @param _effectTx The effect's transaction (for context, not used directly)
+   */
+  private async runComputation(
+    computation: Action,
+    _effectTx: IExtendedStorageTransaction,
+  ): Promise<void> {
+    if (!this.dirty.has(computation)) return; // Already clean
+
+    // Create a separate transaction for this computation
+    const computationTx = this.runtime.edit();
+
+    // Recursively pull dependencies first
+    await this.pullDependencies(computation, computationTx);
+
+    try {
+      // Run the computation
+      await Promise.resolve(computation(computationTx));
+
+      // Commit and wait for the transaction to be reflected
+      const { error } = await computationTx.commit();
+      if (error) {
+        throw error;
+      }
+
+      // Wait for storage to sync so the effect can see the writes
+      await this.runtime.storageManager.synced();
+
+      // Update dependencies based on actual reads/writes
+      const log = txToReactivityLog(computationTx);
+      this.subscribe(computation, log);
+
+    } catch (error) {
+      this.handleError(error as Error, computation);
+    }
+
+    // Clear dirty flag after running
+    this.clearDirty(computation);
   }
 
   private handleError(error: Error, action: any) {
@@ -592,6 +994,18 @@ export class Scheduler {
     }
 
     const order = topologicalSort(this.pending, this.dependencies);
+
+    // In pull mode, assert that only effects are in the pending queue
+    if (this.pullMode) {
+      for (const action of order) {
+        if (this.computations.has(action) && !this.effects.has(action)) {
+          logger.warn("schedule", () => [
+            `[PULL MODE WARNING] Computation found in pending queue: ${action.name || "anonymous"}`,
+            "This may indicate a bug in pull-based scheduling.",
+          ]);
+        }
+      }
+    }
 
     logger.debug("schedule", () => [
       `[EXECUTE] Canceling subscriptions for ${order.length} actions before execution`,

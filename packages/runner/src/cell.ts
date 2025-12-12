@@ -1389,7 +1389,8 @@ function subscribeToReferencedDocs<T>(
   // changed. But ideally we enforce read-only as well.
   tx.commit();
 
-  const cancel = runtime.scheduler.subscribe(action, log);
+  // Mark as effect since sink() is a side-effectful consumer (FRP effect/sink)
+  const cancel = runtime.scheduler.subscribe(action, log, { isEffect: true });
 
   return () => {
     cancel();
