@@ -29,7 +29,6 @@
 import {
   Cell,
   computed,
-  Default,
   handler,
   ifElse,
   NAME,
