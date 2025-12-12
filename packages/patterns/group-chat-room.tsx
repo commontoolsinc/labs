@@ -488,7 +488,7 @@ export default pattern<RoomInput, RoomOutput>(
                       msg,
                       (m: Message) => (m && m.reactions) || [],
                     );
-                    const hasReactions = derive(
+                    const _hasReactions = derive(
                       messageReactions,
                       (r: Reaction[]) => r.length > 0,
                     );

@@ -91,7 +91,7 @@ const joinChat = handler<
     sessionId: Cell<string>;
     nameInput: Cell<string>;
   }
->((_event, { chatName, messages, users, sessionId, nameInput }) => {
+>((_event, { messages, users, sessionId, nameInput }) => {
   const name = nameInput.get().trim();
   if (!name) {
     console.log("[joinChat] No name entered, returning");
