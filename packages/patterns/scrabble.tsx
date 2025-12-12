@@ -11,8 +11,8 @@
  */
 
 import {
-  cell,
   Cell,
+  cell,
   Default,
   handler,
   NAME,
@@ -23,14 +23,14 @@ import {
 } from "commontools";
 
 import ScrabbleGame, {
-  Player,
   createTileBag,
   drawTilesFromBag,
   getRandomColor,
-  parsePlayersJson,
-  parseGameEventsJson,
-  parseAllRacksJson,
   parseAllPlacedJson,
+  parseAllRacksJson,
+  parseGameEventsJson,
+  parsePlayersJson,
+  Player,
 } from "./scrabble-game.tsx";
 
 // =============================================================================
@@ -39,13 +39,13 @@ import ScrabbleGame, {
 
 interface LobbyInput {
   gameName: Default<string, "Scrabble Match">;
-  boardJson: Cell<Default<string, "">>;  // JSON string of PlacedTile[]
+  boardJson: Cell<Default<string, "">>; // JSON string of PlacedTile[]
   bagJson: Cell<Default<string, "">>;
   bagIndex: Cell<Default<number, 0>>;
-  playersJson: Cell<Default<string, "[]">>;  // JSON string of Player[]
-  gameEventsJson: Cell<Default<string, "[]">>;  // JSON string of GameEvent[]
-  allRacksJson: Cell<Default<string, "{}">>;  // JSON string of AllRacks
-  allPlacedJson: Cell<Default<string, "{}">>;  // JSON string of AllPlaced
+  playersJson: Cell<Default<string, "[]">>; // JSON string of Player[]
+  gameEventsJson: Cell<Default<string, "[]">>; // JSON string of GameEvent[]
+  allRacksJson: Cell<Default<string, "{}">>; // JSON string of AllRacks
+  allPlacedJson: Cell<Default<string, "{}">>; // JSON string of AllPlaced
 }
 
 interface LobbyOutput {
@@ -68,7 +68,7 @@ let createGameAndNavigate: (
   gameEventsJson: Cell<string>,
   allRacksJson: Cell<string>,
   allPlacedJson: Cell<string>,
-  myName: string
+  myName: string,
 ) => unknown = null as any;
 
 // Handler for joining as a specific player slot (0 or 1)
@@ -86,7 +86,21 @@ const joinAsPlayer = handler<
     allRacksJson: Cell<string>;
     allPlacedJson: Cell<string>;
   }
->((_event, { gameName, nameInput, playerSlot, boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson }) => {
+>((
+  _event,
+  {
+    gameName,
+    nameInput,
+    playerSlot,
+    boardJson,
+    bagJson,
+    bagIndex,
+    playersJson,
+    gameEventsJson,
+    allRacksJson,
+    allPlacedJson,
+  },
+) => {
   console.log(`[joinAsPlayer] Handler started for slot ${playerSlot}`);
   const name = nameInput.get().trim();
   if (!name) {
@@ -102,7 +116,11 @@ const joinAsPlayer = handler<
     const freshBag = createTileBag();
     currentBagJson = JSON.stringify(freshBag);
     bagJson.set(currentBagJson);
-    console.log("[joinAsPlayer] Fresh bag created with", freshBag.length, "tiles");
+    console.log(
+      "[joinAsPlayer] Fresh bag created with",
+      freshBag.length,
+      "tiles",
+    );
   }
 
   // Initialize board if empty
@@ -116,7 +134,10 @@ const joinAsPlayer = handler<
   console.log("[joinAsPlayer] Drawing tiles from bag...");
   const currentIndex = bagIndex.get();
   const drawnTiles = drawTilesFromBag(currentBagJson, currentIndex, 7);
-  console.log("[joinAsPlayer] Drew tiles:", drawnTiles.map((t) => t.char).join(","));
+  console.log(
+    "[joinAsPlayer] Drew tiles:",
+    drawnTiles.map((t) => t.char).join(","),
+  );
 
   const newIndex = currentIndex + drawnTiles.length;
   bagIndex.set(newIndex);
@@ -168,7 +189,17 @@ const joinAsPlayer = handler<
   // Navigate to game room
   console.log("[joinAsPlayer] Navigating to game room...");
   if (createGameAndNavigate) {
-    return createGameAndNavigate(gameName, boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson, name);
+    return createGameAndNavigate(
+      gameName,
+      boardJson,
+      bagJson,
+      bagIndex,
+      playersJson,
+      gameEventsJson,
+      allRacksJson,
+      allPlacedJson,
+      name,
+    );
   }
 });
 
@@ -184,7 +215,18 @@ const resetLobby = handler<
     allRacksJson: Cell<string>;
     allPlacedJson: Cell<string>;
   }
->((_event, { boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson }) => {
+>((
+  _event,
+  {
+    boardJson,
+    bagJson,
+    bagIndex,
+    playersJson,
+    gameEventsJson,
+    allRacksJson,
+    allPlacedJson,
+  },
+) => {
   console.log("[resetLobby] Resetting all game state...");
 
   // Clear all state
@@ -203,7 +245,18 @@ const resetLobby = handler<
 });
 
 const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
-  ({ gameName, boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson }) => {
+  (
+    {
+      gameName,
+      boardJson,
+      bagJson,
+      bagIndex,
+      playersJson,
+      gameEventsJson,
+      allRacksJson,
+      allPlacedJson,
+    },
+  ) => {
     // Separate name inputs for each player slot
     const player1NameInput = cell("");
     const player2NameInput = cell("");
@@ -229,15 +282,31 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
               padding: "2rem",
             }}
           >
-            <h1 style={{ marginBottom: "0.5rem", color: "#fff", fontSize: "3rem", fontWeight: "700", letterSpacing: "-0.02em" }}>
+            <h1
+              style={{
+                marginBottom: "0.5rem",
+                color: "#fff",
+                fontSize: "3rem",
+                fontWeight: "700",
+                letterSpacing: "-0.02em",
+              }}
+            >
               SCRABBLE
             </h1>
-            <p style={{ marginBottom: "2.5rem", color: "rgba(255,255,255,0.7)", fontSize: "1.1rem" }}>
+            <p
+              style={{
+                marginBottom: "2.5rem",
+                color: "rgba(255,255,255,0.7)",
+                fontSize: "1.1rem",
+              }}
+            >
               Free-for-all multiplayer — no turns!
             </p>
 
             {/* Two Player Join Sections */}
-            <div style={{ display: "flex", gap: "1.5rem", marginBottom: "1.5rem" }}>
+            <div
+              style={{ display: "flex", gap: "1.5rem", marginBottom: "1.5rem" }}
+            >
               {/* Player 1 Section */}
               <div
                 style={{
@@ -248,7 +317,16 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
                   boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
                 }}
               >
-                <div style={{ fontSize: "0.75rem", fontWeight: "500", color: "#86868b", marginBottom: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: "500",
+                    color: "#86868b",
+                    marginBottom: "0.75rem",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                  }}
+                >
                   Player 1
                 </div>
                 <ct-input
@@ -296,7 +374,16 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
                   boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
                 }}
               >
-                <div style={{ fontSize: "0.75rem", fontWeight: "500", color: "#86868b", marginBottom: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: "500",
+                    color: "#86868b",
+                    marginBottom: "0.75rem",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                  }}
+                >
                   Player 2
                 </div>
                 <ct-input
@@ -371,7 +458,7 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
       allRacksJson,
       allPlacedJson,
     };
-  }
+  },
 );
 
 createGameAndNavigate = (
@@ -383,7 +470,7 @@ createGameAndNavigate = (
   gameEventsJson: Cell<string>,
   allRacksJson: Cell<string>,
   allPlacedJson: Cell<string>,
-  myName: string
+  myName: string,
 ) => {
   console.log("[createGameAndNavigate] Starting...");
   console.log("[createGameAndNavigate] myName:", myName);
@@ -402,7 +489,10 @@ createGameAndNavigate = (
     allPlacedJson,
     myName,
   });
-  console.log("[createGameAndNavigate] ScrabbleGame instance created:", gameInstance);
+  console.log(
+    "[createGameAndNavigate] ScrabbleGame instance created:",
+    gameInstance,
+  );
 
   console.log("[createGameAndNavigate] Calling navigateTo...");
   const navResult = navigateTo(gameInstance);
