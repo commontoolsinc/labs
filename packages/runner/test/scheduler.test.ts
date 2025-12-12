@@ -70,7 +70,7 @@ describe("scheduler", () => {
         a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, true);
+    runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, { scheduleImmediately: true });
     await runtime.idle();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
@@ -119,7 +119,7 @@ describe("scheduler", () => {
         b.getAsNormalizedFullLink(),
       ],
       writes: [c.getAsNormalizedFullLink()],
-    }, true);
+    }, { scheduleImmediately: true });
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
     a.withTx(tx).send(2); // No log, simulate external change
@@ -161,7 +161,7 @@ describe("scheduler", () => {
         a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, true);
+    runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, { scheduleImmediately: true });
     await runtime.idle();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
@@ -219,7 +219,7 @@ describe("scheduler", () => {
         b.getAsNormalizedFullLink(),
       ],
       writes: [c.getAsNormalizedFullLink()],
-    }, true);
+    }, { scheduleImmediately: true });
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
     a.withTx(tx).send(2);
@@ -288,9 +288,9 @@ describe("scheduler", () => {
         c.withTx(tx).get() + d.withTx(tx).get(),
       );
     };
-    runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, true);
+    runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, { scheduleImmediately: true });
     await runtime.idle();
-    runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, true);
+    runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, { scheduleImmediately: true });
     await runtime.idle();
     expect(runs.join(",")).toBe("adder1,adder2");
     expect(c.get()).toBe(3);
@@ -375,11 +375,11 @@ describe("scheduler", () => {
     const stopped = spy(stopper, "stop");
     runtime.scheduler.onError(() => stopper.stop());
 
-    runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, true);
+    runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, { scheduleImmediately: true });
     await runtime.idle();
-    runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, true);
+    runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, { scheduleImmediately: true });
     await runtime.idle();
-    runtime.scheduler.subscribe(adder3, { reads: [], writes: [] }, true);
+    runtime.scheduler.subscribe(adder3, { reads: [], writes: [] }, { scheduleImmediately: true });
     await runtime.idle();
 
     await runtime.idle();
@@ -416,7 +416,7 @@ describe("scheduler", () => {
     const stopped = spy(stopper, "stop");
     runtime.scheduler.onError(() => stopper.stop());
 
-    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, true);
+    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, { scheduleImmediately: true });
     await runtime.idle();
     expect(counter.get()).toBe(1);
     await runtime.idle();
@@ -434,7 +434,7 @@ describe("scheduler", () => {
   it("should immediately run actions that have no dependencies", async () => {
     let runs = 0;
     const inc: Action = () => runs++;
-    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, true);
+    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, { scheduleImmediately: true });
     await runtime.idle();
     expect(runs).toBe(1);
   });
@@ -483,7 +483,7 @@ describe("scheduler", () => {
     runtime.scheduler.subscribe(
       ignoredReadAction,
       { reads: [], writes: [] },
-      true,
+      { scheduleImmediately: true },
     );
     await runtime.idle();
     expect(actionRunCount).toBe(1);
@@ -700,7 +700,7 @@ describe("event handling", () => {
       actionCount++;
       lastEventSeen = eventResultCell.withTx(tx).get();
     };
-    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, true);
+    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, { scheduleImmediately: true });
     await runtime.idle();
 
     runtime.scheduler.addEventHandler(
@@ -844,7 +844,7 @@ describe("reactive retries", () => {
       runtime.scheduler.subscribe(
         reactiveAction,
         { reads: [], writes: [] },
-        true,
+        { scheduleImmediately: true },
       );
 
       // Allow retries to process. Idle may resolve before re-queue occurs,
@@ -941,7 +941,7 @@ describe("reactive retries", () => {
           reads: [source.getAsNormalizedFullLink()],
           writes: [intermediate.getAsNormalizedFullLink()],
         },
-        true,
+        { scheduleImmediately: true },
       );
       runtime.scheduler.subscribe(
         action2,
@@ -949,7 +949,7 @@ describe("reactive retries", () => {
           reads: [intermediate.getAsNormalizedFullLink()],
           writes: [output.getAsNormalizedFullLink()],
         },
-        true,
+        { scheduleImmediately: true },
       );
 
       // Allow all actions to complete (action1 will retry twice)
@@ -1288,7 +1288,7 @@ describe("effect/computation tracking", () => {
     expect(stats1.effects).toBe(0);
 
     const action: Action = () => {};
-    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, true);
+    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, { scheduleImmediately: true });
     await runtime.idle();
 
     const stats2 = runtime.scheduler.getStats();
@@ -1389,7 +1389,7 @@ describe("effect/computation tracking", () => {
     };
 
     // Legacy: passing boolean directly should still work
-    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, true);
+    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, { scheduleImmediately: true });
     await runtime.idle();
 
     expect(runCount).toBe(1);
