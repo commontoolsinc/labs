@@ -2353,7 +2353,10 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       action1A,
       {
-        reads: [cellA1.getAsNormalizedFullLink(), cellB1.getAsNormalizedFullLink()],
+        reads: [
+          cellA1.getAsNormalizedFullLink(),
+          cellB1.getAsNormalizedFullLink(),
+        ],
         writes: [cellB1.getAsNormalizedFullLink()],
       },
       { scheduleImmediately: true },
@@ -2362,7 +2365,10 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       action1B,
       {
-        reads: [cellA1.getAsNormalizedFullLink(), cellB1.getAsNormalizedFullLink()],
+        reads: [
+          cellA1.getAsNormalizedFullLink(),
+          cellB1.getAsNormalizedFullLink(),
+        ],
         writes: [cellA1.getAsNormalizedFullLink()],
       },
       { scheduleImmediately: true },
@@ -2371,7 +2377,10 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       action2A,
       {
-        reads: [cellA2.getAsNormalizedFullLink(), cellB2.getAsNormalizedFullLink()],
+        reads: [
+          cellA2.getAsNormalizedFullLink(),
+          cellB2.getAsNormalizedFullLink(),
+        ],
         writes: [cellB2.getAsNormalizedFullLink()],
       },
       { scheduleImmediately: true },
@@ -2380,7 +2389,10 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       action2B,
       {
-        reads: [cellA2.getAsNormalizedFullLink(), cellB2.getAsNormalizedFullLink()],
+        reads: [
+          cellA2.getAsNormalizedFullLink(),
+          cellB2.getAsNormalizedFullLink(),
+        ],
         writes: [cellA2.getAsNormalizedFullLink()],
       },
       { scheduleImmediately: true },
