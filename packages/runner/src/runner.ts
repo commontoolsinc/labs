@@ -1184,7 +1184,7 @@ export class Runner {
         this.runtime.scheduler.subscribe(
           wrappedAction,
           { reads, writes },
-          true,
+          { scheduleImmediately: true },
         ),
       );
     }
@@ -1254,7 +1254,7 @@ export class Runner {
       this.runtime.scheduler.subscribe(
         action,
         { reads: inputCells, writes: outputCells },
-        true,
+        { scheduleImmediately: true },
       ),
     );
   }
