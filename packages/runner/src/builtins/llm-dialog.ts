@@ -319,14 +319,9 @@ function collectToolEntries(
   const charms: CharmToolEntry[] = [];
 
   for (const [name, tool] of Object.entries(tools)) {
-    if (tool.charm) {
+    if (tool?.charm?.get?.()) {
       const charm: Cell<any> = tool.charm;
-      const charmValue = charm.asSchema(
-        {
-          type: "object",
-          properties: { [NAME]: { type: "string" } },
-        } as const satisfies JSONSchema,
-      ).get();
+      const charmValue = charm.get();
       const charmName = String(charmValue?.[NAME] ?? name);
 
       // Extract handle from link
