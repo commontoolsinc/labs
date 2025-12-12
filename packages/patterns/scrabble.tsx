@@ -14,6 +14,7 @@ import {
   Cell,
   cell,
   Default,
+  derive,
   handler,
   NAME,
   navigateTo,
@@ -261,6 +262,18 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
     const player1NameInput = cell("");
     const player2NameInput = cell("");
 
+    // Derive player data reactively from playersJson
+    const player1 = derive(playersJson, (json: string) => {
+      const players = parsePlayersJson(json);
+      return players[0] || null;
+    });
+    const player2 = derive(playersJson, (json: string) => {
+      const players = parsePlayersJson(json);
+      return players[1] || null;
+    });
+    const player1Name = derive(player1, (p: Player | null) => p?.name || null);
+    const player2Name = derive(player2, (p: Player | null) => p?.name || null);
+
     return {
       [NAME]: str`${gameName} - Lobby`,
       [UI]: (
@@ -329,40 +342,62 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
                 >
                   Player 1
                 </div>
-                <ct-input
-                  $value={player1NameInput}
-                  placeholder="Your name"
-                  style="width: 100%; margin-bottom: 1rem;"
-                  timingStrategy="immediate"
-                />
-                <button
-                  type="button"
-                  style={{
-                    width: "100%",
-                    padding: "0.75rem 1.5rem",
-                    fontSize: "1rem",
-                    backgroundColor: "#3d7c1f",
-                    color: "white",
-                    fontWeight: "600",
-                    border: "none",
-                    borderRadius: "8px",
-                    cursor: "pointer",
-                  }}
-                  onClick={joinAsPlayer({
-                    gameName,
-                    nameInput: player1NameInput,
-                    playerSlot: 0,
-                    boardJson,
-                    bagJson,
-                    bagIndex,
-                    playersJson,
-                    gameEventsJson,
-                    allRacksJson,
-                    allPlacedJson,
-                  })}
-                >
-                  Join
-                </button>
+                {player1Name
+                  ? (
+                    <div style={{ textAlign: "center", padding: "0.5rem 0" }}>
+                      <div
+                        style={{
+                          fontSize: "1.25rem",
+                          fontWeight: "600",
+                          color: "#1d1d1f",
+                          marginBottom: "0.5rem",
+                        }}
+                      >
+                        {player1Name}
+                      </div>
+                      <div style={{ fontSize: "0.875rem", color: "#86868b" }}>
+                        Ready to play
+                      </div>
+                    </div>
+                  )
+                  : (
+                    <>
+                      <ct-input
+                        $value={player1NameInput}
+                        placeholder="Your name"
+                        style="width: 100%; margin-bottom: 1rem;"
+                        timingStrategy="immediate"
+                      />
+                      <button
+                        type="button"
+                        style={{
+                          width: "100%",
+                          padding: "0.75rem 1.5rem",
+                          fontSize: "1rem",
+                          backgroundColor: "#3d7c1f",
+                          color: "white",
+                          fontWeight: "600",
+                          border: "none",
+                          borderRadius: "8px",
+                          cursor: "pointer",
+                        }}
+                        onClick={joinAsPlayer({
+                          gameName,
+                          nameInput: player1NameInput,
+                          playerSlot: 0,
+                          boardJson,
+                          bagJson,
+                          bagIndex,
+                          playersJson,
+                          gameEventsJson,
+                          allRacksJson,
+                          allPlacedJson,
+                        })}
+                      >
+                        Join
+                      </button>
+                    </>
+                  )}
               </div>
 
               {/* Player 2 Section */}
@@ -387,40 +422,62 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
                 >
                   Player 2
                 </div>
-                <ct-input
-                  $value={player2NameInput}
-                  placeholder="Your name"
-                  style="width: 100%; margin-bottom: 1rem;"
-                  timingStrategy="immediate"
-                />
-                <button
-                  type="button"
-                  style={{
-                    width: "100%",
-                    padding: "0.75rem 1.5rem",
-                    fontSize: "1rem",
-                    backgroundColor: "#3d7c1f",
-                    color: "white",
-                    fontWeight: "600",
-                    border: "none",
-                    borderRadius: "8px",
-                    cursor: "pointer",
-                  }}
-                  onClick={joinAsPlayer({
-                    gameName,
-                    nameInput: player2NameInput,
-                    playerSlot: 1,
-                    boardJson,
-                    bagJson,
-                    bagIndex,
-                    playersJson,
-                    gameEventsJson,
-                    allRacksJson,
-                    allPlacedJson,
-                  })}
-                >
-                  Join
-                </button>
+                {player2Name
+                  ? (
+                    <div style={{ textAlign: "center", padding: "0.5rem 0" }}>
+                      <div
+                        style={{
+                          fontSize: "1.25rem",
+                          fontWeight: "600",
+                          color: "#1d1d1f",
+                          marginBottom: "0.5rem",
+                        }}
+                      >
+                        {player2Name}
+                      </div>
+                      <div style={{ fontSize: "0.875rem", color: "#86868b" }}>
+                        Ready to play
+                      </div>
+                    </div>
+                  )
+                  : (
+                    <>
+                      <ct-input
+                        $value={player2NameInput}
+                        placeholder="Your name"
+                        style="width: 100%; margin-bottom: 1rem;"
+                        timingStrategy="immediate"
+                      />
+                      <button
+                        type="button"
+                        style={{
+                          width: "100%",
+                          padding: "0.75rem 1.5rem",
+                          fontSize: "1rem",
+                          backgroundColor: "#3d7c1f",
+                          color: "white",
+                          fontWeight: "600",
+                          border: "none",
+                          borderRadius: "8px",
+                          cursor: "pointer",
+                        }}
+                        onClick={joinAsPlayer({
+                          gameName,
+                          nameInput: player2NameInput,
+                          playerSlot: 1,
+                          boardJson,
+                          bagJson,
+                          bagIndex,
+                          playersJson,
+                          gameEventsJson,
+                          allRacksJson,
+                          allPlacedJson,
+                        })}
+                      >
+                        Join
+                      </button>
+                    </>
+                  )}
               </div>
             </div>
 
