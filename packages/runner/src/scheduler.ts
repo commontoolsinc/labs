@@ -80,6 +80,18 @@ export type SpaceURIAndType = `${MemorySpace}/${URI}/${MediaType}`;
 const MAX_ITERATIONS_PER_RUN = 100;
 const DEFAULT_RETRIES_FOR_EVENTS = 5;
 const MAX_RETRIES_FOR_REACTIVE = 10;
+const MAX_CYCLE_ITERATIONS = 20;
+const FAST_CYCLE_THRESHOLD_MS = 16;
+
+/**
+ * Statistics tracked for each action's execution performance.
+ */
+export interface ActionStats {
+  runCount: number;
+  totalTime: number;
+  averageTime: number;
+  lastRunTime: number;
+}
 
 export class Scheduler {
   private eventQueue: {
@@ -103,6 +115,16 @@ export class Scheduler {
   private isEffectAction = new WeakMap<Action, boolean>();
   private dirty = new Set<Action>();
   private pullMode = false;
+
+  // Compute time tracking for cycle-aware scheduling
+  private actionStats = new WeakMap<Action, ActionStats>();
+  // Cycle detection during dependency collection
+  private collectStack = new Set<Action>();
+  // Slow cycle state for yielding between iterations
+  private slowCycleState = new WeakMap<
+    Action,
+    { iteration: number; lastYield: number }
+  >();
 
   private idlePromises: (() => void)[] = [];
   private loopCounter = new WeakMap<Action, number>();
@@ -269,10 +291,15 @@ export class Scheduler {
     if (this.runningPromise) await this.runningPromise;
 
     const tx = this.runtime.edit();
+    const actionStartTime = performance.now();
 
     let result: any;
     this.runningPromise = new Promise((resolve) => {
       const finalizeAction = (error?: unknown) => {
+        // Record action execution time for cycle-aware scheduling
+        const elapsed = performance.now() - actionStartTime;
+        this.recordActionTime(action, elapsed);
+
         try {
           if (error) {
             logger.error("schedule-error", () => [
@@ -321,6 +348,7 @@ export class Scheduler {
             `[RUN] Action completed: ${action.name || "anonymous"}`,
             `Reads: ${log.reads.length}`,
             `Writes: ${log.writes.length}`,
+            `Elapsed: ${elapsed.toFixed(2)}ms`,
           ]);
 
           this.subscribe(action, log);
@@ -329,7 +357,6 @@ export class Scheduler {
       };
 
       try {
-        const actionStartTime = performance.now();
         Promise.resolve(action(tx))
           .then((actionResult) => {
             result = actionResult;
@@ -681,10 +708,24 @@ export class Scheduler {
   /**
    * Collects all dirty computations that an action depends on (transitively).
    * Used in pull mode to build the complete work set before execution.
+   * Returns a set of actions that were detected to be part of a cycle.
    */
-  private collectDirtyDependencies(action: Action, workSet: Set<Action>): void {
+  private collectDirtyDependencies(
+    action: Action,
+    workSet: Set<Action>,
+    cycleMembers: Set<Action> = new Set(),
+  ): Set<Action> {
     const log = this.dependencies.get(action);
-    if (!log) return;
+    if (!log) return cycleMembers;
+
+    // Check for cycle: if action is already in the collection stack, we've found a cycle
+    if (this.collectStack.has(action)) {
+      cycleMembers.add(action);
+      return cycleMembers;
+    }
+
+    // Add to collection stack before processing
+    this.collectStack.add(action);
 
     // Find dirty computations that write to entities this action reads
     for (const computation of this.dirty) {
@@ -701,7 +742,7 @@ export class Scheduler {
           if (write.space === read.space && write.id === read.id) {
             workSet.add(computation);
             // Recursively collect deps of this computation
-            this.collectDirtyDependencies(computation, workSet);
+            this.collectDirtyDependencies(computation, workSet, cycleMembers);
             found = true;
             break;
           }
@@ -709,6 +750,266 @@ export class Scheduler {
         if (found) break;
       }
     }
+
+    // Remove from collection stack after processing
+    this.collectStack.delete(action);
+
+    return cycleMembers;
+  }
+
+  /**
+   * Detects cycles (strongly connected components) in a work set of actions.
+   * Uses Tarjan's algorithm to identify all SCCs.
+   * Returns a list of cycle groups (each group is a set of actions forming a cycle).
+   */
+  detectCycles(workSet: Set<Action>): Set<Action>[] {
+    const index = new Map<Action, number>();
+    const lowlink = new Map<Action, number>();
+    const onStack = new Set<Action>();
+    const stack: Action[] = [];
+    const sccs: Set<Action>[] = [];
+    let currentIndex = 0;
+
+    const strongconnect = (action: Action) => {
+      index.set(action, currentIndex);
+      lowlink.set(action, currentIndex);
+      currentIndex++;
+      stack.push(action);
+      onStack.add(action);
+
+      // Get successors: actions that depend on this action's output
+      const successors = this.getSuccessorsInWorkSet(action, workSet);
+
+      for (const successor of successors) {
+        if (!index.has(successor)) {
+          // Successor hasn't been visited yet
+          strongconnect(successor);
+          lowlink.set(
+            action,
+            Math.min(lowlink.get(action)!, lowlink.get(successor)!),
+          );
+        } else if (onStack.has(successor)) {
+          // Successor is on the stack and hence in the current SCC
+          lowlink.set(
+            action,
+            Math.min(lowlink.get(action)!, index.get(successor)!),
+          );
+        }
+      }
+
+      // If action is a root node, pop the stack and generate an SCC
+      if (lowlink.get(action) === index.get(action)) {
+        const scc = new Set<Action>();
+        let w: Action;
+        do {
+          w = stack.pop()!;
+          onStack.delete(w);
+          scc.add(w);
+        } while (w !== action);
+
+        // Only include SCCs with more than one node (actual cycles)
+        if (scc.size > 1) {
+          sccs.push(scc);
+        }
+      }
+    };
+
+    // Run Tarjan's algorithm on all actions in the work set
+    for (const action of workSet) {
+      if (!index.has(action)) {
+        strongconnect(action);
+      }
+    }
+
+    return sccs;
+  }
+
+  /**
+   * Gets actions in the work set that depend on this action's output.
+   * Used by detectCycles to build the dependency graph.
+   */
+  private getSuccessorsInWorkSet(
+    action: Action,
+    workSet: Set<Action>,
+  ): Action[] {
+    const successors: Action[] = [];
+    const actionLog = this.dependencies.get(action);
+    if (!actionLog) return successors;
+
+    for (const otherAction of workSet) {
+      if (otherAction === action) continue;
+
+      const otherLog = this.dependencies.get(otherAction);
+      if (!otherLog) continue;
+
+      // Check if otherAction reads what this action writes
+      for (const write of actionLog.writes) {
+        for (const read of otherLog.reads) {
+          if (write.space === read.space && write.id === read.id) {
+            successors.push(otherAction);
+            break;
+          }
+        }
+      }
+    }
+
+    return successors;
+  }
+
+  /**
+   * Estimates the total time for one iteration of a cycle based on action stats.
+   * Returns 0 if no stats are available (assumes fast).
+   */
+  private estimateCycleTime(cycle: Set<Action>): number {
+    let total = 0;
+    for (const action of cycle) {
+      const stats = this.actionStats.get(action);
+      if (stats) {
+        total += stats.averageTime;
+      }
+    }
+    return total;
+  }
+
+  /**
+   * Determines if a cycle is "fast" (< 16ms estimated time).
+   * Fast cycles converge completely before any effect sees a value.
+   */
+  private isFastCycle(cycle: Set<Action>): boolean {
+    return this.estimateCycleTime(cycle) < FAST_CYCLE_THRESHOLD_MS;
+  }
+
+  /**
+   * Converges a fast cycle by running all dirty members repeatedly until stable.
+   * Returns true if the cycle converged, false if max iterations reached.
+   */
+  private async convergeFastCycle(cycle: Set<Action>): Promise<boolean> {
+    let iterations = 0;
+
+    while (iterations < MAX_CYCLE_ITERATIONS) {
+      // Find dirty members of the cycle
+      const dirtyMembers = [...cycle].filter((action) =>
+        this.dirty.has(action)
+      );
+
+      if (dirtyMembers.length === 0) {
+        // Cycle has converged
+        logger.debug("schedule-cycle", () => [
+          `[CYCLE] Fast cycle converged after ${iterations} iterations`,
+        ]);
+        return true;
+      }
+
+      iterations++;
+
+      // Sort dirty members topologically within the cycle
+      const sorted = topologicalSort(
+        new Set(dirtyMembers),
+        this.dependencies,
+      );
+
+      // Run each dirty member
+      for (const action of sorted) {
+        if (!this.dirty.has(action)) continue; // May have been cleared by earlier run
+
+        this.dirty.delete(action);
+        this.pending.delete(action);
+        this.unsubscribe(action);
+        await this.run(action);
+      }
+    }
+
+    // Max iterations reached - cycle didn't converge
+    logger.warn("schedule-cycle", () => [
+      `[CYCLE] Fast cycle did not converge after ${MAX_CYCLE_ITERATIONS} iterations`,
+    ]);
+    return false;
+  }
+
+  /**
+   * Runs one iteration of a slow cycle and re-queues dirty members.
+   * Returns true if the cycle converged, false if more iterations needed.
+   */
+  private async runSlowCycleIteration(cycle: Set<Action>): Promise<boolean> {
+    // Find dirty members of the cycle
+    const dirtyMembers = [...cycle].filter((action) => this.dirty.has(action));
+
+    if (dirtyMembers.length === 0) {
+      // Cycle has converged
+      return true;
+    }
+
+    // Update slow cycle state for tracking
+    for (const action of cycle) {
+      const state = this.slowCycleState.get(action);
+      if (state) {
+        state.iteration++;
+        state.lastYield = performance.now();
+
+        // Check if we've exceeded max iterations
+        if (state.iteration > MAX_CYCLE_ITERATIONS) {
+          this.handleError(
+            new Error(
+              `Slow cycle did not converge after ${MAX_CYCLE_ITERATIONS} iterations`,
+            ),
+            action,
+          );
+          // Clean up state
+          for (const member of cycle) {
+            this.slowCycleState.delete(member);
+            this.dirty.delete(member);
+          }
+          return true; // Stop iterating
+        }
+      } else {
+        this.slowCycleState.set(action, {
+          iteration: 1,
+          lastYield: performance.now(),
+        });
+      }
+    }
+
+    // Sort dirty members topologically within the cycle
+    const sorted = topologicalSort(new Set(dirtyMembers), this.dependencies);
+
+    // Run one iteration of dirty members
+    for (const action of sorted) {
+      if (!this.dirty.has(action)) continue;
+
+      this.dirty.delete(action);
+      this.pending.delete(action);
+      this.unsubscribe(action);
+      await this.run(action);
+    }
+
+    // Check if cycle converged after this iteration
+    const stillDirty = [...cycle].some((action) => this.dirty.has(action));
+    if (!stillDirty) {
+      // Clean up state on convergence
+      for (const action of cycle) {
+        this.slowCycleState.delete(action);
+      }
+      logger.debug("schedule-cycle", () => [
+        `[CYCLE] Slow cycle converged`,
+      ]);
+      return true;
+    }
+
+    // Re-queue effects from the cycle for next iteration
+    for (const action of cycle) {
+      if (this.dirty.has(action) && this.effects.has(action)) {
+        this.pending.add(action);
+      }
+    }
+
+    // Schedule affected effects for the next iteration
+    for (const action of cycle) {
+      if (this.dirty.has(action)) {
+        this.scheduleAffectedEffects(action);
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -740,6 +1041,39 @@ export class Scheduler {
       this.queueExecution();
       this.pending.add(effect);
     }
+  }
+
+  // ============================================================
+  // Compute time tracking for cycle-aware scheduling
+  // ============================================================
+
+  /**
+   * Records the execution time for an action.
+   * Updates running statistics including run count, total time, and average time.
+   */
+  private recordActionTime(action: Action, elapsed: number): void {
+    const existing = this.actionStats.get(action);
+    if (existing) {
+      existing.runCount++;
+      existing.totalTime += elapsed;
+      existing.averageTime = existing.totalTime / existing.runCount;
+      existing.lastRunTime = elapsed;
+    } else {
+      this.actionStats.set(action, {
+        runCount: 1,
+        totalTime: elapsed,
+        averageTime: elapsed,
+        lastRunTime: elapsed,
+      });
+    }
+  }
+
+  /**
+   * Returns the execution statistics for an action, if available.
+   * Useful for diagnostics and determining cycle convergence strategy.
+   */
+  getActionStats(action: Action): ActionStats | undefined {
+    return this.actionStats.get(action);
   }
 
   private handleError(error: Error, action: any) {
@@ -868,6 +1202,44 @@ export class Scheduler {
           workSet.size - this.pending.size
         }`,
       ]);
+
+      // Detect and handle cycles in the work set
+      const cycles = this.detectCycles(workSet);
+      if (cycles.length > 0) {
+        logger.debug("schedule-cycle", () => [
+          `[EXECUTE] Detected ${cycles.length} cycles in work set`,
+        ]);
+
+        // Track which actions are part of cycles (to exclude from normal execution)
+        const cycleActions = new Set<Action>();
+        for (const cycle of cycles) {
+          for (const action of cycle) {
+            cycleActions.add(action);
+          }
+        }
+
+        // Handle each cycle
+        for (const cycle of cycles) {
+          if (this.isFastCycle(cycle)) {
+            // Fast cycle: converge completely before continuing
+            logger.debug("schedule-cycle", () => [
+              `[EXECUTE] Running fast cycle convergence (${cycle.size} members)`,
+            ]);
+            await this.convergeFastCycle(cycle);
+          } else {
+            // Slow cycle: run one iteration and yield
+            logger.debug("schedule-cycle", () => [
+              `[EXECUTE] Running slow cycle iteration (${cycle.size} members)`,
+            ]);
+            await this.runSlowCycleIteration(cycle);
+          }
+        }
+
+        // Remove cycle actions from the work set (they've been handled)
+        for (const action of cycleActions) {
+          workSet.delete(action);
+        }
+      }
     } else {
       // Push mode: as-is - work set is just the pending actions
       workSet = this.pending;
