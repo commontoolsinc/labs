@@ -586,7 +586,6 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 
     return new Promise((resolve) => {
       let result: Readonly<T>;
-      let cancel: Cancel | undefined;
 
       const action: Action = (tx) => {
         // Read the value inside the effect - this ensures dependencies are pulled
@@ -600,7 +599,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       tx.commit();
 
       // Subscribe as an effect with scheduleImmediately so it runs in the next cycle
-      cancel = this.runtime.scheduler.subscribe(action, log, {
+      const cancel = this.runtime.scheduler.subscribe(action, log, {
         isEffect: true,
         scheduleImmediately: true,
       });
