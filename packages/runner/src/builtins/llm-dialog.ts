@@ -537,7 +537,7 @@ function extractRunArguments(input: unknown): Record<string, any> {
  * @param toolHandlers - Optional map to populate with handler references for invocation
  * @returns Flattened tools object with handler/pattern entries
  */
-function flattenTools(
+function _flattenTools(
   toolsCell: Cell<any>,
   _runtime?: Runtime,
 ): Record<
@@ -628,7 +628,7 @@ function flattenTools(
  * (description, inputSchema, internal) and excludes handler which may have
  * circular references.
  */
-function toolsHaveChanged(
+function _toolsHaveChanged(
   newTools: Record<string, any>,
   oldTools: Record<string, any> | undefined,
 ): boolean {
@@ -1764,6 +1764,7 @@ export function llmDialog(
             pending,
             internal,
             pinnedCells,
+            result,
             requestId,
             abortController.signal,
           );
@@ -1793,6 +1794,9 @@ export function llmDialog(
     // cell as it's the only way to get to requestId, here we are passing it
     // around on the side.
 
+    // Removing flatted tool support for now, just used in UI and too expensive
+    // to recalculate on every context change
+    /*
     // Update flattened tools whenever tools change
     const toolsCell = inputs.key("tools");
     // Ensure reactivity: register a read of tools with this tx
@@ -1806,25 +1810,7 @@ export function llmDialog(
     if (hasChanged) {
       result.withTx(tx).key("flattenedTools").set(flattened as any);
     }
-
-    // Update merged pinnedCells whenever context or internal pinnedCells change
-    const contextCells = inputs.key("context").withTx(tx).get() ?? {};
-    const toolPinnedCells = pinnedCells.withTx(tx).get() ?? [];
-
-    // Convert context cells to PinnedCell format
-    const contextAsPinnedCells: PinnedCell[] = Object.entries(contextCells).map(
-      ([name, cell]) => {
-        const link = cell.resolveAsCell().getAsNormalizedFullLink();
-        const path = createLLMFriendlyLink(link);
-        return { name, path };
-      },
-    );
-
-    // Merge context cells and tool-pinned cells
-    const mergedPinnedCells = [...contextAsPinnedCells, ...toolPinnedCells];
-
-    // Write to result cell
-    result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
+    */
 
     if (
       (!result.withTx(tx).key("pending").get() ||
@@ -1847,6 +1833,7 @@ function startRequest(
   pending: Cell<boolean>,
   internal: Cell<Schema<typeof internalSchema>>,
   pinnedCells: Cell<PinnedCell[]>,
+  result: Cell<Schema<typeof resultSchema>>,
   requestId: string,
   abortSignal: AbortSignal,
 ) {
@@ -1857,7 +1844,27 @@ function startRequest(
     Record<string, Schema<typeof LLMToolSchema>>
   >;
 
-  // No need to flatten here; UI handles flattened tools reactively
+  // Update merged pinnedCells in case context or internal pinnedCells changed
+  const contextCells = inputs.key("context").withTx(tx).get() ?? {};
+  const toolPinnedCells = pinnedCells.withTx(tx).get() ?? [];
+
+  const contextAsPinnedCells: PinnedCell[] = Object.entries(contextCells)
+    // Convert context cells to PinnedCell format
+    .map(
+      ([name, cell]) => {
+        const link = cell.resolveAsCell().getAsNormalizedFullLink();
+        const path = createLLMFriendlyLink(link);
+        return { name, path };
+      },
+    )
+    // Remove pinned cells that are already in the context
+    .filter(({ path }) => !toolPinnedCells.some((cell) => cell.path === path));
+
+  // Merge context cells and tool-pinned cells
+  const mergedPinnedCells = [...contextAsPinnedCells, ...toolPinnedCells];
+
+  // Write to result cell
+  result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
 
   const toolCatalog = buildToolCatalog(toolsCell);
 
@@ -2074,6 +2081,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
               pending,
               internal,
               pinnedCells,
+              result,
               requestId,
               abortSignal,
             );
