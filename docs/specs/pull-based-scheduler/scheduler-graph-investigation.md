@@ -44,7 +44,7 @@ Run ALL pending actions in order
 
 1. **Immediate scheduling**: When registering actions (scheduler.ts:1187):
    ```typescript
-   this.runtime.scheduler.subscribe(wrappedAction, { reads, writes }, true);
+   this.runtime.scheduler.subscribe(wrappedAction, { reads, writes }, { scheduleImmediately: true });
    //                                                                ^^^^
    // scheduleImmediately = true → action runs even if nothing observes output
    ```

@@ -165,13 +165,9 @@ export class Scheduler {
     options: {
       scheduleImmediately?: boolean;
       isEffect?: boolean;
-    } | boolean = {},
+    } = {},
   ): Cancel {
-    // Support legacy boolean signature for backwards compatibility
-    const opts = typeof options === "boolean"
-      ? { scheduleImmediately: options }
-      : options;
-    const { scheduleImmediately = false, isEffect = false } = opts;
+    const { scheduleImmediately = false, isEffect = false } = options;
 
     const reads = this.setDependencies(action, log);
 
@@ -308,7 +304,7 @@ export class Scheduler {
                 // Must re-subscribe to ensure dependencies are set before
                 // topologicalSort runs in execute(). Use the log from below
                 // which has the correct dependencies from the previous run.
-                this.subscribe(action, log, true);
+                this.subscribe(action, log, { scheduleImmediately: true });
               }
             } else {
               // Clear retries after successful commit.
