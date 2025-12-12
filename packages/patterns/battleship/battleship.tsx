@@ -4,6 +4,7 @@ import {
   computed,
   derive,
   handler,
+  ifElse,
   NAME,
   pattern,
   UI,
@@ -37,6 +38,8 @@ interface GameState {
   player2: PlayerBoard;
   winner: 1 | 2 | null;
   lastMessage: string;
+  viewingAs: 1 | 2 | null; // null = full transition screen (ready to reveal)
+  awaitingPass: boolean; // true = show result + pass button, board locked
 }
 
 // =============================================================================
@@ -150,7 +153,9 @@ function createInitialState(): GameState {
       shots: createEmptyGrid(),
     },
     winner: null,
-    lastMessage: "Player 1's turn - click on Player 2's board to fire!",
+    lastMessage: "Player 1's turn",
+    viewingAs: null, // Start with transition screen
+    awaitingPass: false,
   };
 }
 
@@ -165,24 +170,28 @@ interface Output {
 }
 
 export default pattern<Input, Output>(({}) => {
-  // Create game state with Cell.of() for initial value
   const game = Cell.of<GameState>(createInitialState());
+
   // ---------------------------------------------------------------------------
   // Handlers
   // ---------------------------------------------------------------------------
 
   const fireShot = handler<
     unknown,
-    { row: number; col: number; targetPlayer: 1 | 2; game: Cell<GameState> }
-  >((_, { row, col, targetPlayer, game }) => {
+    { row: number; col: number; game: Cell<GameState> }
+  >((_, { row, col, game }) => {
     const state = game.get();
 
-    // Can't fire if game is over
+    // Can't fire if game is over, in transition, or awaiting pass
     if (state.phase === "finished") return;
+    if (state.viewingAs === null) return;
+    if (state.awaitingPass) return;
 
-    // Can only fire at opponent
-    if (state.currentTurn === targetPlayer) return;
+    // Can only fire on your turn
+    if (state.currentTurn !== state.viewingAs) return;
 
+    // Target the opponent's board
+    const targetPlayer = state.viewingAs === 1 ? 2 : 1;
     const targetBoard = targetPlayer === 1 ? state.player1 : state.player2;
     const shots = targetBoard.shots;
 
@@ -222,6 +231,8 @@ export default pattern<Input, Output>(({}) => {
         phase: "finished",
         winner: state.currentTurn,
         lastMessage: `${message} Player ${state.currentTurn} wins!`,
+        viewingAs: state.viewingAs,
+        awaitingPass: false,
       });
     } else {
       const nextTurn = state.currentTurn === 1 ? 2 : 1;
@@ -230,10 +241,41 @@ export default pattern<Input, Output>(({}) => {
         player1: targetPlayer === 1 ? newTargetBoard : state.player1,
         player2: targetPlayer === 2 ? newTargetBoard : state.player2,
         currentTurn: nextTurn as 1 | 2,
-        lastMessage: `${message} Player ${nextTurn}'s turn.`,
+        lastMessage: message,
+        viewingAs: state.viewingAs, // Stay on current view to show result
+        awaitingPass: true, // Lock board, show pass button
       });
     }
   });
+
+  const passDevice = handler<unknown, { game: Cell<GameState> }>(
+    (_, { game }) => {
+      const state = game.get();
+      if (state.phase === "finished") return;
+      if (!state.awaitingPass) return;
+      // Go to full transition screen
+      game.set({
+        ...state,
+        viewingAs: null,
+        awaitingPass: false,
+      });
+    }
+  );
+
+  const playerReady = handler<unknown, { game: Cell<GameState> }>(
+    (_, { game }) => {
+      const state = game.get();
+      if (state.phase === "finished") return;
+      if (state.viewingAs !== null) return; // Must be on transition screen
+      // Set viewingAs to whoever's turn it is
+      game.set({
+        ...state,
+        viewingAs: state.currentTurn,
+        awaitingPass: false,
+        lastMessage: `Player ${state.currentTurn}'s turn - fire at the enemy board!`,
+      });
+    }
+  );
 
   const resetGame = handler<unknown, { game: Cell<GameState> }>(
     (_, { game }) => {
@@ -242,66 +284,75 @@ export default pattern<Input, Output>(({}) => {
   );
 
   // ---------------------------------------------------------------------------
-  // Computed Values - Pre-compute everything needed for rendering
+  // Computed Values
   // ---------------------------------------------------------------------------
 
-  // Using .get() since game is Cell<GameState> from Cell.of()
-  const lastMessage = derive(game, (g) => g.get().lastMessage ?? "Player 1's turn - click on Player 2's board to fire!");
-  const currentTurn = derive(game, (g) => g.get().currentTurn ?? 1);
+  const lastMessage = derive(game, (g) => g.get().lastMessage);
+  const currentTurn = derive(game, (g) => g.get().currentTurn);
+  const viewingAs = derive(game, (g) => g.get().viewingAs);
+  const isTransition = derive(game, (g) => g.get().viewingAs === null);
+  const isFinished = derive(game, (g) => g.get().phase === "finished");
+  const winner = derive(game, (g) => g.get().winner);
+  const awaitingPass = derive(game, (g) => g.get().awaitingPass);
 
-  // Grid cell data for each player - compute ALL display values upfront
-  const p1CellData = computed(() => {
+  // My board (the viewing player's board) - shows my ships + shots I received
+  const myBoardCells = computed(() => {
     const state = game.get();
-    const shots = state.player1?.shots ?? createEmptyGrid();
-    const ships = state.player1?.ships ?? [];
+    const viewer = state.viewingAs;
+    if (viewer === null) return [];
+
+    const myBoard = viewer === 1 ? state.player1 : state.player2;
+    const shots = myBoard.shots;
+    const ships = myBoard.ships;
     const shipPositions = buildShipPositions(ships);
 
     return GRID_INDICES.map(({ row, col }) => {
       const shotState = shots[row]?.[col] ?? "empty";
       const hasShip = !!shipPositions[`${row},${col}`];
+      // Show my ships, and show hits/misses on them
       const bgColor =
         shotState === "hit"
-          ? "#dc2626"
+          ? "#dc2626" // Hit on my ship
           : shotState === "miss"
-            ? "#374151"
+            ? "#374151" // Miss (opponent fired here)
             : hasShip
-              ? "#4a5568"
-              : "#1e3a5f";
+              ? "#22c55e" // My ship (green for own ships)
+              : "#1e3a5f"; // Water
       const content = shotState === "hit" ? "X" : shotState === "miss" ? "O" : "";
-      // Use strings for grid positions to avoid px suffix
       const gridRow = `${row + 2}`;
       const gridCol = `${col + 2}`;
       return { row, col, bgColor, content, gridRow, gridCol };
     });
   });
 
-  const p2CellData = computed(() => {
+  // Enemy board (opponent's board) - shows only my shots, NOT their ships
+  const enemyBoardCells = computed(() => {
     const state = game.get();
-    const shots = state.player2?.shots ?? createEmptyGrid();
-    const ships = state.player2?.ships ?? [];
-    const shipPositions = buildShipPositions(ships);
+    const viewer = state.viewingAs;
+    if (viewer === null) return [];
+
+    const enemyBoard = viewer === 1 ? state.player2 : state.player1;
+    const shots = enemyBoard.shots; // Shots the enemy received (= my shots)
 
     return GRID_INDICES.map(({ row, col }) => {
       const shotState = shots[row]?.[col] ?? "empty";
-      const hasShip = !!shipPositions[`${row},${col}`];
+      // Don't show enemy ships! Only show hits/misses
       const bgColor =
         shotState === "hit"
-          ? "#dc2626"
+          ? "#dc2626" // I hit their ship
           : shotState === "miss"
-            ? "#374151"
-            : hasShip
-              ? "#4a5568"
-              : "#1e3a5f";
+            ? "#374151" // I missed
+            : "#1e3a5f"; // Unknown (water or hidden ship)
       const content = shotState === "hit" ? "X" : shotState === "miss" ? "O" : "";
-      // Use strings for grid positions to avoid px suffix
       const gridRow = `${row + 2}`;
       const gridCol = `${col + 2}`;
-      return { row, col, bgColor, content, gridRow, gridCol };
+      const canClick = shotState === "empty";
+      return { row, col, bgColor, content, gridRow, gridCol, canClick };
     });
   });
 
   // ---------------------------------------------------------------------------
-  // Styles (constant, can define outside)
+  // Styles
   // ---------------------------------------------------------------------------
 
   const gridContainerStyle = {
@@ -335,6 +386,256 @@ export default pattern<Input, Output>(({}) => {
   };
 
   // ---------------------------------------------------------------------------
+  // UI Components
+  // ---------------------------------------------------------------------------
+
+  const transitionScreen = (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: "60vh",
+        gap: "20px",
+      }}
+    >
+      <h2 style={{ fontSize: "32px", margin: "0" }}>
+        Pass device to Player {currentTurn}
+      </h2>
+      <p style={{ color: "#94a3b8", fontSize: "18px", margin: "0" }}>
+        Make sure the other player isn't looking!
+      </p>
+      <ct-button onClick={playerReady({ game })}>
+        I'm Player {currentTurn} - Ready!
+      </ct-button>
+    </div>
+  );
+
+  const victoryScreen = (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: "60vh",
+        gap: "20px",
+      }}
+    >
+      <h2 style={{ fontSize: "48px", margin: "0", color: "#22c55e" }}>
+        Player {winner} Wins!
+      </h2>
+      <p style={{ color: "#94a3b8", fontSize: "18px", margin: "0" }}>
+        All enemy ships have been sunk!
+      </p>
+      <ct-button onClick={resetGame({ game })}>Play Again</ct-button>
+    </div>
+  );
+
+  const gameScreen = (
+    <div>
+      {/* Status bar */}
+      <div
+        style={{
+          textAlign: "center",
+          padding: "12px",
+          backgroundColor: "#1e293b",
+          borderRadius: "8px",
+          marginBottom: "20px",
+          fontSize: "18px",
+        }}
+      >
+        {lastMessage}
+      </div>
+
+      {/* Pass button (shown after firing) */}
+      {ifElse(
+        awaitingPass,
+        <div
+          style={{
+            textAlign: "center",
+            padding: "16px",
+            marginBottom: "20px",
+            backgroundColor: "#1e40af",
+            borderRadius: "8px",
+          }}
+        >
+          <ct-button onClick={passDevice({ game })}>
+            Pass to Player {currentTurn}
+          </ct-button>
+        </div>,
+        <div />
+      )}
+
+      {/* Game boards */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          gap: "40px",
+          flexWrap: "wrap",
+        }}
+      >
+        {/* My Board (left) */}
+        <div style={{ display: "inline-block" }}>
+          <h3 style={{ textAlign: "center", margin: "0 0 8px 0" }}>
+            Your Fleet
+          </h3>
+          <div style={gridContainerStyle}>
+            <div style={headerCellStyle} />
+            {COLS.map((c) => (
+              <div style={headerCellStyle}>{c}</div>
+            ))}
+            {ROWS.map((rowIdx) => (
+              <div
+                style={{
+                  ...headerCellStyle,
+                  gridRow: `${rowIdx + 2}`,
+                  gridColumn: "1",
+                }}
+              >
+                {rowIdx + 1}
+              </div>
+            ))}
+            {myBoardCells.map((cell) => (
+              <div
+                style={{
+                  ...baseCellStyle,
+                  gridRow: cell.gridRow,
+                  gridColumn: cell.gridCol,
+                  backgroundColor: cell.bgColor,
+                }}
+              >
+                {cell.content}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Enemy Board (right) */}
+        <div style={{ display: "inline-block" }}>
+          <h3 style={{ textAlign: "center", margin: "0 0 8px 0" }}>
+            Enemy Waters
+          </h3>
+          <div style={gridContainerStyle}>
+            <div style={headerCellStyle} />
+            {COLS.map((c) => (
+              <div style={headerCellStyle}>{c}</div>
+            ))}
+            {ROWS.map((rowIdx) => (
+              <div
+                style={{
+                  ...headerCellStyle,
+                  gridRow: `${rowIdx + 2}`,
+                  gridColumn: "1",
+                }}
+              >
+                {rowIdx + 1}
+              </div>
+            ))}
+            {enemyBoardCells.map((cell) => (
+              <div
+                style={{
+                  ...baseCellStyle,
+                  gridRow: cell.gridRow,
+                  gridColumn: cell.gridCol,
+                  backgroundColor: cell.bgColor,
+                  cursor: "pointer",
+                }}
+                onClick={fireShot({
+                  row: cell.row,
+                  col: cell.col,
+                  game,
+                })}
+              >
+                {cell.content}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          gap: "20px",
+          marginTop: "20px",
+          fontSize: "14px",
+          color: "#94a3b8",
+        }}
+      >
+        <span>
+          <span
+            style={{
+              display: "inline-block",
+              width: "16px",
+              height: "16px",
+              backgroundColor: "#22c55e",
+              marginRight: "4px",
+              verticalAlign: "middle",
+            }}
+          />
+          Your Ship
+        </span>
+        <span>
+          <span
+            style={{
+              display: "inline-block",
+              width: "16px",
+              height: "16px",
+              backgroundColor: "#1e3a5f",
+              marginRight: "4px",
+              verticalAlign: "middle",
+            }}
+          />
+          Unknown
+        </span>
+        <span>
+          <span
+            style={{
+              display: "inline-block",
+              width: "16px",
+              height: "16px",
+              backgroundColor: "#dc2626",
+              marginRight: "4px",
+              verticalAlign: "middle",
+              textAlign: "center",
+              color: "#fff",
+              fontSize: "12px",
+              lineHeight: "16px",
+            }}
+          >
+            X
+          </span>
+          Hit
+        </span>
+        <span>
+          <span
+            style={{
+              display: "inline-block",
+              width: "16px",
+              height: "16px",
+              backgroundColor: "#374151",
+              marginRight: "4px",
+              verticalAlign: "middle",
+              textAlign: "center",
+              color: "#fff",
+              fontSize: "12px",
+              lineHeight: "16px",
+            }}
+          >
+            O
+          </span>
+          Miss
+        </span>
+      </div>
+    </div>
+  );
+
+  // ---------------------------------------------------------------------------
   // Main UI
   // ---------------------------------------------------------------------------
 
@@ -350,213 +651,19 @@ export default pattern<Input, Output>(({}) => {
           minHeight: "100vh",
         }}
       >
-        <h1 style={{ textAlign: "center", margin: "0 0 10px 0" }}>
+        <h1 style={{ textAlign: "center", margin: "0 0 20px 0" }}>
           BATTLESHIP
         </h1>
-        <p style={{ textAlign: "center", color: "#94a3b8", margin: "0 0 20px 0" }}>
-          Debug Mode - All ships visible
-        </p>
 
-        {/* Status bar */}
-        <div
-          style={{
-            textAlign: "center",
-            padding: "12px",
-            backgroundColor: "#1e293b",
-            borderRadius: "8px",
-            marginBottom: "20px",
-            fontSize: "18px",
-          }}
-        >
-          {lastMessage}
-        </div>
+        {ifElse(
+          isFinished,
+          victoryScreen,
+          ifElse(isTransition, transitionScreen, gameScreen)
+        )}
 
-        {/* Game boards */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            gap: "40px",
-            flexWrap: "wrap",
-          }}
-        >
-          {/* Player 1's Board */}
-          <div style={{ display: "inline-block" }}>
-            <h3 style={{ textAlign: "center", margin: "0 0 8px 0" }}>
-              Player 1
-            </h3>
-            <div style={gridContainerStyle}>
-              {/* Header row */}
-              <div style={headerCellStyle} />
-              {COLS.map((c) => (
-                <div style={headerCellStyle}>{c}</div>
-              ))}
-
-              {/* Row labels - positioned explicitly */}
-              {ROWS.map((rowIdx) => (
-                <div
-                  style={{
-                    ...headerCellStyle,
-                    gridRow: `${rowIdx + 2}`,
-                    gridColumn: "1",
-                  }}
-                >
-                  {rowIdx + 1}
-                </div>
-              ))}
-
-              {/* Grid cells */}
-              {p1CellData.map((cell) => (
-                <div
-                  style={{
-                    ...baseCellStyle,
-                    gridRow: cell.gridRow,
-                    gridColumn: cell.gridCol,
-                    backgroundColor: cell.bgColor,
-                    cursor: "pointer",
-                  }}
-                  onClick={fireShot({
-                    row: cell.row,
-                    col: cell.col,
-                    targetPlayer: 1,
-                    game,
-                  })}
-                >
-                  {cell.content}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Player 2's Board */}
-          <div style={{ display: "inline-block" }}>
-            <h3 style={{ textAlign: "center", margin: "0 0 8px 0" }}>
-              Player 2
-            </h3>
-            <div style={gridContainerStyle}>
-              {/* Header row */}
-              <div style={headerCellStyle} />
-              {COLS.map((c) => (
-                <div style={headerCellStyle}>{c}</div>
-              ))}
-
-              {/* Row labels - positioned explicitly */}
-              {ROWS.map((rowIdx) => (
-                <div
-                  style={{
-                    ...headerCellStyle,
-                    gridRow: `${rowIdx + 2}`,
-                    gridColumn: "1",
-                  }}
-                >
-                  {rowIdx + 1}
-                </div>
-              ))}
-
-              {/* Grid cells */}
-              {p2CellData.map((cell) => (
-                <div
-                  style={{
-                    ...baseCellStyle,
-                    gridRow: cell.gridRow,
-                    gridColumn: cell.gridCol,
-                    backgroundColor: cell.bgColor,
-                    cursor: "pointer",
-                  }}
-                  onClick={fireShot({
-                    row: cell.row,
-                    col: cell.col,
-                    targetPlayer: 2,
-                    game,
-                  })}
-                >
-                  {cell.content}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Reset button */}
-        <div style={{ textAlign: "center", marginTop: "20px" }}>
+        {/* Reset button (always visible) */}
+        <div style={{ textAlign: "center", marginTop: "30px" }}>
           <ct-button onClick={resetGame({ game })}>New Game</ct-button>
-        </div>
-
-        {/* Legend */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            gap: "20px",
-            marginTop: "20px",
-            fontSize: "14px",
-            color: "#94a3b8",
-          }}
-        >
-          <span>
-            <span
-              style={{
-                display: "inline-block",
-                width: "16px",
-                height: "16px",
-                backgroundColor: "#1e3a5f",
-                marginRight: "4px",
-                verticalAlign: "middle",
-              }}
-            />
-            Unexplored
-          </span>
-          <span>
-            <span
-              style={{
-                display: "inline-block",
-                width: "16px",
-                height: "16px",
-                backgroundColor: "#4a5568",
-                marginRight: "4px",
-                verticalAlign: "middle",
-              }}
-            />
-            Ship (debug)
-          </span>
-          <span>
-            <span
-              style={{
-                display: "inline-block",
-                width: "16px",
-                height: "16px",
-                backgroundColor: "#dc2626",
-                marginRight: "4px",
-                verticalAlign: "middle",
-                textAlign: "center",
-                color: "#fff",
-                fontSize: "12px",
-                lineHeight: "16px",
-              }}
-            >
-              X
-            </span>
-            Hit
-          </span>
-          <span>
-            <span
-              style={{
-                display: "inline-block",
-                width: "16px",
-                height: "16px",
-                backgroundColor: "#374151",
-                marginRight: "4px",
-                verticalAlign: "middle",
-                textAlign: "center",
-                color: "#fff",
-                fontSize: "12px",
-                lineHeight: "16px",
-              }}
-            >
-              O
-            </span>
-            Miss
-          </span>
         </div>
       </div>
     ),
