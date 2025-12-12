@@ -2878,6 +2878,7 @@ interface CTHeadingElement extends CTHTMLElement {}
 interface CTCollapsibleElement extends CTHTMLElement {}
 interface CTThemeElement extends CTHTMLElement {}
 interface CTCodeEditorElement extends CTHTMLElement {}
+interface CTRichtextEditorElement extends CTHTMLElement {}
 interface CTCodeEditorLegacyElement extends CTHTMLElement {}
 interface CTScreenElement extends CTHTMLElement {}
 interface CTAutoLayoutElement extends CTHTMLElement {}
@@ -3497,6 +3498,25 @@ interface CTCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
   "onbacklink-create"?: any;
 }
 
+interface CTRichtextEditorAttributes<T> extends CTHTMLAttributes<T> {
+  "$value"?: CellLike<string>;
+  "value"?: string;
+  "disabled"?: boolean;
+  "readonly"?: boolean;
+  "placeholder"?: string;
+  "timingStrategy"?: string;
+  "timingDelay"?: number;
+  // Collaborative editing properties
+  "collaborative"?: boolean;
+  "roomId"?: string;
+  "collabUrl"?: string;
+  "userName"?: string;
+  "userColor"?: string;
+  "onct-change"?: any;
+  "onct-focus"?: any;
+  "onct-blur"?: any;
+}
+
 interface CTAutoLayoutAttributes<T> extends CTHTMLAttributes<T> {
   "tabNames"?: string[];
   "leftOpen"?: boolean;
@@ -4004,6 +4024,10 @@ declare global {
       "ct-code-editor": CTDOM.DetailedHTMLProps<
         CTCodeEditorAttributes<CTCodeEditorElement>,
         CTCodeEditorElement
+      >;
+      "ct-richtext-editor": CTDOM.DetailedHTMLProps<
+        CTRichtextEditorAttributes<CTRichtextEditorElement>,
+        CTRichtextEditorElement
       >;
       "ct-screen": CTDOM.DetailedHTMLProps<
         CTHTMLAttributes<CTScreenElement>,

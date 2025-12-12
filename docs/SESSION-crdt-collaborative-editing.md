@@ -1,6 +1,6 @@
 # Session Log: CRDT Collaborative Editing
 
-## Status: Phase 1 Complete - Starting Phase 2
+## Status: Phase 3 Complete - Rich Text Collaboration Working
 
 ## What We've Done
 - [x] Explored framework architecture (Chronicle, Cell, transaction system)
@@ -48,7 +48,7 @@
 
 ### Phase 1: Infrastructure ✅
 - [x] Set up y-websocket server in toolshed
-- [ ] Test basic Yjs sync between two browser tabs
+- [x] Test basic Yjs sync between two browser tabs
 
 ### Phase 2: ct-code-editor ✅
 - [x] Add `collaborative` and `roomId` props
@@ -58,23 +58,36 @@
 - [x] Updated JSX type definitions for new props
 - [x] Created test pattern (patterns/jkomoros/WIP/collab-test.tsx)
 - [x] Tested - WebSocket connects successfully and shows "Collab status: connected"
+- [x] **Verified real-time sync between two browser tabs** - bidirectional text sync works!
+- [x] **Cursor presence works** - shows other user's cursor position with name label
 
-### Phase 3: ct-richtext-editor (new)
-- [ ] Create component with TipTap
-- [ ] Add Collaboration extension
-- [ ] Test rich text sync
+### Phase 3: ct-richtext-editor ✅
+- [x] Create component with TipTap (StarterKit + Collaboration + CollaborationCursor)
+- [x] Add TipTap and y-prosemirror dependencies to ui package
+- [x] Added JSX type definitions for new props
+- [x] Created test pattern (patterns/jkomoros/WIP/richtext-collab-test.tsx)
+- [x] **Verified real-time sync between two browser tabs** - rich text collaboration works!
+- [x] **Cursor presence works** - shows other user's cursor with name label
 
 ### Phase 4: Polish
-- [ ] Cursor presence / awareness
-- [ ] Reconnection handling
+- [x] Cursor presence / awareness (basic implementation working)
+- [ ] Reconnection handling (y-websocket has built-in reconnect, may need polish)
 - [ ] Bundle optimization (lazy loading)
 
-## Key Files to Modify
+## Key Files Modified
 
 **In labs:**
-- `/packages/ui/src/v2/components/ct-code-editor/ct-code-editor.ts`
-- `/packages/ui/deno.json` (add deps)
-- `/packages/toolshed/...` (if embedding y-websocket)
-
-**New in labs:**
-- `/packages/ui/src/v2/components/ct-richtext-editor/*`
+- `/packages/ui/src/v2/components/ct-code-editor/ct-code-editor.ts` - Added collaborative editing
+- `/packages/ui/src/v2/components/ct-richtext-editor/` - New component (created)
+  - `ct-richtext-editor.ts` - TipTap-based rich text editor with Yjs
+  - `styles.ts` - Component styles including cursor presence
+  - `index.ts` - Export and custom element registration
+- `/packages/ui/src/v2/index.ts` - Added ct-richtext-editor export
+- `/packages/ui/deno.json` - Added yjs, y-codemirror.next, y-websocket, lib0, TipTap deps
+- `/packages/html/src/jsx.d.ts` - Added collaborative props for both editors
+- `/packages/toolshed/routes/collab/` - New Yjs WebSocket server
+  - `yjs-server.ts` - Core Yjs sync logic
+  - `collab.routes.ts` - OpenAPI route definitions
+  - `collab.handlers.ts` - WebSocket handlers
+  - `collab.index.ts` - Router registration
+- `/packages/toolshed/app.ts` - Added collab route registration

@@ -25,6 +25,12 @@
     "yjs": "npm:yjs@^13.6.20",
     "y-codemirror.next": "npm:y-codemirror.next@^0.3.5",
     "y-websocket": "npm:y-websocket@^2.0.4",
-    "lib0": "npm:lib0@^0.2.98"
+    "lib0": "npm:lib0@^0.2.98",
+    "@tiptap/core": "npm:@tiptap/core@^2.10.3",
+    "@tiptap/pm": "npm:@tiptap/pm@^2.10.3",
+    "@tiptap/starter-kit": "npm:@tiptap/starter-kit@^2.10.3",
+    "@tiptap/extension-collaboration": "npm:@tiptap/extension-collaboration@^2.10.3",
+    "@tiptap/extension-collaboration-cursor": "npm:@tiptap/extension-collaboration-cursor@^2.10.3",
+    "y-prosemirror": "npm:y-prosemirror@^1.2.12"
   }
 }
