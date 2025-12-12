@@ -141,7 +141,7 @@ export class Scheduler {
   // Throttle infrastructure - "value can be stale by T ms"
   private actionThrottle = new WeakMap<Action, number>();
 
-  // Push-triggered filtering (Phase 5)
+  // Push-triggered filtering
   // Track what each action has ever written (grows over time)
   private mightWrite = new WeakMap<Action, IMemorySpaceAddress[]>();
   // Track what push mode triggered this execution cycle
@@ -393,7 +393,7 @@ export class Scheduler {
           });
           const log = txToReactivityLog(tx);
 
-          // Update mightWrite with actual writes (Phase 5)
+          // Update mightWrite with actual writes
           this.updateMightWrite(action, log.writes);
 
           logger.debug("schedule-run-complete", () => [
@@ -571,7 +571,7 @@ export class Scheduler {
               ]);
 
               for (const action of triggeredActions) {
-                // Track what push mode triggered (for Phase 5 filtering)
+                // Track what push mode triggered (for push-triggered filtering)
                 this.pushTriggered.add(action);
 
                 logger.debug("schedule", () => [
@@ -940,9 +940,10 @@ export class Scheduler {
     let iterations = 0;
 
     while (iterations < MAX_CYCLE_ITERATIONS) {
-      // Find dirty members of the cycle
+      // Find dirty or pending members of the cycle
+      // (actions may be re-added to pending when they write to cells that other cycle members read)
       const dirtyMembers = [...cycle].filter((action) =>
-        this.dirty.has(action)
+        this.dirty.has(action) || this.pending.has(action)
       );
 
       if (dirtyMembers.length === 0) {
@@ -973,9 +974,23 @@ export class Scheduler {
     }
 
     // Max iterations reached - cycle didn't converge
-    logger.warn("schedule-cycle", () => [
-      `[CYCLE] Fast cycle did not converge after ${MAX_CYCLE_ITERATIONS} iterations`,
-    ]);
+    const error = new Error(
+      `Fast cycle did not converge after ${MAX_CYCLE_ITERATIONS} iterations`,
+    );
+    logger.warn("schedule-cycle", () => [`[CYCLE] ${error.message}`]);
+
+    // Report error to handlers (pick first cycle member as representative)
+    const representative = cycle.values().next().value;
+    if (representative) {
+      this.handleError(error, representative);
+    }
+
+    // Clean up: remove dirty/pending state for cycle members to prevent infinite loops
+    for (const action of cycle) {
+      this.dirty.delete(action);
+      this.pending.delete(action);
+    }
+
     return false;
   }
 
@@ -1217,7 +1232,9 @@ export class Scheduler {
     this.debounceTimers.set(action, timer);
 
     logger.debug("schedule-debounce", () => [
-      `[DEBOUNCE] Action ${action.name || "anonymous"} debounced for ${debounceMs}ms`,
+      `[DEBOUNCE] Action ${
+        action.name || "anonymous"
+      } debounced for ${debounceMs}ms`,
     ]);
   }
 
@@ -1243,7 +1260,9 @@ export class Scheduler {
       this.actionDebounce.set(action, AUTO_DEBOUNCE_DELAY_MS);
       logger.debug("schedule-debounce", () => [
         `[AUTO-DEBOUNCE] Action ${action.name || "anonymous"} ` +
-          `auto-debounced (avg ${stats.averageTime.toFixed(1)}ms >= ${AUTO_DEBOUNCE_THRESHOLD_MS}ms)`,
+        `auto-debounced (avg ${
+          stats.averageTime.toFixed(1)
+        }ms >= ${AUTO_DEBOUNCE_THRESHOLD_MS}ms)`,
       ]);
     }
   }
@@ -1296,14 +1315,17 @@ export class Scheduler {
   }
 
   // ============================================================
-  // Push-triggered filtering (Phase 5)
+  // Push-triggered filtering
   // ============================================================
 
   /**
    * Updates the mightWrite set for an action by accumulating its actual writes.
    * This grows over time to capture all paths an action has ever written.
    */
-  private updateMightWrite(action: Action, writes: IMemorySpaceAddress[]): void {
+  private updateMightWrite(
+    action: Action,
+    writes: IMemorySpaceAddress[],
+  ): void {
     const existing = this.mightWrite.get(action);
     if (!existing) {
       this.mightWrite.set(action, [...writes]);
@@ -1517,6 +1539,11 @@ export class Scheduler {
 
         // Handle each cycle
         for (const cycle of cycles) {
+          console.log(
+            `[DEBUG] Cycle size: ${cycle.size}, isFast: ${
+              this.isFastCycle(cycle)
+            }`,
+          );
           if (this.isFastCycle(cycle)) {
             // Fast cycle: converge completely before continuing
             logger.debug("schedule-cycle", () => [
@@ -1577,7 +1604,7 @@ export class Scheduler {
         continue;
       }
 
-      // Phase 5: Push-triggered filtering
+      // Push-triggered filtering:
       // Skip actions not triggered by actual storage changes (but keep them dirty)
       if (this.shouldFilterAction(fn)) {
         logger.debug("schedule-filter", () => [
@@ -1619,7 +1646,7 @@ export class Scheduler {
       this.loopCounter = new WeakMap();
       this.scheduled = false;
 
-      // Clear Phase 5 tracking sets at end of execution cycle
+      // Clear push-triggered tracking sets at end of execution cycle
       this.pushTriggered.clear();
       this.scheduledImmediately.clear();
     } else {
