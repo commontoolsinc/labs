@@ -161,29 +161,11 @@ async runEffect(effect: Action, tx: IExtendedStorageTransaction) {
 }
 ```
 
-#### 4. Memoization for Computations
-
-```typescript
-async recompute(computation: Action, tx: IExtendedStorageTransaction) {
-  // First, ensure our dependencies are fresh
-  for (const dep of this.getDependencies(computation)) {
-    if (this.isDirty(dep)) {
-      await this.recompute(dep, tx);
-    }
-  }
-
-  // Then recompute
-  const result = await computation(tx);
-  this.clearDirty(computation);
-  return result;
-}
-```
-
 ### Benefits
 
 1. **Reduced computation**: Only compute what's actually needed
-2. **Memory efficiency**: Don't cache results nobody uses
-3. **Better for sparse graphs**: Many computations, few observers
+2. **Better for sparse graphs**: Many computations, few observers
+3. **No explicit memoization needed**: Storage already handles persistence of intermediate values
 
 ### Challenges
 
@@ -197,7 +179,7 @@ async recompute(computation: Action, tx: IExtendedStorageTransaction) {
 
 3. **Glitch freedom**: Must ensure topological ordering within pull
 
-4. **Integration with current tx mechanism**: Transactions assume immediate execution
+4. **Cycle semantics change significantly** (see below)
 
 ### Minimal Change Approach
 
@@ -256,6 +238,59 @@ if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {  // 100
   this.handleError(new Error(`Too many iterations...`), fn);
 }
 ```
+
+The `MAX_ITERATIONS` limit is a safety net for **non-converging cycles** (fixpoint iteration that never stabilizes). This is correct behavior - we want cycles to converge, and limit runaway computation when they don't.
+
+### How Cycle Semantics Change with Pull-Based Scheduling
+
+**Push-based (current):**
+```
+Change → [A dirty] → [B dirty] → [A dirty again] → ...
+         ↓ run       ↓ run        ↓ run
+Each iteration is a separate scheduled batch.
+Effects may see intermediate values between iterations.
+```
+
+**Pull-based (proposed):**
+```
+Effect needs value
+    → pull A → A is dirty, needs B
+              → pull B → B is dirty, needs A
+                        → pull A → ... (cycle detected within single pull)
+```
+
+In pull-based, cycles are encountered **within a single effect's pull chain**, not across separate scheduler batches. This changes the convergence behavior:
+
+- **Fast-converging cycles**: Should complete all iterations *before* the effect sees any value (glitch-free)
+- **Slow cycles**: Need to yield to other effects to avoid UI stalls
+
+### Convergence and UI Responsiveness
+
+The key insight: **convergence speed determines scheduling strategy**.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Fast cycle (< N ms total)     │  Slow cycle (> N ms total)    │
+├────────────────────────────────┼────────────────────────────────┤
+│  Converge completely before    │  Yield between iterations     │
+│  effect sees any value         │  Effect sees intermediate     │
+│                                │  values (with throttling)     │
+│  → Glitch-free, ideal          │  → Progressive update, avoids │
+│                                │     blocking other effects    │
+└────────────────────────────────┴────────────────────────────────┘
+```
+
+For a fast cycle (e.g., a few sub-millisecond computations that converge in 3 iterations), we want:
+1. Pull starts
+2. Cycle iterates to fixpoint
+3. Effect receives stable value
+
+For a slow cycle (e.g., LLM calls or heavy computation), we want:
+1. Pull starts
+2. One iteration runs
+3. Yield to other effects (render partial state)
+4. Continue iteration
+5. Eventually converge or hit limit
 
 ### Proposed Enhancements
 
@@ -420,39 +455,49 @@ interface ThrottleConfig {
 
 ## Implementation Recommendations
 
-### Phase 1: Instrumentation (Low Risk)
+### Phase 1: Effect Marking (Medium Risk)
 
-1. Add compute time tracking to `run()`
-2. Add cycle detection (Tarjan's algorithm) as diagnostic
-3. Log statistics without changing behavior
-
-### Phase 2: Effect Marking (Medium Risk)
+Effect/computation distinction is foundational - cycle semantics depend on it.
 
 1. Add `isEffect` flag to `subscribe()` options
 2. Update `subscribeToReferencedDocs()` to mark effects
 3. Track effects separately from computations
 4. Initially: still schedule both, but track separately
+5. Build reverse dependency graph (who depends on my output)
 
-### Phase 3: Pull-Based for New Code (Medium Risk)
+### Phase 2: Pull-Based Core (Medium Risk)
 
-1. Add dirty tracking alongside existing scheduling
-2. For effects: verify dependencies are fresh before running
-3. Add memoization for computations
+With effects marked, implement pull semantics:
+
+1. On data change: mark computations dirty, only schedule effects
+2. Before running effect: pull through dirty dependency chain
+3. Topological order within pull (for glitch freedom)
 4. Feature flag to enable pull-based mode
 
-### Phase 4: Throttling (Lower Risk)
+### Phase 3: Cycle-Aware Convergence (Medium Risk)
 
-1. Implement debounce infrastructure
+Now that cycles happen within pulls, handle convergence:
+
+1. Add compute time tracking to `run()`
+2. Detect cycles during pull (via call stack or visit marker)
+3. For fast cycles (< threshold): iterate to fixpoint before returning
+4. For slow cycles: yield after each iteration, re-pull on next frame
+5. Maintain iteration limit as safety net for non-convergence
+
+### Phase 4: Throttling & Debounce (Lower Risk)
+
+Refinements for slow computations:
+
+1. Auto-detect slow actions based on compute time history
 2. Add `debounce` option to action creation APIs
-3. Enable auto-debounce for slow actions
-4. Throttle detected cycles based on cost
+3. Throttle slow cycles to avoid UI stalls
+4. Allow declarative debounce annotations
 
-### Phase 5: Full Pull-Based (Higher Risk)
+### Phase 5: Full Migration (Higher Risk)
 
-1. Stop scheduling computations eagerly
-2. Only schedule effects
-3. Pull through dependency graph
-4. Remove push-based code path
+1. Remove push-based code path
+2. All scheduling is pull-based through effects
+3. Comprehensive testing of cycle behavior
 
 ---
 
@@ -463,9 +508,10 @@ interface ThrottleConfig {
 | Push-based: all affected actions run | Pull-based: only effects trigger, pull deps |
 | No effect/computation distinction | Effects are roots, computations are intermediate |
 | Greedy: run everything | Lazy: only compute what's needed |
-| Basic cycle detection (iteration limit) | Explicit cycle detection + throttling |
+| Cycles iterate across scheduler batches | Cycles iterate within pull chain |
+| Effects may see intermediate cycle values | Fast cycles converge before effect sees value |
+| Iteration limit as only safeguard | Convergence-aware: fast=complete, slow=yield |
 | No debouncing | Automatic + declarative debounce |
-| No cost tracking | Compute time instrumentation |
 
 ### Key Files to Modify
 
@@ -476,8 +522,24 @@ interface ThrottleConfig {
 
 ### Risk Assessment
 
-- **Phase 1-2**: Low risk, backward compatible
-- **Phase 3-4**: Medium risk, can be feature-flagged
-- **Phase 5**: Higher risk, requires thorough testing
+- **Phase 1**: Medium risk - foundational change, but can run alongside existing behavior
+- **Phase 2**: Medium risk - can be feature-flagged
+- **Phase 3**: Medium risk - builds on Phase 2's pull semantics
+- **Phase 4**: Lower risk - refinements to existing infrastructure
+- **Phase 5**: Higher risk - removes fallback
 
-The incremental approach allows validating each change before proceeding.
+The key insight is that **effect marking must come first** because cycle behavior fundamentally changes with pull-based scheduling. Understanding cycles in pull mode requires knowing which actions are effects (demand roots) vs computations (intermediate).
+
+### Why Phase Order Matters
+
+```
+Phase 1 (Effect Marking)
+    ↓ enables understanding of
+Phase 2 (Pull-Based)
+    ↓ changes semantics of
+Phase 3 (Cycle Convergence)
+    ↓ provides data for
+Phase 4 (Throttling)
+```
+
+Without effect marking, we can't reason about pull semantics. Without pull semantics, cycle behavior is still push-based (iterating across batches). Throttling only makes sense once we understand how cycles converge in pull mode.
