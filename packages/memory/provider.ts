@@ -53,7 +53,7 @@ import { deepEqual } from "@commontools/runner";
 import type { SchemaPathSelector } from "./consumer.ts";
 
 const logger = getLogger("memory-provider", {
-  enabled: true,
+  enabled: false,
   level: "info",
 });
 
