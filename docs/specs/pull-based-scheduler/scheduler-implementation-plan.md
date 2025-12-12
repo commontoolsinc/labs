@@ -374,7 +374,7 @@ Before starting, ensure you understand:
 
 **File**: `packages/runner/src/builder/module.ts`
 
-- [ ] Add `debounce` option to `lift()` function signature (deferred to Phase 5)
+- [ ] Add `debounce` option to `lift()` function signature (deferred to Phase 6)
 
 - [ ] Add `throttle` option to `lift()` function signature (deferred to Phase 5)
 
