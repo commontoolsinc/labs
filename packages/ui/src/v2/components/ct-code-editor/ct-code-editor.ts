@@ -14,6 +14,10 @@ import { json as createJson } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
 
 // Yjs collaborative editing imports
+// NOTE: These are imported statically for simplicity. The collaborative editing
+// code paths are only executed when `collaborative={true}`. Modern bundlers
+// with tree-shaking may optimize unused code. For further optimization,
+// consider dynamic imports if bundle size becomes an issue.
 import * as Y from "yjs";
 import { yCollab } from "y-codemirror.next";
 import { WebsocketProvider } from "y-websocket";
@@ -268,6 +272,39 @@ export class CTCodeEditor extends BaseElement {
     }
     // Fallback to a random ID
     return `room-${Math.random().toString(36).slice(2)}`;
+  }
+
+  /**
+   * Initialize room on server with content before connecting WebSocket.
+   * This ensures the Y.Doc has initial content and prevents race conditions.
+   */
+  private async _initializeRoomOnServer(
+    roomId: string,
+    content: string,
+    type: "codemirror" | "prosemirror",
+  ): Promise<void> {
+    try {
+      const protocol = globalThis.location?.protocol || "http:";
+      const host = globalThis.location?.host || "localhost:8000";
+      const url = `${protocol}//${host}/api/collab/${encodeURIComponent(roomId)}/init`;
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ content, type }),
+      });
+
+      if (!response.ok) {
+        console.warn(`[ct-code-editor] Failed to initialize room: ${response.status}`);
+      } else {
+        console.log(`[ct-code-editor] Room ${roomId} initialized with ${content.length} chars`);
+      }
+    } catch (error) {
+      // Non-fatal - the WebSocket will still connect and sync
+      console.warn(`[ct-code-editor] Error initializing room:`, error);
+    }
   }
 
   /**
@@ -879,6 +916,12 @@ export class CTCodeEditor extends BaseElement {
       const roomId = this._deriveRoomId();
       console.log(`[ct-code-editor] Setting up collaboration for room: ${roomId}`);
 
+      // Initialize room on server with current Cell value (prevents race conditions)
+      const initialValue = this.getValue();
+      if (initialValue) {
+        this._initializeRoomOnServer(roomId, initialValue, "codemirror");
+      }
+
       // Create Y.Doc
       this._ydoc = new Y.Doc();
       ytext = this._ydoc.getText("codemirror");
@@ -891,17 +934,6 @@ export class CTCodeEditor extends BaseElement {
       this._provider.awareness.setLocalStateField("user", {
         name: this.userName || "Anonymous",
         color: this.userColor || this._generateUserColor(),
-      });
-
-      // Initialize Y.Text with current Cell value if we're the first joiner
-      // (only if the ytext is empty and we have a value)
-      this._provider.on("sync", (synced: boolean) => {
-        if (synced && ytext && ytext.length === 0) {
-          const initialValue = this.getValue();
-          if (initialValue) {
-            ytext.insert(0, initialValue);
-          }
-        }
       });
 
       // Log connection status

@@ -236,29 +236,31 @@ function handleMessage(
 
 /**
  * Initialize a room with content (for server-side initialization from Cell)
+ *
+ * @param roomId - The room identifier
+ * @param content - The initial content (plain text or HTML)
+ * @param type - Content type: "codemirror" for code editor, "prosemirror" for rich text
  */
 export function initializeRoomContent(
   roomId: string,
   content: string,
-  type: "text" | "xml" = "text",
+  type: "codemirror" | "prosemirror" = "codemirror",
 ): void {
   const room = getOrCreateRoom(roomId);
 
-  // Only initialize if the document is empty
-  if (type === "text") {
-    const ytext = room.doc.getText("content");
+  if (type === "codemirror") {
+    // For ct-code-editor - plain text in Y.Text
+    const ytext = room.doc.getText("codemirror");
     if (ytext.length === 0 && content) {
       ytext.insert(0, content);
-      console.log(`[collab] Initialized room ${roomId} with text content`);
+      console.log(`[collab] Initialized room ${roomId} with codemirror content (${content.length} chars)`);
     }
-  } else {
-    // For rich text / XML content, we'd need to parse the HTML
-    // This is more complex and will be implemented in Phase 3
-    const yxml = room.doc.getXmlFragment("content");
-    if (yxml.length === 0 && content) {
-      // TODO: Parse HTML and populate yxml
-      console.log(`[collab] Room ${roomId} XML initialization not yet implemented`);
-    }
+  } else if (type === "prosemirror") {
+    // For ct-richtext-editor - TipTap/ProseMirror uses Y.XmlFragment
+    // TipTap's Collaboration extension creates the fragment automatically
+    // We just need to ensure the room exists; TipTap will handle initialization
+    // via the first client's content if the fragment is empty
+    console.log(`[collab] Room ${roomId} ready for prosemirror content`);
   }
 }
 
@@ -267,15 +269,16 @@ export function initializeRoomContent(
  */
 export function getRoomContent(
   roomId: string,
-  type: "text" | "xml" = "text",
+  type: "codemirror" | "prosemirror" = "codemirror",
 ): string | null {
   const room = rooms.get(roomId);
   if (!room) return null;
 
-  if (type === "text") {
-    return room.doc.getText("content").toString();
+  if (type === "codemirror") {
+    return room.doc.getText("codemirror").toString();
   } else {
-    // TODO: Serialize XML to HTML
+    // ProseMirror/TipTap content is in XmlFragment - would need serialization
+    // For now, return null as the client manages this
     return null;
   }
 }

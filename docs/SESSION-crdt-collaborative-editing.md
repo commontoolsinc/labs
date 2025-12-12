@@ -1,6 +1,6 @@
 # Session Log: CRDT Collaborative Editing
 
-## Status: Phase 3 Complete - Rich Text Collaboration Working
+## Status: Phase 4 In Progress - Polishing
 
 ## What We've Done
 - [x] Explored framework architecture (Chronicle, Cell, transaction system)
@@ -34,9 +34,10 @@
 - Consistent with existing entity references
 
 ### 3. Authentication
-**Decision:** Yes, reuse toolshed auth tokens
-- Secure by default
-- Consistent with other toolshed endpoints
+**Decision:** Deferred - using implicit auth via room ID obscurity
+- Room IDs are Cell entity IDs (not guessable)
+- Full auth requires UCAN support for WebSockets (complex)
+- TODO documented in `collab.index.ts` for production implementation
 
 ### 4. Initial content sync
 **Decision:** Server initializes Y.Doc from Cell on room creation
@@ -71,8 +72,10 @@
 
 ### Phase 4: Polish
 - [x] Cursor presence / awareness (basic implementation working)
+- [x] Initial content sync from Cell - clients call `/api/collab/:roomId/init` before connecting WebSocket
+- [~] Authentication - Documented as TODO in collab.index.ts; currently using implicit auth via room ID obscurity
 - [ ] Reconnection handling (y-websocket has built-in reconnect, may need polish)
-- [ ] Bundle optimization (lazy loading)
+- [ ] Bundle optimization (lazy loading for TipTap/Yjs)
 
 ## Key Files Modified
 

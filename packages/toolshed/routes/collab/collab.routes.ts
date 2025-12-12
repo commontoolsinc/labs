@@ -75,7 +75,8 @@ export const initialize = createRoute({
     body: jsonContent(
       z.object({
         content: z.string().describe("Initial content"),
-        type: z.enum(["text", "xml"]).default("text").describe("Content type"),
+        type: z.enum(["codemirror", "prosemirror"]).default("codemirror")
+          .describe("Content type: codemirror for code editor, prosemirror for rich text"),
       }),
       "Initial content for the room",
     ),
