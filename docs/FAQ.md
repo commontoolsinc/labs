@@ -13,3 +13,5 @@ When entries are added or modified, provenance can be found in this file's git h
 
 | Question | Answer Location | Last Updated |
 |----------|-----------------|--------------|
+| When do I need to use `.get()` on cells? | `docs/common/CELLS_AND_REACTIVITY.md` - Section "3. In Inline Handlers" and "4. In handler() Functions". If the type is `Cell<T>`, use `.get()` to unwrap the value, regardless of whether it was passed as input or created with `Cell.of()`. | 2025-12-12 |
+| Should I use `derive()` or `computed()` in patterns? | `docs/common/CELLS_AND_REACTIVITY.md` - Section "Reactive Computations with computed()". Always prefer `computed()` in patterns. While `derive()` works and can handle multiple inputs, `computed()` is the recommended API. | 2025-12-12 |
