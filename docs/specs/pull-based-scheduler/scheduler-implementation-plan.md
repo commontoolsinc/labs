@@ -81,7 +81,7 @@ Before starting, ensure you understand:
 
 #### 1.5 Write tests
 
-**File**: `packages/runner/src/scheduler.test.ts`
+**File**: `packages/runner/test/scheduler.test.ts`
 
 - [ ] Test: `sink()` calls increment `effects.size`
 - [ ] Test: `lift()`/`derive()` calls increment `computations.size`
@@ -167,7 +167,7 @@ Before starting, ensure you understand:
 
 #### 2.6 Write tests
 
-**File**: `packages/runner/src/scheduler.test.ts`
+**File**: `packages/runner/test/scheduler.test.ts`
 
 - [ ] Test: `pullMode = false` has unchanged behavior
 - [ ] Test: `pullMode = true` only adds effects to `pending`
@@ -264,7 +264,7 @@ Before starting, ensure you understand:
 
 #### 3.5 Write tests
 
-**File**: `packages/runner/src/scheduler.test.ts`
+**File**: `packages/runner/test/scheduler.test.ts`
 
 - [ ] Test: fast cycles (< 16ms) converge before effect sees value
 - [ ] Test: slow cycles yield between iterations
@@ -341,7 +341,7 @@ Before starting, ensure you understand:
 
 #### 4.6 Write tests
 
-**File**: `packages/runner/src/scheduler.test.ts`
+**File**: `packages/runner/test/scheduler.test.ts`
 
 - [ ] Test: `setDebounce()` delays action scheduling
 - [ ] Test: rapid triggers run action once after debounce period
@@ -421,7 +421,7 @@ If issues are discovered at any phase:
 cd packages/runner && deno task test
 
 # Run specific test file
-deno test src/scheduler.test.ts
+deno test test/scheduler.test.ts
 
 # Run with verbose output
 deno test --reporter=verbose src/scheduler.test.ts
