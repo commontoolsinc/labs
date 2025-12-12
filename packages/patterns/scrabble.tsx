@@ -11,8 +11,8 @@
  */
 
 import {
-  Cell,
   cell,
+  Cell,
   Default,
   derive,
   handler,
@@ -24,16 +24,21 @@ import {
 } from "commontools";
 
 import ScrabbleGame, {
+  Letter,
+  PlacedTile,
+  Player,
+  GameEvent,
+  AllRacks,
+  AllPlaced,
   createTileBag,
   drawTilesFromBag,
-  getInitials,
   getRandomColor,
-  MAX_PLAYERS,
-  parseAllPlacedJson,
-  parseAllRacksJson,
-  parseGameEventsJson,
+  getInitials,
   parsePlayersJson,
-  Player,
+  parseGameEventsJson,
+  parseAllRacksJson,
+  parseAllPlacedJson,
+  MAX_PLAYERS,
 } from "./scrabble-game.tsx";
 
 // =============================================================================
@@ -42,13 +47,13 @@ import ScrabbleGame, {
 
 interface LobbyInput {
   gameName: Default<string, "Scrabble Match">;
-  boardJson: Cell<Default<string, "">>; // JSON string of PlacedTile[]
+  boardJson: Cell<Default<string, "">>;  // JSON string of PlacedTile[]
   bagJson: Cell<Default<string, "">>;
   bagIndex: Cell<Default<number, 0>>;
-  playersJson: Cell<Default<string, "[]">>; // JSON string of Player[]
-  gameEventsJson: Cell<Default<string, "[]">>; // JSON string of GameEvent[]
-  allRacksJson: Cell<Default<string, "{}">>; // JSON string of AllRacks
-  allPlacedJson: Cell<Default<string, "{}">>; // JSON string of AllPlaced
+  playersJson: Cell<Default<string, "[]">>;  // JSON string of Player[]
+  gameEventsJson: Cell<Default<string, "[]">>;  // JSON string of GameEvent[]
+  allRacksJson: Cell<Default<string, "{}">>;  // JSON string of AllRacks
+  allPlacedJson: Cell<Default<string, "{}">>;  // JSON string of AllPlaced
 }
 
 interface LobbyOutput {
@@ -71,7 +76,7 @@ let createGameAndNavigate: (
   gameEventsJson: Cell<string>,
   allRacksJson: Cell<string>,
   allPlacedJson: Cell<string>,
-  myName: string,
+  myName: string
 ) => unknown = null as any;
 
 const joinGame = handler<
@@ -87,20 +92,7 @@ const joinGame = handler<
     allRacksJson: Cell<string>;
     allPlacedJson: Cell<string>;
   }
->((
-  _event,
-  {
-    gameName,
-    nameInput,
-    boardJson,
-    bagJson,
-    bagIndex,
-    playersJson,
-    gameEventsJson,
-    allRacksJson,
-    allPlacedJson,
-  },
-) => {
+>((_event, { gameName, nameInput, boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson }) => {
   console.log("[joinGame] Handler started");
   const name = nameInput.get().trim();
   if (!name) {
@@ -140,17 +132,7 @@ const joinGame = handler<
     console.log("[joinGame] Rejoining as existing player");
     nameInput.set("");
     if (createGameAndNavigate) {
-      return createGameAndNavigate(
-        gameName,
-        boardJson,
-        bagJson,
-        bagIndex,
-        playersJson,
-        gameEventsJson,
-        allRacksJson,
-        allPlacedJson,
-        name,
-      );
+      return createGameAndNavigate(gameName, boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson, name);
     }
     return;
   }
@@ -159,10 +141,7 @@ const joinGame = handler<
   console.log("[joinGame] Drawing tiles from bag...");
   const currentIndex = bagIndex.get();
   const drawnTiles = drawTilesFromBag(currentBagJson, currentIndex, 7);
-  console.log(
-    "[joinGame] Drew tiles:",
-    drawnTiles.map((t) => t.char).join(","),
-  );
+  console.log("[joinGame] Drew tiles:", drawnTiles.map(t => t.char).join(","));
 
   const newIndex = currentIndex + drawnTiles.length;
   bagIndex.set(newIndex);
@@ -211,17 +190,7 @@ const joinGame = handler<
   console.log("[joinGame] About to call createGameAndNavigate...");
   if (createGameAndNavigate) {
     console.log("[joinGame] createGameAndNavigate is defined, calling it...");
-    const result = createGameAndNavigate(
-      gameName,
-      boardJson,
-      bagJson,
-      bagIndex,
-      playersJson,
-      gameEventsJson,
-      allRacksJson,
-      allPlacedJson,
-      name,
-    );
+    const result = createGameAndNavigate(gameName, boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson, name);
     console.log("[joinGame] createGameAndNavigate returned:", result);
     return result;
   } else {
@@ -230,30 +199,13 @@ const joinGame = handler<
 });
 
 const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
-  (
-    {
-      gameName,
-      boardJson,
-      bagJson,
-      bagIndex,
-      playersJson,
-      gameEventsJson,
-      allRacksJson,
-      allPlacedJson,
-    },
-  ) => {
+  ({ gameName, boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson }) => {
     const nameInput = cell("");
 
     // Parse players from JSON for UI display - use derive() for proper reactivity
-    const currentPlayers = derive(
-      playersJson,
-      (json: string) => parsePlayersJson(json),
-    );
+    const currentPlayers = derive(playersJson, (json: string) => parsePlayersJson(json));
     const playerCount = derive(currentPlayers, (p: Player[]) => p.length);
-    const isFull = derive(
-      currentPlayers,
-      (p: Player[]) => p.length >= MAX_PLAYERS,
-    );
+    const isFull = derive(currentPlayers, (p: Player[]) => p.length >= MAX_PLAYERS);
 
     return {
       [NAME]: str`${gameName} - Lobby`,
@@ -276,28 +228,11 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
               padding: "2rem",
             }}
           >
-            <h1
-              style={{
-                marginBottom: "0.5rem",
-                color: "#fff",
-                fontSize: "2.5rem",
-                fontWeight: "bold",
-              }}
-            >
+            <h1 style={{ marginBottom: "0.5rem", color: "#fff", fontSize: "2.5rem", fontWeight: "bold" }}>
               SCRABBLE
             </h1>
-            <p
-              style={{
-                marginBottom: "0.5rem",
-                color: "#c5e1a5",
-                fontSize: "1.2rem",
-              }}
-            >
-              {gameName}
-            </p>
-            <p style={{ marginBottom: "2rem", color: "#a5d6a7" }}>
-              Free-for-all multiplayer - no turns!
-            </p>
+            <p style={{ marginBottom: "0.5rem", color: "#c5e1a5", fontSize: "1.2rem" }}>{gameName}</p>
+            <p style={{ marginBottom: "2rem", color: "#a5d6a7" }}>Free-for-all multiplayer - no turns!</p>
 
             <div
               style={{
@@ -317,9 +252,7 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
                   color: isFull ? "#dc2626" : "#1e40af",
                 }}
               >
-                {isFull
-                  ? "Game Full - 2/2 Players"
-                  : `Enter Your Name (${playerCount}/2 players)`}
+                {isFull ? "Game Full - 2/2 Players" : `Enter Your Name (${playerCount}/2 players)`}
               </div>
               <ct-input
                 $value={nameInput}
@@ -327,17 +260,7 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
                 style="width: 100%; margin-bottom: 1rem;"
                 timingStrategy="immediate"
                 disabled={isFull}
-                onct-submit={joinGame({
-                  gameName,
-                  nameInput,
-                  boardJson,
-                  bagJson,
-                  bagIndex,
-                  playersJson,
-                  gameEventsJson,
-                  allRacksJson,
-                  allPlacedJson,
-                })}
+                onct-submit={joinGame({ gameName, nameInput, boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson })}
               />
               <ct-button
                 style={`width: 100%; font-weight: 600; padding: 0.75rem; font-size: 1rem; ${
@@ -346,17 +269,7 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
                     : "background-color: #3b82f6; color: white;"
                 }`}
                 disabled={isFull}
-                onClick={joinGame({
-                  gameName,
-                  nameInput,
-                  boardJson,
-                  bagJson,
-                  bagIndex,
-                  playersJson,
-                  gameEventsJson,
-                  allRacksJson,
-                  allPlacedJson,
-                })}
+                onClick={joinGame({ gameName, nameInput, boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson })}
               >
                 {isFull ? "Game Full" : "Join Game"}
               </ct-button>
@@ -374,8 +287,7 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
                 textAlign: "center",
               }}
             >
-              <strong>Tip:</strong>{" "}
-              Both players can place and submit words at the same time!
+              <strong>Tip:</strong> Both players can place and submit words at the same time!
             </p>
           </div>
 
@@ -403,14 +315,10 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
             </div>
 
             {[0, 1].map((slot) => {
-              const hasPlayer = derive(currentPlayers, (p: Player[]) =>
-                !!p[slot]);
-              const playerColor = derive(currentPlayers, (p: Player[]) =>
-                p[slot]?.color || "#3f3f46");
-              const playerName = derive(currentPlayers, (p: Player[]) =>
-                p[slot]?.name || `Player ${slot + 1}`);
-              const playerInitials = derive(currentPlayers, (p: Player[]) =>
-                p[slot] ? getInitials(p[slot].name) : "?");
+              const hasPlayer = derive(currentPlayers, (p: Player[]) => !!p[slot]);
+              const playerColor = derive(currentPlayers, (p: Player[]) => p[slot]?.color || "#3f3f46");
+              const playerName = derive(currentPlayers, (p: Player[]) => p[slot]?.name || `Player ${slot + 1}`);
+              const playerInitials = derive(currentPlayers, (p: Player[]) => p[slot] ? getInitials(p[slot].name) : "?");
               return (
                 <div
                   style={{
@@ -428,9 +336,7 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
                       width: "48px",
                       height: "48px",
                       borderRadius: "50%",
-                      backgroundColor: hasPlayer
-                        ? "rgba(255,255,255,0.2)"
-                        : "#52525b",
+                      backgroundColor: hasPlayer ? "rgba(255,255,255,0.2)" : "#52525b",
                       color: "white",
                       display: "flex",
                       alignItems: "center",
@@ -470,7 +376,7 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
       allRacksJson,
       allPlacedJson,
     };
-  },
+  }
 );
 
 createGameAndNavigate = (
@@ -482,7 +388,7 @@ createGameAndNavigate = (
   gameEventsJson: Cell<string>,
   allRacksJson: Cell<string>,
   allPlacedJson: Cell<string>,
-  myName: string,
+  myName: string
 ) => {
   console.log("[createGameAndNavigate] Starting...");
   console.log("[createGameAndNavigate] myName:", myName);
@@ -501,10 +407,7 @@ createGameAndNavigate = (
     allPlacedJson,
     myName,
   });
-  console.log(
-    "[createGameAndNavigate] ScrabbleGame instance created:",
-    gameInstance,
-  );
+  console.log("[createGameAndNavigate] ScrabbleGame instance created:", gameInstance);
 
   console.log("[createGameAndNavigate] Calling navigateTo...");
   const navResult = navigateTo(gameInstance);
