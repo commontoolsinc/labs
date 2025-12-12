@@ -249,46 +249,56 @@ export default pattern<Input, Output>(({}) => {
   const lastMessage = derive(game, (g) => g.get().lastMessage ?? "Player 1's turn - click on Player 2's board to fire!");
   const currentTurn = derive(game, (g) => g.get().currentTurn ?? 1);
 
-  // Ship positions for each player (for display)
-  const p1ShipPositions = computed(() => {
-    const state = game.get();
-    const ships = state.player1?.ships;
-    return ships ? buildShipPositions(ships) : {};
-  });
-  const p2ShipPositions = computed(() => {
-    const state = game.get();
-    const ships = state.player2?.ships;
-    return ships ? buildShipPositions(ships) : {};
-  });
-
-  // Grid cell data for each player
+  // Grid cell data for each player - compute ALL display values upfront
   const p1CellData = computed(() => {
     const state = game.get();
-    const shots = state.player1?.shots;
-    const shipPos = p1ShipPositions;
-    return GRID_INDICES.map(({ row, col }) => ({
-      row,
-      col,
-      shotState: (shots?.[row]?.[col] ?? "empty") as SquareState,
-      hasShip: !!shipPos[`${row},${col}`],
-    }));
+    const shots = state.player1?.shots ?? createEmptyGrid();
+    const ships = state.player1?.ships ?? [];
+    const shipPositions = buildShipPositions(ships);
+
+    return GRID_INDICES.map(({ row, col }) => {
+      const shotState = shots[row]?.[col] ?? "empty";
+      const hasShip = !!shipPositions[`${row},${col}`];
+      const bgColor =
+        shotState === "hit"
+          ? "#dc2626"
+          : shotState === "miss"
+            ? "#374151"
+            : hasShip
+              ? "#4a5568"
+              : "#1e3a5f";
+      const content = shotState === "hit" ? "X" : shotState === "miss" ? "O" : "";
+      // Use strings for grid positions to avoid px suffix
+      const gridRow = `${row + 2}`;
+      const gridCol = `${col + 2}`;
+      return { row, col, bgColor, content, gridRow, gridCol };
+    });
   });
 
   const p2CellData = computed(() => {
     const state = game.get();
-    const shots = state.player2?.shots;
-    const shipPos = p2ShipPositions;
-    return GRID_INDICES.map(({ row, col }) => ({
-      row,
-      col,
-      shotState: (shots?.[row]?.[col] ?? "empty") as SquareState,
-      hasShip: !!shipPos[`${row},${col}`],
-    }));
-  });
+    const shots = state.player2?.shots ?? createEmptyGrid();
+    const ships = state.player2?.ships ?? [];
+    const shipPositions = buildShipPositions(ships);
 
-  // Is it player 1's turn to fire at player 2?
-  const p1CanFire = computed(() => currentTurn === 1);
-  const p2CanFire = computed(() => currentTurn === 2);
+    return GRID_INDICES.map(({ row, col }) => {
+      const shotState = shots[row]?.[col] ?? "empty";
+      const hasShip = !!shipPositions[`${row},${col}`];
+      const bgColor =
+        shotState === "hit"
+          ? "#dc2626"
+          : shotState === "miss"
+            ? "#374151"
+            : hasShip
+              ? "#4a5568"
+              : "#1e3a5f";
+      const content = shotState === "hit" ? "X" : shotState === "miss" ? "O" : "";
+      // Use strings for grid positions to avoid px suffix
+      const gridRow = `${row + 2}`;
+      const gridCol = `${col + 2}`;
+      return { row, col, bgColor, content, gridRow, gridCol };
+    });
+  });
 
   // ---------------------------------------------------------------------------
   // Styles (constant, can define outside)
@@ -347,6 +357,14 @@ export default pattern<Input, Output>(({}) => {
           Debug Mode - All ships visible
         </p>
 
+        {/* Debug info */}
+        <div style={{ textAlign: "center", color: "#f00", marginBottom: "10px" }}>
+          <div>p1CellData length: {p1CellData.length}</div>
+          <div>p2CellData length: {p2CellData.length}</div>
+          <div>currentTurn: {currentTurn}</div>
+          <div>First cell: row={p1CellData[0]?.row}, col={p1CellData[0]?.col}, bg={p1CellData[0]?.bgColor}</div>
+        </div>
+
         {/* Status bar */}
         <div
           style={{
@@ -387,30 +405,23 @@ export default pattern<Input, Output>(({}) => {
                 <div
                   style={{
                     ...headerCellStyle,
-                    gridRow: rowIdx + 2,
-                    gridColumn: 1,
+                    gridRow: `${rowIdx + 2}`,
+                    gridColumn: "1",
                   }}
                 >
                   {rowIdx + 1}
                 </div>
               ))}
 
-              {/* Grid cells - positioned explicitly */}
+              {/* Grid cells */}
               {p1CellData.map((cell) => (
                 <div
                   style={{
                     ...baseCellStyle,
-                    gridRow: cell.row + 2,
-                    gridColumn: cell.col + 2,
-                    backgroundColor:
-                      cell.shotState === "hit"
-                        ? "#dc2626"
-                        : cell.shotState === "miss"
-                          ? "#374151"
-                          : cell.hasShip
-                            ? "#4a5568"
-                            : "#1e3a5f",
-                    cursor: p2CanFire && cell.shotState === "empty" ? "pointer" : "default",
+                    gridRow: cell.gridRow,
+                    gridColumn: cell.gridCol,
+                    backgroundColor: cell.bgColor,
+                    cursor: "pointer",
                   }}
                   onClick={fireShot({
                     row: cell.row,
@@ -419,7 +430,7 @@ export default pattern<Input, Output>(({}) => {
                     game,
                   })}
                 >
-                  {cell.shotState === "hit" ? "X" : cell.shotState === "miss" ? "O" : ""}
+                  {cell.content}
                 </div>
               ))}
             </div>
@@ -442,30 +453,23 @@ export default pattern<Input, Output>(({}) => {
                 <div
                   style={{
                     ...headerCellStyle,
-                    gridRow: rowIdx + 2,
-                    gridColumn: 1,
+                    gridRow: `${rowIdx + 2}`,
+                    gridColumn: "1",
                   }}
                 >
                   {rowIdx + 1}
                 </div>
               ))}
 
-              {/* Grid cells - positioned explicitly */}
+              {/* Grid cells */}
               {p2CellData.map((cell) => (
                 <div
                   style={{
                     ...baseCellStyle,
-                    gridRow: cell.row + 2,
-                    gridColumn: cell.col + 2,
-                    backgroundColor:
-                      cell.shotState === "hit"
-                        ? "#dc2626"
-                        : cell.shotState === "miss"
-                          ? "#374151"
-                          : cell.hasShip
-                            ? "#4a5568"
-                            : "#1e3a5f",
-                    cursor: p1CanFire && cell.shotState === "empty" ? "pointer" : "default",
+                    gridRow: cell.gridRow,
+                    gridColumn: cell.gridCol,
+                    backgroundColor: cell.bgColor,
+                    cursor: "pointer",
                   }}
                   onClick={fireShot({
                     row: cell.row,
@@ -474,7 +478,7 @@ export default pattern<Input, Output>(({}) => {
                     game,
                   })}
                 >
-                  {cell.shotState === "hit" ? "X" : cell.shotState === "miss" ? "O" : ""}
+                  {cell.content}
                 </div>
               ))}
             </div>
