@@ -8,10 +8,9 @@ import {
   ifElse,
   lift,
   NAME,
-  OpaqueRef,
   recipe,
-  Stream,
   str,
+  Stream,
   UI,
 } from "commontools";
 
