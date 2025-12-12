@@ -52,6 +52,10 @@ Before writing a handler, ask: "Am I just syncing UI ↔ data?"
 
 ---
 
+## Levels: Progressive Examples
+
+The following examples are complete, self-contained patterns illustrating progressive complexity. For real working patterns, see `packages/patterns/`.
+
 ## Level 1: Basic List
 
 The simplest pattern: a list with bidirectional binding and inline handlers.
