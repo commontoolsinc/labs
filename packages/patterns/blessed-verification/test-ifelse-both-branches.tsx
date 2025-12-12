@@ -24,7 +24,16 @@
  * - Only the visible branch's counter increments
  * - The hidden branch's counter stays frozen until it becomes visible
  */
-import { Cell, Default, NAME, pattern, UI, computed, handler, ifElse } from "commontools";
+import {
+  Cell,
+  computed,
+  Default,
+  handler,
+  ifElse,
+  NAME,
+  pattern,
+  UI,
+} from "commontools";
 
 interface Input {
   condition: Default<boolean, true>;
@@ -55,46 +64,50 @@ export default pattern<Input, Output>(({ condition, toggleCount }) => {
   // Close over condition to create reactive dependency
   const trueBranchContent = computed(() => (
     void condition,
-    trueBranchEvalCount.set(trueBranchEvalCount.get() + 1),
-    <div
-      style={{
-        padding: "16px",
-        backgroundColor: "#e8f5e9",
-        borderRadius: "8px",
-        border: "2px solid #4caf50",
-      }}
-    >
-      <h3 style={{ color: "#2e7d32", margin: "0 0 8px 0" }}>
-        TRUE Branch (Currently Visible)
-      </h3>
-      <p>This branch is shown when condition = true</p>
-      <p>
-        <strong>True Branch Eval Count:</strong> {trueBranchEvalCount}
-      </p>
-    </div>
+      trueBranchEvalCount.set(trueBranchEvalCount.get() + 1),
+      (
+        <div
+          style={{
+            padding: "16px",
+            backgroundColor: "#e8f5e9",
+            borderRadius: "8px",
+            border: "2px solid #4caf50",
+          }}
+        >
+          <h3 style={{ color: "#2e7d32", margin: "0 0 8px 0" }}>
+            TRUE Branch (Currently Visible)
+          </h3>
+          <p>This branch is shown when condition = true</p>
+          <p>
+            <strong>True Branch Eval Count:</strong> {trueBranchEvalCount}
+          </p>
+        </div>
+      )
   ));
 
   // FALSE BRANCH: Increment internal counter each time this computed runs
   // Close over condition to create reactive dependency
   const falseBranchContent = computed(() => (
     void condition,
-    falseBranchEvalCount.set(falseBranchEvalCount.get() + 1),
-    <div
-      style={{
-        padding: "16px",
-        backgroundColor: "#ffebee",
-        borderRadius: "8px",
-        border: "2px solid #f44336",
-      }}
-    >
-      <h3 style={{ color: "#c62828", margin: "0 0 8px 0" }}>
-        FALSE Branch (Currently Visible)
-      </h3>
-      <p>This branch is shown when condition = false</p>
-      <p>
-        <strong>False Branch Eval Count:</strong> {falseBranchEvalCount}
-      </p>
-    </div>
+      falseBranchEvalCount.set(falseBranchEvalCount.get() + 1),
+      (
+        <div
+          style={{
+            padding: "16px",
+            backgroundColor: "#ffebee",
+            borderRadius: "8px",
+            border: "2px solid #f44336",
+          }}
+        >
+          <h3 style={{ color: "#c62828", margin: "0 0 8px 0" }}>
+            FALSE Branch (Currently Visible)
+          </h3>
+          <p>This branch is shown when condition = false</p>
+          <p>
+            <strong>False Branch Eval Count:</strong> {falseBranchEvalCount}
+          </p>
+        </div>
+      )
   ));
 
   return {
@@ -139,13 +152,31 @@ export default pattern<Input, Output>(({ condition, toggleCount }) => {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ccc" }}>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "8px",
+                    borderBottom: "1px solid #ccc",
+                  }}
+                >
                   Branch
                 </th>
-                <th style={{ textAlign: "center", padding: "8px", borderBottom: "1px solid #ccc" }}>
+                <th
+                  style={{
+                    textAlign: "center",
+                    padding: "8px",
+                    borderBottom: "1px solid #ccc",
+                  }}
+                >
                   Eval Count
                 </th>
-                <th style={{ textAlign: "center", padding: "8px", borderBottom: "1px solid #ccc" }}>
+                <th
+                  style={{
+                    textAlign: "center",
+                    padding: "8px",
+                    borderBottom: "1px solid #ccc",
+                  }}
+                >
                   Currently Visible?
                 </th>
               </tr>
@@ -153,7 +184,13 @@ export default pattern<Input, Output>(({ condition, toggleCount }) => {
             <tbody>
               <tr>
                 <td style={{ padding: "8px" }}>True Branch</td>
-                <td style={{ textAlign: "center", padding: "8px", fontWeight: "bold" }}>
+                <td
+                  style={{
+                    textAlign: "center",
+                    padding: "8px",
+                    fontWeight: "bold",
+                  }}
+                >
                   {trueBranchEvalCount}
                 </td>
                 <td style={{ textAlign: "center", padding: "8px" }}>
@@ -162,7 +199,13 @@ export default pattern<Input, Output>(({ condition, toggleCount }) => {
               </tr>
               <tr>
                 <td style={{ padding: "8px" }}>False Branch</td>
-                <td style={{ textAlign: "center", padding: "8px", fontWeight: "bold" }}>
+                <td
+                  style={{
+                    textAlign: "center",
+                    padding: "8px",
+                    fontWeight: "bold",
+                  }}
+                >
                   {falseBranchEvalCount}
                 </td>
                 <td style={{ textAlign: "center", padding: "8px" }}>
@@ -183,10 +226,12 @@ export default pattern<Input, Output>(({ condition, toggleCount }) => {
             <strong>How to interpret:</strong>
             <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
               <li>
-                If BOTH eval counts increment together → Claim VERIFIED (both branches evaluated)
+                If BOTH eval counts increment together → Claim VERIFIED (both
+                branches evaluated)
               </li>
               <li>
-                If only visible branch increments → Claim REFUTED (lazy evaluation)
+                If only visible branch increments → Claim REFUTED (lazy
+                evaluation)
               </li>
             </ul>
           </div>

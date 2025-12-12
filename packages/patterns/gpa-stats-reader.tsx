@@ -5,7 +5,7 @@
  *
  * @reviewed 2025-12-10 docs-rationalization
  */
-import { Default, NAME, pattern, UI, lift } from "commontools";
+import { Default, lift, NAME, pattern, UI } from "commontools";
 
 interface Stats {
   average: number;
@@ -37,19 +37,27 @@ export default pattern<Input, Input>(({ name, gpaStats }) => {
         <table>
           <tbody>
             <tr>
-              <td><strong>Count:</strong></td>
+              <td>
+                <strong>Count:</strong>
+              </td>
               <td>{getCount(gpaStats)}</td>
             </tr>
             <tr>
-              <td><strong>Average:</strong></td>
+              <td>
+                <strong>Average:</strong>
+              </td>
               <td>{fmt(getAvg(gpaStats))}</td>
             </tr>
             <tr>
-              <td><strong>Min:</strong></td>
+              <td>
+                <strong>Min:</strong>
+              </td>
               <td>{fmt(getMin(gpaStats))}</td>
             </tr>
             <tr>
-              <td><strong>Max:</strong></td>
+              <td>
+                <strong>Max:</strong>
+              </td>
               <td>{fmt(getMax(gpaStats))}</td>
             </tr>
           </tbody>

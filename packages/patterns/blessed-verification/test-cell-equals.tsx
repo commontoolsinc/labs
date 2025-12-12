@@ -133,8 +133,8 @@ export default pattern<TestCellEqualsInput, TestCellEqualsOutput>(
         <div style={{ padding: "1rem" }}>
           <h2>Cell.equals() Test Pattern</h2>
           <p style={{ color: "#666", fontSize: "0.9rem" }}>
-            This pattern demonstrates using Cell.equals() for item identification
-            instead of manual ID generation.
+            This pattern demonstrates using Cell.equals() for item
+            identification instead of manual ID generation.
           </p>
 
           {/* Controls */}
@@ -174,10 +174,16 @@ export default pattern<TestCellEqualsInput, TestCellEqualsOutput>(
           )}
 
           {/* Items list - using pre-computed selection state */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          <div
+            style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
+          >
             {itemsWithSelection.map((entry) => (
               <div
-                onClick={selectItem({ selectedItem, items, index: entry.index })}
+                onClick={selectItem({
+                  selectedItem,
+                  items,
+                  index: entry.index,
+                })}
                 style={{
                   padding: "0.75rem",
                   background: entry.isSelected ? "#c8e6c9" : "#f9f9f9",
@@ -189,7 +195,9 @@ export default pattern<TestCellEqualsInput, TestCellEqualsOutput>(
                   transition: "all 0.2s",
                 }}
               >
-                <div style={{ fontWeight: entry.isSelected ? "bold" : "normal" }}>
+                <div
+                  style={{ fontWeight: entry.isSelected ? "bold" : "normal" }}
+                >
                   {entry.item.title}
                 </div>
                 <div style={{ fontSize: "0.85rem", color: "#666" }}>

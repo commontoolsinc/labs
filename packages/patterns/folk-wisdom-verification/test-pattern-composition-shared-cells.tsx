@@ -26,7 +26,17 @@
  * 6. Remove an item from "Category List" using x button
  * 7. Verify it disappears from "Basic List" too
  */
-import { Cell, computed, Default, derive, handler, ifElse, NAME, pattern, UI } from "commontools";
+import {
+  Cell,
+  computed,
+  Default,
+  derive,
+  handler,
+  ifElse,
+  NAME,
+  pattern,
+  UI,
+} from "commontools";
 
 interface ShoppingItem {
   title: string;
@@ -40,7 +50,10 @@ interface BasicListInput {
 }
 
 const BasicList = pattern<BasicListInput>(({ items }) => {
-  const removeItem = handler<unknown, { items: Cell<Array<Cell<ShoppingItem>>>; item: Cell<ShoppingItem> }>(
+  const removeItem = handler<
+    unknown,
+    { items: Cell<Array<Cell<ShoppingItem>>>; item: Cell<ShoppingItem> }
+  >(
     (_event, { items: itemsList, item }) => {
       const current = itemsList.get();
       const index = current.findIndex((el) => el.equals(item));
@@ -50,12 +63,19 @@ const BasicList = pattern<BasicListInput>(({ items }) => {
     },
   );
 
-  const addItem = handler<{ detail: { message: string } }, { items: Cell<ShoppingItem[]> }>(
+  const addItem = handler<
+    { detail: { message: string } },
+    { items: Cell<ShoppingItem[]> }
+  >(
     ({ detail }, { items: itemsList }) => {
       const input = detail?.message?.trim();
       if (input) {
         const [title, category = "Uncategorized"] = input.split(":");
-        itemsList.push({ title: title.trim(), done: false, category: category.trim() });
+        itemsList.push({
+          title: title.trim(),
+          done: false,
+          category: category.trim(),
+        });
       }
     },
   );
@@ -63,13 +83,25 @@ const BasicList = pattern<BasicListInput>(({ items }) => {
   return {
     [NAME]: "Basic Shopping List",
     [UI]: (
-      <div style={{ padding: "12px", border: "2px solid #4caf50", borderRadius: "8px" }}>
-        <h3 style={{ margin: "0 0 12px 0", color: "#2e7d32" }}>Basic List View</h3>
+      <div
+        style={{
+          padding: "12px",
+          border: "2px solid #4caf50",
+          borderRadius: "8px",
+        }}
+      >
+        <h3 style={{ margin: "0 0 12px 0", color: "#2e7d32" }}>
+          Basic List View
+        </h3>
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           {items.map((item) => (
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
               <ct-checkbox $checked={item.done}>
-                <span style={computed(() => (item.done ? { textDecoration: "line-through" } : {}))}>
+                <span
+                  style={computed(
+                    () => (item.done ? { textDecoration: "line-through" } : {}),
+                  )}
+                >
                   {item.title} ({item.category})
                 </span>
               </ct-checkbox>
@@ -95,15 +127,21 @@ interface CategoryListInput {
 
 const CategoryList = pattern<CategoryListInput>(({ items }) => {
   // Compute unique sorted categories from items
-  const categories = derive({ items }, ({ items: itemsArray }: { items: ShoppingItem[] }) => {
-    const cats = new Set<string>();
-    for (const item of itemsArray) {
-      cats.add(item.category || "Uncategorized");
-    }
-    return Array.from(cats).sort();
-  });
+  const categories = derive(
+    { items },
+    ({ items: itemsArray }: { items: ShoppingItem[] }) => {
+      const cats = new Set<string>();
+      for (const item of itemsArray) {
+        cats.add(item.category || "Uncategorized");
+      }
+      return Array.from(cats).sort();
+    },
+  );
 
-  const removeItem = handler<unknown, { items: Cell<Array<Cell<ShoppingItem>>>; item: Cell<ShoppingItem> }>(
+  const removeItem = handler<
+    unknown,
+    { items: Cell<Array<Cell<ShoppingItem>>>; item: Cell<ShoppingItem> }
+  >(
     (_event, { items: itemsList, item }) => {
       const current = itemsList.get();
       const index = current.findIndex((el) => el.equals(item));
@@ -116,25 +154,43 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
   return {
     [NAME]: "Shopping List by Category",
     [UI]: (
-      <div style={{ padding: "12px", border: "2px solid #2196f3", borderRadius: "8px" }}>
-        <h3 style={{ margin: "0 0 12px 0", color: "#1565c0" }}>Category List View</h3>
+      <div
+        style={{
+          padding: "12px",
+          border: "2px solid #2196f3",
+          borderRadius: "8px",
+        }}
+      >
+        <h3 style={{ margin: "0 0 12px 0", color: "#1565c0" }}>
+          Category List View
+        </h3>
         {categories.map((category) => (
           <div style={{ marginBottom: "12px" }}>
             <h4 style={{ margin: "0 0 8px 0", color: "#666" }}>{category}</h4>
             {items.map((item) =>
               ifElse(
                 computed(() => (item.category || "Uncategorized") === category),
-                <div style={{ display: "flex", gap: "8px", alignItems: "center", marginLeft: "16px" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "8px",
+                    alignItems: "center",
+                    marginLeft: "16px",
+                  }}
+                >
                   <ct-checkbox $checked={item.done}>
                     <span
-                      style={computed(() => (item.done ? { textDecoration: "line-through" } : {}))}
+                      style={computed(() => (item.done
+                        ? { textDecoration: "line-through" }
+                        : {})
+                      )}
                     >
                       {item.title}
                     </span>
                   </ct-checkbox>
                   <ct-button onClick={removeItem({ items, item })}>x</ct-button>
                 </div>,
-                null
+                null,
               )
             )}
           </div>
@@ -183,7 +239,9 @@ export default pattern<ComposedInput>(({ items }) => {
             <li>Add an item in Basic List using format "Title:Category"</li>
             <li>Watch it appear in BOTH views instantly</li>
             <li>Toggle done state in one view, see it update in the other</li>
-            <li>Remove an item from either view, watch it disappear from both</li>
+            <li>
+              Remove an item from either view, watch it disappear from both
+            </li>
           </ol>
           <p style={{ margin: "8px 0 0 0" }}>
             <em>If all work correctly → Claim VERIFIED</em>

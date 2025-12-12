@@ -135,8 +135,9 @@ interface PatternState {
 
 export default recipe<PatternState>("Await in Handlers Test", (state) => {
   // Build URL reactively from trigger - uses local /_health endpoint with delay
-  const fetchUrl = derive(state.fetchTrigger, (trigger) =>
-    trigger ? `/_health?delay=3000&_=${trigger}` : "",
+  const fetchUrl = derive(
+    state.fetchTrigger,
+    (trigger) => trigger ? `/_health?delay=3000&_=${trigger}` : "",
   );
 
   // fetchData runs in the reactive layer - doesn't block the handler
@@ -172,7 +173,9 @@ export default recipe<PatternState>("Await in Handlers Test", (state) => {
 
         {/* All buttons together for quick clicking */}
         <div style="background: #f0f0f0; padding: 15px; margin: 20px 0; border-radius: 8px;">
-          <h3 style="margin-top: 0;">Test Buttons (click test, then spam counter)</h3>
+          <h3 style="margin-top: 0;">
+            Test Buttons (click test, then spam counter)
+          </h3>
           <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
             <ct-button id="test-with-await" onClick={testWithAwait(state)}>
               WITH await (3s)
@@ -191,7 +194,8 @@ export default recipe<PatternState>("Await in Handlers Test", (state) => {
             </ct-button>
           </div>
           <p style="margin: 10px 0 0 0; font-size: 13px; color: #666;">
-            Click a test button, then immediately spam the Counter button to test responsiveness
+            Click a test button, then immediately spam the Counter button to
+            test responsiveness
           </p>
         </div>
 
@@ -223,7 +227,8 @@ export default recipe<PatternState>("Await in Handlers Test", (state) => {
             </div>
 
             <div style="background: #fff3cd; padding: 10px; border-radius: 4px; font-size: 13px; margin-top: 10px;">
-              <strong>Expected:</strong> Counter button unresponsive while "Awaiting..."
+              <strong>Expected:</strong>{" "}
+              Counter button unresponsive while "Awaiting..."
             </div>
           </div>
 
@@ -254,7 +259,8 @@ export default recipe<PatternState>("Await in Handlers Test", (state) => {
             </div>
 
             <div style="background: #d4edda; padding: 10px; border-radius: 4px; font-size: 13px; margin-top: 10px;">
-              <strong>Expected:</strong> Counter button works while "Fetching..."
+              <strong>Expected:</strong>{" "}
+              Counter button works while "Fetching..."
             </div>
           </div>
         </div>
@@ -263,12 +269,14 @@ export default recipe<PatternState>("Await in Handlers Test", (state) => {
           <h3 style="margin-top: 0;">Expected Results (According to Claim)</h3>
           <ul style="margin: 10px 0;">
             <li>
-              <strong>WITH await:</strong> UI should freeze. Counter button
-              unresponsive while "Awaiting..." is shown.
+              <strong>WITH await:</strong>{" "}
+              UI should freeze. Counter button unresponsive while "Awaiting..."
+              is shown.
             </li>
             <li>
-              <strong>WITHOUT await (fetchData):</strong> UI should stay
-              responsive. Counter button works while "Fetching..." is shown.
+              <strong>WITHOUT await (fetchData):</strong>{" "}
+              UI should stay responsive. Counter button works while
+              "Fetching..." is shown.
             </li>
           </ul>
         </div>

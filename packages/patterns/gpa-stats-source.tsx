@@ -5,7 +5,7 @@
  *
  * @reviewed 2025-12-10 docs-rationalization
  */
-import { Cell, Default, NAME, pattern, UI, lift, handler } from "commontools";
+import { Cell, Default, handler, lift, NAME, pattern, UI } from "commontools";
 
 interface Stats {
   average: number;
@@ -29,8 +29,8 @@ interface Output {
 const parseGpas = lift((raw: string): number[] => {
   if (!raw.trim()) return [];
   return raw.split("\n")
-    .map(line => parseFloat(line.trim()))
-    .filter(n => !isNaN(n));
+    .map((line) => parseFloat(line.trim()))
+    .filter((n) => !isNaN(n));
 });
 
 const calculateStats = lift((values: number[]): Stats | null => {
