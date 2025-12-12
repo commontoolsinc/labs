@@ -141,6 +141,16 @@ export class Scheduler {
   // Throttle infrastructure - "value can be stale by T ms"
   private actionThrottle = new WeakMap<Action, number>();
 
+  // Push-triggered filtering (Phase 5)
+  // Track what each action has ever written (grows over time)
+  private mightWrite = new WeakMap<Action, IMemorySpaceAddress[]>();
+  // Track what push mode triggered this execution cycle
+  private pushTriggered = new Set<Action>();
+  // Track actions scheduled with scheduleImmediately (bypass filter)
+  private scheduledImmediately = new Set<Action>();
+  // Filter stats for diagnostics
+  private filterStats = { filtered: 0, executed: 0 };
+
   private idlePromises: (() => void)[] = [];
   private loopCounter = new WeakMap<Action, number>();
   private errorHandlers = new Set<ErrorHandler>();
@@ -257,6 +267,8 @@ export class Scheduler {
     );
 
     if (scheduleImmediately) {
+      // Track that this action was scheduled immediately (bypasses push-triggered filter)
+      this.scheduledImmediately.add(action);
       this.scheduleWithDebounce(action);
     } else {
       const pathsByEntity = addressesToPathByEntity(reads);
@@ -380,6 +392,9 @@ export class Scheduler {
             }
           });
           const log = txToReactivityLog(tx);
+
+          // Update mightWrite with actual writes (Phase 5)
+          this.updateMightWrite(action, log.writes);
 
           logger.debug("schedule-run-complete", () => [
             `[RUN] Action completed: ${action.name || "anonymous"}`,
@@ -556,6 +571,9 @@ export class Scheduler {
               ]);
 
               for (const action of triggeredActions) {
+                // Track what push mode triggered (for Phase 5 filtering)
+                this.pushTriggered.add(action);
+
                 logger.debug("schedule", () => [
                   `[TRIGGERED] Action for ${spaceAndURI}/${
                     change.address.path.join("/")
@@ -1277,6 +1295,84 @@ export class Scheduler {
     return elapsed < throttleMs;
   }
 
+  // ============================================================
+  // Push-triggered filtering (Phase 5)
+  // ============================================================
+
+  /**
+   * Updates the mightWrite set for an action by accumulating its actual writes.
+   * This grows over time to capture all paths an action has ever written.
+   */
+  private updateMightWrite(action: Action, writes: IMemorySpaceAddress[]): void {
+    const existing = this.mightWrite.get(action);
+    if (!existing) {
+      this.mightWrite.set(action, [...writes]);
+      return;
+    }
+
+    // Merge new writes into existing set (avoid duplicates)
+    for (const write of writes) {
+      const alreadyExists = existing.some(
+        (e) =>
+          e.space === write.space &&
+          e.id === write.id &&
+          e.path.length === write.path.length &&
+          e.path.every((p, i) => p === write.path[i]),
+      );
+      if (!alreadyExists) {
+        existing.push(write);
+      }
+    }
+  }
+
+  /**
+   * Returns the accumulated "might write" set for an action.
+   * Useful for diagnostics and debugging.
+   */
+  getMightWrite(action: Action): IMemorySpaceAddress[] | undefined {
+    return this.mightWrite.get(action);
+  }
+
+  /**
+   * Returns filter statistics for the current/last execution cycle.
+   */
+  getFilterStats(): { filtered: number; executed: number } {
+    return { ...this.filterStats };
+  }
+
+  /**
+   * Resets filter statistics.
+   */
+  resetFilterStats(): void {
+    this.filterStats = { filtered: 0, executed: 0 };
+  }
+
+  /**
+   * Checks if an action should be filtered out (not run) based on push-triggered info.
+   * Returns true if the action should be skipped.
+   */
+  private shouldFilterAction(action: Action): boolean {
+    // Always run if scheduled immediately (initial run, explicit scheduling)
+    if (this.scheduledImmediately.has(action)) {
+      return false;
+    }
+
+    // Always run if no prior mightWrite (first time this action writes anything)
+    if (!this.mightWrite.has(action)) {
+      return false;
+    }
+
+    // In pull mode, filter based on pushTriggered
+    if (this.pullMode) {
+      // If not triggered by actual storage changes, filter it out
+      if (!this.pushTriggered.has(action)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   private handleError(error: Error, action: any) {
     const { charmId, spellId, recipeId, space } = getCharmMetadataFromFrame(
       (error as Error & { frame?: Frame }).frame,
@@ -1481,6 +1577,20 @@ export class Scheduler {
         continue;
       }
 
+      // Phase 5: Push-triggered filtering
+      // Skip actions not triggered by actual storage changes (but keep them dirty)
+      if (this.shouldFilterAction(fn)) {
+        logger.debug("schedule-filter", () => [
+          `[FILTER] Skipping action not triggered by actual changes: ${
+            fn.name || "anonymous"
+          }`,
+        ]);
+        this.filterStats.filtered++;
+        this.pending.delete(fn);
+        // Keep dirty flag - action may be needed in a future cycle
+        continue;
+      }
+
       // Clean up from pending/dirty before running
       this.pending.delete(fn);
       if (this.pullMode) {
@@ -1488,6 +1598,7 @@ export class Scheduler {
       }
       this.unsubscribe(fn);
 
+      this.filterStats.executed++;
       this.loopCounter.set(fn, (this.loopCounter.get(fn) || 0) + 1);
       if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
         this.handleError(
@@ -1507,6 +1618,10 @@ export class Scheduler {
       this.idlePromises.length = 0;
       this.loopCounter = new WeakMap();
       this.scheduled = false;
+
+      // Clear Phase 5 tracking sets at end of execution cycle
+      this.pushTriggered.clear();
+      this.scheduledImmediately.clear();
     } else {
       // Keep scheduled = true since we're queuing another execution
       queueTask(() => this.execute());
