@@ -115,6 +115,7 @@ export class Scheduler {
   private effects = new Set<Action>();
   private computations = new Set<Action>();
   private dependents = new WeakMap<Action, Set<Action>>();
+  private reverseDependencies = new WeakMap<Action, Set<Action>>();
   // Track which actions are effects persistently (survives unsubscribe/re-subscribe)
   private isEffectAction = new WeakMap<Action, boolean>();
   private dirty = new Set<Action>();
@@ -319,6 +320,18 @@ export class Scheduler {
     this.cancels.delete(action);
     this.dependencies.delete(action);
     this.pending.delete(action);
+    const dependencies = this.reverseDependencies.get(action);
+    if (dependencies) {
+      for (const dependency of dependencies) {
+        const dependents = this.dependents.get(dependency);
+        dependents?.delete(action);
+        if (dependents && dependents.size === 0) {
+          this.dependents.delete(dependency);
+        }
+      }
+      this.reverseDependencies.delete(action);
+    }
+    this.dependents.delete(action);
     // Clean up effect/computation tracking
     this.effects.delete(action);
     this.computations.delete(action);
@@ -632,7 +645,20 @@ export class Scheduler {
    * For each action that writes to paths this action reads, add this action as a dependent.
    */
   private updateDependents(action: Action, log: ReactivityLog): void {
+    const previousDependencies = this.reverseDependencies.get(action);
+    if (previousDependencies) {
+      for (const dependency of previousDependencies) {
+        const dependents = this.dependents.get(dependency);
+        dependents?.delete(action);
+        if (dependents && dependents.size === 0) {
+          this.dependents.delete(dependency);
+        }
+      }
+      this.reverseDependencies.delete(action);
+    }
+
     const reads = log.reads;
+    const newDependencies = new Set<Action>();
 
     // For each read of the new action, find other actions that write to it
     for (const read of reads) {
@@ -658,10 +684,15 @@ export class Scheduler {
                 this.dependents.set(otherAction, deps);
               }
               deps.add(action);
+              newDependencies.add(otherAction);
             }
           }
         }
       }
+    }
+
+    if (newDependencies.size > 0) {
+      this.reverseDependencies.set(action, newDependencies);
     }
   }
 
@@ -734,6 +765,8 @@ export class Scheduler {
     if (this.dirty.has(action)) return; // Already dirty, avoid infinite recursion
 
     this.dirty.add(action);
+    // Treat dirty computations as triggered so they bypass filtering
+    this.pushTriggered.add(action);
 
     // Propagate to dependents transitively
     const deps = this.dependents.get(action);
@@ -1106,6 +1139,7 @@ export class Scheduler {
     findEffects(computation);
 
     for (const effect of toSchedule) {
+      this.pushTriggered.add(effect);
       this.scheduleWithDebounce(effect);
     }
   }
@@ -1386,6 +1420,9 @@ export class Scheduler {
 
     // In pull mode, filter based on pushTriggered
     if (this.pullMode) {
+      if (this.dirty.has(action)) {
+        return false;
+      }
       // If not triggered by actual storage changes, filter it out
       if (!this.pushTriggered.has(action)) {
         return true;
