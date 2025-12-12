@@ -639,13 +639,24 @@ function buildBoardSet(tiles: readonly PlacedTile[]): Set<string> {
   return set;
 }
 
+// Helper to deep clone a letter, stripping any Cell proxy references
+function sanitizeLetter(letter: Letter): Letter {
+  return {
+    char: String(letter.char || ""),
+    points: Number(letter.points || 0),
+    id: String(letter.id || ""),
+    isBlank: Boolean(letter.isBlank),
+  };
+}
+
 function updatePlayerRack(
   allRacksJson: Cell<string>,
   playerName: string,
   newRack: Letter[],
 ) {
   const current = parseAllRacksJson(allRacksJson.get());
-  current[playerName] = newRack;
+  // Deep clone all letters to strip Cell proxy references
+  current[playerName] = newRack.map(sanitizeLetter);
   allRacksJson.set(JSON.stringify(current));
 }
 
@@ -792,37 +803,72 @@ const returnToRack = handler<
 >((event, { allRacksJson, allPlacedJson, myName, message }) => {
   const dragType = event.detail?.type;
   const sourceData = event.detail?.sourceCell;
-  if (!sourceData || dragType !== "board-tile") return;
+  if (!sourceData) return;
+
   const letterId = sourceData.id || sourceData.$alias?.id;
   if (!letterId) {
     message.set("Could not identify dragged tile");
     return;
   }
+
   const allRacks = parseAllRacksJson(allRacksJson.get());
   const allPlaced = parseAllPlacedJson(allPlacedJson.get());
   const currentRack = allRacks[myName] || [];
   const currentPlaced = allPlaced[myName] || [];
-  const tileIndex = currentPlaced.findIndex((t: PlacedTile) =>
-    t.letter.id === letterId
-  );
-  if (tileIndex === -1) {
-    message.set("Tile not found on board");
+
+  // Handle board tile being returned to rack
+  if (dragType === "board-tile") {
+    const tileIndex = currentPlaced.findIndex((t: PlacedTile) =>
+      t.letter.id === letterId
+    );
+    if (tileIndex === -1) {
+      message.set("Tile not found on board");
+      return;
+    }
+    const placedTile = currentPlaced[tileIndex];
+    const returnedLetter: Letter = {
+      char: placedTile.letter.isBlank ? "" : placedTile.letter.char,
+      points: placedTile.letter.points,
+      id: placedTile.letter.id,
+      isBlank: placedTile.letter.isBlank ?? false,
+    };
+    updatePlayerPlaced(
+      allPlacedJson,
+      myName,
+      currentPlaced.filter((_: PlacedTile, i: number) => i !== tileIndex),
+    );
+    updatePlayerRack(allRacksJson, myName, [...currentRack, returnedLetter]);
+    message.set(`Returned ${placedTile.letter.char || "blank"} to rack`);
     return;
   }
-  const placedTile = currentPlaced[tileIndex];
-  const returnedLetter: Letter = {
-    char: placedTile.letter.isBlank ? "" : placedTile.letter.char,
-    points: placedTile.letter.points,
-    id: placedTile.letter.id,
-    isBlank: placedTile.letter.isBlank ?? false,
-  };
-  updatePlayerPlaced(
-    allPlacedJson,
-    myName,
-    currentPlaced.filter((_: PlacedTile, i: number) => i !== tileIndex),
-  );
-  updatePlayerRack(allRacksJson, myName, [...currentRack, returnedLetter]);
-  message.set(`Returned ${placedTile.letter.char || "blank"} to rack`);
+
+  // Handle rack tile being reordered within rack
+  if (dragType === "letter") {
+    const pointerX = event.detail?.pointerX;
+    const dropZoneRect = event.detail?.dropZoneRect;
+    if (!dropZoneRect) return;
+
+    // Find the source tile index
+    const sourceIndex = currentRack.findIndex((l: Letter) => l.id === letterId);
+    if (sourceIndex === -1) return;
+
+    // Calculate target position based on drop location
+    const TILE_WIDTH = 52; // 44px tile + 8px gap
+    const relativeX = pointerX - dropZoneRect.left - 8; // subtract padding
+    let targetIndex = Math.floor(relativeX / TILE_WIDTH);
+    targetIndex = Math.max(0, Math.min(targetIndex, currentRack.length - 1));
+
+    // If same position, do nothing
+    if (targetIndex === sourceIndex) return;
+
+    // Reorder the rack
+    const newRack = [...currentRack];
+    const [movedTile] = newRack.splice(sourceIndex, 1);
+    newRack.splice(targetIndex, 0, movedTile);
+
+    updatePlayerRack(allRacksJson, myName, newRack);
+    message.set("");
+  }
 });
 
 const clearBoard = handler<
@@ -995,11 +1041,13 @@ const submitTurn = handler<
   );
   playersJson.set(JSON.stringify(updatedPlayers));
 
-  // Commit tiles to board (as JSON string)
+  // Clear placed tiles FIRST to avoid intermediate render state
+  // where tiles exist in both myPlaced and board simultaneously
+  updatePlayerPlaced(allPlacedJson, myName, []);
+
+  // Then commit tiles to board - tiles transition cleanly
   const newBoard = [...currentBoard, ...tilesInWords];
   boardJson.set(JSON.stringify(newBoard));
-
-  updatePlayerPlaced(allPlacedJson, myName, []);
 
   // Draw replacement tiles
   const updatedRacks = parseAllRacksJson(allRacksJson.get());
@@ -1072,6 +1120,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
   ) => {
     // Parse racks - use derive() for reactivity
     // IMPORTANT: derive() may pass a Cell proxy instead of the value - need to unwrap
+    // Also ensure we return CLEAN objects to avoid Cell proxy leaking into render
     const myRack = derive(allRacksJson, (input: any) => {
       // If input is a Cell proxy, get its actual value
       const actualInput =
@@ -1086,7 +1135,13 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
         : myName;
       const name = String(nameValue || "");
       const rack = racks[name] || [];
-      return rack;
+      // Deep clone to ensure no Cell proxies leak into render
+      return rack.map((letter: Letter) => ({
+        char: String(letter.char || ""),
+        points: Number(letter.points || 0),
+        id: String(letter.id || ""),
+        isBlank: Boolean(letter.isBlank),
+      }));
     });
 
     // Parse players and game events from JSON - use derive() for proper reactivity
@@ -1322,7 +1377,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                     {/* My placed tiles (this turn) - using pre-computed positions */}
                     {myPlaced.map((tile: any) => (
                       <ct-drag-source
-                        $cell={tile.letter as any}
+                        $cell={{ id: tile.letter.id } as any}
                         type="board-tile"
                         style={{
                           position: "absolute",
@@ -1397,7 +1452,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                 </span>
               </div>
               <ct-drop-zone
-                accept="board-tile"
+                accept="board-tile,letter"
                 onct-drop={returnToRack({
                   allRacksJson,
                   allPlacedJson,
@@ -1417,7 +1472,10 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                   }}
                 >
                   {myRack.map((letter: Letter) => (
-                    <ct-drag-source $cell={letter as any} type="letter">
+                    <ct-drag-source
+                      $cell={{ id: letter.id } as any}
+                      type="letter"
+                    >
                       <div
                         style={{
                           width: "44px",
