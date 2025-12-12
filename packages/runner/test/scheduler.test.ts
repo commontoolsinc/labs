@@ -1715,6 +1715,223 @@ describe("pull-based scheduling", () => {
     expect(effectRuns).toBeGreaterThan(initialEffectRuns);
   });
 
+  it("should recompute multi-hop chains before running effects in pull mode", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "pull-multihop-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const intermediate1 = runtime.getCell<number>(
+      space,
+      "pull-multihop-mid-1",
+      undefined,
+      tx,
+    );
+    intermediate1.set(0);
+    const intermediate2 = runtime.getCell<number>(
+      space,
+      "pull-multihop-mid-2",
+      undefined,
+      tx,
+    );
+    intermediate2.set(0);
+    const effectResult = runtime.getCell<number>(
+      space,
+      "pull-multihop-effect",
+      undefined,
+      tx,
+    );
+    effectResult.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let comp1Runs = 0;
+    let comp2Runs = 0;
+    let effectRuns = 0;
+
+    const computation1: Action = (actionTx) => {
+      comp1Runs++;
+      const val = source.withTx(actionTx).get();
+      intermediate1.withTx(actionTx).send(val + 1);
+    };
+
+    const computation2: Action = (actionTx) => {
+      comp2Runs++;
+      const val = intermediate1.withTx(actionTx).get();
+      intermediate2.withTx(actionTx).send(val * 2);
+    };
+
+    const effect: Action = (actionTx) => {
+      effectRuns++;
+      const val = intermediate2.withTx(actionTx).get();
+      effectResult.withTx(actionTx).send(val - 3);
+    };
+
+    runtime.scheduler.subscribe(
+      computation1,
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        writes: [intermediate1.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+
+    runtime.scheduler.subscribe(
+      computation2,
+      {
+        reads: [intermediate1.getAsNormalizedFullLink()],
+        writes: [intermediate2.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [intermediate2.getAsNormalizedFullLink()],
+        writes: [effectResult.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true, isEffect: true },
+    );
+    await runtime.idle();
+
+    expect(effectResult.get()).toBe((1 + 1) * 2 - 3);
+    expect(comp2Runs).toBe(1);
+    expect(effectRuns).toBe(1);
+
+    const tx2 = runtime.edit();
+    source.withTx(tx2).send(5);
+    await tx2.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(comp1Runs).toBe(2);
+    expect(comp2Runs).toBe(2);
+    expect(effectRuns).toBe(2);
+    expect(effectResult.get()).toBe((5 + 1) * 2 - 3);
+  });
+
+  it("should drop stale dependents when computation changes inputs", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const sourceA = runtime.getCell<number>(
+      space,
+      "pull-deps-source-a",
+      undefined,
+      tx,
+    );
+    sourceA.set(2);
+    const sourceB = runtime.getCell<number>(
+      space,
+      "pull-deps-source-b",
+      undefined,
+      tx,
+    );
+    sourceB.set(7);
+    const selector = runtime.getCell<boolean>(
+      space,
+      "pull-deps-selector",
+      undefined,
+      tx,
+    );
+    selector.set(false);
+    const intermediate = runtime.getCell<number>(
+      space,
+      "pull-deps-intermediate",
+      undefined,
+      tx,
+    );
+    intermediate.set(0);
+    const effectResult = runtime.getCell<number>(
+      space,
+      "pull-deps-effect",
+      undefined,
+      tx,
+    );
+    effectResult.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let effectRuns = 0;
+
+    const computation: Action = (actionTx) => {
+      const useB = selector.withTx(actionTx).get();
+      const value = useB
+        ? sourceB.withTx(actionTx).get()
+        : sourceA.withTx(actionTx).get();
+      intermediate.withTx(actionTx).send(value * 10);
+    };
+
+    const effect: Action = (actionTx) => {
+      effectRuns++;
+      const value = intermediate.withTx(actionTx).get();
+      effectResult.withTx(actionTx).send(value);
+    };
+
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [
+          selector.getAsNormalizedFullLink(),
+          sourceA.getAsNormalizedFullLink(),
+        ],
+        writes: [intermediate.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [intermediate.getAsNormalizedFullLink()],
+        writes: [effectResult.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true, isEffect: true },
+    );
+    await runtime.idle();
+
+    expect(effectRuns).toBe(1);
+    expect(effectResult.get()).toBe(20);
+
+    // Switch computation to sourceB
+    const toggleTx = runtime.edit();
+    selector.withTx(toggleTx).send(true);
+    await toggleTx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(effectRuns).toBe(2);
+    expect(effectResult.get()).toBe(70);
+
+    // Updating sourceA should not dirty the computation any more
+    const tx3 = runtime.edit();
+    sourceA.withTx(tx3).send(999);
+    await tx3.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(effectRuns).toBe(2);
+    expect(effectResult.get()).toBe(70);
+    expect(runtime.scheduler.isDirty(computation)).toBe(false);
+
+    // Updating sourceB should still run the computation
+    const tx4 = runtime.edit();
+    sourceB.withTx(tx4).send(6);
+    await tx4.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(effectRuns).toBe(3);
+    expect(effectResult.get()).toBe(60);
+  });
+
   it("should track getStats with dirty count", async () => {
     runtime.scheduler.enablePullMode();
 
