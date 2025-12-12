@@ -56,7 +56,10 @@ interface Input {
   items: Default<Item[], []>;
 }
 
-const addItem = handler<{ detail: { message: string } }, { items: Cell<Item[]> }>(
+const addItem = handler<
+  { detail: { message: string } },
+  { items: Cell<Item[]> }
+>(
   ({ detail }, { items }) => {
     const content = detail?.message?.trim();
     if (!content) return;
@@ -89,21 +92,27 @@ export default pattern<Input>(({ items }) => {
     }),
   }));
 
-  const pendingCount = derive(sentimentAnalyses.map((s) => s.analysis.pending), (pendingStates) =>
-    pendingStates.filter((p) => p).length);
+  const pendingCount = derive(
+    sentimentAnalyses.map((s) => s.analysis.pending),
+    (pendingStates) => pendingStates.filter((p) => p).length,
+  );
 
-  const completedCount = derive(sentimentAnalyses.map((s) => s.analysis.result), (results) =>
-    results.filter((r) => r !== undefined).length);
+  const completedCount = derive(
+    sentimentAnalyses.map((s) => s.analysis.result),
+    (results) => results.filter((r) => r !== undefined).length,
+  );
 
   return {
     [NAME]: "Test: Dumb Map with generateObject",
     [UI]: (
-      <div style={{ padding: "20px", maxWidth: "800px", fontFamily: "system-ui" }}>
+      <div
+        style={{ padding: "20px", maxWidth: "800px", fontFamily: "system-ui" }}
+      >
         <h2>Dumb Map Approach: generateObject Test</h2>
 
         <p style={{ color: "#666", marginBottom: "20px" }}>
-          Testing that .map() + generateObject works without custom caching. Each item gets
-          independent caching via prompt content hashing.
+          Testing that .map() + generateObject works without custom caching.
+          Each item gets independent caching via prompt content hashing.
         </p>
 
         <div
@@ -115,8 +124,9 @@ export default pattern<Input>(({ items }) => {
             borderLeft: "4px solid #2196F3",
           }}
         >
-          <strong>Status:</strong> {completedCount}/{items.length} completed, {pendingCount}{" "}
-          pending
+          <strong>Status:</strong> {completedCount}/{items.length} completed,
+          {" "}
+          {pendingCount} pending
         </div>
 
         <div style={{ margin: "20px 0" }}>
@@ -144,14 +154,29 @@ export default pattern<Input>(({ items }) => {
               </div>
 
               {derive(
-                [item.analysis.pending, item.analysis.result, item.analysis.error],
+                [
+                  item.analysis.pending,
+                  item.analysis.result,
+                  item.analysis.error,
+                ],
                 ([pending, result, error]) => {
                   if (pending) {
                     return (
                       <div
-                        style={{ color: "#666", padding: "10px", background: "#fff3cd", borderRadius: "4px" }}
+                        style={{
+                          color: "#666",
+                          padding: "10px",
+                          background: "#fff3cd",
+                          borderRadius: "4px",
+                        }}
                       >
-                        <ct-loader show-elapsed style={{ display: "inline-block", marginRight: "8px" }} />
+                        <ct-loader
+                          show-elapsed
+                          style={{
+                            display: "inline-block",
+                            marginRight: "8px",
+                          }}
+                        />
                         Analyzing sentiment...
                       </div>
                     );
@@ -159,7 +184,12 @@ export default pattern<Input>(({ items }) => {
                   if (error) {
                     return (
                       <div
-                        style={{ color: "#d32f2f", padding: "10px", background: "#ffebee", borderRadius: "4px" }}
+                        style={{
+                          color: "#d32f2f",
+                          padding: "10px",
+                          background: "#ffebee",
+                          borderRadius: "4px",
+                        }}
                       >
                         <strong>Error:</strong> {String(error)}
                       </div>
@@ -168,29 +198,36 @@ export default pattern<Input>(({ items }) => {
                   const sentimentResult = result as Sentiment | undefined;
                   if (sentimentResult) {
                     return (
-                      <div style={{ padding: "10px", background: "#f5f5f5", borderRadius: "4px" }}>
+                      <div
+                        style={{
+                          padding: "10px",
+                          background: "#f5f5f5",
+                          borderRadius: "4px",
+                        }}
+                      >
                         <div style={{ marginBottom: "6px" }}>
                           <strong>Sentiment:</strong>{" "}
                           <span
                             style={{
                               fontSize: "16px",
                               fontWeight: "bold",
-                              color:
-                                sentimentResult.sentiment === "positive"
-                                  ? "#4CAF50"
-                                  : sentimentResult.sentiment === "negative"
-                                    ? "#f44336"
-                                    : "#757575",
+                              color: sentimentResult.sentiment === "positive"
+                                ? "#4CAF50"
+                                : sentimentResult.sentiment === "negative"
+                                ? "#f44336"
+                                : "#757575",
                             }}
                           >
                             {sentimentResult.sentiment.toUpperCase()}
                           </span>{" "}
                           <span style={{ color: "#666", fontSize: "12px" }}>
-                            ({Math.round(sentimentResult.confidence * 100)}% confidence)
+                            ({Math.round(sentimentResult.confidence * 100)}%
+                            confidence)
                           </span>
                         </div>
                         <div style={{ fontSize: "12px", color: "#666" }}>
-                          <strong>Keywords:</strong> {sentimentResult.keywords.join(", ")}
+                          <strong>Keywords:</strong>{" "}
+                          {sentimentResult.keywords.join(", ")}
                         </div>
                       </div>
                     );
@@ -200,7 +237,9 @@ export default pattern<Input>(({ items }) => {
               )}
 
               <div style={{ marginTop: "12px" }}>
-                <ct-button onClick={removeItem({ items, itemId: item.itemId })}>Remove</ct-button>
+                <ct-button onClick={removeItem({ items, itemId: item.itemId })}>
+                  Remove
+                </ct-button>
               </div>
             </div>
           ))}

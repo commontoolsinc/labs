@@ -7,14 +7,7 @@
  * 2. Set selectedItem to that value
  * 3. Check if it creates links/aliases vs copies
  */
-import {
-  Cell,
-  Default,
-  handler,
-  NAME,
-  pattern,
-  UI,
-} from "commontools";
+import { Cell, Default, handler, NAME, pattern, UI } from "commontools";
 
 interface Item {
   title: string;
@@ -42,7 +35,12 @@ const addItem = handler<unknown, { items: Cell<Item[]>; log: Cell<string[]> }>(
 // Select item by index - logs what we're doing
 const selectByIndex = handler<
   unknown,
-  { items: Cell<Item[]>; selectedItem: Cell<Item | null>; log: Cell<string[]>; index: number }
+  {
+    items: Cell<Item[]>;
+    selectedItem: Cell<Item | null>;
+    log: Cell<string[]>;
+    index: number;
+  }
 >(
   (_, { items, selectedItem, log, index }) => {
     const itemsArray = items.get();
@@ -97,19 +95,43 @@ export default pattern<DiagInput, DiagInput>(
         <div style={{ padding: "1rem", fontFamily: "monospace" }}>
           <h2>Cell.equals() Diagnostic</h2>
 
-          <div style={{ marginBottom: "1rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <div
+            style={{
+              marginBottom: "1rem",
+              display: "flex",
+              gap: "0.5rem",
+              flexWrap: "wrap",
+            }}
+          >
             <ct-button onClick={addItem({ items, log })}>Add Item</ct-button>
-            <ct-button onClick={clearSelection({ selectedItem, log })}>Clear Selection</ct-button>
+            <ct-button onClick={clearSelection({ selectedItem, log })}>
+              Clear Selection
+            </ct-button>
             <ct-button onClick={clearLog({ log })}>Clear Log</ct-button>
           </div>
 
           <div style={{ marginBottom: "1rem" }}>
             <strong>Items ({items.length}):</strong>
-            <div style={{ background: "#f5f5f5", padding: "0.5rem", marginTop: "0.25rem" }}>
+            <div
+              style={{
+                background: "#f5f5f5",
+                padding: "0.5rem",
+                marginTop: "0.25rem",
+              }}
+            >
               {items.map((item, index) => (
-                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.25rem" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "0.5rem",
+                    alignItems: "center",
+                    marginBottom: "0.25rem",
+                  }}
+                >
                   <span>[{index}] {item.title}: {item.value}</span>
-                  <ct-button onClick={selectByIndex({ items, selectedItem, log, index })}>
+                  <ct-button
+                    onClick={selectByIndex({ items, selectedItem, log, index })}
+                  >
                     Select
                   </ct-button>
                 </div>
@@ -119,16 +141,35 @@ export default pattern<DiagInput, DiagInput>(
 
           <div style={{ marginBottom: "1rem" }}>
             <strong>Selected Item:</strong>
-            <div style={{ background: "#e3f2fd", padding: "0.5rem", marginTop: "0.25rem" }}>
+            <div
+              style={{
+                background: "#e3f2fd",
+                padding: "0.5rem",
+                marginTop: "0.25rem",
+              }}
+            >
               <pre>{JSON.stringify(selectedItem, null, 2)}</pre>
             </div>
           </div>
 
           <div>
             <strong>Log:</strong>
-            <div style={{ background: "#fff3e0", padding: "0.5rem", marginTop: "0.25rem", maxHeight: "300px", overflow: "auto" }}>
+            <div
+              style={{
+                background: "#fff3e0",
+                padding: "0.5rem",
+                marginTop: "0.25rem",
+                maxHeight: "300px",
+                overflow: "auto",
+              }}
+            >
               {log.map((entry) => (
-                <div style={{ borderBottom: "1px solid #ddd", padding: "0.25rem 0" }}>
+                <div
+                  style={{
+                    borderBottom: "1px solid #ddd",
+                    padding: "0.25rem 0",
+                  }}
+                >
                   {entry}
                 </div>
               ))}

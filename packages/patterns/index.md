@@ -77,7 +77,8 @@ type NoteOutput = {
 
 ## `gpa-stats-source.tsx`
 
-Source charm for charm linking example. Computes statistics from GPA data and exposes them for other charms to consume.
+Source charm for charm linking example. Computes statistics from GPA data and
+exposes them for other charms to consume.
 
 **Keywords:** charm-linking, source, lift, computed-stats
 
@@ -103,13 +104,14 @@ interface Stats {
 interface Output {
   name: string;
   rawData: string;
-  gpaStats: Stats | null;  // Exposed for linking
+  gpaStats: Stats | null; // Exposed for linking
 }
 ```
 
 ## `gpa-stats-reader.tsx`
 
-Consumer charm for charm linking example. Receives linked statistics from gpa-stats-source and displays them.
+Consumer charm for charm linking example. Receives linked statistics from
+gpa-stats-source and displays them.
 
 **Keywords:** charm-linking, consumer, Default-null
 
@@ -125,6 +127,6 @@ interface Stats {
 
 interface Input {
   name: Default<string, "gpa-reader-v1">;
-  gpaStats: Default<Stats | null, null>;  // null until linked
+  gpaStats: Default<Stats | null, null>; // null until linked
 }
 ```

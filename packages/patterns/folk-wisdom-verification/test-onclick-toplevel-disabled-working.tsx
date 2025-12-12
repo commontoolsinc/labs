@@ -35,7 +35,15 @@
  * - Handler receives real cell references, not read-only proxies
  * - .set() operations succeed because cells are writable
  */
-import { Cell, computed, Default, handler, NAME, pattern, UI } from "commontools";
+import {
+  Cell,
+  computed,
+  Default,
+  handler,
+  NAME,
+  pattern,
+  UI,
+} from "commontools";
 
 interface State {
   count: Default<number, 0>;
@@ -60,7 +68,9 @@ const incrementHandler = handler<
 export default pattern<State>(({ count, pending, isProcessing }) => {
   // computed() unwraps captured values - no .get() needed
   const isDisabled = computed(() => pending || isProcessing);
-  const buttonText = computed(() => pending ? "Processing..." : "Increment (WORKING)");
+  const buttonText = computed(() =>
+    pending ? "Processing..." : "Increment (WORKING)"
+  );
 
   return {
     [NAME]: "TEST: Top-level button - WORKING",

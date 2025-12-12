@@ -30,7 +30,16 @@
  * 5. Change the last name input
  * 6. Verify BOTH values update identically
  */
-import { Cell, computed, Default, derive, handler, NAME, pattern, UI } from "commontools";
+import {
+  Cell,
+  computed,
+  Default,
+  derive,
+  handler,
+  NAME,
+  pattern,
+  UI,
+} from "commontools";
 
 interface TestInput {
   firstName: Default<string, "John">;
@@ -57,8 +66,9 @@ export default pattern<TestInput>(({ firstName, lastName, age }) => {
 
   // Using derive() with no explicit deps - same behavior as computed
   // Transformer also extracts and unwraps captured values
-  const deriveFullName = derive({}, () =>
-    `${firstName} ${lastName} (age ${age})`,
+  const deriveFullName = derive(
+    {},
+    () => `${firstName} ${lastName} (age ${age})`,
   );
 
   // Using derive() with explicit deps - also equivalent
@@ -84,15 +94,15 @@ export default pattern<TestInput>(({ firstName, lastName, age }) => {
         >
           <h3>Inputs</h3>
           <div style={{ marginBottom: "10px" }}>
-            <label>First Name: </label>
+            <label>First Name:</label>
             <ct-input $value={firstName} />
           </div>
           <div style={{ marginBottom: "10px" }}>
-            <label>Last Name: </label>
+            <label>Last Name:</label>
             <ct-input $value={lastName} />
           </div>
           <div style={{ marginBottom: "10px" }}>
-            <label>Age: </label>
+            <label>Age:</label>
             <ct-input $value={age} type="number" />
           </div>
           <ct-button onClick={updateNames({ firstName, lastName })}>

@@ -39,7 +39,10 @@ interface User {
 interface TestInput {
   count: Default<number, 0>;
   user: Default<User, { name: "Alice"; age: 30 }>;
-  items: Default<Item[], [{ title: "Item 1" }, { title: "Item 2" }, { title: "Item 3" }]>;
+  items: Default<
+    Item[],
+    [{ title: "Item 1" }, { title: "Item 2" }, { title: "Item 3" }]
+  >;
 }
 
 const updateAllValues = handler<
@@ -79,7 +82,9 @@ export default pattern<TestInput>(({ count, user, items }) => {
             borderRadius: "5px",
           }}
         >
-          <h3>All values below use NO computed() - just direct references in JSX</h3>
+          <h3>
+            All values below use NO computed() - just direct references in JSX
+          </h3>
         </div>
 
         <div style={{ display: "grid", gap: "15px", marginBottom: "20px" }}>
@@ -148,9 +153,7 @@ export default pattern<TestInput>(({ count, user, items }) => {
           >
             <strong>Array mapping:</strong>
             <ul style={{ margin: "5px 0 0 0", paddingLeft: "20px" }}>
-              {items.map((item) => (
-                <li>{item.title}</li>
-              ))}
+              {items.map((item) => <li>{item.title}</li>)}
             </ul>
           </div>
         </div>
@@ -170,7 +173,10 @@ export default pattern<TestInput>(({ count, user, items }) => {
           <h4>What to observe:</h4>
           <ul>
             <li>Click the button and watch ALL values update simultaneously</li>
-            <li>No computed() wrappers are needed for any of these reactive updates</li>
+            <li>
+              No computed() wrappers are needed for any of these reactive
+              updates
+            </li>
             <li>This demonstrates that JSX has built-in reactivity</li>
           </ul>
         </div>

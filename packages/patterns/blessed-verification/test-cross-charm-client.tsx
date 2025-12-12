@@ -24,7 +24,17 @@
  *    3. Toggle to Mode B (ct.render active)
  *    4. Click "Invoke Server Stream" - server counter should increment
  */
-import { Cell, Default, NAME, pattern, Stream, UI, wish, derive, handler } from "commontools";
+import {
+  Cell,
+  Default,
+  derive,
+  handler,
+  NAME,
+  pattern,
+  Stream,
+  UI,
+  wish,
+} from "commontools";
 import ct from "commontools";
 
 interface Input {
@@ -63,12 +73,16 @@ const invokeServerStream = handler<
     if (innerValue && innerValue.$stream) {
       // Cell contains { $stream: true } marker - call .send() on the Cell itself
       // Event must be object (runtime calls preventDefault), can have data props, NO functions
-      streamCell.send({});  // Could also be { someData: "value" }
+      streamCell.send({}); // Could also be { someData: "value" }
       const count = state.invocationCount.get() + 1;
       state.invocationCount.set(count);
-      state.lastInvocationStatus.set(`Success! Server counter should increment (invoked ${count} times)`);
+      state.lastInvocationStatus.set(
+        `Success! Server counter should increment (invoked ${count} times)`,
+      );
     } else {
-      state.lastInvocationStatus.set(`Stream not found or invalid: ${JSON.stringify(innerValue)}`);
+      state.lastInvocationStatus.set(
+        `Stream not found or invalid: ${JSON.stringify(innerValue)}`,
+      );
     }
   } catch (error) {
     state.lastInvocationStatus.set(`Failed: ${error}`);
@@ -79,98 +93,152 @@ const invokeServerStream = handler<
 const toggleMode = handler<unknown, { useCtRender: Cell<boolean> }>(
   (_event, { useCtRender }) => {
     useCtRender.set(!useCtRender.get());
-  }
+  },
 );
 
-export default pattern<Input, Output>(({ useCtRender, lastInvocationStatus, invocationCount }) => {
-  // Wish for the server charm by tag
-  const wishResult = wish<{
-    counter: number;
-    invocationLog: string[];
-    incrementCounter: Stream<void>;
-  }>({
-    query: "#cross-charm-test-server",
-  });
+export default pattern<Input, Output>(
+  ({ useCtRender, lastInvocationStatus, invocationCount }) => {
+    // Wish for the server charm by tag
+    const wishResult = wish<{
+      counter: number;
+      invocationLog: string[];
+      incrementCounter: Stream<void>;
+    }>({
+      query: "#cross-charm-test-server",
+    });
 
-  // Access the result from the wish (WishState has a result property)
-  const serverCharm = wishResult.result;
+    // Access the result from the wish (WishState has a result property)
+    const serverCharm = wishResult.result;
 
-  // Extract the stream using derive
-  const serverStream = derive(serverCharm, (charm) => charm?.incrementCounter);
+    // Extract the stream using derive
+    const serverStream = derive(
+      serverCharm,
+      (charm) => charm?.incrementCounter,
+    );
 
-  return {
-    [NAME]: "Cross-Charm Test Client",
-    [UI]: (
-      <div style={{ padding: "16px", border: "2px solid #2196F3", borderRadius: "8px" }}>
-        <h2>Cross-Charm Test Client</h2>
+    return {
+      [NAME]: "Cross-Charm Test Client",
+      [UI]: (
+        <div
+          style={{
+            padding: "16px",
+            border: "2px solid #2196F3",
+            borderRadius: "8px",
+          }}
+        >
+          <h2>Cross-Charm Test Client</h2>
 
-        {/* Mode Toggle Section */}
-        <div style={{ marginTop: "16px", padding: "12px", backgroundColor: "#E3F2FD", borderRadius: "4px" }}>
-          <h3 style={{ marginTop: 0 }}>Claim 2 Test: ct.render Forces Execution</h3>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span>Current Mode:</span>
-            <strong style={{ color: useCtRender ? "#4CAF50" : "#FF9800" }}>
-              {useCtRender ? "Mode B: Wish + ct.render" : "Mode A: Wish Only (no ct.render)"}
-            </strong>
-          </div>
-          <ct-button
-            onClick={toggleMode({ useCtRender })}
-            style="margin-top: 8px;"
+          {/* Mode Toggle Section */}
+          <div
+            style={{
+              marginTop: "16px",
+              padding: "12px",
+              backgroundColor: "#E3F2FD",
+              borderRadius: "4px",
+            }}
           >
-            Toggle Mode
-          </ct-button>
-          <p style={{ fontSize: "12px", marginTop: "8px", marginBottom: 0 }}>
-            In Mode A, server charm should NOT execute. In Mode B, it should execute.
-          </p>
-        </div>
-
-        {/* Server Charm Rendering Section */}
-        <div style={{ marginTop: "16px", padding: "12px", backgroundColor: "#FFF3E0", borderRadius: "4px" }}>
-          <h3 style={{ marginTop: 0 }}>Server Charm Status</h3>
-          {useCtRender ? (
-            <div>
-              <p style={{ color: "#4CAF50", fontWeight: "bold" }}>
-                Mode B Active: Rendering server charm with ct.render
-              </p>
-              {/* Use ct.render to force execution - even hidden, this makes the charm active */}
-              <div style={{ border: "1px dashed #999", padding: "8px", marginTop: "8px" }}>
-                <ct-render $cell={wishResult.result} />
-              </div>
+            <h3 style={{ marginTop: 0 }}>
+              Claim 2 Test: ct.render Forces Execution
+            </h3>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span>Current Mode:</span>
+              <strong style={{ color: useCtRender ? "#4CAF50" : "#FF9800" }}>
+                {useCtRender
+                  ? "Mode B: Wish + ct.render"
+                  : "Mode A: Wish Only (no ct.render)"}
+              </strong>
             </div>
-          ) : (
-            <p style={{ color: "#FF9800", fontWeight: "bold" }}>
-              Mode A Active: Server charm wished for but NOT rendered (should not execute)
+            <ct-button
+              onClick={toggleMode({ useCtRender })}
+              style="margin-top: 8px;"
+            >
+              Toggle Mode
+            </ct-button>
+            <p style={{ fontSize: "12px", marginTop: "8px", marginBottom: 0 }}>
+              In Mode A, server charm should NOT execute. In Mode B, it should
+              execute.
             </p>
-          )}
-        </div>
-
-        {/* Stream Invocation Section */}
-        <div style={{ marginTop: "16px", padding: "12px", backgroundColor: "#F3E5F5", borderRadius: "4px" }}>
-          <h3 style={{ marginTop: 0 }}>Claim 1 Test: Stream Invocation</h3>
-          <div style={{ marginBottom: "8px" }}>
-            <strong>Last Invocation Status:</strong> {lastInvocationStatus}
           </div>
-          <ct-button
-            onClick={invokeServerStream({
-              stream: serverStream,
-              lastInvocationStatus,
-              invocationCount,
-            })}
-            style="margin-top: 8px;"
-          >
-            Invoke Server Stream
-          </ct-button>
-          <p style={{ fontSize: "12px", marginTop: "8px", marginBottom: 0 }}>
-            Click to invoke the incrementCounter stream from the server charm.
-            Check the server charm to see if the counter incremented.
-          </p>
-        </div>
 
-        {/* Debug Info */}
-        <div style={{ marginTop: "16px", padding: "8px", backgroundColor: "#f5f5f5", borderRadius: "4px" }}>
-          <details>
-            <summary style={{ cursor: "pointer", fontWeight: "bold" }}>Debug Info</summary>
-            <pre style={{ fontSize: "10px", overflow: "auto" }}>
+          {/* Server Charm Rendering Section */}
+          <div
+            style={{
+              marginTop: "16px",
+              padding: "12px",
+              backgroundColor: "#FFF3E0",
+              borderRadius: "4px",
+            }}
+          >
+            <h3 style={{ marginTop: 0 }}>Server Charm Status</h3>
+            {useCtRender
+              ? (
+                <div>
+                  <p style={{ color: "#4CAF50", fontWeight: "bold" }}>
+                    Mode B Active: Rendering server charm with ct.render
+                  </p>
+                  {/* Use ct.render to force execution - even hidden, this makes the charm active */}
+                  <div
+                    style={{
+                      border: "1px dashed #999",
+                      padding: "8px",
+                      marginTop: "8px",
+                    }}
+                  >
+                    <ct-render $cell={wishResult.result} />
+                  </div>
+                </div>
+              )
+              : (
+                <p style={{ color: "#FF9800", fontWeight: "bold" }}>
+                  Mode A Active: Server charm wished for but NOT rendered
+                  (should not execute)
+                </p>
+              )}
+          </div>
+
+          {/* Stream Invocation Section */}
+          <div
+            style={{
+              marginTop: "16px",
+              padding: "12px",
+              backgroundColor: "#F3E5F5",
+              borderRadius: "4px",
+            }}
+          >
+            <h3 style={{ marginTop: 0 }}>Claim 1 Test: Stream Invocation</h3>
+            <div style={{ marginBottom: "8px" }}>
+              <strong>Last Invocation Status:</strong> {lastInvocationStatus}
+            </div>
+            <ct-button
+              onClick={invokeServerStream({
+                stream: serverStream,
+                lastInvocationStatus,
+                invocationCount,
+              })}
+              style="margin-top: 8px;"
+            >
+              Invoke Server Stream
+            </ct-button>
+            <p style={{ fontSize: "12px", marginTop: "8px", marginBottom: 0 }}>
+              Click to invoke the incrementCounter stream from the server charm.
+              Check the server charm to see if the counter incremented.
+            </p>
+          </div>
+
+          {/* Debug Info */}
+          <div
+            style={{
+              marginTop: "16px",
+              padding: "8px",
+              backgroundColor: "#f5f5f5",
+              borderRadius: "4px",
+            }}
+          >
+            <details>
+              <summary style={{ cursor: "pointer", fontWeight: "bold" }}>
+                Debug Info
+              </summary>
+              <pre style={{ fontSize: "10px", overflow: "auto" }}>
               {JSON.stringify(
                 {
                   useCtRender,
@@ -182,13 +250,14 @@ export default pattern<Input, Output>(({ useCtRender, lastInvocationStatus, invo
                 null,
                 2
               )}
-            </pre>
-          </details>
+              </pre>
+            </details>
+          </div>
         </div>
-      </div>
-    ),
-    useCtRender,
-    lastInvocationStatus,
-    invocationCount,
-  };
-});
+      ),
+      useCtRender,
+      lastInvocationStatus,
+      invocationCount,
+    };
+  },
+);
