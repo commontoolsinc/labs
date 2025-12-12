@@ -31,6 +31,27 @@ const favoriteListSchema = {
   type: "array",
   items: favoriteEntrySchema,
 } as const satisfies JSONSchema;
+
+// Wish index schema (also defined locally to avoid circular dependency)
+const wishIndexEntrySchema = {
+  type: "object",
+  properties: {
+    query: { type: "string" },
+    resultCell: { not: true, asCell: true },
+    patternUrl: { type: "string" },
+    timestamp: { type: "number" },
+  },
+  required: ["query", "resultCell", "timestamp"],
+} as const satisfies JSONSchema;
+
+const wishIndexListSchema = {
+  type: "array",
+  items: wishIndexEntrySchema,
+} as const satisfies JSONSchema;
+
+// Constants for wish index
+const WISH_INDEX_MAX_ENTRIES = 100;
+const WISH_INDEX_STALENESS_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 import { getRecipeEnvironment } from "../env.ts";
 
 const WISH_TSX_PATH = getRecipeEnvironment().apiUrl + "api/patterns/wish.tsx";
@@ -211,6 +232,15 @@ function resolveBase(
       );
       return [{ cell: nowCell }];
     }
+    case "#wishIndex": {
+      // Wish index comes from the HOME space (user identity DID)
+      const userDID = ctx.runtime.userIdentityDID;
+      if (!userDID) {
+        throw new WishError("User identity DID not available for #wishIndex");
+      }
+      const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+      return [{ cell: homeSpaceCell, pathPrefix: ["wishIndex"] }];
+    }
     default: {
       // Check if it's a well-known target
       const resolution = WISH_TARGETS[parsed.key];
@@ -324,6 +354,80 @@ function cellLinkUI(cell: Cell<unknown>): VNode {
   return h("ct-cell-link", { $cell: cell });
 }
 
+/**
+ * Get recent (non-stale) entries from the wish index.
+ */
+function getRecentWishIndexEntries(
+  runtime: Runtime,
+  tx?: IExtendedStorageTransaction,
+): Array<{
+  query: string;
+  resultCell: Cell<unknown>;
+  patternUrl?: string;
+  timestamp: number;
+}> {
+  try {
+    const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+    let wishIndexCell = homeSpaceCell.key("wishIndex").asSchema(
+      wishIndexListSchema,
+    );
+    if (tx) {
+      wishIndexCell = wishIndexCell.withTx(tx);
+    }
+
+    const entries = wishIndexCell.get() || [];
+    const cutoff = Date.now() - WISH_INDEX_STALENESS_MS;
+
+    return [...entries].filter((entry) => entry.timestamp > cutoff);
+  } catch (_error) {
+    return [];
+  }
+}
+
+/**
+ * Record a successful wish resolution to the wish index.
+ * Implements FIFO eviction when MAX_ENTRIES is exceeded.
+ */
+async function recordToWishIndex(
+  runtime: Runtime,
+  query: string,
+  resultCell: Cell<unknown>,
+  patternUrl?: string,
+): Promise<void> {
+  try {
+    const homeSpaceCell = runtime.getHomeSpaceCell();
+    const wishIndexCell = homeSpaceCell.key("wishIndex").asSchema(
+      wishIndexListSchema,
+    );
+    await wishIndexCell.sync();
+
+    await runtime.editWithRetry((tx: IExtendedStorageTransaction) => {
+      const indexWithTx = wishIndexCell.withTx(tx);
+      const currentEntries = indexWithTx.get() || [];
+
+      // Create new entry
+      const newEntry = {
+        query,
+        resultCell,
+        patternUrl,
+        timestamp: Date.now(),
+      };
+
+      // Add at front, apply FIFO eviction
+      let entries = [newEntry, ...currentEntries];
+      if (entries.length > WISH_INDEX_MAX_ENTRIES) {
+        entries = entries.slice(0, WISH_INDEX_MAX_ENTRIES);
+      }
+
+      indexWithTx.set(entries);
+    });
+
+    await runtime.idle();
+  } catch (e) {
+    console.warn("Failed to record to wish index:", e);
+  }
+}
+
 const TARGET_SCHEMA = {
   anyOf: [{
     type: "string",
@@ -397,12 +501,14 @@ export function wish(
     | { situation: string; context: Record<string, any> }
     | undefined;
   let suggestionPatternResultCell: Cell<WishState<any>> | undefined;
+  let suggestionRecordedToIndex = false; // Track if we've already recorded this result
 
   function launchSuggestionPattern(
     input: { situation: string; context: Record<string, any> },
     providedTx?: IExtendedStorageTransaction,
   ) {
     suggestionPatternInput = input;
+    suggestionRecordedToIndex = false; // Reset for new suggestion
 
     const tx = providedTx || runtime.edit();
 
@@ -415,6 +521,31 @@ export function wish(
       );
 
       addCancel(() => runtime.runner.stop(suggestionPatternResultCell!));
+
+      // Set up a watcher to record successful results to the wish index
+      // NOTE: We read from suggestionPatternInput (not a captured variable) so that
+      // subsequent wishes using the same cell get recorded with the correct query
+      suggestionPatternResultCell.sink(() => {
+        if (suggestionRecordedToIndex) return; // Already recorded
+
+        const state = suggestionPatternResultCell?.get();
+        if (state?.result && !state?.error && suggestionPatternInput) {
+          suggestionRecordedToIndex = true;
+          const currentQuery = suggestionPatternInput.situation;
+          // Defer recording to avoid transaction conflicts
+          // The sink might fire during an active transaction
+          setTimeout(() => {
+            recordToWishIndex(
+              runtime,
+              currentQuery,
+              state.result,
+              SUGGESTION_TSX_PATH,
+            ).catch((e) => {
+              console.warn("Failed to record suggestion to wish index:", e);
+            });
+          }, 0);
+        }
+      });
     }
 
     if (!suggestionPattern) {
@@ -534,7 +665,40 @@ export function wish(
           );
         }
       } else {
-        // Otherwise it's a generic query, instantiate suggestion.tsx
+        // Otherwise it's a generic query
+        // First check the wish index for a cached appropriate result
+        const recentEntries = getRecentWishIndexEntries(runtime, tx);
+
+        if (recentEntries.length > 0) {
+          // Check for appropriate cached entry (sync heuristic check)
+          // For now using simple string matching; TODO: add async Haiku call
+          const queryLower = query.toLowerCase().trim();
+          const cachedEntry = recentEntries.find((entry) => {
+            const entryQueryLower = entry.query.toLowerCase().trim();
+            // Exact match
+            if (queryLower === entryQueryLower) return true;
+            // One is substring of the other and similar length
+            if (
+              (queryLower.includes(entryQueryLower) ||
+                entryQueryLower.includes(queryLower)) &&
+              Math.abs(queryLower.length - entryQueryLower.length) < 10
+            ) {
+              return true;
+            }
+            return false;
+          });
+
+          if (cachedEntry) {
+            // Use cached result from wish index
+            sendResult(tx, {
+              result: cachedEntry.resultCell,
+              [UI]: cellLinkUI(cachedEntry.resultCell),
+            });
+            return;
+          }
+        }
+
+        // No cached result found, instantiate suggestion.tsx
         sendResult(
           tx,
           launchSuggestionPattern(

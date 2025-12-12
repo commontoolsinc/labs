@@ -67,6 +67,39 @@ export type ErrorWithContext = Error & {
 export type ErrorHandler = (error: ErrorWithContext) => void;
 export type NavigateCallback = (target: Cell<any>) => void;
 
+export interface CharmMetadata {
+  name?: string;
+  description?: string;
+  version?: string;
+  [key: string]: any;
+}
+
+export interface SpaceCellContents {
+  allCharms: Cell<never>[];
+  recentCharms: Cell<never>[];
+  defaultPattern: Cell<never>;
+}
+
+/**
+ * Entry in the wish index, caching a successful wish resolution.
+ */
+export interface WishIndexEntry {
+  query: string; // Original situation/query string
+  resultCell: Cell<unknown>; // The resolved cell
+  patternUrl?: string; // Pattern URL used (optional)
+  timestamp: number; // Date.now() when recorded
+}
+
+/**
+ * Contents of the home space cell (where space DID = user identity DID).
+ * Home space contains user-specific data like favorites that persists across all spaces.
+ * See docs/common/HOME_SPACE.md for more details.
+ */
+export interface HomeSpaceCellContents extends SpaceCellContents {
+  favorites: Cell<{ cell: Cell<unknown>; tag: string }[]>;
+  wishIndex: Cell<WishIndexEntry[]>;
+}
+
 export interface RuntimeOptions {
   apiUrl: URL;
   storageManager: IStorageManager;
@@ -118,6 +151,21 @@ export const homeSpaceCellSchema: JSONSchema = {
         required: ["cell"],
       },
       asCell: true,
+    },
+    wishIndex: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          resultCell: { not: true, asCell: true },
+          patternUrl: { type: "string" },
+          timestamp: { type: "number" },
+        },
+        required: ["query", "resultCell", "timestamp"],
+      },
+      asCell: true,
+      default: [],
     },
   },
 } as JSONSchema;
