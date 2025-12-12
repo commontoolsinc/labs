@@ -268,17 +268,6 @@ export class Scheduler {
 
     if (this.runningPromise) await this.runningPromise;
 
-    // In pull mode, pull dirty dependencies before running effects
-    if (this.pullMode && this.effects.has(action)) {
-      // Use a temporary transaction just to pass to pullDependencies
-      // (computations create their own transactions and commit them)
-      const tempTx = this.runtime.edit();
-      await this.pullDependencies(action, tempTx);
-      // Don't commit tempTx - it was just for context
-    }
-
-    // Create a fresh transaction for the effect after dependencies are pulled
-    // This ensures the effect sees the committed writes from computations
     const tx = this.runtime.edit();
 
     let result: any;
@@ -688,6 +677,39 @@ export class Scheduler {
   }
 
   /**
+   * Collects all dirty computations that an action depends on (transitively).
+   * Used in pull mode to build the complete work set before execution.
+   */
+  private collectDirtyDependencies(action: Action, workSet: Set<Action>): void {
+    const log = this.dependencies.get(action);
+    if (!log) return;
+
+    // Find dirty computations that write to entities this action reads
+    for (const computation of this.dirty) {
+      if (workSet.has(computation)) continue; // Already added
+      if (computation === action) continue;
+
+      const computationLog = this.dependencies.get(computation);
+      if (!computationLog) continue;
+
+      // Check if computation writes to something action reads (document-level match)
+      let found = false;
+      for (const write of computationLog.writes) {
+        for (const read of log.reads) {
+          if (write.space === read.space && write.id === read.id) {
+            workSet.add(computation);
+            // Recursively collect deps of this computation
+            this.collectDirtyDependencies(computation, workSet);
+            found = true;
+            break;
+          }
+        }
+        if (found) break;
+      }
+    }
+  }
+
+  /**
    * Finds and schedules all effects that transitively depend on the given computation.
    */
   private scheduleAffectedEffects(computation: Action): void {
@@ -716,177 +738,6 @@ export class Scheduler {
       this.queueExecution();
       this.pending.add(effect);
     }
-  }
-
-  /**
-   * Pulls all dirty dependencies for an action before running it.
-   * This ensures the action sees consistent, up-to-date values.
-   * @param action The action to pull dependencies for
-   * @param tx The transaction to run computations in (so they share the same snapshot)
-   */
-  private async pullDependencies(
-    action: Action,
-    tx: IExtendedStorageTransaction,
-  ): Promise<void> {
-    const log = this.dependencies.get(action);
-    if (!log) return;
-
-    // Find all dirty computations that write to paths this action reads
-    const dirtyDeps: Action[] = [];
-
-    // Iterate through all dirty computations to find those that write
-    // to entities this action reads
-    for (const computation of this.dirty) {
-      if (computation === action) continue;
-      if (!this.computations.has(computation)) continue;
-
-      const computationLog = this.dependencies.get(computation);
-      if (!computationLog) continue;
-
-      // Check if this computation writes to something the action reads
-      // Match at document level (space/id) - path-level matching can be too strict
-      for (const write of computationLog.writes) {
-        let found = false;
-        for (const read of log.reads) {
-          if (write.space === read.space && write.id === read.id) {
-            // Same document - consider it a dependency
-            if (!dirtyDeps.includes(computation)) {
-              dirtyDeps.push(computation);
-            }
-            found = true;
-            break;
-          }
-        }
-        if (found) break;
-      }
-    }
-
-    // Topologically sort the dirty dependencies
-    const sorted = this.topologicalSortDirty(dirtyDeps);
-
-    // Run each dirty computation in the same transaction
-    for (const computation of sorted) {
-      await this.runComputation(computation, tx);
-    }
-  }
-
-  /**
-   * Topologically sorts a set of dirty computations based on their dependencies.
-   */
-  private topologicalSortDirty(actions: Action[]): Action[] {
-    if (actions.length <= 1) return actions;
-
-    const actionSet = new Set(actions);
-    const graph = new Map<Action, Set<Action>>();
-    const inDegree = new Map<Action, number>();
-
-    // Initialize
-    for (const action of actions) {
-      graph.set(action, new Set());
-      inDegree.set(action, 0);
-    }
-
-    // Build dependency edges within the dirty set
-    for (const actionA of actions) {
-      const logA = this.dependencies.get(actionA);
-      if (!logA) continue;
-
-      for (const write of logA.writes) {
-        for (const actionB of actions) {
-          if (actionA === actionB) continue;
-
-          const logB = this.dependencies.get(actionB);
-          if (!logB) continue;
-
-          // Check if actionB reads what actionA writes
-          for (const read of logB.reads) {
-            if (
-              read.space === write.space &&
-              read.id === write.id &&
-              arraysOverlap(write.path, read.path)
-            ) {
-              const neighbors = graph.get(actionA)!;
-              if (!neighbors.has(actionB)) {
-                neighbors.add(actionB);
-                inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
-              }
-              break;
-            }
-          }
-        }
-      }
-    }
-
-    // Kahn's algorithm
-    const queue: Action[] = [];
-    const result: Action[] = [];
-
-    for (const [action, degree] of inDegree) {
-      if (degree === 0) queue.push(action);
-    }
-
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      result.push(current);
-
-      for (const neighbor of graph.get(current) || []) {
-        const newDegree = (inDegree.get(neighbor) || 0) - 1;
-        inDegree.set(neighbor, newDegree);
-        if (newDegree === 0) queue.push(neighbor);
-      }
-    }
-
-    // Handle any remaining actions (cycles)
-    for (const action of actions) {
-      if (!result.includes(action)) {
-        result.push(action);
-      }
-    }
-
-    return result;
-  }
-
-  /**
-   * Runs a computation as part of the pull mechanism.
-   * Recursively pulls dependencies first, then runs the computation.
-   * @param computation The computation to run
-   * @param _effectTx The effect's transaction (for context, not used directly)
-   */
-  private async runComputation(
-    computation: Action,
-    _effectTx: IExtendedStorageTransaction,
-  ): Promise<void> {
-    if (!this.dirty.has(computation)) return; // Already clean
-
-    // Create a separate transaction for this computation
-    const computationTx = this.runtime.edit();
-
-    // Recursively pull dependencies first
-    await this.pullDependencies(computation, computationTx);
-
-    try {
-      // Run the computation
-      await Promise.resolve(computation(computationTx));
-
-      // Commit and wait for the transaction to be reflected
-      const { error } = await computationTx.commit();
-      if (error) {
-        throw error;
-      }
-
-      // Wait for storage to sync so the effect can see the writes
-      await this.runtime.storageManager.synced();
-
-      // Update dependencies based on actual reads/writes
-      const log = txToReactivityLog(computationTx);
-      this.subscribe(computation, log);
-
-    } catch (error) {
-      this.handleError(error as Error, computation);
-    }
-
-    // Clear dirty flag after running
-    this.clearDirty(computation);
   }
 
   private handleError(error: Error, action: any) {
@@ -993,32 +844,58 @@ export class Scheduler {
       }
     }
 
-    const order = topologicalSort(this.pending, this.dependencies);
+    // Build the work set based on scheduling mode
+    let workSet: Set<Action>;
 
-    // In pull mode, assert that only effects are in the pending queue
     if (this.pullMode) {
-      for (const action of order) {
-        if (this.computations.has(action) && !this.effects.has(action)) {
-          logger.warn("schedule", () => [
-            `[PULL MODE WARNING] Computation found in pending queue: ${action.name || "anonymous"}`,
-            "This may indicate a bug in pull-based scheduling.",
-          ]);
-        }
+      // Pull mode: collect pending effects + their dirty computation dependencies
+      workSet = new Set<Action>();
+
+      // Add all pending effects
+      for (const effect of this.pending) {
+        workSet.add(effect);
       }
+
+      // Find all dirty computations that the effects depend on (transitively)
+      for (const effect of this.pending) {
+        this.collectDirtyDependencies(effect, workSet);
+      }
+
+      logger.debug("schedule", () => [
+        `[EXECUTE PULL MODE] Effects: ${this.pending.size}, Dirty deps added: ${workSet.size - this.pending.size}`,
+      ]);
+    } else {
+      // Push mode: as-is - work set is just the pending actions
+      workSet = this.pending;
     }
 
+    const order = topologicalSort(workSet, this.dependencies);
+
     logger.debug("schedule", () => [
-      `[EXECUTE] Canceling subscriptions for ${order.length} actions before execution`,
+      `[EXECUTE] Running ${order.length} actions`,
     ]);
 
     // Now run all functions. This will resubscribe actions with their new
     // dependencies.
     for (const fn of order) {
-      // Maybe it was unsubscribed since it was added to the order.
-      if (!this.pending.has(fn)) continue;
+      // Check if action is still valid (not unsubscribed since added)
+      // In pull mode, check both pending (effects) and dirty (computations)
+      const isInPending = this.pending.has(fn);
+      const isInDirty = this.dirty.has(fn);
 
-      // Take off pending list and unsubscribe, run will resubscribe.
+      if (this.pullMode) {
+        // In pull mode: action must be in pending (effect) or dirty (computation)
+        if (!isInPending && !isInDirty) continue;
+      } else {
+        // Push mode: action must be in pending
+        if (!isInPending) continue;
+      }
+
+      // Clean up from pending/dirty before running
       this.pending.delete(fn);
+      if (this.pullMode) {
+        this.clearDirty(fn);
+      }
       this.unsubscribe(fn);
 
       this.loopCounter.set(fn, (this.loopCounter.get(fn) || 0) + 1);
