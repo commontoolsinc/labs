@@ -467,28 +467,61 @@ class MemoryProviderSession<
       }
       // First, check to see if any of our schema queries need to be notified
       // Any queries that lack access are skipped (with a console log)
-      const facts = await this.getSchemaSubscriptionMatches(
+      const schemaFacts = await this.getSchemaSubscriptionMatches(
         redactedData.transaction,
       );
 
-      const jobIds: InvocationURL<Reference<Subscribe>>[] = [];
-      for (const [id, channels] of this.channels) {
-        if (Subscription.match(redactedData.transaction, channels)) {
-          jobIds.push(id);
+      // Collect all unique facts across all schema subscriptions
+      const allFactsMap = new Map<string, Revision<Fact>>();
+      for (const [_jobId, facts] of schemaFacts) {
+        for (const fact of facts) {
+          allFactsMap.set(this.toKey(fact), fact);
+        }
+      }
+      // Filter facts once - filterKnownFacts has a side effect of updating lastRevision
+      const filteredFacts = this.filterKnownFacts([...allFactsMap.values()]);
+
+      // Build a set of filtered fact keys for quick lookup
+      const filteredFactKeys = new Set(filteredFacts.map((f) => this.toKey(f)));
+
+      // Send facts directly to each schema subscription
+      const space = item.of as Space;
+      for (const [jobId, facts] of schemaFacts) {
+        // Only include facts that passed the filter
+        const subscriptionFacts = facts.filter((f) =>
+          filteredFactKeys.has(this.toKey(f))
+        );
+        if (subscriptionFacts.length > 0) {
+          const selection = {
+            [space]: this.toSelection(subscriptionFacts),
+          } as Selection<Space>;
+          this.perform({
+            the: "task/effect",
+            of: jobId,
+            is: selection,
+          });
         }
       }
 
-      if (jobIds.length > 0) {
-        // The client has a subscription to the space's commit log, but our
-        // subscriptions may trigger inclusion of other objects. Add these here.
+      // Send commits with revisions to commit log subscriptions
+      // The client's startSynchronization() reads revisions to update its heap
+      const commitJobIds: InvocationURL<Reference<Subscribe>>[] = [];
+      for (const [id, channels] of this.channels) {
+        if (Subscription.match(redactedData.transaction, channels)) {
+          commitJobIds.push(id);
+        }
+      }
+
+      if (commitJobIds.length > 0) {
+        // The client has a subscription to the space's commit log
         const enhancedCommit: EnhancedCommit<Space> = {
           commit: {
             [item.of]: { [item.the]: { [item.cause]: { is: redactedData } } },
           } as Commit<Space>,
-          revisions: this.filterKnownFacts(facts),
+          revisions: filteredFacts,
         };
 
-        for (const id of jobIds) {
+        for (const id of commitJobIds) {
           // this is sent to a standard subscription (application/commit+json)
           this.perform({
             the: "task/effect",
@@ -629,22 +662,25 @@ class MemoryProviderSession<
    * For wildcard queries (of: "_"): Match changed docs against type pattern.
    * For specific document queries: Use schemaTracker to find affected docs.
    *
-   * Both paths then incrementally update by following links.
+   * Returns a map of jobId to facts for each schema subscription.
+   * Non-wildcard subscriptions share the same facts (from sharedSchemaTracker).
+   * Wildcard subscriptions get their own facts based on their pattern.
    */
   private async getSchemaSubscriptionMatches<Space extends MemorySpace>(
     transaction: Transaction<Space>,
-  ): Promise<Revision<Fact>[]> {
+  ): Promise<Map<JobId, Revision<Fact>[]>> {
+    const result = new Map<JobId, Revision<Fact>[]>();
     const space = transaction.sub;
 
     // Early exit if no schema subscriptions
     if (this.schemaChannels.size === 0) {
-      return [];
+      return result;
     }
 
     // Extract changed document keys from transaction
     const changedDocs = this.extractChangedDocKeys(transaction);
     if (changedDocs.size === 0) {
-      return [];
+      return result;
     }
 
     // Get access to the space session for evaluating documents
@@ -657,44 +693,48 @@ class MemoryProviderSession<
     }
     const spaceSession = mountResult.ok as unknown as SpaceSession<Space>;
 
-    // First, find affected docs using the shared schemaTracker (for non-wildcard)
+    // Find affected docs using the shared schemaTracker (for non-wildcard)
     const sharedAffectedDocs = this.findAffectedDocs(
       changedDocs,
       this.sharedSchemaTracker,
     );
 
-    // Also collect affected docs from wildcard queries
-    const wildcardAffectedDocs: Array<
-      { docKey: string; schemas: Set<SchemaPathSelector> }
-    > = [];
-    for (const [_id, subscription] of this.schemaChannels) {
+    // Process shared affected docs once for all non-wildcard subscriptions
+    let sharedFacts: Revision<Fact>[] = [];
+    if (sharedAffectedDocs.length > 0) {
+      const sharedResult = this.processIncrementalUpdate(
+        spaceSession,
+        sharedAffectedDocs,
+        space,
+      );
+      sharedFacts = [...sharedResult.newFacts.values()];
+    }
+
+    // Assign facts to each subscription
+    for (const [jobId, subscription] of this.schemaChannels) {
       if (subscription.isWildcardQuery) {
-        const docs = this.findAffectedDocsForWildcard(
+        // Wildcard queries get their own facts based on their pattern
+        const wildcardDocs = this.findAffectedDocsForWildcard(
           changedDocs,
           subscription.invocation,
         );
-        for (const doc of docs) {
-          wildcardAffectedDocs.push(doc);
+        if (wildcardDocs.length > 0) {
+          const wildcardResult = this.processIncrementalUpdate(
+            spaceSession,
+            wildcardDocs,
+            space,
+          );
+          result.set(jobId, [...wildcardResult.newFacts.values()]);
+        }
+      } else {
+        // Non-wildcard subscriptions share the same facts
+        if (sharedFacts.length > 0) {
+          result.set(jobId, sharedFacts);
         }
       }
     }
 
-    // Combine all affected docs (deduplication happens in processIncrementalUpdate)
-    const allAffectedDocs = [...sharedAffectedDocs, ...wildcardAffectedDocs];
-
-    if (allAffectedDocs.length === 0) {
-      return [];
-    }
-
-    // Process all affected docs incrementally using the shared tracker
-    const result = this.processIncrementalUpdate(
-      spaceSession,
-      allAffectedDocs,
-      space,
-    );
-
-    // Return all discovered facts - filterKnownFacts will handle deduplication
-    return [...result.newFacts.values()];
+    return result;
   }
 
   /**
