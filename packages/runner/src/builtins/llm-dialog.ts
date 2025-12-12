@@ -537,7 +537,7 @@ function extractRunArguments(input: unknown): Record<string, any> {
  * @param toolHandlers - Optional map to populate with handler references for invocation
  * @returns Flattened tools object with handler/pattern entries
  */
-function flattenTools(
+function _flattenTools(
   toolsCell: Cell<any>,
   _runtime?: IRuntime,
 ): Record<
