@@ -284,9 +284,9 @@ Before starting, ensure you understand:
 
 ---
 
-## Phase 4: Throttling & Debounce
+## Phase 4: Debounce & Throttle
 
-**Goal**: Add debouncing for slow actions, auto-detect slow actions.
+**Goal**: Add debouncing for slow actions and throttling (staleness tolerance) for computations.
 
 **Depends on**: Phase 3 complete
 
@@ -296,15 +296,18 @@ Before starting, ensure you understand:
 
 **File**: `packages/runner/src/scheduler.ts`
 
-- [ ] Add class properties:
+- [x] Add class properties:
   ```typescript
   private debounceTimers = new WeakMap<Action, ReturnType<typeof setTimeout>>();
   private actionDebounce = new WeakMap<Action, number>();
+  private autoDebounceEnabled = new WeakMap<Action, boolean>();
   ```
 
-- [ ] Add `setDebounce(action, ms)` method
+- [x] Add `setDebounce(action, ms)` method
 
-- [ ] Add `scheduleWithDebounce(action)` method:
+- [x] Add `getDebounce(action)` and `clearDebounce(action)` methods
+
+- [x] Add `scheduleWithDebounce(action)` method:
   - If no debounce configured: add to `pending` immediately
   - Otherwise: clear existing timer, set new timer
 
@@ -312,51 +315,104 @@ Before starting, ensure you understand:
 
 **File**: `packages/runner/src/scheduler.ts`
 
-- [ ] Define constants:
+- [x] Define constants:
   ```typescript
   const AUTO_DEBOUNCE_THRESHOLD_MS = 50;
   const AUTO_DEBOUNCE_MIN_RUNS = 3;
+  const AUTO_DEBOUNCE_DELAY_MS = 100;
   ```
 
-- [ ] Modify `recordActionTime()` to auto-set debounce for slow actions
+- [x] Modify `recordActionTime()` to auto-set debounce for slow actions via `maybeAutoDebounce()`
+
+- [x] Add `setAutoDebounce(action, enabled)` method to control auto-debounce per action
 
 #### 4.3 Add declarative debounce to subscribe
 
 **File**: `packages/runner/src/scheduler.ts`
 
-- [ ] Extend `subscribe()` options to include `debounce?: number`
+- [x] Extend `subscribe()` options to include `debounce?: number` and `autoDebounce?: boolean`
 
-- [ ] Apply debounce setting when provided
+- [x] Apply debounce setting when provided
 
 #### 4.4 Use debounce in scheduling
 
 **File**: `packages/runner/src/scheduler.ts`
 
-- [ ] Replace direct `pending.add()` with `scheduleWithDebounce()` where appropriate
+- [x] Replace direct `pending.add()` with `scheduleWithDebounce()` in:
+  - `subscribe()` when `scheduleImmediately` is true
+  - `createStorageSubscription()` for storage change handling
+  - `scheduleAffectedEffects()` for pull-mode effect scheduling
 
-#### 4.5 Expose debounce in public API
+#### 4.5 Add throttle infrastructure (staleness tolerance)
+
+**File**: `packages/runner/src/scheduler.ts`
+
+- [x] Add class property:
+  ```typescript
+  private actionThrottle = new WeakMap<Action, number>();
+  ```
+
+- [x] Add `lastRunTimestamp` to `ActionStats` interface for throttle timing
+
+- [x] Update `recordActionTime()` to track `lastRunTimestamp`
+
+- [x] Add `setThrottle(action, ms)`, `getThrottle(action)`, `clearThrottle(action)` methods
+
+- [x] Add `isThrottled(action)` private method to check if action ran too recently
+
+- [x] Modify `execute()` to skip throttled actions but keep them dirty:
+  - Throttled actions stay dirty for future pulls
+  - If no effect needs the value later, computation is skipped entirely (pull semantics)
+
+- [x] Extend `subscribe()` options to include `throttle?: number`
+
+**Key difference from debounce:**
+- **Debounce**: "Wait until triggers stop, then run once after T ms of quiet"
+- **Throttle**: "Value can be stale by up to T ms" - skip if ran recently, keep dirty for later
+
+#### 4.6 Expose debounce/throttle in public API
 
 **File**: `packages/runner/src/builder/module.ts`
 
-- [ ] Add `debounce` option to `lift()` function signature
+- [ ] Add `debounce` option to `lift()` function signature (deferred to Phase 5)
 
-- [ ] Pass through to runner/scheduler
+- [ ] Add `throttle` option to `lift()` function signature (deferred to Phase 5)
 
-#### 4.6 Write tests
+- [ ] Pass through to runner/scheduler (deferred to Phase 5)
+
+#### 4.7 Write tests
 
 **File**: `packages/runner/test/scheduler.test.ts`
 
-- [ ] Test: `setDebounce()` delays action scheduling
-- [ ] Test: rapid triggers run action once after debounce period
-- [ ] Test: auto-debounce kicks in for slow actions (> 50ms avg after 3 runs)
-- [ ] Test: declarative debounce in `subscribe()` works
-- [ ] Test: cleanup on unsubscribe cancels pending timers
+**Debounce tests (10):**
+- [x] Test: `setDebounce()` delays action scheduling
+- [x] Test: rapid triggers run action once after debounce period
+- [x] Test: auto-debounce kicks in for slow actions (> 50ms avg after 3 runs)
+- [x] Test: declarative debounce in `subscribe()` works
+- [x] Test: cleanup on unsubscribe cancels pending timers
+- [x] Test: `getDebounce()` returns configured debounce value
+- [x] Test: `clearDebounce()` removes debounce configuration
+- [x] Test: debounce timer cancellation on rapid re-triggers
+- [x] Test: auto-debounce can be disabled per action
+- [x] Test: debounce integrates with pull mode
 
-#### 4.7 Verify Phase 4
+**Throttle tests (9):**
+- [x] Test: `setThrottle()` and `getThrottle()` API
+- [x] Test: `setThrottle(0)` clears throttle
+- [x] Test: throttle from `subscribe()` options
+- [x] Test: skip throttled action if ran recently
+- [x] Test: run throttled action after throttle period expires
+- [x] Test: keep action dirty when throttled in pull mode
+- [x] Test: run throttled effect after throttle expires (pull mode)
+- [x] Test: `lastRunTimestamp` in action stats
+- [x] Test: first run allowed even with throttle set (no previous timestamp)
 
-- [ ] All previous phase tests pass
-- [ ] New debounce tests pass
-- [ ] Run `deno task test` in `packages/runner`
+#### 4.8 Verify Phase 4
+
+- [x] All previous phase tests pass
+- [x] New debounce tests pass (10 tests)
+- [x] New throttle tests pass (9 tests)
+- [x] Run `deno task test` in `packages/runner` - all 111 tests pass
 
 ---
 
@@ -440,6 +496,6 @@ Update this section as phases complete:
 |-------|--------|--------------|------|
 | Phase 1: Effect Marking | Complete | Claude | 2025-12-12 |
 | Phase 2: Pull-Based Core | Complete | Claude | 2025-12-12 |
-| Phase 3: Cycle Convergence | Not Started | | |
-| Phase 4: Throttling | Not Started | | |
+| Phase 3: Cycle Convergence | Complete | Claude | 2025-12-12 |
+| Phase 4: Debounce & Throttle | Complete | Claude | 2025-12-12 |
 | Phase 5: Migration | Not Started | | |

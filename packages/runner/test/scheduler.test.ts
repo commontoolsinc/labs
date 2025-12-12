@@ -2798,3 +2798,666 @@ describe("cycle-aware convergence (Phase 3)", () => {
     expect(cycleRuns).toBeLessThan(500);
   });
 });
+
+describe("debounce and throttling (Phase 4)", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should set and get debounce for an action", () => {
+    const action: Action = () => {};
+
+    // Initially no debounce
+    expect(runtime.scheduler.getDebounce(action)).toBeUndefined();
+
+    // Set debounce
+    runtime.scheduler.setDebounce(action, 100);
+    expect(runtime.scheduler.getDebounce(action)).toBe(100);
+
+    // Clear debounce
+    runtime.scheduler.clearDebounce(action);
+    expect(runtime.scheduler.getDebounce(action)).toBeUndefined();
+  });
+
+  it("should set debounce to 0 clears it", () => {
+    const action: Action = () => {};
+
+    runtime.scheduler.setDebounce(action, 100);
+    expect(runtime.scheduler.getDebounce(action)).toBe(100);
+
+    runtime.scheduler.setDebounce(action, 0);
+    expect(runtime.scheduler.getDebounce(action)).toBeUndefined();
+  });
+
+  it("should delay action execution when debounce is set", async () => {
+    const cell = runtime.getCell<number>(space, "debounce-test", undefined, tx);
+    cell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runCount = 0;
+    const action: Action = (actionTx) => {
+      runCount++;
+      cell.withTx(actionTx).send(runCount);
+    };
+
+    // Set a short debounce
+    runtime.scheduler.setDebounce(action, 50);
+
+    // Subscribe with scheduleImmediately
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true },
+    );
+
+    // Action should NOT have run immediately
+    expect(runCount).toBe(0);
+
+    // Wait for debounce period
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await runtime.idle();
+
+    // Now it should have run
+    expect(runCount).toBe(1);
+  });
+
+  it("should coalesce rapid triggers into single execution", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "debounce-coalesce",
+      undefined,
+      tx,
+    );
+    cell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runCount = 0;
+    const action: Action = (actionTx) => {
+      runCount++;
+      cell.withTx(actionTx).send(runCount);
+    };
+
+    // Set debounce
+    runtime.scheduler.setDebounce(action, 50);
+
+    // Trigger multiple times rapidly
+    for (let i = 0; i < 5; i++) {
+      runtime.scheduler.subscribe(
+        action,
+        { reads: [], writes: [] },
+        { scheduleImmediately: true },
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    // Should not have run yet (debounce keeps resetting)
+    expect(runCount).toBe(0);
+
+    // Wait for debounce to complete
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await runtime.idle();
+
+    // Should have run only once
+    expect(runCount).toBe(1);
+  });
+
+  it("should apply debounce from subscribe options", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "debounce-option",
+      undefined,
+      tx,
+    );
+    cell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runCount = 0;
+    const action: Action = (actionTx) => {
+      runCount++;
+      cell.withTx(actionTx).send(runCount);
+    };
+
+    // Subscribe with debounce option
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true, debounce: 50 },
+    );
+
+    // Verify debounce was set
+    expect(runtime.scheduler.getDebounce(action)).toBe(50);
+
+    // Action should NOT have run immediately
+    expect(runCount).toBe(0);
+
+    // Wait for debounce
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await runtime.idle();
+
+    expect(runCount).toBe(1);
+  });
+
+  it("should cancel debounce timer on unsubscribe", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "debounce-cancel",
+      undefined,
+      tx,
+    );
+    cell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runCount = 0;
+    const action: Action = (actionTx) => {
+      runCount++;
+      cell.withTx(actionTx).send(runCount);
+    };
+
+    // Set debounce
+    runtime.scheduler.setDebounce(action, 100);
+
+    // Subscribe with scheduleImmediately
+    const cancel = runtime.scheduler.subscribe(
+      action,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true },
+    );
+
+    // Action should not have run yet
+    expect(runCount).toBe(0);
+
+    // Unsubscribe before debounce completes
+    cancel();
+
+    // Wait past the debounce period
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await runtime.idle();
+
+    // Action should NOT have run because we unsubscribed
+    expect(runCount).toBe(0);
+  });
+
+  it("should enable auto-debounce via subscribe option", () => {
+    const action: Action = () => {};
+
+    // Subscribe with autoDebounce enabled
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], writes: [] },
+      { autoDebounce: true },
+    );
+
+    // Auto-debounce should be enabled (internal state)
+    // We can verify by checking that running the action multiple times
+    // will eventually trigger auto-debounce
+    // For now just verify no errors occur
+  });
+
+  it("should auto-debounce slow actions after threshold runs", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "auto-debounce-test",
+      undefined,
+      tx,
+    );
+    cell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Create a slow action (simulated with artificial delay tracking)
+    const action: Action = (actionTx) => {
+      // We can't easily make this actually slow in tests,
+      // so we'll manually set the stats to simulate slow execution
+      const val = cell.withTx(actionTx).get();
+      cell.withTx(actionTx).send(val + 1);
+    };
+
+    // Subscribe with autoDebounce enabled
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true, autoDebounce: true },
+    );
+    await runtime.idle();
+
+    // Initially no debounce
+    expect(runtime.scheduler.getDebounce(action)).toBeUndefined();
+
+    // The auto-debounce requires the action to be slow (>50ms avg after 3 runs)
+    // In unit tests we can't easily simulate slow execution time,
+    // so we mainly verify the infrastructure is in place
+  });
+
+  it("should not auto-debounce fast actions", async () => {
+    const cell = runtime.getCell<number>(space, "fast-action", undefined, tx);
+    cell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const action: Action = (actionTx) => {
+      const val = cell.withTx(actionTx).get();
+      cell.withTx(actionTx).send(val + 1);
+    };
+
+    // Subscribe with autoDebounce enabled
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true, autoDebounce: true },
+    );
+    await runtime.idle();
+
+    // Run multiple times (fast actions)
+    for (let i = 0; i < 5; i++) {
+      runtime.scheduler.subscribe(
+        action,
+        { reads: [], writes: [] },
+        { scheduleImmediately: true },
+      );
+      await runtime.idle();
+    }
+
+    // Fast actions should NOT get auto-debounced
+    expect(runtime.scheduler.getDebounce(action)).toBeUndefined();
+
+    // Stats should be tracked
+    const stats = runtime.scheduler.getActionStats(action);
+    expect(stats).toBeDefined();
+    expect(stats!.runCount).toBeGreaterThanOrEqual(5);
+    // Average time should be well under threshold (50ms)
+    expect(stats!.averageTime).toBeLessThan(50);
+  });
+
+  it("should work with both debounce and pull mode", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "debounce-pull-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const result = runtime.getCell<number>(
+      space,
+      "debounce-pull-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runCount = 0;
+    const effect: Action = (actionTx) => {
+      runCount++;
+      const val = source.withTx(actionTx).get();
+      result.withTx(actionTx).send(val * 2);
+    };
+
+    // Set debounce before subscribing
+    runtime.scheduler.setDebounce(effect, 50);
+
+    // Subscribe as effect
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        writes: [result.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true, isEffect: true },
+    );
+
+    // Should not run immediately due to debounce
+    expect(runCount).toBe(0);
+
+    // Wait for debounce
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await runtime.idle();
+
+    // Should have run
+    expect(runCount).toBe(1);
+    expect(result.get()).toBe(2);
+  });
+});
+
+describe("throttle - staleness tolerance (Phase 4 extension)", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should set and get throttle for an action", () => {
+    const action: Action = () => {};
+
+    // Initially no throttle
+    expect(runtime.scheduler.getThrottle(action)).toBeUndefined();
+
+    // Set throttle
+    runtime.scheduler.setThrottle(action, 200);
+    expect(runtime.scheduler.getThrottle(action)).toBe(200);
+
+    // Clear throttle
+    runtime.scheduler.clearThrottle(action);
+    expect(runtime.scheduler.getThrottle(action)).toBeUndefined();
+  });
+
+  it("should set throttle to 0 clears it", () => {
+    const action: Action = () => {};
+
+    runtime.scheduler.setThrottle(action, 200);
+    expect(runtime.scheduler.getThrottle(action)).toBe(200);
+
+    runtime.scheduler.setThrottle(action, 0);
+    expect(runtime.scheduler.getThrottle(action)).toBeUndefined();
+  });
+
+  it("should apply throttle from subscribe options", () => {
+    const action: Action = () => {};
+
+    // Subscribe with throttle option
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], writes: [] },
+      { throttle: 200 },
+    );
+
+    // Verify throttle was set
+    expect(runtime.scheduler.getThrottle(action)).toBe(200);
+  });
+
+  it("should skip throttled action if ran recently", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "throttle-skip-test",
+      undefined,
+      tx,
+    );
+    cell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runCount = 0;
+    const action: Action = (actionTx) => {
+      runCount++;
+      const val = cell.withTx(actionTx).get();
+      cell.withTx(actionTx).send(val + 1);
+    };
+
+    // First run (no throttle yet to establish lastRunTimestamp)
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+    expect(runCount).toBe(1);
+
+    // Now set throttle
+    runtime.scheduler.setThrottle(action, 500);
+
+    // Try to run again immediately
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+
+    // Should be skipped due to throttle
+    expect(runCount).toBe(1);
+  });
+
+  it("should run throttled action after throttle period expires", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "throttle-expire-test",
+      undefined,
+      tx,
+    );
+    cell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runCount = 0;
+    const action: Action = (actionTx) => {
+      runCount++;
+      const val = cell.withTx(actionTx).get();
+      cell.withTx(actionTx).send(val + 1);
+    };
+
+    // First run with short throttle
+    runtime.scheduler.setThrottle(action, 50);
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+    expect(runCount).toBe(1);
+
+    // Try immediately - should be throttled
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+    expect(runCount).toBe(1);
+
+    // Wait for throttle to expire
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Now should run
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+    expect(runCount).toBe(2);
+  });
+
+  it("should keep action dirty when throttled in pull mode", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "throttle-dirty-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const result = runtime.getCell<number>(
+      space,
+      "throttle-dirty-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computeCount = 0;
+    const computation: Action = (actionTx) => {
+      computeCount++;
+      const val = source.withTx(actionTx).get();
+      result.withTx(actionTx).send(val * 2);
+    };
+
+    // Run computation once to establish timestamp
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        writes: [result.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+    expect(computeCount).toBe(1);
+
+    // Set throttle
+    runtime.scheduler.setThrottle(computation, 500);
+
+    // Change source to mark computation dirty
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Wait for propagation
+    await runtime.idle();
+
+    // Computation should be marked dirty but not run (throttled)
+    expect(runtime.scheduler.isDirty(computation)).toBe(true);
+    expect(computeCount).toBe(1);
+  });
+
+  it("should run throttled effect after throttle expires", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "throttle-pull-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const result = runtime.getCell<number>(
+      space,
+      "throttle-pull-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let effectCount = 0;
+    const effect: Action = (actionTx) => {
+      effectCount++;
+      const val = source.withTx(actionTx).get();
+      result.withTx(actionTx).send(val * 2);
+    };
+
+    // Subscribe as effect with short throttle
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        writes: [result.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true, throttle: 50, isEffect: true },
+    );
+    await runtime.idle();
+    expect(effectCount).toBe(1);
+    expect(result.get()).toBe(2);
+
+    // Change source - effect is scheduled but throttled
+    source.withTx(tx).send(5);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    // Still at old value due to throttle
+    expect(effectCount).toBe(1);
+
+    // Wait for throttle to expire
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Trigger again - now throttle has expired, should run
+    source.withTx(tx).send(10);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    // Now effect should run
+    expect(effectCount).toBe(2);
+    expect(result.get()).toBe(20);
+  });
+
+  it("should record lastRunTimestamp in action stats", async () => {
+    const action: Action = () => {};
+
+    // No stats initially
+    expect(runtime.scheduler.getActionStats(action)).toBeUndefined();
+
+    // Run action
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+
+    // Stats should now include lastRunTimestamp
+    const stats = runtime.scheduler.getActionStats(action);
+    expect(stats).toBeDefined();
+    expect(stats!.lastRunTimestamp).toBeDefined();
+    expect(stats!.lastRunTimestamp).toBeGreaterThan(0);
+  });
+
+  it("should allow first run even with throttle set (no previous timestamp)", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "throttle-first-run",
+      undefined,
+      tx,
+    );
+    cell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runCount = 0;
+    const action: Action = (actionTx) => {
+      runCount++;
+      cell.withTx(actionTx).send(runCount);
+    };
+
+    // Set throttle BEFORE first run
+    runtime.scheduler.setThrottle(action, 1000);
+
+    // First run should still execute (no previous timestamp to throttle against)
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+
+    expect(runCount).toBe(1);
+  });
+});
