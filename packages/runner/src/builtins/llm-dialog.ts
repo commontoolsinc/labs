@@ -17,6 +17,7 @@ import type {
 import {
   LLMMessageSchema,
   LLMParamsSchema,
+  LLMReducedToolSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
 import { getLogger } from "@commontools/utils/logger";
@@ -318,9 +319,14 @@ function collectToolEntries(
   const charms: CharmToolEntry[] = [];
 
   for (const [name, tool] of Object.entries(tools)) {
-    if (tool?.charm?.get?.()) {
+    if (tool.charm) {
       const charm: Cell<any> = tool.charm;
-      const charmValue = charm.get();
+      const charmValue = charm.asSchema(
+        {
+          type: "object",
+          properties: { [NAME]: { type: "string" } },
+        } as const satisfies JSONSchema,
+      ).get();
       const charmName = String(charmValue?.[NAME] ?? name);
 
       // Extract handle from link
@@ -537,9 +543,8 @@ function extractRunArguments(input: unknown): Record<string, any> {
  * @param toolHandlers - Optional map to populate with handler references for invocation
  * @returns Flattened tools object with handler/pattern entries
  */
-function _flattenTools(
+function flattenTools(
   toolsCell: Cell<any>,
-  _runtime?: Runtime,
 ): Record<
   string,
   {
@@ -555,7 +560,7 @@ function _flattenTools(
   }
 > {
   const flattened: Record<string, any> = {};
-  const { legacy, charms } = collectToolEntries(toolsCell);
+  const { legacy } = collectToolEntries(toolsCell);
 
   for (const entry of legacy) {
     const passThrough: Record<string, unknown> = { ...entry.tool };
@@ -567,27 +572,17 @@ function _flattenTools(
     flattened[entry.name] = passThrough;
   }
 
-  // Build pinned cells context for tool descriptions
-  const handleList = charms.length > 0
-    ? charms.map((e) => `${e.charmName} (${e.handle})`).join(", ")
-    : "";
-  const pinnedCellsContext = handleList
-    ? `Currently pinned: ${handleList}.`
-    : "";
-
   flattened[READ_TOOL_NAME] = {
     description:
       'Read data from any cell. Input: { "@link": "/of:bafyabc123/path" }. ' +
       "Returns the cell's data with nested cells as link objects. " +
-      "Compose with invoke(): invoke() returns a link, then read(link) gets the data. " +
-      pinnedCellsContext,
+      "Compose with invoke(): invoke() returns a link, then read(link) gets the data. ",
     inputSchema: READ_INPUT_SCHEMA,
   };
   flattened[INVOKE_TOOL_NAME] = {
     description:
       'Invoke a handler or pattern. If you do not know the schema of the the handler, use schema() first. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
-      'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ' +
-      pinnedCellsContext,
+      'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ',
     inputSchema: INVOKE_INPUT_SCHEMA,
   };
   flattened[PIN_TOOL_NAME] = {
@@ -614,8 +609,7 @@ function _flattenTools(
     description:
       "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
       'Input: { "@link": "/of:bafyabc123" }. ' +
-      "Returns schema showing what data can be read and what handlers can be invoked. " +
-      pinnedCellsContext,
+      "Returns schema showing what data can be read and what handlers can be invoked. ",
     inputSchema: SCHEMA_INPUT_SCHEMA,
   };
 
@@ -1794,23 +1788,19 @@ export function llmDialog(
     // cell as it's the only way to get to requestId, here we are passing it
     // around on the side.
 
-    // Removing flatted tool support for now, just used in UI and too expensive
-    // to recalculate on every context change
-    /*
     // Update flattened tools whenever tools change
-    const toolsCell = inputs.key("tools");
-    // Ensure reactivity: register a read of tools with this tx
-    toolsCell.withTx(tx).get();
-    const flattened = flattenTools(toolsCell, runtime);
+    // `flattenedTools` is for now just used in the UI, and so we only need
+    // inputSchema and description. This makes retrieving the tools much faster.
+    const toolsCell = inputs.key("tools").asSchema(
+      {
+        type: "object",
+        additionalProperties: LLMReducedToolSchema,
+      } as const satisfies JSONSchema,
+    ).withTx(tx);
+    const flattened = flattenTools(toolsCell);
 
-    // Only write if changed to avoid concurrent write conflicts
-    const currentFlattened = result.withTx(tx).key("flattenedTools").get();
-    const hasChanged = toolsHaveChanged(flattened, currentFlattened);
-
-    if (hasChanged) {
-      result.withTx(tx).key("flattenedTools").set(flattened as any);
-    }
-    */
+    // Runtime already makes this a no-op if there are no changes
+    result.withTx(tx).key("flattenedTools").set(flattened);
 
     if (
       (!result.withTx(tx).key("pending").get() ||
