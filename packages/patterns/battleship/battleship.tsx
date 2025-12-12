@@ -357,14 +357,6 @@ export default pattern<Input, Output>(({}) => {
           Debug Mode - All ships visible
         </p>
 
-        {/* Debug info */}
-        <div style={{ textAlign: "center", color: "#f00", marginBottom: "10px" }}>
-          <div>p1CellData length: {p1CellData.length}</div>
-          <div>p2CellData length: {p2CellData.length}</div>
-          <div>currentTurn: {currentTurn}</div>
-          <div>First cell: row={p1CellData[0]?.row}, col={p1CellData[0]?.col}, bg={p1CellData[0]?.bgColor}</div>
-        </div>
-
         {/* Status bar */}
         <div
           style={{
