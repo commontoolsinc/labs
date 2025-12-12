@@ -34,10 +34,12 @@
 - Consistent with existing entity references
 
 ### 3. Authentication
-**Decision:** Deferred - using implicit auth via room ID obscurity
-- Room IDs are Cell entity IDs (not guessable)
-- Full auth requires UCAN support for WebSockets (complex)
-- TODO documented in `collab.index.ts` for production implementation
+**Decision:** Cryptographic auth using same identity system as memory storage
+- Components sign auth tokens using `cell.runtime.storageManager.as` (Signer)
+- Server verifies using `VerifierIdentity.fromDid()`
+- Token payload: `{ roomId, timestamp, userDid }` (signed, base64-encoded)
+- Passed as URL query params: `?payload=...&sig=...&did=...`
+- Currently allows anonymous connections; can enforce auth when ready
 
 ### 4. Initial content sync
 **Decision:** Server initializes Y.Doc from Cell on room creation
@@ -74,24 +76,29 @@
 - [x] Cursor presence / awareness (basic implementation working)
 - [x] Initial content sync - clients initialize Y.Doc from Cell on first sync (no server call needed)
 - [x] Server simplified to generic Yjs relay (no component-specific knowledge)
-- [x] Authentication - Documented as TODO in collab.index.ts; using implicit auth via room ID obscurity
+- [x] **Authentication - Implemented cryptographic auth extending existing identity system**
+  - Server: `collab.auth.ts` verifies signed tokens using VerifierIdentity
+  - Client: `collab-auth.ts` signs tokens using Cell's Signer
+  - Tokens passed as WebSocket URL query params
 - [x] Reconnection handling - y-websocket handles automatically with exponential backoff
 - [x] Bundle optimization - documented; tree shaking handles unused code paths
 
 ## Key Files Modified
 
 **In labs:**
-- `/packages/ui/src/v2/components/ct-code-editor/ct-code-editor.ts` - Added collaborative editing
+- `/packages/ui/src/v2/components/ct-code-editor/ct-code-editor.ts` - Added collaborative editing with auth
 - `/packages/ui/src/v2/components/ct-richtext-editor/` - New component (created)
-  - `ct-richtext-editor.ts` - TipTap-based rich text editor with Yjs
+  - `ct-richtext-editor.ts` - TipTap-based rich text editor with Yjs and auth
   - `styles.ts` - Component styles including cursor presence
   - `index.ts` - Export and custom element registration
+- `/packages/ui/src/v2/core/collab-auth.ts` - Client-side auth token signing
 - `/packages/ui/src/v2/index.ts` - Added ct-richtext-editor export
 - `/packages/ui/deno.json` - Added yjs, y-codemirror.next, y-websocket, lib0, TipTap deps
 - `/packages/html/src/jsx.d.ts` - Added collaborative props for both editors
-- `/packages/toolshed/routes/collab/` - New Yjs WebSocket server
-  - `yjs-server.ts` - Core Yjs sync logic
+- `/packages/toolshed/routes/collab/` - Yjs WebSocket server with auth
+  - `yjs-server.ts` - Core Yjs sync logic with userIdentity tracking
+  - `collab.auth.ts` - Server-side auth token verification
   - `collab.routes.ts` - OpenAPI route definitions
-  - `collab.handlers.ts` - WebSocket handlers
+  - `collab.handlers.ts` - WebSocket handlers with auth verification
   - `collab.index.ts` - Router registration
 - `/packages/toolshed/app.ts` - Added collab route registration
