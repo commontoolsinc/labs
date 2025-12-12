@@ -467,10 +467,9 @@ class MemoryProviderSession<
       }
       // First, check to see if any of our schema queries need to be notified
       // Any queries that lack access are skipped (with a console log)
-      const [_lastId, _maxSince, facts] = await this
-        .getSchemaSubscriptionMatches(
-          redactedData.transaction,
-        );
+      const facts = await this.getSchemaSubscriptionMatches(
+        redactedData.transaction,
+      );
 
       const jobIds: InvocationURL<Reference<Subscribe>>[] = [];
       for (const [id, channels] of this.channels) {
@@ -562,8 +561,7 @@ class MemoryProviderSession<
       isWildcardQuery,
     );
     this.schemaChannels.set(of, subscription);
-    // Note: lastRevision is updated by filterKnownFacts when excludeSent is used,
-    // and by getSchemaSubscriptionMatches for subsequent updates
+    // Note: lastRevision is updated by filterKnownFacts when facts are sent
   }
 
   /**
@@ -635,21 +633,18 @@ class MemoryProviderSession<
    */
   private async getSchemaSubscriptionMatches<Space extends MemorySpace>(
     transaction: Transaction<Space>,
-  ): Promise<[JobId | undefined, number, Revision<Fact>[]]> {
-    const schemaMatches = new Map<string, Revision<Fact>>();
+  ): Promise<Revision<Fact>[]> {
     const space = transaction.sub;
-    let maxSince = -1;
-    let lastId: JobId | undefined;
 
     // Early exit if no schema subscriptions
     if (this.schemaChannels.size === 0) {
-      return [undefined, -1, []];
+      return [];
     }
 
     // Extract changed document keys from transaction
     const changedDocs = this.extractChangedDocKeys(transaction);
     if (changedDocs.size === 0) {
-      return [undefined, -1, []];
+      return [];
     }
 
     // Get access to the space session for evaluating documents
@@ -672,7 +667,7 @@ class MemoryProviderSession<
     const wildcardAffectedDocs: Array<
       { docKey: string; schemas: Set<SchemaPathSelector> }
     > = [];
-    for (const [id, subscription] of this.schemaChannels) {
+    for (const [_id, subscription] of this.schemaChannels) {
       if (subscription.isWildcardQuery) {
         const docs = this.findAffectedDocsForWildcard(
           changedDocs,
@@ -681,12 +676,6 @@ class MemoryProviderSession<
         for (const doc of docs) {
           wildcardAffectedDocs.push(doc);
         }
-        if (docs.length > 0) {
-          lastId = id;
-        }
-      } else if (sharedAffectedDocs.length > 0) {
-        // Non-wildcard subscription cares about shared tracker changes
-        lastId = id;
       }
     }
 
@@ -694,7 +683,7 @@ class MemoryProviderSession<
     const allAffectedDocs = [...sharedAffectedDocs, ...wildcardAffectedDocs];
 
     if (allAffectedDocs.length === 0) {
-      return [undefined, -1, []];
+      return [];
     }
 
     // Process all affected docs incrementally using the shared tracker
@@ -704,20 +693,8 @@ class MemoryProviderSession<
       space,
     );
 
-    // Collect facts that are newer than what we've sent on this session
-    // Note: we don't update lastRevision here - that happens in filterKnownFacts
-    // when facts are actually sent to the client
-    for (const [_address, factVersion] of result.newFacts) {
-      const factKey = this.toKey(factVersion);
-      const previousSince = this.lastRevision.get(factKey);
-
-      if (previousSince === undefined || previousSince < factVersion.since) {
-        schemaMatches.set(factKey, factVersion);
-        maxSince = Math.max(maxSince, factVersion.since);
-      }
-    }
-
-    return [lastId, maxSince, [...schemaMatches.values()]];
+    // Return all discovered facts - filterKnownFacts will handle deduplication
+    return [...result.newFacts.values()];
   }
 
   /**
