@@ -356,7 +356,7 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
                         {player1Name}
                       </div>
                       <div style={{ fontSize: "0.875rem", color: "#86868b" }}>
-                        Ready to play
+                        Now playing
                       </div>
                     </div>
                   )
@@ -436,7 +436,7 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
                         {player2Name}
                       </div>
                       <div style={{ fontSize: "0.875rem", color: "#86868b" }}>
-                        Ready to play
+                        Now playing
                       </div>
                     </div>
                   )
