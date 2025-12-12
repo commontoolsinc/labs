@@ -1794,7 +1794,7 @@ export function llmDialog(
     // around on the side.
 
     // Removing flatted tool support for now, just used in UI and too expensive
-    // to recalucalte on every context change
+    // to recalculate on every context change
     /*
     // Update flattened tools whenever tools change
     const toolsCell = inputs.key("tools");
