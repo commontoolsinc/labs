@@ -235,52 +235,49 @@ function handleMessage(
 }
 
 /**
- * Initialize a room with content (for server-side initialization from Cell)
+ * Initialize a Y.Text field in a room with content.
+ * This is a generic operation - clients specify the field name.
+ *
+ * NOTE: Most clients should handle initialization on sync instead of calling this.
+ * This endpoint exists for cases where content must be pre-populated before
+ * any client connects.
  *
  * @param roomId - The room identifier
- * @param content - The initial content (plain text or HTML)
- * @param type - Content type: "codemirror" for code editor, "prosemirror" for rich text
+ * @param field - The Y.Text field name to initialize
+ * @param content - The initial text content
+ * @returns true if content was inserted, false if field already had content
  */
-export function initializeRoomContent(
+export function initializeTextField(
   roomId: string,
+  field: string,
   content: string,
-  type: "codemirror" | "prosemirror" = "codemirror",
-): void {
+): boolean {
   const room = getOrCreateRoom(roomId);
+  const ytext = room.doc.getText(field);
 
-  if (type === "codemirror") {
-    // For ct-code-editor - plain text in Y.Text
-    const ytext = room.doc.getText("codemirror");
-    if (ytext.length === 0 && content) {
-      ytext.insert(0, content);
-      console.log(`[collab] Initialized room ${roomId} with codemirror content (${content.length} chars)`);
-    }
-  } else if (type === "prosemirror") {
-    // For ct-richtext-editor - TipTap/ProseMirror uses Y.XmlFragment
-    // TipTap's Collaboration extension creates the fragment automatically
-    // We just need to ensure the room exists; TipTap will handle initialization
-    // via the first client's content if the fragment is empty
-    console.log(`[collab] Room ${roomId} ready for prosemirror content`);
+  if (ytext.length === 0 && content) {
+    ytext.insert(0, content);
+    console.log(`[collab] Initialized room ${roomId} field "${field}" (${content.length} chars)`);
+    return true;
   }
+
+  return false;
 }
 
 /**
- * Get the current content from a room
+ * Get the current content of a Y.Text field from a room
+ *
+ * @param roomId - The room identifier
+ * @param field - The Y.Text field name
+ * @returns The text content, or null if room doesn't exist
  */
-export function getRoomContent(
+export function getTextField(
   roomId: string,
-  type: "codemirror" | "prosemirror" = "codemirror",
+  field: string,
 ): string | null {
   const room = rooms.get(roomId);
   if (!room) return null;
-
-  if (type === "codemirror") {
-    return room.doc.getText("codemirror").toString();
-  } else {
-    // ProseMirror/TipTap content is in XmlFragment - would need serialization
-    // For now, return null as the client manages this
-    return null;
-  }
+  return room.doc.getText(field).toString();
 }
 
 /**

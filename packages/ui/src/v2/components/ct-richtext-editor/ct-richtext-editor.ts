@@ -155,38 +155,6 @@ export class CTRichtextEditor extends BaseElement {
     return `room-${Math.random().toString(36).slice(2)}`;
   }
 
-  /**
-   * Initialize room on server with content before connecting WebSocket.
-   * This ensures the Y.Doc has initial content and prevents race conditions.
-   */
-  private async _initializeRoomOnServer(
-    roomId: string,
-    content: string,
-    type: "codemirror" | "prosemirror",
-  ): Promise<void> {
-    try {
-      const protocol = globalThis.location?.protocol || "http:";
-      const host = globalThis.location?.host || "localhost:8000";
-      const url = `${protocol}//${host}/api/collab/${encodeURIComponent(roomId)}/init`;
-
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ content, type }),
-      });
-
-      if (!response.ok) {
-        console.warn(`[ct-richtext-editor] Failed to initialize room: ${response.status}`);
-      } else {
-        console.log(`[ct-richtext-editor] Room ${roomId} initialized with ${content.length} chars`);
-      }
-    } catch (error) {
-      // Non-fatal - the WebSocket will still connect and sync
-      console.warn(`[ct-richtext-editor] Error initializing room:`, error);
-    }
-  }
 
   private getValue(): string {
     return this._cellController.getValue();
@@ -323,12 +291,6 @@ export class CTRichtextEditor extends BaseElement {
     if (this.collaborative) {
       const roomId = this._deriveRoomId();
       console.log(`[ct-richtext-editor] Setting up collaboration for room: ${roomId}`);
-
-      // Initialize room on server with current Cell value (prevents race conditions)
-      const initialValue = this.getValue();
-      if (initialValue) {
-        this._initializeRoomOnServer(roomId, initialValue, "prosemirror");
-      }
 
       // Create Y.Doc
       this._ydoc = new Y.Doc();

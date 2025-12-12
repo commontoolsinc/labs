@@ -274,38 +274,6 @@ export class CTCodeEditor extends BaseElement {
     return `room-${Math.random().toString(36).slice(2)}`;
   }
 
-  /**
-   * Initialize room on server with content before connecting WebSocket.
-   * This ensures the Y.Doc has initial content and prevents race conditions.
-   */
-  private async _initializeRoomOnServer(
-    roomId: string,
-    content: string,
-    type: "codemirror" | "prosemirror",
-  ): Promise<void> {
-    try {
-      const protocol = globalThis.location?.protocol || "http:";
-      const host = globalThis.location?.host || "localhost:8000";
-      const url = `${protocol}//${host}/api/collab/${encodeURIComponent(roomId)}/init`;
-
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ content, type }),
-      });
-
-      if (!response.ok) {
-        console.warn(`[ct-code-editor] Failed to initialize room: ${response.status}`);
-      } else {
-        console.log(`[ct-code-editor] Room ${roomId} initialized with ${content.length} chars`);
-      }
-    } catch (error) {
-      // Non-fatal - the WebSocket will still connect and sync
-      console.warn(`[ct-code-editor] Error initializing room:`, error);
-    }
-  }
 
   /**
    * Create a backlink completion source for [[backlinks]]
@@ -916,12 +884,6 @@ export class CTCodeEditor extends BaseElement {
       const roomId = this._deriveRoomId();
       console.log(`[ct-code-editor] Setting up collaboration for room: ${roomId}`);
 
-      // Initialize room on server with current Cell value (prevents race conditions)
-      const initialValue = this.getValue();
-      if (initialValue) {
-        this._initializeRoomOnServer(roomId, initialValue, "codemirror");
-      }
-
       // Create Y.Doc
       this._ydoc = new Y.Doc();
       ytext = this._ydoc.getText("codemirror");
@@ -939,6 +901,18 @@ export class CTCodeEditor extends BaseElement {
       // Log connection status
       this._provider.on("status", (event: { status: string }) => {
         console.log(`[ct-code-editor] Collab status: ${event.status}`);
+      });
+
+      // Initialize content from Cell value after sync completes
+      // This ensures the first client to connect seeds the Y.Doc from the Cell
+      this._provider.on("sync", (synced: boolean) => {
+        if (synced && ytext && ytext.length === 0) {
+          const initialValue = this.getValue();
+          if (initialValue) {
+            ytext.insert(0, initialValue);
+            console.log(`[ct-code-editor] Initialized Y.Text from Cell (${initialValue.length} chars)`);
+          }
+        }
       });
     }
 

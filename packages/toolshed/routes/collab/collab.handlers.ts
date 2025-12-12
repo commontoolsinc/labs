@@ -51,7 +51,7 @@ export const stats: AppRouteHandler<typeof Routes.stats> = (c) => {
 };
 
 /**
- * Initialize a room with content
+ * Initialize a Y.Text field in a room with content
  */
 export const initialize: AppRouteHandler<typeof Routes.initialize> = async (
   c,
@@ -63,12 +63,13 @@ export const initialize: AppRouteHandler<typeof Routes.initialize> = async (
 
       span.setAttribute("collab.roomId", roomId);
       span.setAttribute("collab.operation", "initialize");
-      span.setAttribute("collab.contentType", body.type);
+      span.setAttribute("collab.field", body.field);
 
-      YjsServer.initializeRoomContent(roomId, body.content, body.type);
+      const initialized = YjsServer.initializeTextField(roomId, body.field, body.content);
 
       span.setAttribute("collab.status", "success");
-      return c.json({ success: true, roomId }, HttpStatusCodes.OK);
+      span.setAttribute("collab.initialized", initialized);
+      return c.json({ success: true, roomId, initialized }, HttpStatusCodes.OK);
     } catch (error) {
       span.setAttribute("collab.status", "exception");
       span.setAttribute(

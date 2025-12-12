@@ -62,7 +62,11 @@ export const stats = createRoute({
 });
 
 /**
- * Initialize a room with content (optional - for server-side initialization)
+ * Initialize a Y.Text field in a room with content.
+ *
+ * NOTE: Most clients should handle initialization on sync instead.
+ * This endpoint exists for cases where content must be pre-populated
+ * before any client connects.
  */
 export const initialize = createRoute({
   method: "post",
@@ -74,11 +78,10 @@ export const initialize = createRoute({
     }),
     body: jsonContent(
       z.object({
-        content: z.string().describe("Initial content"),
-        type: z.enum(["codemirror", "prosemirror"]).default("codemirror")
-          .describe("Content type: codemirror for code editor, prosemirror for rich text"),
+        field: z.string().min(1).describe("Y.Text field name to initialize"),
+        content: z.string().describe("Initial text content"),
       }),
-      "Initial content for the room",
+      "Field and content to initialize",
     ),
   },
   responses: {
@@ -86,8 +89,9 @@ export const initialize = createRoute({
       z.object({
         success: z.boolean(),
         roomId: z.string(),
+        initialized: z.boolean().describe("True if content was inserted, false if field already had content"),
       }),
-      "Room initialized successfully",
+      "Room field initialization result",
     ),
     [HttpStatusCodes.BAD_REQUEST]: {
       description: "Invalid request",
