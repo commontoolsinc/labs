@@ -5,10 +5,10 @@
 ## Prerequisites
 
 Before starting, ensure you understand:
-- [ ] Read `docs/specs/pull-based-scheduler/scheduler-graph-investigation.md` for context
-- [ ] Read `packages/runner/src/scheduler.ts` (current implementation)
-- [ ] Read `packages/runner/src/cell.ts` (`sink()` and `subscribeToReferencedDocs()`)
-- [ ] Understand the difference between effects (sinks) and computations (lifts/derives)
+- Read `docs/specs/pull-based-scheduler/scheduler-graph-investigation.md` for context
+- Read `packages/runner/src/scheduler.ts` (current implementation)
+- Read `packages/runner/src/cell.ts` (`sink()` and `subscribeToReferencedDocs()`)
+- Understand the difference between effects (sinks) and computations (lifts/derives)
 
 ---
 
@@ -24,13 +24,13 @@ Before starting, ensure you understand:
 
 **File**: `packages/runner/src/scheduler.ts`
 
-- [ ] Add class properties:
+- [x] Add class properties:
   ```typescript
   private effects = new Set<Action>();
   private computations = new Set<Action>();
   ```
 
-- [ ] Modify `subscribe()` signature to accept `isEffect` option:
+- [x] Modify `subscribe()` signature to accept `isEffect` option:
   ```typescript
   subscribe(
     action: Action,
@@ -42,15 +42,15 @@ Before starting, ensure you understand:
   ): Cancel
   ```
 
-- [ ] In `subscribe()`, track action type based on `isEffect` flag
+- [x] In `subscribe()`, track action type based on `isEffect` flag
 
-- [ ] Update `unsubscribe()` to clean up from both sets
+- [x] Update `unsubscribe()` to clean up from both sets
 
 #### 1.2 Mark sink callbacks as effects
 
 **File**: `packages/runner/src/cell.ts`
 
-- [ ] In `subscribeToReferencedDocs()` (~line 1308), pass `isEffect: true`:
+- [x] In `subscribeToReferencedDocs()` (~line 1308), pass `isEffect: true`:
   ```typescript
   const cancel = runtime.scheduler.subscribe(action, log, { isEffect: true });
   ```
@@ -59,40 +59,40 @@ Before starting, ensure you understand:
 
 **File**: `packages/runner/src/scheduler.ts`
 
-- [ ] Add `getStats()` method:
+- [x] Add `getStats()` method:
   ```typescript
   getStats(): { effects: number; computations: number; pending: number }
   ```
 
-- [ ] Add debug logging in `execute()` for effect/computation counts
+- [x] Add debug logging in `execute()` for effect/computation counts
 
 #### 1.4 Build reverse dependency graph
 
 **File**: `packages/runner/src/scheduler.ts`
 
-- [ ] Add class property:
+- [x] Add class property:
   ```typescript
   private dependents = new WeakMap<Action, Set<Action>>();
   ```
 
-- [ ] Add `updateDependents()` method that finds all actions reading what this action writes
+- [x] Add `updateDependents()` method that finds all actions reading what this action writes
 
-- [ ] Call `updateDependents()` in `subscribe()` after `setDependencies()`
+- [x] Call `updateDependents()` in `subscribe()` after `setDependencies()`
 
 #### 1.5 Write tests
 
 **File**: `packages/runner/test/scheduler.test.ts`
 
-- [ ] Test: `sink()` calls increment `effects.size`
-- [ ] Test: `lift()`/`derive()` calls increment `computations.size`
-- [ ] Test: `unsubscribe()` removes from correct set
-- [ ] Test: `dependents` map correctly tracks reverse dependencies
+- [x] Test: `sink()` calls increment `effects.size`
+- [x] Test: `lift()`/`derive()` calls increment `computations.size`
+- [x] Test: `unsubscribe()` removes from correct set
+- [x] Test: `dependents` map correctly tracks reverse dependencies
 
 #### 1.6 Verify Phase 1
 
-- [ ] All existing tests pass (no behavioral changes)
-- [ ] New diagnostic tests pass
-- [ ] Run `deno task test` in `packages/runner`
+- [x] All existing tests pass (no behavioral changes)
+- [x] New diagnostic tests pass
+- [x] Run `deno task test` in `packages/runner`
 
 ---
 
@@ -108,52 +108,52 @@ Before starting, ensure you understand:
 
 **File**: `packages/runner/src/scheduler.ts`
 
-- [ ] Add class property:
+- [x] Add class property:
   ```typescript
   private dirty = new Set<Action>();
   ```
 
-- [ ] Add `markDirty(action)` method with transitive propagation to dependents
+- [x] Add `markDirty(action)` method with transitive propagation to dependents
 
-- [ ] Add `isDirty(action)` and `clearDirty(action)` methods
+- [x] Add `isDirty(action)` and `clearDirty(action)` methods
 
 #### 2.2 Add feature flag
 
 **File**: `packages/runner/src/scheduler.ts`
 
-- [ ] Add class property:
+- [x] Add class property:
   ```typescript
   private pullMode = false;
   ```
 
-- [ ] Add `enablePullMode()` method
+- [x] Add `enablePullMode()` method
 
-- [ ] Consider making this a constructor option or runtime config
+- [x] Consider making this a constructor option or runtime config
 
 #### 2.3 Modify storage change handler for pull mode
 
 **File**: `packages/runner/src/scheduler.ts`
 
-- [ ] In `createStorageSubscription()`, branch on `pullMode`:
+- [x] In `createStorageSubscription()`, branch on `pullMode`:
   - Push mode: existing behavior (add to `pending`)
   - Pull mode:
     - If effect: add to `pending`
     - If computation: call `markDirty()` and `scheduleAffectedEffects()`
 
-- [ ] Add `scheduleAffectedEffects(computation)` method that recursively finds and schedules effects
+- [x] Add `scheduleAffectedEffects(computation)` method that recursively finds and schedules effects
 
 #### 2.4 Implement pull mechanism
 
 **File**: `packages/runner/src/scheduler.ts`
 
-- [ ] Modify `run()` to call `pullDependencies()` before running effects in pull mode
+- [x] Modify `run()` to call `pullDependencies()` before running effects in pull mode
 
-- [ ] Add `pullDependencies(action)` method:
+- [x] Add `pullDependencies(action)` method:
   - Find dirty computations that write to paths this action reads
   - Topologically sort them
   - Run each via `runComputation()`
 
-- [ ] Add `runComputation(computation)` method:
+- [x] Add `runComputation(computation)` method:
   - Recursively call `pullDependencies()` first
   - Run the computation
   - Call `clearDirty()`
@@ -163,25 +163,25 @@ Before starting, ensure you understand:
 
 **File**: `packages/runner/src/scheduler.ts`
 
-- [ ] In `execute()`, add assertion that only effects are pending when in pull mode
+- [x] In `execute()`, add assertion that only effects are pending when in pull mode
 
 #### 2.6 Write tests
 
 **File**: `packages/runner/test/scheduler.test.ts`
 
-- [ ] Test: `pullMode = false` has unchanged behavior
-- [ ] Test: `pullMode = true` only adds effects to `pending`
-- [ ] Test: computations are marked dirty, not scheduled
-- [ ] Test: `pullDependencies()` runs dirty deps before effects
-- [ ] Test: topological order preserved within pull
-- [ ] Test: effects see consistent (glitch-free) state
+- [x] Test: `pullMode = false` has unchanged behavior
+- [x] Test: `pullMode = true` only adds effects to `pending`
+- [x] Test: computations are marked dirty, not scheduled
+- [x] Test: `pullDependencies()` runs dirty deps before effects
+- [x] Test: topological order preserved within pull
+- [x] Test: effects see consistent (glitch-free) state
 
 #### 2.7 Verify Phase 2
 
-- [ ] All existing tests pass with `pullMode = false`
-- [ ] All existing tests pass with `pullMode = true`
-- [ ] New pull-mode tests pass
-- [ ] Run `deno task test` in `packages/runner`
+- [x] All existing tests pass with `pullMode = false`
+- [x] All existing tests pass with `pullMode = true`
+- [x] New pull-mode tests pass
+- [x] Run `deno task test` in `packages/runner`
 
 ---
 
@@ -435,8 +435,8 @@ Update this section as phases complete:
 
 | Phase | Status | Completed By | Date |
 |-------|--------|--------------|------|
-| Phase 1: Effect Marking | Not Started | | |
-| Phase 2: Pull-Based Core | Not Started | | |
+| Phase 1: Effect Marking | Complete | Claude | 2025-12-12 |
+| Phase 2: Pull-Based Core | Complete | Claude | 2025-12-12 |
 | Phase 3: Cycle Convergence | Not Started | | |
 | Phase 4: Throttling | Not Started | | |
 | Phase 5: Migration | Not Started | | |
