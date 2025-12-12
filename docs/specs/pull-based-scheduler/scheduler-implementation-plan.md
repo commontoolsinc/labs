@@ -142,28 +142,27 @@ Before starting, ensure you understand:
 
 - [x] Add `scheduleAffectedEffects(computation)` method that recursively finds and schedules effects
 
-#### 2.4 Implement pull mechanism
+#### 2.4 Implement pull mechanism in execute()
 
 **File**: `packages/runner/src/scheduler.ts`
 
-- [x] Modify `run()` to call `pullDependencies()` before running effects in pull mode
+- [x] Add `collectDirtyDependencies(action, workSet)` method:
+  - Recursively finds all dirty computations an action depends on
+  - Adds them to the work set for execution
 
-- [x] Add `pullDependencies(action)` method:
-  - Find dirty computations that write to paths this action reads
-  - Topologically sort them
-  - Run each via `runComputation()`
+- [x] Modify `execute()` to build work queue differently in pull mode:
+  - Push mode: same as before (just `pending` set)
+  - Pull mode: collect pending effects + all their dirty computation dependencies
+  - Topologically sort the combined work set
+  - Run all actions via existing `run()` method
+  - Clear dirty flags as computations run
 
-- [x] Add `runComputation(computation)` method:
-  - Recursively call `pullDependencies()` first
-  - Run the computation
-  - Call `clearDirty()`
-  - Update dependencies
-
-#### 2.5 Update execute loop
+#### 2.5 Clean up legacy code
 
 **File**: `packages/runner/src/scheduler.ts`
 
-- [x] In `execute()`, add assertion that only effects are pending when in pull mode
+- [x] Remove legacy boolean signature from `subscribe()` - now only accepts options object
+- [x] Update all call sites across codebase to use `{ scheduleImmediately: true }`
 
 #### 2.6 Write tests
 
@@ -187,9 +186,11 @@ Before starting, ensure you understand:
 
 ## Phase 3: Cycle-Aware Convergence
 
-**Goal**: Handle cycles within pull chains; fast cycles converge completely, slow cycles yield.
+**Goal**: Handle cycles within the work queue; fast cycles converge completely, slow cycles yield.
 
 **Depends on**: Phase 2 complete
+
+**Note**: With the simplified Phase 2 architecture, cycle detection happens during `collectDirtyDependencies()` or topological sort in `execute()`, not during a separate pull phase.
 
 ### Tasks
 
@@ -213,32 +214,35 @@ Before starting, ensure you understand:
 
 - [ ] Add `getActionStats(action)` method for diagnostics
 
-#### 3.2 Add cycle detection during pull
+#### 3.2 Add cycle detection during dependency collection
 
 **File**: `packages/runner/src/scheduler.ts`
 
 - [ ] Add class property:
   ```typescript
-  private pullStack = new Set<Action>();
+  private collectStack = new Set<Action>();
   ```
 
-- [ ] Modify `pullDependencies()`:
-  - Check if action is already in `pullStack` (cycle detected)
-  - If cycle: call `handleCycleInPull()`
+- [ ] Modify `collectDirtyDependencies()`:
+  - Check if action is already in `collectStack` (cycle detected)
+  - If cycle: record cycle members, continue without infinite recursion
   - Otherwise: add to stack, process, remove from stack
 
-- [ ] Add `handleCycleInPull(action)` method:
-  - Get cycle members from `pullStack`
-  - Calculate total expected time from `actionStats`
-  - If < 16ms: call `convergeCycleFast()`
-  - Otherwise: call `convergeCycleSlow()`
+- [ ] Add `detectCycles(workSet)` method:
+  - Identify strongly connected components in the work set
+  - Return list of cycle groups
 
-#### 3.3 Implement fast cycle convergence
+#### 3.3 Implement cycle convergence in execute()
 
 **File**: `packages/runner/src/scheduler.ts`
 
-- [ ] Add `convergeCycleFast(cycle)` method:
-  - Set `MAX_CYCLE_ITERATIONS = 20`
+- [ ] Modify `execute()` to handle cycles:
+  - After building work set, detect cycles via `detectCycles()`
+  - For each cycle group, calculate total expected time from `actionStats`
+  - If < 16ms: run cycle members repeatedly until converged (max 20 iterations)
+  - If >= 16ms: run one iteration, re-queue if still dirty
+
+- [ ] Add `convergeCycle(cycleMembers)` method:
   - Loop: run all dirty cycle members in topological order
   - Break when no members are dirty (converged)
   - Warn if max iterations reached
@@ -255,10 +259,9 @@ Before starting, ensure you understand:
   }>();
   ```
 
-- [ ] Add `convergeCycleSlow(cycle)` method:
-  - Get/create state for cycle
-  - Run one iteration
-  - If still dirty and under limit: schedule continuation via `queueTask()`
+- [ ] For slow cycles (>= 16ms estimated time):
+  - Run one iteration of cycle members
+  - If still dirty and under limit: re-add to pending, let next `execute()` continue
   - If limit reached: error and clean up
   - If converged: clean up
 
@@ -269,7 +272,7 @@ Before starting, ensure you understand:
 - [ ] Test: fast cycles (< 16ms) converge before effect sees value
 - [ ] Test: slow cycles yield between iterations
 - [ ] Test: iteration limit enforced for non-converging cycles
-- [ ] Test: cycle detection via pull stack works
+- [ ] Test: cycle detection during dependency collection works
 - [ ] Test: no infinite loops
 
 #### 3.6 Verify Phase 3
