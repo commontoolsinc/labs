@@ -33,7 +33,6 @@ Before starting pattern development:
    - `docs/common/TYPES_AND_SCHEMAS.md` - Type system, Cell<> vs OpaqueRef<>
    - `docs/common/DEBUGGING.md` - Error reference and troubleshooting
 3. **Check example patterns** - Look in `packages/patterns/` for working examples
-4. **Community knowledge** - The `community-patterns` repo (peer to `labs/`) contains empirically-validated patterns and gotchas not yet in official docs. See `community-patterns/community-docs/blessed/` for framework-author-approved knowledge.
 
 ## Quick Decision Tree
 
@@ -162,8 +161,7 @@ Use the **ct** skill to retrieve source:
    - Pattern questions → `PATTERNS.md`
    - Reactivity issues → `CELLS_AND_REACTIVITY.md`
    - General debugging → `DEBUGGING.md`
-3. **Check community knowledge** - The `community-patterns` repo (peer to `labs/`) has framework-author-approved gotchas in `community-docs/blessed/`
-4. **Inspect deployed charm** - Use **ct** skill for inspection commands
+3. **Inspect deployed charm** - Use **ct** skill for inspection commands
 5. **Check examples** - Look in `packages/patterns/` for similar patterns
 
 ### Quick Error Reference
@@ -285,7 +283,6 @@ When working with patterns, consult these docs based on your task:
 | LLM integration (generateObject, etc.) | `docs/common/LLM.md` |
 | ct binary commands | Use **ct** skill |
 | Working examples | `packages/patterns/` directory |
-| Framework-author-approved gotchas | `community-patterns` repo: `community-docs/blessed/` |
 
 ## Resources
 
@@ -298,6 +295,5 @@ High-level workflow patterns and best practices for pattern development. Consult
 - **Use the ct skill** for ct binary commands and deployment details
 - **Read `docs/common/` files** for pattern framework concepts - don't ask for duplicated information
 - **Check `packages/patterns/`** for working examples before building from scratch
-- **Check `community-patterns` repo** (peer to `labs/`) for `community-docs/blessed/` - framework-author-approved gotchas
 - **Start simple** - minimal viable pattern first, then add features
 - **Bidirectional binding first** - only use handlers when truly needed
