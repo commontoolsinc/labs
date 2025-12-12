@@ -162,7 +162,7 @@ Use the **ct** skill to retrieve source:
    - Reactivity issues → `CELLS_AND_REACTIVITY.md`
    - General debugging → `DEBUGGING.md`
 3. **Inspect deployed charm** - Use **ct** skill for inspection commands
-5. **Check examples** - Look in `packages/patterns/` for similar patterns
+4. **Check examples** - Look in `packages/patterns/` for similar patterns
 
 ### Quick Error Reference
 

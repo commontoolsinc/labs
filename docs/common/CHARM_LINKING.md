@@ -156,4 +156,4 @@ const invokeStream = handler<unknown, { stream: Stream<void> }>(
 );
 ```
 
-See `packages/patterns/blessed-verification/test-cross-charm-*.tsx` for examples.
+See `packages/patterns/` for cross-charm examples.
