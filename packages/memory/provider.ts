@@ -844,7 +844,9 @@ class MemoryProviderSession<
   }
 
   /** Parse docKey (format "id/type") back to id and type */
-  private parseDocKey(docKey: string): { docId: string | null; docType: string } {
+  private parseDocKey(
+    docKey: string,
+  ): { docId: string | null; docType: string } {
     // Note: type can contain slashes (e.g., "application/json"), so we split on the FIRST slash
     // The id is always in the form "of:HASH" which doesn't contain slashes
     const slashIndex = docKey.indexOf("/");
