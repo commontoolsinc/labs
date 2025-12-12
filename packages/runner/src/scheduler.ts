@@ -82,6 +82,9 @@ const DEFAULT_RETRIES_FOR_EVENTS = 5;
 const MAX_RETRIES_FOR_REACTIVE = 10;
 const MAX_CYCLE_ITERATIONS = 20;
 const FAST_CYCLE_THRESHOLD_MS = 16;
+const AUTO_DEBOUNCE_THRESHOLD_MS = 50;
+const AUTO_DEBOUNCE_MIN_RUNS = 3;
+const AUTO_DEBOUNCE_DELAY_MS = 100;
 
 /**
  * Statistics tracked for each action's execution performance.
@@ -91,6 +94,7 @@ export interface ActionStats {
   totalTime: number;
   averageTime: number;
   lastRunTime: number;
+  lastRunTimestamp: number; // When the action last ran (performance.now())
 }
 
 export class Scheduler {
@@ -125,6 +129,17 @@ export class Scheduler {
     Action,
     { iteration: number; lastYield: number }
   >();
+
+  // Debounce infrastructure for throttling slow actions
+  private debounceTimers = new WeakMap<
+    Action,
+    ReturnType<typeof setTimeout>
+  >();
+  private actionDebounce = new WeakMap<Action, number>();
+  private autoDebounceEnabled = new WeakMap<Action, boolean>();
+
+  // Throttle infrastructure - "value can be stale by T ms"
+  private actionThrottle = new WeakMap<Action, number>();
 
   private idlePromises: (() => void)[] = [];
   private loopCounter = new WeakMap<Action, number>();
@@ -185,9 +200,30 @@ export class Scheduler {
     options: {
       scheduleImmediately?: boolean;
       isEffect?: boolean;
+      debounce?: number;
+      autoDebounce?: boolean;
+      throttle?: number;
     } = {},
   ): Cancel {
-    const { scheduleImmediately = false, isEffect = false } = options;
+    const {
+      scheduleImmediately = false,
+      isEffect = false,
+      debounce,
+      autoDebounce,
+      throttle,
+    } = options;
+
+    // Apply debounce settings if provided
+    if (debounce !== undefined) {
+      this.setDebounce(action, debounce);
+    }
+    if (autoDebounce !== undefined) {
+      this.setAutoDebounce(action, autoDebounce);
+    }
+    // Apply throttle setting if provided
+    if (throttle !== undefined) {
+      this.setThrottle(action, throttle);
+    }
 
     const reads = this.setDependencies(action, log);
 
@@ -221,8 +257,7 @@ export class Scheduler {
     );
 
     if (scheduleImmediately) {
-      this.queueExecution();
-      this.pending.add(action);
+      this.scheduleWithDebounce(action);
     } else {
       const pathsByEntity = addressesToPathByEntity(reads);
 
@@ -275,6 +310,8 @@ export class Scheduler {
     // Clean up effect/computation tracking
     this.effects.delete(action);
     this.computations.delete(action);
+    // Cancel any pending debounce timer
+    this.cancelDebounceTimer(action);
   }
 
   async run(action: Action): Promise<any> {
@@ -533,8 +570,7 @@ export class Scheduler {
                 if (this.pullMode) {
                   // Pull mode: only schedule effects, mark computations as dirty
                   if (this.effects.has(action)) {
-                    this.queueExecution();
-                    this.pending.add(action);
+                    this.scheduleWithDebounce(action);
                   } else {
                     // Mark computation as dirty and schedule affected effects
                     this.markDirty(action);
@@ -542,8 +578,7 @@ export class Scheduler {
                   }
                 } else {
                   // Push mode: existing behavior - schedule all triggered actions
-                  this.queueExecution();
-                  this.pending.add(action);
+                  this.scheduleWithDebounce(action);
                 }
               }
             } else {
@@ -1038,8 +1073,7 @@ export class Scheduler {
     findEffects(computation);
 
     for (const effect of toSchedule) {
-      this.queueExecution();
-      this.pending.add(effect);
+      this.scheduleWithDebounce(effect);
     }
   }
 
@@ -1052,20 +1086,26 @@ export class Scheduler {
    * Updates running statistics including run count, total time, and average time.
    */
   private recordActionTime(action: Action, elapsed: number): void {
+    const now = performance.now();
     const existing = this.actionStats.get(action);
     if (existing) {
       existing.runCount++;
       existing.totalTime += elapsed;
       existing.averageTime = existing.totalTime / existing.runCount;
       existing.lastRunTime = elapsed;
+      existing.lastRunTimestamp = now;
     } else {
       this.actionStats.set(action, {
         runCount: 1,
         totalTime: elapsed,
         averageTime: elapsed,
         lastRunTime: elapsed,
+        lastRunTimestamp: now,
       });
     }
+
+    // Check if action should be auto-debounced based on performance
+    this.maybeAutoDebounce(action);
   }
 
   /**
@@ -1074,6 +1114,167 @@ export class Scheduler {
    */
   getActionStats(action: Action): ActionStats | undefined {
     return this.actionStats.get(action);
+  }
+
+  // ============================================================
+  // Debounce infrastructure for throttling slow actions
+  // ============================================================
+
+  /**
+   * Sets a debounce delay for an action.
+   * When the action is triggered, it will wait for the specified delay before running.
+   * If triggered again during the delay, the timer resets.
+   */
+  setDebounce(action: Action, ms: number): void {
+    if (ms <= 0) {
+      this.actionDebounce.delete(action);
+    } else {
+      this.actionDebounce.set(action, ms);
+    }
+  }
+
+  /**
+   * Gets the current debounce delay for an action, if set.
+   */
+  getDebounce(action: Action): number | undefined {
+    return this.actionDebounce.get(action);
+  }
+
+  /**
+   * Clears the debounce setting for an action.
+   */
+  clearDebounce(action: Action): void {
+    this.actionDebounce.delete(action);
+    this.cancelDebounceTimer(action);
+  }
+
+  /**
+   * Enables or disables auto-debounce detection for an action.
+   * When enabled, slow actions (> 50ms avg after 3 runs) will automatically get debounced.
+   */
+  setAutoDebounce(action: Action, enabled: boolean): void {
+    if (enabled) {
+      this.autoDebounceEnabled.set(action, true);
+    } else {
+      this.autoDebounceEnabled.delete(action);
+    }
+  }
+
+  /**
+   * Cancels any pending debounce timer for an action.
+   */
+  private cancelDebounceTimer(action: Action): void {
+    const timer = this.debounceTimers.get(action);
+    if (timer) {
+      clearTimeout(timer);
+      this.debounceTimers.delete(action);
+    }
+  }
+
+  /**
+   * Schedules an action with debounce support.
+   * If the action has a debounce delay, it will wait before being added to pending.
+   * Otherwise, it's added immediately.
+   */
+  private scheduleWithDebounce(action: Action): void {
+    const debounceMs = this.actionDebounce.get(action);
+
+    if (!debounceMs || debounceMs <= 0) {
+      // No debounce - add immediately
+      this.pending.add(action);
+      this.queueExecution();
+      return;
+    }
+
+    // Clear existing timer if any
+    this.cancelDebounceTimer(action);
+
+    // Set new timer
+    const timer = setTimeout(() => {
+      this.debounceTimers.delete(action);
+      this.pending.add(action);
+      this.queueExecution();
+    }, debounceMs);
+
+    this.debounceTimers.set(action, timer);
+
+    logger.debug("schedule-debounce", () => [
+      `[DEBOUNCE] Action ${action.name || "anonymous"} debounced for ${debounceMs}ms`,
+    ]);
+  }
+
+  /**
+   * Checks if an action should be auto-debounced based on its performance stats.
+   * Called after recording action time to potentially enable debouncing for slow actions.
+   */
+  private maybeAutoDebounce(action: Action): void {
+    // Check if auto-debounce is enabled for this action
+    if (!this.autoDebounceEnabled.get(action)) return;
+
+    // Check if already has a manual debounce set
+    if (this.actionDebounce.has(action)) return;
+
+    const stats = this.actionStats.get(action);
+    if (!stats) return;
+
+    // Need minimum runs before auto-detecting
+    if (stats.runCount < AUTO_DEBOUNCE_MIN_RUNS) return;
+
+    // Check if action is slow enough to warrant debouncing
+    if (stats.averageTime >= AUTO_DEBOUNCE_THRESHOLD_MS) {
+      this.actionDebounce.set(action, AUTO_DEBOUNCE_DELAY_MS);
+      logger.debug("schedule-debounce", () => [
+        `[AUTO-DEBOUNCE] Action ${action.name || "anonymous"} ` +
+          `auto-debounced (avg ${stats.averageTime.toFixed(1)}ms >= ${AUTO_DEBOUNCE_THRESHOLD_MS}ms)`,
+      ]);
+    }
+  }
+
+  // ============================================================
+  // Throttle infrastructure - "value can be stale by T ms"
+  // ============================================================
+
+  /**
+   * Sets a throttle period for an action.
+   * The action won't run if it ran within the last `ms` milliseconds.
+   * Unlike debounce, throttled actions stay dirty and will be pulled
+   * by effects when the throttle period expires.
+   */
+  setThrottle(action: Action, ms: number): void {
+    if (ms <= 0) {
+      this.actionThrottle.delete(action);
+    } else {
+      this.actionThrottle.set(action, ms);
+    }
+  }
+
+  /**
+   * Gets the current throttle period for an action, if set.
+   */
+  getThrottle(action: Action): number | undefined {
+    return this.actionThrottle.get(action);
+  }
+
+  /**
+   * Clears the throttle setting for an action.
+   */
+  clearThrottle(action: Action): void {
+    this.actionThrottle.delete(action);
+  }
+
+  /**
+   * Checks if an action is currently throttled (ran too recently).
+   * Returns true if the action should be skipped this execution cycle.
+   */
+  private isThrottled(action: Action): boolean {
+    const throttleMs = this.actionThrottle.get(action);
+    if (!throttleMs) return false;
+
+    const stats = this.actionStats.get(action);
+    if (!stats) return false; // No stats yet, action hasn't run
+
+    const elapsed = performance.now() - stats.lastRunTimestamp;
+    return elapsed < throttleMs;
   }
 
   private handleError(error: Error, action: any) {
@@ -1265,6 +1466,19 @@ export class Scheduler {
       } else {
         // Push mode: action must be in pending
         if (!isInPending) continue;
+      }
+
+      // Check throttle: skip recently-run actions but keep them dirty
+      // They'll be pulled next time an effect needs them (if throttle expired)
+      if (this.isThrottled(fn)) {
+        logger.debug("schedule-throttle", () => [
+          `[THROTTLE] Skipping throttled action: ${fn.name || "anonymous"}`,
+        ]);
+        // Don't clear from pending or dirty - action stays in its current state
+        // but we remove from pending so it doesn't run this cycle
+        this.pending.delete(fn);
+        // Keep dirty flag so it can be pulled later
+        continue;
       }
 
       // Clean up from pending/dirty before running
