@@ -471,37 +471,8 @@ class MemoryProviderSession<
         redactedData.transaction,
       );
 
-      // Collect all unique facts across all schema subscriptions
-      const allFactsMap = new Map<string, Revision<Fact>>();
-      for (const [_jobId, facts] of schemaFacts) {
-        for (const fact of facts) {
-          allFactsMap.set(this.toKey(fact), fact);
-        }
-      }
       // Filter facts once - filterKnownFacts has a side effect of updating lastRevision
-      const filteredFacts = this.filterKnownFacts([...allFactsMap.values()]);
-
-      // Build a set of filtered fact keys for quick lookup
-      const filteredFactKeys = new Set(filteredFacts.map((f) => this.toKey(f)));
-
-      // Send facts directly to each schema subscription
-      const space = item.of as Space;
-      for (const [jobId, facts] of schemaFacts) {
-        // Only include facts that passed the filter
-        const subscriptionFacts = facts.filter((f) =>
-          filteredFactKeys.has(this.toKey(f))
-        );
-        if (subscriptionFacts.length > 0) {
-          const selection = {
-            [space]: this.toSelection(subscriptionFacts),
-          } as Selection<Space>;
-          this.perform({
-            the: "task/effect",
-            of: jobId,
-            is: selection,
-          });
-        }
-      }
+      const filteredFacts = this.filterKnownFacts(schemaFacts);
 
       // Send commits with revisions to commit log subscriptions
       // The client's startSynchronization() reads revisions to update its heap
@@ -662,25 +633,22 @@ class MemoryProviderSession<
    * For wildcard queries (of: "_"): Match changed docs against type pattern.
    * For specific document queries: Use schemaTracker to find affected docs.
    *
-   * Returns a map of jobId to facts for each schema subscription.
-   * Non-wildcard subscriptions share the same facts (from sharedSchemaTracker).
-   * Wildcard subscriptions get their own facts based on their pattern.
+   * Returns all facts that match any subscription's criteria.
    */
   private async getSchemaSubscriptionMatches<Space extends MemorySpace>(
     transaction: Transaction<Space>,
-  ): Promise<Map<JobId, Revision<Fact>[]>> {
-    const result = new Map<JobId, Revision<Fact>[]>();
+  ): Promise<Revision<Fact>[]> {
     const space = transaction.sub;
 
     // Early exit if no schema subscriptions
     if (this.schemaChannels.size === 0) {
-      return result;
+      return [];
     }
 
     // Extract changed document keys from transaction
     const changedDocs = this.extractChangedDocKeys(transaction);
     if (changedDocs.size === 0) {
-      return result;
+      return [];
     }
 
     // Get access to the space session for evaluating documents
@@ -693,6 +661,9 @@ class MemoryProviderSession<
     }
     const spaceSession = mountResult.ok as unknown as SpaceSession<Space>;
 
+    // Collect all facts from all subscriptions
+    const allFacts = new Map<string, Revision<Fact>>();
+
     // Find affected docs using the shared schemaTracker (for non-wildcard)
     const sharedAffectedDocs = this.findAffectedDocs(
       changedDocs,
@@ -700,20 +671,20 @@ class MemoryProviderSession<
     );
 
     // Process shared affected docs once for all non-wildcard subscriptions
-    let sharedFacts: Revision<Fact>[] = [];
     if (sharedAffectedDocs.length > 0) {
       const sharedResult = this.processIncrementalUpdate(
         spaceSession,
         sharedAffectedDocs,
         space,
       );
-      sharedFacts = [...sharedResult.newFacts.values()];
+      for (const [key, fact] of sharedResult.newFacts) {
+        allFacts.set(key, fact);
+      }
     }
 
-    // Assign facts to each subscription
-    for (const [jobId, subscription] of this.schemaChannels) {
+    // Process wildcard subscriptions separately
+    for (const [_jobId, subscription] of this.schemaChannels) {
       if (subscription.isWildcardQuery) {
-        // Wildcard queries get their own facts based on their pattern
         const wildcardDocs = this.findAffectedDocsForWildcard(
           changedDocs,
           subscription.invocation,
@@ -724,17 +695,14 @@ class MemoryProviderSession<
             wildcardDocs,
             space,
           );
-          result.set(jobId, [...wildcardResult.newFacts.values()]);
-        }
-      } else {
-        // Non-wildcard subscriptions share the same facts
-        if (sharedFacts.length > 0) {
-          result.set(jobId, sharedFacts);
+          for (const [key, fact] of wildcardResult.newFacts) {
+            allFacts.set(key, fact);
+          }
         }
       }
     }
 
-    return result;
+    return [...allFacts.values()];
   }
 
   /**
