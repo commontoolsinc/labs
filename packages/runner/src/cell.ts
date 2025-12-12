@@ -81,6 +81,42 @@ import {
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 
+/**
+ * Deeply traverse a value to access all properties.
+ * This is used by pull() to ensure all nested values are read,
+ * which registers them as dependencies for pull-based scheduling.
+ * Works with query result proxies which trigger reads on property access.
+ */
+function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
+  if (value === null || value === undefined) return;
+  if (typeof value !== "object") return;
+
+  // Avoid infinite loops with circular references
+  if (seen.has(value)) return;
+  seen.add(value);
+
+  try {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        deepTraverse(item, seen);
+      }
+    } else {
+      for (const key in value) {
+        if (Object.prototype.hasOwnProperty.call(value, key)) {
+          try {
+            deepTraverse((value as Record<string, unknown>)[key], seen);
+          } catch {
+            // Ignore errors from accessing individual properties (e.g., link cycles)
+          }
+        }
+      }
+    }
+  } catch {
+    // Ignore errors from traversal (e.g., link cycles)
+    // We've already registered the dependencies we can access
+  }
+}
+
 // Shared map factory instance for all cells
 let mapFactory: NodeFactory<any, any> | undefined;
 
@@ -588,12 +624,25 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   pull(): Promise<Readonly<T>> {
     if (!this.synced) this.sync(); // No await, just kicking this off
 
+    // Check if we need to traverse the result to register all dependencies.
+    // This is needed when there's no schema or when the schema is TrueSchema ("any"),
+    // because without schema constraints we need to read all nested values.
+    const schema = this._link.schema;
+    const needsTraversal = schema === undefined ||
+      ContextualFlowControl.isTrueSchema(schema);
+
     return new Promise((resolve) => {
       let result: Readonly<T>;
 
       const action: Action = (tx) => {
         // Read the value inside the effect - this ensures dependencies are pulled
         result = validateAndTransform(this.runtime, tx, this.link, this.synced);
+
+        // If no schema or TrueSchema, traverse the result to register all
+        // nested values as read dependencies.
+        if (needsTraversal && result !== undefined && result !== null) {
+          deepTraverse(result);
+        }
       };
 
       // Run the action once to capture dependencies
