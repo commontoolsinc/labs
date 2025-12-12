@@ -1251,3 +1251,503 @@ describe("Stream event success callbacks", () => {
     expect(status.status).toBe("error");
   });
 });
+
+describe("effect/computation tracking", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should track actions as computations by default", async () => {
+    const a = runtime.getCell<number>(
+      space,
+      "track-computations-1",
+      undefined,
+      tx,
+    );
+    a.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const stats1 = runtime.scheduler.getStats();
+    expect(stats1.computations).toBe(0);
+    expect(stats1.effects).toBe(0);
+
+    const action: Action = () => {};
+    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, true);
+    await runtime.idle();
+
+    const stats2 = runtime.scheduler.getStats();
+    expect(stats2.computations).toBe(1);
+    expect(stats2.effects).toBe(0);
+    expect(runtime.scheduler.isComputation(action)).toBe(true);
+    expect(runtime.scheduler.isEffect(action)).toBe(false);
+  });
+
+  it("should track actions as effects when isEffect is true", async () => {
+    const a = runtime.getCell<number>(
+      space,
+      "track-effects-1",
+      undefined,
+      tx,
+    );
+    a.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const stats1 = runtime.scheduler.getStats();
+    expect(stats1.effects).toBe(0);
+
+    const action: Action = () => {};
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true, isEffect: true },
+    );
+    await runtime.idle();
+
+    const stats2 = runtime.scheduler.getStats();
+    expect(stats2.effects).toBe(1);
+    expect(stats2.computations).toBe(0);
+    expect(runtime.scheduler.isEffect(action)).toBe(true);
+    expect(runtime.scheduler.isComputation(action)).toBe(false);
+  });
+
+  it("should remove from correct set on unsubscribe", async () => {
+    const a = runtime.getCell<number>(
+      space,
+      "unsubscribe-tracking-1",
+      undefined,
+      tx,
+    );
+    a.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const computation: Action = () => {};
+    const effect: Action = () => {};
+
+    runtime.scheduler.subscribe(
+      computation,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true, isEffect: false },
+    );
+    runtime.scheduler.subscribe(
+      effect,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true, isEffect: true },
+    );
+    await runtime.idle();
+
+    const stats1 = runtime.scheduler.getStats();
+    expect(stats1.computations).toBe(1);
+    expect(stats1.effects).toBe(1);
+
+    // Unsubscribe computation
+    runtime.scheduler.unsubscribe(computation);
+    const stats2 = runtime.scheduler.getStats();
+    expect(stats2.computations).toBe(0);
+    expect(stats2.effects).toBe(1);
+    expect(runtime.scheduler.isComputation(computation)).toBe(false);
+
+    // Unsubscribe effect
+    runtime.scheduler.unsubscribe(effect);
+    const stats3 = runtime.scheduler.getStats();
+    expect(stats3.computations).toBe(0);
+    expect(stats3.effects).toBe(0);
+    expect(runtime.scheduler.isEffect(effect)).toBe(false);
+  });
+
+  it("should support legacy boolean signature for scheduleImmediately", async () => {
+    const a = runtime.getCell<number>(
+      space,
+      "legacy-signature-1",
+      undefined,
+      tx,
+    );
+    a.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runCount = 0;
+    const action: Action = () => {
+      runCount++;
+    };
+
+    // Legacy: passing boolean directly should still work
+    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, true);
+    await runtime.idle();
+
+    expect(runCount).toBe(1);
+    // Default is computation when using legacy signature
+    expect(runtime.scheduler.isComputation(action)).toBe(true);
+    expect(runtime.scheduler.isEffect(action)).toBe(false);
+  });
+
+  it("should track sink() calls as effects", async () => {
+    const a = runtime.getCell<number>(
+      space,
+      "sink-as-effect-1",
+      undefined,
+      tx,
+    );
+    a.set(42);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const stats1 = runtime.scheduler.getStats();
+    const initialEffects = stats1.effects;
+
+    let sinkValue: number | undefined;
+    const cancel = a.sink((value) => {
+      sinkValue = value;
+    });
+    await runtime.idle();
+
+    const stats2 = runtime.scheduler.getStats();
+    // sink() should add an effect
+    expect(stats2.effects).toBe(initialEffects + 1);
+    expect(sinkValue).toBe(42);
+
+    cancel();
+    await runtime.idle();
+
+    // After cancel, effect count should decrease (but may not be immediate due to GC)
+  });
+
+  it("should track dependents for reverse dependency graph", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "dependents-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const intermediate = runtime.getCell<number>(
+      space,
+      "dependents-intermediate",
+      undefined,
+      tx,
+    );
+    intermediate.set(0);
+    const output = runtime.getCell<number>(
+      space,
+      "dependents-output",
+      undefined,
+      tx,
+    );
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Action 1: reads source, writes intermediate
+    const action1: Action = (actionTx) => {
+      const val = source.withTx(actionTx).get();
+      intermediate.withTx(actionTx).send(val * 10);
+    };
+
+    // Action 2: reads intermediate, writes output
+    const action2: Action = (actionTx) => {
+      const val = intermediate.withTx(actionTx).get();
+      output.withTx(actionTx).send(val + 5);
+    };
+
+    // Subscribe action1 first (writes to intermediate)
+    runtime.scheduler.subscribe(
+      action1,
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        writes: [intermediate.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+
+    // Subscribe action2 (reads intermediate)
+    runtime.scheduler.subscribe(
+      action2,
+      {
+        reads: [intermediate.getAsNormalizedFullLink()],
+        writes: [output.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+
+    // action2 should be a dependent of action1 (action1 writes what action2 reads)
+    const dependents = runtime.scheduler.getDependents(action1);
+    expect(dependents.has(action2)).toBe(true);
+  });
+});
+
+describe("pull-based scheduling", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should have unchanged behavior with pullMode = false", async () => {
+    // Verify push mode is the default
+    expect(runtime.scheduler.isPullModeEnabled()).toBe(false);
+
+    const source = runtime.getCell<number>(
+      space,
+      "push-mode-unchanged-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const result = runtime.getCell<number>(
+      space,
+      "push-mode-unchanged-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computationRuns = 0;
+    const computation: Action = (actionTx) => {
+      computationRuns++;
+      const val = source.withTx(actionTx).get();
+      result.withTx(actionTx).send(val * 10);
+    };
+
+    runtime.scheduler.subscribe(
+      computation,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+
+    expect(computationRuns).toBe(1);
+    expect(result.get()).toBe(10);
+
+    // Change source - should trigger computation in push mode
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(computationRuns).toBe(2);
+    expect(result.get()).toBe(20);
+  });
+
+  it("should mark computations as dirty in pull mode when source changes", async () => {
+    // This test verifies that in pull mode, computations are marked dirty
+    // rather than scheduled when their inputs change.
+    runtime.scheduler.enablePullMode();
+    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+
+    const source = runtime.getCell<number>(
+      space,
+      "pull-mode-dirty-marking-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const result = runtime.getCell<number>(
+      space,
+      "pull-mode-dirty-marking-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computationRuns = 0;
+
+    // Computation: reads source, writes result
+    const computation: Action = (actionTx) => {
+      computationRuns++;
+      const val = source.withTx(actionTx).get();
+      result.withTx(actionTx).send(val * 10);
+    };
+
+    // Subscribe computation
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        writes: [result.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+
+    // After computation runs, result should be 10
+    expect(result.get()).toBe(10);
+    expect(computationRuns).toBe(1);
+
+    // Verify computation is clean after running
+    expect(runtime.scheduler.isDirty(computation)).toBe(false);
+
+    // Change source - in pull mode, computation should be marked dirty
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Give time for the storage notification to process
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // In pull mode with no effect depending on this computation,
+    // the computation should be marked dirty but not run
+    // (since there's no effect to pull it)
+    expect(runtime.scheduler.isDirty(computation)).toBe(true);
+
+    // The computation should NOT have run again (pull mode doesn't schedule computations)
+    expect(computationRuns).toBe(1);
+  });
+
+  it("should schedule effects when affected by dirty computations", async () => {
+    // This test verifies that scheduleAffectedEffects correctly finds and
+    // schedules effects that depend on a dirty computation.
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "schedule-effects-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const intermediate = runtime.getCell<number>(
+      space,
+      "schedule-effects-intermediate",
+      undefined,
+      tx,
+    );
+    intermediate.set(0);
+    const effectResult = runtime.getCell<number>(
+      space,
+      "schedule-effects-result",
+      undefined,
+      tx,
+    );
+    effectResult.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let effectRuns = 0;
+
+    // Computation: reads source, writes intermediate
+    const computation: Action = (actionTx) => {
+      const val = source.withTx(actionTx).get();
+      intermediate.withTx(actionTx).send(val * 10);
+    };
+
+    // Effect: reads intermediate
+    const effect: Action = (actionTx) => {
+      effectRuns++;
+      const val = intermediate.withTx(actionTx).get();
+      effectResult.withTx(actionTx).send(val + 5);
+    };
+
+    // Subscribe computation first
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        writes: [intermediate.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+
+    // Subscribe effect with isEffect: true
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [intermediate.getAsNormalizedFullLink()],
+        writes: [effectResult.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true, isEffect: true },
+    );
+    await runtime.idle();
+
+    // Verify dependency tracking is set up correctly
+    const dependents = runtime.scheduler.getDependents(computation);
+    expect(dependents.has(effect)).toBe(true);
+
+    // Track initial effect runs
+    const initialEffectRuns = effectRuns;
+
+    // Change source - computation should be marked dirty, effect should be scheduled
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    // Effect should have run (triggered via scheduleAffectedEffects)
+    expect(effectRuns).toBeGreaterThan(initialEffectRuns);
+  });
+
+  it("should track getStats with dirty count", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "stats-dirty-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const computation: Action = () => {};
+
+    runtime.scheduler.subscribe(
+      computation,
+      { reads: [source.getAsNormalizedFullLink()], writes: [] },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+
+    // Computation should be clean
+    expect(runtime.scheduler.isDirty(computation)).toBe(false);
+
+    // Stats should show correct counts
+    const stats = runtime.scheduler.getStats();
+    expect(stats.computations).toBeGreaterThanOrEqual(1);
+    expect(stats.effects).toBe(0);
+  });
+
+  it("should allow disabling pull mode", async () => {
+    runtime.scheduler.enablePullMode();
+    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+
+    runtime.scheduler.disablePullMode();
+    expect(runtime.scheduler.isPullModeEnabled()).toBe(false);
+  });
+});
