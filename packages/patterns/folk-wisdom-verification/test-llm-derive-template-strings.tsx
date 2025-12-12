@@ -6,25 +6,29 @@
  * SOURCE: folk_wisdom/llm.md - "When to Use derive() for generateObject Prompts"
  *
  * WHAT THIS TESTS:
- * - That template strings accessing multiple properties directly cause "opaque value" errors
- * - That wrapping in derive() fixes the issue
- * - This is JavaScript evaluation timing, not framework magic
+ * - That derive() wrapper enables template strings with OpaqueRef properties
+ * - The broken approach (direct template strings) fails at compile time
  *
- * FRAMEWORK EVIDENCE:
- * - This is NOT about framework caching - it's about JavaScript template evaluation
- * - Template strings evaluate IMMEDIATELY: `foo ${bar.baz}` tries to access bar.baz NOW
- * - But bar might be an OpaqueRef, which requires reactive access tracking
- * - derive() defers evaluation until inside reactive context
+ * BROKEN APPROACH (does not compile):
+ * ```tsx
+ * const summaries = articles.map((article) => ({
+ *   summary: generateObject<Summary>({
+ *     prompt: `Title: ${article.title}\nContent: ${article.content}`,  // ERROR!
+ *   }),
+ * }));
+ * ```
+ * This fails with: "Tried to directly access an opaque value"
+ * Because JavaScript evaluates ${article.title} IMMEDIATELY, but article is OpaqueRef.
  *
- * EXPECTED BEHAVIOR:
- * - BROKEN version: Console error "Tried to directly access an opaque value"
- * - WORKING version: No errors, generates successfully
- *
- * MANUAL VERIFICATION STEPS:
- * 1. Deploy the pattern
- * 2. Add an article with title + content (format: "Title | Content")
- * 3. Check console for errors
- * 4. Observe which version (broken/working) shows results
+ * WORKING APPROACH (this pattern):
+ * ```tsx
+ * const summaries = articles.map((article) => ({
+ *   summary: generateObject<Summary>({
+ *     prompt: derive(article, (a) => `Title: ${a.title}\nContent: ${a.content}`),
+ *   }),
+ * }));
+ * ```
+ * derive() defers evaluation until reactive context is established.
  */
 import {
   Cell,
@@ -44,7 +48,7 @@ interface Article {
 
 interface Summary {
   mainPoints: string[];
-  wordCount: number;
+  sentiment: string;
 }
 
 interface Input {
@@ -65,27 +69,20 @@ const addArticle = handler<{ detail: { message: string } }, { articles: Cell<Art
   },
 );
 
-export default pattern<Input>(({ articles }) => {
-  // BROKEN: Direct template string tries to access OpaqueRef immediately
-  // This causes "Tried to directly access an opaque value" error
-  // because JavaScript evaluates `${article.title}` BEFORE the function runs
-  const brokenSummaries = articles.map((article) => ({
-    article,
-    summary: generateObject<Summary>({
-      system: "Summarize the article into main points.",
-      // BROKEN: Direct template evaluation - article is OpaqueRef, not unwrapped
-      prompt: `Title: ${article.title}\n\nContent: ${article.content}`,
-      model: "anthropic:claude-sonnet-4-5",
-    }),
-  }));
+const clearArticles = handler<unknown, { articles: Cell<Article[]> }>(
+  (_, { articles }) => {
+    articles.set([]);
+  },
+);
 
-  // WORKING: derive() wrapper defers evaluation
+export default pattern<Input>(({ articles }) => {
+  // WORKING: derive() wrapper defers template evaluation
   // Framework tracks dependencies, evaluates inside reactive context
-  const workingSummaries = articles.map((article) => ({
+  const summaries = articles.map((article) => ({
     article,
     summary: generateObject<Summary>({
-      system: "Summarize the article into main points.",
-      // WORKING: derive() defers template evaluation until reactive context
+      system: "Summarize the article. Return main points and overall sentiment.",
+      // derive() defers template evaluation until reactive context
       prompt: derive(article, (a) => {
         if (!a) return "";
         return `Title: ${a.title}\n\nContent: ${a.content}`;
@@ -100,101 +97,90 @@ export default pattern<Input>(({ articles }) => {
       <div style={{ padding: "20px", maxWidth: "800px", fontFamily: "system-ui" }}>
         <h2>Template Strings Require derive()</h2>
 
-        <p style={{ color: "#666" }}>
-          This pattern tests that template strings with multiple properties need derive() wrapper.
-          The working version uses derive() to defer template evaluation.
-        </p>
+        <div style={{ padding: "15px", background: "#fff3e0", borderRadius: "6px", marginBottom: "20px" }}>
+          <strong>Folk Wisdom Claim:</strong> Template strings accessing multiple OpaqueRef properties
+          need a derive() wrapper.
+        </div>
+
+        {/* Broken code example (documentation only) */}
+        <div style={{ border: "2px solid #f44336", borderRadius: "6px", padding: "15px", marginBottom: "20px" }}>
+          <h3 style={{ color: "#f44336", marginTop: 0 }}>BROKEN (fails to compile)</h3>
+          <pre style={{ background: "#ffebee", padding: "10px", borderRadius: "4px", overflow: "auto", fontSize: "12px" }}>
+{`// This code fails at compile time:
+const summaries = articles.map((article) => ({
+  summary: generateObject<Summary>({
+    prompt: \`Title: \${article.title}\\nContent: \${article.content}\`,
+  }),
+}));
+
+// Error: "Tried to directly access an opaque value"`}
+          </pre>
+          <p style={{ fontSize: "13px", color: "#666", margin: "10px 0 0 0" }}>
+            JavaScript evaluates <code>${`{article.title}`}</code> immediately, but <code>article</code> is
+            an OpaqueRef that requires reactive context.
+          </p>
+        </div>
+
+        {/* Working code example */}
+        <div style={{ border: "2px solid #4CAF50", borderRadius: "6px", padding: "15px", marginBottom: "20px" }}>
+          <h3 style={{ color: "#4CAF50", marginTop: 0 }}>WORKING (this pattern)</h3>
+          <pre style={{ background: "#e8f5e9", padding: "10px", borderRadius: "4px", overflow: "auto", fontSize: "12px" }}>
+{`// This code works:
+const summaries = articles.map((article) => ({
+  summary: generateObject<Summary>({
+    prompt: derive(article, (a) =>
+      \`Title: \${a.title}\\nContent: \${a.content}\`
+    ),
+  }),
+}));`}
+          </pre>
+          <p style={{ fontSize: "13px", color: "#666", margin: "10px 0 0 0" }}>
+            <code>derive()</code> defers template evaluation until reactive context is established.
+          </p>
+        </div>
 
         <div style={{ margin: "20px 0" }}>
           <ct-message-input
-            placeholder="Enter: Title | Content (e.g., 'React Tips | Use hooks for state')"
+            placeholder="Add article: Title | Content (e.g., 'React Tips | Hooks simplify state')"
             appearance="rounded"
             onct-send={addArticle({ articles })}
           />
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginTop: "20px" }}>
-          {/* BROKEN VERSION */}
-          <div style={{ border: "2px solid #f44336", borderRadius: "6px", padding: "15px" }}>
-            <h3 style={{ color: "#f44336", marginTop: 0 }}>BROKEN: Direct Template</h3>
-            <p style={{ fontSize: "13px", color: "#666" }}>
-              Using <code>`Title: $&#123;article.title&#125;...`</code> directly
-            </p>
-            <p style={{ fontSize: "12px", color: "#d32f2f", background: "#ffebee", padding: "8px", borderRadius: "4px" }}>
-              Expected: "Tried to directly access an opaque value" error in console
-            </p>
+        <div style={{ marginBottom: "10px" }}>
+          <ct-button onClick={clearArticles({ articles })}>Clear Articles</ct-button>
+          <span style={{ marginLeft: "10px", color: "#666" }}>
+            {derive({ articles }, ({ articles: arr }) => `${arr.length} article(s)`)}
+          </span>
+        </div>
 
-            {brokenSummaries.map((item, idx) => (
-              <div
-                key={idx}
-                style={{ margin: "10px 0", padding: "10px", background: "#ffebee", borderRadius: "4px" }}
-              >
-                <div style={{ fontSize: "12px", marginBottom: "8px" }}>
-                  <strong>{item.article.title}</strong>
-                </div>
-                {derive(
-                  [item.summary.pending, item.summary.result, item.summary.error],
-                  ([pending, result, error]) => {
-                    if (pending) {
-                      return (
-                        <div style={{ color: "#666" }}>
-                          <ct-loader show-elapsed /> Generating...
-                        </div>
-                      );
-                    }
-                    if (error) {
-                      return (
-                        <div style={{ color: "#d32f2f", fontSize: "12px" }}>
-                          <strong>Error (expected):</strong> {String(error)}
-                        </div>
-                      );
-                    }
-                    const summaryResult = result as Summary | undefined;
-                    if (summaryResult) {
-                      return (
-                        <div style={{ fontSize: "12px" }}>
-                          <strong>Unexpected success!</strong> (This shouldn't happen)
-                        </div>
-                      );
-                    }
-                    return null;
-                  },
-                )}
-              </div>
-            ))}
-          </div>
-
-          {/* WORKING VERSION */}
-          <div style={{ border: "2px solid #4CAF50", borderRadius: "6px", padding: "15px" }}>
-            <h3 style={{ color: "#4CAF50", marginTop: 0 }}>WORKING: derive() Wrapper</h3>
-            <p style={{ fontSize: "13px", color: "#666" }}>
-              Using <code>derive(article, a =&gt; `Title: $&#123;a.title&#125;...`)</code>
-            </p>
-            <p style={{ fontSize: "12px", color: "#4CAF50", background: "#e8f5e9", padding: "8px", borderRadius: "4px" }}>
-              Expected: Successful generation, no errors
-            </p>
-
-            {workingSummaries.map((item, idx) => (
+        {/* Live results */}
+        <div style={{ marginTop: "20px" }}>
+          <h3>Live Results (using derive() approach):</h3>
+          {summaries.map((item, idx) => (
             <div
               key={idx}
-              style={{ margin: "10px 0", padding: "10px", background: "#e8f5e9", borderRadius: "4px" }}
+              style={{ margin: "10px 0", padding: "15px", background: "#f5f5f5", borderRadius: "6px" }}
             >
-              <div style={{ fontSize: "12px", marginBottom: "8px" }}>
-                <strong>{item.article.title}</strong>
+              <div style={{ fontWeight: "bold", marginBottom: "10px" }}>
+                {item.article.title}
+              </div>
+              <div style={{ fontSize: "13px", color: "#666", marginBottom: "10px" }}>
+                {item.article.content}
               </div>
               {derive(
                 [item.summary.pending, item.summary.result, item.summary.error],
                 ([pending, result, error]) => {
                   if (pending) {
                     return (
-                      <div style={{ color: "#666" }}>
-                        <ct-loader show-elapsed /> Generating...
+                      <div style={{ color: "#1976d2" }}>
+                        <ct-loader show-elapsed /> Generating summary...
                       </div>
                     );
                   }
                   if (error) {
                     return (
-                      <div style={{ color: "#d32f2f", fontSize: "12px" }}>
+                      <div style={{ color: "#d32f2f", fontSize: "13px" }}>
                         <strong>Error:</strong> {String(error)}
                       </div>
                     );
@@ -202,62 +188,40 @@ export default pattern<Input>(({ articles }) => {
                   const summaryResult = result as Summary | undefined;
                   if (summaryResult) {
                     return (
-                      <div style={{ fontSize: "12px" }}>
-                        <strong>Summary:</strong>
-                        <ul style={{ margin: "5px 0", paddingLeft: "20px" }}>
-                          {summaryResult.mainPoints.map((point: string, i: number) => (
-                            <li key={i}>{point}</li>
-                          ))}
-                        </ul>
-                        <div>Words: {summaryResult.wordCount}</div>
+                      <div style={{ fontSize: "13px" }}>
+                        <div style={{ marginBottom: "8px" }}>
+                          <strong>Main Points:</strong>
+                          <ul style={{ margin: "5px 0", paddingLeft: "20px" }}>
+                            {summaryResult.mainPoints.map((point: string, i: number) => (
+                              <li key={i}>{point}</li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div>
+                          <strong>Sentiment:</strong> {summaryResult.sentiment}
+                        </div>
                       </div>
                     );
                   }
-                  return null;
+                  return <div style={{ color: "#666" }}>Waiting for input...</div>;
                 },
               )}
             </div>
           ))}
-          </div>
         </div>
 
-        <div
-          style={{
-            marginTop: "30px",
-            padding: "20px",
-            background: "#e3f2fd",
-            borderRadius: "6px",
-          }}
-        >
-          <h3 style={{ marginTop: 0 }}>Manual Testing Instructions:</h3>
-          <ol style={{ lineHeight: 1.8 }}>
-            <li>Add an article: "React Hooks | React Hooks let you use state"</li>
-            <li>Open DevTools Console - look for errors</li>
-            <li>Working version should show successful summary</li>
-          </ol>
-
-          <div
-            style={{
-              marginTop: "15px",
-              padding: "10px",
-              background: "white",
-              borderRadius: "4px",
-              fontSize: "13px",
-            }}
-          >
-            <strong>Why derive() Is Needed:</strong>
-            <ul style={{ margin: "10px 0", paddingLeft: "20px" }}>
-              <li>JavaScript evaluates template strings IMMEDIATELY</li>
-              <li>`foo $&#123;bar.baz&#125;` tries to access bar.baz before calling the function</li>
-              <li>But article is an OpaqueRef requiring reactive tracking</li>
-              <li>derive() defers evaluation until reactive context is established</li>
-            </ul>
-          </div>
+        <div style={{ marginTop: "30px", padding: "15px", background: "#e3f2fd", borderRadius: "6px" }}>
+          <h4 style={{ marginTop: 0 }}>Why derive() Is Needed:</h4>
+          <ul style={{ margin: 0, paddingLeft: "20px", lineHeight: 1.8 }}>
+            <li>JavaScript evaluates template strings <strong>immediately</strong></li>
+            <li><code>`$&#123;article.title&#125;`</code> tries to access the property NOW</li>
+            <li>But <code>article</code> is an OpaqueRef requiring reactive tracking</li>
+            <li><code>derive()</code> defers evaluation until reactive context exists</li>
+          </ul>
         </div>
       </div>
     ),
     articles,
-    brokenSummaries,
-    workingSummaries,
+    summaries,
   };
 });

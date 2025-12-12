@@ -10,6 +10,14 @@ failing) or know when to properly reschedule them.**
 
 ## Overview
 
+> **Polling-Based Architecture**
+>
+> This service is polling-based, not event-driven:
+> - Polls registered charms every ~60 seconds (configurable via `POLLING_INTERVAL_MS`)
+> - `bgUpdater` handlers do not automatically trigger when captured cells change
+> - On each poll, sends `{}` to the charm's `bgUpdater` Stream
+> - For real-time updates, use browser-triggered handlers instead
+
 The Background Charm Service runs charms in the background with:
 
 - Space-based isolation for charm execution (one web worker per space)
