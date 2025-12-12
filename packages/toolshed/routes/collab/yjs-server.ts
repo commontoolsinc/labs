@@ -85,13 +85,25 @@ function broadcastToRoom(
 }
 
 /**
+ * Authenticated user identity passed from handler
+ */
+export interface UserIdentity {
+  userDid: string;
+}
+
+/**
  * Handle a new WebSocket connection to a room
  */
-export function handleConnection(socket: WebSocket, roomId: string): void {
+export function handleConnection(
+  socket: WebSocket,
+  roomId: string,
+  userIdentity?: UserIdentity,
+): void {
   const room = getOrCreateRoom(roomId);
   room.clients.add(socket);
+  const userInfo = userIdentity ? ` (user: ${userIdentity.userDid})` : " (anonymous)";
   console.log(
-    `[collab] Client connected to room ${roomId}. Total clients: ${room.clients.size}`,
+    `[collab] Client connected to room ${roomId}${userInfo}. Total clients: ${room.clients.size}`,
   );
 
   // Send sync step 1 (state vector) to the new client

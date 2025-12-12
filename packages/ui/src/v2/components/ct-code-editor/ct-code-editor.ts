@@ -39,6 +39,7 @@ import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 import { Mentionable, MentionableArray } from "../../core/mentionable.ts";
+import { createCollabAuthToken } from "../../core/collab-auth.ts";
 
 /**
  * Supported MIME types for syntax highlighting
@@ -872,7 +873,7 @@ export class CTCodeEditor extends BaseElement {
     this._updateMentionedFromContent();
   }
 
-  private _initializeEditor(): void {
+  private async _initializeEditor(): Promise<void> {
     const editorElement = this.shadowRoot?.querySelector(
       ".code-editor",
     ) as HTMLElement;
@@ -888,8 +889,27 @@ export class CTCodeEditor extends BaseElement {
       this._ydoc = new Y.Doc();
       ytext = this._ydoc.getText("codemirror");
 
-      // Connect to collaboration server
-      const collabUrl = this._getCollabUrl();
+      // Connect to collaboration server with auth if we have a Cell
+      let collabUrl = this._getCollabUrl();
+
+      // Sign auth token if we have a Cell value
+      if (isCell(this.value)) {
+        try {
+          const authToken = await createCollabAuthToken(this.value, roomId);
+          if (authToken) {
+            // Append auth params to URL - y-websocket preserves query params when adding roomId
+            const url = new URL(collabUrl);
+            url.searchParams.set("payload", authToken.payload);
+            url.searchParams.set("sig", authToken.signature);
+            url.searchParams.set("did", authToken.did);
+            collabUrl = url.toString();
+            console.log(`[ct-code-editor] Auth token created for user: ${authToken.did}`);
+          }
+        } catch (error) {
+          console.warn(`[ct-code-editor] Failed to create auth token:`, error);
+        }
+      }
+
       this._provider = new WebsocketProvider(collabUrl, roomId, this._ydoc);
 
       // Set awareness state for cursor presence

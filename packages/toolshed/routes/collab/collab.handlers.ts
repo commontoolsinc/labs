@@ -3,23 +3,49 @@ import type * as Routes from "./collab.routes.ts";
 import { createSpan } from "@/middlewares/opentelemetry.ts";
 import * as YjsServer from "./yjs-server.ts";
 import * as HttpStatusCodes from "stoker/http-status-codes";
+import { extractAuthToken, verifyCollabAuth } from "./collab.auth.ts";
 
 /**
  * Handle WebSocket upgrade for collaborative editing
  */
-export const websocket: AppRouteHandler<typeof Routes.websocket> = (c) => {
-  return createSpan("collab.websocket", (span) => {
+export const websocket: AppRouteHandler<typeof Routes.websocket> = async (c) => {
+  return await createSpan("collab.websocket", async (span) => {
     try {
       const { roomId } = c.req.valid("param");
       span.setAttribute("collab.roomId", roomId);
       span.setAttribute("collab.operation", "websocket_upgrade");
+
+      // Extract and verify auth token if present
+      const url = new URL(c.req.url);
+      const token = extractAuthToken(url);
+
+      let userIdentity: { userDid: string } | undefined;
+
+      if (token) {
+        const authResult = await verifyCollabAuth(token, roomId);
+        if (authResult.error) {
+          span.setAttribute("collab.auth.status", "failed");
+          span.setAttribute("collab.auth.error", authResult.error.code);
+          console.warn(`[collab] Auth failed for room ${roomId}: ${authResult.error.message}`);
+          // For now, allow connection but log the failure
+          // TODO: Return 401 when auth is required
+        } else if (authResult.ok) {
+          span.setAttribute("collab.auth.status", "success");
+          span.setAttribute("collab.auth.userDid", authResult.ok.userDid);
+          userIdentity = { userDid: authResult.ok.userDid };
+          console.log(`[collab] Auth success for room ${roomId}: ${authResult.ok.userDid}`);
+        }
+      } else {
+        span.setAttribute("collab.auth.status", "missing");
+        console.warn(`[collab] No auth token for room ${roomId} - allowing anonymous connection`);
+      }
 
       // Upgrade to WebSocket
       const { socket, response } = Deno.upgradeWebSocket(c.req.raw);
       span.setAttribute("websocket.upgrade", "success");
 
       // Handle the connection in the Yjs server
-      YjsServer.handleConnection(socket, roomId);
+      YjsServer.handleConnection(socket, roomId, userIdentity);
 
       return response;
     } catch (error) {

@@ -19,6 +19,7 @@ import { WebsocketProvider } from "y-websocket";
 import { type Cell, getEntityId, isCell } from "@commontools/runner";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
+import { createCollabAuthToken } from "../../core/collab-auth.ts";
 
 /**
  * CTRichtextEditor - Rich text editor component with collaborative editing support
@@ -273,7 +274,7 @@ export class CTRichtextEditor extends BaseElement {
     this._setupCellSyncHandler();
   }
 
-  private _initializeEditor(): void {
+  private async _initializeEditor(): Promise<void> {
     const editorElement = this.shadowRoot?.querySelector(
       ".richtext-editor",
     ) as HTMLElement;
@@ -295,8 +296,27 @@ export class CTRichtextEditor extends BaseElement {
       // Create Y.Doc
       this._ydoc = new Y.Doc();
 
-      // Connect to collaboration server
-      const collabUrl = this._getCollabUrl();
+      // Connect to collaboration server with auth if we have a Cell
+      let collabUrl = this._getCollabUrl();
+
+      // Sign auth token if we have a Cell value
+      if (isCell(this.value)) {
+        try {
+          const authToken = await createCollabAuthToken(this.value, roomId);
+          if (authToken) {
+            // Append auth params to URL - y-websocket preserves query params when adding roomId
+            const url = new URL(collabUrl);
+            url.searchParams.set("payload", authToken.payload);
+            url.searchParams.set("sig", authToken.signature);
+            url.searchParams.set("did", authToken.did);
+            collabUrl = url.toString();
+            console.log(`[ct-richtext-editor] Auth token created for user: ${authToken.did}`);
+          }
+        } catch (error) {
+          console.warn(`[ct-richtext-editor] Failed to create auth token:`, error);
+        }
+      }
+
       this._provider = new WebsocketProvider(collabUrl, roomId, this._ydoc);
 
       // Log connection status
