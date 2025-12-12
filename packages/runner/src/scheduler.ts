@@ -572,11 +572,15 @@ export class Scheduler {
         this.runningPromise = Promise.resolve(
           this.runtime.harness.invoke(() => action(tx)),
         ).then(() => {
+          const duration = (performance.now() - actionStartTime) / 1000;
+          if (duration > 10) {
+            console.warn(`Slow action: ${duration.toFixed(3)}s`, action);
+          }
           logger.debug("action-timing", () => {
-            const duration = ((performance.now() - actionStartTime) / 1000)
-              .toFixed(3);
             return [
-              `Action ${action.name || "anonymous"} completed in ${duration}s`,
+              `Action ${action.name || "anonymous"} completed in ${
+                duration.toFixed(3)
+              }s`,
             ];
           });
           finalize();
