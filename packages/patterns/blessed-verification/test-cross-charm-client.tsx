@@ -35,7 +35,6 @@ import {
   UI,
   wish,
 } from "commontools";
-import ct from "commontools";
 
 interface Input {
   // Toggle between Mode A (wish only) and Mode B (wish + ct.render)

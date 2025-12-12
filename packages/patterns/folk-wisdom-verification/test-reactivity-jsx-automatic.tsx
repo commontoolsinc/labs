@@ -153,7 +153,7 @@ export default pattern<TestInput>(({ count, user, items }) => {
           >
             <strong>Array mapping:</strong>
             <ul style={{ margin: "5px 0 0 0", paddingLeft: "20px" }}>
-              {items.map((item) => <li>{item.title}</li>)}
+              {items.map((item, i) => <li key={i}>{item.title}</li>)}
             </ul>
           </div>
         </div>
