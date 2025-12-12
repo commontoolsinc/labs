@@ -10,6 +10,7 @@ This guide consolidates common errors, debugging workflows, and troubleshooting 
 | "Property X does not exist on type 'OpaqueRef\<unknown\>'" | Missing type annotation in `.map()` | [Type Errors](#type-errors) |
 | "Type 'string' is not assignable to type 'CSSProperties'" | Using string style on HTML element | [Style Errors](#style-errors) |
 | "Type 'OpaqueRef\<T\>' is not assignable to 'Cell\<T\>'" | Binding whole item instead of property | [Type Errors](#type-errors) |
+| Using `OpaqueRef<T>` in Output interface for handlers | Should use `Stream<T>` instead | [OpaqueRef in Output Interface Handlers](#opaqueref-in-output-interface-handlers) |
 | Data not updating in UI | Missing `$` prefix or wrong event name | [Reactivity Issues](#reactivity-issues) |
 | Filtered list not updating | Need `computed()` outside JSX | [Reactivity Issues](#reactivity-issues) |
 | Can't access variable in nested scope | Variable scoping limitation | [Reactivity Issues](#reactivity-issues) |
@@ -128,6 +129,30 @@ const addItem = handler<
 ```
 
 **Rule:** Never use `OpaqueRef<>` in handler signatures. Always use `Cell<T[]>`.
+
+### OpaqueRef in Output Interface Handlers
+
+**Error:** Type errors when exposing handlers in Output interface
+
+❌ **Problem:** Using `OpaqueRef<>` for handlers in Output interface
+
+```typescript
+interface Output {
+  increment: OpaqueRef<void>;  // Wrong!
+  addItem: OpaqueRef<{ title: string }>;  // Wrong!
+}
+```
+
+✅ **Solution:** Use `Stream<T>` for handlers in Output interfaces
+
+```typescript
+interface Output {
+  increment: Stream<void>;  // Correct!
+  addItem: Stream<{ title: string }>;  // Correct!
+}
+```
+
+**Rule:** Handlers in Output interfaces must be typed as `Stream<T>`, not `OpaqueRef<T>`. See [TYPES_AND_SCHEMAS.md](TYPES_AND_SCHEMAS.md) section "Handler Types in Output Interfaces" for details.
 
 ### Cell<T[]> vs Cell<Array<Cell<T>>>
 

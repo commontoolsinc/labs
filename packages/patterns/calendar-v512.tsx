@@ -8,9 +8,9 @@ import {
   ifElse,
   lift,
   NAME,
-  OpaqueRef,
   recipe,
   str,
+  Stream,
   UI,
 } from "commontools";
 
@@ -83,17 +83,17 @@ interface Output {
   currentDate: string;
   name: string;
   customTimeLabels: TimeLabel[];
-  addEntry: OpaqueRef<{ date: string; text: string }>;
-  updateEntry: OpaqueRef<{ date: string; noteId: string; text: string }>;
-  goToDate: OpaqueRef<{ date: string }>;
-  rename: OpaqueRef<{ name: string }>;
+  addEntry: Stream<{ date: string; text: string }>;
+  updateEntry: Stream<{ date: string; noteId: string; text: string }>;
+  goToDate: Stream<{ date: string }>;
+  rename: Stream<{ name: string }>;
 
   // Field setters
-  setScheduledTime: OpaqueRef<
+  setScheduledTime: Stream<
     { date: string; noteId: string; scheduledTime?: string }
   >;
-  setDuration: OpaqueRef<{ date: string; noteId: string; duration?: string }>;
-  setNotification: OpaqueRef<
+  setDuration: Stream<{ date: string; noteId: string; duration?: string }>;
+  setNotification: Stream<
     {
       date: string;
       noteId: string;
@@ -104,7 +104,7 @@ interface Output {
   >;
 
   // Series management
-  createSeries: OpaqueRef<
+  createSeries: Stream<
     {
       text: string;
       rrule: string;
@@ -118,7 +118,7 @@ interface Output {
       count?: number;
     }
   >;
-  updateSeries: OpaqueRef<
+  updateSeries: Stream<
     {
       seriesId: string;
       text?: string;
@@ -132,7 +132,7 @@ interface Output {
       count?: number;
     }
   >;
-  deleteSeries: OpaqueRef<{ seriesId: string }>;
+  deleteSeries: Stream<{ seriesId: string }>;
 }
 
 // Format time in AM/PM format - base function
