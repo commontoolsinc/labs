@@ -4319,4 +4319,116 @@ describe("Cell success callbacks", () => {
       expect(schemaCell.schema).toBeUndefined();
     });
   });
+
+  describe("pull()", () => {
+    it("should return the cell value in push mode", async () => {
+      const c = runtime.getCell<number>(space, "pull-test-1", undefined, tx);
+      c.set(42);
+      await tx.commit();
+      tx = runtime.edit();
+
+      const value = await c.pull();
+      expect(value).toBe(42);
+    });
+
+    it("should wait for dependent computations in push mode", async () => {
+      // Create a source cell
+      const source = runtime.getCell<number>(
+        space,
+        "pull-source",
+        undefined,
+        tx,
+      );
+      source.set(5);
+      await tx.commit();
+      tx = runtime.edit();
+
+      // Create a computation that depends on source
+      const computed = runtime.getCell<number>(
+        space,
+        "pull-computed",
+        undefined,
+        tx,
+      );
+
+      const action = (actionTx: IExtendedStorageTransaction) => {
+        const val = source.withTx(actionTx).get();
+        computed.withTx(actionTx).set(val * 2);
+      };
+
+      // Run once to set up initial value and log reads
+      const setupTx = runtime.edit();
+      action(setupTx);
+      const log = txToReactivityLog(setupTx);
+      await setupTx.commit();
+
+      // Subscribe the computation
+      runtime.scheduler.subscribe(action, log, { scheduleImmediately: true });
+
+      // Pull should wait for the computation to run
+      const value = await computed.pull();
+      expect(value).toBe(10);
+    });
+
+    it("should work in pull mode", async () => {
+      runtime.scheduler.enablePullMode();
+
+      // In pull mode, pull() works the same way - it registers as an effect
+      // and waits for the scheduler. The key difference is that pull() ensures
+      // the effect mechanism is used, which triggers pull-based execution.
+      const c = runtime.getCell<number>(space, "pull-mode-cell", undefined, tx);
+      c.set(42);
+      await tx.commit();
+      tx = runtime.edit();
+
+      const value = await c.pull();
+      expect(value).toBe(42);
+
+      // Verify we can pull after updates
+      const tx2 = runtime.edit();
+      c.withTx(tx2).set(100);
+      await tx2.commit();
+
+      const value2 = await c.pull();
+      expect(value2).toBe(100);
+
+      runtime.scheduler.disablePullMode();
+    });
+
+    it("should handle multiple sequential pulls", async () => {
+      const c = runtime.getCell<number>(space, "pull-multi", undefined, tx);
+      c.set(1);
+      await tx.commit();
+
+      expect(await c.pull()).toBe(1);
+
+      const tx2 = runtime.edit();
+      c.withTx(tx2).set(2);
+      await tx2.commit();
+
+      expect(await c.pull()).toBe(2);
+
+      const tx3 = runtime.edit();
+      c.withTx(tx3).set(3);
+      await tx3.commit();
+
+      expect(await c.pull()).toBe(3);
+    });
+
+    it("should pull nested cell values", async () => {
+      const c = runtime.getCell<{ a: { b: number } }>(
+        space,
+        "pull-nested",
+        undefined,
+        tx,
+      );
+      c.set({ a: { b: 99 } });
+      await tx.commit();
+      tx = runtime.edit();
+
+      const nested = c.key("a").key("b");
+      const value = await nested.pull();
+      expect(value).toBe(99);
+    });
+  });
 });

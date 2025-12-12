@@ -129,6 +129,11 @@ declare module "@commontools/api" {
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
     sink(callback: (value: Readonly<T>) => Cancel | undefined | void): Cancel;
     sync(): Promise<Cell<T>> | Cell<T>;
+<<<<<<< HEAD
+=======
+    resolveToRoot(): Cell<unknown>;
+    pull(): Promise<Readonly<T>>;
+>>>>>>> d07e61c1c (feat(cell): add pull() method for demand-driven value retrieval)
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
@@ -233,6 +238,7 @@ const cellMethods = new Set<keyof ICell<unknown>>([
   "withTx",
   "sink",
   "sync",
+  "pull",
   "getAsQueryResult",
   "getAsNormalizedFullLink",
   "getAsLink",
@@ -551,6 +557,64 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       this.link,
       this.synced,
     );
+  }
+
+  /**
+   * Pull the cell's value, ensuring all dependencies are computed first.
+   *
+   * In pull-based scheduling mode, computations don't run automatically when
+   * their inputs change - they only run when pulled by an effect. This method
+   * registers a temporary effect that reads the cell's value, triggering the
+   * scheduler to compute all transitive dependencies first.
+   *
+   * In push-based mode (the default), this is equivalent to `await idle()`
+   * followed by `get()`, but ensures consistent behavior across both modes.
+   *
+   * Use this in tests or when you need to ensure a computed value is up-to-date
+   * before reading it:
+   *
+   * ```ts
+   * // Instead of:
+   * await runtime.scheduler.idle();
+   * const value = cell.get();
+   *
+   * // Use:
+   * const value = await cell.pull();
+   * ```
+   *
+   * @returns A promise that resolves to the cell's current value after all
+   *          dependencies have been computed.
+   */
+  pull(): Promise<Readonly<T>> {
+    if (!this.synced) this.sync(); // No await, just kicking this off
+
+    return new Promise((resolve) => {
+      let result: Readonly<T>;
+      let cancel: Cancel | undefined;
+
+      const action: Action = (tx) => {
+        // Read the value inside the effect - this ensures dependencies are pulled
+        result = validateAndTransform(this.runtime, tx, this.link, this.synced);
+      };
+
+      // Run the action once to capture dependencies
+      const tx = this.runtime.edit();
+      action(tx);
+      const log = txToReactivityLog(tx);
+      tx.commit();
+
+      // Subscribe as an effect with scheduleImmediately so it runs in the next cycle
+      cancel = this.runtime.scheduler.subscribe(action, log, {
+        isEffect: true,
+        scheduleImmediately: true,
+      });
+
+      // Wait for the scheduler to process all pending work, then resolve
+      this.runtime.scheduler.idle().then(() => {
+        cancel?.();
+        resolve(result);
+      });
+    });
   }
 
   set(
