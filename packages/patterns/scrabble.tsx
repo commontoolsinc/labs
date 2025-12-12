@@ -14,7 +14,6 @@ import {
   cell,
   Cell,
   Default,
-  derive,
   handler,
   NAME,
   navigateTo,
@@ -24,21 +23,14 @@ import {
 } from "commontools";
 
 import ScrabbleGame, {
-  Letter,
-  PlacedTile,
   Player,
-  GameEvent,
-  AllRacks,
-  AllPlaced,
   createTileBag,
   drawTilesFromBag,
   getRandomColor,
-  getInitials,
   parsePlayersJson,
   parseGameEventsJson,
   parseAllRacksJson,
   parseAllPlacedJson,
-  MAX_PLAYERS,
 } from "./scrabble-game.tsx";
 
 // =============================================================================
@@ -79,11 +71,13 @@ let createGameAndNavigate: (
   myName: string
 ) => unknown = null as any;
 
-const joinGame = handler<
+// Handler for joining as a specific player slot (0 or 1)
+const joinAsPlayer = handler<
   unknown,
   {
     gameName: string;
     nameInput: Cell<string>;
+    playerSlot: number;
     boardJson: Cell<string>;
     bagJson: Cell<string>;
     bagIndex: Cell<number>;
@@ -92,23 +86,23 @@ const joinGame = handler<
     allRacksJson: Cell<string>;
     allPlacedJson: Cell<string>;
   }
->((_event, { gameName, nameInput, boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson }) => {
-  console.log("[joinGame] Handler started");
+>((_event, { gameName, nameInput, playerSlot, boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson }) => {
+  console.log(`[joinAsPlayer] Handler started for slot ${playerSlot}`);
   const name = nameInput.get().trim();
   if (!name) {
-    console.log("[joinGame] No name entered, returning");
+    console.log("[joinAsPlayer] No name entered, returning");
     return;
   }
-  console.log("[joinGame] Name:", name);
+  console.log("[joinAsPlayer] Name:", name, "Slot:", playerSlot);
 
   // Lazy initialize bag if empty
   let currentBagJson = bagJson.get();
   if (!currentBagJson || currentBagJson === "") {
-    console.log("[joinGame] Bag is empty, initializing fresh tile bag...");
+    console.log("[joinAsPlayer] Bag is empty, initializing fresh tile bag...");
     const freshBag = createTileBag();
     currentBagJson = JSON.stringify(freshBag);
     bagJson.set(currentBagJson);
-    console.log("[joinGame] Fresh bag created with", freshBag.length, "tiles");
+    console.log("[joinAsPlayer] Fresh bag created with", freshBag.length, "tiles");
   }
 
   // Initialize board if empty
@@ -118,94 +112,101 @@ const joinGame = handler<
     currentBoardJson = "[]";
   }
 
-  const existingPlayers = parsePlayersJson(playersJson.get());
-  console.log("[joinGame] Existing players:", existingPlayers.length);
-
-  if (existingPlayers.length >= MAX_PLAYERS) {
-    console.log("[joinGame] Game is full");
-    return;
-  }
-
-  // Check if name already exists (rejoining)
-  const existingPlayer = existingPlayers.find((p) => p.name === name);
-  if (existingPlayer) {
-    console.log("[joinGame] Rejoining as existing player");
-    nameInput.set("");
-    if (createGameAndNavigate) {
-      return createGameAndNavigate(gameName, boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson, name);
-    }
-    return;
-  }
-
-  // Draw 7 tiles
-  console.log("[joinGame] Drawing tiles from bag...");
+  // Draw 7 tiles for this player
+  console.log("[joinAsPlayer] Drawing tiles from bag...");
   const currentIndex = bagIndex.get();
   const drawnTiles = drawTilesFromBag(currentBagJson, currentIndex, 7);
-  console.log("[joinGame] Drew tiles:", drawnTiles.map(t => t.char).join(","));
+  console.log("[joinAsPlayer] Drew tiles:", drawnTiles.map((t) => t.char).join(","));
 
   const newIndex = currentIndex + drawnTiles.length;
   bagIndex.set(newIndex);
-  console.log("[joinGame] Bag index updated to:", newIndex);
+  console.log("[joinAsPlayer] Bag index updated to:", newIndex);
 
-  // Store in allRacksJson (using JSON string to avoid Cell array corruption)
-  console.log("[joinGame] Storing tiles in allRacksJson...");
+  // Store rack for this player
   const currentAllRacks = parseAllRacksJson(allRacksJson.get());
   currentAllRacks[name] = drawnTiles;
   allRacksJson.set(JSON.stringify(currentAllRacks));
-  console.log("[joinGame] allRacksJson updated for player:", name);
+  console.log("[joinAsPlayer] Rack stored for:", name);
 
-  // Initialize empty placed tiles (using JSON string to avoid Cell array corruption)
+  // Initialize empty placed tiles for this player
   const currentAllPlaced = parseAllPlacedJson(allPlacedJson.get());
   currentAllPlaced[name] = [];
   allPlacedJson.set(JSON.stringify(currentAllPlaced));
 
-  // Add player (using JSON string to avoid Cell array corruption)
-  const playerIndex = existingPlayers.length;
-  console.log("[joinGame] Adding player at index:", playerIndex);
+  // Create/update player at the specified slot
+  const existingPlayers = parsePlayersJson(playersJson.get());
   const newPlayer: Player = {
     name,
-    color: getRandomColor(playerIndex),
+    color: getRandomColor(playerSlot),
     score: 0,
     joinedAt: Date.now(),
   };
-  existingPlayers.push(newPlayer);
-  playersJson.set(JSON.stringify(existingPlayers));
-  console.log("[joinGame] Player added");
 
-  // Add join event (using JSON string to avoid Cell array corruption)
+  // Ensure array is big enough and set at exact slot
+  while (existingPlayers.length <= playerSlot) {
+    existingPlayers.push(null as any);
+  }
+  existingPlayers[playerSlot] = newPlayer;
+  // Filter out any null entries if slot 1 was set before slot 0
+  const cleanedPlayers = existingPlayers.filter((p) => p !== null);
+  playersJson.set(JSON.stringify(cleanedPlayers));
+  console.log("[joinAsPlayer] Player added at slot:", playerSlot);
+
+  // Add join event
   const existingEvents = parseGameEventsJson(gameEventsJson.get());
   existingEvents.push({
     id: `event-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     type: "join",
     player: name,
-    details: `${name} joined the game (drew ${drawnTiles.length} tiles)`,
+    details: `${name} joined as Player ${playerSlot + 1}`,
     timestamp: Date.now(),
   });
   gameEventsJson.set(JSON.stringify(existingEvents));
-  console.log("[joinGame] Event added");
 
   nameInput.set("");
 
   // Navigate to game room
-  console.log("[joinGame] About to call createGameAndNavigate...");
+  console.log("[joinAsPlayer] Navigating to game room...");
   if (createGameAndNavigate) {
-    console.log("[joinGame] createGameAndNavigate is defined, calling it...");
-    const result = createGameAndNavigate(gameName, boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson, name);
-    console.log("[joinGame] createGameAndNavigate returned:", result);
-    return result;
-  } else {
-    console.log("[joinGame] ERROR: createGameAndNavigate is null!");
+    return createGameAndNavigate(gameName, boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson, name);
   }
+});
+
+// Handler to reset the lobby (clear all game state)
+const resetLobby = handler<
+  unknown,
+  {
+    boardJson: Cell<string>;
+    bagJson: Cell<string>;
+    bagIndex: Cell<number>;
+    playersJson: Cell<string>;
+    gameEventsJson: Cell<string>;
+    allRacksJson: Cell<string>;
+    allPlacedJson: Cell<string>;
+  }
+>((_event, { boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson }) => {
+  console.log("[resetLobby] Resetting all game state...");
+
+  // Clear all state
+  boardJson.set("[]");
+  bagIndex.set(0);
+  playersJson.set("[]");
+  gameEventsJson.set("[]");
+  allRacksJson.set("{}");
+  allPlacedJson.set("{}");
+
+  // Initialize fresh bag
+  const freshBag = createTileBag();
+  bagJson.set(JSON.stringify(freshBag));
+
+  console.log("[resetLobby] Game state reset complete");
 });
 
 const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
   ({ gameName, boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson }) => {
-    const nameInput = cell("");
-
-    // Parse players from JSON for UI display - use derive() for proper reactivity
-    const currentPlayers = derive(playersJson, (json: string) => parsePlayersJson(json));
-    const playerCount = derive(currentPlayers, (p: Player[]) => p.length);
-    const isFull = derive(currentPlayers, (p: Player[]) => p.length >= MAX_PLAYERS);
+    // Separate name inputs for each player slot
+    const player1NameInput = cell("");
+    const player2NameInput = cell("");
 
     return {
       [NAME]: str`${gameName} - Lobby`,
@@ -228,142 +229,136 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
               padding: "2rem",
             }}
           >
-            <h1 style={{ marginBottom: "0.5rem", color: "#fff", fontSize: "2.5rem", fontWeight: "bold" }}>
+            <h1 style={{ marginBottom: "0.5rem", color: "#fff", fontSize: "3rem", fontWeight: "700", letterSpacing: "-0.02em" }}>
               SCRABBLE
             </h1>
-            <p style={{ marginBottom: "0.5rem", color: "#c5e1a5", fontSize: "1.2rem" }}>{gameName}</p>
-            <p style={{ marginBottom: "2rem", color: "#a5d6a7" }}>Free-for-all multiplayer - no turns!</p>
+            <p style={{ marginBottom: "2.5rem", color: "rgba(255,255,255,0.7)", fontSize: "1.1rem" }}>
+              Free-for-all multiplayer — no turns!
+            </p>
 
-            <div
-              style={{
-                width: "100%",
-                maxWidth: "400px",
-                padding: "1.5rem",
-                backgroundColor: isFull ? "#fee2e2" : "#dbeafe",
-                borderRadius: "12px",
-                border: isFull ? "2px solid #ef4444" : "2px solid #3b82f6",
-              }}
-            >
+            {/* Two Player Join Sections */}
+            <div style={{ display: "flex", gap: "1.5rem", marginBottom: "1.5rem" }}>
+              {/* Player 1 Section */}
               <div
                 style={{
-                  fontSize: "1rem",
-                  fontWeight: "600",
-                  marginBottom: "1rem",
-                  color: isFull ? "#dc2626" : "#1e40af",
+                  width: "240px",
+                  padding: "1.5rem",
+                  backgroundColor: "white",
+                  borderRadius: "16px",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
                 }}
               >
-                {isFull ? "Game Full - 2/2 Players" : `Enter Your Name (${playerCount}/2 players)`}
-              </div>
-              <ct-input
-                $value={nameInput}
-                placeholder="Your name..."
-                style="width: 100%; margin-bottom: 1rem;"
-                timingStrategy="immediate"
-                disabled={isFull}
-                onct-submit={joinGame({ gameName, nameInput, boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson })}
-              />
-              <ct-button
-                style={`width: 100%; font-weight: 600; padding: 0.75rem; font-size: 1rem; ${
-                  isFull
-                    ? "background-color: #9ca3af; color: #6b7280; cursor: not-allowed;"
-                    : "background-color: #3b82f6; color: white;"
-                }`}
-                disabled={isFull}
-                onClick={joinGame({ gameName, nameInput, boardJson, bagJson, bagIndex, playersJson, gameEventsJson, allRacksJson, allPlacedJson })}
-              >
-                {isFull ? "Game Full" : "Join Game"}
-              </ct-button>
-            </div>
-
-            <p
-              style={{
-                marginTop: "1.5rem",
-                fontSize: "0.875rem",
-                color: "#fef3c7",
-                backgroundColor: "#78350f",
-                padding: "0.75rem 1rem",
-                borderRadius: "8px",
-                maxWidth: "400px",
-                textAlign: "center",
-              }}
-            >
-              <strong>Tip:</strong> Both players can place and submit words at the same time!
-            </p>
-          </div>
-
-          <div
-            style={{
-              width: "120px",
-              padding: "1rem",
-              backgroundColor: "#1a3009",
-              borderLeft: "1px solid #4a7c23",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.5rem",
-            }}
-          >
-            <div
-              style={{
-                fontSize: "0.75rem",
-                fontWeight: "600",
-                color: "#a5d6a7",
-                textAlign: "center",
-                marginBottom: "0.5rem",
-              }}
-            >
-              PLAYERS
-            </div>
-
-            {[0, 1].map((slot) => {
-              const hasPlayer = derive(currentPlayers, (p: Player[]) => !!p[slot]);
-              const playerColor = derive(currentPlayers, (p: Player[]) => p[slot]?.color || "#3f3f46");
-              const playerName = derive(currentPlayers, (p: Player[]) => p[slot]?.name || `Player ${slot + 1}`);
-              const playerInitials = derive(currentPlayers, (p: Player[]) => p[slot] ? getInitials(p[slot].name) : "?");
-              return (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    padding: "0.5rem",
-                    backgroundColor: playerColor,
-                    borderRadius: "8px",
-                    opacity: hasPlayer ? 1 : 0.5,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: "48px",
-                      height: "48px",
-                      borderRadius: "50%",
-                      backgroundColor: hasPlayer ? "rgba(255,255,255,0.2)" : "#52525b",
-                      color: "white",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: "600",
-                      fontSize: "14px",
-                    }}
-                  >
-                    {playerInitials}
-                  </div>
-                  <div
-                    style={{
-                      marginTop: "0.25rem",
-                      fontSize: "0.75rem",
-                      color: "white",
-                      textAlign: "center",
-                      maxWidth: "100px",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {playerName}
-                  </div>
+                <div style={{ fontSize: "0.75rem", fontWeight: "500", color: "#86868b", marginBottom: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  Player 1
                 </div>
-              );
-            })}
+                <ct-input
+                  $value={player1NameInput}
+                  placeholder="Your name"
+                  style="width: 100%; margin-bottom: 1rem;"
+                  timingStrategy="immediate"
+                />
+                <button
+                  style={{
+                    width: "100%",
+                    padding: "0.75rem 1.5rem",
+                    fontSize: "1rem",
+                    backgroundColor: "#3d7c1f",
+                    color: "white",
+                    fontWeight: "600",
+                    border: "none",
+                    borderRadius: "8px",
+                    cursor: "pointer",
+                  }}
+                  onClick={joinAsPlayer({
+                    gameName,
+                    nameInput: player1NameInput,
+                    playerSlot: 0,
+                    boardJson,
+                    bagJson,
+                    bagIndex,
+                    playersJson,
+                    gameEventsJson,
+                    allRacksJson,
+                    allPlacedJson,
+                  })}
+                >
+                  Join
+                </button>
+              </div>
+
+              {/* Player 2 Section */}
+              <div
+                style={{
+                  width: "240px",
+                  padding: "1.5rem",
+                  backgroundColor: "white",
+                  borderRadius: "16px",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                }}
+              >
+                <div style={{ fontSize: "0.75rem", fontWeight: "500", color: "#86868b", marginBottom: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  Player 2
+                </div>
+                <ct-input
+                  $value={player2NameInput}
+                  placeholder="Your name"
+                  style="width: 100%; margin-bottom: 1rem;"
+                  timingStrategy="immediate"
+                />
+                <button
+                  style={{
+                    width: "100%",
+                    padding: "0.75rem 1.5rem",
+                    fontSize: "1rem",
+                    backgroundColor: "#3d7c1f",
+                    color: "white",
+                    fontWeight: "600",
+                    border: "none",
+                    borderRadius: "8px",
+                    cursor: "pointer",
+                  }}
+                  onClick={joinAsPlayer({
+                    gameName,
+                    nameInput: player2NameInput,
+                    playerSlot: 1,
+                    boardJson,
+                    bagJson,
+                    bagIndex,
+                    playersJson,
+                    gameEventsJson,
+                    allRacksJson,
+                    allPlacedJson,
+                  })}
+                >
+                  Join
+                </button>
+              </div>
+            </div>
+
+            {/* Reset Button */}
+            <button
+              style={{
+                marginTop: "1rem",
+                padding: "0.5rem 1rem",
+                fontSize: "0.875rem",
+                background: "none",
+                color: "rgba(255,255,255,0.6)",
+                fontWeight: "400",
+                border: "none",
+                cursor: "pointer",
+              }}
+              onClick={resetLobby({
+                boardJson,
+                bagJson,
+                bagIndex,
+                playersJson,
+                gameEventsJson,
+                allRacksJson,
+                allPlacedJson,
+              })}
+            >
+              Reset
+            </button>
           </div>
         </div>
       ),
