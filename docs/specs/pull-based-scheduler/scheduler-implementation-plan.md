@@ -416,40 +416,186 @@ Before starting, ensure you understand:
 
 ---
 
-## Phase 5: Full Migration
+## Phase 5: Push-Triggered Filtering
 
-**Goal**: Remove push-based code path after validation.
+**Goal**: Use push mode's precision to filter pull mode's conservative work set. Only run actions whose inputs actually changed.
 
-**Depends on**: Phase 4 complete + production validation
+**Depends on**: Phase 4 complete
+
+**Key Insight**: Pull mode builds a superset of what *might* need to run (conservative). Push mode knows what *actually* changed (precise). Running their intersection gives us the best of both worlds.
+
+### Background
+
+Currently in pull mode:
+1. Storage change arrives → `determineTriggeredActions` finds affected actions
+2. Effects → scheduled; Computations → marked dirty + schedule affected effects
+3. `execute()` builds work set from pending effects + dirty dependencies
+4. All actions in work set run
+
+The problem: Dirty propagation is transitive and conservative. If A might write to X, and B reads X, B gets marked dirty even if A didn't actually change X.
+
+### Solution
+
+Track what push mode would have triggered (based on actual changes), then filter the pull work set to only include those actions.
+
+```
+Pull work set: {effects} ∪ {dirty computations they depend on}  (conservative)
+Push triggered: actions whose reads overlap with actual changes  (precise)
+Actual execution: Pull work set ∩ Push triggered
+```
 
 ### Tasks
 
-#### 5.1 Enable pull mode by default
+#### 5.1 Track "might write" set per action
+
+**File**: `packages/runner/src/scheduler.ts`
+
+- [ ] Add class property:
+  ```typescript
+  private mightWrite = new WeakMap<Action, ReactivityLog>();
+  ```
+
+- [ ] After each action runs, accumulate its writes into `mightWrite`:
+  ```typescript
+  // In run() after action completes:
+  private updateMightWrite(action: Action, log: ReactivityLog): void {
+    const existing = this.mightWrite.get(action);
+    if (existing) {
+      // Merge: add any new write paths
+      this.mergeWritePaths(existing, log.writes);
+    } else {
+      this.mightWrite.set(action, { reads: [], writes: [...log.writes] });
+    }
+  }
+  ```
+
+- [ ] Use `mightWrite` instead of current-run writes for dirty propagation
+
+#### 5.2 Track push-triggered actions per cycle
+
+**File**: `packages/runner/src/scheduler.ts`
+
+- [ ] Add class property:
+  ```typescript
+  private pushTriggered = new Set<Action>();
+  ```
+
+- [ ] In `createStorageSubscription()`, when `determineTriggeredActions` returns actions:
+  ```typescript
+  for (const action of triggeredActions) {
+    this.pushTriggered.add(action);  // Track what push would run
+    // ... existing pull mode logic
+  }
+  ```
+
+- [ ] Clear `pushTriggered` at the end of each `execute()` cycle
+
+#### 5.3 Filter work set using push-triggered info
+
+**File**: `packages/runner/src/scheduler.ts`
+
+- [ ] Modify `execute()` to filter actions before running:
+  ```typescript
+  for (const fn of order) {
+    // ... existing validity checks ...
+
+    // Push-triggered filter: skip if not triggered by actual changes
+    if (this.pullMode && !this.pushTriggered.has(fn)) {
+      // Not triggered by actual changes - skip but DON'T clear dirty
+      // It stays dirty for next cycle when its inputs might change
+      this.pending.delete(fn);
+      continue;
+    }
+
+    // ... run action as normal ...
+  }
+  ```
+
+- [ ] Consider: should skipped actions keep their dirty flag? (Yes - they might be needed next cycle)
+
+#### 5.4 Handle edge cases
+
+**File**: `packages/runner/src/scheduler.ts`
+
+- [ ] Actions scheduled with `scheduleImmediately: true` should always run (bypass filter)
+
+- [ ] First run of an action (no prior `mightWrite`) should always run
+
+- [ ] Cycle members should not be filtered (cycle convergence needs all members)
+
+- [ ] Effects that were explicitly scheduled (not via storage change) should run
+
+#### 5.5 Add diagnostic API
+
+**File**: `packages/runner/src/scheduler.ts`
+
+- [ ] Add method to inspect `mightWrite` for debugging:
+  ```typescript
+  getMightWrite(action: Action): ReactivityLog | undefined
+  ```
+
+- [ ] Add stats for filtered vs executed actions:
+  ```typescript
+  getFilterStats(): { filtered: number; executed: number }
+  ```
+
+#### 5.6 Write tests
+
+**File**: `packages/runner/test/scheduler.test.ts`
+
+- [ ] Test: `mightWrite` grows from actual writes over time
+- [ ] Test: action not in `pushTriggered` is skipped
+- [ ] Test: skipped action stays dirty for next cycle
+- [ ] Test: `scheduleImmediately` bypasses filter
+- [ ] Test: first run of action bypasses filter
+- [ ] Test: cycle members are not filtered
+- [ ] Test: chained computations where intermediate doesn't change output
+- [ ] Test: filter stats are accurate
+
+#### 5.7 Verify Phase 5
+
+- [ ] All previous phase tests pass
+- [ ] New filter tests pass
+- [ ] Performance improvement measurable (fewer unnecessary runs)
+- [ ] Run `deno task test` in `packages/runner`
+
+---
+
+## Phase 6: Full Migration
+
+**Goal**: Remove push-based code path after validation.
+
+**Depends on**: Phase 5 complete + production validation
+
+### Tasks
+
+#### 6.1 Enable pull mode by default
 
 - [ ] Change `pullMode` default to `true`
 
 - [ ] Add escape hatch config to disable if needed
 
-#### 5.2 Production validation
+#### 6.2 Production validation
 
 - [ ] Deploy with feature flag
 - [ ] Monitor for regressions
 - [ ] Collect metrics on effect/computation ratios
 - [ ] Validate cycle convergence behavior
+- [ ] Validate push-triggered filtering reduces unnecessary runs
 
-#### 5.3 Remove push-based code
+#### 6.3 Remove push-based code
 
 - [ ] Remove `pullMode` flag and conditionals
 - [ ] Remove dead code paths
 - [ ] Simplify storage change handler
 
-#### 5.4 Final cleanup
+#### 6.4 Final cleanup
 
 - [ ] Update documentation
 - [ ] Remove any temporary logging
 - [ ] Clean up unused properties
 
-#### 5.5 Verify Phase 5
+#### 6.5 Verify Phase 6
 
 - [ ] All tests pass
 - [ ] Performance benchmarks show improvement
@@ -466,10 +612,11 @@ If issues are discovered at any phase:
 | 1 | Remove effect tracking code (no behavioral impact) |
 | 2 | Set `pullMode = false` (instant rollback) |
 | 3 | Cycle handling falls back to existing iteration limits |
-| 4 | Clear debounce settings, disable auto-debounce |
-| 5 | Re-enable push-based code path via config |
+| 4 | Clear debounce/throttle settings |
+| 5 | Disable push-triggered filtering (run all dirty actions) |
+| 6 | Re-enable push-based code path via config |
 
-**Critical**: Keep push-based code path until Phase 5 is fully validated in production.
+**Critical**: Keep push-based code path until Phase 6 is fully validated in production.
 
 ---
 
@@ -498,4 +645,5 @@ Update this section as phases complete:
 | Phase 2: Pull-Based Core | Complete | Claude | 2025-12-12 |
 | Phase 3: Cycle Convergence | Complete | Claude | 2025-12-12 |
 | Phase 4: Debounce & Throttle | Complete | Claude | 2025-12-12 |
-| Phase 5: Migration | Not Started | | |
+| Phase 5: Push-Triggered Filtering | Not Started | | |
+| Phase 6: Migration | Not Started | | |
