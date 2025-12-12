@@ -3484,6 +3484,12 @@ interface CTCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
   "tabSize"?: number;
   "tabIndent"?: boolean;
   "theme"?: "light" | "dark";
+  // Collaborative editing properties
+  "collaborative"?: boolean;
+  "roomId"?: string;
+  "collabUrl"?: string;
+  "userName"?: string;
+  "userColor"?: string;
   "onct-change"?: any;
   "onct-focus"?: any;
   "onct-blur"?: any;

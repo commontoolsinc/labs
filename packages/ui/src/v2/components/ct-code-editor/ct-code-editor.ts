@@ -13,6 +13,11 @@ import { html as createHtml } from "@codemirror/lang-html";
 import { json as createJson } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
 
+// Yjs collaborative editing imports
+import * as Y from "yjs";
+import { yCollab } from "y-codemirror.next";
+import { WebsocketProvider } from "y-websocket";
+
 import {
   acceptCompletion,
   autocompletion,
@@ -91,6 +96,11 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  * @attr {number} tabSize - Tab size (spaces shown for a tab, default: 2)
  * @attr {boolean} tabIndent - Indent on Tab key (default: true)
  * @attr {"light"|"dark"} theme - Editor theme mode; "dark" enables oneDark.
+ * @attr {boolean} collaborative - Enable real-time collaborative editing (default: false)
+ * @attr {string} roomId - Room ID for collaboration (defaults to Cell entity ID)
+ * @attr {string} collabUrl - WebSocket URL for collaboration server
+ * @attr {string} userName - User name for cursor presence (default: "Anonymous")
+ * @attr {string} userColor - User color for cursor presence (random if not set)
  *
  * @fires ct-change - Fired when content changes with detail: { value, oldValue, language }
  * @fires ct-focus - Fired on focus
@@ -102,6 +112,14 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  *
  * @example
  * <ct-code-editor language="text/javascript" placeholder="Enter code..."></ct-code-editor>
+ *
+ * @example Collaborative editing
+ * <ct-code-editor
+ *   .value=${noteCell}
+ *   collaborative
+ *   userName="Alice"
+ *   userColor="#f783ac"
+ * ></ct-code-editor>
  */
 export class CTCodeEditor extends BaseElement {
   static override styles = [BaseElement.baseStyles, styles];
@@ -124,6 +142,12 @@ export class CTCodeEditor extends BaseElement {
     tabSize: { type: Number },
     tabIndent: { type: Boolean },
     theme: { type: String, reflect: true },
+    // Collaborative editing props
+    collaborative: { type: Boolean },
+    roomId: { type: String },
+    collabUrl: { type: String },
+    userName: { type: String },
+    userColor: { type: String },
   };
 
   declare value: Cell<string> | string;
@@ -145,8 +169,17 @@ export class CTCodeEditor extends BaseElement {
   declare tabSize: number;
   declare tabIndent: boolean;
   declare theme: "light" | "dark";
+  // Collaborative editing properties
+  declare collaborative: boolean;
+  declare roomId?: string;
+  declare collabUrl?: string;
+  declare userName?: string;
+  declare userColor?: string;
 
   private _editorView: EditorView | undefined;
+  // Yjs collaborative state
+  private _ydoc?: Y.Doc;
+  private _provider?: WebsocketProvider;
   private _lang = new Compartment();
   private _readonly = new Compartment();
   private _wrap = new Compartment();
@@ -191,6 +224,50 @@ export class CTCodeEditor extends BaseElement {
     this.tabIndent = true;
     this.theme = "light";
     this.mentionable = null;
+    // Collaborative editing defaults
+    this.collaborative = false;
+    this.roomId = undefined;
+    this.collabUrl = undefined;
+    this.userName = "Anonymous";
+    this.userColor = this._generateUserColor();
+  }
+
+  /**
+   * Generate a random color for cursor presence
+   */
+  private _generateUserColor(): string {
+    const colors = [
+      "#f783ac", "#da77f2", "#9775fa", "#748ffc",
+      "#4dabf7", "#38d9a9", "#69db7c", "#ffd43b",
+      "#ff922b", "#ff6b6b",
+    ];
+    return colors[Math.floor(Math.random() * colors.length)];
+  }
+
+  /**
+   * Get the WebSocket URL for collaboration
+   */
+  private _getCollabUrl(): string {
+    if (this.collabUrl) return this.collabUrl;
+    // Default to toolshed on same host
+    const protocol = globalThis.location?.protocol === "https:" ? "wss:" : "ws:";
+    const host = globalThis.location?.host || "localhost:8000";
+    return `${protocol}//${host}/api/collab`;
+  }
+
+  /**
+   * Derive room ID from Cell entity ID if not provided
+   */
+  private _deriveRoomId(): string {
+    if (this.roomId) return this.roomId;
+    // Try to get entity ID from the Cell
+    if (isCell(this.value)) {
+      const entityId = getEntityId(this.value);
+      const idValue = entityId?.["/"];
+      if (idValue) return idValue;
+    }
+    // Fallback to a random ID
+    return `room-${Math.random().toString(36).slice(2)}`;
   }
 
   /**
@@ -640,6 +717,16 @@ export class CTCodeEditor extends BaseElement {
     }
     this._cleanupFns.forEach((fn) => fn());
     this._cleanupFns = [];
+    // Clean up Yjs collaborative state
+    if (this._provider) {
+      this._provider.disconnect();
+      this._provider.destroy();
+      this._provider = undefined;
+    }
+    if (this._ydoc) {
+      this._ydoc.destroy();
+      this._ydoc = undefined;
+    }
     if (this._editorView) {
       this._editorView.destroy();
       this._editorView = undefined;
@@ -786,6 +873,43 @@ export class CTCodeEditor extends BaseElement {
     ) as HTMLElement;
     if (!editorElement) return;
 
+    // Set up Yjs collaborative editing if enabled
+    let ytext: Y.Text | undefined;
+    if (this.collaborative) {
+      const roomId = this._deriveRoomId();
+      console.log(`[ct-code-editor] Setting up collaboration for room: ${roomId}`);
+
+      // Create Y.Doc
+      this._ydoc = new Y.Doc();
+      ytext = this._ydoc.getText("codemirror");
+
+      // Connect to collaboration server
+      const collabUrl = this._getCollabUrl();
+      this._provider = new WebsocketProvider(collabUrl, roomId, this._ydoc);
+
+      // Set awareness state for cursor presence
+      this._provider.awareness.setLocalStateField("user", {
+        name: this.userName || "Anonymous",
+        color: this.userColor || this._generateUserColor(),
+      });
+
+      // Initialize Y.Text with current Cell value if we're the first joiner
+      // (only if the ytext is empty and we have a value)
+      this._provider.on("sync", (synced: boolean) => {
+        if (synced && ytext && ytext.length === 0) {
+          const initialValue = this.getValue();
+          if (initialValue) {
+            ytext.insert(0, initialValue);
+          }
+        }
+      });
+
+      // Log connection status
+      this._provider.on("status", (event: { status: string }) => {
+        console.log(`[ct-code-editor] Collab status: ${event.status}`);
+      });
+    }
+
     // Create editor extensions
     const extensions: Extension[] = [
       basicSetup,
@@ -893,9 +1017,15 @@ export class CTCodeEditor extends BaseElement {
       extensions.push(placeholder(this.placeholder));
     }
 
+    // Add Yjs collaborative extension if enabled
+    if (this.collaborative && ytext && this._provider) {
+      extensions.push(yCollab(ytext, this._provider.awareness));
+    }
+
     // Create editor state
+    // For collaborative mode, let Yjs manage the document content
     const state = EditorState.create({
-      doc: this.getValue(),
+      doc: this.collaborative ? "" : this.getValue(),
       extensions,
     });
 
