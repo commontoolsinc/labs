@@ -101,11 +101,15 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  * @attr {number} tabSize - Tab size (spaces shown for a tab, default: 2)
  * @attr {boolean} tabIndent - Indent on Tab key (default: true)
  * @attr {"light"|"dark"} theme - Editor theme mode; "dark" enables oneDark.
- * @attr {boolean} collaborative - Enable real-time collaborative editing (default: false)
+ * @attr {boolean} collaborative - Enable real-time collaborative editing (default: false).
+ *   PRIVACY NOTE: When enabled, your cursor position and userName are visible to all
+ *   other users in the same room. The distinctive colored cursors serve as the visual
+ *   indicator that you are in a shared editing session. This follows the Google Docs
+ *   model where presence visibility is intrinsic to collaboration.
  * @attr {string} roomId - Room ID for collaboration (defaults to Cell entity ID)
  * @attr {string} collabUrl - WebSocket URL for collaboration server
- * @attr {string} userName - User name for cursor presence (default: "Anonymous")
- * @attr {string} userColor - User color for cursor presence (random if not set)
+ * @attr {string} userName - User name shown to other collaborators (default: "Anonymous")
+ * @attr {string} userColor - Cursor color shown to other collaborators (random if not set)
  *
  * @fires ct-change - Fired when content changes with detail: { value, oldValue, language }
  * @fires ct-focus - Fired on focus

@@ -41,6 +41,15 @@
 - Passed as URL query params: `?payload=...&sig=...&did=...`
 - Currently allows anonymous connections; can enforce auth when ready
 
+### 5. Presence/Privacy Model
+**Decision:** Collaborative mode implies full presence sharing (cursor visibility = consent)
+- When `collaborative={true}`, user's cursor position and name are broadcast to all connected clients
+- The distinctive colored cursors with name labels serve as the visual consent indicator
+- Users who see collaborative cursors know they are in a shared editing session
+- This follows the Google Docs model: presence visibility is intrinsic to the collaborative experience
+- No "sync-only" mode without presence - if you want privacy, don't enable collaborative mode
+- Security: auth ensures only authorized users can connect; presence ensures no one is surprised by sharing
+
 ### 4. Initial content sync
 **Decision:** Server initializes Y.Doc from Cell on room creation
 - Avoids race conditions
