@@ -658,28 +658,20 @@ class MemoryProviderSession<
     }
     const spaceSession = mountResult.ok as unknown as SpaceSession<Space>;
 
-    // Collect all facts from all subscriptions
-    const allFacts = new Map<string, Revision<Fact>>();
-
     // Find affected docs using the shared schemaTracker (for non-wildcard)
     const sharedAffectedDocs = this.findAffectedDocs(
       changedDocs,
       this.sharedSchemaTracker,
     );
 
-    // Process shared affected docs once for all non-wildcard subscriptions
-    if (sharedAffectedDocs.length > 0) {
-      const sharedResult = this.processIncrementalUpdate(
-        spaceSession,
-        sharedAffectedDocs,
-        space,
-      );
-      for (const [key, fact] of sharedResult.newFacts) {
-        allFacts.set(key, fact);
-      }
-    }
+    // Process shared affected docs
+    const { newFacts } = this.processIncrementalUpdate(
+      spaceSession,
+      sharedAffectedDocs,
+      space,
+    );
 
-    // Process wildcard subscriptions separately
+    // Add facts from wildcard subscriptions
     for (const [_jobId, subscription] of this.schemaChannels) {
       if (subscription.isWildcardQuery) {
         const wildcardDocs = this.findAffectedDocsForWildcard(
@@ -693,13 +685,13 @@ class MemoryProviderSession<
             space,
           );
           for (const [key, fact] of wildcardResult.newFacts) {
-            allFacts.set(key, fact);
+            newFacts.set(key, fact);
           }
         }
       }
     }
 
-    return [...allFacts.values()];
+    return [...newFacts.values()];
   }
 
   /**
