@@ -256,19 +256,15 @@ editor.commands.setContent(html, false);  // Don't emit update
 - y-codemirror.next: ~5KB
 - TipTap (full): ~50KB (but tree-shakeable)
 
-## Open Questions for Prototyping
+## Decisions
 
-1. **y-websocket deployment**: Run as separate process or embed in toolshed?
-   - Separate: simpler, can use off-the-shelf y-websocket server
-   - Embedded: single process, can reuse toolshed auth
+1. **y-websocket deployment**: **Embedded in toolshed** - fits "everything in toolshed" approach, reuses auth
 
-2. **Room derivation**: Use Cell entity ID directly, or hash it for shorter room IDs?
+2. **Room derivation**: **Direct Cell entity ID** - more debuggable, consistent with existing references
 
-3. **Authentication**: Does collab WebSocket need auth? (Probably yes - reuse existing toolshed auth)
+3. **Authentication**: **Yes, reuse toolshed auth tokens** - secure by default
 
-4. **Initial content sync**: When user joins room, how to initialize Y.Doc from Cell value?
-   - Option A: First joiner seeds from Cell, others sync from Yjs
-   - Option B: Server initializes Y.Doc from Cell on room creation
+4. **Initial content sync**: **Server initializes Y.Doc from Cell on room creation** - avoids race conditions
 
 ## Success Criteria
 
