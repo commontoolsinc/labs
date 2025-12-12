@@ -28,11 +28,11 @@ const computeIndex = lift<
     const cs = allCharms ?? [];
 
     for (const c of cs) {
-      c.backlinks?.set([]);
+      c?.backlinks?.set([]);
     }
 
     for (const c of cs) {
-      const mentions = c.mentioned ?? [];
+      const mentions = c?.mentioned ?? [];
       for (const m of mentions) {
         m?.backlinks?.push(c);
       }

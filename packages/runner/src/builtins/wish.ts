@@ -390,7 +390,7 @@ function cellLinkUI(cell: Cell<unknown>): VNode {
  * Get recent (non-stale) entries from the wish index.
  */
 function getRecentWishIndexEntries(
-  runtime: IRuntime,
+  runtime: Runtime,
   tx?: IExtendedStorageTransaction,
 ): Array<{
   query: string;
@@ -406,7 +406,6 @@ function getRecentWishIndexEntries(
     if (tx) {
       wishIndexCell = wishIndexCell.withTx(tx);
     }
-    wishIndexCell.sync();
 
     const entries = wishIndexCell.get() || [];
     const cutoff = Date.now() - WISH_INDEX_STALENESS_MS;
@@ -418,69 +417,11 @@ function getRecentWishIndexEntries(
 }
 
 /**
- * Use Haiku to check if any cached wish index entry is appropriate for the current query.
- * Returns the appropriate entry if found, undefined otherwise.
- */
-async function findAppropriateWishIndexEntry(
-  runtime: IRuntime,
-  query: string,
-  entries: Array<{
-    query: string;
-    resultCell: Cell<unknown>;
-    patternUrl?: string;
-    timestamp: number;
-  }>,
-): Promise<
-  | { query: string; resultCell: Cell<unknown>; patternUrl?: string }
-  | undefined
-> {
-  if (entries.length === 0) return undefined;
-
-  // Build a prompt for Haiku to evaluate appropriateness
-  const entrySummaries = entries.map((e, i) =>
-    `${i}: "${e.query}"${e.patternUrl ? ` (via pattern)` : ""}`
-  ).join("\n");
-
-  try {
-    // Use the LLM module registry to make a simple completion
-    // For now, we'll do a simple string matching as a fallback
-    // A full LLM integration would use the pattern framework
-
-    // Simple heuristic: exact match or very similar query
-    const queryLower = query.toLowerCase().trim();
-    for (const entry of entries) {
-      const entryQueryLower = entry.query.toLowerCase().trim();
-      // Exact match
-      if (queryLower === entryQueryLower) {
-        return entry;
-      }
-      // One is substring of the other and they're similar length
-      if (
-        (queryLower.includes(entryQueryLower) ||
-          entryQueryLower.includes(queryLower)) &&
-        Math.abs(queryLower.length - entryQueryLower.length) < 10
-      ) {
-        return entry;
-      }
-    }
-
-    // TODO: Add full Haiku LLM call for semantic matching
-    // This would involve using generateObject or similar to ask Haiku
-    // if any cached entry is appropriate for the current query
-
-    return undefined;
-  } catch (e) {
-    console.warn("Wish index appropriateness check failed:", e);
-    return undefined;
-  }
-}
-
-/**
  * Record a successful wish resolution to the wish index.
  * Implements FIFO eviction when MAX_ENTRIES is exceeded.
  */
 async function recordToWishIndex(
-  runtime: IRuntime,
+  runtime: Runtime,
   query: string,
   resultCell: Cell<unknown>,
   patternUrl?: string,
@@ -492,7 +433,7 @@ async function recordToWishIndex(
     );
     await wishIndexCell.sync();
 
-    await runtime.editWithRetry((tx) => {
+    await runtime.editWithRetry((tx: IExtendedStorageTransaction) => {
       const indexWithTx = wishIndexCell.withTx(tx);
       const currentEntries = indexWithTx.get() || [];
 
@@ -512,6 +453,8 @@ async function recordToWishIndex(
 
       indexWithTx.set(entries);
     });
+
+    await runtime.idle();
   } catch (e) {
     console.warn("Failed to record to wish index:", e);
   }
@@ -612,19 +555,21 @@ export function wish(
       addCancel(() => runtime.runner.stop(suggestionPatternResultCell!));
 
       // Set up a watcher to record successful results to the wish index
-      const query = input.situation;
+      // NOTE: We read from suggestionPatternInput (not a captured variable) so that
+      // subsequent wishes using the same cell get recorded with the correct query
       suggestionPatternResultCell.sink(() => {
         if (suggestionRecordedToIndex) return; // Already recorded
 
         const state = suggestionPatternResultCell?.get();
-        if (state?.result && !state?.error) {
+        if (state?.result && !state?.error && suggestionPatternInput) {
           suggestionRecordedToIndex = true;
+          const currentQuery = suggestionPatternInput.situation;
           // Defer recording to avoid transaction conflicts
           // The sink might fire during an active transaction
           setTimeout(() => {
             recordToWishIndex(
               runtime,
-              query,
+              currentQuery,
               state.result,
               SUGGESTION_TSX_PATH,
             ).catch((e) => {

@@ -1,6 +1,7 @@
 import {
   type Cell,
-  type IRuntime,
+  type IExtendedStorageTransaction,
+  type Runtime,
   type JSONSchema,
   type Schema,
   type WishIndexEntry,
@@ -34,7 +35,7 @@ export type WishIndexList = Schema<typeof wishIndexListSchema>;
 /**
  * Get the wish index cell from the home space (singleton across all spaces).
  */
-export function getWishIndex(runtime: IRuntime): Cell<WishIndexEntry[]> {
+export function getWishIndex(runtime: Runtime): Cell<WishIndexEntry[]> {
   return runtime.getHomeSpaceCell().key("wishIndex").asSchema(
     wishIndexListSchema,
   ) as Cell<WishIndexEntry[]>;
@@ -45,13 +46,13 @@ export function getWishIndex(runtime: IRuntime): Cell<WishIndexEntry[]> {
  * Implements FIFO eviction when MAX_ENTRIES is exceeded.
  */
 export async function addWishIndexEntry(
-  runtime: IRuntime,
+  runtime: Runtime,
   entry: Omit<WishIndexEntry, "timestamp">,
 ): Promise<void> {
   const wishIndex = getWishIndex(runtime);
   await wishIndex.sync();
 
-  await runtime.editWithRetry((tx) => {
+  await runtime.editWithRetry((tx: IExtendedStorageTransaction) => {
     const indexWithTx = wishIndex.withTx(tx);
     const currentEntries = indexWithTx.get() || [];
 
@@ -78,7 +79,7 @@ export async function addWishIndexEntry(
  * Returns entries from the last STALENESS_DAYS days.
  */
 export function getRecentWishIndexEntries(
-  runtime: IRuntime,
+  runtime: Runtime,
 ): WishIndexEntry[] {
   try {
     const wishIndex = getWishIndex(runtime);
@@ -100,14 +101,14 @@ export function getRecentWishIndexEntries(
  * @returns true if the entry was removed
  */
 export async function removeWishIndexEntry(
-  runtime: IRuntime,
+  runtime: Runtime,
   entry: Pick<WishIndexEntry, "query" | "timestamp">,
 ): Promise<boolean> {
   const wishIndex = getWishIndex(runtime);
   await wishIndex.sync();
 
   let removed = false;
-  const result = await runtime.editWithRetry((tx) => {
+  const result = await runtime.editWithRetry((tx: IExtendedStorageTransaction) => {
     const indexWithTx = wishIndex.withTx(tx);
     const entries = indexWithTx.get() || [];
     const filtered: WishIndexEntry[] = [...entries].filter(
@@ -125,11 +126,11 @@ export async function removeWishIndexEntry(
 /**
  * Clear all entries from the wish index.
  */
-export async function clearWishIndex(runtime: IRuntime): Promise<void> {
+export async function clearWishIndex(runtime: Runtime): Promise<void> {
   const wishIndex = getWishIndex(runtime);
   await wishIndex.sync();
 
-  await runtime.editWithRetry((tx) => {
+  await runtime.editWithRetry((tx: IExtendedStorageTransaction) => {
     wishIndex.withTx(tx).set([]);
   });
 
