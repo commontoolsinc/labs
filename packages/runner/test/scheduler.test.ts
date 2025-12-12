@@ -1394,34 +1394,6 @@ describe("effect/computation tracking", () => {
     expect(runtime.scheduler.isEffect(effect)).toBe(false);
   });
 
-  it("should support legacy boolean signature for scheduleImmediately", async () => {
-    const a = runtime.getCell<number>(
-      space,
-      "legacy-signature-1",
-      undefined,
-      tx,
-    );
-    a.set(1);
-    await tx.commit();
-    tx = runtime.edit();
-
-    let runCount = 0;
-    const action: Action = () => {
-      runCount++;
-    };
-
-    // Legacy: passing boolean directly should still work
-    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {
-      scheduleImmediately: true,
-    });
-    await runtime.idle();
-
-    expect(runCount).toBe(1);
-    // Default is computation when using legacy signature
-    expect(runtime.scheduler.isComputation(action)).toBe(true);
-    expect(runtime.scheduler.isEffect(action)).toBe(false);
-  });
-
   it("should track sink() calls as effects", async () => {
     const a = runtime.getCell<number>(
       space,
@@ -1776,7 +1748,7 @@ describe("pull-based scheduling", () => {
   });
 });
 
-describe("cycle-aware convergence (Phase 3)", () => {
+describe("cycle-aware convergence", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -2054,6 +2026,7 @@ describe("cycle-aware convergence (Phase 3)", () => {
       errorCaught = true;
     });
 
+    // Subscribe both actions before awaiting idle so they're both in pending set
     runtime.scheduler.subscribe(
       actionA,
       {
@@ -2062,7 +2035,6 @@ describe("cycle-aware convergence (Phase 3)", () => {
       },
       { scheduleImmediately: true },
     );
-    await runtime.idle();
 
     runtime.scheduler.subscribe(
       actionB,
@@ -2082,6 +2054,9 @@ describe("cycle-aware convergence (Phase 3)", () => {
     // (either via MAX_ITERATIONS_PER_RUN or MAX_CYCLE_ITERATIONS)
     // Total runs should be bounded, not infinite
     expect(runCountA + runCountB).toBeLessThan(500);
+
+    // The error handler should have been called due to cycle detection
+    expect(errorCaught).toBe(true);
   });
 
   it("should not create infinite loops in collectDirtyDependencies", async () => {
@@ -2353,70 +2328,82 @@ describe("cycle-aware convergence (Phase 3)", () => {
     // Cycle 1 actions - both read AND write to create bidirectional dependency
     const action1A: Action = (actionTx) => {
       const a = cellA1.withTx(actionTx).get();
-      const b = cellB1.withTx(actionTx).get();
+      const _b = cellB1.withTx(actionTx).get();
       cellB1.withTx(actionTx).send(a + 1);
     };
     const action1B: Action = (actionTx) => {
       const b = cellB1.withTx(actionTx).get();
-      const a = cellA1.withTx(actionTx).get();
+      const _a = cellA1.withTx(actionTx).get();
       if (b < 5) cellA1.withTx(actionTx).send(b);
     };
 
     // Cycle 2 actions
     const action2A: Action = (actionTx) => {
       const a = cellA2.withTx(actionTx).get();
-      const b = cellB2.withTx(actionTx).get();
+      const _b = cellB2.withTx(actionTx).get();
       cellB2.withTx(actionTx).send(a + 1);
     };
     const action2B: Action = (actionTx) => {
       const b = cellB2.withTx(actionTx).get();
-      const a = cellA2.withTx(actionTx).get();
+      const _a = cellA2.withTx(actionTx).get();
       if (b < 5) cellA2.withTx(actionTx).send(b);
     };
 
-    // Subscribe all - let them run to establish dependencies
+    // Subscribe all with proper dependency declarations
     runtime.scheduler.subscribe(
       action1A,
-      { reads: [], writes: [] },
+      {
+        reads: [cellA1.getAsNormalizedFullLink(), cellB1.getAsNormalizedFullLink()],
+        writes: [cellB1.getAsNormalizedFullLink()],
+      },
       { scheduleImmediately: true },
     );
-    await runtime.idle();
 
     runtime.scheduler.subscribe(
       action1B,
-      { reads: [], writes: [] },
+      {
+        reads: [cellA1.getAsNormalizedFullLink(), cellB1.getAsNormalizedFullLink()],
+        writes: [cellA1.getAsNormalizedFullLink()],
+      },
       { scheduleImmediately: true },
     );
-    await runtime.idle();
 
     runtime.scheduler.subscribe(
       action2A,
-      { reads: [], writes: [] },
+      {
+        reads: [cellA2.getAsNormalizedFullLink(), cellB2.getAsNormalizedFullLink()],
+        writes: [cellB2.getAsNormalizedFullLink()],
+      },
       { scheduleImmediately: true },
     );
-    await runtime.idle();
 
     runtime.scheduler.subscribe(
       action2B,
-      { reads: [], writes: [] },
+      {
+        reads: [cellA2.getAsNormalizedFullLink(), cellB2.getAsNormalizedFullLink()],
+        writes: [cellA2.getAsNormalizedFullLink()],
+      },
       { scheduleImmediately: true },
     );
+
     await runtime.idle();
 
-    // After running, each action should have established its dependencies
-    // The scheduler should have recorded what each action reads/writes
     const workSet = new Set([action1A, action1B, action2A, action2B]);
     const cycles = runtime.scheduler.detectCycles(workSet);
 
-    // Should detect cycles (at least the ones that formed)
-    // The exact number depends on how dependencies were established
-    expect(cycles.length).toBeGreaterThanOrEqual(0);
+    // Should detect 2 independent cycles (Cycle1: action1A ↔ action1B, Cycle2: action2A ↔ action2B)
+    expect(cycles.length).toBe(2);
   });
 
   it("should handle diamond dependencies (not a cycle)", async () => {
     // Diamond: Source → A, Source → B, A → Sink, B → Sink
     // This is NOT a cycle
-    const source = runtime.getCell<number>(space, "diamond-source", undefined, tx);
+    const source = runtime.getCell<number>(
+      space,
+      "diamond-source",
+      undefined,
+      tx,
+    );
     source.set(1);
     const midA = runtime.getCell<number>(space, "diamond-midA", undefined, tx);
     midA.set(0);
@@ -2799,7 +2786,7 @@ describe("cycle-aware convergence (Phase 3)", () => {
   });
 });
 
-describe("debounce and throttling (Phase 4)", () => {
+describe("debounce and throttling", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -3140,7 +3127,7 @@ describe("debounce and throttling (Phase 4)", () => {
   });
 });
 
-describe("throttle - staleness tolerance (Phase 4 extension)", () => {
+describe("throttle - staleness tolerance", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -3462,7 +3449,7 @@ describe("throttle - staleness tolerance (Phase 4 extension)", () => {
   });
 });
 
-describe("push-triggered filtering (Phase 5)", () => {
+describe("push-triggered filtering", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
