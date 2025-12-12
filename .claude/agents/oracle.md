@@ -24,7 +24,7 @@ Follow the source hierarchy from highest to lowest authority:
    - These show what actually works in practice
 
 3. **Runtime implementation**:
-   - Read runtime code in `packages/common/`, `packages/lookslike/`, etc.
+   - Read runtime code in `packages/runner/`, `packages/memory/`, etc.
    - Understand actual implementation details
    - Compare against documented behavior
 

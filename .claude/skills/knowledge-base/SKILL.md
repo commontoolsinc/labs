@@ -32,7 +32,7 @@ These show reality, not aspirations.
 ### 3. Runtime Code
 Core system implementation:
 - `packages/runner/` - Execution engine
-- `packages/builder/` - Compilation
+- `packages/runner/src/builder/` - Compilation
 - `packages/memory/` - Storage layer
 
 Code is always right about what it does.
