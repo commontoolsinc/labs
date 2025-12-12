@@ -95,14 +95,12 @@ export class Scheduler {
   private triggers = new Map<SpaceAndURI, Map<Action, SortedAndCompactPaths>>();
   private retries = new WeakMap<Action, number>();
 
-  // Phase 1: Effect/computation tracking for pull-based scheduling
+  // Effect/computation tracking for pull-based scheduling
   private effects = new Set<Action>();
   private computations = new Set<Action>();
   private dependents = new WeakMap<Action, Set<Action>>();
   // Track which actions are effects persistently (survives unsubscribe/re-subscribe)
   private isEffectAction = new WeakMap<Action, boolean>();
-
-  // Phase 2: Pull-based scheduling
   private dirty = new Set<Action>();
   private pullMode = false;
 
@@ -191,7 +189,13 @@ export class Scheduler {
 
     logger.debug(
       "schedule",
-      () => ["Subscribing to action:", action, reads, scheduleImmediately, isEffect ? "effect" : "computation"],
+      () => [
+        "Subscribing to action:",
+        action,
+        reads,
+        scheduleImmediately,
+        isEffect ? "effect" : "computation",
+      ],
     );
 
     if (scheduleImmediately) {
@@ -494,7 +498,9 @@ export class Scheduler {
                   }`,
                   `Action name: ${action.name || "anonymous"}`,
                   `Mode: ${this.pullMode ? "pull" : "push"}`,
-                  `Type: ${this.effects.has(action) ? "effect" : "computation"}`,
+                  `Type: ${
+                    this.effects.has(action) ? "effect" : "computation"
+                  }`,
                 ]);
 
                 if (this.pullMode) {
@@ -613,7 +619,7 @@ export class Scheduler {
   }
 
   // ============================================================
-  // Phase 2: Pull-based scheduling methods
+  // Pull-based scheduling methods
   // ============================================================
 
   /**
@@ -858,7 +864,9 @@ export class Scheduler {
       }
 
       logger.debug("schedule", () => [
-        `[EXECUTE PULL MODE] Effects: ${this.pending.size}, Dirty deps added: ${workSet.size - this.pending.size}`,
+        `[EXECUTE PULL MODE] Effects: ${this.pending.size}, Dirty deps added: ${
+          workSet.size - this.pending.size
+        }`,
       ]);
     } else {
       // Push mode: as-is - work set is just the pending actions
