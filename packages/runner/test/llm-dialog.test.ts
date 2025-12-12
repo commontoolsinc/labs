@@ -37,6 +37,8 @@ describe("llmDialog", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
+    // Use push mode for llmDialog tests
+    runtime.scheduler.disablePullMode();
     tx = runtime.edit();
 
     const { commontools } = createBuilder();

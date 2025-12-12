@@ -25,6 +25,8 @@ describe("when and unless built-in functions", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
+    // Use push mode for when/unless tests
+    runtime.scheduler.disablePullMode();
 
     tx = runtime.edit();
 
