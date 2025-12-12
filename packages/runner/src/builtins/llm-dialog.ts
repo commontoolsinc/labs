@@ -1764,6 +1764,7 @@ export function llmDialog(
             pending,
             internal,
             pinnedCells,
+            result,
             requestId,
             abortController.signal,
           );
@@ -1832,6 +1833,7 @@ function startRequest(
   pending: Cell<boolean>,
   internal: Cell<Schema<typeof internalSchema>>,
   pinnedCells: Cell<PinnedCell[]>,
+  result: Cell<Schema<typeof resultSchema>>,
   requestId: string,
   abortSignal: AbortSignal,
 ) {
@@ -1862,7 +1864,7 @@ function startRequest(
   const mergedPinnedCells = [...contextAsPinnedCells, ...toolPinnedCells];
 
   // Write to result cell
-  pinnedCells.withTx(tx).set(mergedPinnedCells as any);
+  result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
 
   const toolCatalog = buildToolCatalog(toolsCell);
 
@@ -2079,6 +2081,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
               pending,
               internal,
               pinnedCells,
+              result,
               requestId,
               abortSignal,
             );
