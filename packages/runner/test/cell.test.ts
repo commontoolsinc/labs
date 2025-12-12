@@ -39,9 +39,6 @@ describe("Cell", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-    // Use push mode for cell tests
-    runtime.scheduler.disablePullMode();
-
     tx = runtime.edit();
   });
 

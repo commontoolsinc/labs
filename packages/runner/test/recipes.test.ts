@@ -42,8 +42,6 @@ describe("Recipe Runner", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-    // Use push mode for recipe tests
-    runtime.scheduler.disablePullMode();
 
     tx = runtime.edit();
 
@@ -87,9 +85,8 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    expect(result.getAsQueryResult()).toMatchObject({ result: 10 });
+    const value = await result.pull();
+    expect(value).toMatchObject({ result: 10 });
   });
 
   it("should handle nested recipes", async () => {
@@ -122,9 +119,8 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    expect(result.getAsQueryResult()).toEqual({ result: 17 });
+    const value = await result.pull();
+    expect(value).toEqual({ result: 17 });
   });
 
   it("should handle recipes with default values", async () => {
@@ -158,9 +154,8 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
-
-    expect(result1.getAsQueryResult()).toMatchObject({ sum: 15 });
+    const value1 = await result1.pull();
+    expect(value1).toMatchObject({ sum: 15 });
 
     const resultCell2 = runtime.getCell<{ sum: number }>(
       space,
@@ -173,9 +168,8 @@ describe("Recipe Runner", () => {
     }, resultCell2);
     tx.commit();
 
-    await runtime.idle();
-
-    expect(result2.getAsQueryResult()).toMatchObject({ sum: 30 });
+    const value2 = await result2.pull();
+    expect(value2).toMatchObject({ sum: 30 });
   });
 
   it("should handle recipes with map nodes", async () => {
@@ -215,9 +209,8 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    expect(result.get()).toMatchObjectIgnoringSymbols({
+    const value = await result.pull();
+    expect(value).toMatchObjectIgnoringSymbols({
       multiplied: [{ multiplied: 3 }, { multiplied: 12 }, { multiplied: 27 }],
     });
   });
@@ -247,9 +240,8 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    expect(result.get()).toMatchObjectIgnoringSymbols({ doubled: [] });
+    const value = await result.pull();
+    expect(value).toMatchObjectIgnoringSymbols({ doubled: [] });
   });
 
   it("should execute handlers", async () => {
@@ -278,15 +270,15 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
+    await result.pull();
 
     result.key("stream").send({ amount: 1 });
-    await runtime.idle();
-    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 1 } });
+    let value = await result.pull();
+    expect(value).toMatchObject({ counter: { value: 1 } });
 
     result.key("stream").send({ amount: 2 });
-    await runtime.idle();
-    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
+    value = await result.pull();
+    expect(value).toMatchObject({ counter: { value: 3 } });
   });
 
   it("should execute recipes returned by handlers", async () => {
@@ -346,14 +338,14 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
+    await result.pull();
 
     result.key("stream").send({ amount: 1 });
-    await runtime.idle();
+    await counter.pull();
     expect(values).toEqual([[1, 1, 0]]);
 
     result.key("stream").send({ amount: 2 });
-    await runtime.idle();
+    await counter.pull();
 
     expect(values).toContainEqual([1, 1, 0]);
 
@@ -371,6 +363,7 @@ describe("Recipe Runner", () => {
     );
     x.withTx(tx).set(2);
     tx.commit();
+    await x.pull();
     tx = runtime.edit();
 
     const y = runtime.getCell<number>(
@@ -381,6 +374,7 @@ describe("Recipe Runner", () => {
     );
     y.withTx(tx).set(3);
     tx.commit();
+    await y.pull();
     tx = runtime.edit();
 
     const runCounts = {
@@ -435,9 +429,8 @@ describe("Recipe Runner", () => {
       multiplyGenerator2: 0,
     });
 
-    await runtime.idle();
-
-    expect(result.getAsQueryResult()).toMatchObject({
+    let value = await result.pull();
+    expect(value).toMatchObject({
       result1: 6,
       result2: 6,
     });
@@ -453,7 +446,7 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    value = await result.pull();
 
     expect(runCounts).toMatchObject({
       multiply: 4,
@@ -461,7 +454,7 @@ describe("Recipe Runner", () => {
       multiplyGenerator2: 2,
     });
 
-    expect(result.getAsQueryResult()).toMatchObject({
+    expect(value).toMatchObject({
       result1: 9,
       result2: 9,
     });
@@ -494,9 +487,8 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    expect(result.getAsQueryResult()).toMatchObject({ result: 10 });
+    const value = await result.pull();
+    expect(value).toMatchObject({ result: 10 });
   });
 
   it("should handle schema with cell references", async () => {
@@ -535,6 +527,7 @@ describe("Recipe Runner", () => {
     );
     settingsCell.withTx(tx).set({ value: 5 });
     tx.commit();
+    await settingsCell.pull();
     tx = runtime.edit();
 
     const resultCell = runtime.getCell<{ result: number }>(
@@ -550,18 +543,16 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
-
-    expect(result.getAsQueryResult()).toEqual({ result: 15 });
+    let value = await result.pull();
+    expect(value).toEqual({ result: 15 });
 
     // Update the cell and verify the recipe recomputes
     settingsCell.withTx(tx).send({ value: 10 });
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
-
-    expect(result.getAsQueryResult()).toEqual({ result: 30 });
+    value = await result.pull();
+    expect(value).toEqual({ result: 30 });
   });
 
   it("should handle nested cell references in schema", async () => {
@@ -629,9 +620,8 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    expect(result.getAsQueryResult()).toEqual({ result: 3 });
+    const value = await result.pull();
+    expect(value).toEqual({ result: 3 });
   });
 
   it("should handle dynamic cell references with schema", async () => {
@@ -694,9 +684,8 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    expect(result.getAsQueryResult()).toEqual({ result: 12 });
+    const value = await result.pull();
+    expect(value).toEqual({ result: 12 });
   });
 
   it("should execute handlers with schemas", async () => {
@@ -735,15 +724,15 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
+    await result.pull();
 
     result.key("stream").send({ amount: 1 });
-    await runtime.idle();
-    expect(result.getAsQueryResult()).toMatchObject({ counter: 1 });
+    let value = await result.pull();
+    expect(value).toMatchObject({ counter: 1 });
 
     result.key("stream").send({ amount: 2 });
-    await runtime.idle();
-    expect(result.getAsQueryResult()).toMatchObject({ counter: 3 });
+    value = await result.pull();
+    expect(value).toMatchObject({ counter: 3 });
   });
 
   it("failed handlers should be ignored", async () => {
@@ -784,18 +773,18 @@ describe("Recipe Runner", () => {
     const charm = runtime.run(tx, divRecipe, { result: 1 }, charmCell);
     tx.commit();
 
-    await runtime.idle();
+    await charm.pull();
 
     charm.key("updater").send({ divisor: 5, dividend: 1 });
-    await runtime.idle();
+    let value = await charm.pull();
     expect(errors).toBe(0);
 
-    expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
+    expect(value).toMatchObject({ result: 5 });
 
     charm.key("updater").send({ divisor: 10, dividend: 0 });
-    await runtime.idle();
+    value = await charm.pull();
     expect(errors).toBe(1);
-    expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
+    expect(value).toMatchObject({ result: 5 });
 
     // Cast to any to avoid type checking
     const sourceCellValue = charm.getSourceCell()?.getRaw() as any;
@@ -815,8 +804,8 @@ describe("Recipe Runner", () => {
     // NOTE(ja): this test is really important after a handler
     // fails the entire system crashes!!!!
     charm.key("updater").send({ divisor: 10, dividend: 5 });
-    await runtime.idle();
-    expect(charm.getAsQueryResult()).toMatchObject({ result: 2 });
+    value = await charm.pull();
+    expect(value).toMatchObject({ result: 2 });
   });
 
   it("failed lifted functions should be ignored", async () => {
@@ -855,6 +844,7 @@ describe("Recipe Runner", () => {
     );
     dividend.withTx(tx).set(1);
     tx.commit();
+    await dividend.pull();
     tx = runtime.edit();
 
     const charmCell = runtime.getCell<{ result: number }>(
@@ -870,18 +860,18 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    let value = await charm.pull();
 
     expect(errors).toBe(0);
-    expect(charm.get()).toMatchObject({ result: 10 });
+    expect(value).toMatchObject({ result: 10 });
 
     dividend.withTx(tx).send(0);
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    value = await charm.pull();
     expect(errors).toBe(1);
-    expect(charm.getAsQueryResult()).toMatchObject({ result: 10 });
+    expect(value).toMatchObject({ result: 10 });
 
     const recipeId = charm.getSourceCell()?.get()?.[TYPE];
     expect(recipeId).toBeDefined();
@@ -896,11 +886,11 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    value = await charm.pull();
     expect((charm.getRaw() as any).result.$alias.cell).toEqual(
       charm.getSourceCell()?.entityId,
     );
-    expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
+    expect(value).toMatchObject({ result: 5 });
   });
 
   it("idle should wait for slow async lifted functions", async () => {
@@ -939,9 +929,9 @@ describe("Recipe Runner", () => {
     expect(liftCalled).toBe(true);
     expect(timeoutCalled).toBe(false);
 
-    await runtime.idle();
+    const value = await result.pull();
     expect(timeoutCalled).toBe(true);
-    expect(result.get()).toMatchObject({ result: 2 });
+    expect(value).toMatchObject({ result: 2 });
   });
 
   it("idle should wait for slow async handlers", async () => {
@@ -979,7 +969,7 @@ describe("Recipe Runner", () => {
     const charm = runtime.run(tx, slowHandlerRecipe, { result: 0 }, charmCell);
     tx.commit();
 
-    await runtime.idle();
+    await charm.pull();
 
     // Trigger the handler
     charm.key("updater").send({ value: 5 });
@@ -989,10 +979,10 @@ describe("Recipe Runner", () => {
     expect(handlerCalled).toBe(true);
     expect(timeoutCalled).toBe(false);
 
-    // Now idle should wait for the handler's promise to resolve
-    await runtime.idle();
+    // Now pull should wait for the handler's promise to resolve
+    const value = await charm.pull();
     expect(timeoutCalled).toBe(true);
-    expect(charm.get()).toMatchObject({ result: 10 });
+    expect(value).toMatchObject({ result: 10 });
   });
 
   it("idle should not wait for deliberately async handlers and writes should fail", async () => {
@@ -1036,20 +1026,21 @@ describe("Recipe Runner", () => {
     const charm = runtime.run(tx, slowHandlerRecipe, { result: 0 }, charmCell);
     tx.commit();
 
-    await runtime.idle();
+    await charm.pull();
 
     // Trigger the handler
     charm.key("updater").send({ value: 5 });
 
-    await runtime.idle();
+    await charm.pull();
     expect(handlerCalled).toBe(true);
     expect(timeoutCalled).toBe(false);
 
-    // Now idle should wait for the handler's promise to resolve
+    // Now wait for the timeout promise to resolve
     await timeoutPromise;
     expect(timeoutCalled).toBe(true);
     expect(caughtErrorTryingToSetResult).toBeDefined();
-    expect(charm.get()?.result).toBe(0); // No change
+    const value = await charm.pull();
+    expect(value?.result).toBe(0); // No change
   });
 
   it("should create and use a named cell inside a lift", async () => {
@@ -1088,7 +1079,7 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    await result.pull();
 
     // Initial state
     const wrapperCell = result.key("value").get();
@@ -1110,7 +1101,7 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    await result.pull();
 
     // That same value was updated, which shows that the id was stable
     expect(tx.readValueOrThrow(ref)).toBe(10);
@@ -1178,39 +1169,36 @@ describe("Recipe Runner", () => {
     const result = runtime.run(tx, itemsRecipe, { items: [] }, resultCell);
     tx.commit();
 
-    await runtime.idle();
+    await result.pull();
 
     // Add first item
     result.key("stream").send({ detail: { message: "First Item" } });
-    await runtime.idle();
+    let value = await result.pull();
 
-    const firstState = result.getAsQueryResult();
-    expect(firstState.items).toHaveLength(1);
-    expect(firstState.items[0].title).toBe("First Item");
+    expect(value.items).toHaveLength(1);
+    expect(value.items[0].title).toBe("First Item");
 
     // Test reuse of proxy for array items
-    expect(firstState.items[0].items).toBe(firstState.items);
+    expect(value.items[0].items).toBe(value.items);
 
     // Add second item
     result.key("stream").send({ detail: { message: "Second Item" } });
-    await runtime.idle();
-
-    const secondState = result.getAsQueryResult();
-    expect(secondState.items).toHaveLength(2);
-    expect(secondState.items[1].title).toBe("Second Item");
+    value = await result.pull();
+    expect(value.items).toHaveLength(2);
+    expect(value.items[1].title).toBe("Second Item");
 
     // All three should point to the same array
-    expect(secondState.items[0].items).toBe(secondState.items);
-    expect(secondState.items[1].items).toBe(secondState.items);
+    expect(value.items[0].items).toBe(value.items);
+    expect(value.items[1].items).toBe(value.items);
 
     // And triple check that it actually refers to the same underlying array
-    expect(firstState.items[0].items[1].title).toBe("Second Item");
+    expect(value.items[0].items[1].title).toBe("Second Item");
 
     const recurse = ({ items }: { items: { items: any[] }[] }): any =>
       items.map((item) => recurse(item));
 
     // Now test that we catch infinite recursion
-    expect(() => recurse(firstState)).toThrow();
+    expect(() => recurse(value as any)).toThrow();
   });
 
   it("should allow sending cells to an event handler", async () => {
@@ -1262,10 +1250,10 @@ describe("Recipe Runner", () => {
     const charm = runtime.run(tx, listRecipe, { list: [] }, charmCell);
     tx.commit();
 
-    await runtime.idle();
+    await charm.pull();
 
     charm.key("stream").send({ charm: testCell });
-    await runtime.idle();
+    await charm.pull();
 
     // Add schema so we get the entry as a cell and can compare the two
     const listCell = charm.key("list").asSchema({
@@ -1336,16 +1324,16 @@ describe("Recipe Runner", () => {
 
     tx.commit();
 
-    await runtime.idle();
+    await charm.pull();
 
     // Toggle
     charm.key("stream").send({ expandChat: true });
-    await runtime.idle();
+    await charm.pull();
 
     expect(charm.key("text").get()).toEqual("A");
 
     charm.key("stream").send({ expandChat: false });
-    await runtime.idle();
+    await charm.pull();
 
     expect(charm.key("text").get()).toEqual("b");
   });
@@ -1428,7 +1416,7 @@ describe("Recipe Runner", () => {
     runtime.run(tx, outerPattern, {}, charmCell);
     tx.commit();
 
-    await runtime.idle();
+    await charmCell.pull();
 
     tx = runtime.edit();
 
@@ -1440,7 +1428,7 @@ describe("Recipe Runner", () => {
     result.add.withTx(tx).send({ text: "hello" });
     tx.commit();
 
-    await runtime.idle();
+    await charmCell.pull();
 
     tx = runtime.edit();
     const result2 = charmCell.withTx(tx).get();
@@ -1515,10 +1503,10 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    let value = await result.pull();
 
     // Verify initial result: 10 + 5 = 15
-    expect(result.get()).toMatchObject({ result: 15 });
+    expect(value).toMatchObject({ result: 15 });
     expect(liftRunCount).toBe(1);
 
     // Update the second cell (read with sample(), so non-reactive)
@@ -1526,24 +1514,24 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    value = await result.pull();
 
     // The lift should NOT have re-run because sample() is non-reactive
     expect(liftRunCount).toBe(1);
     // Result should still be 15 (not updated)
-    expect(result.get()).toMatchObject({ result: 15 });
+    expect(value).toMatchObject({ result: 15 });
 
     // Now update the first cell (read reactively via the normal get())
     firstCell.withTx(tx).send(100);
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    value = await result.pull();
 
     // The lift should have re-run now
     expect(liftRunCount).toBe(2);
     // Result should reflect both new values: 100 + 20 = 120
     // (the second cell's new value is picked up because the lift re-ran)
-    expect(result.get()).toMatchObject({ result: 120 });
+    expect(value).toMatchObject({ result: 120 });
   });
 });
