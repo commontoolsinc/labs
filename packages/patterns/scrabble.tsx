@@ -336,6 +336,7 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
                   timingStrategy="immediate"
                 />
                 <button
+                  type="button"
                   style={{
                     width: "100%",
                     padding: "0.75rem 1.5rem",
@@ -393,6 +394,7 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
                   timingStrategy="immediate"
                 />
                 <button
+                  type="button"
                   style={{
                     width: "100%",
                     padding: "0.75rem 1.5rem",
@@ -424,6 +426,7 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
 
             {/* Reset Button */}
             <button
+              type="button"
               style={{
                 marginTop: "1rem",
                 padding: "0.5rem 1rem",
