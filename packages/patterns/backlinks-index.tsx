@@ -71,7 +71,7 @@ const BacklinksIndex = recipe<Input, Output>(
         out.push(c);
         const exported = (c as unknown as {
           mentionable?: MentionableCharm[] | { get?: () => MentionableCharm[] };
-        }).mentionable;
+        })?.mentionable;
         if (Array.isArray(exported)) {
           for (const m of exported) if (m) out.push(m);
         } else if (exported && typeof (exported as any).get === "function") {
