@@ -4430,5 +4430,81 @@ describe("Cell success callbacks", () => {
       const value = await nested.pull();
       expect(value).toBe(99);
     });
+
+    it("should not create a persistent effect after pull completes", async () => {
+      runtime.scheduler.enablePullMode();
+
+      // Create source and computed cells
+      const source = runtime.getCell<number>(
+        space,
+        "pull-no-persist-source",
+        undefined,
+        tx,
+      );
+      source.set(5);
+      const computed = runtime.getCell<number>(
+        space,
+        "pull-no-persist-computed",
+        undefined,
+        tx,
+      );
+      computed.set(0);
+      await tx.commit();
+
+      // Track how many times the computation runs
+      let runCount = 0;
+
+      // Create a computation that multiplies source by 2
+      const action = (actionTx: IExtendedStorageTransaction) => {
+        runCount++;
+        const val = source.withTx(actionTx).get();
+        computed.withTx(actionTx).set(val * 2);
+      };
+
+      // Run once to set up initial value and capture dependencies
+      const setupTx = runtime.edit();
+      action(setupTx);
+      const log = txToReactivityLog(setupTx);
+      await setupTx.commit();
+
+      // Subscribe the computation (as a computation, NOT an effect)
+      // In pull mode, computations only run when pulled by effects
+      runtime.scheduler.subscribe(action, log, { isEffect: false });
+
+      // Change source to mark the computation as dirty
+      const tx1 = runtime.edit();
+      source.withTx(tx1).set(6); // Change from 5 to 6 to trigger dirtiness
+      await tx1.commit();
+
+      // Reset run count after marking dirty
+      runCount = 0;
+
+      // First pull - should trigger the computation because pull() creates
+      // a temporary effect that pulls dirty dependencies
+      const value1 = await computed.pull();
+      expect(value1).toBe(12); // 6 * 2 = 12
+      const runsAfterFirstPull = runCount;
+      expect(runsAfterFirstPull).toBeGreaterThan(0);
+
+      // Now change the source AFTER pull completed
+      const tx2 = runtime.edit();
+      source.withTx(tx2).set(7);
+      await tx2.commit();
+
+      // Wait for any scheduled work to complete
+      await runtime.scheduler.idle();
+
+      // The computation should NOT have run again because:
+      // 1. pull() cancelled its temporary effect after completing
+      // 2. There are no other effects subscribed
+      // 3. In pull mode, computations only run when pulled by effects
+      const runsAfterSourceChange = runCount;
+
+      // If pull() created a persistent effect, the computation would run
+      // again when source changes. With correct cleanup, it should NOT run.
+      expect(runsAfterSourceChange).toBe(runsAfterFirstPull);
+
+      runtime.scheduler.disablePullMode();
+    });
   });
 });
