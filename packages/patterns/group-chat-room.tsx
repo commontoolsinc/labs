@@ -1,0 +1,1154 @@
+/// <cts-enable />
+import {
+  Cell,
+  cell,
+  Default,
+  derive,
+  handler,
+  ifElse,
+  ImageData,
+  NAME,
+  pattern,
+  str,
+  UI,
+} from "commontools";
+
+/**
+ * Group Chat Room Pattern v9
+ *
+ * New features:
+ * 1. Click avatar to set/change avatar
+ * 2. Camera icon sends images to chat
+ * 3. Emoji reactions on messages with hover UI
+ */
+
+// Emoji reaction type
+export interface Reaction {
+  emoji: string;
+  userNames: string[];
+}
+
+export interface Message {
+  id: string;
+  author: string;
+  content: string;
+  timestamp: number;
+  type: "chat" | "system" | "image";
+  imageUrl?: string;
+  reactions?: Reaction[];
+}
+
+export interface User {
+  name: string;
+  joinedAt: number;
+  color: string;
+  avatarImage?: { url: string };
+}
+
+interface RoomInput {
+  messages: Cell<Default<Message[], []>>;
+  users: Cell<Default<User[], []>>;
+  myName: Default<string, "">;
+  mySessionId: Default<string, "">;
+  currentSessionId: Cell<Default<string, "">>;
+}
+
+interface RoomOutput {
+  myName: Default<string, "">;
+}
+
+// Common reaction emojis
+const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡"];
+
+// Utility function to get initials from a name
+function getInitials(name: string): string {
+  if (!name || typeof name !== "string") return "?";
+  return name
+    .trim()
+    .split(/\s+/)
+    .map((word) => word[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+}
+
+// Handler to send a text message
+const sendMessage = handler<
+  unknown,
+  { messages: Cell<Message[]>; myName: string; contentInput: Cell<string> }
+>((_event, { messages, myName, contentInput }) => {
+  const content = contentInput.get().trim();
+  if (!content || !myName) return;
+
+  messages.push({
+    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    author: myName,
+    content,
+    timestamp: Date.now(),
+    type: "chat",
+  });
+
+  contentInput.set("");
+});
+
+// Handler to send an image message
+const sendImageMessage = handler<
+  unknown,
+  { messages: Cell<Message[]>; myName: string; chatImages: Cell<ImageData[]> }
+>((_event, { messages, myName, chatImages }) => {
+  const images = chatImages.get() || [];
+  if (images.length === 0 || !myName) return;
+
+  const image = images[0];
+  messages.push({
+    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    author: myName,
+    content: "",
+    imageUrl: image.url,
+    timestamp: Date.now(),
+    type: "image",
+  });
+
+  chatImages.set([]);
+});
+
+// Handler to confirm and save the avatar from avatarImages cell
+const confirmAvatar = handler<
+  unknown,
+  { users: Cell<User[]>; myName: string; avatarImages: Cell<ImageData[]> }
+>((_event, { users, myName, avatarImages }) => {
+  const images = avatarImages.get() || [];
+  if (images.length === 0) return;
+
+  const newImage = images[0];
+  const currentUsers = users.get() || [];
+  const myUser = currentUsers.find((usr: User) => usr.name === myName);
+
+  if (!myUser) return;
+
+  const updatedUsers = currentUsers.map((usr: User) =>
+    usr.name === myName ? { ...usr, avatarImage: { url: newImage.url } } : usr
+  );
+  users.set(updatedUsers);
+  avatarImages.set([]);
+});
+
+// Handler to cancel pending avatar
+const cancelAvatar = handler<
+  unknown,
+  { avatarImages: Cell<ImageData[]> }
+>((_event, { avatarImages }) => {
+  avatarImages.set([]);
+});
+
+// Handler to toggle emoji picker for a message
+const toggleEmojiPicker = handler<
+  unknown,
+  { emojiPickerMessageId: Cell<string>; msgId: string }
+>((_event, { emojiPickerMessageId, msgId }) => {
+  const current = emojiPickerMessageId.get();
+  // Toggle: if already open for this message, close it; otherwise open for this message
+  emojiPickerMessageId.set(current === msgId ? "" : msgId);
+});
+
+// Handler to add/toggle a reaction on a message
+const toggleReaction = handler<
+  unknown,
+  {
+    messages: Cell<Message[]>;
+    msgId: string;
+    emoji: string;
+    myName: string;
+    emojiPickerMessageId: Cell<string>;
+  }
+>((_event, { messages, msgId, emoji, myName, emojiPickerMessageId }) => {
+  const msgs = messages.get() || [];
+  const msgIndex = msgs.findIndex((m: Message) => m && m.id === msgId);
+  if (msgIndex < 0) return;
+
+  const msg = msgs[msgIndex];
+  const reactions = [...(msg.reactions || [])];
+
+  const existingIdx = reactions.findIndex((r: Reaction) => r.emoji === emoji);
+
+  if (existingIdx >= 0) {
+    const reaction = { ...reactions[existingIdx] };
+    if (reaction.userNames.includes(myName)) {
+      reaction.userNames = reaction.userNames.filter((n: string) =>
+        n !== myName
+      );
+      if (reaction.userNames.length === 0) {
+        reactions.splice(existingIdx, 1);
+      } else {
+        reactions[existingIdx] = reaction;
+      }
+    } else {
+      reaction.userNames = [...reaction.userNames, myName];
+      reactions[existingIdx] = reaction;
+    }
+  } else {
+    reactions.push({ emoji, userNames: [myName] });
+  }
+
+  const updatedMsgs = [...msgs];
+  updatedMsgs[msgIndex] = { ...msg, reactions };
+  messages.set(updatedMsgs);
+
+  // Close the emoji picker after selecting
+  emojiPickerMessageId.set("");
+});
+
+export default pattern<RoomInput, RoomOutput>(
+  ({ messages, users, myName, mySessionId, currentSessionId }) => {
+    const contentInput = cell("");
+    const avatarImages = cell<ImageData[]>([]);
+    const chatImages = cell<ImageData[]>([]);
+    const emojiPickerMessageId = cell<string>("");
+
+    const userList = derive(
+      users,
+      (u: User[]) => (u || []).filter((user: User) => user && user.name),
+    );
+    const myNameResolved = derive(myName, (n: string) => n || "");
+
+    const hasPendingAvatar = derive(
+      avatarImages,
+      (imgs: ImageData[]) => imgs && imgs.length > 0,
+    );
+    const pendingAvatarUrl = derive(avatarImages, (imgs: ImageData[]) => {
+      if (!imgs || imgs.length === 0) {
+        return "";
+      }
+      return imgs[0].url || imgs[0].data || "";
+    });
+
+    const hasPendingChatImage = derive(
+      chatImages,
+      (imgs: ImageData[]) => imgs && imgs.length > 0,
+    );
+    const pendingChatImageUrl = derive(chatImages, (imgs: ImageData[]) => {
+      if (!imgs || imgs.length === 0) {
+        return "";
+      }
+      return imgs[0].url || imgs[0].data || "";
+    });
+
+    const isSessionValid = derive(
+      { mySessionId, currentSessionId },
+      (
+        { mySessionId: mine, currentSessionId: current }: {
+          mySessionId: string;
+          currentSessionId: string;
+        },
+      ) => {
+        if (!mine || !current) return true;
+        return mine === current;
+      },
+    );
+
+    const myUser = derive(
+      { users, myNameResolved },
+      (
+        { users: u, myNameResolved: n }: {
+          users: User[];
+          myNameResolved: string;
+        },
+      ) => {
+        return (u || []).find((user) => user.name === n);
+      },
+    );
+
+    const myAvatarUrl = derive(
+      myUser,
+      (u: User | undefined) => u?.avatarImage?.url || "",
+    );
+    const myColor = derive(
+      myUser,
+      (u: User | undefined) => u?.color || "#007AFF",
+    );
+
+    return {
+      [NAME]: str`Chat: ${myName}`,
+      [UI]: (
+        <div
+          style={{
+            display: "flex",
+            height: "100%",
+            fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
+          }}
+        >
+          {ifElse(
+            isSessionValid,
+            <>
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  padding: "1rem",
+                }}
+              >
+                {/* Header with user list */}
+                <div
+                  style={{
+                    padding: "0.75rem 1rem",
+                    backgroundColor: "white",
+                    borderRadius: "12px",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+                    marginBottom: "1rem",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: "0.7rem",
+                      fontWeight: "500",
+                      color: "#8e8e93",
+                      marginBottom: "0.5rem",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                    }}
+                  >
+                    Now chatting
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "0.5rem",
+                      paddingBottom: "0.75rem",
+                      borderBottom: "1px solid #e5e5ea",
+                    }}
+                  >
+                    {userList.map((user) => {
+                      const hasAvatar = derive(
+                        user,
+                        (u: User) => u && !!u.avatarImage?.url,
+                      );
+                      return (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.5rem",
+                            padding: "0.5rem 0.75rem",
+                            backgroundColor: "#f2f2f7",
+                            borderRadius: "20px",
+                          }}
+                        >
+                          {ifElse(
+                            hasAvatar,
+                            <img
+                              src={user.avatarImage?.url}
+                              style={{
+                                width: "28px",
+                                height: "28px",
+                                borderRadius: "50%",
+                                objectFit: "cover",
+                              }}
+                            />,
+                            <div
+                              style={{
+                                width: "28px",
+                                height: "28px",
+                                borderRadius: "50%",
+                                backgroundColor: user.color,
+                                color: "white",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                fontWeight: "600",
+                                fontSize: "11px",
+                              }}
+                            >
+                              {derive(
+                                user,
+                                (u: User) => u ? getInitials(u.name) : "?",
+                              )}
+                            </div>,
+                          )}
+                          <span
+                            style={{
+                              fontSize: "0.875rem",
+                              fontWeight: "500",
+                              color: "#1c1c1e",
+                            }}
+                          >
+                            {user.name}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Messages Container */}
+                <div
+                  style={{
+                    flex: 1,
+                    overflowY: "auto",
+                    marginBottom: "1rem",
+                    padding: "0.5rem",
+                    backgroundColor: "#f5f5f7",
+                    borderRadius: "12px",
+                  }}
+                >
+                  {messages.map((msg) => {
+                    // Guard against undefined messages in the array
+                    const isValidMessage = derive(
+                      msg,
+                      (m: Message) => m && m.id,
+                    );
+                    const isMyMessage = derive(
+                      { msg, myNameResolved },
+                      (
+                        { msg: m, myNameResolved: n }: {
+                          msg: Message;
+                          myNameResolved: string;
+                        },
+                      ) => m && m.author === n,
+                    );
+                    const isSystemMessage = derive(
+                      msg,
+                      (m: Message) => m && m.type === "system",
+                    );
+                    const isImageMessage = derive(
+                      msg,
+                      (m: Message) => m && m.type === "image",
+                    );
+                    const authorColor = derive(
+                      { msg, users },
+                      (
+                        { msg: m, users: u }: { msg: Message; users: User[] },
+                      ) => {
+                        if (!m) return "#6b7280";
+                        const user = (u || []).find((usr) =>
+                          usr && usr.name === m.author
+                        );
+                        return user?.color || "#6b7280";
+                      },
+                    );
+                    const authorAvatarUrl = derive(
+                      { msg, users },
+                      (
+                        { msg: m, users: u }: { msg: Message; users: User[] },
+                      ) => {
+                        if (!m) return "";
+                        const user = (u || []).find((usr) =>
+                          usr && usr.name === m.author
+                        );
+                        return user?.avatarImage?.url || "";
+                      },
+                    );
+                    const isFirstInAuthorBlock = derive(
+                      { messages, msg },
+                      (
+                        { messages: msgs, msg: m }: {
+                          messages: Message[];
+                          msg: Message;
+                        },
+                      ) => {
+                        if (!m) return true;
+                        const msgArray = (msgs || []).filter((
+                          message: Message,
+                        ) => message && message.id);
+                        const currentIndex = msgArray.findIndex((
+                          message: Message,
+                        ) => message && message.id === m.id);
+                        if (currentIndex <= 0) return true;
+                        const prevMessage = msgArray[currentIndex - 1];
+                        if (!prevMessage) return true;
+                        return prevMessage.author !== m.author ||
+                          prevMessage.type === "system";
+                      },
+                    );
+                    const shouldShowAvatar = derive(
+                      { isMyMessage, isFirstInAuthorBlock },
+                      (
+                        { isMyMessage: isMine, isFirstInAuthorBlock: isFirst }:
+                          {
+                            isMyMessage: boolean;
+                            isFirstInAuthorBlock: boolean;
+                          },
+                      ) => !isMine && isFirst,
+                    );
+
+                    // Check if emoji picker is open for this message
+                    const isPickerOpen = derive(
+                      { emojiPickerMessageId, msgId: msg.id },
+                      (
+                        { emojiPickerMessageId: openId, msgId }: {
+                          emojiPickerMessageId: string;
+                          msgId: string;
+                        },
+                      ) => msgId && openId === msgId,
+                    );
+
+                    // Get reactions for display
+                    const messageReactions = derive(
+                      msg,
+                      (m: Message) => (m && m.reactions) || [],
+                    );
+                    const _hasReactions = derive(
+                      messageReactions,
+                      (r: Reaction[]) => r.length > 0,
+                    );
+
+                    return (
+                      <div
+                        style={{
+                          display: derive(isValidMessage, (valid: boolean) =>
+                            valid ? "flex" : "none"),
+                          marginBottom: derive(
+                            { msg, messages },
+                            (
+                              { msg: m, messages: msgs }: {
+                                msg: Message;
+                                messages: Message[];
+                              },
+                            ) => {
+                              if (!m) {
+                                return "8px";
+                              }
+                              const msgArray = (msgs || []).filter((
+                                message: Message,
+                              ) =>
+                                message && message.id
+                              );
+                              const currentIndex = msgArray.findIndex((
+                                message: Message,
+                              ) => message && message.id === m.id);
+                              if (
+                                currentIndex < 0 ||
+                                currentIndex >= msgArray.length - 1
+                              ) return "8px";
+                              const nextMessage = msgArray[currentIndex + 1];
+                              if (!nextMessage) return "8px";
+                              return nextMessage.author === m.author &&
+                                  nextMessage.type !== "system"
+                                ? "2px"
+                                : "8px";
+                            },
+                          ),
+                          flexDirection: derive(
+                            { msg, myNameResolved },
+                            (
+                              { msg: m, myNameResolved: n }: {
+                                msg: Message;
+                                myNameResolved: string;
+                              },
+                            ) =>
+                              !m
+                                ? "row"
+                                : (m.type === "system"
+                                  ? "column"
+                                  : (m.author === n ? "row-reverse" : "row")),
+                          ),
+                          alignItems: "flex-end",
+                          gap: "8px",
+                        }}
+                      >
+                        {ifElse(
+                          isSystemMessage,
+                          <div
+                            style={{
+                              width: "100%",
+                              textAlign: "center",
+                              padding: "8px 12px",
+                              fontSize: "13px",
+                              color: "#6b7280",
+                              fontStyle: "italic",
+                            }}
+                          >
+                            {msg.content}
+                          </div>,
+                          <>
+                            {/* Avatar */}
+                            {ifElse(
+                              isMyMessage,
+                              null,
+                              ifElse(
+                                shouldShowAvatar,
+                                ifElse(
+                                  authorAvatarUrl,
+                                  <img
+                                    src={authorAvatarUrl}
+                                    style={{
+                                      width: "32px",
+                                      height: "32px",
+                                      borderRadius: "50%",
+                                      objectFit: "cover",
+                                      flexShrink: "0",
+                                    }}
+                                  />,
+                                  <div
+                                    style={{
+                                      width: "32px",
+                                      height: "32px",
+                                      borderRadius: "50%",
+                                      backgroundColor: authorColor,
+                                      color: "white",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      fontWeight: "600",
+                                      fontSize: "12px",
+                                      flexShrink: "0",
+                                    }}
+                                  >
+                                    {derive(msg, (m: Message) =>
+                                      m ? getInitials(m.author) : "?")}
+                                  </div>,
+                                ),
+                                <div
+                                  style={{ width: "32px", flexShrink: "0" }}
+                                />,
+                              ),
+                            )}
+
+                            {/* Message bubble and reactions */}
+                            <div
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                alignItems: derive(
+                                  { msg, myNameResolved },
+                                  (
+                                    { msg: m, myNameResolved: n }: {
+                                      msg: Message;
+                                      myNameResolved: string;
+                                    },
+                                  ) =>
+                                    m && m.author === n
+                                      ? "flex-end"
+                                      : "flex-start",
+                                ),
+                              }}
+                            >
+                              {/* Author name */}
+                              {ifElse(
+                                shouldShowAvatar,
+                                <div
+                                  style={{
+                                    fontSize: "12px",
+                                    fontWeight: "600",
+                                    color: "#86868b",
+                                    marginBottom: "2px",
+                                    marginLeft: "4px",
+                                  }}
+                                >
+                                  {msg.author}
+                                </div>,
+                                null,
+                              )}
+
+                              {/* Bubble - text or image */}
+                              {ifElse(
+                                isImageMessage,
+                                <img
+                                  src={msg.imageUrl}
+                                  style={{
+                                    maxWidth: "200px",
+                                    maxHeight: "200px",
+                                    borderRadius: "12px",
+                                    objectFit: "cover",
+                                  }}
+                                />,
+                                <div
+                                  style={{
+                                    width: "fit-content",
+                                    maxWidth: "66%",
+                                    padding: "10px 14px",
+                                    borderRadius: "18px",
+                                    borderBottomRightRadius: derive(
+                                      { msg, myNameResolved },
+                                      (
+                                        { msg: m, myNameResolved: n }: {
+                                          msg: Message;
+                                          myNameResolved: string;
+                                        },
+                                      ) =>
+                                        m && m.author === n ? "4px" : "18px",
+                                    ),
+                                    borderBottomLeftRadius: derive(
+                                      { msg, myNameResolved },
+                                      (
+                                        { msg: m, myNameResolved: n }: {
+                                          msg: Message;
+                                          myNameResolved: string;
+                                        },
+                                      ) => m && m.author === n ? "18px" : "4px",
+                                    ),
+                                    backgroundColor: derive(
+                                      { msg, myNameResolved },
+                                      (
+                                        { msg: m, myNameResolved: n }: {
+                                          msg: Message;
+                                          myNameResolved: string;
+                                        },
+                                      ) =>
+                                        m && m.author === n
+                                          ? "#007AFF"
+                                          : "#E5E5EA",
+                                    ),
+                                    color: derive(
+                                      { msg, myNameResolved },
+                                      (
+                                        { msg: m, myNameResolved: n }: {
+                                          msg: Message;
+                                          myNameResolved: string;
+                                        },
+                                      ) =>
+                                        m && m.author === n
+                                          ? "white"
+                                          : "#1d1d1f",
+                                    ),
+                                    fontSize: "15px",
+                                    lineHeight: "1.4",
+                                  }}
+                                >
+                                  {msg.content}
+                                </div>,
+                              )}
+
+                              {/* Reactions row */}
+                              <div
+                                style={{
+                                  display: "flex",
+                                  gap: "4px",
+                                  marginTop: "4px",
+                                  marginBottom: "12px",
+                                  flexWrap: "wrap",
+                                  alignItems: "center",
+                                }}
+                              >
+                                {/* Existing reactions */}
+                                {messageReactions.map((reaction) => (
+                                  <button
+                                    type="button"
+                                    onClick={toggleReaction({
+                                      messages,
+                                      msgId: msg.id,
+                                      emoji: reaction.emoji,
+                                      myName,
+                                      emojiPickerMessageId,
+                                    })}
+                                    style={{
+                                      padding: "2px 6px",
+                                      fontSize: "12px",
+                                      backgroundColor: "#f0f0f0",
+                                      borderRadius: "12px",
+                                      border: "1px solid #e0e0e0",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "2px",
+                                    }}
+                                  >
+                                    {reaction.emoji}
+                                    <span
+                                      style={{
+                                        fontSize: "11px",
+                                        color: "#666",
+                                      }}
+                                    >
+                                      {derive(
+                                        reaction,
+                                        (r: Reaction) =>
+                                          r && r.userNames
+                                            ? r.userNames.length
+                                            : 0,
+                                      )}
+                                    </span>
+                                  </button>
+                                ))}
+
+                                {/* Add reaction button - always visible, click to toggle picker */}
+                                <button
+                                  type="button"
+                                  onClick={toggleEmojiPicker({
+                                    emojiPickerMessageId,
+                                    msgId: msg.id,
+                                  })}
+                                  style={{
+                                    padding: "2px 6px",
+                                    fontSize: "12px",
+                                    backgroundColor: "#f8f8f8",
+                                    borderRadius: "12px",
+                                    border: "1px solid #e0e0e0",
+                                    cursor: "pointer",
+                                    color: "#888",
+                                  }}
+                                >
+                                  +
+                                </button>
+
+                                {/* Emoji picker (visible when toggled) - positioned inline to avoid clipping */}
+                                {ifElse(
+                                  isPickerOpen,
+                                  <div
+                                    style={{
+                                      display: "inline-flex",
+                                      gap: "2px",
+                                      padding: "4px 6px",
+                                      backgroundColor: "white",
+                                      borderRadius: "16px",
+                                      border: "1px solid #e0e0e0",
+                                      boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                                      marginLeft: "4px",
+                                    }}
+                                  >
+                                    {REACTION_EMOJIS.map((emoji) => (
+                                      <button
+                                        type="button"
+                                        onClick={toggleReaction({
+                                          messages,
+                                          msgId: msg.id,
+                                          emoji,
+                                          myName,
+                                          emojiPickerMessageId,
+                                        })}
+                                        style={{
+                                          padding: "2px 4px",
+                                          fontSize: "14px",
+                                          background: "none",
+                                          border: "none",
+                                          cursor: "pointer",
+                                          borderRadius: "4px",
+                                        }}
+                                      >
+                                        {emoji}
+                                      </button>
+                                    ))}
+                                  </div>,
+                                  null,
+                                )}
+                              </div>
+                            </div>
+                          </>,
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Input Area */}
+                <div
+                  style={{
+                    padding: "0.75rem",
+                    backgroundColor: "#f0f9ff",
+                    borderRadius: "8px",
+                    border: "1px solid #bae6fd",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.75rem",
+                      marginBottom: "0.5rem",
+                    }}
+                  >
+                    {/* Clickable Avatar - click to change */}
+                    <div style={{ position: "relative", cursor: "pointer" }}>
+                      {ifElse(
+                        myAvatarUrl,
+                        <img
+                          src={myAvatarUrl}
+                          style={{
+                            width: "40px",
+                            height: "40px",
+                            borderRadius: "50%",
+                            objectFit: "cover",
+                            border: "2px solid #bae6fd",
+                          }}
+                        />,
+                        <div
+                          style={{
+                            width: "40px",
+                            height: "40px",
+                            borderRadius: "50%",
+                            backgroundColor: myColor,
+                            color: "white",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontWeight: "600",
+                            fontSize: "14px",
+                            border: "2px solid #bae6fd",
+                          }}
+                        >
+                          {derive(
+                            myNameResolved,
+                            (n: string) => getInitials(n),
+                          )}
+                        </div>,
+                      )}
+                      {/* Hidden ct-image-input overlaid on avatar */}
+                      <ct-image-input
+                        $images={avatarImages}
+                        maxImages={1}
+                        showPreview={false}
+                        buttonText=""
+                        variant="ghost"
+                        size="sm"
+                        style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;"
+                      />
+                    </div>
+
+                    <div style={{ flex: 1 }}>
+                      <div
+                        style={{
+                          fontSize: "0.875rem",
+                          fontWeight: "600",
+                          color: "#0369a1",
+                        }}
+                      >
+                        Chatting as:{" "}
+                        <strong style={{ color: "#0c4a6e" }}>{myName}</strong>
+                      </div>
+                    </div>
+
+                    {/* Attachment button for sending images to chat */}
+                    <ct-image-input
+                      $images={chatImages}
+                      maxImages={1}
+                      showPreview={false}
+                      buttonText="📎"
+                      variant="ghost"
+                      size="sm"
+                    />
+
+                    {/* Pending avatar preview */}
+                    {ifElse(
+                      hasPendingAvatar,
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.5rem",
+                        }}
+                      >
+                        <img
+                          src={pendingAvatarUrl}
+                          style={{
+                            width: "40px",
+                            height: "40px",
+                            borderRadius: "50%",
+                            objectFit: "cover",
+                            border: "2px solid #34C759",
+                          }}
+                        />
+                        <button
+                          type="button"
+                          style={{
+                            padding: "0.25rem 0.5rem",
+                            fontSize: "0.75rem",
+                            backgroundColor: "#34C759",
+                            color: "white",
+                            fontWeight: "600",
+                            border: "none",
+                            borderRadius: "4px",
+                            cursor: "pointer",
+                          }}
+                          onClick={confirmAvatar({
+                            users,
+                            myName,
+                            avatarImages,
+                          })}
+                        >
+                          ✓
+                        </button>
+                        <button
+                          type="button"
+                          style={{
+                            padding: "0.25rem 0.5rem",
+                            fontSize: "0.75rem",
+                            backgroundColor: "#FF3B30",
+                            color: "white",
+                            fontWeight: "600",
+                            border: "none",
+                            borderRadius: "4px",
+                            cursor: "pointer",
+                          }}
+                          onClick={cancelAvatar({ avatarImages })}
+                        >
+                          ✗
+                        </button>
+                      </div>,
+                      null,
+                    )}
+
+                    {/* Pending chat image preview */}
+                    {ifElse(
+                      hasPendingChatImage,
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.5rem",
+                        }}
+                      >
+                        <img
+                          src={pendingChatImageUrl}
+                          style={{
+                            width: "40px",
+                            height: "40px",
+                            borderRadius: "8px",
+                            objectFit: "cover",
+                            border: "2px solid #007AFF",
+                          }}
+                        />
+                        <button
+                          type="button"
+                          style={{
+                            padding: "0.25rem 0.5rem",
+                            fontSize: "0.75rem",
+                            backgroundColor: "#007AFF",
+                            color: "white",
+                            fontWeight: "600",
+                            border: "none",
+                            borderRadius: "4px",
+                            cursor: "pointer",
+                          }}
+                          onClick={sendImageMessage({
+                            messages,
+                            myName,
+                            chatImages,
+                          })}
+                        >
+                          Send
+                        </button>
+                        <button
+                          type="button"
+                          style={{
+                            padding: "0.25rem 0.5rem",
+                            fontSize: "0.75rem",
+                            backgroundColor: "#FF3B30",
+                            color: "white",
+                            fontWeight: "600",
+                            border: "none",
+                            borderRadius: "4px",
+                            cursor: "pointer",
+                          }}
+                          onClick={cancelAvatar({ avatarImages: chatImages })}
+                        >
+                          ✗
+                        </button>
+                      </div>,
+                      null,
+                    )}
+                  </div>
+
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <ct-input
+                      $value={contentInput}
+                      placeholder="Type your message..."
+                      style="flex: 1;"
+                      timingStrategy="immediate"
+                      onct-submit={sendMessage({
+                        messages,
+                        myName,
+                        contentInput,
+                      })}
+                    />
+                    <ct-button
+                      onClick={sendMessage({ messages, myName, contentInput })}
+                    >
+                      Send
+                    </ct-button>
+                  </div>
+                </div>
+              </div>
+            </>,
+            // Expired session
+            <div
+              style={{
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "2rem",
+                backgroundColor: "#f2f2f7",
+              }}
+            >
+              <div
+                style={{
+                  padding: "2rem",
+                  backgroundColor: "white",
+                  borderRadius: "16px",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+                  textAlign: "center",
+                  maxWidth: "400px",
+                }}
+              >
+                <div
+                  style={{
+                    width: "64px",
+                    height: "64px",
+                    borderRadius: "50%",
+                    backgroundColor: "#FF3B30",
+                    color: "white",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "32px",
+                    margin: "0 auto 1rem",
+                  }}
+                >
+                  !
+                </div>
+                <h2
+                  style={{
+                    color: "#1c1c1e",
+                    fontSize: "1.5rem",
+                    fontWeight: "600",
+                    marginBottom: "0.5rem",
+                  }}
+                >
+                  Session Expired
+                </h2>
+                <p
+                  style={{
+                    color: "#8e8e93",
+                    fontSize: "1rem",
+                    marginBottom: "1.5rem",
+                    lineHeight: "1.5",
+                  }}
+                >
+                  This chat session has been reset. Please return to the lobby
+                  to join a new session.
+                </p>
+                <div
+                  style={{
+                    padding: "0.75rem 1.5rem",
+                    backgroundColor: "#f2f2f7",
+                    borderRadius: "8px",
+                    color: "#8e8e93",
+                    fontSize: "0.875rem",
+                    marginBottom: "1rem",
+                  }}
+                >
+                  You were chatting as:{" "}
+                  <strong style={{ color: "#1c1c1e" }}>{myName}</strong>
+                </div>
+                <div
+                  style={{
+                    padding: "0.75rem 1.5rem",
+                    fontSize: "0.875rem",
+                    backgroundColor: "#e5e5ea",
+                    borderRadius: "8px",
+                    color: "#6b7280",
+                  }}
+                >
+                  Use the back button to return to the lobby
+                </div>
+              </div>
+            </div>,
+          )}
+        </div>
+      ),
+      myName,
+    };
+  },
+);

@@ -7,7 +7,7 @@ import { generateObject, generateText, llm } from "./llm.ts";
 import { ifElse } from "./if-else.ts";
 import { when } from "./when.ts";
 import { unless } from "./unless.ts";
-import type { IRuntime } from "../runtime.ts";
+import type { Runtime } from "../runtime.ts";
 import { compileAndRun } from "./compile-and-run.ts";
 import { navigateTo } from "./navigate-to.ts";
 import { wish } from "./wish.ts";
@@ -21,7 +21,7 @@ import { llmDialog } from "./llm-dialog.ts";
 /**
  * Register all built-in modules with a runtime's module registry
  */
-export function registerBuiltins(runtime: IRuntime) {
+export function registerBuiltins(runtime: Runtime) {
   const moduleRegistry = runtime.moduleRegistry;
 
   moduleRegistry.addModuleByRef("map", raw(map));

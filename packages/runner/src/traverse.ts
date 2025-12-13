@@ -845,8 +845,9 @@ export function loadSource(
   valueEntry: IMemorySpaceAttestation,
   cycleCheck: Set<string> = new Set<string>(),
   schemaTracker: MapSet<string, SchemaPathSelector>,
+  newLinks?: Array<{ docKey: string; schema: SchemaPathSelector }>,
 ) {
-  loadLinkedRecipe(tx, valueEntry, schemaTracker);
+  loadLinkedRecipe(tx, valueEntry, schemaTracker, newLinks);
   if (!isObject(valueEntry.value)) {
     return;
   }
@@ -884,13 +885,17 @@ export function loadSource(
   if (error || entry === null || entry.value === undefined) {
     return;
   }
-  schemaTracker.add(getTrackerKey(address), {
-    path: [],
-    schemaContext: SchemaNone,
-  });
+  const docKey = getTrackerKey(address);
+  if (!schemaTracker.hasValue(docKey, MinimalSchemaSelector)) {
+    schemaTracker.add(docKey, MinimalSchemaSelector);
+    if (newLinks !== undefined) {
+      newLinks.push({ docKey, schema: MinimalSchemaSelector });
+    }
+  }
+
   // We've lost the space from our address in the tx.read, so recreate
   const fullEntry = { address: address, value: entry.value };
-  loadSource(tx, fullEntry, cycleCheck, schemaTracker);
+  loadSource(tx, fullEntry, cycleCheck, schemaTracker, newLinks);
 }
 
 // With unified traversal code, we don't need to worry about the server
@@ -1150,6 +1155,7 @@ function loadLinkedRecipe(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
   schemaTracker: MapSet<string, SchemaPathSelector>,
+  newLinks?: Array<{ docKey: string; schema: SchemaPathSelector }>,
 ) {
   if (!isObject(valueEntry.value)) {
     return;
@@ -1195,10 +1201,13 @@ function loadLinkedRecipe(
   if (entry === null || entry.value === undefined) {
     return;
   }
-  schemaTracker.add(getTrackerKey(address), {
-    path: [],
-    schemaContext: SchemaNone,
-  });
+  const docKey = getTrackerKey(address);
+  if (!schemaTracker.hasValue(docKey, MinimalSchemaSelector)) {
+    schemaTracker.add(docKey, MinimalSchemaSelector);
+    if (newLinks !== undefined) {
+      newLinks.push({ docKey, schema: MinimalSchemaSelector });
+    }
+  }
 }
 
 // docPath is where we found the pointer and are doing this work. It does not
@@ -1288,6 +1297,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
     >(deepEqual),
     objectCreator?: IObjectCreator<V>,
     traverseCells?: boolean,
+    private newLinks?: Array<{ docKey: string; schema: SchemaPathSelector }>,
   ) {
     super(tx, undefined, objectCreator, traverseCells);
   }
@@ -1296,8 +1306,19 @@ export class SchemaObjectTraverser<V extends JSONValue>
     doc: IMemorySpaceAttestation,
     link?: NormalizedFullLink,
   ): V | JSONValue | undefined {
-    this.schemaTracker.add(getTrackerKey(doc.address), this.selector);
+    this.trackNewLink(getTrackerKey(doc.address), this.selector);
+    //this.schemaTracker.add(getTrackerKey(doc.address), this.selector);
     return this.traverseWithSelector(doc, this.selector, link);
+  }
+
+  /** Add to schemaTracker and record as newly discovered if not already tracked */
+  private trackNewLink(docKey: string, schema: SchemaPathSelector): void {
+    if (!this.schemaTracker.hasValue(docKey, schema)) {
+      this.schemaTracker.add(docKey, schema);
+      if (this.newLinks !== undefined) {
+        this.newLinks.push({ docKey, schema });
+      }
+    }
   }
 
   // Traverse the specified doc with the selector.

@@ -159,17 +159,17 @@ export class CharmManager {
     );
     // Use the space DID as the cause - it's derived from the space name
     // and consistently available everywhere
-    // For home space (where space DID = user identity DID), getHomeSpaceCell()
-    // uses homeSpaceCellSchema which includes favorites for proper sync/query behavior.
+    // For home space (where space DID = user identity DID), getHomeSpaceCellContents()
+    // uses homeSpaceCellContentsSchema which includes favorites for proper sync/query behavior.
     const isHomeSpace = this.space === this.runtime.userIdentityDID;
     this.spaceCell = isHomeSpace
       ? this.runtime.getHomeSpaceCell()
       : this.runtime.getSpaceCell(this.space);
 
-    const syncSpaceCell = Promise.resolve(this.spaceCell.sync());
+    const syncSpaceCellContents = Promise.resolve(this.spaceCell.sync());
 
     // Initialize the space cell structure by linking to existing cells
-    const linkSpaceCell = syncSpaceCell.then(() =>
+    const linkSpaceCellContents = syncSpaceCellContents.then(() =>
       this.runtime.editWithRetry((tx) => {
         const spaceCellWithTx = this.spaceCell.withTx(tx);
 
@@ -215,8 +215,8 @@ export class CharmManager {
       this.syncCharms(this.charms),
       this.syncCharms(this.pinnedCharms),
       this.syncCharms(this.recentCharms),
-      syncSpaceCell,
-      linkSpaceCell,
+      syncSpaceCellContents,
+      linkSpaceCellContents,
     ]).then(() => {});
   }
 
@@ -266,7 +266,7 @@ export class CharmManager {
     return this.pinnedCharms;
   }
 
-  getSpaceCell(): Cell<SpaceCellContents> {
+  getSpaceCellContents(): Cell<SpaceCellContents> {
     return this.spaceCell;
   }
 

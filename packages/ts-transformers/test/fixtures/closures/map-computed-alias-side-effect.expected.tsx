@@ -253,7 +253,10 @@ export default recipe({
                         __ct_amount_key: true
                     },
                     required: ["element", "__ct_amount_key"]
-                } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number",
+                    asOpaque: true
+                } as const satisfies __ctHelpers.JSONSchema, {
                     element: element,
                     __ct_amount_key: __ct_amount_key
                 }, ({ element, __ct_amount_key }) => element[__ct_amount_key]);

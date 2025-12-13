@@ -295,6 +295,19 @@ export class CTButton extends BaseElement {
       this.size = "default";
       this.disabled = false;
       this.type = "button";
+
+      // Suppress click events on the host element when disabled.
+      // JSX attaches onClick handlers to the host element, but click events
+      // cross the shadow boundary and would fire even when disabled.
+      this.addEventListener(
+        "click",
+        (e) => {
+          if (this.disabled) {
+            e.stopImmediatePropagation();
+          }
+        },
+        { capture: true },
+      );
     }
 
     override firstUpdated(

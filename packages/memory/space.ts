@@ -678,17 +678,23 @@ export const selectFacts = function <Space extends MemorySpace>(
   { the, of, cause, is, since }: FactSelector,
 ): SelectedFact[] {
   const stmt = getPreparedStatement(store, "export", EXPORT);
-  const results = [];
-  for (
-    const row of stmt.iter({
-      the: the === SelectAllString ? null : the,
-      of: of === SelectAllString ? null : of,
-      cause: cause === SelectAllString ? null : cause,
-      is: is === undefined ? null : {},
-      since: since ?? null,
-    }) as Iterable<StateRow>
-  ) {
-    results.push(toFact(row));
+  const results: SelectedFact[] = [];
+  const iter = stmt.iter({
+    the: the === SelectAllString ? null : the,
+    of: of === SelectAllString ? null : of,
+    cause: cause === SelectAllString ? null : cause,
+    is: is === undefined ? null : {},
+    since: since ?? null,
+  }) as IterableIterator<StateRow>;
+  // Explicit cleanup via finally - for-of loops don't call return() on normal
+  // completion, leaving the prepared statement active and causing "cannot
+  // commit transaction - SQL statements in progress" errors.
+  try {
+    for (const row of iter) {
+      results.push(toFact(row));
+    }
+  } finally {
+    iter.return?.();
   }
   return results;
 };
@@ -698,18 +704,17 @@ export const selectFact = function <Space extends MemorySpace>(
   { the, of, since }: { the: MIME; of: URI; since?: number },
 ): SelectedFact | undefined {
   const stmt = getPreparedStatement(store, "export", EXPORT);
-  for (
-    const row of stmt.iter({
-      the: the,
-      of: of,
-      cause: null,
-      is: null,
-      since: since ?? null,
-    }) as Iterable<StateRow>
-  ) {
-    return toFact(row);
-  }
-  return undefined;
+  // Use get() instead of iter() to avoid leaving an active iterator
+  // when we only need the first row. Active iterators cause
+  // "cannot commit transaction - SQL statements in progress" errors.
+  const row = stmt.get({
+    the: the,
+    of: of,
+    cause: null,
+    is: null,
+    since: since ?? null,
+  }) as StateRow | undefined;
+  return row ? toFact(row) : undefined;
 };
 
 /**
@@ -984,7 +989,13 @@ export const transact = <Space extends MemorySpace>(
       span.setAttribute("memory.has_changes", true);
     }
 
-    return execute(session.store.transaction(commit), session, transaction);
+    // Use IMMEDIATE transaction to acquire write lock at start, reducing
+    // lock contention with external processes like litestream
+    return execute(
+      session.store.transaction(commit).immediate,
+      session,
+      transaction,
+    );
   });
 };
 
@@ -1167,23 +1178,29 @@ export function getLabels<
     "getLabelsBatch",
     GET_LABELS_BATCH,
   );
-  for (
-    const row of stmt.iter({
-      the: LABEL_TYPE,
-      ofs: JSON.stringify(ofs),
-    }) as Iterable<StateRow>
-  ) {
-    const labelFact = toFact(row);
-    set<FactSelectionValue, OfTheCause<FactSelectionValue>>(
-      labels,
-      labelFact.of,
-      labelFact.the,
-      labelFact.cause,
-      {
-        since: labelFact.since,
-        ...(labelFact.is ? { is: labelFact.is } : {}),
-      },
-    );
+  const iter = stmt.iter({
+    the: LABEL_TYPE,
+    ofs: JSON.stringify(ofs),
+  }) as IterableIterator<StateRow>;
+  // Explicit cleanup via finally - for-of loops don't call return() on normal
+  // completion, leaving the prepared statement active and causing "cannot
+  // commit transaction - SQL statements in progress" errors.
+  try {
+    for (const row of iter) {
+      const labelFact = toFact(row);
+      set<FactSelectionValue, OfTheCause<FactSelectionValue>>(
+        labels,
+        labelFact.of,
+        labelFact.the,
+        labelFact.cause,
+        {
+          since: labelFact.since,
+          ...(labelFact.is ? { is: labelFact.is } : {}),
+        },
+      );
+    }
+  } finally {
+    iter.return?.();
   }
 
   return labels;

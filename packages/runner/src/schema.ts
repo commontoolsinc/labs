@@ -8,8 +8,12 @@ import { createCell, isCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
-import { type IRuntime } from "./runtime.ts";
-import { type NormalizedFullLink } from "./link-utils.ts";
+import { type Runtime } from "./runtime.ts";
+import {
+  createDataCellURI,
+  type NormalizedFullLink,
+  parseLink,
+} from "./link-utils.ts";
 import {
   createQueryResultProxy,
   isCellResultForDereferencing,
@@ -122,7 +126,7 @@ function filterAsCell(schema: JSONSchema | undefined): JSONSchema | undefined {
  * For `required` objects and arrays assume {} and [] as default value.
  */
 export function processDefaultValue(
-  runtime: IRuntime,
+  runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   defaultValue: any,
@@ -321,7 +325,7 @@ function mergeDefaults(
 
 function annotateWithBackToCellSymbols(
   value: any,
-  runtime: IRuntime,
+  runtime: Runtime,
   link: NormalizedFullLink,
   tx: IExtendedStorageTransaction | undefined,
 ) {
@@ -341,7 +345,7 @@ function annotateWithBackToCellSymbols(
 }
 
 export function validateAndTransform(
-  runtime: IRuntime,
+  runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   _seen?: Array<[string, any]>,
@@ -447,7 +451,7 @@ export function validateAndTransform(
 class TransformObjectCreator
   implements IObjectCreator<AnyCellWrapping<JSONValue>> {
   constructor(
-    private runtime: IRuntime,
+    private runtime: Runtime,
     private tx: IExtendedStorageTransaction,
   ) {
   }

@@ -53,7 +53,7 @@ import { deepEqual } from "@commontools/runner";
 import type { SchemaPathSelector } from "./consumer.ts";
 
 const logger = getLogger("memory-provider", {
-  enabled: true,
+  enabled: false,
   level: "info",
 });
 
@@ -467,29 +467,29 @@ class MemoryProviderSession<
       }
       // First, check to see if any of our schema queries need to be notified
       // Any queries that lack access are skipped (with a console log)
-      const [_lastId, _maxSince, facts] = await this
-        .getSchemaSubscriptionMatches(
-          redactedData.transaction,
-        );
+      const schemaFacts = await this.getSchemaSubscriptionMatches(
+        redactedData.transaction,
+      );
 
-      const jobIds: InvocationURL<Reference<Subscribe>>[] = [];
+      // Send commits with revisions to commit log subscriptions
+      // The client's startSynchronization() reads revisions to update its heap
+      const commitJobIds: InvocationURL<Reference<Subscribe>>[] = [];
       for (const [id, channels] of this.channels) {
         if (Subscription.match(redactedData.transaction, channels)) {
-          jobIds.push(id);
+          commitJobIds.push(id);
         }
       }
 
-      if (jobIds.length > 0) {
-        // The client has a subscription to the space's commit log, but our
-        // subscriptions may trigger inclusion of other objects. Add these here.
+      if (commitJobIds.length > 0) {
+        // The client has a subscription to the space's commit log
         const enhancedCommit: EnhancedCommit<Space> = {
           commit: {
             [item.of]: { [item.the]: { [item.cause]: { is: redactedData } } },
           } as Commit<Space>,
-          revisions: this.filterKnownFacts(facts),
+          revisions: this.filterKnownFacts(schemaFacts),
         };
 
-        for (const id of jobIds) {
+        for (const id of commitJobIds) {
           // this is sent to a standard subscription (application/commit+json)
           this.perform({
             the: "task/effect",
@@ -562,8 +562,7 @@ class MemoryProviderSession<
       isWildcardQuery,
     );
     this.schemaChannels.set(of, subscription);
-    // Note: lastRevision is updated by filterKnownFacts when excludeSent is used,
-    // and by getSchemaSubscriptionMatches for subsequent updates
+    // Note: lastRevision is updated by filterKnownFacts when facts are sent
   }
 
   /**
@@ -631,25 +630,22 @@ class MemoryProviderSession<
    * For wildcard queries (of: "_"): Match changed docs against type pattern.
    * For specific document queries: Use schemaTracker to find affected docs.
    *
-   * Both paths then incrementally update by following links.
+   * Returns all facts that match any subscription's criteria.
    */
   private async getSchemaSubscriptionMatches<Space extends MemorySpace>(
     transaction: Transaction<Space>,
-  ): Promise<[JobId | undefined, number, Revision<Fact>[]]> {
-    const schemaMatches = new Map<string, Revision<Fact>>();
+  ): Promise<Revision<Fact>[]> {
     const space = transaction.sub;
-    let maxSince = -1;
-    let lastId: JobId | undefined;
 
     // Early exit if no schema subscriptions
     if (this.schemaChannels.size === 0) {
-      return [undefined, -1, []];
+      return [];
     }
 
     // Extract changed document keys from transaction
     const changedDocs = this.extractChangedDocKeys(transaction);
     if (changedDocs.size === 0) {
-      return [undefined, -1, []];
+      return [];
     }
 
     // Get access to the space session for evaluating documents
@@ -662,62 +658,40 @@ class MemoryProviderSession<
     }
     const spaceSession = mountResult.ok as unknown as SpaceSession<Space>;
 
-    // First, find affected docs using the shared schemaTracker (for non-wildcard)
+    // Find affected docs using the shared schemaTracker (for non-wildcard)
     const sharedAffectedDocs = this.findAffectedDocs(
       changedDocs,
       this.sharedSchemaTracker,
     );
 
-    // Also collect affected docs from wildcard queries
-    const wildcardAffectedDocs: Array<
-      { docKey: string; schemas: Set<SchemaPathSelector> }
-    > = [];
-    for (const [id, subscription] of this.schemaChannels) {
-      if (subscription.isWildcardQuery) {
-        const docs = this.findAffectedDocsForWildcard(
-          changedDocs,
-          subscription.invocation,
-        );
-        for (const doc of docs) {
-          wildcardAffectedDocs.push(doc);
-        }
-        if (docs.length > 0) {
-          lastId = id;
-        }
-      } else if (sharedAffectedDocs.length > 0) {
-        // Non-wildcard subscription cares about shared tracker changes
-        lastId = id;
-      }
-    }
-
-    // Combine all affected docs (deduplication happens in processIncrementalUpdate)
-    const allAffectedDocs = [...sharedAffectedDocs, ...wildcardAffectedDocs];
-
-    if (allAffectedDocs.length === 0) {
-      return [undefined, -1, []];
-    }
-
-    // Process all affected docs incrementally using the shared tracker
-    const result = this.processIncrementalUpdate(
+    // Process shared affected docs
+    const { newFacts } = this.processIncrementalUpdate(
       spaceSession,
-      allAffectedDocs,
+      sharedAffectedDocs,
       space,
     );
 
-    // Collect facts that are newer than what we've sent on this session
-    // Note: we don't update lastRevision here - that happens in filterKnownFacts
-    // when facts are actually sent to the client
-    for (const [_address, factVersion] of result.newFacts) {
-      const factKey = this.toKey(factVersion);
-      const previousSince = this.lastRevision.get(factKey);
-
-      if (previousSince === undefined || previousSince < factVersion.since) {
-        schemaMatches.set(factKey, factVersion);
-        maxSince = Math.max(maxSince, factVersion.since);
+    // Add facts from wildcard subscriptions
+    for (const [_jobId, subscription] of this.schemaChannels) {
+      if (subscription.isWildcardQuery) {
+        const wildcardDocs = this.findAffectedDocsForWildcard(
+          changedDocs,
+          subscription.invocation,
+        );
+        if (wildcardDocs.length > 0) {
+          const wildcardResult = this.processIncrementalUpdate(
+            spaceSession,
+            wildcardDocs,
+            space,
+          );
+          for (const [key, fact] of wildcardResult.newFacts) {
+            newFacts.set(key, fact);
+          }
+        }
       }
     }
 
-    return [lastId, maxSince, [...schemaMatches.values()]];
+    return [...newFacts.values()];
   }
 
   /**
@@ -771,59 +745,38 @@ class MemoryProviderSession<
     // TODO(ubik2,seefeld): Make this a per-session classification
     const classification = undefined;
 
-    // Queue of (docKey, schema) pairs to process
-    const pendingPairs: Array<{ docKey: string; schema: SchemaPathSelector }> =
-      [];
+    // Collect all unique docKeys that need to be fetched
+    // Start with the initially affected docs
+    const docsToFetch = new Set<string>(affectedDocs.map((d) => d.docKey));
 
-    // Initialize with affected docs and their schemas
+    // Evaluate each affected doc with each of its schemas
+    // evaluateDocumentLinks does a full traversal and finds all linked documents
     for (const { docKey, schemas } of affectedDocs) {
+      const { docId, docType } = this.parseDocKey(docKey);
+      if (docId === null) continue;
+
       for (const schema of schemas) {
-        pendingPairs.push({ docKey, schema });
+        const result = evaluateDocumentLinks(
+          spaceSession,
+          { id: docId, type: docType },
+          schema,
+          classification,
+          this.sharedSchemaTracker,
+        );
+        // Collect newly discovered docs to fetch
+        if (result !== null) {
+          for (const { docKey: newDocKey } of result.newLinks) {
+            docsToFetch.add(newDocKey);
+          }
+        }
       }
     }
 
-    // Process pending pairs - may grow as we discover new links
-    // Track processed (docKey, schema) pairs to avoid redundant work
-    const processedPairs = new Set<string>();
-    // Also track how many times each doc has been processed (regardless of schema)
-    // to detect growing path cycles like A -> A/foo -> A/foo/foo
-    const docProcessCount = new Map<string, number>();
-    const MAX_DOC_VISITS = 100; // Limit visits per doc to catch growing cycles
+    // Fetch each unique doc once and add to results
+    for (const docKey of docsToFetch) {
+      const { docId, docType } = this.parseDocKey(docKey);
+      if (docId === null) continue;
 
-    while (pendingPairs.length > 0) {
-      const { docKey, schema } = pendingPairs.pop()!;
-      const pairKey = `${docKey}|${JSON.stringify(schema)}`;
-
-      // Skip if already processed this exact pair
-      if (processedPairs.has(pairKey)) {
-        continue;
-      }
-      processedPairs.add(pairKey);
-
-      // Check if we've visited this doc too many times (growing path cycle)
-      const visitCount = (docProcessCount.get(docKey) ?? 0) + 1;
-      if (visitCount > MAX_DOC_VISITS) {
-        logger.warn(
-          "incremental-update-cycle",
-          () => [
-            `Document ${docKey} visited ${visitCount} times, possible growing path cycle`,
-          ],
-        );
-        continue;
-      }
-      docProcessCount.set(docKey, visitCount);
-
-      // Parse docKey back to id and type (format is "id/type" from BaseObjectManager.toKey)
-      // Note: type can contain slashes (e.g., "application/json"), so we split on the FIRST slash
-      // The id is always in the form "of:HASH" which doesn't contain slashes
-      const slashIndex = docKey.indexOf("/");
-      if (slashIndex === -1) {
-        continue;
-      }
-      const docId = docKey.slice(0, slashIndex);
-      const docType = docKey.slice(slashIndex + 1);
-
-      // Load the fact for this document to include in results
       const fact = selectFact(spaceSession, {
         of: docId as `${string}:${string}`,
         the: docType as `${string}/${string}`,
@@ -842,25 +795,25 @@ class MemoryProviderSession<
         is: fact.is,
         since: fact.since,
       });
-
-      // Evaluate this document with the schema to find its current links
-      // Pass sharedSchemaTracker - it will be mutated with newly discovered links,
-      // and will skip traversing into already-tracked (doc, schema) pairs
-      evaluateDocumentLinks(
-        spaceSession,
-        { id: docId, type: docType },
-        schema,
-        classification,
-        this.sharedSchemaTracker,
-      );
-      // Note: evaluateDocumentLinks adds new links to sharedSchemaTracker.
-      // We don't need to explicitly add them to pendingPairs here because
-      // the early termination in loadFactsForDoc means we won't re-traverse
-      // already-tracked docs. The sharedSchemaTracker itself becomes the
-      // source of truth for what needs incremental updates on future commits.
     }
 
     return { newFacts };
+  }
+
+  /** Parse docKey (format "id/type") back to id and type */
+  private parseDocKey(
+    docKey: string,
+  ): { docId: string | null; docType: string } {
+    // Note: type can contain slashes (e.g., "application/json"), so we split on the FIRST slash
+    // The id is always in the form "of:HASH" which doesn't contain slashes
+    const slashIndex = docKey.indexOf("/");
+    if (slashIndex === -1) {
+      return { docId: null, docType: "" };
+    }
+    return {
+      docId: docKey.slice(0, slashIndex),
+      docType: docKey.slice(slashIndex + 1),
+    };
   }
 
   private async getAcl(space: MemorySpace): Promise<ACL | undefined> {

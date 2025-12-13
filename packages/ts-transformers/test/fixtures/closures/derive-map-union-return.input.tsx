@@ -25,7 +25,7 @@ export default recipe<State>("DeriveMapUnionReturn", (state) => {
     if (!messages || messages.length === 0) return null;
 
     for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
+      const msg = messages[i]!;
       if (msg.role === "assistant") {
         // This map call inside the derive callback was the key issue
         const content = typeof msg.content === "string"

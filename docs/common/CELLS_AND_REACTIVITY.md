@@ -194,7 +194,7 @@ const removeItem = (items: Cell<Item[]>, item: Cell<Item>) => {
 
 `computed()` creates reactive derived values that update when their dependencies change.
 
-**Note:** You may see `derive()` in some docs or error messages - it's the same thing as `computed()`. Use `computed()` in your code.
+**Note:** You may see `derive()` in some docs or error messages. While `derive()` works and can handle multiple inputs (arrays or objects of dependencies), **always prefer `computed()`** in patterns. The CTS transformer automatically handles closure extraction, making `computed()` the recommended API for all reactive computations.
 
 ### Basic Usage
 
@@ -207,6 +207,19 @@ const fullName = computed(() => `${firstName} ${lastName}`);
 
 // Use in JSX
 <div>Hello, {fullName}!</div>
+```
+
+### Never Nest computed()
+
+There is never a reason to nest `computed()` calls. The inner `computed()` returns an `OpaqueRef`, not a value, which breaks reactivity:
+
+```typescript
+// ❌ WRONG - never nest computed()
+const value = computed(() => 123 + computed(() => myCell.get() * 2));
+
+// ✅ CORRECT - declare separately
+const doubled = computed(() => myCell.get() * 2);
+const value = computed(() => 123 + doubled);
 ```
 
 ### When to Use computed()
@@ -358,10 +371,10 @@ Reactivity is completely automatic:
 
 ### 3. In Inline Handlers
 
-You need to explicitly get/set values:
+When working with `Cell<T>` types (whether passed as inputs or created with `Cell.of()`), you need to explicitly get/set values:
 
 ```typescript
-// ✅ Use .get() to read, .set() to write
+// ✅ Use .get() to read, .set() to write when you have Cell<T>
 <ct-button onClick={() => {
   const current = count.get();  // Read current value
   count.set(current + 1);       // Write new value
@@ -369,7 +382,7 @@ You need to explicitly get/set values:
   Increment
 </ct-button>
 
-// ✅ For arrays
+// ✅ For arrays - if items is Cell<T[]>
 <ct-button onClick={() => {
   items.push({ title: "New", done: false });
 }}>
@@ -377,17 +390,22 @@ You need to explicitly get/set values:
 </ct-button>
 ```
 
+**Key point:** If the type is `Cell<T>` (whether from a pattern input parameter or created locally with `Cell.of()`), you need `.get()` to unwrap the value. The method of creation doesn't matter - what matters is the type.
+
 ### 4. In handler() Functions
 
-Same as inline handlers—explicit get/set:
+Same as inline handlers—when the type is `Cell<T>`, use explicit get/set:
 
 ```typescript
 const increment = handler<never, { count: Cell<number> }>(
   (_, { count }) => {
+    // count is Cell<number>, so .get() is required
     count.set(count.get() + 1);
   }
 );
 ```
+
+**Remember:** Whether a cell was passed in as an input or created locally with `Cell.of()`, if the type is `Cell<T>`, you use `.get()` to read its value.
 
 ### 5. In computed() Functions
 

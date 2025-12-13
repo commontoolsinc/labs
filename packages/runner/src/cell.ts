@@ -62,7 +62,7 @@ import {
   type URI,
 } from "./sigil-types.ts";
 import { areLinksSame, isLink } from "./link-utils.ts";
-import type { IRuntime } from "./runtime.ts";
+import type { Runtime } from "./runtime.ts";
 import {
   createSigilLinkFromParsedLink,
   findAndInlineDataURILinks,
@@ -187,7 +187,7 @@ declare module "@commontools/api" {
       boundTarget?: (...args: unknown[]) => unknown,
     ): OpaqueRef<T>;
     toJSON(): LegacyJSONCellLink | null;
-    runtime: IRuntime;
+    runtime: Runtime;
     tx: IExtendedStorageTransaction | undefined;
     schema?: JSONSchema;
     rootSchema?: JSONSchema;
@@ -248,7 +248,7 @@ const cellMethods = new Set<keyof ICell<unknown>>([
 ]);
 
 export function createCell<T>(
-  runtime: IRuntime,
+  runtime: Runtime,
   link?: NormalizedLink,
   tx?: IExtendedStorageTransaction,
   synced = false,
@@ -304,7 +304,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   private _kind: CellKind;
 
   constructor(
-    public readonly runtime: IRuntime,
+    public readonly runtime: Runtime,
     public readonly tx: IExtendedStorageTransaction | undefined,
     link?: NormalizedLink,
     private synced: boolean = false,
@@ -1264,7 +1264,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 
 function subscribeToReferencedDocs<T>(
   callback: (value: T) => Cancel | undefined | void,
-  runtime: IRuntime,
+  runtime: Runtime,
   link: NormalizedFullLink,
 ): Cancel {
   let cleanup: Cancel | undefined | void;

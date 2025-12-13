@@ -25,7 +25,7 @@ import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { isCell, isStream } from "../cell.ts";
 import { ID, NAME, type Recipe } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
-import type { IRuntime } from "../runtime.ts";
+import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { formatTransactionSummary } from "../storage/transaction-summary.ts";
 import {
@@ -235,7 +235,7 @@ function traverseAndSerialize(
  * @returns The cellified value
  */
 function traverseAndCellify(
-  runtime: IRuntime,
+  runtime: Runtime,
   space: MemorySpace,
   value: unknown,
 ): unknown {
@@ -537,9 +537,9 @@ function extractRunArguments(input: unknown): Record<string, any> {
  * @param toolHandlers - Optional map to populate with handler references for invocation
  * @returns Flattened tools object with handler/pattern entries
  */
-function flattenTools(
+function _flattenTools(
   toolsCell: Cell<any>,
-  _runtime?: IRuntime,
+  _runtime?: Runtime,
 ): Record<
   string,
   {
@@ -628,7 +628,7 @@ function flattenTools(
  * (description, inputSchema, internal) and excludes handler which may have
  * circular references.
  */
-function toolsHaveChanged(
+function _toolsHaveChanged(
   newTools: Record<string, any>,
   oldTools: Record<string, any> | undefined,
 ): boolean {
@@ -762,7 +762,7 @@ function buildToolCatalog(
  * This is appended to the system prompt so the LLM has immediate context.
  */
 function buildAvailableCellsDocumentation(
-  runtime: IRuntime,
+  runtime: Runtime,
   space: MemorySpace,
   context: Record<string, Cell<any>> | undefined,
   pinnedCells: Cell<PinnedCell[]>,
@@ -925,7 +925,7 @@ type ResolvedToolCall =
   };
 
 function resolveToolCall(
-  runtime: IRuntime,
+  runtime: Runtime,
   space: MemorySpace,
   toolCallPart: BuiltInLLMToolCallPart,
   catalog: ToolCatalog,
@@ -1151,7 +1151,7 @@ type ToolCallExecutionResult = {
 };
 
 async function executeToolCalls(
-  runtime: IRuntime,
+  runtime: Runtime,
   space: MemorySpace,
   toolCatalog: ToolCatalog,
   toolCallParts: BuiltInLLMToolCallPart[],
@@ -1254,7 +1254,7 @@ export const llmToolExecutionHelpers = {
  * @returns true if the action was performed, false otherwise
  */
 async function safelyPerformUpdate(
-  runtime: IRuntime,
+  runtime: Runtime,
   pending: Cell<boolean>,
   internal: Cell<Schema<typeof internalSchema>>,
   requestId: string,
@@ -1283,7 +1283,7 @@ async function safelyPerformUpdate(
  * Handles the pin tool call.
  */
 function handlePin(
-  runtime: IRuntime,
+  runtime: Runtime,
   resolved: ResolvedToolCall & { type: "pin" },
   pinnedCells: Cell<PinnedCell[]>,
 ): { type: string; value: any } {
@@ -1313,7 +1313,7 @@ function handlePin(
  * Handles the unpin tool call.
  */
 function handleUnpin(
-  runtime: IRuntime,
+  runtime: Runtime,
   resolved: ResolvedToolCall & { type: "unpin" },
   pinnedCells: Cell<PinnedCell[]>,
 ): { type: string; value: any } {
@@ -1374,7 +1374,7 @@ function handleRead(
  * Handles the update Argument tool call.
  */
 function handleUpdateArgument(
-  runtime: IRuntime,
+  runtime: Runtime,
   resolved: ResolvedToolCall & { type: "updateArgument" },
 ): { type: string; value: any } {
   const cell = resolved.cellRef;
@@ -1419,7 +1419,7 @@ function handleUpdateArgument(
  * Handles the invoke tool call (both pattern and handler execution).
  */
 async function handleInvoke(
-  runtime: IRuntime,
+  runtime: Runtime,
   space: MemorySpace,
   resolved: ResolvedToolCall,
 ): Promise<{ type: string; value: any }> {
@@ -1556,7 +1556,7 @@ async function handleInvoke(
  * @returns Promise that resolves to the tool execution result
  */
 async function invokeToolCall(
-  runtime: IRuntime,
+  runtime: Runtime,
   space: MemorySpace,
   resolved: ResolvedToolCall,
   _catalog?: ToolCatalog,
@@ -1612,7 +1612,7 @@ export function llmDialog(
   addCancel: (cancel: () => void) => void,
   cause: any,
   parentCell: Cell<any>,
-  runtime: IRuntime, // Runtime will be injected by the registration function
+  runtime: Runtime, // Runtime will be injected by the registration function
 ): Action {
   const inputs = inputsCell.asSchema(LLMParamsSchema);
 
@@ -1764,6 +1764,7 @@ export function llmDialog(
             pending,
             internal,
             pinnedCells,
+            result,
             requestId,
             abortController.signal,
           );
@@ -1793,6 +1794,9 @@ export function llmDialog(
     // cell as it's the only way to get to requestId, here we are passing it
     // around on the side.
 
+    // Removing flatted tool support for now, just used in UI and too expensive
+    // to recalculate on every context change
+    /*
     // Update flattened tools whenever tools change
     const toolsCell = inputs.key("tools");
     // Ensure reactivity: register a read of tools with this tx
@@ -1806,25 +1810,7 @@ export function llmDialog(
     if (hasChanged) {
       result.withTx(tx).key("flattenedTools").set(flattened as any);
     }
-
-    // Update merged pinnedCells whenever context or internal pinnedCells change
-    const contextCells = inputs.key("context").withTx(tx).get() ?? {};
-    const toolPinnedCells = pinnedCells.withTx(tx).get() ?? [];
-
-    // Convert context cells to PinnedCell format
-    const contextAsPinnedCells: PinnedCell[] = Object.entries(contextCells).map(
-      ([name, cell]) => {
-        const link = cell.resolveAsCell().getAsNormalizedFullLink();
-        const path = createLLMFriendlyLink(link);
-        return { name, path };
-      },
-    );
-
-    // Merge context cells and tool-pinned cells
-    const mergedPinnedCells = [...contextAsPinnedCells, ...toolPinnedCells];
-
-    // Write to result cell
-    result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
+    */
 
     if (
       (!result.withTx(tx).key("pending").get() ||
@@ -1840,13 +1826,14 @@ export function llmDialog(
 
 function startRequest(
   tx: IExtendedStorageTransaction,
-  runtime: IRuntime,
+  runtime: Runtime,
   space: MemorySpace,
   cause: any,
   inputs: Cell<Schema<typeof LLMParamsSchema>>,
   pending: Cell<boolean>,
   internal: Cell<Schema<typeof internalSchema>>,
   pinnedCells: Cell<PinnedCell[]>,
+  result: Cell<Schema<typeof resultSchema>>,
   requestId: string,
   abortSignal: AbortSignal,
 ) {
@@ -1857,7 +1844,27 @@ function startRequest(
     Record<string, Schema<typeof LLMToolSchema>>
   >;
 
-  // No need to flatten here; UI handles flattened tools reactively
+  // Update merged pinnedCells in case context or internal pinnedCells changed
+  const contextCells = inputs.key("context").withTx(tx).get() ?? {};
+  const toolPinnedCells = pinnedCells.withTx(tx).get() ?? [];
+
+  const contextAsPinnedCells: PinnedCell[] = Object.entries(contextCells)
+    // Convert context cells to PinnedCell format
+    .map(
+      ([name, cell]) => {
+        const link = cell.resolveAsCell().getAsNormalizedFullLink();
+        const path = createLLMFriendlyLink(link);
+        return { name, path };
+      },
+    )
+    // Remove pinned cells that are already in the context
+    .filter(({ path }) => !toolPinnedCells.some((cell) => cell.path === path));
+
+  // Merge context cells and tool-pinned cells
+  const mergedPinnedCells = [...contextAsPinnedCells, ...toolPinnedCells];
+
+  // Write to result cell
+  result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
 
   const toolCatalog = buildToolCatalog(toolsCell);
 
@@ -2074,6 +2081,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
               pending,
               internal,
               pinnedCells,
+              result,
               requestId,
               abortSignal,
             );

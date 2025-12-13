@@ -795,6 +795,8 @@ export type JSONSchemaObj = {
   readonly [ID_FIELD]?: unknown;
   // makes it so that your handler gets a Cell object for that property. So you can call .set()/.update()/.push()/etc on it.
   readonly asCell?: boolean;
+  // marks values that are OpaqueRef - tracked reactive references
+  readonly asOpaque?: boolean;
   // streams are what handler returns. if you pass that to another handler/lift and declare it as asSteam, you can call .send on it
   readonly asStream?: boolean;
   // temporarily used to assign labels like "confidential"

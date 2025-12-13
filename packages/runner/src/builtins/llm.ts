@@ -19,7 +19,7 @@ import {
 import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
-import type { IRuntime } from "../runtime.ts";
+import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
 import {
@@ -148,7 +148,7 @@ async function executeWithToolsLoop(params: {
   llmParams: LLMRequest;
   toolCatalog: ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>;
   updatePartial: (text: string) => void;
-  runtime: IRuntime;
+  runtime: Runtime;
   space: any;
   getCurrentRun: () => number;
   thisRun: number;
@@ -223,7 +223,7 @@ async function executeWithToolsLoop(params: {
  */
 async function handleLLMError<T, P>(
   error: unknown,
-  runtime: IRuntime,
+  runtime: Runtime,
   pendingCell: Cell<boolean>,
   resultCell: Cell<T>,
   errorCell: Cell<unknown>,
@@ -264,7 +264,7 @@ async function handleLLMError<T, P>(
  */
 function buildContextDocumentation(
   inputs: Cell<any>,
-  runtime: IRuntime,
+  runtime: Runtime,
   space: any,
   tx: IExtendedStorageTransaction,
 ): string {
@@ -323,7 +323,7 @@ export function llm(
   _addCancel: (cancel: () => void) => void,
   cause: any,
   parentCell: Cell<any>,
-  runtime: IRuntime, // Runtime will be injected by the registration function
+  runtime: Runtime, // Runtime will be injected by the registration function
 ): Action {
   const inputs = inputsCell.asSchema(LLMParamsSchema);
 
@@ -487,7 +487,7 @@ export function generateText(
   _addCancel: (cancel: () => void) => void,
   cause: any,
   parentCell: Cell<any>,
-  runtime: IRuntime,
+  runtime: Runtime,
 ): Action {
   const inputs = inputsCell.asSchema(GenerateTextParamsSchema);
 
@@ -673,7 +673,7 @@ export function generateObject<T extends Record<string, unknown>>(
   _addCancel: (cancel: () => void) => void,
   cause: any,
   parentCell: Cell<any>,
-  runtime: IRuntime,
+  runtime: Runtime,
 ): Action {
   const inputs = inputsCell.asSchema(GenerateObjectParamsSchema);
 

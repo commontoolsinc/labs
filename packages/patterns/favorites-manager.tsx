@@ -1,7 +1,7 @@
 /// <cts-enable />
 import { Cell, handler, NAME, pattern, UI, wish } from "commontools";
 
-type Favorite = { cell: Cell<{ [NAME]?: string }>; description: string };
+type Favorite = { cell: Cell<{ [NAME]?: string }>; tag: string };
 
 const onRemoveFavorite = handler<
   Record<string, never>,
@@ -31,7 +31,7 @@ export default pattern<Record<string, never>>((_) => {
               >
                 Remove
               </ct-button>
-              <pre>{item.description}</pre>
+              <pre>{item.tag}</pre>
             </div>
           </ct-cell-context>
         ))}

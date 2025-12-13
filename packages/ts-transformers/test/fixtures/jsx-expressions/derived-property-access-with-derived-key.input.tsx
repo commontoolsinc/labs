@@ -32,7 +32,7 @@ export default recipe<{ items: Item[] }>(
         if (!groups[assignment.aisle]) {
           groups[assignment.aisle] = [];
         }
-        groups[assignment.aisle].push(assignment);
+        groups[assignment.aisle]!.push(assignment);
       }
       return groups;
     });
@@ -52,7 +52,7 @@ export default recipe<{ items: Item[] }>(
           {aisleNames.map((aisleName) => (
             <div>
               <h3>{aisleName}</h3>
-              {(groupedByAisle[aisleName] ?? []).map((assignment) => (
+              {(groupedByAisle[aisleName]! ?? []).map((assignment) => (
                 <div>
                   <span>{assignment.item.name}</span>
                   <ct-checkbox $checked={assignment.item.done} />

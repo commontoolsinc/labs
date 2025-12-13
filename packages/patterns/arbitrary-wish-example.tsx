@@ -1,16 +1,18 @@
 /// <cts-enable />
-import { NAME, pattern, UI, wish } from "commontools";
+import { Cell, NAME, pattern, UI, wish } from "commontools";
 
 export default pattern<Record<string, never>>((_) => {
-  const wishResult = wish<{ content: string }>({
-    query: "a nice poem about cats",
+  const wishText = Cell.of("#note");
+
+  const wishResult = wish<unknown>({
+    query: wishText,
   });
 
   return {
     [NAME]: "Wish tester",
     [UI]: (
       <div>
-        <pre>{wishResult.result.content}</pre>
+        <ct-textarea $value={wishText} />
         <hr />
         {wishResult}
       </div>
