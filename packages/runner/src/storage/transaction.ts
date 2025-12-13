@@ -362,7 +362,7 @@ export const WriteIsolationError = (
 ): IStorageTransactionWriteIsolationError => ({
   name: "StorageTransactionWriteIsolationError",
   message:
-    `Can not open transaction writer for ${requested} beacuse transaction has writer open for ${open}`,
+    `Can not open transaction writer for ${requested} because transaction has writer open for ${open}`,
   open,
   requested,
 });
