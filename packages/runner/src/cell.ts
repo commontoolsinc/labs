@@ -525,7 +525,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 
   get(): Readonly<T> {
     if (!this.synced) this.sync(); // No await, just kicking this off
-    return validateAndTransform(this.runtime, this.tx, this.link, this.synced);
+    return validateAndTransform(this.runtime, this.tx, this.link);
   }
 
   /**
@@ -545,12 +545,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     const readTx = this.runtime.readTx(this.tx);
     const nonReactiveTx = createNonReactiveTransaction(readTx);
 
-    return validateAndTransform(
-      this.runtime,
-      nonReactiveTx,
-      this.link,
-      this.synced,
-    );
+    return validateAndTransform(this.runtime, nonReactiveTx, this.link);
   }
 
   set(
@@ -815,8 +810,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       });
       const sourceCellSchema = sourceCell?.key("resultRef").get()?.schema;
       if (sourceCellSchema !== undefined) {
-        const cfc = new ContextualFlowControl();
-        schema = cfc.schemaAtPath(
+        schema = this.runtime.cfc.schemaAtPath(
           sourceCellSchema,
           this._link.path,
           sourceCellSchema,
@@ -1285,7 +1279,7 @@ function subscribeToReferencedDocs<T>(
     const extraTx = runtime.edit();
     const wrappedTx = createChildCellTransaction(tx, extraTx);
 
-    const newValue = validateAndTransform(runtime, wrappedTx, link, true);
+    const newValue = validateAndTransform(runtime, wrappedTx, link);
     cleanup = callback(newValue);
 
     // no async await here, but that also means no retry. TODO(seefeld): Should
