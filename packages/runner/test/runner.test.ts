@@ -336,7 +336,7 @@ describe("runRecipe", () => {
       resultCell,
     );
 
-    let inputCellValue = await inputCell.pull();
+    const inputCellValue = await inputCell.pull();
     expect(inputCellValue).toMatchObject({ input: 10, output: 20 });
     let resultValue = await result.pull();
     expect(resultValue).toEqual({ output: 20 });
@@ -990,7 +990,7 @@ describe("setup/start", () => {
     const resultCell = runtime.getCell(space, "setup reuse previous recipe");
     runtime.setup(undefined, recipe, { input: 5 }, resultCell);
     runtime.start(resultCell);
-    let cellValue = await resultCell.pull();
+    const cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 5 });
 
     // Stop and setup without specifying recipe; should reuse stored one
