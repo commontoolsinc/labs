@@ -257,10 +257,10 @@ describe("Cell", () => {
     const resultCell = runtime.getCell(space, "doubling recipe instance");
     runtime.setup(undefined, doubleRecipe, { input: 5 }, resultCell);
     runtime.start(resultCell);
-    await runtime.idle();
 
-    // Verify initial output
-    expect(resultCell.getAsQueryResult().output).toEqual(10);
+    // Verify initial output (use pull to trigger computation)
+    const initial = (await resultCell.pull()) as { output: number };
+    expect(initial?.output).toEqual(10);
 
     // Get the argument cell and update it
     const argumentCell = resultCell.getArgumentCell<{ input: number }>();
@@ -271,18 +271,19 @@ describe("Cell", () => {
     const updateTx = runtime.edit();
     argumentCell!.withTx(updateTx).set({ input: 7 });
     updateTx.commit();
-    await runtime.idle();
 
-    // Verify the output has changed
-    expect(resultCell.getAsQueryResult()).toEqual({ output: 14 });
+    // Verify the output has changed (use pull to trigger re-computation)
+    const updated = await resultCell.pull();
+    expect(updated).toEqual({ output: 14 });
 
     // Update again to verify reactivity
     const updateTx2 = runtime.edit();
     argumentCell!.withTx(updateTx2).set({ input: 100 });
     updateTx2.commit();
-    await runtime.idle();
 
-    expect(resultCell.getAsQueryResult()).toEqual({ output: 200 });
+    // Verify final output
+    const final = await resultCell.pull();
+    expect(final).toEqual({ output: 200 });
   });
 
   it("should translate circular references into links", () => {

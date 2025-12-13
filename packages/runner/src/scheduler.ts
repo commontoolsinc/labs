@@ -821,9 +821,14 @@ export class Scheduler {
       const computationLog = this.dependencies.get(computation);
       if (!computationLog) continue;
 
+      // Use mightWrite if available (tracks all paths computation has ever written)
+      // This ensures we pull the computation even if its last run threw before writing
+      const computationWrites = this.mightWrite.get(computation) ??
+        computationLog.writes;
+
       // Check if computation writes to something action reads (document-level match)
       let found = false;
-      for (const write of computationLog.writes) {
+      for (const write of computationWrites) {
         for (const read of log.reads) {
           if (write.space === read.space && write.id === read.id) {
             workSet.add(computation);
@@ -929,10 +934,18 @@ export class Scheduler {
       if (!otherLog) continue;
 
       // Check if otherAction reads what this action writes
+      // We need to check both space/id AND path overlap
+      let found = false;
       for (const write of actionLog.writes) {
+        if (found) break;
         for (const read of otherLog.reads) {
-          if (write.space === read.space && write.id === read.id) {
+          if (
+            write.space === read.space &&
+            write.id === read.id &&
+            arraysOverlap(write.path, read.path)
+          ) {
             successors.push(otherAction);
+            found = true;
             break;
           }
         }
