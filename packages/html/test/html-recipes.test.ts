@@ -69,8 +69,7 @@ describe("recipes with HTML", () => {
     );
     tx.commit();
 
-    await runtime.idle();
-    const resultValue = result.get();
+    const resultValue = await result.pull();
 
     assert.matchObject(resultValue, {
       [UI]: {
@@ -119,7 +118,7 @@ describe("recipes with HTML", () => {
     ) as Cell<{ [UI]: VNode }>;
     tx.commit();
 
-    await runtime.idle();
+    await result.pull();
 
     const root = document.getElementById("root")!;
     const cell = result.key(UI);
@@ -163,7 +162,7 @@ describe("recipes with HTML", () => {
     ) as Cell<{ [UI]: VNode }>;
     tx.commit();
 
-    await runtime.idle();
+    await result.pull();
 
     const root = document.getElementById("root")!;
     const cell = result.key(UI);
@@ -185,7 +184,7 @@ describe("recipes with HTML", () => {
     ) as Cell<{ [UI]: VNode }>;
     tx.commit();
 
-    await runtime.idle();
+    await result.pull();
 
     const root = document.getElementById("root")!;
     const cell = result.key(UI);
@@ -231,7 +230,7 @@ describe("recipes with HTML", () => {
     ) as Cell<{ [UI]: VNode }>;
     tx.commit();
 
-    await runtime.idle();
+    await result.pull();
 
     const root = document.getElementById("root")!;
     const cell = result.key(UI);
@@ -274,7 +273,7 @@ describe("recipes with HTML", () => {
     });
     tx.commit();
 
-    await runtime.idle();
+    await cell1.pull();
 
     const root = document.getElementById("root")!;
     render(root, cell1.key("ui"), renderOptions);

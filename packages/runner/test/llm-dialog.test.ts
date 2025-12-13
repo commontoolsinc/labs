@@ -154,11 +154,8 @@ describe("llmDialog", () => {
     const result = runtime.run(tx, testRecipe, {}, resultCell);
     tx.commit();
 
-    // Wait for initial processing (if any)
-    await runtime.idle();
-
     // Get the addMessage handler
-    const addMessage = result.key("addMessage").get();
+    const addMessage = await result.key("addMessage").pull();
 
     // Send initial message
     addMessage.send({
@@ -300,9 +297,7 @@ describe("llmDialog", () => {
     const result = runtime.run(tx, testRecipe, {}, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    const addMessage = result.key("addMessage").get();
+    const addMessage = await result.key("addMessage").pull();
 
     // Send initial message
     addMessage.send({
@@ -321,7 +316,7 @@ describe("llmDialog", () => {
     expect(toolCalled).toBe(true);
 
     // Verify the conversation history
-    const messages = result.key("messages").get()!;
+    const messages = (await result.key("messages").pull())!;
     expect(messages).toHaveLength(4);
     expect(messages[1].role).toBe("assistant");
     const content = messages[1].content as any[];
@@ -435,9 +430,7 @@ describe("llmDialog", () => {
     const result = runtime.run(tx, testRecipe, {}, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    const addMessage = result.key("addMessage").get();
+    const addMessage = await result.key("addMessage").pull();
 
     // Send message to trigger pin
     addMessage.send({
@@ -449,7 +442,7 @@ describe("llmDialog", () => {
     await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
 
     // Verify pinned cells
-    const pinnedCells = result.key("pinnedCells").get();
+    const pinnedCells = await result.key("pinnedCells").pull();
     expect(pinnedCells).toBeDefined();
     expect(Array.isArray(pinnedCells)).toBe(true);
     expect(pinnedCells?.length).toBe(1);
@@ -605,9 +598,7 @@ describe("llmDialog", () => {
     const result = runtime.run(tx, testRecipe, {}, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    const addMessage = result.key("addMessage").get();
+    const addMessage = await result.key("addMessage").pull();
 
     // First pin a cell
     addMessage.send({
@@ -619,7 +610,7 @@ describe("llmDialog", () => {
     await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
 
     // Verify cell was pinned
-    let pinnedCells = result.key("pinnedCells").get();
+    let pinnedCells = await result.key("pinnedCells").pull();
     expect(pinnedCells?.length).toBe(1);
     expect(pinnedCells?.[0].path).toBe(cellPath);
 
@@ -633,7 +624,7 @@ describe("llmDialog", () => {
     await expect(waitForMessages(result, 8)).resolves.toBeUndefined();
 
     // Verify pinned cells is now empty
-    pinnedCells = result.key("pinnedCells").get();
+    pinnedCells = await result.key("pinnedCells").pull();
     expect(pinnedCells).toBeDefined();
     expect(Array.isArray(pinnedCells)).toBe(true);
     expect(pinnedCells?.length).toBe(0);
@@ -712,9 +703,7 @@ describe("llmDialog", () => {
     const result = runtime.run(tx, testRecipe, {}, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    const addMessage = result.key("addMessage").get();
+    const addMessage = await result.key("addMessage").pull();
 
     // Send message
     addMessage.send({
@@ -726,7 +715,7 @@ describe("llmDialog", () => {
     await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
 
     // Verify context cells appear in pinnedCells output
-    const pinnedCells = result.key("pinnedCells").get();
+    const pinnedCells = await result.key("pinnedCells").pull();
     expect(pinnedCells).toBeDefined();
     expect(Array.isArray(pinnedCells)).toBe(true);
     expect(pinnedCells?.length).toBe(1);
@@ -848,9 +837,7 @@ describe("llmDialog", () => {
     const result = runtime.run(tx, testRecipe, {}, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    const addMessage = result.key("addMessage").get();
+    const addMessage = await result.key("addMessage").pull();
 
     // Send message to trigger pin
     addMessage.send({
@@ -862,7 +849,7 @@ describe("llmDialog", () => {
     await expect(waitForMessages(result, 4)).resolves.toBeUndefined();
 
     // Verify pinnedCells output contains both context cell and tool-pinned cell
-    const pinnedCells = result.key("pinnedCells").get();
+    const pinnedCells = await result.key("pinnedCells").pull();
     expect(pinnedCells).toBeDefined();
     expect(Array.isArray(pinnedCells)).toBe(true);
     expect(pinnedCells?.length).toBe(2);

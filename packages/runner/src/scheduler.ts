@@ -80,6 +80,22 @@ export type SpaceURIAndType = `${MemorySpace}/${URI}/${MediaType}`;
 const MAX_ITERATIONS_PER_RUN = 100;
 const DEFAULT_RETRIES_FOR_EVENTS = 5;
 const MAX_RETRIES_FOR_REACTIVE = 10;
+const MAX_CYCLE_ITERATIONS = 20;
+const FAST_CYCLE_THRESHOLD_MS = 16;
+const AUTO_DEBOUNCE_THRESHOLD_MS = 50;
+const AUTO_DEBOUNCE_MIN_RUNS = 3;
+const AUTO_DEBOUNCE_DELAY_MS = 100;
+
+/**
+ * Statistics tracked for each action's execution performance.
+ */
+export interface ActionStats {
+  runCount: number;
+  totalTime: number;
+  averageTime: number;
+  lastRunTime: number;
+  lastRunTimestamp: number; // When the action last ran (performance.now())
+}
 
 export class Scheduler {
   private eventQueue: {
@@ -94,6 +110,47 @@ export class Scheduler {
   private cancels = new WeakMap<Action, Cancel>();
   private triggers = new Map<SpaceAndURI, Map<Action, SortedAndCompactPaths>>();
   private retries = new WeakMap<Action, number>();
+
+  // Effect/computation tracking for pull-based scheduling
+  private effects = new Set<Action>();
+  private computations = new Set<Action>();
+  private dependents = new WeakMap<Action, Set<Action>>();
+  private reverseDependencies = new WeakMap<Action, Set<Action>>();
+  // Track which actions are effects persistently (survives unsubscribe/re-subscribe)
+  private isEffectAction = new WeakMap<Action, boolean>();
+  private dirty = new Set<Action>();
+  private pullMode = false;
+
+  // Compute time tracking for cycle-aware scheduling
+  private actionStats = new WeakMap<Action, ActionStats>();
+  // Cycle detection during dependency collection
+  private collectStack = new Set<Action>();
+  // Slow cycle state for yielding between iterations
+  private slowCycleState = new WeakMap<
+    Action,
+    { iteration: number; lastYield: number }
+  >();
+
+  // Debounce infrastructure for throttling slow actions
+  private debounceTimers = new WeakMap<
+    Action,
+    ReturnType<typeof setTimeout>
+  >();
+  private actionDebounce = new WeakMap<Action, number>();
+  private autoDebounceEnabled = new WeakMap<Action, boolean>();
+
+  // Throttle infrastructure - "value can be stale by T ms"
+  private actionThrottle = new WeakMap<Action, number>();
+
+  // Push-triggered filtering
+  // Track what each action has ever written (grows over time)
+  private mightWrite = new WeakMap<Action, IMemorySpaceAddress[]>();
+  // Track what push mode triggered this execution cycle
+  private pushTriggered = new Set<Action>();
+  // Track actions scheduled with scheduleImmediately (bypass filter)
+  private scheduledImmediately = new Set<Action>();
+  // Filter stats for diagnostics
+  private filterStats = { filtered: 0, executed: 0 };
 
   private idlePromises: (() => void)[] = [];
   private loopCounter = new WeakMap<Action, number>();
@@ -151,18 +208,69 @@ export class Scheduler {
   subscribe(
     action: Action,
     log: ReactivityLog,
-    scheduleImmediately: boolean = false,
+    options: {
+      scheduleImmediately?: boolean;
+      isEffect?: boolean;
+      debounce?: number;
+      autoDebounce?: boolean;
+      throttle?: number;
+    } = {},
   ): Cancel {
+    const {
+      scheduleImmediately = false,
+      isEffect = false,
+      debounce,
+      autoDebounce,
+      throttle,
+    } = options;
+
+    // Apply debounce settings if provided
+    if (debounce !== undefined) {
+      this.setDebounce(action, debounce);
+    }
+    if (autoDebounce !== undefined) {
+      this.setAutoDebounce(action, autoDebounce);
+    }
+    // Apply throttle setting if provided
+    if (throttle !== undefined) {
+      this.setThrottle(action, throttle);
+    }
+
     const reads = this.setDependencies(action, log);
+
+    // Track action type for pull-based scheduling
+    // Once an action is marked as an effect, it stays an effect (persists across re-subscriptions)
+    if (isEffect) {
+      this.isEffectAction.set(action, true);
+    }
+
+    // Use the persistent effect status for tracking
+    if (this.isEffectAction.get(action)) {
+      this.effects.add(action);
+      this.computations.delete(action);
+    } else {
+      this.computations.add(action);
+      this.effects.delete(action);
+    }
+
+    // Update reverse dependency graph
+    this.updateDependents(action, log);
 
     logger.debug(
       "schedule",
-      () => ["Subscribing to action:", action, reads, scheduleImmediately],
+      () => [
+        "Subscribing to action:",
+        action,
+        reads,
+        scheduleImmediately,
+        isEffect ? "effect" : "computation",
+      ],
     );
 
     if (scheduleImmediately) {
-      this.queueExecution();
-      this.pending.add(action);
+      // Track that this action was scheduled immediately (bypasses push-triggered filter)
+      this.scheduledImmediately.add(action);
+      this.scheduleWithDebounce(action);
     } else {
       const pathsByEntity = addressesToPathByEntity(reads);
 
@@ -212,6 +320,23 @@ export class Scheduler {
     this.cancels.delete(action);
     this.dependencies.delete(action);
     this.pending.delete(action);
+    const dependencies = this.reverseDependencies.get(action);
+    if (dependencies) {
+      for (const dependency of dependencies) {
+        const dependents = this.dependents.get(dependency);
+        dependents?.delete(action);
+        if (dependents && dependents.size === 0) {
+          this.dependents.delete(dependency);
+        }
+      }
+      this.reverseDependencies.delete(action);
+    }
+    this.dependents.delete(action);
+    // Clean up effect/computation tracking
+    this.effects.delete(action);
+    this.computations.delete(action);
+    // Cancel any pending debounce timer
+    this.cancelDebounceTimer(action);
   }
 
   async run(action: Action): Promise<any> {
@@ -222,15 +347,21 @@ export class Scheduler {
 
     logger.debug("schedule-run-start", () => [
       `[RUN] Starting action: ${action.name || "anonymous"}`,
+      `Pull mode: ${this.pullMode}`,
     ]);
 
     if (this.runningPromise) await this.runningPromise;
 
     const tx = this.runtime.edit();
+    const actionStartTime = performance.now();
 
     let result: any;
     this.runningPromise = new Promise((resolve) => {
       const finalizeAction = (error?: unknown) => {
+        // Record action execution time for cycle-aware scheduling
+        const elapsed = performance.now() - actionStartTime;
+        this.recordActionTime(action, elapsed);
+
         try {
           if (error) {
             logger.error("schedule-error", () => [
@@ -266,7 +397,7 @@ export class Scheduler {
                 // Must re-subscribe to ensure dependencies are set before
                 // topologicalSort runs in execute(). Use the log from below
                 // which has the correct dependencies from the previous run.
-                this.subscribe(action, log, true);
+                this.subscribe(action, log, { scheduleImmediately: true });
               }
             } else {
               // Clear retries after successful commit.
@@ -275,10 +406,14 @@ export class Scheduler {
           });
           const log = txToReactivityLog(tx);
 
+          // Update mightWrite with actual writes
+          this.updateMightWrite(action, log.writes);
+
           logger.debug("schedule-run-complete", () => [
             `[RUN] Action completed: ${action.name || "anonymous"}`,
             `Reads: ${log.reads.length}`,
             `Writes: ${log.writes.length}`,
+            `Elapsed: ${elapsed.toFixed(2)}ms`,
           ]);
 
           this.subscribe(action, log);
@@ -287,7 +422,6 @@ export class Scheduler {
       };
 
       try {
-        const actionStartTime = performance.now();
         Promise.resolve(action(tx))
           .then((actionResult) => {
             result = actionResult;
@@ -450,14 +584,33 @@ export class Scheduler {
               ]);
 
               for (const action of triggeredActions) {
+                // Track what push mode triggered (for push-triggered filtering)
+                this.pushTriggered.add(action);
+
                 logger.debug("schedule", () => [
                   `[TRIGGERED] Action for ${spaceAndURI}/${
                     change.address.path.join("/")
                   }`,
                   `Action name: ${action.name || "anonymous"}`,
+                  `Mode: ${this.pullMode ? "pull" : "push"}`,
+                  `Type: ${
+                    this.effects.has(action) ? "effect" : "computation"
+                  }`,
                 ]);
-                this.queueExecution();
-                this.pending.add(action);
+
+                if (this.pullMode) {
+                  // Pull mode: only schedule effects, mark computations as dirty
+                  if (this.effects.has(action)) {
+                    this.scheduleWithDebounce(action);
+                  } else {
+                    // Mark computation as dirty and schedule affected effects
+                    this.markDirty(action);
+                    this.scheduleAffectedEffects(action);
+                  }
+                } else {
+                  // Push mode: existing behavior - schedule all triggered actions
+                  this.scheduleWithDebounce(action);
+                }
               }
             } else {
               logger.debug("schedule", () => [
@@ -485,6 +638,811 @@ export class Scheduler {
     const writes = sortAndCompactPaths(log.writes);
     this.dependencies.set(action, { reads, writes });
     return reads;
+  }
+
+  /**
+   * Updates the reverse dependency graph (dependents map).
+   * For each action that writes to paths this action reads, add this action as a dependent.
+   */
+  private updateDependents(action: Action, log: ReactivityLog): void {
+    const previousDependencies = this.reverseDependencies.get(action);
+    if (previousDependencies) {
+      for (const dependency of previousDependencies) {
+        const dependents = this.dependents.get(dependency);
+        dependents?.delete(action);
+        if (dependents && dependents.size === 0) {
+          this.dependents.delete(dependency);
+        }
+      }
+      this.reverseDependencies.delete(action);
+    }
+
+    const reads = log.reads;
+    const newDependencies = new Set<Action>();
+
+    // For each read of the new action, find other actions that write to it
+    for (const read of reads) {
+      // Check all registered actions (via triggers) for ones that write to this read
+      for (const [_spaceAndURI, actionPaths] of this.triggers) {
+        for (const [otherAction] of actionPaths) {
+          if (otherAction === action) continue;
+
+          const otherLog = this.dependencies.get(otherAction);
+          if (!otherLog) continue;
+
+          // Check if otherAction writes to this entity we're reading
+          for (const write of otherLog.writes) {
+            if (
+              read.space === write.space &&
+              read.id === write.id &&
+              arraysOverlap(write.path, read.path)
+            ) {
+              // otherAction writes → this action reads, so this action depends on otherAction
+              let deps = this.dependents.get(otherAction);
+              if (!deps) {
+                deps = new Set();
+                this.dependents.set(otherAction, deps);
+              }
+              deps.add(action);
+              newDependencies.add(otherAction);
+            }
+          }
+        }
+      }
+    }
+
+    if (newDependencies.size > 0) {
+      this.reverseDependencies.set(action, newDependencies);
+    }
+  }
+
+  /**
+   * Returns diagnostic statistics about the scheduler state.
+   * Useful for debugging and monitoring pull-based scheduling behavior.
+   */
+  getStats(): { effects: number; computations: number; pending: number } {
+    return {
+      effects: this.effects.size,
+      computations: this.computations.size,
+      pending: this.pending.size,
+    };
+  }
+
+  /**
+   * Returns whether an action is registered as an effect.
+   */
+  isEffect(action: Action): boolean {
+    return this.effects.has(action);
+  }
+
+  /**
+   * Returns whether an action is registered as a computation.
+   */
+  isComputation(action: Action): boolean {
+    return this.computations.has(action);
+  }
+
+  /**
+   * Returns the set of actions that depend on this action's output.
+   */
+  getDependents(action: Action): Set<Action> {
+    return this.dependents.get(action) ?? new Set();
+  }
+
+  // ============================================================
+  // Pull-based scheduling methods
+  // ============================================================
+
+  /**
+   * Enables pull-based scheduling mode.
+   * In pull mode, only effects are scheduled; computations are marked dirty
+   * and pulled on demand when effects need their values.
+   */
+  enablePullMode(): void {
+    this.pullMode = true;
+  }
+
+  /**
+   * Disables pull-based scheduling mode (returns to push mode).
+   */
+  disablePullMode(): void {
+    this.pullMode = false;
+    // Clear dirty set when switching back to push mode
+    this.dirty.clear();
+  }
+
+  /**
+   * Returns whether pull mode is enabled.
+   */
+  isPullModeEnabled(): boolean {
+    return this.pullMode;
+  }
+
+  /**
+   * Marks an action as dirty and propagates to all dependents transitively.
+   */
+  private markDirty(action: Action): void {
+    if (this.dirty.has(action)) return; // Already dirty, avoid infinite recursion
+
+    this.dirty.add(action);
+    // Treat dirty computations as triggered so they bypass filtering
+    this.pushTriggered.add(action);
+
+    // Propagate to dependents transitively
+    const deps = this.dependents.get(action);
+    if (deps) {
+      for (const dependent of deps) {
+        this.markDirty(dependent);
+      }
+    }
+  }
+
+  /**
+   * Returns whether an action is marked as dirty.
+   */
+  isDirty(action: Action): boolean {
+    return this.dirty.has(action);
+  }
+
+  /**
+   * Clears the dirty flag for an action.
+   */
+  private clearDirty(action: Action): void {
+    this.dirty.delete(action);
+  }
+
+  /**
+   * Collects all dirty computations that an action depends on (transitively).
+   * Used in pull mode to build the complete work set before execution.
+   * Returns a set of actions that were detected to be part of a cycle.
+   */
+  private collectDirtyDependencies(
+    action: Action,
+    workSet: Set<Action>,
+    cycleMembers: Set<Action> = new Set(),
+  ): Set<Action> {
+    const log = this.dependencies.get(action);
+    if (!log) return cycleMembers;
+
+    // Check for cycle: if action is already in the collection stack, we've found a cycle
+    if (this.collectStack.has(action)) {
+      cycleMembers.add(action);
+      return cycleMembers;
+    }
+
+    // Add to collection stack before processing
+    this.collectStack.add(action);
+
+    // Find dirty computations that write to entities this action reads
+    for (const computation of this.dirty) {
+      if (workSet.has(computation)) continue; // Already added
+      if (computation === action) continue;
+
+      const computationLog = this.dependencies.get(computation);
+      if (!computationLog) continue;
+
+      // Use mightWrite if available (tracks all paths computation has ever written)
+      // This ensures we pull the computation even if its last run threw before writing
+      const computationWrites = this.mightWrite.get(computation) ??
+        computationLog.writes;
+
+      // Check if computation writes to something action reads (document-level match)
+      let found = false;
+      for (const write of computationWrites) {
+        for (const read of log.reads) {
+          if (write.space === read.space && write.id === read.id) {
+            workSet.add(computation);
+            // Recursively collect deps of this computation
+            this.collectDirtyDependencies(computation, workSet, cycleMembers);
+            found = true;
+            break;
+          }
+        }
+        if (found) break;
+      }
+    }
+
+    // Remove from collection stack after processing
+    this.collectStack.delete(action);
+
+    return cycleMembers;
+  }
+
+  /**
+   * Detects cycles (strongly connected components) in a work set of actions.
+   * Uses Tarjan's algorithm to identify all SCCs.
+   * Returns a list of cycle groups (each group is a set of actions forming a cycle).
+   */
+  detectCycles(workSet: Set<Action>): Set<Action>[] {
+    const index = new Map<Action, number>();
+    const lowlink = new Map<Action, number>();
+    const onStack = new Set<Action>();
+    const stack: Action[] = [];
+    const sccs: Set<Action>[] = [];
+    let currentIndex = 0;
+
+    const strongconnect = (action: Action) => {
+      index.set(action, currentIndex);
+      lowlink.set(action, currentIndex);
+      currentIndex++;
+      stack.push(action);
+      onStack.add(action);
+
+      // Get successors: actions that depend on this action's output
+      const successors = this.getSuccessorsInWorkSet(action, workSet);
+
+      for (const successor of successors) {
+        if (!index.has(successor)) {
+          // Successor hasn't been visited yet
+          strongconnect(successor);
+          lowlink.set(
+            action,
+            Math.min(lowlink.get(action)!, lowlink.get(successor)!),
+          );
+        } else if (onStack.has(successor)) {
+          // Successor is on the stack and hence in the current SCC
+          lowlink.set(
+            action,
+            Math.min(lowlink.get(action)!, index.get(successor)!),
+          );
+        }
+      }
+
+      // If action is a root node, pop the stack and generate an SCC
+      if (lowlink.get(action) === index.get(action)) {
+        const scc = new Set<Action>();
+        let w: Action;
+        do {
+          w = stack.pop()!;
+          onStack.delete(w);
+          scc.add(w);
+        } while (w !== action);
+
+        // Only include SCCs with more than one node (actual cycles)
+        if (scc.size > 1) {
+          sccs.push(scc);
+        }
+      }
+    };
+
+    // Run Tarjan's algorithm on all actions in the work set
+    for (const action of workSet) {
+      if (!index.has(action)) {
+        strongconnect(action);
+      }
+    }
+
+    return sccs;
+  }
+
+  /**
+   * Gets actions in the work set that depend on this action's output.
+   * Used by detectCycles to build the dependency graph.
+   */
+  private getSuccessorsInWorkSet(
+    action: Action,
+    workSet: Set<Action>,
+  ): Action[] {
+    const successors: Action[] = [];
+    const actionLog = this.dependencies.get(action);
+    if (!actionLog) return successors;
+
+    for (const otherAction of workSet) {
+      if (otherAction === action) continue;
+
+      const otherLog = this.dependencies.get(otherAction);
+      if (!otherLog) continue;
+
+      // Check if otherAction reads what this action writes
+      // We need to check both space/id AND path overlap
+      let found = false;
+      for (const write of actionLog.writes) {
+        if (found) break;
+        for (const read of otherLog.reads) {
+          if (
+            write.space === read.space &&
+            write.id === read.id &&
+            arraysOverlap(write.path, read.path)
+          ) {
+            successors.push(otherAction);
+            found = true;
+            break;
+          }
+        }
+      }
+    }
+
+    return successors;
+  }
+
+  /**
+   * Estimates the total time for one iteration of a cycle based on action stats.
+   * Returns 0 if no stats are available (assumes fast).
+   */
+  private estimateCycleTime(cycle: Set<Action>): number {
+    let total = 0;
+    for (const action of cycle) {
+      const stats = this.actionStats.get(action);
+      if (stats) {
+        total += stats.averageTime;
+      }
+    }
+    return total;
+  }
+
+  /**
+   * Determines if a cycle is "fast" (< 16ms estimated time).
+   * Fast cycles converge completely before any effect sees a value.
+   */
+  private isFastCycle(cycle: Set<Action>): boolean {
+    return this.estimateCycleTime(cycle) < FAST_CYCLE_THRESHOLD_MS;
+  }
+
+  /**
+   * Converges a fast cycle by running all dirty members repeatedly until stable.
+   * Returns true if the cycle converged, false if max iterations reached.
+   */
+  private async convergeFastCycle(cycle: Set<Action>): Promise<boolean> {
+    let iterations = 0;
+
+    while (iterations < MAX_CYCLE_ITERATIONS) {
+      // Find dirty or pending members of the cycle
+      // (actions may be re-added to pending when they write to cells that other cycle members read)
+      const dirtyMembers = [...cycle].filter((action) =>
+        this.dirty.has(action) || this.pending.has(action)
+      );
+
+      if (dirtyMembers.length === 0) {
+        // Cycle has converged
+        logger.debug("schedule-cycle", () => [
+          `[CYCLE] Fast cycle converged after ${iterations} iterations`,
+        ]);
+        return true;
+      }
+
+      iterations++;
+
+      // Sort dirty members topologically within the cycle
+      const sorted = topologicalSort(
+        new Set(dirtyMembers),
+        this.dependencies,
+      );
+
+      // Run each dirty member
+      for (const action of sorted) {
+        if (!this.dirty.has(action)) continue; // May have been cleared by earlier run
+
+        this.dirty.delete(action);
+        this.pending.delete(action);
+        this.unsubscribe(action);
+        await this.run(action);
+      }
+    }
+
+    // Max iterations reached - cycle didn't converge
+    const error = new Error(
+      `Fast cycle did not converge after ${MAX_CYCLE_ITERATIONS} iterations`,
+    );
+    logger.warn("schedule-cycle", () => [`[CYCLE] ${error.message}`]);
+
+    // Report error to handlers (pick first cycle member as representative)
+    const representative = cycle.values().next().value;
+    if (representative) {
+      this.handleError(error, representative);
+    }
+
+    // Clean up: remove dirty/pending state for cycle members to prevent infinite loops
+    for (const action of cycle) {
+      this.dirty.delete(action);
+      this.pending.delete(action);
+    }
+
+    return false;
+  }
+
+  /**
+   * Runs one iteration of a slow cycle and re-queues dirty members.
+   * Returns true if the cycle converged, false if more iterations needed.
+   */
+  private async runSlowCycleIteration(cycle: Set<Action>): Promise<boolean> {
+    // Find dirty members of the cycle
+    const dirtyMembers = [...cycle].filter((action) => this.dirty.has(action));
+
+    if (dirtyMembers.length === 0) {
+      // Cycle has converged
+      return true;
+    }
+
+    // Update slow cycle state for tracking
+    for (const action of cycle) {
+      const state = this.slowCycleState.get(action);
+      if (state) {
+        state.iteration++;
+        state.lastYield = performance.now();
+
+        // Check if we've exceeded max iterations
+        if (state.iteration > MAX_CYCLE_ITERATIONS) {
+          this.handleError(
+            new Error(
+              `Slow cycle did not converge after ${MAX_CYCLE_ITERATIONS} iterations`,
+            ),
+            action,
+          );
+          // Clean up state
+          for (const member of cycle) {
+            this.slowCycleState.delete(member);
+            this.dirty.delete(member);
+          }
+          return true; // Stop iterating
+        }
+      } else {
+        this.slowCycleState.set(action, {
+          iteration: 1,
+          lastYield: performance.now(),
+        });
+      }
+    }
+
+    // Sort dirty members topologically within the cycle
+    const sorted = topologicalSort(new Set(dirtyMembers), this.dependencies);
+
+    // Run one iteration of dirty members
+    for (const action of sorted) {
+      if (!this.dirty.has(action)) continue;
+
+      this.dirty.delete(action);
+      this.pending.delete(action);
+      this.unsubscribe(action);
+      await this.run(action);
+    }
+
+    // Check if cycle converged after this iteration
+    const stillDirty = [...cycle].some((action) => this.dirty.has(action));
+    if (!stillDirty) {
+      // Clean up state on convergence
+      for (const action of cycle) {
+        this.slowCycleState.delete(action);
+      }
+      logger.debug("schedule-cycle", () => [
+        `[CYCLE] Slow cycle converged`,
+      ]);
+      return true;
+    }
+
+    // Re-queue effects from the cycle for next iteration
+    for (const action of cycle) {
+      if (this.dirty.has(action) && this.effects.has(action)) {
+        this.pending.add(action);
+      }
+    }
+
+    // Schedule affected effects for the next iteration
+    for (const action of cycle) {
+      if (this.dirty.has(action)) {
+        this.scheduleAffectedEffects(action);
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Finds and schedules all effects that transitively depend on the given computation.
+   */
+  private scheduleAffectedEffects(computation: Action): void {
+    const visited = new Set<Action>();
+    const toSchedule: Action[] = [];
+
+    const findEffects = (action: Action) => {
+      if (visited.has(action)) return;
+      visited.add(action);
+
+      if (this.effects.has(action)) {
+        toSchedule.push(action);
+      }
+
+      const deps = this.dependents.get(action);
+      if (deps) {
+        for (const dependent of deps) {
+          findEffects(dependent);
+        }
+      }
+    };
+
+    findEffects(computation);
+
+    for (const effect of toSchedule) {
+      this.pushTriggered.add(effect);
+      this.scheduleWithDebounce(effect);
+    }
+  }
+
+  // ============================================================
+  // Compute time tracking for cycle-aware scheduling
+  // ============================================================
+
+  /**
+   * Records the execution time for an action.
+   * Updates running statistics including run count, total time, and average time.
+   */
+  private recordActionTime(action: Action, elapsed: number): void {
+    const now = performance.now();
+    const existing = this.actionStats.get(action);
+    if (existing) {
+      existing.runCount++;
+      existing.totalTime += elapsed;
+      existing.averageTime = existing.totalTime / existing.runCount;
+      existing.lastRunTime = elapsed;
+      existing.lastRunTimestamp = now;
+    } else {
+      this.actionStats.set(action, {
+        runCount: 1,
+        totalTime: elapsed,
+        averageTime: elapsed,
+        lastRunTime: elapsed,
+        lastRunTimestamp: now,
+      });
+    }
+
+    // Check if action should be auto-debounced based on performance
+    this.maybeAutoDebounce(action);
+  }
+
+  /**
+   * Returns the execution statistics for an action, if available.
+   * Useful for diagnostics and determining cycle convergence strategy.
+   */
+  getActionStats(action: Action): ActionStats | undefined {
+    return this.actionStats.get(action);
+  }
+
+  // ============================================================
+  // Debounce infrastructure for throttling slow actions
+  // ============================================================
+
+  /**
+   * Sets a debounce delay for an action.
+   * When the action is triggered, it will wait for the specified delay before running.
+   * If triggered again during the delay, the timer resets.
+   */
+  setDebounce(action: Action, ms: number): void {
+    if (ms <= 0) {
+      this.actionDebounce.delete(action);
+    } else {
+      this.actionDebounce.set(action, ms);
+    }
+  }
+
+  /**
+   * Gets the current debounce delay for an action, if set.
+   */
+  getDebounce(action: Action): number | undefined {
+    return this.actionDebounce.get(action);
+  }
+
+  /**
+   * Clears the debounce setting for an action.
+   */
+  clearDebounce(action: Action): void {
+    this.actionDebounce.delete(action);
+    this.cancelDebounceTimer(action);
+  }
+
+  /**
+   * Enables or disables auto-debounce detection for an action.
+   * When enabled, slow actions (> 50ms avg after 3 runs) will automatically get debounced.
+   */
+  setAutoDebounce(action: Action, enabled: boolean): void {
+    if (enabled) {
+      this.autoDebounceEnabled.set(action, true);
+    } else {
+      this.autoDebounceEnabled.delete(action);
+    }
+  }
+
+  /**
+   * Cancels any pending debounce timer for an action.
+   */
+  private cancelDebounceTimer(action: Action): void {
+    const timer = this.debounceTimers.get(action);
+    if (timer) {
+      clearTimeout(timer);
+      this.debounceTimers.delete(action);
+    }
+  }
+
+  /**
+   * Schedules an action with debounce support.
+   * If the action has a debounce delay, it will wait before being added to pending.
+   * Otherwise, it's added immediately.
+   */
+  private scheduleWithDebounce(action: Action): void {
+    const debounceMs = this.actionDebounce.get(action);
+
+    if (!debounceMs || debounceMs <= 0) {
+      // No debounce - add immediately
+      this.pending.add(action);
+      this.queueExecution();
+      return;
+    }
+
+    // Clear existing timer if any
+    this.cancelDebounceTimer(action);
+
+    // Set new timer
+    const timer = setTimeout(() => {
+      this.debounceTimers.delete(action);
+      this.pending.add(action);
+      this.queueExecution();
+    }, debounceMs);
+
+    this.debounceTimers.set(action, timer);
+
+    logger.debug("schedule-debounce", () => [
+      `[DEBOUNCE] Action ${
+        action.name || "anonymous"
+      } debounced for ${debounceMs}ms`,
+    ]);
+  }
+
+  /**
+   * Checks if an action should be auto-debounced based on its performance stats.
+   * Called after recording action time to potentially enable debouncing for slow actions.
+   */
+  private maybeAutoDebounce(action: Action): void {
+    // Check if auto-debounce is enabled for this action
+    if (!this.autoDebounceEnabled.get(action)) return;
+
+    // Check if already has a manual debounce set
+    if (this.actionDebounce.has(action)) return;
+
+    const stats = this.actionStats.get(action);
+    if (!stats) return;
+
+    // Need minimum runs before auto-detecting
+    if (stats.runCount < AUTO_DEBOUNCE_MIN_RUNS) return;
+
+    // Check if action is slow enough to warrant debouncing
+    if (stats.averageTime >= AUTO_DEBOUNCE_THRESHOLD_MS) {
+      this.actionDebounce.set(action, AUTO_DEBOUNCE_DELAY_MS);
+      logger.debug("schedule-debounce", () => [
+        `[AUTO-DEBOUNCE] Action ${action.name || "anonymous"} ` +
+        `auto-debounced (avg ${
+          stats.averageTime.toFixed(1)
+        }ms >= ${AUTO_DEBOUNCE_THRESHOLD_MS}ms)`,
+      ]);
+    }
+  }
+
+  // ============================================================
+  // Throttle infrastructure - "value can be stale by T ms"
+  // ============================================================
+
+  /**
+   * Sets a throttle period for an action.
+   * The action won't run if it ran within the last `ms` milliseconds.
+   * Unlike debounce, throttled actions stay dirty and will be pulled
+   * by effects when the throttle period expires.
+   */
+  setThrottle(action: Action, ms: number): void {
+    if (ms <= 0) {
+      this.actionThrottle.delete(action);
+    } else {
+      this.actionThrottle.set(action, ms);
+    }
+  }
+
+  /**
+   * Gets the current throttle period for an action, if set.
+   */
+  getThrottle(action: Action): number | undefined {
+    return this.actionThrottle.get(action);
+  }
+
+  /**
+   * Clears the throttle setting for an action.
+   */
+  clearThrottle(action: Action): void {
+    this.actionThrottle.delete(action);
+  }
+
+  /**
+   * Checks if an action is currently throttled (ran too recently).
+   * Returns true if the action should be skipped this execution cycle.
+   */
+  private isThrottled(action: Action): boolean {
+    const throttleMs = this.actionThrottle.get(action);
+    if (!throttleMs) return false;
+
+    const stats = this.actionStats.get(action);
+    if (!stats) return false; // No stats yet, action hasn't run
+
+    const elapsed = performance.now() - stats.lastRunTimestamp;
+    return elapsed < throttleMs;
+  }
+
+  // ============================================================
+  // Push-triggered filtering
+  // ============================================================
+
+  /**
+   * Updates the mightWrite set for an action by accumulating its actual writes.
+   * This grows over time to capture all paths an action has ever written.
+   */
+  private updateMightWrite(
+    action: Action,
+    writes: IMemorySpaceAddress[],
+  ): void {
+    const existing = this.mightWrite.get(action);
+    if (!existing) {
+      this.mightWrite.set(action, [...writes]);
+      return;
+    }
+
+    // Merge new writes into existing set (avoid duplicates)
+    for (const write of writes) {
+      const alreadyExists = existing.some(
+        (e) =>
+          e.space === write.space &&
+          e.id === write.id &&
+          e.path.length === write.path.length &&
+          e.path.every((p, i) => p === write.path[i]),
+      );
+      if (!alreadyExists) {
+        existing.push(write);
+      }
+    }
+  }
+
+  /**
+   * Returns the accumulated "might write" set for an action.
+   * Useful for diagnostics and debugging.
+   */
+  getMightWrite(action: Action): IMemorySpaceAddress[] | undefined {
+    return this.mightWrite.get(action);
+  }
+
+  /**
+   * Returns filter statistics for the current/last execution cycle.
+   */
+  getFilterStats(): { filtered: number; executed: number } {
+    return { ...this.filterStats };
+  }
+
+  /**
+   * Resets filter statistics.
+   */
+  resetFilterStats(): void {
+    this.filterStats = { filtered: 0, executed: 0 };
+  }
+
+  /**
+   * Checks if an action should be filtered out (not run) based on push-triggered info.
+   * Returns true if the action should be skipped.
+   */
+  private shouldFilterAction(action: Action): boolean {
+    // Always run if scheduled immediately (initial run, explicit scheduling)
+    if (this.scheduledImmediately.has(action)) {
+      return false;
+    }
+
+    // Always run if no prior mightWrite (first time this action writes anything)
+    if (!this.mightWrite.has(action)) {
+      return false;
+    }
+
+    // In pull mode, filter based on pushTriggered
+    if (this.pullMode) {
+      if (this.dirty.has(action)) {
+        return false;
+      }
+      // If not triggered by actual storage changes, filter it out
+      if (!this.pushTriggered.has(action)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private handleError(error: Error, action: any) {
@@ -591,22 +1549,128 @@ export class Scheduler {
       }
     }
 
-    const order = topologicalSort(this.pending, this.dependencies);
+    // Build the work set based on scheduling mode
+    let workSet: Set<Action>;
+
+    if (this.pullMode) {
+      // Pull mode: collect pending effects + their dirty computation dependencies
+      workSet = new Set<Action>();
+
+      // Add all pending effects
+      for (const effect of this.pending) {
+        workSet.add(effect);
+      }
+
+      // Find all dirty computations that the effects depend on (transitively)
+      for (const effect of this.pending) {
+        this.collectDirtyDependencies(effect, workSet);
+      }
+
+      logger.debug("schedule", () => [
+        `[EXECUTE PULL MODE] Effects: ${this.pending.size}, Dirty deps added: ${
+          workSet.size - this.pending.size
+        }`,
+      ]);
+
+      // Detect and handle cycles in the work set
+      const cycles = this.detectCycles(workSet);
+      if (cycles.length > 0) {
+        logger.debug("schedule-cycle", () => [
+          `[EXECUTE] Detected ${cycles.length} cycles in work set`,
+        ]);
+
+        // Track which actions are part of cycles (to exclude from normal execution)
+        const cycleActions = new Set<Action>();
+        for (const cycle of cycles) {
+          for (const action of cycle) {
+            cycleActions.add(action);
+          }
+        }
+
+        // Handle each cycle
+        for (const cycle of cycles) {
+          if (this.isFastCycle(cycle)) {
+            // Fast cycle: converge completely before continuing
+            logger.debug("schedule-cycle", () => [
+              `[EXECUTE] Running fast cycle convergence (${cycle.size} members)`,
+            ]);
+            await this.convergeFastCycle(cycle);
+          } else {
+            // Slow cycle: run one iteration and yield
+            logger.debug("schedule-cycle", () => [
+              `[EXECUTE] Running slow cycle iteration (${cycle.size} members)`,
+            ]);
+            await this.runSlowCycleIteration(cycle);
+          }
+        }
+
+        // Remove cycle actions from the work set (they've been handled)
+        for (const action of cycleActions) {
+          workSet.delete(action);
+        }
+      }
+    } else {
+      // Push mode: as-is - work set is just the pending actions
+      workSet = this.pending;
+    }
+
+    const order = topologicalSort(workSet, this.dependencies);
 
     logger.debug("schedule", () => [
-      `[EXECUTE] Canceling subscriptions for ${order.length} actions before execution`,
+      `[EXECUTE] Running ${order.length} actions`,
     ]);
 
     // Now run all functions. This will resubscribe actions with their new
     // dependencies.
     for (const fn of order) {
-      // Maybe it was unsubscribed since it was added to the order.
-      if (!this.pending.has(fn)) continue;
+      // Check if action is still valid (not unsubscribed since added)
+      // In pull mode, check both pending (effects) and dirty (computations)
+      const isInPending = this.pending.has(fn);
+      const isInDirty = this.dirty.has(fn);
 
-      // Take off pending list and unsubscribe, run will resubscribe.
+      if (this.pullMode) {
+        // In pull mode: action must be in pending (effect) or dirty (computation)
+        if (!isInPending && !isInDirty) continue;
+      } else {
+        // Push mode: action must be in pending
+        if (!isInPending) continue;
+      }
+
+      // Check throttle: skip recently-run actions but keep them dirty
+      // They'll be pulled next time an effect needs them (if throttle expired)
+      if (this.isThrottled(fn)) {
+        logger.debug("schedule-throttle", () => [
+          `[THROTTLE] Skipping throttled action: ${fn.name || "anonymous"}`,
+        ]);
+        // Don't clear from pending or dirty - action stays in its current state
+        // but we remove from pending so it doesn't run this cycle
+        this.pending.delete(fn);
+        // Keep dirty flag so it can be pulled later
+        continue;
+      }
+
+      // Push-triggered filtering:
+      // Skip actions not triggered by actual storage changes (but keep them dirty)
+      if (this.shouldFilterAction(fn)) {
+        logger.debug("schedule-filter", () => [
+          `[FILTER] Skipping action not triggered by actual changes: ${
+            fn.name || "anonymous"
+          }`,
+        ]);
+        this.filterStats.filtered++;
+        this.pending.delete(fn);
+        // Keep dirty flag - action may be needed in a future cycle
+        continue;
+      }
+
+      // Clean up from pending/dirty before running
       this.pending.delete(fn);
+      if (this.pullMode) {
+        this.clearDirty(fn);
+      }
       this.unsubscribe(fn);
 
+      this.filterStats.executed++;
       this.loopCounter.set(fn, (this.loopCounter.get(fn) || 0) + 1);
       if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
         this.handleError(
@@ -626,6 +1690,10 @@ export class Scheduler {
       this.idlePromises.length = 0;
       this.loopCounter = new WeakMap();
       this.scheduled = false;
+
+      // Clear push-triggered tracking sets at end of execution cycle
+      this.pushTriggered.clear();
+      this.scheduledImmediately.clear();
     } else {
       // Keep scheduled = true since we're queuing another execution
       queueTask(() => this.execute());
