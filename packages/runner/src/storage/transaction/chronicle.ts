@@ -41,22 +41,16 @@ export {
   UnsupportedMediaTypeError,
 };
 
-export class ReadOnlyAddressError extends Error
-  implements IReadOnlyAddressError {
-  override readonly name = "ReadOnlyAddressError";
-  declare readonly address: IMemoryAddress;
-
-  constructor(address: IMemoryAddress) {
-    super(
-      `Cannot write to read-only address: ${address.id}`,
-    );
-    this.address = address;
-  }
-
+export const ReadOnlyAddressError = (
+  address: IMemoryAddress,
+): IReadOnlyAddressError => ({
+  name: "ReadOnlyAddressError",
+  message: `Cannot write to read-only address: ${address.id}`,
+  address,
   from(_space: MemorySpace) {
     return this;
-  }
-}
+  },
+});
 
 export class Chronicle {
   #replica: ISpaceReplica;
@@ -126,13 +120,13 @@ export class Chronicle {
   ): Result<
     IAttestation,
     | IStorageTransactionInconsistent
-    | ReadOnlyAddressError
+    | IReadOnlyAddressError
     | INotFoundError
     | ITypeMismatchError
   > {
     // Check if address is inline (data: URI) - these are read-only
     if (Address.isInline(address)) {
-      return { error: new ReadOnlyAddressError(address) };
+      return { error: ReadOnlyAddressError(address) };
     }
 
     // Load the fact from replica
@@ -152,7 +146,7 @@ export class Chronicle {
     if (rebase.ok.value === undefined && address.path.length > 0) {
       const path = rebase.ok.address.path;
       return {
-        error: new NotFound(
+        error: NotFound(
           rebase.ok,
           address,
           path.length > 0 ? path.slice(0, -1) : undefined,
@@ -202,7 +196,7 @@ export class Chronicle {
 
     // Check if document exists when trying to read from nested path
     if (state.is === undefined && address.path.length > 0) {
-      return { error: new NotFound(attest(state), address) };
+      return { error: NotFound(attest(state), address) };
     }
 
     const loaded = attest(state);
@@ -266,7 +260,7 @@ export class Chronicle {
         // because we're trying to apply changes to something that has changed state
         if (error.name === "NotFoundError") {
           return {
-            error: new StateInconsistency({
+            error: StateInconsistency({
               address: changes.address,
               expected: "document to exist",
               actual: undefined,
@@ -274,7 +268,7 @@ export class Chronicle {
           };
         } else if (error.name === "TypeMismatchError") {
           return {
-            error: new StateInconsistency({
+            error: StateInconsistency({
               address: error.address,
               expected: "object",
               actual: error.actualType,
@@ -407,7 +401,7 @@ class History {
 
         if (JSON.stringify(expected) !== JSON.stringify(actual)) {
           return {
-            error: new StateInconsistency({
+            error: StateInconsistency({
               address,
               expected,
               actual,

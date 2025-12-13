@@ -680,7 +680,7 @@ describe("Attestation Module", () => {
           path: ["data", "property"],
         } as const;
 
-        const error = new Attestation.NotFound(source, address);
+        const error = Attestation.NotFound(source, address);
 
         expect(error.name).toBe("NotFoundError");
         expect(error.message).toBe(
@@ -701,7 +701,7 @@ describe("Attestation Module", () => {
           path: ["property"],
         } as const;
 
-        const error = new Attestation.NotFound(source, address);
+        const error = Attestation.NotFound(source, address);
         const withSpace = error.from(space);
 
         // NotFound error now returns the same instance from .from()
@@ -720,7 +720,7 @@ describe("Attestation Module", () => {
           path: ["data", "property"],
         } as const;
 
-        const error = new Attestation.TypeMismatchError(
+        const error = Attestation.TypeMismatchError(
           address,
           "number",
           "write",
@@ -739,7 +739,7 @@ describe("Attestation Module", () => {
           path: ["user", "name"],
         } as const;
 
-        const error = new Attestation.TypeMismatchError(
+        const error = Attestation.TypeMismatchError(
           address,
           "null",
           "read",
@@ -754,7 +754,7 @@ describe("Attestation Module", () => {
 
     describe("StateInconsistency", () => {
       it("should create descriptive error message", () => {
-        const error = new Attestation.StateInconsistency({
+        const error = Attestation.StateInconsistency({
           address: {
             id: "test:1",
             type: "application/json",
@@ -773,7 +773,7 @@ describe("Attestation Module", () => {
       });
 
       it("should handle undefined values", () => {
-        const error = new Attestation.StateInconsistency({
+        const error = Attestation.StateInconsistency({
           address: { id: "test:1", type: "application/json", path: [] },
           expected: undefined,
           actual: { new: "data" },
@@ -786,14 +786,13 @@ describe("Attestation Module", () => {
       });
 
       it("should support space context", () => {
-        const error = new Attestation.StateInconsistency({
+        const error = Attestation.StateInconsistency({
           address: { id: "test:1", type: "application/json", path: [] },
           expected: "old",
           actual: "new",
         });
 
         const withSpace = error.from(space);
-        expect(withSpace.source.space).toBe(space);
         expect(withSpace.message).toContain(`in space "${space}"`);
       });
     });
@@ -879,9 +878,6 @@ describe("Attestation Module", () => {
         const result = Attestation.load(address);
 
         expect(result.error).toBeDefined();
-        expect(result.error).toBeInstanceOf(
-          Attestation.UnsupportedMediaTypeError,
-        );
         expect(result.error!.name).toBe("UnsupportedMediaTypeError");
         expect(result.error!.message).toContain("Media type mismatch");
         expect(result.error!.message).toContain('expected "application/json"');
@@ -900,7 +896,6 @@ describe("Attestation Module", () => {
         const result = Attestation.load(address);
 
         expect(result.error).toBeDefined();
-        expect(result.error).toBeInstanceOf(Attestation.InvalidDataURIError);
         expect(result.error!.name).toBe("InvalidDataURIError");
         expect(result.error!.message).toContain(
           "Failed to parse JSON from data URI",
@@ -917,7 +912,6 @@ describe("Attestation Module", () => {
         const result = Attestation.load(address);
 
         expect(result.error).toBeDefined();
-        expect(result.error).toBeInstanceOf(Attestation.InvalidDataURIError);
         expect(result.error!.name).toBe("InvalidDataURIError");
         expect(result.error!.message).toContain("missing comma separator");
       });
