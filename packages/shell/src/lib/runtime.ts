@@ -1,135 +1,301 @@
-import { createSession, DID, Identity } from "@commontools/identity";
+import { createSession, DID, Identity, Session } from "@commontools/identity";
+import { RuntimeTelemetryMarkerResult } from "@commontools/runner";
+import { NameSchema } from "@commontools/charm";
 import {
-  Runtime,
-  RuntimeTelemetry,
-  RuntimeTelemetryEvent,
-  RuntimeTelemetryMarkerResult,
-} from "@commontools/runner";
-import {
-  charmId,
-  CharmManager,
-  NameSchema,
-  nameSchema,
-} from "@commontools/charm";
-import { CharmController, CharmsController } from "@commontools/charm/ops";
-import { StorageManager } from "@commontools/runner/storage/cache";
+  RemoteCell,
+  RuntimeWorker,
+  RuntimeWorkerConsoleEvent,
+  RuntimeWorkerErrorEvent,
+  RuntimeWorkerNavigateEvent,
+} from "@commontools/runner/worker";
 import { navigate } from "./navigate.ts";
-import * as Inspector from "@commontools/runner/storage/inspector";
-import { setupIframe } from "./iframe-ctx.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { AppView } from "./app/view.ts";
-import * as PatternFactory from "./pattern-factory.ts";
+import { API_URL } from "./env.ts";
 
-const logger = getLogger("shell.telemetry", {
+const logger = getLogger("shell.runtime", {
   enabled: false,
   level: "debug",
 });
 
-const identityLogger = getLogger("shell.telemetry", {
+const identityLogger = getLogger("shell.identity", {
   enabled: true,
   level: "debug",
 });
 
-// RuntimeInternals bundles all of the lifetimes
-// of resources bound to an identity,host,space triplet,
-// containing runtime, inspector, and charm references.
+/**
+ * Wrapper around a charm cell from RuntimeWorker.
+ * Provides a similar interface to CharmController for compatibility.
+ */
+export class CharmHandle<T = unknown> {
+  readonly id: string;
+  readonly cell: RemoteCell<T>;
+
+  constructor(id: string, cell: RemoteCell<T>) {
+    this.id = id;
+    this.cell = cell;
+  }
+
+  getCell(): RemoteCell<T> {
+    return this.cell;
+  }
+
+  /**
+   * Get the charm's name from its cell data.
+   * Returns undefined if the name field is not set.
+   */
+  name(): string | undefined {
+    try {
+      const data = this.cell.get() as Record<string, unknown> | undefined;
+      if (data && typeof data === "object" && "$NAME" in data) {
+        return data.$NAME as string;
+      }
+    } catch {
+      // Cell not synced yet
+    }
+    return undefined;
+  }
+}
+
+/**
+ * RuntimeInternals bundles all resources bound to an identity/host/space triplet.
+ * Uses RuntimeWorker to run the Runtime in a web worker.
+ */
 export class RuntimeInternals extends EventTarget {
-  #cc: CharmsController;
-  #telemetry: RuntimeTelemetry;
-  #telemetryMarkers: RuntimeTelemetryMarkerResult[];
-  #inspector: Inspector.Channel;
+  #worker: RuntimeWorker;
   #disposed = false;
-  #space: string; // The MemorySpace DID
-  #spaceRootPatternId?: string;
+  #space: DID;
+  #spaceName?: string;
   #isHomeSpace: boolean;
-  #patternCache: PatternCache;
+  #spaceRootPatternId?: string;
+  #patternCache: Map<string, CharmHandle<NameSchema>> = new Map();
+  #telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
 
   private constructor(
-    cc: CharmsController,
-    telemetry: RuntimeTelemetry,
-    space: string,
+    worker: RuntimeWorker,
+    space: DID,
+    spaceName: string | undefined,
     isHomeSpace: boolean,
   ) {
     super();
-    this.#cc = cc;
+    this.#worker = worker;
     this.#space = space;
+    this.#spaceName = spaceName;
     this.#isHomeSpace = isHomeSpace;
-    const runtimeId = this.#cc.manager().runtime.id;
-    this.#inspector = new Inspector.Channel(
-      runtimeId,
-      this.#onInspectorUpdate,
-    );
-    this.#telemetry = telemetry;
-    this.#telemetry.addEventListener("telemetry", this.#onTelemetry);
-    this.#telemetryMarkers = [];
-    this.#patternCache = new PatternCache(this.#cc);
+
+    // Forward worker events
+    this.#worker.addEventListener("console", this.#onConsole);
+    this.#worker.addEventListener("navigate", this.#onNavigate);
+    this.#worker.addEventListener("error", this.#onError);
   }
 
+  /**
+   * Get the RuntimeWorker instance.
+   */
+  runtime(): RuntimeWorker {
+    return this.#worker;
+  }
+
+  /**
+   * Get telemetry markers.
+   * Note: Telemetry is currently not collected in worker mode.
+   */
   telemetry(): RuntimeTelemetryMarkerResult[] {
     return this.#telemetryMarkers;
   }
 
-  cc(): CharmsController {
-    return this.#cc;
-  }
-
-  runtime(): Runtime {
-    return this.#cc.manager().runtime;
-  }
-
-  space(): string {
+  /**
+   * Get the space DID.
+   */
+  space(): DID {
     return this.#space;
   }
 
-  // Returns the space root pattern, creating it if it doesn't exist.
-  // The space root pattern type is determined at RuntimeInternals creation
-  // based on the view type (home vs space).
-  async getSpaceRootPattern(): Promise<CharmController<NameSchema>> {
+  /**
+   * Get the space name if available.
+   */
+  spaceName(): string | undefined {
+    return this.#spaceName;
+  }
+
+  /**
+   * Check if this is the home space.
+   */
+  isHomeSpace(): boolean {
+    return this.#isHomeSpace;
+  }
+
+  /**
+   * Create a new charm from a program.
+   */
+  async createCharm<T>(
+    entryUrl: URL,
+    options?: { argument?: unknown; run?: boolean },
+  ): Promise<CharmHandle<T>> {
+    this.#check();
+    const result = await this.#worker.createCharmFromUrl<T>(entryUrl, options);
+    return new CharmHandle(result.id, result.cell);
+  }
+
+  /**
+   * Get a charm by ID.
+   */
+  async getCharm<T>(
+    charmId: string,
+    runIt?: boolean,
+  ): Promise<CharmHandle<T> | null> {
+    this.#check();
+    const result = await this.#worker.getCharm<T>(charmId, runIt);
+    if (!result) return null;
+    return new CharmHandle(result.id, result.cell);
+  }
+
+  /**
+   * Remove a charm.
+   */
+  async removeCharm(charmId: string): Promise<void> {
+    this.#check();
+    await this.#worker.removeCharm(charmId);
+  }
+
+  /**
+   * Start a charm.
+   */
+  async startCharm(charmId: string): Promise<void> {
+    this.#check();
+    await this.#worker.startCharm(charmId);
+  }
+
+  /**
+   * Stop a charm.
+   */
+  async stopCharm(charmId: string): Promise<void> {
+    this.#check();
+    await this.#worker.stopCharm(charmId);
+  }
+
+  /**
+   * Get the charms list cell for reactive updates.
+   */
+  getCharmsListCell<T>(): Promise<RemoteCell<T[]>> {
+    this.#check();
+    return this.#worker.getCharmsListCell<T>();
+  }
+
+  /**
+   * Get the space root pattern, creating it if needed.
+   */
+  async getSpaceRootPattern(): Promise<CharmHandle<NameSchema>> {
     this.#check();
     if (this.#spaceRootPatternId) {
       return this.getPattern(this.#spaceRootPatternId);
     }
-    const pattern = await PatternFactory.getOrCreate(
-      this.#cc,
+
+    // Import pattern factory dynamically to avoid circular deps
+    const PatternFactory = await import("./pattern-factory.ts");
+    const pattern = await PatternFactory.getOrCreateWorker(
+      this.#worker,
       this.#isHomeSpace ? "home" : "space-root",
     );
     this.#spaceRootPatternId = pattern.id;
-    await this.#patternCache.add(pattern);
+    this.#patternCache.set(pattern.id, pattern);
     return pattern;
   }
 
-  async getPattern(id: string): Promise<CharmController<NameSchema>> {
+  /**
+   * Get a pattern by ID.
+   */
+  async getPattern(id: string): Promise<CharmHandle<NameSchema>> {
     this.#check();
-    const cached = await this.#patternCache.get(id);
+
+    const cached = this.#patternCache.get(id);
     if (cached) {
       return cached;
     }
 
-    const pattern = await this.#cc.get(id, true, nameSchema);
-    await this.#patternCache.add(pattern);
-    return pattern;
+    const result = await this.#worker.getCharm<NameSchema>(id, true);
+    if (!result) {
+      throw new Error(`Pattern not found: ${id}`);
+    }
+
+    const handle = new CharmHandle<NameSchema>(result.id, result.cell);
+    this.#patternCache.set(id, handle);
+    return handle;
   }
 
-  async dispose() {
+  /**
+   * Wait for pending operations to complete.
+   */
+  async idle(): Promise<void> {
+    this.#check();
+    await this.#worker.idle();
+  }
+
+  /**
+   * Wait for storage to be synced.
+   */
+  async synced(): Promise<void> {
+    this.#check();
+    await this.#worker.synced();
+  }
+
+  async dispose(): Promise<void> {
     if (this.#disposed) return;
     this.#disposed = true;
-    this.#inspector.close();
-    await this.#cc.dispose();
+    this.#worker.removeEventListener("console", this.#onConsole);
+    this.#worker.removeEventListener("navigate", this.#onNavigate);
+    this.#worker.removeEventListener("error", this.#onError);
+    await this.#worker.dispose();
   }
 
-  #onInspectorUpdate = (command: Inspector.BroadcastCommand) => {
-    this.#check();
-    this.#telemetry.processInspectorCommand(command);
+  #onConsole = (event: Event) => {
+    const e = event as RuntimeWorkerConsoleEvent;
+    const { metadata, method, args } = e.detail;
+    if (metadata?.charmId) {
+      console.log(`Charm(${metadata.charmId}) [${method}]:`, ...args);
+    } else {
+      console.log(`Console [${method}]:`, ...args);
+    }
   };
 
-  #onTelemetry = (event: Event) => {
-    this.#check();
-    const marker = (event as RuntimeTelemetryEvent).marker;
-    this.#telemetryMarkers.push(marker);
-    // Dispatch an event here so that views may subscribe,
-    // and know when to rerender, fetching the markers
-    this.dispatchEvent(new CustomEvent("telemetryupdate"));
-    logger.log(marker.type, marker);
+  #onNavigate = (event: Event) => {
+    const e = event as RuntimeWorkerNavigateEvent;
+    const { target } = e.detail;
+
+    // Get charm ID from the target cell
+    // The target is a RemoteCell, we need to extract the ID from its link
+    const link = target.getAsLink();
+    const linkData = link["/"];
+    if (!linkData || !("link@1" in linkData)) {
+      console.error("Invalid navigation target - not a valid link");
+      return;
+    }
+
+    const id = (linkData as { "link@1": { id: string } })["link@1"].id;
+    if (!id) {
+      console.error("Could not get charm ID from navigation target");
+      return;
+    }
+
+    // Extract just the charm ID from the entity URI
+    const charmIdMatch = id.match(/^[^/]+/);
+    const targetCharmId = charmIdMatch ? charmIdMatch[0] : id;
+
+    logger.log("navigate", `Navigating to charm: ${targetCharmId}`);
+
+    if (this.#spaceName) {
+      navigate({
+        spaceName: this.#spaceName,
+        charmId: id,
+      });
+    } else {
+      navigate({ spaceDid: this.#space as DID, charmId: id });
+    }
+  };
+
+  #onError = (event: Event) => {
+    const e = event as RuntimeWorkerErrorEvent;
+    console.error("[RuntimeWorker Error]", e.detail);
   };
 
   #check() {
@@ -138,166 +304,78 @@ export class RuntimeInternals extends EventTarget {
     }
   }
 
-  static async create(
-    { identity, view, apiUrl }: {
-      identity: Identity;
-      view: AppView;
-      apiUrl: URL;
-    },
-  ): Promise<RuntimeInternals> {
-    let session;
-    let spaceName;
+  /**
+   * Create a new RuntimeInternals instance.
+   */
+  static async create({
+    identity,
+    view,
+    apiUrl,
+  }: {
+    identity: Identity;
+    view: AppView;
+    apiUrl: URL;
+  }): Promise<RuntimeInternals> {
+    let session: Session | undefined;
     let isHomeSpace = false;
+
     if ("builtin" in view) {
       switch (view.builtin) {
         case "home":
-          session = await createSession({ identity, spaceDid: identity.did() });
-          spaceName = "<home>";
+          session = await createSession({
+            identity,
+            spaceDid: identity.did(),
+          });
+          session.spaceName = "<home>";
           isHomeSpace = true;
           break;
       }
     } else if ("spaceName" in view) {
-      session = await createSession({ identity, spaceName: view.spaceName });
-      spaceName = view.spaceName;
+      session = await createSession({
+        identity,
+        spaceName: view.spaceName,
+      });
     } else if ("spaceDid" in view) {
-      session = await createSession({ identity, spaceDid: view.spaceDid });
-    }
-    if (!session) {
-      throw new Error("Unexpected view provided.");
+      session = await createSession({
+        identity,
+        spaceDid: view.spaceDid,
+      });
     }
 
-    // Log user identity for debugging and sharing
-    identityLogger.log("telemetry", `[Identity] User DID: ${session.as.did()}`);
+    if (!session) {
+      throw new Error(`Invalid view: ${view}`);
+    }
+
+    // Log user identity for debugging
     identityLogger.log(
-      "telemetry",
-      `[Identity] Space: ${spaceName ?? "<unknown>"} (${session.space})`,
+      "identity",
+      `[Identity] User DID: ${identity.did()}`,
+    );
+    identityLogger.log(
+      "identity",
+      `[Identity] Space: ${session.spaceName ?? "<unknown>"} (${
+        session.space ?? "by name"
+      })`,
     );
 
-    // We're hoisting CharmManager so that
-    // we can create it after the runtime, but still reference
-    // its `getSpaceName` method in a runtime callback.
-    // deno-lint-ignore prefer-const
-    let charmManager: CharmManager;
-
-    const telemetry = new RuntimeTelemetry();
-    const runtime = new Runtime({
-      apiUrl: new URL(apiUrl),
-      storageManager: StorageManager.open({
-        as: session.as,
-        spaceIdentity: session.spaceIdentity,
-        address: new URL("/api/storage/memory", apiUrl),
-      }),
-      errorHandlers: [(error) => {
-        console.error(error);
-      }],
-      telemetry,
-      consoleHandler: ({ metadata, method, args }) => {
-        // Handle console messages depending on charm context.
-        // This is essentially the same as the default handling currently,
-        // but adding this here for future use.
-        if (metadata?.charmId) {
-          return [`Charm(${metadata.charmId}) [${method}]:`, ...args];
-        }
-        return [`Console [${method}]:`, ...args];
-      },
-      navigateCallback: (target) => {
-        const id = charmId(target);
-        if (!id) {
-          throw new Error(`Could not navigate to cell that is not a charm.`);
-        }
-        const navigateCallback = createNavCallback(
-          session.space,
-          charmManager.getSpaceName(),
-        );
-
-        // Await storage being synced, at least for now, as the page fully
-        // reloads. Once we have in-page navigation with reloading, we don't
-        // need this anymore
-        runtime.storageManager.synced().then(async () => {
-          // Check if the charm is already in the list
-          const charms = charmManager.getCharms();
-          const existingCharm = charms.get().find((charm) =>
-            charmId(charm) === id
-          );
-
-          // If the charm doesn't exist in the list, add it
-          if (!existingCharm) {
-            // FIXME(jake): This feels, perhaps, like an incorrect mix of
-            // concerns. If `navigateTo`
-            // should be managing/updating the charms list cell, that should be
-            // happening as part of the runtime built-in function, not up in
-            // the shell layer...
-
-            // Add target charm to the charm list
-            await charmManager.add([target]);
-          }
-
-          navigateCallback(id);
-        }).catch((err) => {
-          console.error("[navigateCallback] Error during storage sync:", err);
-          navigateCallback(id);
-        });
-      },
+    // Create RuntimeWorker
+    const worker = new RuntimeWorker({
+      apiUrl,
+      identity: session.as,
+      spaceIdentity: session.spaceIdentity,
+      spaceDid: session.space,
+      spaceName: session.spaceName,
+      workerUrl: new URL("./scripts/worker-runtime.js", API_URL),
     });
 
-    if (!(await runtime.healthCheck())) {
-      const message =
-        `Runtime failed health check: could not connect to "${apiUrl.toString()}".`;
+    // Wait for CharmManager to sync
+    await worker.synced();
 
-      // Throw an error for good measure, but this is typically called
-      // in a Lit task where the error is not displayed, so mostly
-      // relying on console error here for DX.
-      console.error(message);
-      throw new Error(message);
-    }
-
-    // Set up iframe context handler
-    setupIframe(runtime);
-
-    charmManager = new CharmManager(session, runtime);
-    await charmManager.synced();
-    const cc = new CharmsController(charmManager);
     return new RuntimeInternals(
-      cc,
-      telemetry,
+      worker,
       session.space,
+      session.spaceName,
       isHomeSpace,
     );
   }
-}
-
-// Caches patterns, and updates recent charms data upon access.
-class PatternCache {
-  private cache: Map<string, CharmController<NameSchema>> = new Map();
-  private cc: CharmsController;
-
-  constructor(cc: CharmsController) {
-    this.cc = cc;
-  }
-
-  async add(pattern: CharmController<NameSchema>) {
-    this.cache.set(pattern.id, pattern);
-    await this.cc.manager().trackRecentCharm(pattern.getCell());
-  }
-
-  async get(id: string): Promise<CharmController<NameSchema> | undefined> {
-    const cached = this.cache.get(id);
-    if (cached) {
-      await this.cc.manager().trackRecentCharm(cached.getCell());
-      return cached;
-    }
-  }
-}
-
-function createNavCallback(spaceDid: DID, spaceName?: string) {
-  return (id: string) => {
-    if (spaceName) {
-      navigate({
-        spaceName,
-        charmId: id,
-      });
-    } else {
-      navigate({ spaceDid, charmId: id });
-    }
-  };
 }

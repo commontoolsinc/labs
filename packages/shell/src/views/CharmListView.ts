@@ -1,8 +1,7 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseView } from "./BaseView.ts";
-import { RuntimeInternals } from "../lib/runtime.ts";
-import { CharmController } from "@commontools/charm/ops";
+import { CharmHandle, RuntimeInternals } from "../lib/runtime.ts";
 
 export class XCharmListView extends BaseView {
   static override styles = css`
@@ -48,7 +47,7 @@ export class XCharmListView extends BaseView {
   `;
 
   @property({ attribute: false })
-  charms?: CharmController[];
+  charms?: CharmHandle[];
 
   @property({ attribute: false })
   spaceName?: string;
@@ -63,16 +62,14 @@ export class XCharmListView extends BaseView {
     }
 
     try {
-      const removed = await this.rt.cc().remove(charmId);
-      if (removed) {
-        this.dispatchEvent(
-          new CustomEvent("charm-removed", {
-            detail: { charmId },
-            bubbles: true,
-            composed: true,
-          }),
-        );
-      }
+      await this.rt.removeCharm(charmId);
+      this.dispatchEvent(
+        new CustomEvent("charm-removed", {
+          detail: { charmId },
+          bubbles: true,
+          composed: true,
+        }),
+      );
     } catch (error) {
       console.error("Failed to remove charm:", error);
     }

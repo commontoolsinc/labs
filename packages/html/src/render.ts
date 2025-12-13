@@ -1,14 +1,13 @@
 import { isObject, isRecord } from "@commontools/utils/types";
 import {
   type Cancel,
-  type Cell,
   convertCellsToLinks,
   effect,
-  isCell,
   type JSONSchema,
   UI,
   useCancelGroup,
 } from "@commontools/runner";
+import { isRemoteCell, type RemoteCell } from "@commontools/runner/worker";
 import { isVNode, type Props, type RenderNode, type VNode } from "./jsx.ts";
 import * as logger from "./logger.ts";
 
@@ -22,7 +21,7 @@ export interface RenderOptions {
   setProp?: SetPropHandler;
   document?: Document;
   /** The root cell for auto-wrapping with ct-cell-context on [UI] traversal */
-  rootCell?: Cell;
+  rootCell?: RemoteCell<VNode>;
 }
 
 export const vdomSchema: JSONSchema = {
@@ -60,25 +59,30 @@ export const vdomSchema: JSONSchema = {
  */
 export const render = (
   parent: HTMLElement,
-  view: VNode | Cell<VNode>,
+  view: VNode | RemoteCell<VNode>,
   options: RenderOptions = {},
 ): Cancel => {
-  // Initialize visited set with the original cell for cycle detection
-  const visited = new Set<object>();
-  let rootCell: Cell | undefined;
+  let rootCell: RemoteCell<VNode> | undefined;
 
-  if (isCell(view)) {
-    visited.add(view);
-    rootCell = view; // Capture the original cell for ct-cell-context wrapping
-    view = view.asSchema(vdomSchema);
+  if (isRemoteCell(view)) {
+    rootCell = view as RemoteCell<VNode>; // Capture the original cell for ct-cell-context wrapping
+    view = rootCell.asSchema(vdomSchema) as RemoteCell<VNode>;
   }
 
   // Pass rootCell through options if we have one
   const optionsWithCell = rootCell ? { ...options, rootCell } : options;
 
   return effect(
-    view,
-    (view: VNode) => renderImpl(parent, view, optionsWithCell, visited),
+    view as VNode,
+    (view: VNode) => {
+      // Create a fresh visited set for each render pass.
+      // This prevents false cycle detection when re-rendering with updated values.
+      const visited = new Set<object>();
+      if (rootCell) {
+        visited.add(rootCell);
+      }
+      return renderImpl(parent, view, optionsWithCell, visited);
+    },
   );
 };
 
@@ -131,7 +135,7 @@ const createCyclePlaceholder = (document: Document): HTMLSpanElement => {
 /** Check if a cell has been visited, using .equals() for cell comparison */
 const hasVisitedCell = (
   visited: Set<object>,
-  cell: Cell<unknown>,
+  cell: { equals(other: unknown): boolean },
 ): boolean => {
   for (const item of visited) {
     if (cell.equals(item)) {
@@ -207,7 +211,7 @@ const renderNode = (
   if (cellForContext && element) {
     const wrapper = document.createElement(
       "ct-cell-context",
-    ) as HTMLElement & { cell?: Cell };
+    ) as HTMLElement & { cell?: RemoteCell<VNode> };
     wrapper.cell = cellForContext;
     wrapper.appendChild(element);
     return [wrapper, cancel];
@@ -235,13 +239,16 @@ const bindChildren = (
     const document = options.document ?? globalThis.document;
 
     // Check for cell cycle before setting up effect (using .equals() for comparison)
-    if (isCell(child) && hasVisitedCell(visited, child)) {
+    if (
+      isRenderableCell(child) &&
+      hasVisitedCell(visited, child as unknown as RemoteCell<unknown>)
+    ) {
       logger.warn("render", "Cycle detected in cell graph", child);
       return { node: createCyclePlaceholder(document), cancel: () => {} };
     }
 
     // Track if this child is a cell for the visited set
-    const childIsCell = isCell(child);
+    const childIsCell = isRenderableCell(child);
 
     let currentNode: ChildNode | null = null;
     const cancel = effect(child, (childValue) => {
@@ -377,7 +384,7 @@ const bindProps = (
   const setProperty = options.setProp ?? setProp;
   const [cancel, addCancel] = useCancelGroup();
   for (const [propKey, propValue] of Object.entries(props)) {
-    if (isCell(propValue)) {
+    if (isRenderableCell(propValue)) {
       // If prop is an event, we need to add an event listener
       if (isEventProp(propKey)) {
         const key = cleanEventProp(propKey);
@@ -538,10 +545,10 @@ const sanitizeScripts = (node: VNode): VNode | null => {
   if (node.name === "script") {
     return null;
   }
-  if (!isCell(node.props) && !isObject(node.props)) {
+  if (!isRenderableCell(node.props) && !isObject(node.props)) {
     node = { ...node, props: {} };
   }
-  if (!isCell(node.children) && !Array.isArray(node.children)) {
+  if (!isRenderableCell(node.children) && !Array.isArray(node.children)) {
     node = { ...node, children: [] };
   }
 
@@ -653,4 +660,13 @@ function isSelectElement(value: unknown): value is HTMLSelectElement {
   return !!(value && typeof value === "object" && ("tagName" in value) &&
     typeof value.tagName === "string" &&
     value.tagName.toUpperCase() === "SELECT");
+}
+
+type RenderableCell = {
+  send(value: unknown): void;
+};
+function isRenderableCell(value: unknown): value is RenderableCell {
+  // Check for any object with a send() method (Cell, RemoteCell, or Stream)
+  return !!value && typeof value === "object" && "send" in value &&
+    typeof (value as RenderableCell).send === "function";
 }

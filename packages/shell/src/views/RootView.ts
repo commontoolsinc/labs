@@ -11,7 +11,8 @@ import { AppUpdateEvent } from "../lib/app/events.ts";
 import { KeyStore } from "@commontools/identity";
 import { property, state } from "lit/decorators.js";
 import { Task } from "@lit/task";
-import { type MemorySpace, Runtime } from "@commontools/runner";
+import { type RuntimeWorker } from "@commontools/runner/worker";
+import { type DID } from "@commontools/identity";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { runtimeContext, spaceContext } from "@commontools/ui";
 import { provide } from "@lit/context";
@@ -50,11 +51,11 @@ export class XRootView extends BaseView {
 
   @provide({ context: runtimeContext })
   @state()
-  private runtime?: Runtime;
+  private runtime?: RuntimeWorker;
 
   @provide({ context: spaceContext })
   @state()
-  private space?: MemorySpace;
+  private space?: DID;
 
   // The runtime task runs when AppState changes, and determines
   // if a new RuntimeInternals must be created, like when
@@ -98,7 +99,7 @@ export class XRootView extends BaseView {
 
         // Update the provided runtime and space values
         this.runtime = rt.runtime();
-        this.space = rt.space() as MemorySpace; // Use the DID from the session
+        this.space = rt.space() as DID;
 
         return rt;
       },

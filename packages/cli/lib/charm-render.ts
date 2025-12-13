@@ -1,5 +1,6 @@
 import { render, vdomSchema, VNode } from "@commontools/html";
 import { Cell, UI } from "@commontools/runner";
+import { type RemoteCell } from "@commontools/runner/worker";
 import { loadManager } from "./charm.ts";
 import { CharmsController } from "@commontools/charm/ops";
 import type { CharmConfig } from "./charm.ts";
@@ -53,7 +54,11 @@ export async function renderCharm(
   if (options.watch) {
     // 4a. Reactive rendering - pass the Cell directly
     const uiCell = cell.key(UI);
-    const cancel = render(container, uiCell as Cell<VNode>, renderOptions); // FIXME: types
+    const cancel = render(
+      container,
+      uiCell as unknown as RemoteCell<VNode>,
+      renderOptions,
+    ); // FIXME: types
 
     // 5a. Set up monitoring for changes
     let updateCount = 0;

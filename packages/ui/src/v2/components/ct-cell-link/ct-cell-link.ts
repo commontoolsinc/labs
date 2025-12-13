@@ -3,7 +3,8 @@ import { property, state } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import "../ct-chip/ct-chip.ts";
-import type { Cell, MemorySpace, Runtime } from "@commontools/runner";
+import type { RemoteCell, RuntimeWorker } from "@commontools/runner/worker";
+import type { DID } from "@commontools/identity";
 import { NAME } from "@commontools/runner";
 import { parseLLMFriendlyLink } from "@commontools/runner";
 import { runtimeContext, spaceContext } from "../../runtime-context.ts";
@@ -43,18 +44,18 @@ export class CTCellLink extends BaseElement {
   label?: string;
 
   @property({ attribute: false })
-  cell?: Cell;
+  cell?: RemoteCell;
 
   @consume({ context: runtimeContext, subscribe: true })
   @property({ attribute: false })
-  runtime?: Runtime;
+  runtime?: RuntimeWorker;
 
   @consume({ context: spaceContext, subscribe: true })
   @property({ attribute: false })
-  space?: MemorySpace;
+  space?: DID;
 
   @state()
-  private _resolvedCell?: Cell;
+  private _resolvedCell?: RemoteCell;
 
   @state()
   private _name?: string;
@@ -172,11 +173,14 @@ export class CTCellLink extends BaseElement {
 
   private _handleClick(e: Event) {
     e.stopPropagation();
+    // @TODO(runtime-worker-refactor)
+    /*
     if (this._resolvedCell && this._resolvedCell.runtime) {
       this._resolvedCell.runtime.navigateCallback?.(this._resolvedCell);
     } else if (this.runtime && this._resolvedCell) {
       this.runtime.navigateCallback?.(this._resolvedCell);
     }
+    */
   }
 
   override render() {
