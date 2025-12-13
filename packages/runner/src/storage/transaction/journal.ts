@@ -176,7 +176,7 @@ const edit = (
       return state.reason;
     } else {
       return {
-        error: new TransactionCompleteError(`Journal is closed`),
+        error: TransactionCompleteError(`Journal is closed`),
       };
     }
   } else {
@@ -241,7 +241,7 @@ export const abort = (journal: IJournal, reason: unknown) => {
       branches: open.branches,
       activity: open.activity,
       status: "closed",
-      reason: { error: new TransactionAborted(reason) },
+      reason: { error: TransactionAborted(reason) },
     };
 
     return { ok: journal };
@@ -348,18 +348,17 @@ export class TransactionWriter implements ITransactionWriter {
   }
 }
 
-export class TransactionCompleteError extends RangeError
-  implements IStorageTransactionComplete {
-  override name = "StorageTransactionCompleteError" as const;
-}
+export const TransactionCompleteError = (
+  message = "Transaction is complete",
+): IStorageTransactionComplete => ({
+  name: "StorageTransactionCompleteError",
+  message,
+});
 
-export class TransactionAborted extends RangeError
-  implements IStorageTransactionAborted {
-  override name = "StorageTransactionAborted" as const;
-  reason: unknown;
-
-  constructor(reason?: unknown) {
-    super("Transaction was aborted");
-    this.reason = reason;
-  }
-}
+export const TransactionAborted = (
+  reason?: unknown,
+): IStorageTransactionAborted => ({
+  name: "StorageTransactionAborted",
+  message: "Transaction was aborted",
+  reason,
+});

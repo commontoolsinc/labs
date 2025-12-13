@@ -4,6 +4,7 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import * as Chronicle from "../src/storage/transaction/chronicle.ts";
 import { assert } from "@commontools/memory/fact";
+import type { IReadOnlyAddressError } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("chronicle test");
 const space = signer.did();
@@ -1245,7 +1246,7 @@ describe("Chronicle", () => {
           "Cannot write to read-only address",
         );
         expect(result.error!.message).toContain(address.id);
-        expect((result.error as Chronicle.ReadOnlyAddressError).address)
+        expect((result.error as IReadOnlyAddressError).address)
           .toEqual(address);
       });
 
@@ -1261,7 +1262,7 @@ describe("Chronicle", () => {
 
         expect(result.error).toBeDefined();
         expect(result.error!.name).toBe("ReadOnlyAddressError");
-        expect((result.error as Chronicle.ReadOnlyAddressError).address)
+        expect((result.error as IReadOnlyAddressError).address)
           .toEqual(address);
       });
 
