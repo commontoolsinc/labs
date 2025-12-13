@@ -1034,6 +1034,9 @@ export class Runner {
                   tx,
                 ),
               );
+              // Initiate pull to ensure execution
+              // (nothing else would read from it, otherwise)
+              resultCell.pull();
               addCancel(() => this.stop(resultCell));
             }
             return result;
