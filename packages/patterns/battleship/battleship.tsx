@@ -4,7 +4,6 @@ import {
   computed,
   derive,
   handler,
-  ifElse,
   NAME,
   pattern,
   UI,
@@ -284,18 +283,26 @@ export default pattern<Input, Output>(({}) => {
   );
 
   // ---------------------------------------------------------------------------
-  // Computed Values
+  // Computed Values - Consolidated to reduce reactive subscriptions
   // ---------------------------------------------------------------------------
 
-  const lastMessage = derive(game, (g) => g.get().lastMessage);
-  const currentTurn = derive(game, (g) => g.get().currentTurn);
-  const viewingAs = derive(game, (g) => g.get().viewingAs);
-  const isTransition = derive(game, (g) => g.get().viewingAs === null);
-  const isFinished = derive(game, (g) => g.get().phase === "finished");
-  const winner = derive(game, (g) => g.get().winner);
-  const awaitingPass = derive(game, (g) => g.get().awaitingPass);
+  // Single computed for all display values (accessed via properties)
+  const gameStatus = computed(() => {
+    const state = game.get();
+    return {
+      lastMessage: state.lastMessage,
+      currentTurn: state.currentTurn,
+      viewingAs: state.viewingAs,
+      winner: state.winner,
+      awaitingPass: state.awaitingPass,
+    };
+  });
 
-  // My board (the viewing player's board) - shows my ships + shots I received
+  // Screen visibility conditions
+  const isTransition = computed(() => game.get().viewingAs === null);
+  const isFinished = computed(() => game.get().phase === "finished");
+
+  // Board cell computation - ONE computed per board = minimal subscriptions
   const myBoardCells = computed(() => {
     const state = game.get();
     const viewer = state.viewingAs;
@@ -303,51 +310,35 @@ export default pattern<Input, Output>(({}) => {
 
     const myBoard = viewer === 1 ? state.player1 : state.player2;
     const shots = myBoard.shots;
-    const ships = myBoard.ships;
-    const shipPositions = buildShipPositions(ships);
+    const shipPositions = buildShipPositions(myBoard.ships);
 
     return GRID_INDICES.map(({ row, col }) => {
       const shotState = shots[row]?.[col] ?? "empty";
       const hasShip = !!shipPositions[`${row},${col}`];
-      // Show my ships, and show hits/misses on them
       const bgColor =
-        shotState === "hit"
-          ? "#dc2626" // Hit on my ship
-          : shotState === "miss"
-            ? "#374151" // Miss (opponent fired here)
-            : hasShip
-              ? "#22c55e" // My ship (green for own ships)
-              : "#1e3a5f"; // Water
+        shotState === "hit" ? "#dc2626" :
+        shotState === "miss" ? "#374151" :
+        hasShip ? "#22c55e" : "#1e3a5f";
       const content = shotState === "hit" ? "X" : shotState === "miss" ? "O" : "";
-      const gridRow = `${row + 2}`;
-      const gridCol = `${col + 2}`;
-      return { row, col, bgColor, content, gridRow, gridCol };
+      return { row, col, bgColor, content, gridRow: `${row + 2}`, gridCol: `${col + 2}` };
     });
   });
 
-  // Enemy board (opponent's board) - shows only my shots, NOT their ships
   const enemyBoardCells = computed(() => {
     const state = game.get();
     const viewer = state.viewingAs;
     if (viewer === null) return [];
 
     const enemyBoard = viewer === 1 ? state.player2 : state.player1;
-    const shots = enemyBoard.shots; // Shots the enemy received (= my shots)
+    const shots = enemyBoard.shots;
 
     return GRID_INDICES.map(({ row, col }) => {
       const shotState = shots[row]?.[col] ?? "empty";
-      // Don't show enemy ships! Only show hits/misses
       const bgColor =
-        shotState === "hit"
-          ? "#dc2626" // I hit their ship
-          : shotState === "miss"
-            ? "#374151" // I missed
-            : "#1e3a5f"; // Unknown (water or hidden ship)
+        shotState === "hit" ? "#dc2626" :
+        shotState === "miss" ? "#374151" : "#1e3a5f";
       const content = shotState === "hit" ? "X" : shotState === "miss" ? "O" : "";
-      const gridRow = `${row + 2}`;
-      const gridCol = `${col + 2}`;
-      const canClick = shotState === "empty";
-      return { row, col, bgColor, content, gridRow, gridCol, canClick };
+      return { row, col, bgColor, content, gridRow: `${row + 2}`, gridCol: `${col + 2}` };
     });
   });
 
@@ -386,28 +377,49 @@ export default pattern<Input, Output>(({}) => {
   };
 
   // ---------------------------------------------------------------------------
-  // UI Components
+  // CSS-based screen visibility (avoid ifElse DOM destruction)
+  // ---------------------------------------------------------------------------
+
+  // Compute display styles for each screen - CSS changes instead of DOM swap
+  const transitionDisplay = derive(isTransition, (t) =>
+    t ? "flex" : "none"
+  );
+  const victoryDisplay = derive(isFinished, (f) =>
+    f ? "flex" : "none"
+  );
+  const gameDisplay = computed(() => {
+    const state = game.get();
+    const showGame = state.phase !== "finished" && state.viewingAs !== null;
+    return showGame ? "block" : "none";
+  });
+
+  // ---------------------------------------------------------------------------
+  // UI Components (now always rendered, visibility via CSS)
   // ---------------------------------------------------------------------------
 
   const transitionScreen = (
     <div
       style={{
-        display: "flex",
+        display: transitionDisplay,
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
         minHeight: "60vh",
         gap: "20px",
+        position: "absolute",
+        top: "0",
+        left: "0",
+        right: "0",
       }}
     >
       <h2 style={{ fontSize: "32px", margin: "0" }}>
-        Pass device to Player {currentTurn}
+        Pass device to Player {gameStatus.currentTurn}
       </h2>
       <p style={{ color: "#94a3b8", fontSize: "18px", margin: "0" }}>
         Make sure the other player isn't looking!
       </p>
       <ct-button onClick={playerReady({ game })}>
-        I'm Player {currentTurn} - Ready!
+        I'm Player {gameStatus.currentTurn} - Ready!
       </ct-button>
     </div>
   );
@@ -415,16 +427,20 @@ export default pattern<Input, Output>(({}) => {
   const victoryScreen = (
     <div
       style={{
-        display: "flex",
+        display: victoryDisplay,
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
         minHeight: "60vh",
         gap: "20px",
+        position: "absolute",
+        top: "0",
+        left: "0",
+        right: "0",
       }}
     >
       <h2 style={{ fontSize: "48px", margin: "0", color: "#22c55e" }}>
-        Player {winner} Wins!
+        Player {gameStatus.winner} Wins!
       </h2>
       <p style={{ color: "#94a3b8", fontSize: "18px", margin: "0" }}>
         All enemy ships have been sunk!
@@ -434,7 +450,15 @@ export default pattern<Input, Output>(({}) => {
   );
 
   const gameScreen = (
-    <div>
+    <div
+      style={{
+        display: gameDisplay,
+        position: "absolute",
+        top: "0",
+        left: "0",
+        right: "0",
+      }}
+    >
       {/* Status bar */}
       <div
         style={{
@@ -446,27 +470,24 @@ export default pattern<Input, Output>(({}) => {
           fontSize: "18px",
         }}
       >
-        {lastMessage}
+        {gameStatus.lastMessage}
       </div>
 
       {/* Pass button (shown after firing) */}
-      {ifElse(
-        awaitingPass,
-        <div
-          style={{
-            textAlign: "center",
-            padding: "16px",
-            marginBottom: "20px",
-            backgroundColor: "#1e40af",
-            borderRadius: "8px",
-          }}
-        >
-          <ct-button onClick={passDevice({ game })}>
-            Pass to Player {currentTurn}
-          </ct-button>
-        </div>,
-        <div />
-      )}
+      <div
+        style={{
+          display: derive(gameStatus.awaitingPass, (a) => a ? "block" : "none"),
+          textAlign: "center",
+          padding: "16px",
+          marginBottom: "20px",
+          backgroundColor: "#1e40af",
+          borderRadius: "8px",
+        }}
+      >
+        <ct-button onClick={passDevice({ game })}>
+          Pass to Player {gameStatus.currentTurn}
+        </ct-button>
+      </div>
 
       {/* Game boards */}
       <div
@@ -649,17 +670,19 @@ export default pattern<Input, Output>(({}) => {
           backgroundColor: "#0f172a",
           color: "#e2e8f0",
           minHeight: "100vh",
+          position: "relative",
         }}
       >
         <h1 style={{ textAlign: "center", margin: "0 0 20px 0" }}>
           BATTLESHIP
         </h1>
 
-        {ifElse(
-          isFinished,
-          victoryScreen,
-          ifElse(isTransition, transitionScreen, gameScreen)
-        )}
+        {/* Screen container - relative positioning for absolute children */}
+        <div style={{ position: "relative", minHeight: "70vh" }}>
+          {victoryScreen}
+          {transitionScreen}
+          {gameScreen}
+        </div>
 
         {/* Reset button (always visible) */}
         <div style={{ textAlign: "center", marginTop: "30px" }}>
