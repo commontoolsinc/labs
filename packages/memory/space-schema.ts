@@ -275,30 +275,24 @@ export const selectSchema = <Space extends MemorySpace>(
   return { facts: includedFacts, schemaTracker };
 };
 
-export interface EvaluateLinksResult {
-  schemaTracker: MapSet<string, SchemaPathSelector>;
-  /** Newly discovered doc+schema pairs that weren't already in the tracker */
-  newLinks: Array<{ docKey: string; schema: SchemaPathSelector }>;
-}
-
 /**
  * Evaluates a single document with a schema and returns the links it contains.
  * Used for incremental subscription updates - when a document changes, we re-evaluate
- * just that document to find what links it now has.
+ * that document (and reachable documents) to find what links it now has.
  *
  * @param session - The space store session
- * @param docAddress - The document to evaluate (id and type)
+ * @param address - The document to evaluate (space, id, and type)
  * @param schemaSelector - The schema to apply
  * @param classification - Classification claims for access control
- * @returns An object with the schemaTracker and newly discovered links, or null if doc not found
+ * @returns The updated schemaTracker
  */
 export function evaluateDocumentLinks<Space extends MemorySpace>(
   session: SpaceStoreSession<Space>,
-  docAddress: { id: string; type: string },
+  address: { space: MemorySpace; id: Entity; type: MIME },
   schemaSelector: SchemaPathSelector,
-  classification?: string[],
-  existingSchemaTracker?: MapSet<string, SchemaPathSelector>,
-): EvaluateLinksResult | null {
+  classification: string[],
+  schemaTracker: MapSet<string, SchemaPathSelector>,
+): MapSet<string, SchemaPathSelector> {
   const providedClassifications = new Set<string>(classification);
   const manager = new ServerObjectManager(session, providedClassifications);
   const tracker = new CompoundCycleTracker<
@@ -306,21 +300,15 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
     SchemaContext | undefined
   >();
   const cfc = new ContextualFlowControl();
-  // Use existing tracker if provided - enables early termination for already-tracked docs
-  const schemaTracker = existingSchemaTracker ??
-    new MapSet<string, SchemaPathSelector>(deepEqual);
-
-  // Collect newly discovered links during traversal
-  const newLinks: Array<{ docKey: string; schema: SchemaPathSelector }> = [];
 
   // Load the document
-  const address = {
-    id: docAddress.id as Entity,
-    type: docAddress.type as MIME,
-  };
   const fact = manager.load(address);
   if (fact === null || fact.value === undefined) {
-    return null;
+    // If the fact doesn't exist, we still want to add it to the
+    // schemaTracker, so we get updates when the fact is added.
+    const factKey = `${address.space}/${address.id}/${address.type}`;
+    schemaTracker.add(factKey, schemaSelector);
+    return schemaTracker;
   }
 
   // Create the IAttestation with cause/since (we don't need these for link evaluation)
@@ -330,27 +318,18 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
     since: 0,
   };
 
-  // These selectorEntry objects in SchemaQuery have their path relative
-  // to the value, but our traversal wants them to be relative to the
-  // fact.is, so adjust the paths.
-  const selector = {
-    ...schemaSelector,
-    path: ["value", ...schemaSelector.path],
-  };
-
   // Run the schema traversal to populate schemaTracker with links
   loadFactsForDoc(
     manager,
     attestation,
-    selector,
+    schemaSelector,
     tracker,
     cfc,
     session.subject,
     schemaTracker,
-    newLinks,
   );
 
-  return { schemaTracker, newLinks };
+  return schemaTracker;
 }
 
 // The fact passed in is the IAttestation for the top level 'is', so path
@@ -364,7 +343,6 @@ function loadFactsForDoc(
   cfc: ContextualFlowControl,
   space: MemorySpace,
   schemaTracker: MapSet<string, SchemaPathSelector>,
-  newLinks?: Array<{ docKey: string; schema: SchemaPathSelector }>,
 ) {
   // A query without a schema context is the same as a query with the minimal schema
   // This will match the specified document, but no linked documents
@@ -381,9 +359,6 @@ function loadFactsForDoc(
 
   // Track this doc+schema pair and record it as newly discovered
   schemaTracker.add(factKey, selector);
-  if (newLinks !== undefined) {
-    newLinks.push({ docKey: factKey, schema: selector });
-  }
 
   if (isObject(fact.value)) {
     const managedTx = new ManagedStorageTransaction(manager);
@@ -417,7 +392,6 @@ function loadFactsForDoc(
         schemaTracker,
         undefined,
         undefined,
-        newLinks,
       );
       // We don't actually use the return value here, but we've built up
       // a list of all the documents we need to watch.
@@ -434,7 +408,6 @@ function loadFactsForDoc(
       { address: fullAddress, value: fact.value },
       new Set<string>(),
       schemaTracker,
-      newLinks,
     );
   }
 }
