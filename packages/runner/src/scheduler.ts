@@ -1572,11 +1572,6 @@ export class Scheduler {
 
         // Handle each cycle
         for (const cycle of cycles) {
-          console.log(
-            `[DEBUG] Cycle size: ${cycle.size}, isFast: ${
-              this.isFastCycle(cycle)
-            }`,
-          );
           if (this.isFastCycle(cycle)) {
             // Fast cycle: converge completely before continuing
             logger.debug("schedule-cycle", () => [
