@@ -168,7 +168,7 @@ describe("fetch-data mutex mechanism", () => {
 
     // Wait for async work
     await new Promise((resolve) => setTimeout(resolve, 200));
-    await runtime.idle();
+    await resultCell.pull();
 
     const firstCallCount =
       fetchCalls.filter((c) => c.url.includes("/api/first")).length;
@@ -181,7 +181,7 @@ describe("fetch-data mutex mechanism", () => {
 
     // Wait for async work
     await new Promise((resolve) => setTimeout(resolve, 200));
-    await runtime.idle();
+    await resultCell.pull();
 
     // Should have made a new fetch with the new URL
     const secondCallCount =
