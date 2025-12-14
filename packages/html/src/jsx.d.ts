@@ -2888,6 +2888,7 @@ interface CTHStackElement extends CTHTMLElement {}
 interface CTFabElement extends CTHTMLElement {}
 interface CTChevronButtonElement extends CTHTMLElement {}
 interface CTCardElement extends CTHTMLElement {}
+interface CTAlertElement extends CTHTMLElement {}
 interface CTVStackElement extends CTHTMLElement {}
 interface CTMessageInputElement extends CTHTMLElement {}
 interface CTToolbarElement extends CTHTMLElement {}
@@ -2918,6 +2919,49 @@ interface CTCharmElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
 interface CTVoiceInputElement extends CTHTMLElement {}
 interface CTAudioVisualizerElement extends CTHTMLElement {}
+
+// Tab components
+interface CTTabsElement extends CTHTMLElement {}
+interface CTTabElement extends CTHTMLElement {}
+interface CTTabListElement extends CTHTMLElement {}
+interface CTTabPanelElement extends CTHTMLElement {}
+
+// Accordion components
+interface CTAccordionElement extends CTHTMLElement {}
+interface CTAccordionItemElement extends CTHTMLElement {}
+
+// Form components
+interface CTFormElement extends CTHTMLElement {}
+interface CTSliderElement extends CTHTMLElement {}
+interface CTSwitchElement extends CTHTMLElement {}
+interface CTToggleElement extends CTHTMLElement {}
+interface CTToggleGroupElement extends CTHTMLElement {}
+interface CTRadioElement extends CTHTMLElement {}
+interface CTInputOtpElement extends CTHTMLElement {}
+interface CTLabelElement extends CTHTMLElement {}
+
+// Display components
+interface CTBadgeElement extends CTHTMLElement {}
+interface CTChipElement extends CTHTMLElement {}
+interface CTProgressElement extends CTHTMLElement {}
+interface CTSkeletonElement extends CTHTMLElement {}
+interface CTSeparatorElement extends CTHTMLElement {}
+interface CTTileElement extends CTHTMLElement {}
+
+// Layout components
+interface CTGridElement extends CTHTMLElement {}
+interface CTHGroupElement extends CTHTMLElement {}
+interface CTVGroupElement extends CTHTMLElement {}
+interface CTAspectRatioElement extends CTHTMLElement {}
+
+// Resizable components
+interface CTResizablePanelElement extends CTHTMLElement {}
+interface CTResizablePanelGroupElement extends CTHTMLElement {}
+interface CTResizableHandleElement extends CTHTMLElement {}
+
+// Other components
+interface CTScrollAreaElement extends CTHTMLElement {}
+interface CTToolCallElement extends CTHTMLElement {}
 
 interface CTDraggableAttributes<T> extends CTHTMLAttributes<T> {
   "key"?: number;
@@ -3122,17 +3166,28 @@ interface CTMarkdownAttributes<T> extends CTHTMLAttributes<T> {
   "$content"?: CellLike<string>;
   "variant"?: "default" | "inverse";
   "streaming"?: boolean;
+  "compact"?: boolean;
+}
+
+interface CTAlertAttributes<T> extends CTHTMLAttributes<T> {
+  "variant"?: "default" | "destructive" | "warning" | "success" | "info";
+  "dismissible"?: boolean;
+  "onct-dismiss"?: EventHandler<{}>;
+}
+
+interface CTCardAttributes<T> extends CTHTMLAttributes<T> {
+  "clickable"?: boolean;
 }
 
 interface CTButtonAttributes<T> extends CTHTMLAttributes<T> {
   "variant"?:
     | "default"
+    | "primary"
     | "destructive"
     | "outline"
     | "secondary"
     | "ghost"
     | "link"
-    | "danger"
     | "pill";
   "size"?: "default" | "sm" | "lg" | "icon";
   "disabled"?: boolean;
@@ -3228,7 +3283,23 @@ interface CTChevronButtonAttributes<T> extends CTHTMLAttributes<T> {
 interface CTInputAttributes<T> extends CTHTMLAttributes<T> {
   "$value"?: CellLike<string>;
   "customStyle"?: string; // bf: I think this is going to go away one day soon
-  "type"?: string;
+  "type"?:
+    | "text"
+    | "password"
+    | "email"
+    | "number"
+    | "tel"
+    | "url"
+    | "search"
+    | "date"
+    | "time"
+    | "datetime-local"
+    | "month"
+    | "week"
+    | "color"
+    | "file"
+    | "range"
+    | "hidden";
   "placeholder"?: string;
   "value"?: string;
   "disabled"?: boolean;
@@ -3399,6 +3470,11 @@ interface CTSelectAttributes<T> extends CTHTMLAttributes<T> {
   "$value": CellLike<any | any[]>;
   "items": { label: string; value: any }[];
   "multiple"?: boolean;
+  "disabled"?: boolean;
+  "required"?: boolean;
+  "size"?: number;
+  "name"?: string;
+  "placeholder"?: string;
   "onct-change"?: EventHandler<
     { items: { label: string; value: any }[]; value: any | any[] }
   >;
@@ -3460,7 +3536,14 @@ interface CTThemeAttributes<T> extends CTHTMLAttributes<T> {
 }
 interface CTCodeEditorLegacyAttributes<T> extends CTHTMLAttributes<T> {
   "source"?: string;
-  "language"?: `text/${string}`;
+  "language"?:
+    | "text/css"
+    | "text/html"
+    | "text/javascript"
+    | "text/x.jsx"
+    | "text/x.typescript"
+    | "application/json"
+    | "text/markdown";
   "onChange"?: any;
   "errors"?: any[];
 }
@@ -3468,7 +3551,14 @@ interface CTCodeEditorLegacyAttributes<T> extends CTHTMLAttributes<T> {
 interface CTCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
   "$value"?: CellLike<string>;
   "value"?: string;
-  "language"?: `text/${string}`;
+  "language"?:
+    | "text/css"
+    | "text/html"
+    | "text/javascript"
+    | "text/x.jsx"
+    | "text/x.typescript"
+    | "application/json"
+    | "text/markdown";
   "disabled"?: boolean;
   "readonly"?: boolean;
   "placeholder"?: string;
@@ -3495,6 +3585,211 @@ interface CTAutoLayoutAttributes<T> extends CTHTMLAttributes<T> {
   "tabNames"?: string[];
   "leftOpen"?: boolean;
   "rightOpen"?: boolean;
+}
+
+// Tab component attributes
+interface CTTabsAttributes<T> extends CTHTMLAttributes<T> {
+  "value"?: string | CellLike<string>;
+  "orientation"?: "horizontal" | "vertical" | CellLike<"horizontal" | "vertical">;
+  "onct-change"?: EventHandler<{ value: string }>;
+}
+
+interface CTTabAttributes<T> extends CTHTMLAttributes<T> {
+  "value"?: string | CellLike<string>;
+  "disabled"?: boolean | CellLike<boolean>;
+  "selected"?: boolean | CellLike<boolean>;
+}
+
+interface CTTabListAttributes<T> extends CTHTMLAttributes<T> {
+  "orientation"?: "horizontal" | "vertical" | CellLike<"horizontal" | "vertical">;
+}
+
+interface CTTabPanelAttributes<T> extends CTHTMLAttributes<T> {
+  "value"?: string | CellLike<string>;
+}
+
+// Accordion component attributes
+interface CTAccordionAttributes<T> extends CTHTMLAttributes<T> {
+  "type"?: "single" | "multiple" | CellLike<"single" | "multiple">;
+  "value"?: string | string[] | CellLike<string | string[]>;
+  "collapsible"?: boolean | CellLike<boolean>;
+  "onct-change"?: EventHandler<{ value: string | string[] }>;
+}
+
+interface CTAccordionItemAttributes<T> extends CTHTMLAttributes<T> {
+  "value"?: string | CellLike<string>;
+  "disabled"?: boolean | CellLike<boolean>;
+  "expanded"?: boolean | CellLike<boolean>;
+}
+
+// Form component attributes
+interface CTFormAttributes<T> extends CTHTMLAttributes<T> {
+  "method"?: "GET" | "POST" | CellLike<"GET" | "POST">;
+  "action"?: string | CellLike<string>;
+  "onct-submit"?: EventHandler<any>;
+}
+
+interface CTSliderAttributes<T> extends CTHTMLAttributes<T> {
+  "value"?: number | CellLike<number>;
+  "$value"?: CellLike<number>;
+  "min"?: number | CellLike<number>;
+  "max"?: number | CellLike<number>;
+  "step"?: number | CellLike<number>;
+  "disabled"?: boolean | CellLike<boolean>;
+  "orientation"?: "horizontal" | "vertical" | CellLike<"horizontal" | "vertical">;
+  "onct-change"?: EventHandler<{ value: number }>;
+}
+
+interface CTSwitchAttributes<T> extends CTHTMLAttributes<T> {
+  "checked"?: boolean | CellLike<boolean>;
+  "$checked"?: CellLike<boolean>;
+  "disabled"?: boolean | CellLike<boolean>;
+  "name"?: string | CellLike<string>;
+  "value"?: string | CellLike<string>;
+  "onct-change"?: EventHandler<{ checked: boolean }>;
+}
+
+interface CTToggleAttributes<T> extends CTHTMLAttributes<T> {
+  "pressed"?: boolean | CellLike<boolean>;
+  "$pressed"?: CellLike<boolean>;
+  "disabled"?: boolean | CellLike<boolean>;
+  "variant"?: "default" | "outline" | CellLike<"default" | "outline">;
+  "size"?: "default" | "sm" | "lg" | CellLike<"default" | "sm" | "lg">;
+  "onct-change"?: EventHandler<{ pressed: boolean }>;
+}
+
+interface CTToggleGroupAttributes<T> extends CTHTMLAttributes<T> {
+  "type"?: "single" | "multiple" | CellLike<"single" | "multiple">;
+  "value"?: string | string[] | CellLike<string | string[]>;
+  "$value"?: CellLike<string | string[]>;
+  "disabled"?: boolean | CellLike<boolean>;
+  "onct-change"?: EventHandler<{ value: string | string[] }>;
+}
+
+interface CTRadioAttributes<T> extends CTHTMLAttributes<T> {
+  "checked"?: boolean | CellLike<boolean>;
+  "disabled"?: boolean | CellLike<boolean>;
+  "value"?: string | CellLike<string>;
+  "name"?: string | CellLike<string>;
+  "onct-change"?: EventHandler<{ checked: boolean; value: string }>;
+}
+
+interface CTInputOtpAttributes<T> extends CTHTMLAttributes<T> {
+  "length"?: number | CellLike<number>;
+  "value"?: string | CellLike<string>;
+  "$value"?: CellLike<string>;
+  "disabled"?: boolean | CellLike<boolean>;
+  "name"?: string | CellLike<string>;
+  "placeholder"?: string | CellLike<string>;
+  "autoComplete"?: boolean | CellLike<boolean>;
+  "autofocus"?: boolean | CellLike<boolean>;
+  "onct-change"?: EventHandler<{ value: string }>;
+  "onct-complete"?: EventHandler<{ value: string }>;
+}
+
+interface CTLabelAttributes<T> extends CTHTMLAttributes<T> {
+  "for"?: string | CellLike<string>;
+  "required"?: boolean | CellLike<boolean>;
+  "disabled"?: boolean | CellLike<boolean>;
+}
+
+// Display component attributes
+interface CTBadgeAttributes<T> extends CTHTMLAttributes<T> {
+  "variant"?: "default" | "secondary" | "destructive" | "outline" | CellLike<"default" | "secondary" | "destructive" | "outline">;
+  "removable"?: boolean | CellLike<boolean>;
+  "onct-remove"?: EventHandler<{}>;
+}
+
+interface CTChipAttributes<T> extends CTHTMLAttributes<T> {
+  "label"?: string | CellLike<string>;
+  "variant"?: "default" | "primary" | "accent" | CellLike<"default" | "primary" | "accent">;
+  "removable"?: boolean | CellLike<boolean>;
+  "interactive"?: boolean | CellLike<boolean>;
+  "onct-remove"?: EventHandler<{}>;
+  "onct-click"?: EventHandler<{}>;
+}
+
+interface CTProgressAttributes<T> extends CTHTMLAttributes<T> {
+  "value"?: number | CellLike<number>;
+  "max"?: number | CellLike<number>;
+  "indeterminate"?: boolean | CellLike<boolean>;
+}
+
+interface CTSkeletonAttributes<T> extends CTHTMLAttributes<T> {
+  "variant"?: "default" | "text" | "circular" | CellLike<"default" | "text" | "circular">;
+  "animated"?: boolean | CellLike<boolean>;
+  "width"?: string | CellLike<string>;
+  "height"?: string | CellLike<string>;
+}
+
+interface CTSeparatorAttributes<T> extends CTHTMLAttributes<T> {
+  "orientation"?: "horizontal" | "vertical" | CellLike<"horizontal" | "vertical">;
+  "decorative"?: boolean | CellLike<boolean>;
+}
+
+interface CTTileAttributes<T> extends CTHTMLAttributes<T> {
+  "item"?: any | CellLike<any>;
+  "summary"?: string | CellLike<string>;
+  "clickable"?: boolean | CellLike<boolean>;
+  "onct-click"?: EventHandler<{}>;
+}
+
+// Layout component attributes
+interface CTGridAttributes<T> extends CTHTMLAttributes<T> {
+  "columns"?: string | CellLike<string>;
+  "rows"?: string | CellLike<string>;
+  "gap"?: string | CellLike<string>;
+  "rowGap"?: string | CellLike<string>;
+  "columnGap"?: string | CellLike<string>;
+  "align"?: string | CellLike<string>;
+  "justify"?: string | CellLike<string>;
+  "place"?: string | CellLike<string>;
+  "flow"?: string | CellLike<string>;
+  "padding"?: string | CellLike<string>;
+}
+
+interface CTHGroupAttributes<T> extends CTHTMLAttributes<T> {
+  "gap"?: "sm" | "md" | "lg" | CellLike<"sm" | "md" | "lg">;
+  "wrap"?: boolean | CellLike<boolean>;
+  "align"?: "start" | "center" | "end" | "stretch" | "baseline" | CellLike<"start" | "center" | "end" | "stretch" | "baseline">;
+  "justify"?: "start" | "center" | "end" | "between" | "around" | "evenly" | CellLike<"start" | "center" | "end" | "between" | "around" | "evenly">;
+}
+
+interface CTVGroupAttributes<T> extends CTHTMLAttributes<T> {
+  "gap"?: "sm" | "md" | "lg" | CellLike<"sm" | "md" | "lg">;
+  "align"?: "start" | "center" | "end" | "stretch" | CellLike<"start" | "center" | "end" | "stretch">;
+  "justify"?: "start" | "center" | "end" | "between" | "around" | "evenly" | CellLike<"start" | "center" | "end" | "between" | "around" | "evenly">;
+}
+
+interface CTAspectRatioAttributes<T> extends CTHTMLAttributes<T> {
+  "ratio"?: string | CellLike<string>;
+}
+
+// Resizable component attributes
+interface CTResizablePanelAttributes<T> extends CTHTMLAttributes<T> {
+  "minSize"?: number | CellLike<number>;
+  "defaultSize"?: number | CellLike<number>;
+  "maxSize"?: number | CellLike<number>;
+  "collapsible"?: boolean | CellLike<boolean>;
+}
+
+interface CTResizablePanelGroupAttributes<T> extends CTHTMLAttributes<T> {
+  "direction"?: "horizontal" | "vertical" | CellLike<"horizontal" | "vertical">;
+}
+
+interface CTResizableHandleAttributes<T> extends CTHTMLAttributes<T> {
+  "withHandle"?: boolean | CellLike<boolean>;
+}
+
+// Other component attributes
+interface CTScrollAreaAttributes<T> extends CTHTMLAttributes<T> {
+  "orientation"?: "vertical" | "horizontal" | "both" | CellLike<"vertical" | "horizontal" | "both">;
+}
+
+interface CTToolCallAttributes<T> extends CTHTMLAttributes<T> {
+  "call"?: any | CellLike<any>;
+  "result"?: any | CellLike<any>;
+  "expanded"?: boolean | CellLike<boolean>;
 }
 
 /**
@@ -4036,7 +4331,7 @@ declare global {
         CTMarkdownElement
       >;
       "ct-card": CTDOM.DetailedHTMLProps<
-        CTHTMLAttributes<CTCardElement>,
+        CTCardAttributes<CTCardElement>,
         CTCardElement
       >;
       "ct-toolbar": CTDOM.DetailedHTMLProps<
@@ -4112,8 +4407,8 @@ declare global {
         CTDraggableElement
       >;
       "ct-alert": CTDOM.DetailedHTMLProps<
-        CTHTMLAttributes<CTHTMLElement>,
-        CTHTMLElement
+        CTAlertAttributes<CTAlertElement>,
+        CTAlertElement
       >;
       "os-container": CTDOM.DetailedHTMLProps<
         CTHTMLAttributes<CTHTMLElement>,
@@ -4158,6 +4453,136 @@ declare global {
       "ct-vstack": CTDOM.DetailedHTMLProps<
         CTStackAttributes<CTVStackElement>,
         CTVStackElement
+      >;
+
+      // Tab components
+      "ct-tabs": CTDOM.DetailedHTMLProps<
+        CTTabsAttributes<CTTabsElement>,
+        CTTabsElement
+      >;
+      "ct-tab": CTDOM.DetailedHTMLProps<
+        CTTabAttributes<CTTabElement>,
+        CTTabElement
+      >;
+      "ct-tab-list": CTDOM.DetailedHTMLProps<
+        CTTabListAttributes<CTTabListElement>,
+        CTTabListElement
+      >;
+      "ct-tab-panel": CTDOM.DetailedHTMLProps<
+        CTTabPanelAttributes<CTTabPanelElement>,
+        CTTabPanelElement
+      >;
+
+      // Accordion components
+      "ct-accordion": CTDOM.DetailedHTMLProps<
+        CTAccordionAttributes<CTAccordionElement>,
+        CTAccordionElement
+      >;
+      "ct-accordion-item": CTDOM.DetailedHTMLProps<
+        CTAccordionItemAttributes<CTAccordionItemElement>,
+        CTAccordionItemElement
+      >;
+
+      // Form components
+      "ct-form": CTDOM.DetailedHTMLProps<
+        CTFormAttributes<CTFormElement>,
+        CTFormElement
+      >;
+      "ct-slider": CTDOM.DetailedHTMLProps<
+        CTSliderAttributes<CTSliderElement>,
+        CTSliderElement
+      >;
+      "ct-switch": CTDOM.DetailedHTMLProps<
+        CTSwitchAttributes<CTSwitchElement>,
+        CTSwitchElement
+      >;
+      "ct-toggle": CTDOM.DetailedHTMLProps<
+        CTToggleAttributes<CTToggleElement>,
+        CTToggleElement
+      >;
+      "ct-toggle-group": CTDOM.DetailedHTMLProps<
+        CTToggleGroupAttributes<CTToggleGroupElement>,
+        CTToggleGroupElement
+      >;
+      "ct-radio": CTDOM.DetailedHTMLProps<
+        CTRadioAttributes<CTRadioElement>,
+        CTRadioElement
+      >;
+      "ct-input-otp": CTDOM.DetailedHTMLProps<
+        CTInputOtpAttributes<CTInputOtpElement>,
+        CTInputOtpElement
+      >;
+      "ct-label": CTDOM.DetailedHTMLProps<
+        CTLabelAttributes<CTLabelElement>,
+        CTLabelElement
+      >;
+
+      // Display components
+      "ct-badge": CTDOM.DetailedHTMLProps<
+        CTBadgeAttributes<CTBadgeElement>,
+        CTBadgeElement
+      >;
+      "ct-chip": CTDOM.DetailedHTMLProps<
+        CTChipAttributes<CTChipElement>,
+        CTChipElement
+      >;
+      "ct-progress": CTDOM.DetailedHTMLProps<
+        CTProgressAttributes<CTProgressElement>,
+        CTProgressElement
+      >;
+      "ct-skeleton": CTDOM.DetailedHTMLProps<
+        CTSkeletonAttributes<CTSkeletonElement>,
+        CTSkeletonElement
+      >;
+      "ct-separator": CTDOM.DetailedHTMLProps<
+        CTSeparatorAttributes<CTSeparatorElement>,
+        CTSeparatorElement
+      >;
+      "ct-tile": CTDOM.DetailedHTMLProps<
+        CTTileAttributes<CTTileElement>,
+        CTTileElement
+      >;
+
+      // Layout components
+      "ct-grid": CTDOM.DetailedHTMLProps<
+        CTGridAttributes<CTGridElement>,
+        CTGridElement
+      >;
+      "ct-hgroup": CTDOM.DetailedHTMLProps<
+        CTHGroupAttributes<CTHGroupElement>,
+        CTHGroupElement
+      >;
+      "ct-vgroup": CTDOM.DetailedHTMLProps<
+        CTVGroupAttributes<CTVGroupElement>,
+        CTVGroupElement
+      >;
+      "ct-aspect-ratio": CTDOM.DetailedHTMLProps<
+        CTAspectRatioAttributes<CTAspectRatioElement>,
+        CTAspectRatioElement
+      >;
+
+      // Resizable components
+      "ct-resizable-panel": CTDOM.DetailedHTMLProps<
+        CTResizablePanelAttributes<CTResizablePanelElement>,
+        CTResizablePanelElement
+      >;
+      "ct-resizable-panel-group": CTDOM.DetailedHTMLProps<
+        CTResizablePanelGroupAttributes<CTResizablePanelGroupElement>,
+        CTResizablePanelGroupElement
+      >;
+      "ct-resizable-handle": CTDOM.DetailedHTMLProps<
+        CTResizableHandleAttributes<CTResizableHandleElement>,
+        CTResizableHandleElement
+      >;
+
+      // Other components
+      "ct-scroll-area": CTDOM.DetailedHTMLProps<
+        CTScrollAreaAttributes<CTScrollAreaElement>,
+        CTScrollAreaElement
+      >;
+      "ct-tool-call": CTDOM.DetailedHTMLProps<
+        CTToolCallAttributes<CTToolCallElement>,
+        CTToolCallElement
       >;
     }
   }
