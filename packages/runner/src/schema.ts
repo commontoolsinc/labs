@@ -348,7 +348,12 @@ export function validateAndTransform(
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
-  const resolvedLink = resolveLink(tx ?? runtime.edit(), link, "writeRedirect");
+  const resolvedLink = resolveLink(
+    runtime,
+    tx ?? runtime.edit(),
+    link,
+    "writeRedirect",
+  );
 
   // Use schema from alias if provided and no explicit schema was set
   if (resolvedSchema === undefined && resolvedLink.schema) {
@@ -457,7 +462,7 @@ export function validateAndTransform(
   // and `path` will still point to the parent, as in e.g. the `anyOf` case
   // below we might still create a new Cell and it should point to the top of
   // this set of links.
-  const ref = resolveLink(tx ?? runtime.edit(), link);
+  const ref = resolveLink(runtime, tx ?? runtime.edit(), link);
   const value = (tx ?? runtime.edit()).readValueOrThrow(ref);
 
   // Check for undefined value and return processed default if available
