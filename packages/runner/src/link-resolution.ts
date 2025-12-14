@@ -185,7 +185,13 @@ export function resolveLink(
       // If we're crossing spaces, force fetching data from server, as the
       // original server will not have pushed the data to the client yet.
       if (crossSpace) {
-        runtime.getCellFromLink(link).sync();
+        const maybePromise = runtime.getCellFromLink(link).sync();
+        if (maybePromise instanceof Promise) {
+          const promise = maybePromise.finally(() => {
+            runtime.storageManager.removeCrossSpacePromise(promise);
+          }) as unknown as Promise<void>;
+          runtime.storageManager.addCrossSpacePromise(promise);
+        }
       }
     } else {
       break;

@@ -2040,6 +2040,7 @@ export class StorageManager implements IStorageManager {
   spaceIdentity?: Signer;
   #providers: Map<string, IStorageProviderWithReplica> = new Map();
   #subscription = SubscriptionManager.create();
+  #crossSpacesPromises: Set<Promise<void>> = new Set();
 
   static open(options: Options) {
     if (options.address.protocol === "memory:") {
@@ -2138,8 +2139,37 @@ export class StorageManager implements IStorageManager {
     const { resolve, promise } = Promise.withResolvers<void>();
     Promise.all(
       this.#providers.values().map((provider) => provider.synced()),
-    ).finally(() => setTimeout(() => resolve(), 0));
+    ).finally(() => this.resolveCrossSpacePromises(resolve));
     return promise;
+  }
+
+  /**
+   * TODO(seefeld): Remove this again once we have a better way
+   *
+   * This is a bit of a hack to make await storage.synced wait for cross-space
+   * queries, since those are triggered during retrieval of cells and if
+   * synced is awaited earlier those queries are not in the awaited set.
+   *
+   * The other half of the code is in link-resolution.ts
+   */
+  private resolveCrossSpacePromises(resolve: () => void) {
+    const promises = Array.from(this.#crossSpacesPromises.values());
+    if (promises.length === 0) {
+      setTimeout(() => resolve(), 0);
+      return Promise.resolve();
+    }
+    // Keep going until the set is empty
+    return Promise.all(promises).finally(() =>
+      this.resolveCrossSpacePromises(resolve)
+    );
+  }
+
+  addCrossSpacePromise(promise: Promise<void>) {
+    this.#crossSpacesPromises.add(promise);
+  }
+
+  removeCrossSpacePromise(promise: Promise<void>) {
+    this.#crossSpacesPromises.delete(promise);
   }
 
   async syncCell<T>(
