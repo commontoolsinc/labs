@@ -3589,13 +3589,14 @@ interface CTAutoLayoutAttributes<T> extends CTHTMLAttributes<T> {
 
 // Tab component attributes
 interface CTTabsAttributes<T> extends CTHTMLAttributes<T> {
-  "value"?: string | CellLike<string>;
+  "$value"?: CellLike<string>; // Bidirectional cell binding
+  "value"?: string; // Plain string value (use $value for cells)
   "orientation"?: "horizontal" | "vertical" | CellLike<"horizontal" | "vertical">;
-  "onct-change"?: EventHandler<{ value: string }>;
+  "onct-change"?: EventHandler<{ value: string; oldValue: string }>;
 }
 
 interface CTTabAttributes<T> extends CTHTMLAttributes<T> {
-  "value"?: string | CellLike<string>;
+  "value"?: string; // Tab identifier (plain string, no cell binding needed)
   "disabled"?: boolean | CellLike<boolean>;
   "selected"?: boolean | CellLike<boolean>;
 }
@@ -3605,7 +3606,7 @@ interface CTTabListAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 interface CTTabPanelAttributes<T> extends CTHTMLAttributes<T> {
-  "value"?: string | CellLike<string>;
+  "value"?: string; // Panel identifier (plain string, no cell binding needed)
 }
 
 // Accordion component attributes
