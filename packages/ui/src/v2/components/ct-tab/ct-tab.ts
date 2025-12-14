@@ -19,7 +19,7 @@ import { BaseElement } from "../../core/base-element.ts";
  */
 export class CTTab extends BaseElement {
   static override properties = {
-    value: { type: String },
+    value: { type: String, reflect: true },
     disabled: { type: Boolean },
     selected: { type: Boolean },
   };
