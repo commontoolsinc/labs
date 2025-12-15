@@ -21,6 +21,7 @@ import type {
   WriteError,
   WriterError,
 } from "./interface.ts";
+import { toThrowable } from "./interface.ts";
 
 import { ignoreReadForScheduling } from "../scheduler.ts";
 
@@ -84,7 +85,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // information about parent paths.
       readResult.error.name !== "TypeMismatchError"
     ) {
-      throw readResult.error;
+      throw toThrowable(readResult.error);
     }
     return readResult.ok?.value;
   }
@@ -160,10 +161,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         valueObj,
       );
       if (writeResultRetry.error) {
-        throw writeResultRetry.error;
+        throw toThrowable(writeResultRetry.error);
       }
     } else if (writeResult.error) {
-      throw writeResult.error;
+      throw toThrowable(writeResult.error);
     }
   }
 

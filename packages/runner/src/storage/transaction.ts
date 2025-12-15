@@ -146,7 +146,7 @@ const edit = (
   if (state.status === "ready") {
     return { ok: state };
   } else {
-    return { error: new TransactionCompleteError() };
+    return { error: TransactionCompleteError() };
   }
 };
 
@@ -184,7 +184,7 @@ export const writer = (
         return { ok: writer };
       } else {
         return {
-          error: new WriteIsolationError({
+          error: WriteIsolationError({
             open: writer.did(),
             requested: space,
           }),
@@ -295,7 +295,7 @@ export const abort = (
         status: "done",
         journal: ready.journal,
         result: {
-          error: new TransactionAborted(reason),
+          error: TransactionAborted(reason),
         },
       });
     }
@@ -344,34 +344,25 @@ export const commit = async (
   }
 };
 
-export class TransactionCompleteError extends RangeError
-  implements IStorageTransactionComplete {
-  override name = "StorageTransactionCompleteError" as const;
-}
+export const TransactionCompleteError = (): IStorageTransactionComplete => ({
+  name: "StorageTransactionCompleteError",
+  message: "Transaction is complete",
+});
 
-export class TransactionAborted extends RangeError
-  implements IStorageTransactionAborted {
-  override name = "StorageTransactionAborted" as const;
-  reason: unknown;
+export const TransactionAborted = (
+  reason?: unknown,
+): IStorageTransactionAborted => ({
+  name: "StorageTransactionAborted",
+  message: "Transaction was aborted",
+  reason,
+});
 
-  constructor(reason?: unknown) {
-    super("Transaction was aborted");
-    this.reason = reason;
-  }
-}
-
-export class WriteIsolationError extends RangeError
-  implements IStorageTransactionWriteIsolationError {
-  override name = "StorageTransactionWriteIsolationError" as const;
-  open: MemorySpace;
-  requested: MemorySpace;
-  constructor(
-    { open, requested }: { open: MemorySpace; requested: MemorySpace },
-  ) {
-    super(
-      `Can not open transaction writer for ${requested} beacuse transaction has writer open for ${open}`,
-    );
-    this.open = open;
-    this.requested = requested;
-  }
-}
+export const WriteIsolationError = (
+  { open, requested }: { open: MemorySpace; requested: MemorySpace },
+): IStorageTransactionWriteIsolationError => ({
+  name: "StorageTransactionWriteIsolationError",
+  message:
+    `Can not open transaction writer for ${requested} because transaction has writer open for ${open}`,
+  open,
+  requested,
+});

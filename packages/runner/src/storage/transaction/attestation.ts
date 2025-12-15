@@ -36,37 +36,27 @@ const dataURICache = new Map<
 >();
 const MAX_CACHE_SIZE = 1000;
 
-export class InvalidDataURIError extends Error implements IInvalidDataURIError {
-  override readonly name = "InvalidDataURIError";
-  declare readonly cause: Error;
-
-  constructor(
-    message: string,
-    cause?: Error,
-  ) {
-    super(message);
-    if (cause) {
-      this.cause = cause;
-    }
-  }
-
+export const InvalidDataURIError = (
+  message: string,
+  cause?: IInvalidDataURIError["cause"],
+): IInvalidDataURIError => ({
+  name: "InvalidDataURIError",
+  message,
+  cause,
   from(_space: MemorySpace) {
     return this;
-  }
-}
+  },
+});
 
-export class UnsupportedMediaTypeError extends Error
-  implements IUnsupportedMediaTypeError {
-  override readonly name = "UnsupportedMediaTypeError";
-
-  constructor(message: string) {
-    super(message);
-  }
-
+export const UnsupportedMediaTypeError = (
+  message: string,
+): IUnsupportedMediaTypeError => ({
+  name: "UnsupportedMediaTypeError",
+  message,
   from(_space: MemorySpace) {
     return this;
-  }
-}
+  },
+});
 
 /**
  * Takes `source` attestation, `address` and `value` and produces derived
@@ -100,7 +90,7 @@ export const write = (
       return { error };
     } else if (ok.value === undefined) {
       return {
-        error: new NotFound(source, address, path),
+        error: NotFound(source, address, path),
       };
     } else {
       const type = ok.value === null
@@ -131,7 +121,7 @@ export const write = (
       } else {
         // Type mismatch - trying to write property on non-object
         return {
-          error: new TypeMismatchError(
+          error: TypeMismatchError(
             address,
             type,
             "write",
@@ -217,7 +207,7 @@ export const claim = (
     return { ok: state };
   } else {
     return {
-      error: new StateInconsistency({ address, expected, actual }),
+      error: StateInconsistency({ address, expected, actual }),
     };
   }
 };
@@ -242,7 +232,7 @@ export const resolve = (
   // If the source value is undefined (document doesn't exist), return NotFound
   if (source.value === undefined && path.length > source.address.path.length) {
     return {
-      error: new NotFound(
+      error: NotFound(
         source,
         address,
         // Last valid path component is assumed to be the one that points to
@@ -265,13 +255,13 @@ export const resolve = (
       // write onto it. Return error with last valid path component.
       if (value === undefined) {
         return {
-          error: new NotFound(source, address, path.slice(0, Math.max(0, at))),
+          error: NotFound(source, address, path.slice(0, Math.max(0, at))),
         };
       }
       // Type mismatch - trying to access property on non-object
       const actualType = value === null ? "null" : typeof value;
       return {
-        error: new TypeMismatchError(
+        error: TypeMismatchError(
           { ...address, path: path.slice(0, at + 1) },
           actualType,
           "read",
@@ -312,7 +302,7 @@ export const load = (
 
     if (url.protocol !== "data:") {
       result = {
-        error: new InvalidDataURIError(
+        error: InvalidDataURIError(
           "Invalid data URI: protocol must be 'data:'",
         ),
       };
@@ -321,9 +311,8 @@ export const load = (
 
       if (data === undefined) {
         result = {
-          error: new InvalidDataURIError(
+          error: InvalidDataURIError(
             "Invalid data URI format: missing comma separator",
-            undefined,
           ),
         };
       } else {
@@ -339,7 +328,7 @@ export const load = (
         if (mediaType !== address.type) {
           // Media type mismatch - return error
           result = {
-            error: new UnsupportedMediaTypeError(
+            error: UnsupportedMediaTypeError(
               `Media type mismatch: expected "${address.type}" but data URI contains "${mediaType}"`,
             ),
           };
@@ -352,9 +341,8 @@ export const load = (
           } catch (error) {
             const reason = error as Error;
             result = {
-              error: new InvalidDataURIError(
+              error: InvalidDataURIError(
                 `Failed to parse JSON from data URI: ${reason.message}`,
-                reason,
               ),
             };
           }
@@ -366,7 +354,7 @@ export const load = (
           };
         } else {
           result = {
-            error: new UnsupportedMediaTypeError(
+            error: UnsupportedMediaTypeError(
               `Unsupported media type ${mediaType}`,
             ),
           };
@@ -376,9 +364,8 @@ export const load = (
   } catch (error) {
     const reason = error as Error;
     result = {
-      error: new InvalidDataURIError(
+      error: InvalidDataURIError(
         `Invalid data URI: ${reason.message}`,
-        reason,
       ),
     };
   }
@@ -396,101 +383,82 @@ export const load = (
   return result;
 };
 
-export class NotFound extends RangeError implements INotFoundError {
-  override name = "NotFoundError" as const;
-  declare readonly source: IAttestation;
-  declare readonly address: IMemoryAddress;
-  declare readonly path: readonly MemoryAddressPathComponent[] | undefined;
+export const NotFound = (
+  source: IAttestation,
+  address: IMemoryAddress,
+  path?: readonly MemoryAddressPathComponent[],
+): INotFoundError => {
+  let message: string;
 
-  constructor(
-    source: IAttestation,
-    address: IMemoryAddress,
-    path?: readonly MemoryAddressPathComponent[],
-  ) {
-    let message: string;
-
-    // Document doesn't exist
-    if (source.value === undefined && source.address.path.length === 0) {
-      message = `Document not found: ${address.id}`;
-    } // Path doesn't exist within document
-    else {
-      message = `Cannot access path [${address.path.join(", ")}] - ${
-        source.value === undefined
-          ? "document does not exist"
-          : "path does not exist"
-      }`;
-    }
-
-    super(message);
-    this.source = source;
-    this.address = address;
-    this.path = path;
+  // Document doesn't exist
+  if (source.value === undefined && source.address.path.length === 0) {
+    message = `Document not found: ${address.id}`;
+  } // Path doesn't exist within document
+  else {
+    message = `Cannot access path [${address.path.join(", ")}] - ${
+      source.value === undefined
+        ? "document does not exist"
+        : "path does not exist"
+    }`;
   }
 
-  from(_space: MemorySpace) {
-    // Return the same error instance as it doesn't use space in the message
-    return this;
-  }
-}
-
-export class TypeMismatchError extends TypeError implements ITypeMismatchError {
-  override name = "TypeMismatchError" as const;
-  declare readonly address: IMemoryAddress;
-  declare readonly actualType: string;
-
-  constructor(
-    address: IMemoryAddress,
-    actualType: string,
-    operation: "read" | "write",
-  ) {
-    const message = `Cannot ${operation} property at path [${
-      address.path.join(", ")
-    }] - expected object but found ${actualType}`;
-    super(message);
-    this.address = address;
-    this.actualType = actualType;
-  }
-
-  from(_space: MemorySpace) {
-    // Return the same error instance as it doesn't use space in the message
-    return this;
-  }
-}
-
-export class StateInconsistency extends RangeError
-  implements IStorageTransactionInconsistent {
-  override name = "StorageTransactionInconsistent" as const;
-
-  constructor(
-    public source: {
-      address: IMemoryAddress;
-      expected?: JSONValue;
-      actual?: JSONValue;
-      space?: MemorySpace;
+  return {
+    name: "NotFoundError",
+    message,
+    source,
+    address,
+    path,
+    from(_space: MemorySpace) {
+      // Return the same error instance as it doesn't use space in the message
+      return this;
     },
-  ) {
-    const { address, space, expected, actual } = source;
-    const message = [
-      `Transaction consistency violated: The "${address.type}" of "${address.id}" at "${
-        address.path.join(".")
-      }"`,
-      space ? ` in space "${space}"` : "",
-      ` hash changed. Previously it used to be:\n `,
-      expected === undefined ? "undefined" : JSON.stringify(expected),
-      "\n and currently it is:\n ",
-      actual === undefined ? "undefined" : JSON.stringify(actual),
-    ].join("");
+  };
+};
 
-    super(message);
-  }
-  get address() {
-    return this.source.address;
-  }
+export const TypeMismatchError = (
+  address: IMemoryAddress,
+  actualType: string,
+  operation: "read" | "write",
+): ITypeMismatchError => ({
+  name: "TypeMismatchError",
+  message: `Cannot ${operation} property at path [${
+    address.path.join(", ")
+  }] - expected object but found ${actualType}`,
+  address,
+  actualType,
+  from(_space: MemorySpace) {
+    // Return the same error instance as it doesn't use space in the message
+    return this;
+  },
+});
 
-  from(space: MemorySpace) {
-    return new StateInconsistency({
-      ...this.source,
-      space,
-    });
-  }
-}
+export const StateInconsistency = (source: {
+  address: IMemoryAddress;
+  expected?: JSONValue;
+  actual?: JSONValue;
+  space?: MemorySpace;
+}): IStorageTransactionInconsistent => {
+  const { address, space, expected, actual } = source;
+  const message = [
+    `Transaction consistency violated: The "${address.type}" of "${address.id}" at "${
+      address.path.join(".")
+    }"`,
+    space ? ` in space "${space}"` : "",
+    ` hash changed. Previously it used to be:\n `,
+    expected === undefined ? "undefined" : JSON.stringify(expected),
+    "\n and currently it is:\n ",
+    actual === undefined ? "undefined" : JSON.stringify(actual),
+  ].join("");
+
+  return {
+    name: "StorageTransactionInconsistent",
+    message,
+    address,
+    from(newSpace: MemorySpace) {
+      return StateInconsistency({
+        ...source,
+        space: newSpace,
+      });
+    },
+  };
+};
