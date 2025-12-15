@@ -1064,8 +1064,28 @@ export class Runner {
         module,
         recipe,
       });
+
+      // Create callback to populate dependencies for pull mode scheduling.
+      // This reads all cells the handler will access (except the event itself).
+      const populateDependencies = module.argumentSchema
+        ? (depTx: IExtendedStorageTransaction) => {
+            const inputsCell = this.runtime.getImmutableCell(
+              processCell.space,
+              inputs,
+              undefined,
+              depTx,
+            );
+            // Use traverseCells to read into all nested Cell objects
+            inputsCell.asSchema(module.argumentSchema!).get({ traverseCells: true });
+          }
+        : undefined;
+
       addCancel(
-        this.runtime.scheduler.addEventHandler(wrappedHandler, streamLink),
+        this.runtime.scheduler.addEventHandler(
+          wrappedHandler,
+          streamLink,
+          populateDependencies,
+        ),
       );
     } else {
       if (isRecord(inputs) && "$event" in inputs) {

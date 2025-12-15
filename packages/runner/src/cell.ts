@@ -565,9 +565,16 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     return isStreamValue(value);
   }
 
-  get(): Readonly<T> {
+  get(options?: { traverseCells?: boolean }): Readonly<T> {
     if (!this.synced) this.sync(); // No await, just kicking this off
-    return validateAndTransform(this.runtime, this.tx, this.link, this.synced);
+    return validateAndTransform(
+      this.runtime,
+      this.tx,
+      this.link,
+      this.synced,
+      [],
+      options,
+    );
   }
 
   /**

@@ -52,7 +52,15 @@ export interface TelemetryAnnotations {
 
 export type Action = (tx: IExtendedStorageTransaction) => any;
 export type AnnotatedAction = Action & TelemetryAnnotations;
-export type EventHandler = (tx: IExtendedStorageTransaction, event: any) => any;
+export type EventHandler = ((tx: IExtendedStorageTransaction, event: any) => any) & {
+  /**
+   * Optional callback to populate a transaction with the handler's read dependencies.
+   * Called by the scheduler to discover what cells the handler will read.
+   * The callback should read all cells (using .get({ traverseCells: true })) that
+   * the handler will access, so the transaction captures all dependencies.
+   */
+  populateDependencies?: (tx: IExtendedStorageTransaction) => void;
+};
 export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
 
 /**
@@ -110,6 +118,7 @@ export interface ActionStats {
 export class Scheduler {
   private eventQueue: {
     action: Action;
+    handler: EventHandler;
     retriesLeft: number;
     onCommit?: (tx: IExtendedStorageTransaction) => void;
   }[] = [];
@@ -531,6 +540,7 @@ export class Scheduler {
         this.queueExecution();
         this.eventQueue.push({
           action: (tx: IExtendedStorageTransaction) => handler(tx, event),
+          handler,
           retriesLeft: retries,
           onCommit,
         });
@@ -552,7 +562,14 @@ export class Scheduler {
     }
   }
 
-  addEventHandler(handler: EventHandler, ref: NormalizedFullLink): Cancel {
+  addEventHandler(
+    handler: EventHandler,
+    ref: NormalizedFullLink,
+    populateDependencies?: (tx: IExtendedStorageTransaction) => void,
+  ): Cancel {
+    if (populateDependencies) {
+      handler.populateDependencies = populateDependencies;
+    }
     this.eventHandlers.push([ref, handler]);
     return () => {
       const index = this.eventHandlers.findIndex(([r, h]) =>
@@ -1523,12 +1540,52 @@ export class Scheduler {
     // the topological sort in the right way.
     const event = this.eventQueue.shift();
     if (event) {
-      const { action, retriesLeft, onCommit } = event;
+      const { action, handler, retriesLeft, onCommit } = event;
       this.runtime.telemetry.submit({
         type: "scheduler.invocation",
         handler: action,
       });
-      const finalize = (error?: unknown) => {
+      // In pull mode, ensure handler dependencies are computed before running
+      let shouldSkipEvent = false;
+      if (this.pullMode && handler.populateDependencies) {
+        // Get the handler's dependencies (read-only, just capturing what will be read)
+        const depTx = this.runtime.edit();
+        handler.populateDependencies(depTx);
+        const deps = txToReactivityLog(depTx);
+        // Commit even though we only read - the tx has no writes so this is safe
+        depTx.commit();
+
+        // Check if any dependencies are dirty (have pending computations)
+        const dirtyDeps: Action[] = [];
+        for (const read of deps.reads) {
+          const spaceAndURI = `${read.space}/${read.id}` as SpaceAndURI;
+          const actionsForEntity = this.triggers.get(spaceAndURI);
+          if (actionsForEntity) {
+            for (const [depAction] of actionsForEntity) {
+              if (this.dirty.has(depAction)) {
+                dirtyDeps.push(depAction);
+              }
+            }
+          }
+        }
+
+        // If there are dirty dependencies, add them to pending and re-queue event
+        if (dirtyDeps.length > 0) {
+          for (const dep of dirtyDeps) {
+            this.pending.add(dep);
+          }
+          // Re-queue the event to be processed after dependencies compute
+          this.eventQueue.unshift(event);
+          shouldSkipEvent = true;
+        }
+      }
+
+      // Skip running the event if we need to compute dependencies first
+      if (shouldSkipEvent) {
+        // Continue to process pending actions
+        // The event will be processed in the next execute() cycle
+      } else {
+        const finalize = (error?: unknown) => {
         try {
           if (error) this.handleError(error as Error, action);
         } finally {
@@ -1541,6 +1598,7 @@ export class Scheduler {
             if (error && retriesLeft > 0) {
               this.eventQueue.unshift({
                 action,
+                handler,
                 retriesLeft: retriesLeft - 1,
                 onCommit,
               });
@@ -1588,6 +1646,7 @@ export class Scheduler {
       } catch (error) {
         finalize(error);
       }
+      } // Close else block for shouldSkipEvent
     }
 
     // Build the work set based on scheduling mode
