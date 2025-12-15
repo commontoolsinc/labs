@@ -6,17 +6,19 @@ type Input = {
   selected: Cell<Default<string, "opt_1">>;
   numericChoice: Cell<Default<number, 1>>;
   category: Cell<Default<string, "Other">>;
+  activeTab: Cell<Default<string, "tab1">>;
 };
 
 type Result = {
   selected: string;
   numericChoice: number;
   category: string;
+  activeTab: string;
 };
 
 export default recipe<Input, Result>(
   "ct-select demo",
-  ({ selected, numericChoice, category }) => {
+  ({ selected, numericChoice, category, activeTab }) => {
     return {
       [NAME]: "ct-select demo",
       [UI]: (
@@ -97,11 +99,36 @@ export default recipe<Input, Result>(
             />
             <p>Selected category: {category}</p>
           </ct-card>
+
+          <ct-card>
+            <h4>
+              <code>ct-tabs</code>
+            </h4>
+            <p>Tabs use $value binding for the active tab</p>
+            <ct-tabs $value={activeTab}>
+              <ct-tab-list>
+                <ct-tab value="tab1">First Tab</ct-tab>
+                <ct-tab value="tab2">Second Tab</ct-tab>
+                <ct-tab value="tab3">Third Tab</ct-tab>
+              </ct-tab-list>
+              <ct-tab-panel value="tab1">
+                <p>Content for the first tab panel.</p>
+              </ct-tab-panel>
+              <ct-tab-panel value="tab2">
+                <p>Content for the second tab panel.</p>
+              </ct-tab-panel>
+              <ct-tab-panel value="tab3">
+                <p>Content for the third tab panel.</p>
+              </ct-tab-panel>
+            </ct-tabs>
+            <p>Active tab: {activeTab}</p>
+          </ct-card>
         </ct-vstack>
       ),
       selected,
       numericChoice,
       category,
+      activeTab,
     };
   },
 );

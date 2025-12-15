@@ -29,8 +29,8 @@ export class CTTabList extends BaseElement {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        border-radius: var(--ct-border-radius-md);
-        background-color: var(--ct-colors-gray-100);
+        border-radius: var(--ct-theme-border-radius, var(--ct-border-radius-md));
+        background-color: var(--ct-theme-color-surface, #f1f5f9);
         padding: var(--ct-spacing-1);
         height: 2.5rem;
         gap: 0.125rem;
@@ -50,13 +50,6 @@ export class CTTabList extends BaseElement {
       .tab-list[data-orientation="vertical"] ::slotted(ct-tab) {
         width: 100%;
         justify-content: flex-start;
-      }
-
-      /* Dark mode support */
-      @media (prefers-color-scheme: dark) {
-        .tab-list {
-          background-color: var(--ct-colors-gray-800);
-        }
       }
     `,
   ];

@@ -59,7 +59,7 @@ export class CTTabPanel extends BaseElement {
   ];
 
   static override properties = {
-    value: { type: String },
+    value: { type: String, reflect: true },
     hidden: { type: Boolean, reflect: true },
   };
 
