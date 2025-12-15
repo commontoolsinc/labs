@@ -162,6 +162,12 @@ export class Scheduler {
   // Filter stats for diagnostics
   private filterStats = { filtered: 0, executed: 0 };
 
+  // Parent-child action tracking for proper execution ordering
+  // When a child action is created during parent execution, parent must run first
+  private executingAction: Action | null = null;
+  private actionParent = new WeakMap<Action, Action>();
+  private actionChildren = new WeakMap<Action, Set<Action>>();
+
   private idlePromises: (() => void)[] = [];
   private loopCounter = new WeakMap<Action, number>();
   private errorHandlers = new Set<ErrorHandler>();
@@ -266,6 +272,26 @@ export class Scheduler {
     // Update reverse dependency graph
     this.updateDependents(action, log);
 
+    // Track parent-child relationship if action is created during another action's execution
+    if (this.executingAction && this.executingAction !== action) {
+      const parent = this.executingAction;
+      this.actionParent.set(action, parent);
+
+      // Add to parent's children set
+      let children = this.actionChildren.get(parent);
+      if (!children) {
+        children = new Set();
+        this.actionChildren.set(parent, children);
+      }
+      children.add(action);
+
+      logger.debug("schedule", () => [
+        `[PARENT-CHILD] Action ${action.name || "anonymous"} is child of ${
+          parent.name || "anonymous"
+        }`,
+      ]);
+    }
+
     logger.debug(
       "schedule",
       () => [
@@ -345,6 +371,16 @@ export class Scheduler {
     // Clean up effect/computation tracking
     this.effects.delete(action);
     this.computations.delete(action);
+    // Clean up dirty tracking
+    this.dirty.delete(action);
+    // Clean up parent-child relationships
+    const parent = this.actionParent.get(action);
+    if (parent) {
+      const siblings = this.actionChildren.get(parent);
+      siblings?.delete(action);
+      this.actionParent.delete(action);
+    }
+    this.actionChildren.delete(action);
     // Cancel any pending debounce timer
     this.cancelDebounceTimer(action);
   }
@@ -432,9 +468,12 @@ export class Scheduler {
       };
 
       try {
+        // Track executing action for parent-child relationship tracking
+        this.executingAction = action;
         Promise.resolve(action(tx))
           .then((actionResult) => {
             result = actionResult;
+            this.executingAction = null;
             logger.debug("schedule-action-timing", () => {
               const duration = ((performance.now() - actionStartTime) / 1000)
                 .toFixed(3);
@@ -446,8 +485,12 @@ export class Scheduler {
             });
             finalizeAction();
           })
-          .catch((error) => finalizeAction(error));
+          .catch((error) => {
+            this.executingAction = null;
+            finalizeAction(error);
+          });
       } catch (error) {
+        this.executingAction = null;
         finalizeAction(error);
       }
     });
@@ -1016,6 +1059,7 @@ export class Scheduler {
       const sorted = topologicalSort(
         new Set(dirtyMembers),
         this.dependencies,
+        this.actionParent,
       );
 
       // Run each dirty member
@@ -1094,7 +1138,11 @@ export class Scheduler {
     }
 
     // Sort dirty members topologically within the cycle
-    const sorted = topologicalSort(new Set(dirtyMembers), this.dependencies);
+    const sorted = topologicalSort(
+      new Set(dirtyMembers),
+      this.dependencies,
+      this.actionParent,
+    );
 
     // Run one iteration of dirty members
     for (const action of sorted) {
@@ -1611,7 +1659,11 @@ export class Scheduler {
       workSet = this.pending;
     }
 
-    const order = topologicalSort(workSet, this.dependencies);
+    const order = topologicalSort(
+      workSet,
+      this.dependencies,
+      this.actionParent,
+    );
 
     logger.debug("schedule", () => [
       `[EXECUTE] Running ${order.length} actions`,
@@ -1701,6 +1753,7 @@ export class Scheduler {
 function topologicalSort(
   actions: Set<Action>,
   dependencies: WeakMap<Action, ReactivityLog>,
+  actionParent?: WeakMap<Action, Action>,
 ): Action[] {
   const graph = new Map<Action, Set<Action>>();
   const inDegree = new Map<Action, number>();
@@ -1711,14 +1764,18 @@ function topologicalSort(
     inDegree.set(action, 0);
   }
 
-  // Build the graph
+  // Build the graph based on read/write dependencies
   for (const actionA of actions) {
-    const { writes } = dependencies.get(actionA)!;
+    const log = dependencies.get(actionA);
+    if (!log) continue;
+    const { writes } = log;
     const graphA = graph.get(actionA)!;
     for (const write of writes) {
       for (const actionB of actions) {
         if (actionA !== actionB && !graphA.has(actionB)) {
-          const { reads } = dependencies.get(actionB)!;
+          const logB = dependencies.get(actionB);
+          if (!logB) continue;
+          const { reads } = logB;
           if (
             reads.some(
               (addr) =>
@@ -1730,6 +1787,20 @@ function topologicalSort(
             graphA.add(actionB);
             inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
           }
+        }
+      }
+    }
+  }
+
+  // Add parent-child edges: parent must execute before child
+  if (actionParent) {
+    for (const child of actions) {
+      const parent = actionParent.get(child);
+      if (parent && actions.has(parent)) {
+        const graphParent = graph.get(parent)!;
+        if (!graphParent.has(child)) {
+          graphParent.add(child);
+          inDegree.set(child, (inDegree.get(child) || 0) + 1);
         }
       }
     }

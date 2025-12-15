@@ -553,12 +553,16 @@ describe("scheduler", () => {
     // Cell.set uses diffAndUpdate which marks reads as potential writes
     // Both properties should appear in potentialWrites (even unchanged ones)
     expect(log.potentialWrites).toBeDefined();
-    expect(log.potentialWrites!.some((addr) => addr.path[0] === "a")).toBe(true);
-    expect(log.potentialWrites!.some((addr) => addr.path[0] === "b")).toBe(true);
+    expect(log.potentialWrites!.some((addr) => addr.path[0] === "a")).toBe(
+      true,
+    );
+    expect(log.potentialWrites!.some((addr) => addr.path[0] === "b")).toBe(
+      true,
+    );
 
     // Only `b` changed, so only `b` should be in writes
     expect(log.writes.some((w) => w.path[0] === "a")).toBe(false); // a NOT written
-    expect(log.writes.some((w) => w.path[0] === "b")).toBe(true);  // b written
+    expect(log.writes.some((w) => w.path[0] === "b")).toBe(true); // b written
 
     await setTx.commit();
   });
@@ -4032,5 +4036,324 @@ describe("push-triggered filtering", () => {
     const stats = runtime.scheduler.getFilterStats();
     expect(stats.filtered).toBe(0);
     expect(stats.executed).toBe(0);
+  });
+});
+
+describe("parent-child action ordering", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    // Enable pull mode for parent-child ordering tests
+    runtime.scheduler.enablePullMode();
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should execute parent actions before child actions", async () => {
+    const executionOrder: string[] = [];
+
+    const source = runtime.getCell<number>(
+      space,
+      "parent-child-order-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Parent action that subscribes a child during execution
+    const parentAction: Action = (actionTx) => {
+      executionOrder.push("parent");
+      const val = source.withTx(actionTx).get();
+
+      // Subscribe child action during parent execution
+      runtime.scheduler.subscribe(
+        childAction,
+        { reads: [], writes: [] },
+        { scheduleImmediately: true },
+      );
+
+      return val;
+    };
+
+    const childAction: Action = (_actionTx) => {
+      executionOrder.push("child");
+    };
+
+    // Subscribe parent
+    runtime.scheduler.subscribe(
+      parentAction,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+
+    // Parent should execute first, then child
+    expect(executionOrder).toEqual(["parent", "child"]);
+  });
+
+  it("should skip child if parent unsubscribes it", async () => {
+    const executionOrder: string[] = [];
+
+    const source = runtime.getCell<number>(
+      space,
+      "parent-child-unsubscribe-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const toggle = runtime.getCell<boolean>(
+      space,
+      "parent-child-unsubscribe-toggle",
+      undefined,
+      tx,
+    );
+    toggle.set(true);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childCanceler: (() => void) | null = null;
+
+    // Parent action that conditionally subscribes/unsubscribes child
+    const parentAction: Action = (actionTx) => {
+      executionOrder.push("parent");
+      const shouldHaveChild = toggle.withTx(actionTx).get();
+
+      if (shouldHaveChild && !childCanceler) {
+        childCanceler = runtime.scheduler.subscribe(
+          childAction,
+          { reads: [], writes: [] },
+          { scheduleImmediately: true },
+        );
+      } else if (!shouldHaveChild && childCanceler) {
+        childCanceler();
+        childCanceler = null;
+      }
+    };
+
+    const childAction: Action = (_actionTx) => {
+      executionOrder.push("child");
+    };
+
+    // Subscribe parent as an effect (so it re-runs when toggle changes)
+    runtime.scheduler.subscribe(
+      parentAction,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true, isEffect: true },
+    );
+    await runtime.idle();
+
+    expect(executionOrder).toEqual(["parent", "child"]);
+
+    // Now toggle to false - parent should unsubscribe child
+    executionOrder.length = 0;
+    toggle.withTx(tx).send(false);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    // Parent runs (and unsubscribes child), child should NOT run
+    expect(executionOrder).toEqual(["parent"]);
+  });
+
+  it("should order parent before child even when both become dirty", async () => {
+    const executionOrder: string[] = [];
+
+    const source = runtime.getCell<number>(
+      space,
+      "parent-child-both-dirty-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childSubscribed = false;
+
+    // Parent reads source and subscribes child on first run
+    const parentAction: Action = (actionTx) => {
+      executionOrder.push("parent");
+      const val = source.withTx(actionTx).get();
+
+      if (!childSubscribed) {
+        childSubscribed = true;
+        // Subscribe child as an effect too (so it re-runs when source changes)
+        runtime.scheduler.subscribe(
+          childAction,
+          { reads: [], writes: [] },
+          { scheduleImmediately: true, isEffect: true },
+        );
+      }
+
+      return val;
+    };
+
+    // Child also reads source (so both become dirty when source changes)
+    const childAction: Action = (actionTx) => {
+      executionOrder.push("child");
+      source.withTx(actionTx).get();
+    };
+
+    // Mark parent as effect so it re-runs when source changes
+    runtime.scheduler.subscribe(
+      parentAction,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true, isEffect: true },
+    );
+    await runtime.idle();
+
+    expect(executionOrder).toEqual(["parent", "child"]);
+
+    // Change source - both parent and child should become dirty
+    executionOrder.length = 0;
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    // Parent should still execute before child
+    expect(executionOrder).toEqual(["parent", "child"]);
+  });
+
+  it("should handle nested parent-child-grandchild ordering", async () => {
+    const executionOrder: string[] = [];
+
+    const source = runtime.getCell<number>(
+      space,
+      "parent-child-grandchild-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childSubscribed = false;
+    let grandchildSubscribed = false;
+
+    const grandparentAction: Action = (actionTx) => {
+      executionOrder.push("grandparent");
+      source.withTx(actionTx).get();
+
+      if (!childSubscribed) {
+        childSubscribed = true;
+        // Subscribe parent as effect so it re-runs when source changes
+        runtime.scheduler.subscribe(
+          parentAction,
+          { reads: [], writes: [] },
+          { scheduleImmediately: true, isEffect: true },
+        );
+      }
+    };
+
+    const parentAction: Action = (actionTx) => {
+      executionOrder.push("parent");
+      source.withTx(actionTx).get();
+
+      if (!grandchildSubscribed) {
+        grandchildSubscribed = true;
+        // Subscribe child as effect so it re-runs when source changes
+        runtime.scheduler.subscribe(
+          childAction,
+          { reads: [], writes: [] },
+          { scheduleImmediately: true, isEffect: true },
+        );
+      }
+    };
+
+    const childAction: Action = (actionTx) => {
+      executionOrder.push("child");
+      source.withTx(actionTx).get();
+    };
+
+    // Mark grandparent as effect so the chain re-runs when source changes
+    runtime.scheduler.subscribe(
+      grandparentAction,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true, isEffect: true },
+    );
+    await runtime.idle();
+
+    // Should execute in order: grandparent -> parent -> child
+    expect(executionOrder).toEqual(["grandparent", "parent", "child"]);
+
+    // Change source - all three should become dirty and re-execute in order
+    executionOrder.length = 0;
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(executionOrder).toEqual(["grandparent", "parent", "child"]);
+  });
+
+  it("should clean up parent-child relationships on unsubscribe", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "parent-child-cleanup-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childCanceler: (() => void) | undefined;
+    let childRunCount = 0;
+
+    const parentAction: Action = (actionTx) => {
+      source.withTx(actionTx).get();
+
+      if (!childCanceler) {
+        childCanceler = runtime.scheduler.subscribe(
+          childAction,
+          { reads: [], writes: [] },
+          { scheduleImmediately: true },
+        );
+      }
+    };
+
+    const childAction: Action = (actionTx) => {
+      childRunCount++;
+      source.withTx(actionTx).get();
+    };
+
+    const parentCanceler = runtime.scheduler.subscribe(
+      parentAction,
+      { reads: [], writes: [] },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+
+    expect(childRunCount).toBe(1);
+
+    // Unsubscribe the parent - this should clean up the relationship
+    parentCanceler();
+
+    // Also unsubscribe child to prevent it from running independently
+    if (childCanceler) childCanceler();
+
+    // Change source and verify neither runs
+    childRunCount = 0;
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(childRunCount).toBe(0);
   });
 });
