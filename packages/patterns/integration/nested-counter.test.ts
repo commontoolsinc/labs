@@ -3,7 +3,7 @@ import { CharmController, CharmsController } from "@commontools/charm/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
-import { assert, assertEquals } from "@std/assert";
+import { assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 
@@ -68,14 +68,9 @@ describe("nested counter integration test", () => {
   it("should click the increment button and update the counter", async () => {
     const page = shell.page();
 
-    // Find all buttons and click the increment button (second button)
-    const buttons = await page.$$("[data-ct-button]", {
-      strategy: "pierce",
-    });
-    assert(buttons.length >= 2, "Should find at least 2 buttons");
-
     // Click increment button (second button - first is decrement)
-    await buttons[1].click();
+    // Use retry logic to handle unstable box model during page settling
+    await clickNthButton(page, "[data-ct-button]", 1);
 
     // Wait for charm result update
     await waitFor(async () => {
@@ -141,5 +136,25 @@ async function waitForCounter(page: Page, text: string) {
       strategy: "pierce",
     });
     return (await counterResult?.innerText())?.trim() === text;
+  });
+}
+
+// Clicks the nth button matching selector, retrying if the element lacks a stable box model.
+// This handles timing issues where the element is found but the page
+// is still settling (re-renders, layout shifts, hydration).
+function clickNthButton(
+  page: Page,
+  selector: string,
+  index: number,
+): Promise<void> {
+  return waitFor(async () => {
+    const buttons = await page.$$(selector, { strategy: "pierce" });
+    if (buttons.length <= index) return false;
+    try {
+      await buttons[index].click();
+      return true;
+    } catch (_) {
+      return false;
+    }
   });
 }

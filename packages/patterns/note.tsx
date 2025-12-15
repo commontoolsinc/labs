@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   Cell,
-  cell,
   type Default,
   derive,
   generateText,
@@ -106,10 +105,10 @@ const Note = recipe<Input, Output>(
     const mentionable = wish<Default<MentionableCharm[], []>>(
       "#mentionable",
     );
-    const mentioned = cell<MentionableCharm[]>([]);
+    const mentioned = Cell.of<MentionableCharm[]>([]);
 
     // populated in backlinks-index.tsx
-    const backlinks = cell<MentionableCharm[]>([]);
+    const backlinks = Cell.of<MentionableCharm[]>([]);
 
     // The only way to serialize a pattern, apparently?
     const pattern = derive(undefined, () => JSON.stringify(Note));
