@@ -138,7 +138,7 @@ export default recipe(
           <hr />
           <ct-code-editor
             $value={content}
-            language="text/x-markdown"
+            language="text/markdown"
             placeholder="Enter something..."
             style="height: 256px"
           />

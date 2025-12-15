@@ -36,7 +36,7 @@ export default recipe(
           <div style="border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
             <ct-code-editor
               $value={content}
-              language="text/plain"
+              language="text/markdown"
               style="min-height: 400px;"
             />
           </div>
