@@ -101,6 +101,9 @@ export class CTMessageInput extends BaseElement {
 
     // Emit the send event
     this.emit("ct-send", { message });
+
+    // Restore focus to input for rapid entry (chat, list-building workflows)
+    input.focus();
   }
 
   private _handleKeyDown(event: KeyboardEvent) {
