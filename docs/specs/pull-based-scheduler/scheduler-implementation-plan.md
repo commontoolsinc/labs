@@ -531,11 +531,117 @@ Actual execution: Pull work set ∩ Push triggered
 
 ---
 
+## Phase 5b: Parent-Child Action Ordering
+
+**Goal**: Ensure parent actions run before their child actions in pull mode, preventing stale execution of old child computations.
+
+**Depends on**: Phase 5 complete
+
+### Problem Statement
+
+When a lifted function returns a recipe:
+1. The lift runs and creates a new recipe (child computations)
+2. The recipe is instantiated, creating child actions that subscribe to cells
+3. When inputs change, BOTH the parent lift AND the old child computations become dirty
+4. In pull mode, if we run the old child first, it executes with stale values
+5. Then the parent runs, stops the old child, and creates a new one
+6. Result: extra runs with stale data
+
+**Example**: `multiplyGenerator2` returns `multiply({x, y})`:
+- Initial: x=2, y=3 → multiply runs with hardcoded x=2, y=3
+- x changes to 3:
+  - Old multiply is dirty (reads x cell)
+  - multiplyGenerator2 is dirty (reads x)
+  - If old multiply runs first: executes with x=2 (stale!)
+  - multiplyGenerator2 runs: stops old multiply, creates new one with x=3
+  - New multiply runs with x=3
+
+### Solution: Track Parent-Child Relationships
+
+Track when actions are scheduled during another action's execution. Use this to:
+1. Order parents before children in topological sort
+2. Remove children from work set when parent unsubscribes them
+
+### Tasks
+
+#### 5b.1 Track scheduling context
+
+**File**: `packages/runner/src/scheduler.ts`
+
+- [ ] Add class property:
+  ```typescript
+  private executingAction: Action | null = null;
+  private actionParent = new WeakMap<Action, Action>();
+  ```
+
+- [ ] In `run()`, set `executingAction` before running action, clear after
+
+- [ ] In `subscribe()`, if `executingAction` is set, record parent relationship:
+  ```typescript
+  if (this.executingAction) {
+    this.actionParent.set(action, this.executingAction);
+  }
+  ```
+
+#### 5b.2 Order parents before children in execution
+
+**File**: `packages/runner/src/scheduler.ts`
+
+- [ ] Modify `topologicalSort()` to consider parent-child edges:
+  - Parent must come before child in sort order
+  - This is in addition to read/write dependency edges
+
+- [ ] Alternative: Add parent-child to `dependents` map so existing topological sort handles it
+
+#### 5b.3 Remove children when parent unsubscribes them
+
+**File**: `packages/runner/src/scheduler.ts`
+
+- [ ] Track children per parent:
+  ```typescript
+  private actionChildren = new WeakMap<Action, Set<Action>>();
+  ```
+
+- [ ] In `subscribe()`, add child to parent's children set
+
+- [ ] In `unsubscribe()`, if action has a parent, remove from parent's children set
+
+- [ ] Modify `execute()` work set handling:
+  - Before running each action, check if it's still subscribed
+  - If parent unsubscribed it during this cycle, skip it
+  - Or: after each parent runs, filter remaining work set to remove unsubscribed children
+
+#### 5b.4 Handle nested parent-child chains
+
+- [ ] Parent-child relationship should be transitive for ordering
+- [ ] If A creates B, and B creates C, then order must be A → B → C
+- [ ] Use `getAncestors(action)` helper to find all ancestors
+
+#### 5b.5 Write tests
+
+**File**: `packages/runner/test/scheduler.test.ts`
+
+- [ ] Test: child scheduled during parent execution has parent recorded
+- [ ] Test: parent runs before child in execution order
+- [ ] Test: child unsubscribed by parent is removed from work set
+- [ ] Test: nested parent-child chains ordered correctly
+- [ ] Test: "should handle recipes returned by lifted functions" passes in pull mode
+- [ ] Test: "should execute recipes returned by handlers" passes in pull mode
+
+#### 5b.6 Verify Phase 5b
+
+- [ ] All previous phase tests pass
+- [ ] New parent-child ordering tests pass
+- [ ] The two failing recipe tests now pass in pull mode
+- [ ] Run `deno task test` in `packages/runner` with `pullMode = true`
+
+---
+
 ## Phase 6: Full Migration
 
 **Goal**: Remove push-based code path after validation.
 
-**Depends on**: Phase 5 complete + production validation
+**Depends on**: Phase 5b complete + production validation
 
 ### Tasks
 
@@ -584,6 +690,7 @@ If issues are discovered at any phase:
 | 3 | Cycle handling falls back to existing iteration limits |
 | 4 | Clear debounce/throttle settings |
 | 5 | Disable push-triggered filtering (run all dirty actions) |
+| 5b | Remove parent-child tracking, fall back to dependency-only ordering |
 | 6 | Re-enable push-based code path via config |
 
 **Critical**: Keep push-based code path until Phase 6 is fully validated in production.
@@ -616,4 +723,5 @@ Update this section as phases complete:
 | Phase 3: Cycle Convergence | Complete | Claude | 2025-12-12 |
 | Phase 4: Debounce & Throttle | Complete | Claude | 2025-12-12 |
 | Phase 5: Push-Triggered Filtering | Complete | Claude | 2025-12-12 |
+| Phase 5b: Parent-Child Ordering | Not Started | | |
 | Phase 6: Migration | Not Started | | |
