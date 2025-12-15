@@ -533,14 +533,12 @@ export function wish(
     | { situation: string; context: Record<string, any> }
     | undefined;
   let suggestionPatternResultCell: Cell<WishState<any>> | undefined;
-  let suggestionRecordedToIndex = false; // Track if we've already recorded this result
 
   function launchSuggestionPattern(
     input: { situation: string; context: Record<string, any> },
     providedTx?: IExtendedStorageTransaction,
   ) {
     suggestionPatternInput = input;
-    suggestionRecordedToIndex = false; // Reset for new suggestion
 
     const tx = providedTx || runtime.edit();
 
@@ -554,30 +552,16 @@ export function wish(
 
       addCancel(() => runtime.runner.stop(suggestionPatternResultCell!));
 
-      // Set up a watcher to record successful results to the wish index
-      // NOTE: We read from suggestionPatternInput (not a captured variable) so that
-      // subsequent wishes using the same cell get recorded with the correct query
-      suggestionPatternResultCell.sink(() => {
-        if (suggestionRecordedToIndex) return; // Already recorded
-
-        const state = suggestionPatternResultCell?.get();
-        if (state?.result && !state?.error && suggestionPatternInput) {
-          suggestionRecordedToIndex = true;
-          const currentQuery = suggestionPatternInput.situation;
-          // Defer recording to avoid transaction conflicts
-          // The sink might fire during an active transaction
-          setTimeout(() => {
-            recordToWishIndex(
-              runtime,
-              currentQuery,
-              state.result,
-              SUGGESTION_TSX_PATH,
-            ).catch((e) => {
-              console.warn("Failed to record suggestion to wish index:", e);
-            });
-          }, 0);
-        }
-      });
+      // Record to wish index immediately - the cell reference is stable,
+      // even though the result may not be populated yet
+      setTimeout(() => {
+        recordToWishIndex(
+          runtime,
+          input.situation,
+          suggestionPatternResultCell!,
+          SUGGESTION_TSX_PATH,
+        );
+      }, 0);
     }
 
     if (!suggestionPattern) {
@@ -635,6 +619,11 @@ export function wish(
           : parsed.path;
         const resolvedCell = resolvePath(baseResolutions[0].cell, combinedPath);
         sendResult(tx, resolvedCell);
+
+                // Record to wish index (deferred to avoid transaction conflicts)
+                setTimeout(() => {
+                  recordToWishIndex(runtime, wishTarget, resolvedCell);
+                }, 0);
       } catch (e) {
         // Provide helpful feedback for common defaultPattern issues
         if (
@@ -664,6 +653,7 @@ export function wish(
           { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
         );
       }
+
       return;
     } else if (typeof targetValue === "object") {
       const { query, path, schema, context, scope: _scope } =
@@ -702,6 +692,11 @@ export function wish(
               result: resultCells[0],
               [UI]: cellLinkUI(resultCells[0]),
             });
+
+            // Record to wish index (deferred to avoid transaction conflicts)
+            setTimeout(() => {
+              recordToWishIndex(runtime, query, resultCells[0]);
+            }, 0);
           } else {
             // If it's multiple result, launch the wish pattern, which will
             // immediately return the first candidate as result
