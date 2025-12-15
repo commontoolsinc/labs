@@ -1745,7 +1745,6 @@ export function llmDialog(
           // Start a new request. This will start an async operation that will
           // outlive this handler call.
           startRequest(
-            tx,
             runtime,
             parentCell.space,
             cause,
@@ -1810,7 +1809,6 @@ export function llmDialog(
 }
 
 async function startRequest(
-  tx: IExtendedStorageTransaction,
   runtime: Runtime,
   space: MemorySpace,
   cause: any,
@@ -1822,7 +1820,31 @@ async function startRequest(
   requestId: string,
   abortSignal: AbortSignal,
 ) {
-  const { system, maxTokens, model } = inputs.withTx(tx).get();
+  // Pull input dependencies to ensure they're computed in pull mode
+  await inputs.pull();
+  await pinnedCells.pull();
+
+  // Also pull individual context cells and pinned cell targets
+  const contextCellsForPull = inputs.key("context").get() ?? {};
+  for (const cell of Object.values(contextCellsForPull)) {
+    if (isCell(cell)) {
+      await cell.resolveAsCell().pull();
+    }
+  }
+  const pinnedCellsForPull = pinnedCells.get() ?? [];
+  for (const pinnedCell of pinnedCellsForPull) {
+    try {
+      const link = parseLLMFriendlyLink(pinnedCell.path, space);
+      const cell = runtime.getCellFromLink(link);
+      if (cell) {
+        await cell.resolveAsCell().pull();
+      }
+    } catch {
+      // Ignore errors - cell might not exist
+    }
+  }
+
+  const { system, maxTokens, model } = inputs.get();
 
   const messagesCell = inputs.key("messages");
   const toolsCell = inputs.key("tools") as Cell<
@@ -1830,8 +1852,8 @@ async function startRequest(
   >;
 
   // Update merged pinnedCells in case context or internal pinnedCells changed
-  const contextCells = inputs.key("context").withTx(tx).get() ?? {};
-  const toolPinnedCells = pinnedCells.withTx(tx).get() ?? [];
+  const contextCells = inputs.key("context").get() ?? {};
+  const toolPinnedCells = pinnedCells.get() ?? [];
 
   const contextAsPinnedCells: PinnedCell[] = Object.entries(contextCells)
     // Convert context cells to PinnedCell format
@@ -1848,8 +1870,10 @@ async function startRequest(
   // Merge context cells and tool-pinned cells
   const mergedPinnedCells = [...contextAsPinnedCells, ...toolPinnedCells];
 
-  // Write to result cell
-  result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
+  // Write to result cell using editWithRetry since we're outside handler tx
+  await runtime.editWithRetry((tx) => {
+    result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
+  });
 
   const toolCatalog = buildToolCatalog(toolsCell);
 
@@ -1913,7 +1937,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
 
   const llmParams: LLMRequest = {
     system: augmentedSystem,
-    messages: messagesCell.withTx(tx).get() as BuiltInLLMMessage[],
+    messages: messagesCell.get() as BuiltInLLMMessage[],
     maxTokens: maxTokens,
     stream: true,
     model: model ?? DEFAULT_MODEL_NAME,
@@ -2056,9 +2080,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           if (success) {
             logger.info("llm", "Continuing conversation after tool calls...");
 
-            const continueTx = runtime.edit();
             startRequest(
-              continueTx,
               runtime,
               space,
               cause,
@@ -2070,7 +2092,6 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
               requestId,
               abortSignal,
             );
-            continueTx.commit();
           } else {
             logger.info(
               "llm",

@@ -29,10 +29,7 @@ export function registerBuiltins(runtime: Runtime) {
   moduleRegistry.addModuleByRef("fetchProgram", raw(fetchProgram));
   moduleRegistry.addModuleByRef("streamData", raw(streamData));
   moduleRegistry.addModuleByRef("llm", raw(llm));
-  moduleRegistry.addModuleByRef(
-    "llmDialog",
-    raw(llmDialog, { isEffect: true }),
-  );
+  moduleRegistry.addModuleByRef("llmDialog", raw(llmDialog));
   moduleRegistry.addModuleByRef("ifElse", raw(ifElse));
   moduleRegistry.addModuleByRef("when", raw(when));
   moduleRegistry.addModuleByRef("unless", raw(unless));
