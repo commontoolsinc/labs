@@ -1,5 +1,5 @@
 import { refer } from "merkle-reference";
-import { SchemaAll, SchemaNone } from "@commontools/memory/schema";
+import { SchemaAll } from "@commontools/memory/schema";
 import { MIME } from "@commontools/memory/interface";
 import { JSONSchemaObj } from "@commontools/api";
 // TODO(@ubik2): Ideally this would use the following, but rollup has issues
