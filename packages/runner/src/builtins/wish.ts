@@ -52,6 +52,7 @@ const wishIndexListSchema = {
 // Constants for wish index
 const WISH_INDEX_MAX_ENTRIES = 100;
 const WISH_INDEX_STALENESS_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const WISH_INDEX_DEBOUNCE_MS = 30000; // 30 seconds
 import { getRecipeEnvironment } from "../env.ts";
 
 const WISH_TSX_PATH = getRecipeEnvironment().apiUrl + "api/patterns/wish.tsx";
@@ -419,6 +420,7 @@ function getRecentWishIndexEntries(
 /**
  * Record a successful wish resolution to the wish index.
  * Implements FIFO eviction when MAX_ENTRIES is exceeded.
+ * Deduplicates entries with the same query within the debounce window.
  */
 async function recordToWishIndex(
   runtime: Runtime,
@@ -436,17 +438,32 @@ async function recordToWishIndex(
     await runtime.editWithRetry((tx: IExtendedStorageTransaction) => {
       const indexWithTx = wishIndexCell.withTx(tx);
       const currentEntries = indexWithTx.get() || [];
+      const now = Date.now();
+
+      // Check for duplicate: same query recorded recently
+      const queryLower = query.toLowerCase().trim();
+      const existingEntry = currentEntries.find((entry) =>
+        entry?.query?.toLowerCase().trim() === queryLower &&
+        now - (entry?.timestamp ?? 0) < WISH_INDEX_DEBOUNCE_MS
+      );
+
+      if (existingEntry) {
+        // Skip duplicate
+        return;
+      }
 
       // Create new entry
       const newEntry = {
         query,
         resultCell,
         patternUrl,
-        timestamp: Date.now(),
+        timestamp: now,
       };
 
-      // Add at front, apply FIFO eviction
-      let entries = [newEntry, ...currentEntries];
+      // Add at front, filter nulls, apply FIFO eviction
+      let entries = [newEntry, ...currentEntries].filter(
+        (e) => e != null && e.query != null,
+      );
       if (entries.length > WISH_INDEX_MAX_ENTRIES) {
         entries = entries.slice(0, WISH_INDEX_MAX_ENTRIES);
       }
@@ -533,6 +550,7 @@ export function wish(
     | { situation: string; context: Record<string, any> }
     | undefined;
   let suggestionPatternResultCell: Cell<WishState<any>> | undefined;
+  let lastRecordedSuggestionQuery: string | undefined;
 
   function launchSuggestionPattern(
     input: { situation: string; context: Record<string, any> },
@@ -551,17 +569,6 @@ export function wish(
       );
 
       addCancel(() => runtime.runner.stop(suggestionPatternResultCell!));
-
-      // Record to wish index immediately - the cell reference is stable,
-      // even though the result may not be populated yet
-      setTimeout(() => {
-        recordToWishIndex(
-          runtime,
-          input.situation,
-          suggestionPatternResultCell!,
-          SUGGESTION_TSX_PATH,
-        );
-      }, 0);
     }
 
     if (!suggestionPattern) {
@@ -591,6 +598,20 @@ export function wish(
     }
 
     if (!providedTx) tx.commit();
+
+    // Record to wish index when query changes (after all setup is complete)
+    if (input.situation !== lastRecordedSuggestionQuery) {
+      const queryToRecord = input.situation;
+      lastRecordedSuggestionQuery = queryToRecord;
+      setTimeout(() => {
+        recordToWishIndex(
+          runtime,
+          queryToRecord,
+          suggestionPatternResultCell!,
+          SUGGESTION_TSX_PATH,
+        );
+      }, 100);
+    }
 
     return suggestionPatternResultCell;
   }
