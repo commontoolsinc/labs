@@ -88,6 +88,8 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   const result = runtime.run(tx, patternFactory, argument, resultCell);
   tx.commit();
 
+  // Sink to keep the result reactive
+  result.sink(() => {});
   await runtime.idle();
 
   let stepIndex = 0;
