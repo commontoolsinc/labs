@@ -75,7 +75,7 @@ export interface IAnyCell<T> {
  * Readable cells can retrieve their current value.
  */
 export interface IReadable<T> {
-  get(): Readonly<T>;
+  get(options?: { traverseCells?: boolean }): Readonly<T>;
   /**
    * Read the cell's current value without creating a reactive dependency.
    * Unlike `get()`, calling `sample()` inside a lift won't cause the lift
