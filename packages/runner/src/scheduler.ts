@@ -52,15 +52,17 @@ export interface TelemetryAnnotations {
 
 export type Action = (tx: IExtendedStorageTransaction) => any;
 export type AnnotatedAction = Action & TelemetryAnnotations;
-export type EventHandler = ((tx: IExtendedStorageTransaction, event: any) => any) & {
-  /**
-   * Optional callback to populate a transaction with the handler's read dependencies.
-   * Called by the scheduler to discover what cells the handler will read.
-   * The callback should read all cells (using .get({ traverseCells: true })) that
-   * the handler will access, so the transaction captures all dependencies.
-   */
-  populateDependencies?: (tx: IExtendedStorageTransaction) => void;
-};
+export type EventHandler =
+  & ((tx: IExtendedStorageTransaction, event: any) => any)
+  & {
+    /**
+     * Optional callback to populate a transaction with the handler's read dependencies.
+     * Called by the scheduler to discover what cells the handler will read.
+     * The callback should read all cells (using .get({ traverseCells: true })) that
+     * the handler will access, so the transaction captures all dependencies.
+     */
+    populateDependencies?: (tx: IExtendedStorageTransaction) => void;
+  };
 export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
 
 /**
@@ -1586,66 +1588,66 @@ export class Scheduler {
         // The event will be processed in the next execute() cycle
       } else {
         const finalize = (error?: unknown) => {
-        try {
-          if (error) this.handleError(error as Error, action);
-        } finally {
-          tx.commit().then(({ error }) => {
-            // If the transaction failed, and we have retries left, queue the
-            // event again at the beginning of the queue. This isn't guaranteed
-            // to be the same order as the original event, but it's close
-            // enough, especially for a series of event that act on the same
-            // conflicting data.
-            if (error && retriesLeft > 0) {
-              this.eventQueue.unshift({
-                action,
-                handler,
-                retriesLeft: retriesLeft - 1,
-                onCommit,
-              });
-              // Ensure the re-queued event gets processed even if the scheduler
-              // finished this cycle before the commit completed.
-              this.queueExecution();
-            } else if (onCommit) {
-              // Call commit callback when:
-              // - Commit succeeds (!error), OR
-              // - Commit fails but we're out of retries (retriesLeft === 0)
-              try {
-                onCommit(tx);
-              } catch (callbackError) {
-                logger.error(
-                  "schedule-error",
-                  "Error in event commit callback:",
-                  callbackError,
-                );
+          try {
+            if (error) this.handleError(error as Error, action);
+          } finally {
+            tx.commit().then(({ error }) => {
+              // If the transaction failed, and we have retries left, queue the
+              // event again at the beginning of the queue. This isn't guaranteed
+              // to be the same order as the original event, but it's close
+              // enough, especially for a series of event that act on the same
+              // conflicting data.
+              if (error && retriesLeft > 0) {
+                this.eventQueue.unshift({
+                  action,
+                  handler,
+                  retriesLeft: retriesLeft - 1,
+                  onCommit,
+                });
+                // Ensure the re-queued event gets processed even if the scheduler
+                // finished this cycle before the commit completed.
+                this.queueExecution();
+              } else if (onCommit) {
+                // Call commit callback when:
+                // - Commit succeeds (!error), OR
+                // - Commit fails but we're out of retries (retriesLeft === 0)
+                try {
+                  onCommit(tx);
+                } catch (callbackError) {
+                  logger.error(
+                    "schedule-error",
+                    "Error in event commit callback:",
+                    callbackError,
+                  );
+                }
               }
-            }
-          });
-        }
-      };
-      const tx = this.runtime.edit();
-
-      try {
-        const actionStartTime = performance.now();
-        this.runningPromise = Promise.resolve(
-          this.runtime.harness.invoke(() => action(tx)),
-        ).then(() => {
-          const duration = (performance.now() - actionStartTime) / 1000;
-          if (duration > 10) {
-            console.warn(`Slow action: ${duration.toFixed(3)}s`, action);
+            });
           }
-          logger.debug("action-timing", () => {
-            return [
-              `Action ${action.name || "anonymous"} completed in ${
-                duration.toFixed(3)
-              }s`,
-            ];
-          });
-          finalize();
-        }).catch((error) => finalize(error));
-        await this.runningPromise;
-      } catch (error) {
-        finalize(error);
-      }
+        };
+        const tx = this.runtime.edit();
+
+        try {
+          const actionStartTime = performance.now();
+          this.runningPromise = Promise.resolve(
+            this.runtime.harness.invoke(() => action(tx)),
+          ).then(() => {
+            const duration = (performance.now() - actionStartTime) / 1000;
+            if (duration > 10) {
+              console.warn(`Slow action: ${duration.toFixed(3)}s`, action);
+            }
+            logger.debug("action-timing", () => {
+              return [
+                `Action ${action.name || "anonymous"} completed in ${
+                  duration.toFixed(3)
+                }s`,
+              ];
+            });
+            finalize();
+          }).catch((error) => finalize(error));
+          await this.runningPromise;
+        } catch (error) {
+          finalize(error);
+        }
       } // Close else block for shouldSkipEvent
     }
 
