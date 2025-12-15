@@ -1009,10 +1009,27 @@ export class Runner {
             tx,
           );
 
-          const argument = module.argumentSchema
+          const argument = module.argumentSchema !== undefined
             ? inputsCell.asSchema(module.argumentSchema).get()
             : inputsCell.getAsQueryResult([], tx);
-          const result = fn(argument);
+
+          // If we have a schema of false, we don't use our argument, so undefined is ok
+          const isValidArgument = module.argumentSchema === false ||
+            argument !== undefined;
+
+          if (!isValidArgument) {
+            logger.debug(
+              "stream",
+              () => [
+                "action argument is undefined (potential schema mismatch) -- not running",
+                module.argumentSchema,
+                inputsCell.getRaw(),
+              ],
+            );
+          }
+          // We only run the action if we have a valid argument, or the function's schema
+          // is false (like an input of `never`).
+          const result = isValidArgument ? fn(argument) : undefined;
 
           const postRun = (result: any) => {
             if (containsOpaqueRef(result) || frame.opaqueRefs.size > 0) {
@@ -1099,19 +1116,27 @@ export class Runner {
         );
 
         try {
-          const argument = module.argumentSchema
+          const argument = module.argumentSchema !== undefined
             ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
             : inputsCell.getAsQueryResult([], tx);
 
-          if (argument === undefined) {
+          // If we have a schema of false, we don't use our argument, so undefined is ok
+          const isValidArgument = module.argumentSchema === false ||
+            argument !== undefined;
+
+          if (!isValidArgument) {
             logger.debug(
               "action",
-              "action argument is undefined (potential schema mismatch) -- not running",
-              module.argumentSchema,
-              inputsCell.getRaw(),
+              () => [
+                "action argument is undefined (potential schema mismatch) -- not running",
+                module.argumentSchema,
+                inputsCell.getRaw(),
+              ],
             );
           }
-          const result = argument !== undefined ? fn(argument) : undefined;
+          // We only run the action if we have a valid argument, or the function's schema
+          // is false (like an input of `never`).
+          const result = isValidArgument ? fn(argument) : undefined;
 
           const postRun = (result: any) => {
             if (containsOpaqueRef(result) || frame.opaqueRefs.size > 0) {

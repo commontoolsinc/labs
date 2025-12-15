@@ -2012,7 +2012,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
         "traversePointerWithSchema",
         () => ["Encountered link to undefined value", doc, normalizedLink],
       );
-      return null;
+      return undefined;
     }
     // The call to getAtPath above will track entry into the pointer,
     // but we may have a pointer cycle of docs, and we've finished resolving
@@ -2024,7 +2024,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
         "traversePointerWithSchema",
         () => ["Encountered cycle", doc, normalizedLink],
       );
-      return null;
+      return undefined;
     }
     return this.traverseWithSelector(newDoc, newSelector!, link);
   }
