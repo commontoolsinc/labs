@@ -12,7 +12,7 @@ import {
   areLinksSame,
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
-  isAnyCellLink,
+  isPrimitiveCellLink,
   isSigilLink,
   parseLink,
 } from "../src/link-utils.ts";
@@ -568,8 +568,8 @@ describe("data-updating", () => {
         "should update the same document with ID-based entity objects",
       );
 
-      expect(isAnyCellLink(testCell.getRaw().items[0])).toBe(true);
-      expect(isAnyCellLink(testCell.getRaw().items[1])).toBe(true);
+      expect(isPrimitiveCellLink(testCell.getRaw().items[0])).toBe(true);
+      expect(isPrimitiveCellLink(testCell.getRaw().items[1])).toBe(true);
       expect(areLinksSame(testCell.getRaw().items[0], newLink)).toBe(false);
       expect(
         (tx.readValueOrThrow(
@@ -681,8 +681,8 @@ describe("data-updating", () => {
       );
 
       // Verify that the second item reused the existing document
-      expect(isAnyCellLink(testCell.getRaw().items[0])).toBe(true);
-      expect(isAnyCellLink(testCell.getRaw().items[1])).toBe(true);
+      expect(isPrimitiveCellLink(testCell.getRaw().items[0])).toBe(true);
+      expect(isPrimitiveCellLink(testCell.getRaw().items[1])).toBe(true);
       expect(areLinksSame(testCell.getRaw().items[1], initialLink)).toBe(true);
       expect(
         (tx.readValueOrThrow(
@@ -724,8 +724,8 @@ describe("data-updating", () => {
         "it should treat different properties as different ID namespaces",
       );
 
-      expect(isAnyCellLink(testCell.getRaw().a)).toBe(true);
-      expect(isAnyCellLink(testCell.getRaw().b)).toBe(true);
+      expect(isPrimitiveCellLink(testCell.getRaw().a)).toBe(true);
+      expect(isPrimitiveCellLink(testCell.getRaw().b)).toBe(true);
       expect(areLinksSame(testCell.getRaw().a, testCell.getRaw().b)).toBe(
         false,
       );
@@ -1019,7 +1019,7 @@ describe("data-updating", () => {
       expect(titleChange!.value).toBe("Data with Link");
       expect(referenceChange).toBeDefined();
       // The reference should be resolved to the actual cell link
-      expect(isAnyCellLink(referenceChange!.value)).toBe(true);
+      expect(isPrimitiveCellLink(referenceChange!.value)).toBe(true);
       expect(metadataChange).toBeDefined();
       expect(metadataChange!.value).toEqual("Contains a nested link");
       expect(objectChange).toBeDefined();
@@ -1207,8 +1207,8 @@ describe("data-updating", () => {
       );
 
       const result = testCell.getRaw();
-      expect(isAnyCellLink(result?.items[0])).toBe(true);
-      expect(isAnyCellLink(result?.items[1])).toBe(true);
+      expect(isPrimitiveCellLink(result?.items[0])).toBe(true);
+      expect(isPrimitiveCellLink(result?.items[1])).toBe(true);
       expect(areLinksSame(result?.items[0], result?.items[1]))
         .toBe(true);
       expect(

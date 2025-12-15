@@ -5,7 +5,7 @@ import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";
 import { Cell, ID } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
-import { isAnyCellLink } from "../src/link-utils.ts";
+import { isPrimitiveCellLink } from "../src/link-types.ts";
 import { Provider } from "../src/storage/cache.ts";
 import * as Subscription from "../src/storage/subscription.ts";
 import {
@@ -228,7 +228,7 @@ describe.skip("Push conflict", () => {
     // This is locally ahead of the db, and retry wasn't called yet.
     expect(name.get()).toEqual("bar");
     expect(list.get()).toEqual([{ n: 4 }]);
-    expect(isAnyCellLink(list.getRaw()?.[0])).toBe(true);
+    expect(isPrimitiveCellLink(list.getRaw()?.[0])).toBe(true);
 
     await runtime.storageManager.synced();
 

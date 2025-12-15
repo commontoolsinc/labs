@@ -1,6 +1,5 @@
 import { isRecord } from "@commontools/utils/types";
 import { type LegacyAlias } from "../sigil-types.ts";
-import { isLegacyAlias, isLink } from "../link-utils.ts";
 import {
   isRecipe,
   type JSONSchema,
@@ -17,7 +16,12 @@ import {
 import { getTopFrame } from "./recipe.ts";
 import { deepEqual } from "../path-utils.ts";
 import { Runtime } from "../runtime.ts";
-import { parseLink, sanitizeSchemaForLinks } from "../link-utils.ts";
+import {
+  isCellLink,
+  isLegacyAlias,
+  parseLink,
+  sanitizeSchemaForLinks,
+} from "../link-utils.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -132,7 +136,7 @@ export function createJsonSchema(
   const seen = new Map<string, JSONSchemaMutable>();
 
   function analyzeType(value: any): JSONSchema {
-    if (isLink(value)) {
+    if (isCellLink(value)) {
       const link = parseLink(value);
       const linkAsStr = JSON.stringify(link);
       if (seen.has(linkAsStr)) {

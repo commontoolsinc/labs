@@ -7,8 +7,8 @@ import {
   createSigilLinkFromParsedLink,
   decodeJsonPointer,
   encodeJsonPointer,
+  isCellLink,
   isLegacyAlias,
-  isLink,
   isSigilValue,
   isWriteRedirectLink,
   type NormalizedLink,
@@ -125,36 +125,36 @@ describe("link-utils", () => {
     });
   });
 
-  describe("isLink", () => {
+  describe("isCellLink", () => {
     it("should identify query results as links", () => {
       const cell = runtime.getCell(space, "test", undefined, tx);
       // Has to be an object, otherwise asQueryResult() returns a literal
       cell.set({ value: 42 });
       const queryResult = cell.getAsQueryResult();
-      expect(isLink(queryResult)).toBe(true);
+      expect(isCellLink(queryResult)).toBe(true);
     });
 
     it("should identify cell links as links", () => {
       const cell = runtime.getCell(space, "test", undefined, tx);
       const cellLink = cell.getAsLink();
-      expect(isLink(cellLink)).toBe(true);
+      expect(isCellLink(cellLink)).toBe(true);
     });
 
     it("should identify cells as links", () => {
       const cell = runtime.getCell(space, "test", undefined, tx);
-      expect(isLink(cell)).toBe(true);
+      expect(isCellLink(cell)).toBe(true);
     });
 
     it("should identify EntityId format as links", () => {
-      expect(isLink({ "/": "of:test" })).toBe(true);
+      expect(isCellLink({ "/": "of:test" })).toBe(true);
     });
 
     it("should not identify non-links as links", () => {
-      expect(isLink("string")).toBe(false);
-      expect(isLink(123)).toBe(false);
-      expect(isLink({ notLink: "value" })).toBe(false);
-      expect(isLink(null)).toBe(false);
-      expect(isLink(undefined)).toBe(false);
+      expect(isCellLink("string")).toBe(false);
+      expect(isCellLink(123)).toBe(false);
+      expect(isCellLink({ notLink: "value" })).toBe(false);
+      expect(isCellLink(null)).toBe(false);
+      expect(isCellLink(undefined)).toBe(false);
     });
   });
 

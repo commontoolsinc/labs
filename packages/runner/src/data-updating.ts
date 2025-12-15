@@ -10,8 +10,8 @@ import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   findAndInlineDataURILinks,
-  isAnyCellLink,
-  isLink,
+  isCellLink,
+  isPrimitiveCellLink,
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
@@ -156,7 +156,7 @@ export function normalizeAndDiff(
       if (Array.isArray(parent)) {
         const base = runtime.getCellFromLink(link, undefined, tx);
         for (const v of parent) {
-          if (isLink(v)) {
+          if (isCellLink(v)) {
             const sibling = parseLink(v, base);
             const siblingId = tx.readValueOrThrow({
               ...sibling,
@@ -224,7 +224,9 @@ export function normalizeAndDiff(
 
   // Check for links that are data: URIs and inline them, by calling
   // normalizeAndDiff on the contents of the link.
-  if (isLink(newValue) && parseLink(newValue, link).id?.startsWith("data:")) {
+  if (
+    isCellLink(newValue) && parseLink(newValue, link).id?.startsWith("data:")
+  ) {
     return normalizeAndDiff(
       runtime,
       tx,
@@ -296,7 +298,7 @@ export function normalizeAndDiff(
     );
   }
 
-  if (isAnyCellLink(newValue)) {
+  if (isPrimitiveCellLink(newValue)) {
     diffLogger.debug(
       "diff",
       () =>
@@ -335,7 +337,7 @@ export function normalizeAndDiff(
       );
     }
     if (
-      isAnyCellLink(currentValue) &&
+      isPrimitiveCellLink(currentValue) &&
       areLinksSame(newValue, currentValue, link)
     ) {
       diffLogger.debug(
@@ -487,7 +489,7 @@ export function normalizeAndDiff(
     );
     // If the current value is not a (regular) object, set it to an empty object
     // Note that the alias case is handled above
-    if (!isRecord(currentValue) || isAnyCellLink(currentValue)) {
+    if (!isRecord(currentValue) || isPrimitiveCellLink(currentValue)) {
       diffLogger.debug(
         "diff",
         () =>
@@ -610,7 +612,7 @@ export function addCommonIDfromObjectID(
       obj[ID_FIELD] = fieldName;
     }
 
-    if (isRecord(obj) && !isCell(obj) && !isAnyCellLink(obj)) {
+    if (isRecord(obj) && !isCell(obj) && !isPrimitiveCellLink(obj)) {
       Object.values(obj).forEach((v) => traverse(v));
     }
   }

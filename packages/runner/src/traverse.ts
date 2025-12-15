@@ -17,7 +17,7 @@ import type {
   SchemaPathSelector,
 } from "@commontools/memory/interface";
 import { deepEqual } from "./path-utils.ts";
-import { isAnyCellLink, parseLink } from "./link-utils.ts";
+import { isPrimitiveCellLink, parseLink } from "./link-utils.ts";
 import { fromURI } from "./uri-utils.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 
@@ -317,7 +317,7 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
       ) as Immutable<JSONValue>[];
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
-      if (isAnyCellLink(doc.value)) {
+      if (isPrimitiveCellLink(doc.value)) {
         // Check if target doc is already tracked BEFORE calling getAtPath,
         // since getAtPath/followPointer will add it to schemaTracker
         let alreadyTracked = false;
@@ -406,7 +406,7 @@ export function getAtPath<S extends BaseMemoryAddress>(
 ): [IAttestation, SchemaPathSelector | undefined] {
   let curDoc = doc;
   let remaining = [...path];
-  while (isAnyCellLink(curDoc.value)) {
+  while (isPrimitiveCellLink(curDoc.value)) {
     [curDoc, selector] = followPointer(
       manager,
       curDoc,
@@ -448,7 +448,7 @@ export function getAtPath<S extends BaseMemoryAddress>(
       }, selector];
     }
     // If this next value is a pointer, use the pointer resolution code
-    while (isAnyCellLink(curDoc.value)) {
+    while (isPrimitiveCellLink(curDoc.value)) {
       [curDoc, selector] = followPointer(
         manager,
         curDoc,
@@ -651,7 +651,7 @@ function loadLinkedRecipe<S extends BaseMemoryAddress>(
   let address;
   // Check for a spell link first, since this is more efficient
   // Older recipes will only have a $TYPE
-  if ("spell" in value && isAnyCellLink(value["spell"])) {
+  if ("spell" in value && isPrimitiveCellLink(value["spell"])) {
     const link = parseLink(value["spell"])!;
     address = manager.toAddress(fromURI(link.id!));
   } else if ("$TYPE" in value && isString(value["$TYPE"])) {
@@ -891,7 +891,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
       }
       return undefined;
     } else if (isObject(doc.value)) {
-      if (isAnyCellLink(doc.value)) {
+      if (isPrimitiveCellLink(doc.value)) {
         return this.traversePointerWithSchema(doc, {
           schema: schemaObj,
           rootSchema: schemaContext.rootSchema,

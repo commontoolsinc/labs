@@ -61,11 +61,12 @@ import {
   type SigilWriteRedirectLink,
   type URI,
 } from "./sigil-types.ts";
-import { areLinksSame, isLink } from "./link-utils.ts";
 import type { Runtime } from "./runtime.ts";
 import {
+  areLinksSame,
   createSigilLinkFromParsedLink,
   findAndInlineDataURILinks,
+  isCellLink,
   type NormalizedFullLink,
   type NormalizedLink,
 } from "./link-utils.ts";
@@ -1400,7 +1401,7 @@ function recursivelyAddIDIfNeeded<T>(
   if (!frame) return value;
 
   // Not a record, no need to add IDs. Already a link, no need to add IDs.
-  if (!isRecord(value) || isLink(value)) return value;
+  if (!isRecord(value) || isCellLink(value)) return value;
 
   // Already seen, return previously annotated result.
   if (seen.has(value)) return seen.get(value) as T;
@@ -1415,7 +1416,7 @@ function recursivelyAddIDIfNeeded<T>(
       const value = recursivelyAddIDIfNeeded(v, frame, seen);
       // For objects on arrays only: Add ID if not already present.
       if (
-        isObject(value) && !isLink(value) && !(ID in value)
+        isObject(value) && !isCellLink(value) && !(ID in value)
       ) {
         return { [ID]: frame.generatedIdCounter++, ...value };
       } else {
