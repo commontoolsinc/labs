@@ -417,7 +417,7 @@ export class Scheduler {
           const log = txToReactivityLog(tx);
 
           // Update mightWrite with actual writes
-          this.updateMightWrite(action, log.writes);
+          this.updateMightWrite(action, log);
 
           logger.debug("schedule-run-complete", () => [
             `[RUN] Action completed: ${action.name || "anonymous"}`,
@@ -1381,32 +1381,19 @@ export class Scheduler {
    */
   private updateMightWrite(
     action: Action,
-    writes: IMemorySpaceAddress[],
+    log: ReactivityLog,
   ): void {
-    const existing = this.mightWrite.get(action);
-    if (!existing) {
-      this.mightWrite.set(action, [...writes]);
-      return;
-    }
-
-    // Merge new writes into existing set (avoid duplicates)
-    for (const write of writes) {
-      const alreadyExists = existing.some(
-        (e) =>
-          e.space === write.space &&
-          e.id === write.id &&
-          e.path.length === write.path.length &&
-          e.path.every((p, i) => p === write.path[i]),
-      );
-      if (!alreadyExists) {
-        existing.push(write);
-      }
-    }
+    const existing = this.mightWrite.get(action) ?? [];
+    const newMightWrites = sortAndCompactPaths([
+      ...existing,
+      ...log.writes,
+      ...(log.potentialWrites ?? []),
+    ]);
+    this.mightWrite.set(action, newMightWrites);
   }
 
   /**
    * Returns the accumulated "might write" set for an action.
-   * Useful for diagnostics and debugging.
    */
   getMightWrite(action: Action): IMemorySpaceAddress[] | undefined {
     return this.mightWrite.get(action);
