@@ -97,6 +97,14 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
     this: IsThisArray,
     ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : never
   ): void;
+  remove(
+    this: IsThisArray,
+    ref: T extends (infer U)[] ? (U | AnyBrandedCell<U>) : never,
+  ): void;
+  removeAll(
+    this: IsThisArray,
+    ref: T extends (infer U)[] ? (U | AnyBrandedCell<U>) : never,
+  ): void;
 }
 
 /**
