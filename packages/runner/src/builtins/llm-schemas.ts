@@ -59,6 +59,14 @@ export const LLMToolSchema = {
   required: [],
 } as const satisfies JSONSchema;
 
+export const LLMReducedToolSchema = {
+  type: "object",
+  properties: {
+    description: { type: "string" },
+    inputSchema: { type: "object" },
+  },
+} as const satisfies JSONSchema;
+
 export const LLMParamsSchema = {
   type: "object",
   properties: {
