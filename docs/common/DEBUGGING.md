@@ -13,7 +13,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | "Type 'string' is not assignable to type 'CSSProperties'" | String style on HTML element | Use object syntax `style={{ ... }}` ([COMPONENTS](COMPONENTS.md)) |
 | "Type 'OpaqueRef\<T\>' is not assignable to 'Cell\<T\>'" | Binding whole item, not property | Bind `item.done`, not `item` |
 | Using `OpaqueRef<T>` in Output for handlers | Should use `Stream<T>` | Use `Stream<T>` for handlers ([TYPES](TYPES_AND_SCHEMAS.md)) |
-| "ReadOnlyAddressError" | onClick inside derive() | Move button outside, use disabled ([see below](#onclick-inside-derive)) |
+| "ReadOnlyAddressError" | onClick inside computed() | Move button outside, use disabled ([see below](#onclick-inside-computed)) |
 | Charm hangs, never renders | ifElse with composed pattern cell | Use local computed cell ([see below](#ifelse-with-composed-pattern-cells)) |
 | Data not updating | Missing `$` prefix or wrong event | Use `$checked`, `$value` ([COMPONENTS](COMPONENTS.md)) |
 | Filtered list not updating | Need computed() | Wrap in `computed()` ([CELLS](CELLS_AND_REACTIVITY.md)) |
@@ -25,26 +25,26 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 
 These issues compile without errors but fail at runtime.
 
-### onClick Inside derive()
+### onClick Inside computed()
 
 **Error:** "ReadOnlyAddressError: Cannot write to read-only address"
 
 ```typescript
-// ❌ Buttons inside derive() fail when clicked
-{derive(showAdd, (show) =>
-  show ? <ct-button onClick={addItem({ items })}>Add</ct-button> : null
+// ❌ Buttons inside computed() fail when clicked
+{computed(() =>
+  showAdd ? <ct-button onClick={addItem({ items })}>Add</ct-button> : null
 )}
 
 // ✅ Move button outside, use disabled attribute
-<ct-button onClick={addItem({ items })} disabled={derive(showAdd, (show) => !show)}>
+<ct-button onClick={addItem({ items })} disabled={computed(() => !showAdd)}>
   Add
 </ct-button>
 
-// ✅ Or use ifElse instead of derive
+// ✅ Or use ifElse instead of computed
 {ifElse(showAdd, <ct-button onClick={addItem({ items })}>Add</ct-button>, null)}
 ```
 
-**Why:** `derive()` creates read-only inline data addresses. Always render buttons at the top level and control visibility with `disabled`.
+**Why:** `computed()` creates read-only inline data addresses. Always render buttons at the top level and control visibility with `disabled`.
 
 ### ifElse with Composed Pattern Cells
 

@@ -123,7 +123,7 @@ Map over items - caching is automatic per-item:
 const summaries = articles.map((article) => ({
   article,
   summary: generateText({
-    prompt: derive(article, (a) => `Summarize: ${a.title}\n${a.content}`),
+    prompt: computed(() => `Summarize: ${article.title}\n${article.content}`),
   }),
 }));
 
@@ -138,7 +138,7 @@ const summaries = articles.map((article) => ({
 ))}
 ```
 
-### Template Strings Require derive()
+### Template Strings Require computed()
 
 When referencing multiple properties from opaque refs:
 
@@ -146,8 +146,8 @@ When referencing multiple properties from opaque refs:
 // ❌ Fails: "Tried to directly access an opaque value"
 prompt: `Title: ${article.title}\nContent: ${article.content}`
 
-// ✅ Works: defer evaluation with derive()
-prompt: derive(article, (a) => `Title: ${a.title}\nContent: ${a.content}`)
+// ✅ Works: defer evaluation with computed()
+prompt: computed(() => `Title: ${article.title}\nContent: ${article.content}`)
 ```
 
 ---
@@ -216,5 +216,5 @@ When adding items to an array, only new items trigger LLM requests.
 **Key rules:**
 - Call from pattern body only
 - Handle pending/error/result states
-- Use `derive()` for template strings with opaque refs
+- Use `computed()` for template strings with opaque refs
 - Schema root must be object (not array)

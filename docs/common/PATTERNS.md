@@ -372,7 +372,7 @@ const prompt = computed(() => `Seed: ${seed}`);
 <span style={done ? { textDecoration: "line-through" } : {}}>
 ```
 
-### onClick in derive()
+### onClick in computed()
 
 ```typescript
 // ❌ Causes ReadOnlyAddressError
