@@ -35,7 +35,7 @@ export class CTTab extends BaseElement {
         align-items: center;
         justify-content: center;
         white-space: nowrap;
-        border-radius: var(--ct-border-radius-md);
+        border-radius: var(--ct-theme-border-radius, var(--ct-border-radius-md));
         padding: var(--ct-spacing-2) var(--ct-spacing-3);
         font-size: var(--ct-font-size-sm);
         font-weight: var(--ct-font-weight-medium);
@@ -44,17 +44,17 @@ export class CTTab extends BaseElement {
         cursor: pointer;
         background: transparent;
         border: none;
-        color: var(--ct-colors-gray-600);
+        color: var(--ct-theme-color-text-muted, #6b7280);
         font-family: inherit;
         position: relative;
       }
 
       .tab:hover:not(:disabled) {
-        color: var(--ct-colors-gray-900);
+        color: var(--ct-theme-color-text, #111827);
       }
 
       .tab:focus-visible {
-        outline: 2px solid var(--ct-colors-primary-500);
+        outline: 2px solid var(--ct-theme-color-primary, var(--ct-colors-primary-500));
         outline-offset: 2px;
       }
 
@@ -64,7 +64,7 @@ export class CTTab extends BaseElement {
       }
 
       .tab[data-selected="true"] {
-        color: var(--ct-colors-gray-900);
+        color: var(--ct-theme-color-text, #111827);
       }
 
       /* Indicator for selected state */
@@ -75,7 +75,7 @@ export class CTTab extends BaseElement {
         right: 0;
         bottom: -1px;
         height: 2px;
-        background-color: var(--ct-colors-primary-500);
+        background-color: var(--ct-theme-color-primary, var(--ct-colors-primary-500));
       }
 
       /* Vertical orientation styles */
@@ -87,21 +87,6 @@ export class CTTab extends BaseElement {
         right: auto;
         width: 2px;
         height: auto;
-      }
-
-      /* Dark mode support */
-      @media (prefers-color-scheme: dark) {
-        .tab {
-          color: var(--muted-foreground, hsl(0, 0%, 63.9%));
-        }
-
-        .tab:hover:not(:disabled) {
-          color: var(--foreground, hsl(0, 0%, 98%));
-        }
-
-        .tab[data-selected="true"] {
-          color: var(--foreground, hsl(0, 0%, 98%));
-        }
       }
     `,
   ];
