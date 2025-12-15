@@ -323,7 +323,10 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
     since: 0,
   };
 
-  // Run the schema traversal to populate schemaTracker with links
+  // Run the schema traversal to populate schemaTracker with links.
+  // Pass forceTraverse=true because the entry document may already be in
+  // schemaTracker (that's how we found it), but we need to re-traverse
+  // it to discover any new links after it changed.
   loadFactsForDoc(
     manager,
     attestation,
@@ -332,6 +335,7 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
     cfc,
     schemaTracker,
     newLinks,
+    true, // forceTraverse
   );
 
   return { schemaTracker, newLinks };
@@ -347,23 +351,19 @@ function loadFactsForDoc(
   cfc: ContextualFlowControl,
   schemaTracker: MapSet<string, SchemaPathSelector>,
   newLinks?: Array<{ docKey: string; schema: SchemaPathSelector }>,
+  forceTraverse = false,
 ) {
   const factKey = manager.toKey(fact.address);
 
-  // If this doc+schema pair is already tracked, we've already traversed its links
-  // so we can skip the entire traversal (early termination optimization)
-  if (schemaTracker.hasValue(factKey, selector)) {
+  // Check early termination (unless forceTraverse is set for re-evaluating changed docs)
+  if (!forceTraverse && schemaTracker.hasValue(factKey, selector)) {
     return;
-  }
-
-  // Track this doc+schema pair and record it as newly discovered
-  schemaTracker.add(factKey, selector);
-  if (newLinks !== undefined) {
-    newLinks.push({ docKey: factKey, schema: selector });
   }
 
   if (isObject(fact.value)) {
     if (selector.schemaContext !== undefined) {
+      // When we have a schemaContext, the traverser will handle tracking.
+      // Don't add here to avoid the traverser seeing it as already tracked.
       const factValue: IAttestation = {
         address: { ...fact.address, path: [...fact.address.path, "value"] },
         value: (fact.value as Immutable<JSONObject>).value,
@@ -376,6 +376,7 @@ function loadFactsForDoc(
         cfc,
         schemaTracker,
         selector,
+        newLinks,
       );
       if (newDoc.value === undefined) {
         return;
@@ -396,7 +397,13 @@ function loadFactsForDoc(
       // If we didn't provide a schema context, we still want the selected
       // object in our manager, so load it directly.
       manager.load(fact.address);
-      // Note: already tracked at top of function
+      // Track this doc+schema pair (no traverser to do it for us)
+      if (!schemaTracker.hasValue(factKey, selector)) {
+        schemaTracker.add(factKey, selector);
+        if (newLinks !== undefined) {
+          newLinks.push({ docKey: factKey, schema: selector });
+        }
+      }
     }
     // Also load any source links and recipes
     loadSource(manager, fact, new Set<string>(), schemaTracker, newLinks);

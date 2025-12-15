@@ -399,6 +399,7 @@ export function getAtPath<S extends BaseMemoryAddress>(
   cfc: ContextualFlowControl,
   schemaTracker: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
+  newLinks?: Array<{ docKey: string; schema: SchemaPathSelector }>,
 ): [IAttestation, SchemaPathSelector | undefined] {
   let curDoc = doc;
   let remaining = [...path];
@@ -411,6 +412,7 @@ export function getAtPath<S extends BaseMemoryAddress>(
       cfc,
       schemaTracker,
       selector,
+      newLinks,
     );
     remaining = [];
   }
@@ -452,6 +454,7 @@ export function getAtPath<S extends BaseMemoryAddress>(
         cfc,
         schemaTracker,
         selector,
+        newLinks,
       );
       remaining = [];
     }
@@ -486,6 +489,7 @@ function followPointer<S extends BaseMemoryAddress>(
   cfc: ContextualFlowControl,
   schemaTracker: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
+  newLinks?: Array<{ docKey: string; schema: SchemaPathSelector }>,
 ): [IAttestation, SchemaPathSelector | undefined] {
   const link = parseLink(doc.value)!;
   const target: BaseMemoryAddress = (link.id !== undefined)
@@ -522,7 +526,13 @@ function followPointer<S extends BaseMemoryAddress>(
     // We have a reference to a different doc, so track the dependency
     // and update our targetDoc
     if (selector !== undefined) {
-      schemaTracker.add(manager.toKey(target), selector);
+      const docKey = manager.toKey(target);
+      if (!schemaTracker.hasValue(docKey, selector)) {
+        schemaTracker.add(docKey, selector);
+        if (newLinks !== undefined) {
+          newLinks.push({ docKey, schema: selector });
+        }
+      }
     }
     // Load the sources/recipes recursively unless we're a retracted fact.
     if (valueEntry.value !== undefined) {
@@ -531,6 +541,7 @@ function followPointer<S extends BaseMemoryAddress>(
         valueEntry,
         new Set<string>(),
         schemaTracker,
+        newLinks,
       );
     }
   }
@@ -558,6 +569,7 @@ function followPointer<S extends BaseMemoryAddress>(
     cfc,
     schemaTracker,
     selector,
+    newLinks,
   );
 }
 
@@ -752,18 +764,17 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
   override traverse(
     doc: IAttestation,
   ): Immutable<OptJSONValue> {
-    this.trackNewLink(this.manager.toKey(doc.address), this.selector);
-    return this.traverseWithSelector(doc, this.selector);
-  }
-
-  /** Add to schemaTracker and record as newly discovered if not already tracked */
-  private trackNewLink(docKey: string, schema: SchemaPathSelector): void {
-    if (!this.schemaTracker.hasValue(docKey, schema)) {
-      this.schemaTracker.add(docKey, schema);
-      if (this.newLinks !== undefined) {
-        this.newLinks.push({ docKey, schema });
-      }
+    const docKey = this.manager.toKey(doc.address);
+    // Early termination: if this doc+schema is already tracked, skip traversal
+    if (this.schemaTracker.hasValue(docKey, this.selector)) {
+      return doc.value;
     }
+    // Track this new doc+schema pair
+    this.schemaTracker.add(docKey, this.selector);
+    if (this.newLinks !== undefined) {
+      this.newLinks.push({ docKey, schema: this.selector });
+    }
+    return this.traverseWithSelector(doc, this.selector);
   }
 
   // Traverse the specified doc with the selector.
@@ -794,6 +805,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
         this.cfc,
         this.schemaTracker,
         selector,
+        this.newLinks,
       );
       if (nextDoc.value === undefined) {
         return undefined;
@@ -1025,6 +1037,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
       this.cfc,
       this.schemaTracker,
       selector,
+      this.newLinks,
     );
     if (newDoc.value === undefined) {
       return null;
