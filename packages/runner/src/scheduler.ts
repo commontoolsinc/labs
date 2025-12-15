@@ -691,7 +691,10 @@ export class Scheduler {
     // Initialize/update mightWrite with declared writes
     // This ensures dependency chain can be built even before action runs
     const existingMightWrite = this.mightWrite.get(action) ?? [];
-    this.mightWrite.set(action, sortAndCompactPaths([...existingMightWrite, ...writes]));
+    this.mightWrite.set(
+      action,
+      sortAndCompactPaths([...existingMightWrite, ...writes]),
+    );
 
     return reads;
   }
@@ -728,7 +731,8 @@ export class Scheduler {
 
           // Use mightWrite if available (accumulates all paths action has ever written)
           // This ensures dependency chain is built even if first run writes undefined
-          const otherWrites = this.mightWrite.get(otherAction) ?? otherLog.writes;
+          const otherWrites = this.mightWrite.get(otherAction) ??
+            otherLog.writes;
 
           // Check if otherAction writes to this entity we're reading
           for (const write of otherWrites) {
