@@ -34,7 +34,7 @@ export default recipe<RecipeState, RecipeOutput>((state) => {
       </div>
     ),
     value: state.value,
-    roll: roll(state) as unknown as Stream<{ sides?: number }>,
+    roll: roll(state),
     something: {
       nested: "a secret surprise!",
     },

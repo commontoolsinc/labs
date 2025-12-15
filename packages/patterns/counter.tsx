@@ -35,7 +35,7 @@ export default recipe<RecipeState, RecipeOutput>((state) => {
       </div>
     ),
     value: state.value,
-    increment: increment(state) as unknown as Stream<void>,
-    decrement: decrement(state) as unknown as Stream<void>,
+    increment: increment(state),
+    decrement: decrement(state),
   };
 });
