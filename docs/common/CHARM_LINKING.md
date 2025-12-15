@@ -131,7 +131,7 @@ Find charms by tag instead of explicit linking:
 /** A #note charm for storing text */
 interface Output {
   content: string;
-  editContent: Stream<{ value: string }>;
+  editContent: Stream<void>;
 }
 
 // Find charm by tag (must be favorited first)

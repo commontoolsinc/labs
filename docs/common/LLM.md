@@ -44,16 +44,20 @@ interface ProductIdea {
 const idea = generateObject<ProductIdea>({
   prompt: userInput,
   system: "Generate a product idea.",
+  model: "anthropic:claude-sonnet-4-5",
 });
 
 // Response: { result: ProductIdea, error: string, pending: boolean }
 {ifElse(idea.pending,
   <span>Generating...</span>,
-  <div>
-    <h3>{idea.result.name}</h3>
-    <p>{idea.result.description}</p>
-    <p>${idea.result.price}</p>
-  </div>
+  ifElse(idea.error,
+    <span>Error: {idea.error}</span>,
+    <div>
+      <h3>{idea.result?.name}</h3>
+      <p>{idea.result?.description}</p>
+      <p>${idea.result?.price}</p>
+    </div>
+  )
 )}
 ```
 
