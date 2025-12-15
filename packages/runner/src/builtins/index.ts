@@ -29,7 +29,10 @@ export function registerBuiltins(runtime: Runtime) {
   moduleRegistry.addModuleByRef("fetchProgram", raw(fetchProgram));
   moduleRegistry.addModuleByRef("streamData", raw(streamData));
   moduleRegistry.addModuleByRef("llm", raw(llm));
-  moduleRegistry.addModuleByRef("llmDialog", raw(llmDialog, { isEffect: true }));
+  moduleRegistry.addModuleByRef(
+    "llmDialog",
+    raw(llmDialog, { isEffect: true }),
+  );
   moduleRegistry.addModuleByRef("ifElse", raw(ifElse));
   moduleRegistry.addModuleByRef("when", raw(when));
   moduleRegistry.addModuleByRef("unless", raw(unless));
@@ -52,6 +55,9 @@ export function registerBuiltins(runtime: Runtime) {
       requestHash: Cell<string | undefined>;
     }>(generateText),
   );
-  moduleRegistry.addModuleByRef("navigateTo", raw(navigateTo, { isEffect: true }));
+  moduleRegistry.addModuleByRef(
+    "navigateTo",
+    raw(navigateTo, { isEffect: true }),
+  );
   moduleRegistry.addModuleByRef("wish", raw(wish));
 }
