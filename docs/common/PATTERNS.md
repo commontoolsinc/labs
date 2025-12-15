@@ -260,7 +260,7 @@ export default pattern<Input, Output>(({ ... }) => {
 For dynamic collections, use a Cell:
 
 ```typescript
-const createdCharms = cell<any[]>([]);
+const createdCharms = Cell.of<any[]>([]);
 
 const create = handler((_, { createdCharms }) => {
   createdCharms.push(ChildPattern({ name: "New" }));
