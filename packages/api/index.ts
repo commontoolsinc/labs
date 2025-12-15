@@ -1120,27 +1120,24 @@ export type HandlerFunction = {
     eventSchema: E,
     stateSchema: T,
     handler: (event: Schema<E>, props: Schema<T>) => any,
-  ): ModuleFactory<
-    StripCell<SchemaWithoutCell<T>>,
-    Stream<SchemaWithoutCell<E>>
-  >;
+  ): HandlerFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
 
   // With inferred types
   <E, T>(
     eventSchema: JSONSchema,
     stateSchema: JSONSchema,
     handler: (event: E, props: HandlerState<T>) => any,
-  ): ModuleFactory<StripCell<T>, Stream<StripCell<E>>>;
+  ): HandlerFactory<T, E>;
 
   // Without schemas
   <E, T>(
     handler: (event: E, props: T) => any,
     options: { proxy: true },
-  ): ModuleFactory<StripCell<T>, Stream<StripCell<E>>>;
+  ): HandlerFactory<T, E>;
 
   <E, T>(
     handler: (event: E, props: HandlerState<T>) => any,
-  ): ModuleFactory<StripCell<T>, Stream<StripCell<E>>>;
+  ): HandlerFactory<T, E>;
 };
 
 /**
