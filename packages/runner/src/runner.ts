@@ -1034,10 +1034,13 @@ export class Runner {
                   tx,
                 ),
               );
-              // Initiate pull to ensure execution
+              // Create a sink to make this an effect that re-runs when inputs change
               // (nothing else would read from it, otherwise)
-              resultCell.pull();
-              addCancel(() => this.stop(resultCell));
+              const cancelSink = resultCell.sink(() => {});
+              addCancel(() => {
+                cancelSink();
+                this.stop(resultCell);
+              });
             }
             return result;
           };
