@@ -1069,15 +1069,17 @@ export class Runner {
       // This reads all cells the handler will access (except the event itself).
       const populateDependencies = module.argumentSchema
         ? (depTx: IExtendedStorageTransaction) => {
-            const inputsCell = this.runtime.getImmutableCell(
-              processCell.space,
-              inputs,
-              undefined,
-              depTx,
-            );
-            // Use traverseCells to read into all nested Cell objects
-            inputsCell.asSchema(module.argumentSchema!).get({ traverseCells: true });
-          }
+          const inputsCell = this.runtime.getImmutableCell(
+            processCell.space,
+            inputs,
+            undefined,
+            depTx,
+          );
+          // Use traverseCells to read into all nested Cell objects
+          inputsCell.asSchema(module.argumentSchema!).get({
+            traverseCells: true,
+          });
+        }
         : undefined;
 
       addCancel(
