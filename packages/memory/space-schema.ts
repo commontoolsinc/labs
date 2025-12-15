@@ -376,6 +376,7 @@ function loadFactsForDoc(
         cfc,
         schemaTracker,
         selector,
+        newLinks,
       );
       if (newDoc.value === undefined) {
         return;
