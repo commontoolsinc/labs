@@ -52,6 +52,6 @@ export function registerBuiltins(runtime: Runtime) {
       requestHash: Cell<string | undefined>;
     }>(generateText),
   );
-  moduleRegistry.addModuleByRef("navigateTo", raw(navigateTo));
+  moduleRegistry.addModuleByRef("navigateTo", raw(navigateTo, { isEffect: true }));
   moduleRegistry.addModuleByRef("wish", raw(wish));
 }
