@@ -12,6 +12,7 @@ The `ct` binary is the primary command-line interface for interacting with the C
 ## When to Use This Skill
 
 Use this skill for:
+- Starting, stopping, or restarting local development servers
 - Deploying recipes as charms to a space
 - Managing charm data (get/set fields, call handlers)
 - Linking charms together for reactive data flow
@@ -53,6 +54,40 @@ This is the recommended approach for all users. If you use `ct` frequently, you 
 ```bash
 alias ct="deno task ct"
 ```
+
+## Local Development Servers
+
+**Always use the scripts** — never use manual `pkill` or process management:
+
+```bash
+# Start both servers (backend + frontend)
+./scripts/start-local-dev.sh
+
+# Stop servers
+./scripts/stop-local-dev.sh
+
+# Restart (with optional flags)
+./scripts/restart-local-dev.sh
+./scripts/restart-local-dev.sh --clear-cache  # Clear toolshed cache
+./scripts/restart-local-dev.sh --force        # Kill existing processes first
+```
+
+**Local URLs:**
+- **Backend API**: `http://localhost:8000` (use with `-a` flag)
+- **Frontend/Shell**: `http://localhost:5173` (access spaces in browser)
+- **Logs**: `packages/shell/local-dev-shell.log`, `packages/toolshed/local-dev-toolshed.log`
+
+**Example local deployment:**
+```bash
+./scripts/restart-local-dev.sh --force
+
+deno task ct charm new path/to/pattern.tsx \
+  -i claude.key -a http://localhost:8000 -s my-space
+
+# Then open: http://localhost:5173/my-space
+```
+
+If scripts fail, see `docs/common/LOCAL_DEV_SERVERS.md` for troubleshooting.
 
 ## Prerequisites and Setup
 
@@ -242,6 +277,7 @@ Documentation of well-known charm IDs (like `allCharms`) that provide access to 
 
 ## Remember
 
+- **Local servers** - Always use `./scripts/restart-local-dev.sh`, never manual pkill
 - **Use `--help` flags** - The tool itself is the documentation
 - **Check `deno task ct charm --help`** before asking about available commands
 - **Path syntax** - Always forward slashes, numeric array indices

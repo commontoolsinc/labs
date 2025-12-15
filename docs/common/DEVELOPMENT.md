@@ -1,3 +1,5 @@
+<!-- @reviewed 2025-12-10 docs-rationalization -->
+
 # Development Guide
 
 This guide covers coding standards, design principles, and build/test workflows for CommonTools development.

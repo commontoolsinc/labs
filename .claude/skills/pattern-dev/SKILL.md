@@ -1,3 +1,4 @@
+<!-- @reviewed 2025-12-10 docs-rationalization -->
 ---
 name: pattern-dev
 description: Guide for developing CommonTools patterns (TypeScript modules that define reactive data transformations with UI). Use this skill when creating patterns, modifying existing patterns, linking patches (instantiated patterns), debugging pattern errors, or working with the pattern framework. Triggers include requests like "build a pattern", "fix this pattern error", "deploy this charm/patch", "link these charms", or questions about handlers, cells, and reactive patterns.
@@ -14,7 +15,7 @@ Develop CommonTools patterns using the `ct` binary and the reactive pattern fram
 Use this skill when:
 - Building new patterns from scratch
 - Modifying or debugging existing patterns
-- Understanding pattern framework concepts (cells, handlers, derive, lift)
+- Understanding pattern framework concepts (cells, handlers, computed, lift)
 - Troubleshooting type errors or runtime issues
 - Working with multi-file pattern structures
 
@@ -26,10 +27,11 @@ Before starting pattern development:
 
 1. **Know the ct binary** - Use the **ct** skill for ct command reference
 2. **Read the documentation** - Key docs to reference:
-   - `docs/common/RECIPES.md` - Core concepts and best practices
-   - `docs/common/PATTERNS.md` - Common patterns with examples
-   - `docs/common/HANDLERS.md` - Handler patterns and type guidance
+   - `docs/common/PATTERNS.md` - Main tutorial with examples and common patterns
+   - `docs/common/CELLS_AND_REACTIVITY.md` - Cell system, computed(), reactivity
    - `docs/common/COMPONENTS.md` - UI components and bidirectional binding
+   - `docs/common/TYPES_AND_SCHEMAS.md` - Type system, Cell<> vs OpaqueRef<>
+   - `docs/common/DEBUGGING.md` - Error reference and troubleshooting
 3. **Check example patterns** - Look in `packages/patterns/` for working examples
 
 ## Quick Decision Tree
@@ -40,7 +42,7 @@ Before starting pattern development:
 → **Modify existing pattern** → Go to "Modifying Patterns"
 → **Fix pattern errors** → Go to "Debugging Patterns"
 → **Deploy/link charms** → Use **ct** skill
-→ **Understand pattern concepts** → Read `docs/common/RECIPES.md` and `PATTERNS.md`
+→ **Understand pattern concepts** → Read `docs/common/PATTERNS.md` and `CELLS_AND_REACTIVITY.md`
 
 ## Building a New Pattern
 
@@ -50,7 +52,7 @@ Begin with minimal viable pattern:
 
 ```typescript
 /// <cts-enable />
-import { Default, NAME, recipe, UI } from "commontools";
+import { Default, NAME, pattern, UI } from "commontools";
 
 interface Item {
   title: string;
@@ -61,9 +63,9 @@ interface Input {
   items: Default<Item[], []>;
 }
 
-export default recipe<Input, Input>("My Pattern", ({ items }) => {
+export default pattern<Input, Input>(({ items }) => {
   return {
-    [NAME]: "My Pattern",
+    [NAME]: "My Pattern",  // Optional: displayed in UI
     [UI]: (
       <div>
         {items.map((item) => (
@@ -135,15 +137,15 @@ Use the **ct** skill to retrieve source:
 
 ### Common Error Categories
 
-**Type Errors** (see `HANDLERS.md` for details):
+**Type Errors** (see `TYPES_AND_SCHEMAS.md` and `PATTERNS.md` for details):
 - Wrong style syntax (object vs string, see `COMPONENTS.md`)
 - Using `Cell<OpaqueRef<T>[]>` instead of `Cell<T[]>` in handlers
 - Forgetting `Cell<>` wrapper in handler state types
 
-**Runtime Errors** (see `RECIPES.md` for details):
+**Runtime Errors** (see `PATTERNS.md` and `DEBUGGING.md` for details):
 - DOM access (use cells instead)
 - Conditionals in JSX (use `ifElse()`)
-- Calling `llm()` from handlers (only works in recipe body)
+- Calling `generateText()`/`generateObject()` from handlers (only works in pattern body)
 
 **Data Not Updating** (see `COMPONENTS.md` for details):
 - Forgot `$` prefix for bidirectional binding
@@ -154,10 +156,11 @@ Use the **ct** skill to retrieve source:
 
 1. **Check TypeScript errors first** - Use **ct** skill for `deno task ct dev pattern.tsx --no-run`
 2. **Consult the docs** - Match error pattern to relevant doc:
-   - Type errors → `HANDLERS.md`
+   - Type errors → `TYPES_AND_SCHEMAS.md`
    - Component issues → `COMPONENTS.md`
    - Pattern questions → `PATTERNS.md`
-   - Core concepts → `RECIPES.md`
+   - Reactivity issues → `CELLS_AND_REACTIVITY.md`
+   - General debugging → `DEBUGGING.md`
 3. **Inspect deployed charm** - Use **ct** skill for inspection commands
 4. **Check examples** - Look in `packages/patterns/` for similar patterns
 
@@ -166,7 +169,7 @@ Use the **ct** skill to retrieve source:
 | Error Message | Check |
 |---------------|-------|
 | "Type 'string' is not assignable to type 'CSSProperties'" | Using string style on HTML element - See `COMPONENTS.md` |
-| Handler type mismatch | Check `Cell<T[]>` vs `Cell<Array<Cell<T>>>` - See `HANDLERS.md` |
+| Handler type mismatch | Check `Cell<T[]>` vs `Cell<Array<Cell<T>>>` - See `TYPES_AND_SCHEMAS.md` |
 | Data not updating | Missing `$` prefix or wrong event name - See `COMPONENTS.md` |
 
 ## Key Concepts Summary
@@ -204,15 +207,15 @@ const removeItem = handler<
 
 **Critical Rule:** Use `Cell<T[]>` in handler parameters, not `Cell<OpaqueRef<T>[]>`.
 
-See `HANDLERS.md` for complete handler patterns.
+See `PATTERNS.md` for complete handler patterns.
 
 ### Reactive Transformations
 
-**derive() for computed values:**
+**computed() for derived values:**
 
 ```typescript
-const filteredItems = derive(items, (list) =>
-  list.filter(item => !item.done)
+const filteredItems = computed(() =>
+  items.filter(item => !item.done)
 );
 ```
 
@@ -226,7 +229,7 @@ const groupByCategory = lift((items: Item[]) => {
 const grouped = groupByCategory(items);
 ```
 
-See `RECIPES.md` for reactive programming details.
+See `CELLS_AND_REACTIVITY.md` for reactive programming details.
 
 ## Multi-File Patterns
 
@@ -272,10 +275,12 @@ When working with patterns, consult these docs based on your task:
 
 | Task | Read |
 |------|------|
-| Understanding pattern structure | `docs/common/RECIPES.md` |
-| Common patterns (lists, filtering, linking) | `docs/common/PATTERNS.md` |
-| Handler type errors or patterns | `docs/common/HANDLERS.md` |
+| Main tutorial and common patterns | `docs/common/PATTERNS.md` |
+| Cells, reactivity, computed() | `docs/common/CELLS_AND_REACTIVITY.md` |
+| Type system, Cell<> vs OpaqueRef<> | `docs/common/TYPES_AND_SCHEMAS.md` |
 | Component usage and bidirectional binding | `docs/common/COMPONENTS.md` |
+| Error reference and debugging | `docs/common/DEBUGGING.md` |
+| LLM integration (generateObject, etc.) | `docs/common/LLM.md` |
 | ct binary commands | Use **ct** skill |
 | Working examples | `packages/patterns/` directory |
 

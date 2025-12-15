@@ -10,6 +10,15 @@ failing) or know when to properly reschedule them.**
 
 ## Overview
 
+> **Polling-Based Architecture**
+>
+> This service is polling-based, not event-driven:
+>
+> - Polls registered charms every ~60 seconds (hardcoded in `space-manager.ts`)
+> - `bgUpdater` handlers do not automatically trigger when captured cells change
+> - On each poll, sends `{}` to the charm's `bgUpdater` Stream
+> - For real-time updates, use browser-triggered handlers instead
+
 The Background Charm Service runs charms in the background with:
 
 - Space-based isolation for charm execution (one web worker per space)
@@ -87,10 +96,10 @@ API_URL=http://localhost:8000 OPERATOR_PASS=your-passphrase deno task start
 
 ### Environment Variables
 
-- `API_URL`: URL to the toolshed API
-- `OPERATOR_PASS`: Passphrase for the operator identity
-- `POLLING_INTERVAL_MS`: (Optional) Interval for job queue polling
-- `MAX_CONCURRENT_JOBS`: (Optional) Maximum concurrent jobs per space
+- `API_URL`: URL to the toolshed API (default: `http://localhost:8000`)
+- `OPERATOR_PASS`: Passphrase for the operator identity (default:
+  `implicit trust`)
+- `IDENTITY`: (Optional) Path to an identity keyfile
 
 ### Monitoring
 

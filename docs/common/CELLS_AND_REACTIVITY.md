@@ -1,3 +1,5 @@
+<!-- @reviewed 2025-12-10 docs-rationalization -->
+
 # Cells and Reactivity Guide
 
 This guide explains CommonTools' reactive system: how cells work, when reactivity is automatic, and how to work with reactive data effectively.
@@ -170,6 +172,26 @@ const updateData = handler<
 </ct-button>
 ```
 
+### cell.sample() - Non-Reactive Reads
+
+Use `.sample()` to read a cell's value **without creating a reactive dependency**:
+
+```typescript
+// In a computed() - normally .get() would cause re-runs when the cell changes
+const result = computed(() => {
+  const currentUser = userCell.get();      // Creates dependency - result re-runs when userCell changes
+  const initialValue = configCell.sample(); // NO dependency - result won't re-run when configCell changes
+  return doSomething(currentUser, initialValue);
+});
+```
+
+**When to use `.sample()`:**
+- Reading configuration or initial values that shouldn't trigger updates
+- Breaking intentional reactive loops
+- Performance optimization when you want a "snapshot" of a value
+
+**Caution:** Overusing `.sample()` can lead to stale data. Only use it when you specifically want to avoid reactivity.
+
 ### Cell.equals()
 
 Use `Cell.equals()` to compare cells or cell values:
@@ -276,6 +298,33 @@ return {
   {user.name}
 </div>
 ```
+
+### Side Effects in computed()
+
+If your `computed()` has side effects (like setting another cell), they should be idempotent. Non-idempotent side effects cause the scheduler to re-run repeatedly until it hits the 101-iteration limit.
+
+```typescript
+// ❌ Non-idempotent - appends on every run
+const badComputed = computed(() => {
+  const current = logArray.get();
+  logArray.set([...current, { timestamp: Date.now() }]);  // Grows forever
+  return items.length;
+});
+
+// ✅ Idempotent - check-before-write with deterministic key
+const goodComputed = computed(() => {
+  const current = cacheMap.get();
+  const key = `items-${items.length}`;
+  if (!(key in current)) {
+    cacheMap.set({ ...current, [key]: Date.now() });
+  }
+  return items.length;
+});
+```
+
+The scheduler re-runs computations when their dependencies change. If a computation modifies a cell it depends on, it triggers itself. With idempotent operations, the second run produces no change, so the system settles.
+
+Prefer using handlers for mutations instead of side effects in `computed()`.
 
 ### Complex Transformations
 
@@ -419,6 +468,74 @@ const summary = computed(() => {
   return `${done} of ${total} complete`;
 });
 ```
+
+## Stable Array References with [ID]
+
+When working with arrays where items can be inserted, removed, or reordered, you may need stable identity tracking. The `[ID]` symbol provides this.
+
+### Why [ID] Matters
+
+By default, the framework tracks array items by their index position. This works fine for simple cases, but can cause issues when:
+- Inserting items at the beginning or middle of an array
+- Reordering items (sorting, shuffling)
+- Maintaining UI state (focus, animations) across array changes
+
+Without `[ID]`, inserting an item at the start of an array may cause all existing items to "shift" their identity, losing per-item state.
+
+### Basic Usage
+
+```typescript
+import { ID } from "commontools";
+
+interface Item {
+  [ID]: number;  // or string - any unique identifier
+  title: string;
+  done: boolean;
+}
+
+// When creating items, include a unique [ID]
+const newItem = { [ID]: Date.now(), title: "New task", done: false };
+
+// Or use random values
+const newItem = { [ID]: Math.random(), title: "New task", done: false };
+```
+
+### When to Use [ID]
+
+**Use [ID] when:**
+- Inserting items at the front of arrays
+- Sorting or shuffling arrays
+- Items have independent state that should persist across reordering
+
+**You DON'T need [ID] for:**
+- Simple append-only lists (adding to the end)
+- Lists where items are only removed, never reordered
+- Basic todo lists with simple checkbox binding
+
+### Example: Reorderable List
+
+```typescript
+import { Cell, Default, handler, ID, recipe, UI } from "commontools";
+
+interface Item {
+  [ID]: number;
+  title: string;
+}
+
+const insertAtStart = handler((_, { items }: { items: Cell<Item[]> }) => {
+  items.set([
+    { [ID]: Date.now(), title: "New first item" },
+    ...items.get()
+  ]);
+});
+
+const shuffle = handler((_, { items }: { items: Cell<Item[]> }) => {
+  const shuffled = [...items.get()].sort(() => Math.random() - 0.5);
+  items.set(shuffled);
+});
+```
+
+See `packages/patterns/list-operations.tsx` for a complete working example.
 
 ## Common Reactive Patterns
 
