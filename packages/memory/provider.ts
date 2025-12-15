@@ -749,25 +749,38 @@ class MemoryProviderSession<
     // Start with the initially affected docs
     const docsToFetch = new Set<string>(affectedDocs.map((d) => d.docKey));
 
-    // Evaluate each affected doc with each of its schemas
-    // evaluateDocumentLinks does a full traversal and finds all linked documents
+    // First pass: Remove all affected (docKey, schema) pairs from schemaTracker.
+    // This allows the traverser to re-traverse them and discover any new links.
+    // We do this in a separate pass so that if doc A links to doc B, and both
+    // are affected, we don't re-traverse B while evaluating A only to remove
+    // and re-evaluate B again.
+    const toReEvaluate: Array<
+      { docId: string; docType: string; schema: SchemaPathSelector }
+    > = [];
     for (const { docKey, schemas } of affectedDocs) {
       const { docId, docType } = this.parseDocKey(docKey);
       if (docId === null) continue;
 
       for (const schema of schemas) {
-        const result = evaluateDocumentLinks(
-          spaceSession,
-          { id: docId, type: docType },
-          schema,
-          classification,
-          this.sharedSchemaTracker,
-        );
-        // Collect newly discovered docs to fetch
-        if (result !== null) {
-          for (const { docKey: newDocKey } of result.newLinks) {
-            docsToFetch.add(newDocKey);
-          }
+        this.sharedSchemaTracker.deleteValue(docKey, schema);
+        toReEvaluate.push({ docId, docType, schema });
+      }
+    }
+
+    // Second pass: Re-evaluate each affected doc with its schema
+    // evaluateDocumentLinks does a full traversal and finds all linked documents
+    for (const { docId, docType, schema } of toReEvaluate) {
+      const result = evaluateDocumentLinks(
+        spaceSession,
+        { id: docId, type: docType },
+        schema,
+        classification,
+        this.sharedSchemaTracker,
+      );
+      // Collect newly discovered docs to fetch
+      if (result !== null) {
+        for (const { docKey: newDocKey } of result.newLinks) {
+          docsToFetch.add(newDocKey);
         }
       }
     }
