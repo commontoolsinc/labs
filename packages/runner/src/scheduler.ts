@@ -452,9 +452,6 @@ export class Scheduler {
           });
           const log = txToReactivityLog(tx);
 
-          // Update mightWrite with actual writes
-          this.updateMightWrite(action, log);
-
           logger.debug("schedule-run-complete", () => [
             `[RUN] Action completed: ${action.name || "anonymous"}`,
             `Reads: ${log.reads.length}`,
@@ -690,6 +687,12 @@ export class Scheduler {
     const reads = sortAndCompactPaths(log.reads);
     const writes = sortAndCompactPaths(log.writes);
     this.dependencies.set(action, { reads, writes });
+
+    // Initialize/update mightWrite with declared writes
+    // This ensures dependency chain can be built even before action runs
+    const existingMightWrite = this.mightWrite.get(action) ?? [];
+    this.mightWrite.set(action, sortAndCompactPaths([...existingMightWrite, ...writes]));
+
     return reads;
   }
 
@@ -723,8 +726,12 @@ export class Scheduler {
           const otherLog = this.dependencies.get(otherAction);
           if (!otherLog) continue;
 
+          // Use mightWrite if available (accumulates all paths action has ever written)
+          // This ensures dependency chain is built even if first run writes undefined
+          const otherWrites = this.mightWrite.get(otherAction) ?? otherLog.writes;
+
           // Check if otherAction writes to this entity we're reading
-          for (const write of otherLog.writes) {
+          for (const write of otherWrites) {
             if (
               read.space === write.space &&
               read.id === write.id &&
@@ -1059,6 +1066,7 @@ export class Scheduler {
       const sorted = topologicalSort(
         new Set(dirtyMembers),
         this.dependencies,
+        this.mightWrite,
         this.actionParent,
       );
 
@@ -1141,6 +1149,7 @@ export class Scheduler {
     const sorted = topologicalSort(
       new Set(dirtyMembers),
       this.dependencies,
+      this.mightWrite,
       this.actionParent,
     );
 
@@ -1424,23 +1433,6 @@ export class Scheduler {
   // ============================================================
 
   /**
-   * Updates the mightWrite set for an action by accumulating its actual writes.
-   * This grows over time to capture all paths an action has ever written.
-   */
-  private updateMightWrite(
-    action: Action,
-    log: ReactivityLog,
-  ): void {
-    const existing = this.mightWrite.get(action) ?? [];
-    const newMightWrites = sortAndCompactPaths([
-      ...existing,
-      ...log.writes,
-      ...(log.potentialWrites ?? []),
-    ]);
-    this.mightWrite.set(action, newMightWrites);
-  }
-
-  /**
    * Returns the accumulated "might write" set for an action.
    */
   getMightWrite(action: Action): IMemorySpaceAddress[] | undefined {
@@ -1662,6 +1654,7 @@ export class Scheduler {
     const order = topologicalSort(
       workSet,
       this.dependencies,
+      this.mightWrite,
       this.actionParent,
     );
 
@@ -1753,6 +1746,7 @@ export class Scheduler {
 function topologicalSort(
   actions: Set<Action>,
   dependencies: WeakMap<Action, ReactivityLog>,
+  mightWrite: WeakMap<Action, IMemorySpaceAddress[]>,
   actionParent?: WeakMap<Action, Action>,
 ): Action[] {
   const graph = new Map<Action, Set<Action>>();
@@ -1768,7 +1762,8 @@ function topologicalSort(
   for (const actionA of actions) {
     const log = dependencies.get(actionA);
     if (!log) continue;
-    const { writes } = log;
+    // Use mightWrite if available (includes declared writes even if first run writes undefined)
+    const writes = mightWrite.get(actionA) ?? log.writes;
     const graphA = graph.get(actionA)!;
     for (const write of writes) {
       for (const actionB of actions) {
