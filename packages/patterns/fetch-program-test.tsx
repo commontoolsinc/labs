@@ -1,5 +1,6 @@
 /// <cts-enable />
 import {
+  Cell,
   compileAndRun,
   derive,
   fetchProgram,

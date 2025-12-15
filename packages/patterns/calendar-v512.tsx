@@ -3316,7 +3316,9 @@ export default recipe<Input, Output>(
     const scheduleConfirmingScopeCell = Cell.of<boolean>(false); // True when showing scope confirmation after Save clicked
     const scheduleOriginalWeeklyDaysCell = Cell.of<string[]>([]); // Tracks original BYDAY values when opening a weekly recurring event
     const deletionConfirmingScopeCell = Cell.of<boolean>(false); // True when showing scope confirmation for deletion
-    const deletionPendingCell = Cell.of<{ noteId: string; date: string } | null>(
+    const deletionPendingCell = Cell.of<
+      { noteId: string; date: string } | null
+    >(
       null,
     ); // Pending deletion info
 

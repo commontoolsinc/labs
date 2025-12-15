@@ -1,13 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  Default,
-  derive,
-  handler,
-  NAME,
-  recipe,
-  UI,
-} from "commontools";
+import { Cell, Default, derive, handler, NAME, recipe, UI } from "commontools";
 
 interface LinkedList {
   value: string;
