@@ -1992,10 +1992,12 @@ export class SchemaObjectTraverser<V extends JSONValue>
     ) {
       return this.objectCreator.createObject(normalizedLink, undefined);
     }
-    // FIXME: we should use the schema from normalizedLink here too
     const selector = {
       path: doc.address.path,
-      schemaContext: schemaContext,
+      schemaContext: {
+        schema: normalizedLink.schema,
+        rootSchema: normalizedLink.rootSchema,
+      },
     };
     const [newDoc, newSelector] = getAtPath(
       this.tx,
