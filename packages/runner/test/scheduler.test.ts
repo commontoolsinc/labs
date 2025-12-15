@@ -7,6 +7,7 @@ import {
   type Action,
   type EventHandler,
   ignoreReadForScheduling,
+  txToReactivityLog,
 } from "../src/scheduler.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -529,6 +530,97 @@ describe("scheduler", () => {
     // Still should not have run
     expect(actionRunCount).toBe(1);
     expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } });
+  });
+
+  it("should track potentialWrites via Cell.set even when value doesn't change", async () => {
+    // Create a cell with initial values
+    const testCell = runtime.getCell<{ a: number; b: string }>(
+      space,
+      "potential-writes-cell-set-test",
+      undefined,
+      tx,
+    );
+    testCell.set({ a: 1, b: "hello" });
+    tx.commit();
+    tx = runtime.edit();
+
+    // In a new transaction, set values where `a` stays the same but `b` changes
+    const setTx = runtime.edit();
+    testCell.withTx(setTx).set({ a: 1, b: "world" }); // a unchanged, b changed
+
+    const log = txToReactivityLog(setTx);
+
+    // Cell.set uses diffAndUpdate which marks reads as potential writes
+    // Both properties should appear in potentialWrites (even unchanged ones)
+    expect(log.potentialWrites).toBeDefined();
+    expect(log.potentialWrites!.some((addr) => addr.path[0] === "a")).toBe(true);
+    expect(log.potentialWrites!.some((addr) => addr.path[0] === "b")).toBe(true);
+
+    // Only `b` changed, so only `b` should be in writes
+    expect(log.writes.some((w) => w.path[0] === "a")).toBe(false); // a NOT written
+    expect(log.writes.some((w) => w.path[0] === "b")).toBe(true);  // b written
+
+    await setTx.commit();
+  });
+
+  it("should include unchanged properties in potentialWrites when using Cell.set", async () => {
+    // Create a cell with two properties
+    const testCell = runtime.getCell<{ unchanged: number; changed: number }>(
+      space,
+      "diff-update-potential-writes-cell",
+      undefined,
+      tx,
+    );
+    testCell.set({ unchanged: 42, changed: 1 });
+    tx.commit();
+    tx = runtime.edit();
+
+    // In a new transaction, set values where only one property changes
+    const setTx = runtime.edit();
+    testCell.withTx(setTx).set({ unchanged: 42, changed: 999 });
+
+    const log = txToReactivityLog(setTx);
+
+    // Both properties should be in potentialWrites because diffAndUpdate
+    // reads both to compare, even though only one actually changes
+    expect(log.potentialWrites).toBeDefined();
+    expect(
+      log.potentialWrites!.some((addr) => addr.path[0] === "unchanged"),
+    ).toBe(true);
+    expect(
+      log.potentialWrites!.some((addr) => addr.path[0] === "changed"),
+    ).toBe(true);
+
+    // Only changed property should be in writes
+    expect(log.writes.some((w) => w.path[0] === "changed")).toBe(true);
+    // unchanged property should NOT be in writes (value didn't change)
+    expect(log.writes.some((w) => w.path[0] === "unchanged")).toBe(false);
+
+    await setTx.commit();
+  });
+
+  it("should not have potentialWrites when using getRaw without metadata", async () => {
+    const testCell = runtime.getCell<{ value: number }>(
+      space,
+      "no-potential-writes-cell",
+      undefined,
+      tx,
+    );
+    testCell.set({ value: 1 });
+    tx.commit();
+    tx = runtime.edit();
+
+    // getRaw without metadata should not create potentialWrites
+    const readTx = runtime.edit();
+    testCell.withTx(readTx).key("value").getRaw();
+
+    const log = txToReactivityLog(readTx);
+
+    // Should have reads but no potentialWrites
+    expect(log.reads.length).toBeGreaterThanOrEqual(1);
+    expect(log.potentialWrites).toBeUndefined();
+
+    await readTx.commit();
   });
 });
 
