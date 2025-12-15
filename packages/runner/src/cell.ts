@@ -727,114 +727,52 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   remove(
     ref: T extends (infer U)[] ? (U | AnyCell<U>) : never,
   ): void {
-    if (!this.tx) throw new Error("Transaction required for remove");
-
-    // No await for the sync, just kicking this off, so we have the data to
-    // retry on conflict.
-    if (!this.synced) this.sync();
-
-    // Follow aliases and references, since we want to get to an assumed
-    // existing array.
-    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
-    const currentValue = this.tx.readValueOrThrow(resolvedLink);
-    const cause = this._frame?.cause;
-
-    const array = currentValue as unknown[];
-    if (array === undefined || !Array.isArray(array)) {
+    const array = this.get();
+    if (!Array.isArray(array)) {
       throw new Error("Can't remove from non-array value");
     }
-
-    // Find the index of the first matching element
-    const index = this.findMatchingIndex(array, ref);
-
-    if (index !== -1) {
-      const newArray = [...array.slice(0, index), ...array.slice(index + 1)];
-      diffAndUpdate(
-        this.runtime,
-        this.tx,
-        resolvedLink,
-        newArray,
-        cause,
-      );
+    const index = typeof ref === "object"
+      ? array.findIndex((item) =>
+        areLinksSame(
+          item,
+          ref,
+          this as unknown as Cell<any>,
+          true, // resolveBeforeComparing
+          this.tx,
+          this.runtime,
+        )
+      )
+      : array.indexOf(ref);
+    if (index === -1) {
+      return;
     }
+    const newArray = [
+      ...array.slice(0, index),
+      ...array.slice(index + 1),
+    ] as T;
+    this.set(newArray);
   }
 
   removeAll(
     ref: T extends (infer U)[] ? (U | AnyCell<U>) : never,
   ): void {
-    if (!this.tx) throw new Error("Transaction required for removeAll");
-
-    // No await for the sync, just kicking this off, so we have the data to
-    // retry on conflict.
-    if (!this.synced) this.sync();
-
-    // Follow aliases and references, since we want to get to an assumed
-    // existing array.
-    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
-    const currentValue = this.tx.readValueOrThrow(resolvedLink);
-    const cause = this._frame?.cause;
-
-    const array = currentValue as unknown[];
-    if (array === undefined || !Array.isArray(array)) {
+    const array = this.get();
+    if (!Array.isArray(array)) {
       throw new Error("Can't remove from non-array value");
     }
-
-    // Filter out all matching elements
-    const newArray = array.filter(
-      (item) => !this.isMatchingElement(item, ref),
-    );
-
-    if (newArray.length !== array.length) {
-      diffAndUpdate(
-        this.runtime,
-        this.tx,
-        resolvedLink,
-        newArray,
-        cause,
-      );
-    }
-  }
-
-  /**
-   * Find the index of the first element matching ref.
-   * For primitives, uses strict equality.
-   * For objects/cells, uses areLinksSame with resolution.
-   */
-  private findMatchingIndex(array: unknown[], ref: unknown): number {
-    for (let i = 0; i < array.length; i++) {
-      if (this.isMatchingElement(array[i], ref)) {
-        return i;
-      }
-    }
-    return -1;
-  }
-
-  /**
-   * Check if an element matches the ref.
-   * For primitives, uses strict equality.
-   * For objects/cells, uses areLinksSame with resolution.
-   */
-  private isMatchingElement(element: unknown, ref: unknown): boolean {
-    // For primitives, use strict equality
-    if (
-      ref === null ||
-      typeof ref === "string" ||
-      typeof ref === "number" ||
-      typeof ref === "boolean" ||
-      typeof ref === "undefined"
-    ) {
-      return element === ref;
-    }
-
-    // For objects and cells, use areLinksSame with resolution
-    return areLinksSame(
-      element,
-      ref,
-      this as unknown as Cell<any>,
-      true, // resolveBeforeComparing
-      this.tx,
-      this.runtime,
-    );
+    const newArray = array.filter((item) =>
+      typeof ref === "object"
+        ? !areLinksSame(
+          item,
+          ref,
+          this as unknown as Cell<any>,
+          true, // resolveBeforeComparing
+          this.tx,
+          this.runtime,
+        )
+        : item !== ref
+    ) as T;
+    this.set(newArray);
   }
 
   equals(other: any): boolean {
