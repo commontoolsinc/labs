@@ -3591,7 +3591,10 @@ interface CTAutoLayoutAttributes<T> extends CTHTMLAttributes<T> {
 interface CTTabsAttributes<T> extends CTHTMLAttributes<T> {
   "$value"?: CellLike<string>; // Bidirectional cell binding
   "value"?: string; // Plain string value (use $value for cells)
-  "orientation"?: "horizontal" | "vertical" | CellLike<"horizontal" | "vertical">;
+  "orientation"?:
+    | "horizontal"
+    | "vertical"
+    | CellLike<"horizontal" | "vertical">;
   "onct-change"?: EventHandler<{ value: string; oldValue: string }>;
 }
 
@@ -3602,7 +3605,10 @@ interface CTTabAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 interface CTTabListAttributes<T> extends CTHTMLAttributes<T> {
-  "orientation"?: "horizontal" | "vertical" | CellLike<"horizontal" | "vertical">;
+  "orientation"?:
+    | "horizontal"
+    | "vertical"
+    | CellLike<"horizontal" | "vertical">;
 }
 
 interface CTTabPanelAttributes<T> extends CTHTMLAttributes<T> {
@@ -3637,7 +3643,10 @@ interface CTSliderAttributes<T> extends CTHTMLAttributes<T> {
   "max"?: number | CellLike<number>;
   "step"?: number | CellLike<number>;
   "disabled"?: boolean | CellLike<boolean>;
-  "orientation"?: "horizontal" | "vertical" | CellLike<"horizontal" | "vertical">;
+  "orientation"?:
+    | "horizontal"
+    | "vertical"
+    | CellLike<"horizontal" | "vertical">;
   "onct-change"?: EventHandler<{ value: number }>;
 }
 
@@ -3696,14 +3705,23 @@ interface CTLabelAttributes<T> extends CTHTMLAttributes<T> {
 
 // Display component attributes
 interface CTBadgeAttributes<T> extends CTHTMLAttributes<T> {
-  "variant"?: "default" | "secondary" | "destructive" | "outline" | CellLike<"default" | "secondary" | "destructive" | "outline">;
+  "variant"?:
+    | "default"
+    | "secondary"
+    | "destructive"
+    | "outline"
+    | CellLike<"default" | "secondary" | "destructive" | "outline">;
   "removable"?: boolean | CellLike<boolean>;
   "onct-remove"?: EventHandler<{}>;
 }
 
 interface CTChipAttributes<T> extends CTHTMLAttributes<T> {
   "label"?: string | CellLike<string>;
-  "variant"?: "default" | "primary" | "accent" | CellLike<"default" | "primary" | "accent">;
+  "variant"?:
+    | "default"
+    | "primary"
+    | "accent"
+    | CellLike<"default" | "primary" | "accent">;
   "removable"?: boolean | CellLike<boolean>;
   "interactive"?: boolean | CellLike<boolean>;
   "onct-remove"?: EventHandler<{}>;
@@ -3717,14 +3735,21 @@ interface CTProgressAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 interface CTSkeletonAttributes<T> extends CTHTMLAttributes<T> {
-  "variant"?: "default" | "text" | "circular" | CellLike<"default" | "text" | "circular">;
+  "variant"?:
+    | "default"
+    | "text"
+    | "circular"
+    | CellLike<"default" | "text" | "circular">;
   "animated"?: boolean | CellLike<boolean>;
   "width"?: string | CellLike<string>;
   "height"?: string | CellLike<string>;
 }
 
 interface CTSeparatorAttributes<T> extends CTHTMLAttributes<T> {
-  "orientation"?: "horizontal" | "vertical" | CellLike<"horizontal" | "vertical">;
+  "orientation"?:
+    | "horizontal"
+    | "vertical"
+    | CellLike<"horizontal" | "vertical">;
   "decorative"?: boolean | CellLike<boolean>;
 }
 
@@ -3752,14 +3777,39 @@ interface CTGridAttributes<T> extends CTHTMLAttributes<T> {
 interface CTHGroupAttributes<T> extends CTHTMLAttributes<T> {
   "gap"?: "sm" | "md" | "lg" | CellLike<"sm" | "md" | "lg">;
   "wrap"?: boolean | CellLike<boolean>;
-  "align"?: "start" | "center" | "end" | "stretch" | "baseline" | CellLike<"start" | "center" | "end" | "stretch" | "baseline">;
-  "justify"?: "start" | "center" | "end" | "between" | "around" | "evenly" | CellLike<"start" | "center" | "end" | "between" | "around" | "evenly">;
+  "align"?:
+    | "start"
+    | "center"
+    | "end"
+    | "stretch"
+    | "baseline"
+    | CellLike<"start" | "center" | "end" | "stretch" | "baseline">;
+  "justify"?:
+    | "start"
+    | "center"
+    | "end"
+    | "between"
+    | "around"
+    | "evenly"
+    | CellLike<"start" | "center" | "end" | "between" | "around" | "evenly">;
 }
 
 interface CTVGroupAttributes<T> extends CTHTMLAttributes<T> {
   "gap"?: "sm" | "md" | "lg" | CellLike<"sm" | "md" | "lg">;
-  "align"?: "start" | "center" | "end" | "stretch" | CellLike<"start" | "center" | "end" | "stretch">;
-  "justify"?: "start" | "center" | "end" | "between" | "around" | "evenly" | CellLike<"start" | "center" | "end" | "between" | "around" | "evenly">;
+  "align"?:
+    | "start"
+    | "center"
+    | "end"
+    | "stretch"
+    | CellLike<"start" | "center" | "end" | "stretch">;
+  "justify"?:
+    | "start"
+    | "center"
+    | "end"
+    | "between"
+    | "around"
+    | "evenly"
+    | CellLike<"start" | "center" | "end" | "between" | "around" | "evenly">;
 }
 
 interface CTAspectRatioAttributes<T> extends CTHTMLAttributes<T> {
@@ -3784,7 +3834,11 @@ interface CTResizableHandleAttributes<T> extends CTHTMLAttributes<T> {
 
 // Other component attributes
 interface CTScrollAreaAttributes<T> extends CTHTMLAttributes<T> {
-  "orientation"?: "vertical" | "horizontal" | "both" | CellLike<"vertical" | "horizontal" | "both">;
+  "orientation"?:
+    | "vertical"
+    | "horizontal"
+    | "both"
+    | CellLike<"vertical" | "horizontal" | "both">;
 }
 
 interface CTToolCallAttributes<T> extends CTHTMLAttributes<T> {

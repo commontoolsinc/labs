@@ -137,7 +137,9 @@ export class CTTabs extends BaseElement {
     this.updateTabSelection();
   }
 
-  override willUpdate(changedProperties: Map<string | number | symbol, unknown>) {
+  override willUpdate(
+    changedProperties: Map<string | number | symbol, unknown>,
+  ) {
     super.willUpdate(changedProperties);
 
     // If the value property itself changed (e.g., switched to a different cell)

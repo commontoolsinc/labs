@@ -54,7 +54,8 @@ export class CTTab extends BaseElement {
       }
 
       .tab:focus-visible {
-        outline: 2px solid var(--ct-theme-color-primary, var(--ct-colors-primary-500));
+        outline: 2px solid
+          var(--ct-theme-color-primary, var(--ct-colors-primary-500));
         outline-offset: 2px;
       }
 
@@ -75,7 +76,10 @@ export class CTTab extends BaseElement {
         right: 0;
         bottom: -1px;
         height: 2px;
-        background-color: var(--ct-theme-color-primary, var(--ct-colors-primary-500));
+        background-color: var(
+          --ct-theme-color-primary,
+          var(--ct-colors-primary-500)
+        );
       }
 
       /* Vertical orientation styles */
