@@ -58,6 +58,10 @@ class MockStorageManager implements IStorageManager {
     return Promise.resolve();
   }
 
+  addCrossSpacePromise() {}
+
+  removeCrossSpacePromise() {}
+
   syncCell<T>(cell: Cell<T>): Promise<Cell<T>> {
     return Promise.resolve(cell);
   }

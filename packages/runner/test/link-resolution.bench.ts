@@ -26,7 +26,7 @@ Deno.bench("followWriteRedirects with simple alias", () => {
   testCell.set({ value: 42 });
   const binding = { $alias: { path: ["value"] } };
 
-  resolveLink(tx, parseLink(binding, testCell)!, "writeRedirect");
+  resolveLink(runtime, tx, parseLink(binding, testCell)!, "writeRedirect");
 
   tx.commit();
   runtime.dispose();
@@ -63,7 +63,7 @@ Deno.bench("followWriteRedirects with nested aliases (5 levels)", () => {
   }
 
   const binding = { $alias: { path: ["next"] } };
-  resolveLink(tx, parseLink(binding, cells[0])!, "writeRedirect");
+  resolveLink(runtime, tx, parseLink(binding, cells[0])!, "writeRedirect");
 
   tx.commit();
   runtime.dispose();
@@ -86,7 +86,7 @@ Deno.bench("resolveLink with direct reference", () => {
   );
   cell.set({ id: 1, data: "Test data" });
 
-  resolveLink(tx, cell.getAsNormalizedFullLink());
+  resolveLink(runtime, tx, cell.getAsNormalizedFullLink());
 
   tx.commit();
   runtime.dispose();
@@ -220,7 +220,7 @@ Deno.bench("resolveLink with infinitely growing path (A->A/foo)", () => {
   cellA.setRaw(cellA.key("foo").getAsLink());
 
   // This should detect the growing path cycle and return the empty document
-  const resolved = resolveLink(tx, cellA.getAsNormalizedFullLink());
+  const resolved = resolveLink(runtime, tx, cellA.getAsNormalizedFullLink());
 
   // Verify it returned the empty document
   if (resolved.id !== "data:application/json,{}") {

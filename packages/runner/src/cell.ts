@@ -480,6 +480,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     // what .get() would do).
     if (this.hasFullLink()) {
       const resolvedLink = resolveLink(
+        this.runtime,
         this.runtime.readTx(this.tx),
         this.link,
         "writeRedirect",
@@ -497,6 +498,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     // (which is what .get() would do).
     if (this.hasFullLink()) {
       const resolvedLink = resolveLink(
+        this.runtime,
         this.runtime.readTx(this.tx),
         this.link,
         "writeRedirect",
@@ -514,7 +516,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     const tx = this.runtime.readTx(this.tx);
 
     if (!resolvedToValueLink) {
-      resolvedToValueLink = resolveLink(tx, this.link);
+      resolvedToValueLink = resolveLink(this.runtime, tx, this.link);
     }
 
     const value = tx.readValueOrThrow(resolvedToValueLink, {
@@ -558,6 +560,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): Cell<T> {
     const resolvedToValueLink = resolveLink(
+      this.runtime,
       this.runtime.readTx(this.tx),
       this.link,
     );
@@ -595,7 +598,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       diffAndUpdate(
         this.runtime,
         this.tx,
-        resolveLink(this.tx, this.link, "writeRedirect"),
+        resolveLink(this.runtime, this.tx, this.link, "writeRedirect"),
         transformedValue,
         this._frame?.cause,
       );
@@ -629,7 +632,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     if (!this.synced) this.sync();
 
     // Get current value, following aliases and references
-    const resolvedLink = resolveLink(this.tx, this.link);
+    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
 
     // If there's no current value, initialize based on schema, even if there is
@@ -678,7 +681,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 
     // Follow aliases and references, since we want to get to an assumed
     // existing array.
-    const resolvedLink = resolveLink(this.tx, this.link);
+    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
     const cause = this._frame?.cause;
 
@@ -726,6 +729,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       undefined,
       true,
       this.runtime.readTx(this.tx),
+      this.runtime,
     );
   }
 
@@ -804,6 +808,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
    */
   asSchemaFromLinks<T = unknown>(): Cell<T> {
     let { schema, rootSchema } = resolveLink(
+      this.runtime,
       this.runtime.readTx(this.tx),
       this.link,
     );
@@ -879,7 +884,11 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   resolveAsCell(): Cell<T> {
-    const link = resolveLink(this.runtime.readTx(this.tx), this.link);
+    const link = resolveLink(
+      this.runtime,
+      this.runtime.readTx(this.tx),
+      this.link,
+    );
     return createCell(this.runtime, link, this.tx, this.synced);
   }
 
@@ -934,7 +943,10 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 
     const tx = this.runtime.readTx(this.tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final link
-    return tx.readValueOrThrow(resolveLink(tx, this.link, "top"), options) as
+    return tx.readValueOrThrow(
+      resolveLink(this.runtime, tx, this.link, "top"),
+      options,
+    ) as
       | Immutable<T>
       | undefined;
   }
@@ -1535,8 +1547,15 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
      * @returns true if the values are equal
      */
     equals(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean {
-      const { tx } = getTopFrame() ?? {};
-      return areLinksSame(a, b, undefined, !!tx, tx);
+      const frame = getTopFrame();
+      return areLinksSame(
+        a,
+        b,
+        undefined,
+        !!frame?.tx,
+        frame?.tx,
+        frame?.runtime,
+      );
     },
 
     /**

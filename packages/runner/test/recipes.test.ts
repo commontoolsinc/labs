@@ -1095,6 +1095,7 @@ describe("Recipe Runner", () => {
 
     // Follow all the links until we get to the doc holding the value
     const ref = resolveLink(
+      runtime,
       tx,
       wrapperCell.getAsNormalizedFullLink(),
     );

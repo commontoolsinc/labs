@@ -30,6 +30,7 @@ import type {
 import { ContextualFlowControl } from "./cfc.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { IExtendedStorageTransaction } from "./storage/interface.ts";
+import type { Runtime } from "./runtime.ts";
 
 /**
  * Normalized link structure returned by parsers
@@ -336,6 +337,7 @@ export function areLinksSame(
   base?: Cell | NormalizedLink,
   resolveBeforeComparing?: boolean,
   txForResolving?: IExtendedStorageTransaction,
+  runtime?: Runtime,
 ): boolean {
   // If both are the same object, they're equal
   if (value1 === value2) return true;
@@ -353,8 +355,15 @@ export function areLinksSame(
   if (resolveBeforeComparing) {
     const tx = txForResolving;
     if (!tx) throw new Error("Provide tx to resolve before comparing");
-    link1 = isNormalizedFullLink(link1) ? resolveLink(tx, link1) : link1;
-    link2 = isNormalizedFullLink(link2) ? resolveLink(tx, link2) : link2;
+    if (!runtime) {
+      throw new Error("Provide runtime to resolve before comparing");
+    }
+    link1 = isNormalizedFullLink(link1)
+      ? resolveLink(runtime, tx, link1)
+      : link1;
+    link2 = isNormalizedFullLink(link2)
+      ? resolveLink(runtime, tx, link2)
+      : link2;
   }
 
   // Compare normalized links

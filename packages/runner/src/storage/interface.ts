@@ -113,6 +113,16 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   synced(): Promise<void>;
 
   /**
+   * Add a promise to the list of cross-space promises.
+   */
+  addCrossSpacePromise(promise: Promise<void>): void;
+
+  /**
+   * Remove a promise from the list of cross-space promises.
+   */
+  removeCrossSpacePromise(promise: Promise<void>): void;
+
+  /**
    * Load cell from storage. Will also subscribe to new changes.
    *
    * @returns Promise that resolves when the cell sync is complete.
