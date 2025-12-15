@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   Cell,
-  cell,
   computed,
   type Default,
   NAME,
@@ -35,7 +34,7 @@ type Output = {
 const VoiceNoteSimple = recipe<Input, Output>(
   "Voice Note Simple",
   ({ title }) => {
-    const transcription = cell<TranscriptionData | null>(null);
+    const transcription = Cell.of<TranscriptionData | null>(null);
     const hasTranscription = computed(() => transcription.get() !== null);
     const transcriptionText = computed(() => transcription.get()?.text || "");
     const transcriptionDuration = computed(

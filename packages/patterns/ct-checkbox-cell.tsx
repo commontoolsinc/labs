@@ -73,7 +73,7 @@ export default recipe<CheckboxDemoInput, CheckboxDemoOutput>(
           <ct-card>
             <h4>Key Takeaway</h4>
             <p>
-              <strong>$checked automatically updates the cell</strong>{" "}
+              <strong>$checked automatically updates the Cell.of</strong>{" "}
               - you don't need a handler unless you want to add extra logic
               beyond just updating the value.
             </p>

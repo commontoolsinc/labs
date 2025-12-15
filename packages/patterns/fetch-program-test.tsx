@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  cell,
   compileAndRun,
   derive,
   fetchProgram,
@@ -15,7 +14,7 @@ import {
  */
 export default recipe("Fetch Program Test", () => {
   // URL to a simple pattern file
-  const url = cell(
+  const url = Cell.of(
     "https://raw.githubusercontent.com/commontoolsinc/labs/main/packages/patterns/counter.tsx",
   );
 

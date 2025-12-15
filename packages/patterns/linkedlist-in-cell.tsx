@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   Cell,
-  cell,
   Default,
   derive,
   handler,
@@ -56,7 +55,7 @@ const addItem = handler<InputEventType, ListState>(
 );
 
 export default recipe<InputSchema>(({ title }) => {
-  const items_list = cell<LinkedList>({ value: "1" });
+  const items_list = Cell.of<LinkedList>({ value: "1" });
 
   // Create a derived value for the linked list string representation
   // FIXME(@ellyxir): use inputschema instead of just creating it here

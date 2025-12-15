@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   Cell,
-  cell,
   derive,
   generateText,
   ImageData,
@@ -31,8 +30,8 @@ type ImageChatOutput = {
 export default recipe<ImageChatInput, ImageChatOutput>(
   "Image Chat",
   ({ systemPrompt, model }) => {
-    const images = cell<ImageData[]>([]);
-    const prompt = cell<string>("");
+    const images = Cell.of<ImageData[]>([]);
+    const prompt = Cell.of<string>("");
 
     // Build content parts array with text and images
     const contentParts = derive(

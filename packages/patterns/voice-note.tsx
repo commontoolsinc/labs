@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   Cell,
-  cell,
   computed,
   type Default,
   handler,
@@ -54,8 +53,8 @@ const handleDeleteNote = handler<
 const VoiceNote = recipe<Input, Output>(
   "Voice Note",
   ({ title }) => {
-    const transcription = cell<TranscriptionData | null>(null);
-    const notes = cell<TranscriptionData[]>([]);
+    const transcription = Cell.of<TranscriptionData | null>(null);
+    const notes = Cell.of<TranscriptionData[]>([]);
 
     // Computed values for type-safe JSX access
     const hasTranscription = computed(() => transcription.get() !== null);

@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   Cell,
-  cell,
   Default,
   derive,
   handler,
@@ -200,10 +199,10 @@ const toggleReaction = handler<
 
 export default pattern<RoomInput, RoomOutput>(
   ({ messages, users, myName, mySessionId, currentSessionId }) => {
-    const contentInput = cell("");
-    const avatarImages = cell<ImageData[]>([]);
-    const chatImages = cell<ImageData[]>([]);
-    const emojiPickerMessageId = cell<string>("");
+    const contentInput = Cell.of("");
+    const avatarImages = Cell.of<ImageData[]>([]);
+    const chatImages = Cell.of<ImageData[]>([]);
+    const emojiPickerMessageId = Cell.of<string>("");
 
     const userList = derive(
       users,

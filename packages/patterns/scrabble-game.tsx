@@ -12,7 +12,6 @@
 
 import {
   Cell,
-  cell,
   computed,
   Default,
   derive,
@@ -1235,7 +1234,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
       }
     }
 
-    const message = cell("");
+    const message = Cell.of("");
 
     return {
       [NAME]: str`Scrabble: ${myName}`,
