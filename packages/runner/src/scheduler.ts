@@ -64,14 +64,24 @@ export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
 export type ReactivityLog = {
   reads: IMemorySpaceAddress[];
   writes: IMemorySpaceAddress[];
+  /** Reads marked as potential writes (e.g., for diffAndUpdate which reads then conditionally writes) */
+  potentialWrites?: IMemorySpaceAddress[];
 };
 
 const ignoreReadForSchedulingMarker: unique symbol = Symbol(
   "ignoreReadForSchedulingMarker",
 );
 
+const markReadAsPotentialWriteMarker: unique symbol = Symbol(
+  "markReadAsPotentialWriteMarker",
+);
+
 export const ignoreReadForScheduling: Metadata = {
   [ignoreReadForSchedulingMarker]: true,
+};
+
+export const markReadAsPotentialWrite: Metadata = {
+  [markReadAsPotentialWriteMarker]: true,
 };
 
 export type SpaceAndURI = `${MemorySpace}/${URI}`;
@@ -1783,12 +1793,20 @@ export function txToReactivityLog(
   for (const activity of tx.journal.activity()) {
     if ("read" in activity && activity.read) {
       if (activity.read.meta?.[ignoreReadForSchedulingMarker]) continue;
-      log.reads.push({
+      const address = {
         space: activity.read.space,
         id: activity.read.id,
         type: activity.read.type,
         path: activity.read.path.slice(1), // Remove the "value" prefix
-      });
+      };
+      log.reads.push(address);
+      // If marked as potential write, also add to potentialWrites
+      if (activity.read.meta?.[markReadAsPotentialWriteMarker]) {
+        if (!log.potentialWrites) {
+          log.potentialWrites = [];
+        }
+        log.potentialWrites.push(address);
+      }
     }
     if ("write" in activity && activity.write) {
       log.writes.push({
