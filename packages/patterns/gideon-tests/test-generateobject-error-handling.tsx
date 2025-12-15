@@ -20,7 +20,15 @@
  * Note: Use optional chaining (?.) because TypeScript doesn't narrow through ifElse.
  * At runtime, if we reach the inner else branch, result IS defined (pending=false, error=false).
  */
-import { Cell, Default, derive, generateObject, ifElse, NAME, pattern, UI } from "commontools";
+import {
+  Default,
+  derive,
+  generateObject,
+  ifElse,
+  NAME,
+  pattern,
+  UI,
+} from "commontools";
 
 interface ProductIdea {
   name: string;
@@ -35,13 +43,18 @@ interface Input {
 export default pattern<Input, Input>(({ userInput }) => {
   const idea = generateObject<ProductIdea>({
     prompt: userInput,
-    system: "Generate a creative product idea based on the user's input. Be concise.",
+    system:
+      "Generate a creative product idea based on the user's input. Be concise.",
     model: "anthropic:claude-sonnet-4-5",
   });
 
   // Derive error message as string for display
-  const errorMessage = derive(idea.error, (err) =>
-    err ? (typeof err === "string" ? err : JSON.stringify(err, null, 2)) : null
+  const errorMessage = derive(
+    idea.error,
+    (err) =>
+      err
+        ? (typeof err === "string" ? err : JSON.stringify(err, null, 2))
+        : null,
   );
 
   return {
@@ -49,7 +62,9 @@ export default pattern<Input, Input>(({ userInput }) => {
     [UI]: (
       <div style={{ padding: "1rem", fontFamily: "sans-serif" }}>
         <h2>generateObject Error Handling Test</h2>
-        <p>This pattern validates the correct error handling snippet for LLM.md</p>
+        <p>
+          This pattern validates the correct error handling snippet for LLM.md
+        </p>
 
         <div style={{ marginBottom: "1rem" }}>
           <label>Product idea prompt:</label>

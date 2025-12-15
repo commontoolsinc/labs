@@ -97,7 +97,8 @@ API_URL=http://localhost:8000 OPERATOR_PASS=your-passphrase deno task start
 ### Environment Variables
 
 - `API_URL`: URL to the toolshed API (default: `http://localhost:8000`)
-- `OPERATOR_PASS`: Passphrase for the operator identity (default: `implicit trust`)
+- `OPERATOR_PASS`: Passphrase for the operator identity (default:
+  `implicit trust`)
 - `IDENTITY`: (Optional) Path to an identity keyfile
 
 ### Monitoring
