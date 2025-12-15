@@ -952,6 +952,7 @@ export class Runner {
         let value = inputs[key];
         while (isWriteRedirectLink(value)) {
           const maybeStreamLink = resolveLink(
+            this.runtime,
             tx,
             parseLink(value, processCell),
             "writeRedirect",

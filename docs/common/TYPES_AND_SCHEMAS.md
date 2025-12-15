@@ -206,6 +206,51 @@ const removeItem = handler<
 
 **Use `Cell<T[]>` by default.** Only use `Cell<Array<Cell<T>>>` when you specifically need Cell methods on array elements.
 
+## Handler Types in Output Interfaces
+
+**Critical Rule:** Handlers exposed in Output interfaces must be typed as `Stream<T>`, NOT `OpaqueRef<T>`.
+
+### Correct Handler Types in Output
+
+```typescript
+// ✅ CORRECT - Use Stream<T> for handlers in Output
+interface Output {
+  count: number;
+  increment: Stream<void>;           // Handler with no parameters
+  setCount: Stream<{ value: number }>; // Handler with parameters
+  addItem: Stream<{ title: string; done: boolean }>;
+}
+
+export default pattern<Input, Output>(({ count }) => {
+  return {
+    [NAME]: "Counter",
+    [UI]: <div>...</div>,
+    count,
+    increment: increment({ count }) as unknown as Stream<void>,
+    setCount: setCount({ count }) as unknown as Stream<{ value: number }>,
+  };
+});
+```
+
+### Incorrect Handler Types
+
+```typescript
+// ❌ WRONG - OpaqueRef in Output interface
+interface Output {
+  increment: OpaqueRef<void>;        // Wrong!
+  setCount: OpaqueRef<{ value: number }>; // Wrong!
+}
+```
+
+### Why Stream<T>?
+
+- `Stream<T>` represents a write-only channel for triggering actions
+- Handlers become callable streams when returned in pattern outputs
+- Other charms can call these handlers via `.send()` when linked
+- `OpaqueRef<T>` is for reactive references in `.map()` contexts, not handlers
+
+See [KeyLearnings.md](wip/KeyLearnings.md) section "Exposing Actions via Handlers" for cross-charm action patterns.
+
 ## The CTS (CommonTools TypeScript) System
 
 CommonTools uses a TypeScript-first approach where your TypeScript types are automatically processed at runtime.
@@ -435,7 +480,8 @@ const pattern = ({ count }: Input) => {
 **Key Takeaways:**
 
 1. **Cell<> = Write Permission** - Only in signatures when you need `.set()`, `.update()`, `.push()`
-2. **Never OpaqueRef in Handlers** - Always use `Cell<T[]>`
-3. **CTS Handles Runtime** - Just write TypeScript types, validation is automatic
-4. **Default<> for Defaults** - Clear, self-documenting default values
-5. **Compose Types** - Build complex types from simple, reusable parts
+2. **Never OpaqueRef in Handlers** - Always use `Cell<T[]>` in handler parameters
+3. **Stream<T> for Output Handlers** - Use `Stream<T>` (not `OpaqueRef<T>`) for handlers in Output interfaces
+4. **CTS Handles Runtime** - Just write TypeScript types, validation is automatic
+5. **Default<> for Defaults** - Clear, self-documenting default values
+6. **Compose Types** - Build complex types from simple, reusable parts

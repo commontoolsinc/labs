@@ -9,11 +9,7 @@ import { resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
-import {
-  createDataCellURI,
-  type NormalizedFullLink,
-  parseLink,
-} from "./link-utils.ts";
+import { type NormalizedFullLink } from "./link-utils.ts";
 import {
   createQueryResultProxy,
   isCellResultForDereferencing,
@@ -368,7 +364,7 @@ export function validateAndTransform(
   // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
   tx = tx ?? runtime.edit();
-  const resolvedLink = resolveLink(tx, link, "writeRedirect");
+  const resolvedLink = resolveLink(runtime, tx, link, "writeRedirect");
 
   // Use schema from alias if provided and no explicit schema was set
   if (filteredSchema === undefined && resolvedLink.schema) {
@@ -406,7 +402,7 @@ export function validateAndTransform(
     : schema;
 
   // Now resolve further links until we get the actual value.
-  const ref = resolveLink(tx ?? runtime.edit(), link);
+  const ref = resolveLink(runtime, tx, link);
   const objectCreator = new TransformObjectCreator(runtime, tx!);
 
   // If our link is asCell/asStream, and we don't have any path portions, we

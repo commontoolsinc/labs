@@ -46,6 +46,7 @@ describe("link-resolution", () => {
       testCell.set({ value: 42 });
       const binding = { $alias: { path: ["value"] } };
       const result = resolveLink(
+        runtime,
         tx,
         parseLink(binding, testCell)!,
         "writeRedirect",
@@ -72,6 +73,7 @@ describe("link-resolution", () => {
       });
       const binding = { $alias: { path: ["outer"] } };
       const result = resolveLink(
+        runtime,
         tx,
         parseLink(binding, outerCell)!,
         "writeRedirect",
@@ -99,6 +101,7 @@ describe("link-resolution", () => {
       });
       const binding = { $alias: { path: ["a", "a", "c"] } };
       const result = resolveLink(
+        runtime,
         tx,
         parseLink(binding, testCell)!,
         "writeRedirect",
@@ -149,7 +152,7 @@ describe("link-resolution", () => {
       // the resolved link should point to the target cell with its schema
       const linkValue = sourceCell.key("link").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
-      const resolved = resolveLink(tx, parsedLink);
+      const resolved = resolveLink(runtime, tx, parsedLink);
       expect(resolved.schema).toEqual(schema);
     });
 
@@ -191,7 +194,7 @@ describe("link-resolution", () => {
       // The resolved link should have the adjusted schema for the user object
       const linkValue = sourceCell.key("link").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
-      const resolved = resolveLink(tx, parsedLink);
+      const resolved = resolveLink(runtime, tx, parsedLink);
       expect(resolved.schema).toEqual({
         type: "object",
         properties: {
@@ -232,7 +235,7 @@ describe("link-resolution", () => {
       // Resolve with writeRedirect mode
       const linkValue = sourceCell.key("alias").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
-      const resolved = resolveLink(tx, parsedLink, "writeRedirect");
+      const resolved = resolveLink(runtime, tx, parsedLink, "writeRedirect");
       expect(resolved.schema).toEqual(schema);
     });
 
@@ -258,7 +261,7 @@ describe("link-resolution", () => {
 
       const linkValue = sourceCell.key("link").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
-      const resolved = resolveLink(tx, parsedLink);
+      const resolved = resolveLink(runtime, tx, parsedLink);
       expect(resolved.schema).toBeUndefined();
     });
 
@@ -298,7 +301,7 @@ describe("link-resolution", () => {
       tx = runtime.edit();
 
       const link = parseLink(sourceCell.get().link, sourceCell)!;
-      const resolved = resolveLink(tx, link);
+      const resolved = resolveLink(runtime, tx, link);
       expect(resolved.rootSchema).toEqual(rootSchema);
     });
 
@@ -356,7 +359,7 @@ describe("link-resolution", () => {
       // We need to resolve step by step since getAsNormalizedFullLink doesn't preserve schema
       const linkValue = cell2.key("data").get();
       const parsedLink = parseLink(linkValue, cell2)!;
-      const resolved = resolveLink(tx, parsedLink);
+      const resolved = resolveLink(runtime, tx, parsedLink);
 
       // Should have the schema of cell1.nested
       expect(resolved.schema).toEqual({
@@ -412,7 +415,7 @@ describe("link-resolution", () => {
 
       const linkValue = sourceCell.key("link").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
-      const resolved = resolveLink(tx, parsedLink);
+      const resolved = resolveLink(runtime, tx, parsedLink);
 
       // Should have the schema of an array item
       expect(resolved.schema).toEqual({
@@ -463,7 +466,7 @@ describe("link-resolution", () => {
       // Following the chain should preserve the destination schema
       const linkValue = sourceCell.key("ref").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
-      const resolved = resolveLink(tx, parsedLink);
+      const resolved = resolveLink(runtime, tx, parsedLink);
       expect(resolved.schema).toEqual(destinationSchema);
     });
 
@@ -492,7 +495,7 @@ describe("link-resolution", () => {
 
       const linkValue = sourceCell.key("link").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
-      const resolved = resolveLink(tx, parsedLink);
+      const resolved = resolveLink(runtime, tx, parsedLink);
 
       // Empty schema should be preserved
       expect(resolved.schema).toEqual(emptySchema);
@@ -555,7 +558,7 @@ describe("link-resolution", () => {
 
       const linkValue = sourceCell.key("link").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
-      const resolved = resolveLink(tx, parsedLink);
+      const resolved = resolveLink(runtime, tx, parsedLink);
 
       // Should have the schema of the array item
       expect(resolved.schema).toEqual({
@@ -597,7 +600,7 @@ describe("link-resolution", () => {
 
       const linkValue = sourceCell.key("link").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
-      const resolved = resolveLink(tx, parsedLink);
+      const resolved = resolveLink(runtime, tx, parsedLink);
 
       expect(resolved.schema).toEqual(schemaWithAdditional);
     });
@@ -643,7 +646,7 @@ describe("link-resolution", () => {
       // Resolving the ref should give us the target schema
       const linkValue = sourceCell.key("ref").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
-      const resolved = resolveLink(tx, parsedLink);
+      const resolved = resolveLink(runtime, tx, parsedLink);
       expect(resolved.schema).toEqual(schema2);
     });
 
@@ -686,7 +689,7 @@ describe("link-resolution", () => {
 
       // First verify the link to targetCell has the schema
       const dataLink = parseLink(sourceCell.key("data"), sourceCell)!;
-      const dataResolved = resolveLink(tx, dataLink);
+      const dataResolved = resolveLink(runtime, tx, dataLink);
       expect(dataResolved.schema).toEqual(schema);
 
       // Now resolve a path that goes through the link to "length".
@@ -703,7 +706,7 @@ describe("link-resolution", () => {
         path: ["data", "length"],
         schema: undefined, // Start without schema to test inheritance
       };
-      const resolved = resolveLink(tx, linkThroughToLength);
+      const resolved = resolveLink(runtime, tx, linkThroughToLength);
 
       // The resolved link should NOT have a schema since "length" is not
       // defined in the array schema
@@ -736,7 +739,7 @@ describe("link-resolution", () => {
       });
 
       const link = parseLink(targetCell.key("alias"));
-      const resolved = resolveLink(tx, link!, "writeRedirect");
+      const resolved = resolveLink(runtime, tx, link!, "writeRedirect");
 
       // Verify the resolved link doesn't have an overwrite field
       expect("overwrite" in resolved).toBe(false);
@@ -766,7 +769,7 @@ describe("link-resolution", () => {
       });
 
       const link = parseLink(aliasCell.key("ref"));
-      const resolved = resolveLink(tx, link!, "writeRedirect");
+      const resolved = resolveLink(runtime, tx, link!, "writeRedirect");
 
       // Check that all other properties are preserved
       expect(resolved.space).toBe(space);
@@ -805,7 +808,7 @@ describe("link-resolution", () => {
       });
 
       const link = parseLink(cellC.key("alias"));
-      const resolved = resolveLink(tx, link!, "writeRedirect");
+      const resolved = resolveLink(runtime, tx, link!, "writeRedirect");
 
       // Should resolve to the final destination without overwrite field
       expect("overwrite" in resolved).toBe(false);
@@ -1116,7 +1119,7 @@ describe("link-resolution", () => {
       const resolutionPromise = new Promise<any>((resolve) => {
         // When we resolve this link, it should detect the growing path cycle
         // and return the empty document with a data: URI
-        resolve(resolveLink(tx, cellA.getAsNormalizedFullLink()));
+        resolve(resolveLink(runtime, tx, cellA.getAsNormalizedFullLink()));
       });
 
       try {
@@ -1174,6 +1177,7 @@ describe("link-resolution", () => {
       // with a data: URI indicating the cycle was detected
       expect(() =>
         resolveLink(
+          runtime,
           tx,
           cellA.getAsNormalizedFullLink(),
           "value",

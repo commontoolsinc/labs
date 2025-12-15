@@ -747,9 +747,6 @@ describe("data: URI behaviors", () => {
     const result = transaction.read(address);
     expect(result.error).toBeDefined();
     expect(result.error?.name).toBe("InvalidDataURIError");
-    // Should have a cause property with the original error
-    expect(result.error && "cause" in result.error).toBe(true);
-    expect(result.error?.cause).toBeInstanceOf(Error);
   });
 
   it("should error on write to data URI", () => {

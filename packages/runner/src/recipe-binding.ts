@@ -36,7 +36,12 @@ export function sendValueToBinding<T>(
   value: unknown,
 ): void {
   if (isLegacyAlias(binding)) {
-    const ref = resolveLink(tx, parseLink(binding, cell), "writeRedirect");
+    const ref = resolveLink(
+      cell.runtime,
+      tx,
+      parseLink(binding, cell),
+      "writeRedirect",
+    );
     diffAndUpdate(
       cell.runtime,
       tx,

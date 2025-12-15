@@ -39,6 +39,12 @@ describe.skip("Push conflict", () => {
     synced() {
       return Promise.resolve();
     },
+    addCrossSpacePromise() {
+      throw new Error("Not implemented");
+    },
+    removeCrossSpacePromise() {
+      throw new Error("Not implemented");
+    },
     syncCell<T>(cell: Cell<T>) {
       return Promise.resolve(cell);
     },

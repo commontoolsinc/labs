@@ -280,6 +280,7 @@ export function normalizeAndDiff(
     );
     // Log reads of the alias, so that changing aliases cause refreshes
     const redirectLink = resolveLink(
+      runtime,
       tx,
       parseLink(currentValue, link),
       "writeRedirect",

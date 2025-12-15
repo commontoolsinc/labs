@@ -117,7 +117,10 @@ export class MapSet<K, V> {
     } else {
       const values = this.map.get(key)!;
       let existing: V = value;
-      if (this.equalFn !== undefined) {
+      if (values.has(value)) {
+        // Short cut via object identity
+        existing = value;
+      } else if (this.equalFn !== undefined) {
         const match = values.values().find((item) =>
           this.equalFn!(item, value)
         );

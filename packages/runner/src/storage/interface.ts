@@ -41,6 +41,18 @@ export type {
 };
 
 /**
+ * Base interface for storage errors. These are lightweight objects (not Error
+ * instances) used in Result types for better performance. Error instances are
+ * ~500x more expensive to create due to stack trace generation.
+ *
+ * When throwing these errors, wrap them in a real Error at the throw site.
+ */
+export interface IStorageError {
+  readonly name: string;
+  readonly message: string;
+}
+
+/**
  * Metadata that can be attached to read operations
  */
 export interface Metadata extends Record<PropertyKey, unknown> {}
@@ -99,6 +111,16 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * @returns Promise that resolves when all pending syncs are complete.
    */
   synced(): Promise<void>;
+
+  /**
+   * Add a promise to the list of cross-space promises.
+   */
+  addCrossSpacePromise(promise: Promise<void>): void;
+
+  /**
+   * Remove a promise from the list of cross-space promises.
+   */
+  removeCrossSpacePromise(promise: Promise<void>): void;
 
   /**
    * Load cell from storage. Will also subscribe to new changes.
@@ -644,22 +666,22 @@ export interface IStorageTransactionConsistencyMaintenance {
  * Error that is produced when transaction is being updated after it was already
  * aborted.
  */
-export interface IStorageTransactionAborted extends Error {
-  name: "StorageTransactionAborted";
+export interface IStorageTransactionAborted extends IStorageError {
+  readonly name: "StorageTransactionAborted";
   /**
    * Reason provided when transaction was aborted.
    */
-  reason: unknown;
+  readonly reason: unknown;
 }
 
 /**
  * Error indicates that transaction consistency guarantees have being
  * invalidated - some fact has changed while transaction was in progress.
  */
-export interface IStorageTransactionInconsistent extends Error {
-  name: "StorageTransactionInconsistent";
+export interface IStorageTransactionInconsistent extends IStorageError {
+  readonly name: "StorageTransactionInconsistent";
 
-  address: IMemoryAddress;
+  readonly address: IMemoryAddress;
 
   from(space: MemorySpace): IStorageTransactionInconsistent;
 }
@@ -688,19 +710,19 @@ export type CommitError =
   | InactiveTransactionError
   | StorageTransactionRejected;
 
-export interface INotFoundError extends Error {
-  name: "NotFoundError";
-  source: IAttestation;
-  address: IMemoryAddress;
-  path?: readonly MemoryAddressPathComponent[];
+export interface INotFoundError extends IStorageError {
+  readonly name: "NotFoundError";
+  readonly source: IAttestation;
+  readonly address: IMemoryAddress;
+  readonly path?: readonly MemoryAddressPathComponent[];
   from(space: MemorySpace): INotFoundError;
 }
 
 /**
  * Error returned when the media type is not supported by the storage transaction.
  */
-export interface IUnsupportedMediaTypeError extends Error {
-  name: "UnsupportedMediaTypeError";
+export interface IUnsupportedMediaTypeError extends IStorageError {
+  readonly name: "UnsupportedMediaTypeError";
 
   from(space: MemorySpace): IUnsupportedMediaTypeError;
 }
@@ -708,9 +730,9 @@ export interface IUnsupportedMediaTypeError extends Error {
 /**
  * Error returned when a data URI is invalid or cannot be parsed.
  */
-export interface IInvalidDataURIError extends Error {
-  name: "InvalidDataURIError";
-  cause: Error;
+export interface IInvalidDataURIError extends IStorageError {
+  readonly name: "InvalidDataURIError";
+  readonly cause?: IStorageError;
 
   from(space: MemorySpace): IInvalidDataURIError;
 }
@@ -736,8 +758,8 @@ export type WriterError =
   | IStorageTransactionWriteIsolationError
   | IReadOnlyAddressError;
 
-export interface IStorageTransactionComplete extends Error {
-  name: "StorageTransactionCompleteError";
+export interface IStorageTransactionComplete extends IStorageError {
+  readonly name: "StorageTransactionCompleteError";
 }
 
 /**
@@ -821,9 +843,9 @@ export type PullError =
   | IConnectionError
   | IAuthorizationError;
 
-export interface IStoreError extends Error {
-  name: "StoreError";
-  cause: Error;
+export interface IStoreError extends IStorageError {
+  readonly name: "StoreError";
+  readonly cause: IStorageError;
 }
 
 /**
@@ -863,30 +885,30 @@ export interface IReadActivity extends IMemorySpaceAddress {
  * Error is returned on an attempt to open writer in a transaction that already
  * has a writer for a different space.
  */
-export interface IStorageTransactionWriteIsolationError extends Error {
-  name: "StorageTransactionWriteIsolationError";
+export interface IStorageTransactionWriteIsolationError extends IStorageError {
+  readonly name: "StorageTransactionWriteIsolationError";
 
   /**
    * Memory space writer that is already open.
    */
-  open: MemorySpace;
+  readonly open: MemorySpace;
 
   /**
    * Memory space writer could not be opened for.
    */
-  requested: MemorySpace;
+  readonly requested: MemorySpace;
 }
 
 /**
  * Error returned when attempting to write to a read-only address (data: URI).
  */
-export interface IReadOnlyAddressError extends Error {
-  name: "ReadOnlyAddressError";
+export interface IReadOnlyAddressError extends IStorageError {
+  readonly name: "ReadOnlyAddressError";
 
   /**
    * The read-only address that was attempted to be written to.
    */
-  address: IMemoryAddress;
+  readonly address: IMemoryAddress;
 
   from(space: MemorySpace): IReadOnlyAddressError;
 }
@@ -897,18 +919,18 @@ export interface IReadOnlyAddressError extends Error {
  * (state changed). This error indicates a type mismatch that would persist
  * even if the transaction were retried.
  */
-export interface ITypeMismatchError extends Error {
-  name: "TypeMismatchError";
+export interface ITypeMismatchError extends IStorageError {
+  readonly name: "TypeMismatchError";
 
   /**
    * The address being accessed.
    */
-  address: IMemoryAddress;
+  readonly address: IMemoryAddress;
 
   /**
    * The actual type encountered.
    */
-  actualType: string;
+  readonly actualType: string;
 
   from(space: MemorySpace): ITypeMismatchError;
 }
@@ -928,3 +950,15 @@ export {
   createNonReactiveTransaction,
   TransactionWrapper,
 } from "./extended-storage-transaction.ts";
+
+/**
+ * Converts an IStorageError to a throwable Error instance.
+ * Use this when you need to actually throw a storage error.
+ */
+export const toThrowable = (error: IStorageError): Error => {
+  const throwable = new Error(error.message);
+  throwable.name = error.name;
+  // Copy all enumerable properties from the storage error
+  Object.assign(throwable, error);
+  return throwable;
+};

@@ -8,6 +8,7 @@ import {
 } from "./link-utils.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import type { Runtime } from "./runtime.ts";
 
 const logger = getLogger("link-resolution");
 
@@ -60,6 +61,7 @@ const MAX_PATH_RESOLUTION_LENGTH = 100;
  * @returns The resolved link.
  */
 export function resolveLink(
+  runtime: Runtime,
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   lastNode: LastNode = "value",
@@ -170,6 +172,7 @@ export function resolveLink(
     }
 
     if (nextLink !== undefined) {
+      const crossSpace = nextLink.space !== link.space;
       if (nextLink.schema === undefined && link.schema !== undefined) {
         link = {
           ...nextLink,
@@ -178,6 +181,17 @@ export function resolveLink(
         };
       } else {
         link = nextLink;
+      }
+      // If we're crossing spaces, force fetching data from server, as the
+      // original server will not have pushed the data to the client yet.
+      if (crossSpace) {
+        const maybePromise = runtime.getCellFromLink(link).sync();
+        if (maybePromise instanceof Promise) {
+          const promise = maybePromise.finally(() => {
+            runtime.storageManager.removeCrossSpacePromise(promise);
+          }) as unknown as Promise<void>;
+          runtime.storageManager.addCrossSpacePromise(promise);
+        }
       }
     } else {
       break;
