@@ -219,6 +219,8 @@ const cellMethods = new Set<keyof ICell<unknown>>([
   "send",
   "update",
   "push",
+  "remove",
+  "removeAll",
   "equals",
   "equalLinks",
   "key",
@@ -720,6 +722,57 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       recursivelyAddIDIfNeeded([...array, ...value], this._frame),
       cause,
     );
+  }
+
+  remove(
+    ref: T extends (infer U)[] ? (U | AnyCell<U>) : never,
+  ): void {
+    const array = this.get();
+    if (!Array.isArray(array)) {
+      throw new Error("Can't remove from non-array value");
+    }
+    const index = typeof ref === "object"
+      ? array.findIndex((item) =>
+        areLinksSame(
+          item,
+          ref,
+          this as unknown as Cell<any>,
+          true, // resolveBeforeComparing
+          this.tx,
+          this.runtime,
+        )
+      )
+      : array.indexOf(ref);
+    if (index === -1) {
+      return;
+    }
+    const newArray = [
+      ...array.slice(0, index),
+      ...array.slice(index + 1),
+    ] as T;
+    this.set(newArray);
+  }
+
+  removeAll(
+    ref: T extends (infer U)[] ? (U | AnyCell<U>) : never,
+  ): void {
+    const array = this.get();
+    if (!Array.isArray(array)) {
+      throw new Error("Can't remove from non-array value");
+    }
+    const newArray = array.filter((item) =>
+      typeof ref === "object"
+        ? !areLinksSame(
+          item,
+          ref,
+          this as unknown as Cell<any>,
+          true, // resolveBeforeComparing
+          this.tx,
+          this.runtime,
+        )
+        : item !== ref
+    ) as T;
+    this.set(newArray);
   }
 
   equals(other: any): boolean {
