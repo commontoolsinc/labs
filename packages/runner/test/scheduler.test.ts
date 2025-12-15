@@ -4515,3 +4515,420 @@ describe("pull mode with references", () => {
     expect(effectResult.get()).toBe("apple");
   });
 });
+
+describe("handler dependency pulling", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    runtime.scheduler.enablePullMode();
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should pull computed dependencies before running handler (handler is only reader)", async () => {
+    // This test validates that when a handler's populateDependencies callback
+    // reads a computed cell that has no other readers, the scheduler will
+    // pull (compute) that value before running the handler.
+    //
+    // Setup:
+    // - source cell: initial value
+    // - computed action: reads source, writes to computedOutput
+    // - event handler: reads computedOutput (via populateDependencies), writes to result
+    // - The handler is the ONLY reader of computedOutput
+
+    const source = runtime.getCell<number>(
+      space,
+      "handler-pull-source",
+      undefined,
+      tx,
+    );
+    source.set(10);
+
+    const computedOutput = runtime.getCell<number>(
+      space,
+      "handler-pull-computed",
+      undefined,
+      tx,
+    );
+
+    const eventStream = runtime.getCell<number>(
+      space,
+      "handler-pull-events",
+      undefined,
+      tx,
+    );
+    eventStream.set(0);
+
+    const result = runtime.getCell<number>(
+      space,
+      "handler-pull-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computedRuns = 0;
+    let handlerRuns = 0;
+    const executionOrder: string[] = [];
+
+    // Computed action: reads source, writes doubled value to computedOutput
+    const computedAction: Action = (actionTx) => {
+      computedRuns++;
+      executionOrder.push("computed");
+      const val = source.withTx(actionTx).get();
+      computedOutput.withTx(actionTx).send(val * 2);
+    };
+
+    // Subscribe the computed action
+    runtime.scheduler.subscribe(
+      computedAction,
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        writes: [computedOutput.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true },
+    );
+    await runtime.idle();
+
+    expect(computedRuns).toBe(1);
+    expect(computedOutput.get()).toBe(20); // 10 * 2
+
+    // Event handler: reads computedOutput and adds the event value
+    const eventHandler: EventHandler = (handlerTx, event: number) => {
+      handlerRuns++;
+      executionOrder.push("handler");
+      const computed = computedOutput.withTx(handlerTx).get();
+      result.withTx(handlerTx).send(computed + event);
+    };
+
+    // populateDependencies callback - this tells the scheduler what the handler reads
+    const populateDependencies = (depTx: IExtendedStorageTransaction) => {
+      computedOutput.withTx(depTx).get();
+    };
+
+    runtime.scheduler.addEventHandler(
+      eventHandler,
+      eventStream.getAsNormalizedFullLink(),
+      populateDependencies,
+    );
+
+    // Reset execution order tracking
+    executionOrder.length = 0;
+    computedRuns = 0;
+    handlerRuns = 0;
+
+    // Change source value - this marks computedAction as dirty
+    source.withTx(tx).send(20);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // The computed action should NOT run yet (pull mode, no reader)
+    expect(computedRuns).toBe(0);
+
+    // Now queue an event - this should trigger:
+    // 1. Scheduler sees handler depends on computedOutput (via populateDependencies)
+    // 2. computedOutput's producer (computedAction) is dirty
+    // 3. Scheduler pulls computedAction first
+    // 4. Then runs the handler
+    runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 5);
+    await runtime.idle();
+
+    // Computed should have run (pulled by handler dependency)
+    expect(computedRuns).toBe(1);
+    expect(computedOutput.get()).toBe(40); // 20 * 2
+
+    // Handler should have run with the fresh computed value
+    expect(handlerRuns).toBe(1);
+    expect(result.get()).toBe(45); // 40 + 5
+
+    // Execution order should be: computed first, then handler
+    expect(executionOrder).toEqual(["computed", "handler"]);
+  });
+
+  it("should handle multiple dirty dependencies before running handler", async () => {
+    // Test that multiple dirty computed dependencies are all pulled before handler runs
+
+    const source1 = runtime.getCell<number>(
+      space,
+      "handler-multi-source1",
+      undefined,
+      tx,
+    );
+    source1.set(10);
+
+    const source2 = runtime.getCell<number>(
+      space,
+      "handler-multi-source2",
+      undefined,
+      tx,
+    );
+    source2.set(100);
+
+    const computed1 = runtime.getCell<number>(
+      space,
+      "handler-multi-computed1",
+      undefined,
+      tx,
+    );
+    const computed2 = runtime.getCell<number>(
+      space,
+      "handler-multi-computed2",
+      undefined,
+      tx,
+    );
+
+    const eventStream = runtime.getCell<number>(
+      space,
+      "handler-multi-events",
+      undefined,
+      tx,
+    );
+    eventStream.set(0);
+
+    const result = runtime.getCell<number>(
+      space,
+      "handler-multi-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computed1Runs = 0;
+    let computed2Runs = 0;
+    let handlerRuns = 0;
+
+    // First computed action
+    const computedAction1: Action = (actionTx) => {
+      computed1Runs++;
+      const val = source1.withTx(actionTx).get();
+      computed1.withTx(actionTx).send(val * 2);
+    };
+
+    // Second computed action
+    const computedAction2: Action = (actionTx) => {
+      computed2Runs++;
+      const val = source2.withTx(actionTx).get();
+      computed2.withTx(actionTx).send(val * 3);
+    };
+
+    runtime.scheduler.subscribe(
+      computedAction1,
+      {
+        reads: [source1.getAsNormalizedFullLink()],
+        writes: [computed1.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true },
+    );
+
+    runtime.scheduler.subscribe(
+      computedAction2,
+      {
+        reads: [source2.getAsNormalizedFullLink()],
+        writes: [computed2.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true },
+    );
+
+    await runtime.idle();
+
+    expect(computed1.get()).toBe(20);
+    expect(computed2.get()).toBe(300);
+
+    // Handler reads both computed values
+    const eventHandler: EventHandler = (handlerTx, event: number) => {
+      handlerRuns++;
+      const c1 = computed1.withTx(handlerTx).get();
+      const c2 = computed2.withTx(handlerTx).get();
+      result.withTx(handlerTx).send(c1 + c2 + event);
+    };
+
+    const populateDependencies = (depTx: IExtendedStorageTransaction) => {
+      computed1.withTx(depTx).get();
+      computed2.withTx(depTx).get();
+    };
+
+    runtime.scheduler.addEventHandler(
+      eventHandler,
+      eventStream.getAsNormalizedFullLink(),
+      populateDependencies,
+    );
+
+    // Reset counters
+    computed1Runs = 0;
+    computed2Runs = 0;
+    handlerRuns = 0;
+
+    // Change both sources
+    source1.withTx(tx).send(20);
+    source2.withTx(tx).send(200);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Neither should run yet (pull mode)
+    expect(computed1Runs).toBe(0);
+    expect(computed2Runs).toBe(0);
+
+    // Queue event
+    runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 1);
+    await runtime.idle();
+
+    // Both computed should have run
+    expect(computed1Runs).toBe(1);
+    expect(computed2Runs).toBe(1);
+    expect(computed1.get()).toBe(40); // 20 * 2
+    expect(computed2.get()).toBe(600); // 200 * 3
+
+    // Handler should have run with fresh values
+    expect(handlerRuns).toBe(1);
+    expect(result.get()).toBe(641); // 40 + 600 + 1
+  });
+
+  it("should re-queue event if dependencies change during pull", async () => {
+    // Test the scenario where pulling one dependency causes another to become dirty
+    // (e.g., a chain: source -> computed1 -> computed2 -> handler)
+    // The handler should wait until the full chain is computed
+
+    const source = runtime.getCell<number>(
+      space,
+      "handler-chain-source",
+      undefined,
+      tx,
+    );
+    source.set(5);
+
+    const computed1 = runtime.getCell<number>(
+      space,
+      "handler-chain-computed1",
+      undefined,
+      tx,
+    );
+    const computed2 = runtime.getCell<number>(
+      space,
+      "handler-chain-computed2",
+      undefined,
+      tx,
+    );
+
+    const eventStream = runtime.getCell<number>(
+      space,
+      "handler-chain-events",
+      undefined,
+      tx,
+    );
+    eventStream.set(0);
+
+    const result = runtime.getCell<number>(
+      space,
+      "handler-chain-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computed1Runs = 0;
+    let computed2Runs = 0;
+    let handlerRuns = 0;
+
+    // computed1 reads source
+    const computedAction1: Action = (actionTx) => {
+      computed1Runs++;
+      const val = source.withTx(actionTx).get();
+      computed1.withTx(actionTx).send(val * 2);
+    };
+
+    // computed2 reads computed1
+    const computedAction2: Action = (actionTx) => {
+      computed2Runs++;
+      const val = computed1.withTx(actionTx).get();
+      computed2.withTx(actionTx).send(val + 10);
+    };
+
+    runtime.scheduler.subscribe(
+      computedAction1,
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        writes: [computed1.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true },
+    );
+
+    runtime.scheduler.subscribe(
+      computedAction2,
+      {
+        reads: [computed1.getAsNormalizedFullLink()],
+        writes: [computed2.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true },
+    );
+
+    await runtime.idle();
+
+    expect(computed1.get()).toBe(10); // 5 * 2
+    expect(computed2.get()).toBe(20); // 10 + 10
+
+    // Handler reads computed2 (end of chain)
+    const eventHandler: EventHandler = (handlerTx, event: number) => {
+      handlerRuns++;
+      const c2 = computed2.withTx(handlerTx).get();
+      result.withTx(handlerTx).send(c2 + event);
+    };
+
+    // populateDependencies reads computed2, but computed2 depends on computed1
+    // which depends on source. When source changes, both computed actions are dirty.
+    const populateDependencies = (depTx: IExtendedStorageTransaction) => {
+      computed2.withTx(depTx).get();
+    };
+
+    runtime.scheduler.addEventHandler(
+      eventHandler,
+      eventStream.getAsNormalizedFullLink(),
+      populateDependencies,
+    );
+
+    // Reset counters
+    computed1Runs = 0;
+    computed2Runs = 0;
+    handlerRuns = 0;
+
+    // Change source - this makes computed1 dirty, and when computed1 runs,
+    // it will make computed2 dirty
+    source.withTx(tx).send(10);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Queue event
+    runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 3);
+    await runtime.idle();
+
+    // Both computed should have run in order
+    expect(computed1Runs).toBe(1);
+    expect(computed2Runs).toBe(1);
+    expect(computed1.get()).toBe(20); // 10 * 2
+    expect(computed2.get()).toBe(30); // 20 + 10
+
+    // Handler should see the final computed value
+    expect(handlerRuns).toBe(1);
+    expect(result.get()).toBe(33); // 30 + 3
+  });
+});
