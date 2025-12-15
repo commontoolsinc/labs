@@ -100,6 +100,6 @@ export default pattern<Input, Output>(({ counter, invocationLog }) => {
     incrementCounter: incrementHandler({
       counter,
       invocationLog,
-    }) as unknown as Stream<void>,
+    }),
   };
 });
