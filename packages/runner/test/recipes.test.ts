@@ -299,12 +299,17 @@ describe("Recipe Runner", () => {
 
     const values: [number, number, number][] = [];
 
-    const incLogger = lift<{
-      counter: { value: number };
-      amount: number;
-      nested: { c: number };
-    }>(({ counter, amount, nested }) => {
-      values.push([counter.value, amount, nested.c]);
+    const incLogger = lift<
+      {
+        counter: { value: number };
+        amount: number;
+        nested: { c: number };
+      },
+      [number, number, number]
+    >(({ counter, amount, nested }) => {
+      const tuple: [number, number, number] = [counter.value, amount, nested.c];
+      values.push(tuple);
+      return tuple;
     });
 
     const incHandler = handler<
@@ -341,11 +346,11 @@ describe("Recipe Runner", () => {
     await result.pull();
 
     result.key("stream").send({ amount: 1 });
-    await counter.pull();
+    await runtime.idle();
     expect(values).toEqual([[1, 1, 0]]);
 
     result.key("stream").send({ amount: 2 });
-    await counter.pull();
+    await runtime.idle();
 
     expect(values).toContainEqual([1, 1, 0]);
 
