@@ -13,7 +13,11 @@ import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
 import { addCommonIDfromObjectID } from "../src/data-updating.ts";
-import { areLinksSame, isAnyCellLink, parseLink } from "../src/link-utils.ts";
+import {
+  areLinksSame,
+  isPrimitiveCellLink,
+  parseLink,
+} from "../src/link-utils.ts";
 import { areNormalizedLinksSame } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -391,8 +395,8 @@ describe("Cell utility functions", () => {
     );
     c.set({ x: 10 });
     const ref = c.key("x").getAsLink();
-    expect(isAnyCellLink(ref)).toBe(true);
-    expect(isAnyCellLink({})).toBe(false);
+    expect(isPrimitiveCellLink(ref)).toBe(true);
+    expect(isPrimitiveCellLink({})).toBe(false);
   });
 
   it("should identify a cell proxy", () => {
@@ -2191,8 +2195,8 @@ describe("asCell with schema", () => {
     testCell.set(initialDataCopy);
     popFrame(frame1);
 
-    expect(isAnyCellLink(testCell.getRaw()[0])).toBe(true);
-    expect(isAnyCellLink(testCell.getRaw()[1])).toBe(true);
+    expect(isPrimitiveCellLink(testCell.getRaw()[0])).toBe(true);
+    expect(isPrimitiveCellLink(testCell.getRaw()[1])).toBe(true);
     expect(testCell.get()[0].name).toEqual("First Item");
     expect(testCell.get()[1].name).toEqual("Second Item");
     expect(testCell.key("0").key("nested").key("0").key("id").get()).toEqual(
@@ -2216,8 +2220,8 @@ describe("asCell with schema", () => {
     testCell.set(returnedData);
     popFrame(frame2);
 
-    expect(isAnyCellLink(testCell.getRaw()[0])).toBe(true);
-    expect(isAnyCellLink(testCell.getRaw()[1])).toBe(true);
+    expect(isPrimitiveCellLink(testCell.getRaw()[0])).toBe(true);
+    expect(isPrimitiveCellLink(testCell.getRaw()[1])).toBe(true);
     expect(testCell.get()[0].name).toEqual("First Item");
     expect(testCell.get()[1].name).toEqual("Second Item");
 
@@ -2294,8 +2298,8 @@ describe("asCell with schema", () => {
     arrayCell.push({ [ID]: "test", value: 43 });
     expect(frame.generatedIdCounter).toEqual(1); // No increment = no ID generated from it
     popFrame(frame);
-    expect(isAnyCellLink(c.getRaw()?.items[0])).toBe(true);
-    expect(isAnyCellLink(c.getRaw()?.items[1])).toBe(true);
+    expect(isPrimitiveCellLink(c.getRaw()?.items[0])).toBe(true);
+    expect(isPrimitiveCellLink(c.getRaw()?.items[1])).toBe(true);
     expect(arrayCell.get()).toEqualIgnoringSymbols([
       { value: 42 },
       { value: 43 },

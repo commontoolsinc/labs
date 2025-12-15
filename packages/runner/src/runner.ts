@@ -36,7 +36,7 @@ import { resolveLink } from "./link-resolution.ts";
 import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
-  isLink,
+  isCellLink,
   isSigilLink,
   isWriteRedirectLink,
   type NormalizedFullLink,
@@ -238,7 +238,7 @@ export class Runner {
     }, tx);
 
     // If the bindings are a cell, doc or doc link, convert them to an alias
-    if (isLink(argument)) {
+    if (isCellLink(argument)) {
       argument = createSigilLinkFromParsedLink(
         parseLink(argument),
         { base: processCell, includeSchema: true, overwrite: "redirect" },
@@ -1342,7 +1342,7 @@ function getSpellLink(recipeId: string): SigilLink {
 
 function containsOpaqueRef(value: unknown): boolean {
   if (isOpaqueRef(value)) return true;
-  if (isLink(value)) return false;
+  if (isCellLink(value)) return false;
   if (isRecord(value)) {
     return Object.values(value).some(containsOpaqueRef);
   }
@@ -1350,7 +1350,7 @@ function containsOpaqueRef(value: unknown): boolean {
 }
 
 export function cellAwareDeepCopy<T = unknown>(value: T): Mutable<T> {
-  if (isLink(value)) return value as Mutable<T>;
+  if (isCellLink(value)) return value as Mutable<T>;
   if (isRecord(value)) {
     return Array.isArray(value)
       ? value.map(cellAwareDeepCopy) as unknown as Mutable<T>
@@ -1415,7 +1415,7 @@ export function mergeObjects<T>(
     // If we have a literal value, return it. Same for arrays, since we wouldn't
     // know how to merge them. Note that earlier objects take precedence, so if
     // an earlier was e.g. an object, we'll return that instead of the literal.
-    if (!isObject(obj) || isLink(obj)) {
+    if (!isObject(obj) || isCellLink(obj)) {
       return obj as T;
     }
 

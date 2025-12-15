@@ -28,7 +28,7 @@ import { Action, Scheduler } from "./scheduler.ts";
 import { Engine } from "./harness/index.ts";
 import {
   CellLink,
-  isLink,
+  isCellLink,
   isNormalizedFullLink,
   type NormalizedFullLink,
   NormalizedLink,
@@ -423,7 +423,7 @@ export class Runtime {
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<any> {
-    let link = isLink(cellLink)
+    let link = isCellLink(cellLink)
       ? parseLink(cellLink)
       : isNormalizedFullLink(cellLink)
       ? cellLink
