@@ -73,7 +73,9 @@ export default pattern<Input, Output>(({ counter, invocationLog }) => {
             ? <p style={{ color: "#999" }}>No invocations yet</p>
             : (
               <ul style={{ maxHeight: "200px", overflowY: "auto" }}>
-                {invocationLog.map((logEntry, i) => <li key={i}>{logEntry}</li>)}
+                {invocationLog.map((logEntry, i) => (
+                  <li key={i}>{logEntry}</li>
+                ))}
               </ul>
             )}
         </div>
