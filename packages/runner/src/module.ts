@@ -30,6 +30,11 @@ export class ModuleRegistry {
   }
 }
 
+export interface RawModuleOptions {
+  /** If true, this module is an effect (side-effectful) rather than a computation */
+  isEffect?: boolean;
+}
+
 // This corresponds to the node factory factories in common-builder:module.ts.
 // But it's here, because the signature depends on implementation details of the
 // runner, and won't work with any other runners.
@@ -42,9 +47,11 @@ export function raw<T, R>(
     parentCell: Cell<any>,
     runtime: Runtime,
   ) => Action,
+  options?: RawModuleOptions,
 ): ModuleFactory<T, R> {
   return createNodeFactory({
     type: "raw",
     implementation,
+    isEffect: options?.isEffect,
   });
 }
