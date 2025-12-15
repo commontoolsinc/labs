@@ -324,9 +324,9 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
   };
 
   // Run the schema traversal to populate schemaTracker with links.
-  // Pass forceTraverse=true because the entry document may already be in
-  // schemaTracker (that's how we found it), but we need to re-traverse
-  // it to discover any new links after it changed.
+  // The caller should have removed the entry document from schemaTracker
+  // before calling this function, so the traverser will re-traverse it
+  // and discover any new links.
   loadFactsForDoc(
     manager,
     attestation,
@@ -335,7 +335,6 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
     cfc,
     schemaTracker,
     newLinks,
-    true, // forceTraverse
   );
 
   return { schemaTracker, newLinks };
@@ -351,12 +350,11 @@ function loadFactsForDoc(
   cfc: ContextualFlowControl,
   schemaTracker: MapSet<string, SchemaPathSelector>,
   newLinks?: Array<{ docKey: string; schema: SchemaPathSelector }>,
-  forceTraverse = false,
 ) {
   const factKey = manager.toKey(fact.address);
 
-  // Check early termination (unless forceTraverse is set for re-evaluating changed docs)
-  if (!forceTraverse && schemaTracker.hasValue(factKey, selector)) {
+  // Check early termination - if this doc+schema is already tracked, skip
+  if (schemaTracker.hasValue(factKey, selector)) {
     return;
   }
 

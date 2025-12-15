@@ -756,6 +756,11 @@ class MemoryProviderSession<
       if (docId === null) continue;
 
       for (const schema of schemas) {
+        // Remove the entry from schemaTracker before re-evaluating.
+        // This allows the traverser to re-traverse the document and discover
+        // any new links that were added. The traverser will add it back.
+        this.sharedSchemaTracker.deleteValue(docKey, schema);
+
         const result = evaluateDocumentLinks(
           spaceSession,
           { id: docId, type: docType },
