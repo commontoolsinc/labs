@@ -1543,6 +1543,9 @@ export class Scheduler {
     // In case a directly invoked `run` is still running, wait for it to finish.
     if (this.runningPromise) await this.runningPromise;
 
+    // Track dirty dependencies that block events - these must be added to workSet
+    const eventBlockingDeps = new Set<Action>();
+
     // Process next event from the event queue.
 
     // TODO(seefeld): This should maybe run _after_ all pending actions, so it's
@@ -1590,6 +1593,7 @@ export class Scheduler {
         if (dirtyDeps.length > 0) {
           for (const dep of dirtyDeps) {
             this.pending.add(dep);
+            eventBlockingDeps.add(dep); // Track for workSet inclusion
           }
           // Re-queue the event to be processed after dependencies compute
           this.eventQueue.unshift(queuedEvent);
@@ -1676,10 +1680,14 @@ export class Scheduler {
 
       // Add only pending effects (not computations) to workSet
       for (const action of this.pending) {
-        // TODO(seefeld): Remove the true -- breaks tests right now
-        if (this.effects.has(action) || true) {
+        if (this.effects.has(action)) {
           workSet.add(action);
         }
+      }
+
+      // Add computations that are blocking deferred events
+      for (const action of eventBlockingDeps) {
+        workSet.add(action);
       }
 
       // Find all dirty computations that the effects depend on (transitively)
@@ -1810,7 +1818,13 @@ export class Scheduler {
       }
     }
 
-    if (this.pending.size === 0 && this.eventQueue.length === 0) {
+    // In pull mode, we consider ourselves done when there are no effects to execute
+    // (pending computations won't run without an effect pulling them)
+    const effectivePendingSize = this.pullMode
+      ? [...this.pending].filter((a) => this.effects.has(a)).length
+      : this.pending.size;
+
+    if (effectivePendingSize === 0 && this.eventQueue.length === 0) {
       const promises = this.idlePromises;
       for (const resolve of promises) resolve();
       this.idlePromises.length = 0;
