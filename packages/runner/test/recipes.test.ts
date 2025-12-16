@@ -1440,6 +1440,105 @@ describe("Recipe Runner", () => {
     expect(result2.list.get()).toEqual([{ text: "hello" }]);
   });
 
+  it("should wait for lift before handler that reads lift output from event", async () => {
+    // This test verifies that when handler A creates a lift and sends its output
+    // as an event to handler B, the scheduler waits for the lift to complete
+    // before running handler B.
+    //
+    // Flow:
+    // 1. Send { value: 5 } to streamA
+    // 2. Handler A creates a lift (double(value)) and sends its output to streamB
+    // 3. Handler B receives the lift output cell, reads its value, and logs it
+    // 4. The lift must run before handler B can read the correct value (10)
+    //
+    // This test should FAIL if populateDependencies doesn't receive the event,
+    // because then the scheduler won't know handler B depends on the lift output.
+
+    const log: number[] = [];
+
+    // Lift that doubles a number
+    const double = lift((x: number) => x * 2);
+
+    // Handler B receives an event (a cell reference) and logs its value
+    const handlerB = handler(
+      // Event: a cell reference (link to the doubled output)
+      { type: "number", asCell: true },
+      // No state needed
+      {},
+      (eventCell, _state) => {
+        // Read the cell value and log it
+        const value = eventCell.get();
+        log.push(value);
+      },
+    );
+
+    // Handler A receives a value, creates a lift, and sends its output to streamB
+    const handlerA = handler(
+      {
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+      },
+      {
+        type: "object",
+        properties: {
+          streamB: { asStream: true },
+        },
+        required: ["streamB"],
+      },
+      ({ value }, { streamB }) => {
+        // Create the lift dynamically and send its output to streamB
+        const doubled = double(value);
+        streamB.send(doubled);
+        return doubled;
+      },
+    );
+
+    const testRecipe = recipe<{}>(
+      "Handler dependency pulling test",
+      () => {
+        // Create handler B's stream (receives cell references, logs values)
+        const streamB = handlerB({});
+
+        // Create handler A's stream (creates lift and dispatches to streamB)
+        const streamA = handlerA({ streamB });
+
+        return { streamA };
+      },
+    );
+
+    const resultCell = runtime.getCell<{ streamA: any }>(
+      space,
+      "should wait for lift before handler that reads lift output from event",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    // Verify initial state
+    expect(log).toEqual([]);
+
+    // Send an event to handler A with value 5
+    result.key("streamA").send({ value: 5 });
+    await result.pull();
+
+    // Handler B should have logged 10 (5 * 2) - the lift must have run first
+    // If the lift didn't run before handler B, we'd get undefined or wrong value
+    expect(log).toEqual([10]);
+
+    // Send another event to verify consistent behavior
+    result.key("streamA").send({ value: 7 });
+    await result.pull();
+
+    // Handler B should have logged 14 (7 * 2)
+    expect(log).toEqual([10, 14]);
+  });
+
   it("should support non-reactive reads with sample()", async () => {
     let liftRunCount = 0;
 

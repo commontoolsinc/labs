@@ -967,19 +967,30 @@ export class Runner {
     }
 
     if (streamLink) {
+      // Helper to merge event into inputs
+      const mergeEventIntoInputs = (event: any) => {
+        const eventInputs = { ...(inputs as Record<string, any>) };
+        for (const key in eventInputs) {
+          if (isWriteRedirectLink(eventInputs[key])) {
+            const eventLink = parseLink(eventInputs[key], processCell);
+            if (areNormalizedLinksSame(eventLink, streamLink)) {
+              eventInputs[key] = event;
+            }
+          }
+        }
+        return eventInputs;
+      };
+
       // Register as event handler for the stream
       const handler = (tx: IExtendedStorageTransaction, event: any) => {
         // TODO(seefeld): Scheduler has to create the transaction instead
         if (event.preventDefault) event.preventDefault();
-        const eventInputs = { ...(inputs as Record<string, any>) };
+        const eventInputs = mergeEventIntoInputs(event);
         const cause = { ...(inputs as Record<string, any>) };
-        for (const key in eventInputs) {
-          if (isWriteRedirectLink(eventInputs[key])) {
-            // Use format-agnostic comparison for links
-            const eventLink = parseLink(eventInputs[key], processCell);
-
+        for (const key in cause) {
+          if (isWriteRedirectLink(cause[key])) {
+            const eventLink = parseLink(cause[key], processCell);
             if (areNormalizedLinksSame(eventLink, streamLink)) {
-              eventInputs[key] = event;
               cause[key] = crypto.randomUUID();
             }
           }
@@ -1066,18 +1077,18 @@ export class Runner {
       });
 
       // Create callback to populate dependencies for pull mode scheduling.
-      // This reads all cells the handler will access (from the argument schema).
-      // The event parameter is available but not used here - event-based dependencies
-      // would be added by calling runtime.getImmutableCell(space, event).get()
+      // This reads all cells the handler will access (from the argument schema and event).
       const populateDependencies = module.argumentSchema
-        ? (depTx: IExtendedStorageTransaction, _event: any) => {
+        ? (depTx: IExtendedStorageTransaction, event: any) => {
+          // Merge event into inputs the same way the handler does
+          const eventInputs = mergeEventIntoInputs(event);
           const inputsCell = this.runtime.getImmutableCell(
             processCell.space,
-            inputs,
+            eventInputs,
             undefined,
             depTx,
           );
-          // Use traverseCells to read into all nested Cell objects
+          // Use traverseCells to read into all nested Cell objects (including event)
           inputsCell.asSchema(module.argumentSchema!).get({
             traverseCells: true,
           });
