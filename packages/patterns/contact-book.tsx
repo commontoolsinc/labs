@@ -3,7 +3,6 @@ import {
   Cell,
   computed,
   Default,
-  derive,
   ifElse,
   NAME,
   navigateTo,
@@ -37,10 +36,9 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
 
   const contactCount = computed(() => contacts.get().length);
 
-  const contactSelectItems = derive(
-    contacts,
-    (contactList: Contact[]) =>
-      contactList.map((c) => ({ label: c.name || "(unnamed)", value: c.name })),
+  const contactSelectItems = computed(
+    () =>
+      contacts.map((c) => ({ label: c.name || "(unnamed)", value: c.name })),
   );
 
   const matchesSearch = (contact: Contact, query: string): boolean => {

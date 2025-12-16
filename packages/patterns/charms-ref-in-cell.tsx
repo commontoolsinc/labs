@@ -1,8 +1,8 @@
 /// <cts-enable />
 import {
   Cell,
+  computed,
   Default,
-  derive,
   handler,
   ifElse,
   lift,
@@ -29,7 +29,7 @@ const AddCharmSchema = toSchema<AddCharmState>();
 
 // Simple charm that will be instantiated multiple times
 const SimpleRecipe = recipe<{ id: string }>(({ id }) => ({
-  [NAME]: derive(id, (idValue) => `SimpleRecipe: ${idValue}`),
+  [NAME]: computed(() => `SimpleRecipe: ${id}`),
   [UI]: <div>Simple Recipe id {id}</div>,
 }));
 
@@ -103,10 +103,10 @@ export default recipe<RecipeInOutput, RecipeInOutput>(
                   <ct-button
                     onClick={goToCharm({ charm })}
                   >
-                    Go to Charm {derive(index, (i) => i + 1)}
+                    Go to Charm {computed(() => index + 1)}
                   </ct-button>
                   <span>
-                    Charm {derive(index, (i) => i + 1)}:{" "}
+                    Charm {computed(() => index + 1)}:{" "}
                     {charm[NAME] || "Unnamed"}
                   </span>
                 </li>

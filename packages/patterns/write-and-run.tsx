@@ -4,7 +4,6 @@ import {
   compileAndRun,
   computed,
   Default,
-  derive,
   generateText,
   handler,
   ifElse,
@@ -98,9 +97,9 @@ export default pattern<Input, Output>(({ prompt }) => {
   });
 
   // Step 2: Compile the generated code when ready
-  const compileParams = derive(processedResult, (p) => ({
-    files: p ? [{ name: "/main.tsx", contents: p }] : [],
-    main: p ? "/main.tsx" : "",
+  const compileParams = computed(() => ({
+    files: processedResult ? [{ name: "/main.tsx", contents: processedResult }] : [],
+    main: processedResult ? "/main.tsx" : "",
   }));
 
   const compiled = compileAndRun(compileParams);
