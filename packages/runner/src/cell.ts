@@ -433,7 +433,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     if (!space) {
       throw new Error(
         "Cannot create cell link: space is required.\n" +
-          "This can happen when manually calling .get() on closed-over cells.\n" +
+          "This can happen when accessing closed-over cells e.g. with .get().\n" +
           "Use `computed()` for reactive computations - it handles closures automatically.\n",
       );
     }
