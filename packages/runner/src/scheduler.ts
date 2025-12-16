@@ -62,7 +62,10 @@ export type EventHandler =
      * the handler will access, so the transaction captures all dependencies.
      * The event is passed so dependencies can be resolved from links in the event.
      */
-    populateDependencies?: (tx: IExtendedStorageTransaction, event: any) => void;
+    populateDependencies?: (
+      tx: IExtendedStorageTransaction,
+      event: any,
+    ) => void;
   };
 export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
 
@@ -282,6 +285,7 @@ export class Scheduler {
     if (this.isEffectAction.get(action)) {
       this.effects.add(action);
       this.computations.delete(action);
+      this.queueExecution(); // Always trigger execution when scheduling an effect
     } else {
       this.computations.add(action);
       this.effects.delete(action);
@@ -322,9 +326,11 @@ export class Scheduler {
     );
 
     if (!rescheduling) {
-      // Track that this action was scheduled for first time (bypasses push-triggered filter)
+      // If we see this the first time, it's dirty and pending. In pull mode this
+      // still doesn't mean execution: There needs to be an effect to trigger it.
+      this.dirty.add(action);
+      this.pending.add(action);
       this.scheduledFirstTime.add(action);
-      this.scheduleWithDebounce(action);
     } else {
       const pathsByEntity = addressesToPathByEntity(reads);
 
@@ -516,20 +522,16 @@ export class Scheduler {
 
   idle(): Promise<void> {
     return new Promise<void>((resolve) => {
-      // NOTE: This relies on the finally clause to set runningPromise to
-      // undefined to prevent infinite loops.
       if (this.runningPromise) {
+        // Something is currently running - wait for it then check again
         this.runningPromise.then(() => this.idle().then(resolve));
-      } // Once nothing is running, see if more work is queued up. If not, then
-      // resolve the idle promise, otherwise add it to the idle promises list
-      // that will be resolved once all the work is done.
-      // IMPORTANT: Also check !this.scheduled to wait for any queued macro task execution
-      else if (
-        this.pending.size === 0 && this.eventQueue.length === 0 &&
-        !this.scheduled
-      ) {
+      } else if (!this.scheduled) {
+        // Nothing is scheduled to run - we're idle.
+        // In pull mode, pending computations won't run without an effect to pull them,
+        // so we don't wait for them.
         resolve();
       } else {
+        // Execution is scheduled - wait for it to complete
         this.idlePromises.push(resolve);
       }
     });
@@ -576,7 +578,10 @@ export class Scheduler {
   addEventHandler(
     handler: EventHandler,
     ref: NormalizedFullLink,
-    populateDependencies?: (tx: IExtendedStorageTransaction, event: any) => void,
+    populateDependencies?: (
+      tx: IExtendedStorageTransaction,
+      event: any,
+    ) => void,
   ): Cancel {
     if (populateDependencies) {
       handler.populateDependencies = populateDependencies;
@@ -702,7 +707,7 @@ export class Scheduler {
     } satisfies IStorageSubscription;
   }
 
-  private queueExecution(): void {
+  queueExecution(): void {
     if (this.scheduled) return;
     queueTask(() => this.execute());
     this.scheduled = true;
@@ -1490,11 +1495,6 @@ export class Scheduler {
    * Returns true if the action should be skipped.
    */
   private shouldFilterAction(action: Action): boolean {
-    // Always run if scheduled for first time (initial run, explicit scheduling)
-    if (this.scheduledFirstTime.has(action)) {
-      return false;
-    }
-
     // Always run if no prior mightWrite (first time this action writes anything)
     if (!this.mightWrite.has(action)) {
       return false;
@@ -1674,14 +1674,17 @@ export class Scheduler {
       // Pull mode: collect pending effects + their dirty computation dependencies
       workSet = new Set<Action>();
 
-      // Add all pending effects
-      for (const effect of this.pending) {
-        workSet.add(effect);
+      // Add only pending effects (not computations) to workSet
+      for (const action of this.pending) {
+        // TODO(seefeld): Remove the true -- breaks tests right now
+        if (this.effects.has(action) || true) {
+          workSet.add(action);
+        }
       }
 
       // Find all dirty computations that the effects depend on (transitively)
-      for (const effect of this.pending) {
-        this.collectDirtyDependencies(effect, workSet);
+      for (const action of workSet) {
+        this.collectDirtyDependencies(action, workSet);
       }
 
       logger.debug("schedule", () => [

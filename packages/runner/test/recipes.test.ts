@@ -930,11 +930,17 @@ describe("Recipe Runner", () => {
     const result = runtime.run(tx, slowRecipe, { x: 1 }, resultCell);
     tx.commit();
 
+    // In pull-based scheduling, the lift won't run until something pulls on it.
+    // Start the pull (but don't await yet) to trigger the computation.
+    const pullPromise = result.pull();
+
+    // Give time for the lift to start but not complete
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(liftCalled).toBe(true);
     expect(timeoutCalled).toBe(false);
 
-    const value = await result.pull();
+    // Now await the pull to wait for completion
+    const value = await pullPromise;
     expect(timeoutCalled).toBe(true);
     expect(value).toMatchObject({ result: 2 });
   });
@@ -1637,5 +1643,77 @@ describe("Recipe Runner", () => {
     // Result should reflect both new values: 100 + 20 = 120
     // (the second cell's new value is picked up because the lift re-ran)
     expect(value).toMatchObject({ result: 120 });
+  });
+
+  it("should not run lifts until something pulls on them", async () => {
+    // This test verifies true pull-based scheduling:
+    // - Create two independent recipes with lifts
+    // - Instantiate both
+    // - Pull only on the first one's result
+    // - Only the lift in the first recipe should run
+
+    let lift1Runs = 0;
+    let lift2Runs = 0;
+
+    const recipe1 = recipe<{ value: number }>(
+      "Recipe 1 with lift",
+      ({ value }) => {
+        const doubled = lift((x: number) => {
+          lift1Runs++;
+          return x * 2;
+        })(value);
+        return { result: doubled };
+      },
+    );
+
+    const recipe2 = recipe<{ value: number }>(
+      "Recipe 2 with lift",
+      ({ value }) => {
+        const tripled = lift((x: number) => {
+          lift2Runs++;
+          return x * 3;
+        })(value);
+        return { result: tripled };
+      },
+    );
+
+    // Instantiate both recipes
+    const resultCell1 = runtime.getCell<{ result: number }>(
+      space,
+      "lift-pull-test-recipe1",
+      undefined,
+      tx,
+    );
+    const resultCell2 = runtime.getCell<{ result: number }>(
+      space,
+      "lift-pull-test-recipe2",
+      undefined,
+      tx,
+    );
+
+    const result1 = runtime.run(tx, recipe1, { value: 5 }, resultCell1);
+    const result2 = runtime.run(tx, recipe2, { value: 5 }, resultCell2);
+    tx.commit();
+    tx = runtime.edit();
+
+    // Before any pull, no lifts should have run
+    expect(lift1Runs).toBe(0);
+    expect(lift2Runs).toBe(0);
+
+    // Pull only on recipe 1's result
+    const value1 = await result1.pull();
+    expect(value1).toMatchObject({ result: 10 });
+
+    // Only lift1 should have run, lift2 should NOT have run
+    expect(lift1Runs).toBe(1);
+    expect(lift2Runs).toBe(0);
+
+    // Now pull on recipe 2's result
+    const value2 = await result2.pull();
+    expect(value2).toMatchObject({ result: 15 });
+
+    // Now lift2 should have run
+    expect(lift1Runs).toBe(1);
+    expect(lift2Runs).toBe(1);
   });
 });

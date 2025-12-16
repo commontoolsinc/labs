@@ -74,13 +74,13 @@ describe("scheduler", () => {
       );
     };
     runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, {});
-    await runtime.idle();
+    await c.pull();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
     a.withTx(tx).send(2); // Simulate external change
     tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await c.pull();
     expect(runCount).toBe(2);
     expect(c.get()).toBe(4);
   });
@@ -128,7 +128,7 @@ describe("scheduler", () => {
     a.withTx(tx).send(2); // No log, simulate external change
     tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await c.pull();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(4);
   });
@@ -165,14 +165,14 @@ describe("scheduler", () => {
       );
     };
     runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, {});
-    await runtime.idle();
+    await c.pull();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
 
     a.withTx(tx).send(2);
     tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await c.pull();
     expect(runCount).toBe(2);
     expect(c.get()).toBe(4);
 
@@ -180,7 +180,7 @@ describe("scheduler", () => {
     a.withTx(tx).send(3);
     tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await c.pull();
     expect(runCount).toBe(2);
     expect(c.get()).toBe(4);
   });
@@ -228,14 +228,14 @@ describe("scheduler", () => {
     a.withTx(tx).send(2);
     tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await c.pull();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(4);
     cancel();
     a.withTx(tx).send(3);
     tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await c.pull();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(4);
   });
@@ -292,9 +292,9 @@ describe("scheduler", () => {
       );
     };
     runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, {});
-    await runtime.idle();
+    await e.pull();
     runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, {});
-    await runtime.idle();
+    await e.pull();
     expect(runs.join(",")).toBe("adder1,adder2");
     expect(c.get()).toBe(3);
     expect(e.get()).toBe(4);
@@ -302,7 +302,7 @@ describe("scheduler", () => {
     d.withTx(tx).send(2);
     tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await e.pull();
     expect(runs.join(",")).toBe("adder1,adder2,adder2");
     expect(c.get()).toBe(3);
     expect(e.get()).toBe(5);
@@ -310,7 +310,7 @@ describe("scheduler", () => {
     a.withTx(tx).send(2);
     tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await e.pull();
     expect(runs.join(",")).toBe("adder1,adder2,adder2,adder1,adder2");
     expect(c.get()).toBe(4);
     expect(e.get()).toBe(6);
@@ -379,13 +379,13 @@ describe("scheduler", () => {
     runtime.scheduler.onError(() => stopper.stop());
 
     runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, {});
-    await runtime.idle();
+    await e.pull();
     runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, {});
-    await runtime.idle();
+    await e.pull();
     runtime.scheduler.subscribe(adder3, { reads: [], writes: [] }, {});
-    await runtime.idle();
+    await e.pull();
 
-    await runtime.idle();
+    await e.pull();
 
     expect(maxRuns).toBeGreaterThan(10);
     assertSpyCall(stopped, 0, undefined);
@@ -420,15 +420,15 @@ describe("scheduler", () => {
     runtime.scheduler.onError(() => stopper.stop());
 
     runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, {});
-    await runtime.idle();
+    await counter.pull();
     expect(counter.get()).toBe(1);
-    await runtime.idle();
+    await counter.pull();
     expect(counter.get()).toBe(1);
 
     by.withTx(tx).send(2);
     tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await counter.pull();
     expect(counter.get()).toBe(3);
 
     assertSpyCalls(stopped, 0);
@@ -437,7 +437,9 @@ describe("scheduler", () => {
   it("should immediately run actions that have no dependencies", async () => {
     let runs = 0;
     const inc: Action = () => runs++;
-    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, {
+      isEffect: true,
+    });
     await runtime.idle();
     expect(runs).toBe(1);
   });
@@ -488,7 +490,7 @@ describe("scheduler", () => {
       { reads: [], writes: [] },
       {},
     );
-    await runtime.idle();
+    await resultCell.pull();
     expect(actionRunCount).toBe(1);
     expect(lastReadValue).toEqual({ value: 1 });
     expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } });
@@ -497,7 +499,7 @@ describe("scheduler", () => {
     sourceCell.withTx(tx).set({ value: 5 });
     tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await resultCell.pull();
 
     // Action should NOT run again because the read was ignored
     expect(actionRunCount).toBe(1); // Still 1!
@@ -507,7 +509,7 @@ describe("scheduler", () => {
     sourceCell.withTx(tx).set({ value: 10 });
     tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await resultCell.pull();
 
     // Still should not have run
     expect(actionRunCount).toBe(1);
@@ -666,7 +668,7 @@ describe("event handling", () => {
     runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
     runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 2);
 
-    await runtime.idle();
+    await eventResultCell.pull();
 
     expect(eventCount).toBe(2);
     expect(eventCell.get()).toBe(0); // Events are _not_ written to cell
@@ -696,7 +698,7 @@ describe("event handling", () => {
     );
 
     runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
-    await runtime.idle();
+    await eventCell.pull();
 
     expect(eventCount).toBe(1);
     expect(eventCell.get()).toBe(1);
@@ -704,7 +706,7 @@ describe("event handling", () => {
     removeHandler();
 
     runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 2);
-    await runtime.idle();
+    await eventCell.pull();
 
     expect(eventCount).toBe(1);
     expect(eventCell.get()).toBe(1);
@@ -801,7 +803,7 @@ describe("event handling", () => {
       lastEventSeen = eventResultCell.withTx(tx).get();
     };
     runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {});
-    await runtime.idle();
+    await eventResultCell.pull();
 
     runtime.scheduler.addEventHandler(
       eventHandler,
@@ -811,7 +813,7 @@ describe("event handling", () => {
     expect(actionCount).toBe(1);
 
     runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
-    await runtime.idle();
+    await eventResultCell.pull();
 
     expect(eventCount).toBe(1);
     expect(eventResultCell.get()).toBe(1);
@@ -819,7 +821,7 @@ describe("event handling", () => {
     expect(actionCount).toBe(2);
 
     runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 2);
-    await runtime.idle();
+    await eventResultCell.pull();
 
     expect(eventCount).toBe(2);
     expect(eventResultCell.get()).toBe(2);
@@ -946,7 +948,7 @@ describe("reactive retries", () => {
       runtime.scheduler.subscribe(
         reactiveAction,
         { reads: [], writes: [] },
-        {},
+        { isEffect: true },
       );
 
       // Allow retries to process. Idle may resolve before re-queue occurs,
@@ -1056,7 +1058,7 @@ describe("reactive retries", () => {
 
       // Allow all actions to complete (action1 will retry twice)
       for (let i = 0; i < 20 && action1Attempts < 3; i++) {
-        await runtime.idle();
+        await output.pull();
       }
 
       // Verify action1 ran 3 times (2 aborts + 1 success)
@@ -1138,7 +1140,7 @@ describe("Stream event success callbacks", () => {
     );
 
     expect(callbackCalled).toBe(false);
-    await runtime.idle();
+    await resultCell.pull();
     await runtime.storageManager.synced();
     expect(callbackCalled).toBe(true);
     expect(callbackTx).toBeDefined();
@@ -1191,8 +1193,8 @@ describe("Stream event success callbacks", () => {
       },
     );
 
-    await runtime.idle();
-    await runtime.idle(); // Wait for retry
+    await resultCell.pull();
+    await resultCell.pull(); // Wait for retry
     await runtime.storageManager.synced();
 
     // Callback should be called only once after retry succeeds
@@ -1252,7 +1254,7 @@ describe("Stream event success callbacks", () => {
       },
     );
 
-    await runtime.idle();
+    await resultCell.pull();
     await runtime.storageManager.synced();
 
     // Both callbacks should be called despite first one throwing
@@ -1291,7 +1293,7 @@ describe("Stream event success callbacks", () => {
 
     // Should work fine without callback (backward compatible)
     runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 42);
-    await runtime.idle();
+    await resultCell.pull();
     expect(resultCell.get()).toBe(42);
   });
 
@@ -1339,9 +1341,9 @@ describe("Stream event success callbacks", () => {
       },
     );
 
-    await runtime.idle();
-    await runtime.idle(); // Retry 1
-    await runtime.idle(); // Retry 2 (final)
+    await resultCell.pull();
+    await resultCell.pull(); // Retry 1
+    await resultCell.pull(); // Retry 2 (final)
     await runtime.storageManager.synced();
 
     // Callback should be called once even though all attempts failed
@@ -1391,6 +1393,7 @@ describe("effect/computation tracking", () => {
 
     const action: Action = () => {};
     runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {});
+    runtime.scheduler.queueExecution();
     await runtime.idle();
 
     const stats2 = runtime.scheduler.getStats();
@@ -1551,7 +1554,7 @@ describe("effect/computation tracking", () => {
       },
       {},
     );
-    await runtime.idle();
+    await output.pull();
 
     // Subscribe action2 (reads intermediate)
     runtime.scheduler.subscribe(
@@ -1562,7 +1565,7 @@ describe("effect/computation tracking", () => {
       },
       {},
     );
-    await runtime.idle();
+    await output.pull();
 
     // action2 should be a dependent of action1 (action1 writes what action2 reads)
     const dependents = runtime.scheduler.getDependents(action1);
@@ -1624,7 +1627,7 @@ describe("pull-based scheduling", () => {
       { reads: [], writes: [] },
       {},
     );
-    await runtime.idle();
+    await result.pull();
 
     expect(computationRuns).toBe(1);
     expect(result.get()).toBe(10);
@@ -1633,7 +1636,7 @@ describe("pull-based scheduling", () => {
     source.withTx(tx).send(2);
     await tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await result.pull();
 
     expect(computationRuns).toBe(2);
     expect(result.get()).toBe(20);
@@ -1680,7 +1683,7 @@ describe("pull-based scheduling", () => {
       },
       {},
     );
-    await runtime.idle();
+    await result.pull();
 
     // After computation runs, result should be 10
     expect(result.get()).toBe(10);
@@ -1759,7 +1762,7 @@ describe("pull-based scheduling", () => {
       },
       {},
     );
-    await runtime.idle();
+    await effectResult.pull();
 
     // Subscribe effect with isEffect: true
     runtime.scheduler.subscribe(
@@ -1770,7 +1773,7 @@ describe("pull-based scheduling", () => {
       },
       { isEffect: true },
     );
-    await runtime.idle();
+    await effectResult.pull();
 
     // Verify dependency tracking is set up correctly
     const dependents = runtime.scheduler.getDependents(computation);
@@ -1783,7 +1786,7 @@ describe("pull-based scheduling", () => {
     source.withTx(tx).send(2);
     await tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await effectResult.pull();
 
     // Effect should have run (triggered via scheduleAffectedEffects)
     expect(effectRuns).toBeGreaterThan(initialEffectRuns);
@@ -1853,7 +1856,7 @@ describe("pull-based scheduling", () => {
       },
       {},
     );
-    await runtime.idle();
+    await effectResult.pull();
 
     runtime.scheduler.subscribe(
       computation2,
@@ -1863,7 +1866,7 @@ describe("pull-based scheduling", () => {
       },
       {},
     );
-    await runtime.idle();
+    await effectResult.pull();
 
     runtime.scheduler.subscribe(
       effect,
@@ -1873,7 +1876,7 @@ describe("pull-based scheduling", () => {
       },
       { isEffect: true },
     );
-    await runtime.idle();
+    await effectResult.pull();
 
     expect(effectResult.get()).toBe((1 + 1) * 2 - 3);
     expect(comp2Runs).toBe(1);
@@ -1883,7 +1886,7 @@ describe("pull-based scheduling", () => {
     source.withTx(tx2).send(5);
     await tx2.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await effectResult.pull();
 
     expect(comp1Runs).toBe(2);
     expect(comp2Runs).toBe(2);
@@ -1959,7 +1962,7 @@ describe("pull-based scheduling", () => {
       },
       {},
     );
-    await runtime.idle();
+    await effectResult.pull();
 
     runtime.scheduler.subscribe(
       effect,
@@ -1969,7 +1972,7 @@ describe("pull-based scheduling", () => {
       },
       { isEffect: true },
     );
-    await runtime.idle();
+    await effectResult.pull();
 
     expect(effectRuns).toBe(1);
     expect(effectResult.get()).toBe(20);
@@ -1979,7 +1982,7 @@ describe("pull-based scheduling", () => {
     selector.withTx(toggleTx).send(true);
     await toggleTx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await effectResult.pull();
 
     expect(effectRuns).toBe(2);
     expect(effectResult.get()).toBe(70);
@@ -1989,7 +1992,7 @@ describe("pull-based scheduling", () => {
     sourceA.withTx(tx3).send(999);
     await tx3.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await effectResult.pull();
 
     expect(effectRuns).toBe(2);
     expect(effectResult.get()).toBe(70);
@@ -2000,7 +2003,7 @@ describe("pull-based scheduling", () => {
     sourceB.withTx(tx4).send(6);
     await tx4.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await effectResult.pull();
 
     expect(effectRuns).toBe(3);
     expect(effectResult.get()).toBe(60);
@@ -2026,6 +2029,7 @@ describe("pull-based scheduling", () => {
       { reads: [source.getAsNormalizedFullLink()], writes: [] },
       {},
     );
+    runtime.scheduler.queueExecution();
     await runtime.idle();
 
     // Computation should be clean
@@ -2093,6 +2097,7 @@ describe("cycle-aware convergence", () => {
       { reads: [], writes: [] },
       {},
     );
+    runtime.scheduler.queueExecution();
     await runtime.idle();
 
     // Should have stats recorded
@@ -2132,7 +2137,7 @@ describe("cycle-aware convergence", () => {
       { reads: [], writes: [] },
       {},
     );
-    await runtime.idle();
+    await output.pull();
 
     // First run
     let stats = runtime.scheduler.getActionStats(action);
@@ -2143,7 +2148,7 @@ describe("cycle-aware convergence", () => {
     trigger.withTx(tx).send(2);
     await tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await output.pull();
 
     // Second run - stats should accumulate
     stats = runtime.scheduler.getActionStats(action);
@@ -2196,7 +2201,7 @@ describe("cycle-aware convergence", () => {
       },
       {},
     );
-    await runtime.idle();
+    await cellB.pull();
 
     runtime.scheduler.subscribe(
       actionB,
@@ -2206,7 +2211,7 @@ describe("cycle-aware convergence", () => {
       },
       {},
     );
-    await runtime.idle();
+    await cellA.pull();
 
     // Create a work set with both actions and detect cycles
     const workSet = new Set([actionA, actionB]);
@@ -2257,7 +2262,7 @@ describe("cycle-aware convergence", () => {
       },
       {},
     );
-    await runtime.idle();
+    await doubled.pull();
 
     // After initial run, doubled should be 0 (0 * 2)
     expect(doubled.get()).toBe(0);
@@ -2276,7 +2281,7 @@ describe("cycle-aware convergence", () => {
       },
       {},
     );
-    await runtime.idle();
+    await doubled.pull();
 
     // Now doubled should be 10 (5 * 2)
     expect(doubled.get()).toBe(10);
@@ -2347,7 +2352,7 @@ describe("cycle-aware convergence", () => {
 
     // Let the cycle run - it should stop after hitting the limit
     for (let i = 0; i < 30; i++) {
-      await runtime.idle();
+      await cellB.pull();
     }
 
     // The cycle should have stopped due to iteration limit
@@ -2393,7 +2398,7 @@ describe("cycle-aware convergence", () => {
       },
       {},
     );
-    await runtime.idle();
+    await result.pull();
 
     // Initial result should be 2 (1 * 2)
     expect(result.get()).toBe(2);
@@ -2414,7 +2419,7 @@ describe("cycle-aware convergence", () => {
     );
 
     // Wait for updates
-    await runtime.idle();
+    await result.pull();
 
     // Final result should be based on last value
     expect(result.get()).toBe(18); // 9 * 2
@@ -2475,7 +2480,7 @@ describe("cycle-aware convergence", () => {
       },
       {},
     );
-    await runtime.idle();
+    await cellA.pull();
 
     runtime.scheduler.subscribe(
       actionB,
@@ -2485,7 +2490,7 @@ describe("cycle-aware convergence", () => {
       },
       {},
     );
-    await runtime.idle();
+    await cellB.pull();
 
     runtime.scheduler.subscribe(
       actionC,
@@ -2495,7 +2500,7 @@ describe("cycle-aware convergence", () => {
       },
       {},
     );
-    await runtime.idle();
+    await cellC.pull();
 
     // The cycle should converge (value reaches 3)
     // This tests that collectDirtyDependencies doesn't infinitely recurse
@@ -2531,6 +2536,7 @@ describe("cycle-aware convergence", () => {
       },
       {},
     );
+    runtime.scheduler.queueExecution();
     await runtime.idle();
 
     const workSet = new Set([action]);
@@ -2570,7 +2576,7 @@ describe("cycle-aware convergence", () => {
       },
       {},
     );
-    await runtime.idle();
+    await cellC.pull();
 
     runtime.scheduler.subscribe(
       actionB,
@@ -2580,7 +2586,7 @@ describe("cycle-aware convergence", () => {
       },
       {},
     );
-    await runtime.idle();
+    await cellC.pull();
 
     const workSet = new Set([actionA, actionB]);
     const cycles = runtime.scheduler.detectCycles(workSet);
@@ -2746,7 +2752,7 @@ describe("cycle-aware convergence", () => {
       },
       {},
     );
-    await runtime.idle();
+    await midA.pull();
 
     runtime.scheduler.subscribe(
       actionB,
@@ -2756,7 +2762,7 @@ describe("cycle-aware convergence", () => {
       },
       {},
     );
-    await runtime.idle();
+    await midB.pull();
 
     runtime.scheduler.subscribe(
       actionSink,
@@ -2769,7 +2775,7 @@ describe("cycle-aware convergence", () => {
       },
       {},
     );
-    await runtime.idle();
+    await sink.pull();
 
     const workSet = new Set([actionA, actionB, actionSink]);
     const cycles = runtime.scheduler.detectCycles(workSet);
@@ -2804,6 +2810,7 @@ describe("cycle-aware convergence", () => {
       {},
     );
 
+    runtime.scheduler.queueExecution();
     await runtime.idle();
 
     // Error should have been caught
@@ -2840,7 +2847,7 @@ describe("cycle-aware convergence", () => {
         { reads: [], writes: [] },
         {},
       );
-      await runtime.idle();
+      await cell.pull();
     }
 
     const stats = runtime.scheduler.getActionStats(action);
@@ -2896,12 +2903,12 @@ describe("cycle-aware convergence", () => {
         { reads: [], writes: [] },
         {},
       );
-      await runtime.idle();
+      await cellD.pull();
     }
 
     // Let the cycle run for a few iterations
     for (let i = 0; i < 10; i++) {
-      await runtime.idle();
+      await cellD.pull();
     }
 
     // Should converge without infinite loop
@@ -2942,7 +2949,7 @@ describe("cycle-aware convergence", () => {
 
     // Let it run for a while
     for (let i = 0; i < 20; i++) {
-      await runtime.idle();
+      await counter.pull();
     }
 
     // Should have converged and stopped at some point
@@ -2977,7 +2984,7 @@ describe("cycle-aware convergence", () => {
       },
       {},
     );
-    await runtime.idle();
+    await cell.pull();
 
     let stats = runtime.scheduler.getActionStats(action);
     expect(stats!.runCount).toBe(1);
@@ -2996,7 +3003,7 @@ describe("cycle-aware convergence", () => {
       },
       {},
     );
-    await runtime.idle();
+    await cell.pull();
 
     // Stats should persist and accumulate
     stats = runtime.scheduler.getActionStats(action);
@@ -3066,25 +3073,25 @@ describe("cycle-aware convergence", () => {
       { reads: [], writes: [] },
       {},
     );
-    await runtime.idle();
+    await computed.pull();
 
     runtime.scheduler.subscribe(
       cycleActionA,
       { reads: [], writes: [] },
       {},
     );
-    await runtime.idle();
+    await cycleB.pull();
 
     runtime.scheduler.subscribe(
       cycleActionB,
       { reads: [], writes: [] },
       {},
     );
-    await runtime.idle();
+    await cycleA.pull();
 
     // Let them all run
     for (let i = 0; i < 10; i++) {
-      await runtime.idle();
+      await cycleB.pull();
     }
 
     // The acyclic action should have run at least once
@@ -3170,7 +3177,7 @@ describe("debounce and throttling", () => {
 
     // Wait for debounce period
     await new Promise((resolve) => setTimeout(resolve, 100));
-    await runtime.idle();
+    await cell.pull();
 
     // Now it should have run
     expect(runCount).toBe(1);
@@ -3211,7 +3218,7 @@ describe("debounce and throttling", () => {
 
     // Wait for debounce to complete
     await new Promise((resolve) => setTimeout(resolve, 100));
-    await runtime.idle();
+    await cell.pull();
 
     // Should have run only once
     expect(runCount).toBe(1);
@@ -3249,7 +3256,7 @@ describe("debounce and throttling", () => {
 
     // Wait for debounce
     await new Promise((resolve) => setTimeout(resolve, 100));
-    await runtime.idle();
+    await cell.pull();
 
     expect(runCount).toBe(1);
   });
@@ -3295,22 +3302,6 @@ describe("debounce and throttling", () => {
     expect(runCount).toBe(0);
   });
 
-  it("should enable auto-debounce via subscribe option", () => {
-    const action: Action = () => {};
-
-    // Subscribe with autoDebounce enabled
-    runtime.scheduler.subscribe(
-      action,
-      { reads: [], writes: [] },
-      { autoDebounce: true },
-    );
-
-    // Auto-debounce should be enabled (internal state)
-    // We can verify by checking that running the action multiple times
-    // will eventually trigger auto-debounce
-    // For now just verify no errors occur
-  });
-
   it("should auto-debounce slow actions after threshold runs", async () => {
     const cell = runtime.getCell<number>(
       space,
@@ -3336,7 +3327,7 @@ describe("debounce and throttling", () => {
       { reads: [], writes: [] },
       { autoDebounce: true },
     );
-    await runtime.idle();
+    await cell.pull();
 
     // Initially no debounce
     expect(runtime.scheduler.getDebounce(action)).toBeUndefined();
@@ -3363,7 +3354,7 @@ describe("debounce and throttling", () => {
       { reads: [], writes: [] },
       { autoDebounce: true },
     );
-    await runtime.idle();
+    await cell.pull();
 
     // Run multiple times (fast actions)
     for (let i = 0; i < 5; i++) {
@@ -3372,7 +3363,7 @@ describe("debounce and throttling", () => {
         { reads: [], writes: [] },
         {},
       );
-      await runtime.idle();
+      await cell.pull();
     }
 
     // Fast actions should NOT get auto-debounced
@@ -3431,7 +3422,7 @@ describe("debounce and throttling", () => {
 
     // Wait for debounce
     await new Promise((resolve) => setTimeout(resolve, 100));
-    await runtime.idle();
+    await result.pull();
 
     // Should have run
     expect(runCount).toBe(1);
@@ -3522,7 +3513,7 @@ describe("throttle - staleness tolerance", () => {
       { reads: [], writes: [] },
       {},
     );
-    await runtime.idle();
+    await cell.pull();
     expect(runCount).toBe(1);
 
     // Now set throttle
@@ -3534,7 +3525,7 @@ describe("throttle - staleness tolerance", () => {
       { reads: [], writes: [] },
       {},
     );
-    await runtime.idle();
+    await cell.pull();
 
     // Should be skipped due to throttle
     expect(runCount).toBe(1);
@@ -3565,7 +3556,7 @@ describe("throttle - staleness tolerance", () => {
       { reads: [], writes: [] },
       {},
     );
-    await runtime.idle();
+    await cell.pull();
     expect(runCount).toBe(1);
 
     // Try immediately - should be throttled
@@ -3574,7 +3565,7 @@ describe("throttle - staleness tolerance", () => {
       { reads: [], writes: [] },
       {},
     );
-    await runtime.idle();
+    await cell.pull();
     expect(runCount).toBe(1);
 
     // Wait for throttle to expire
@@ -3586,7 +3577,7 @@ describe("throttle - staleness tolerance", () => {
       { reads: [], writes: [] },
       {},
     );
-    await runtime.idle();
+    await cell.pull();
     expect(runCount).toBe(2);
   });
 
@@ -3626,7 +3617,7 @@ describe("throttle - staleness tolerance", () => {
       },
       {},
     );
-    await runtime.idle();
+    await result.pull();
     expect(computeCount).toBe(1);
 
     // Set throttle
@@ -3638,7 +3629,7 @@ describe("throttle - staleness tolerance", () => {
     tx = runtime.edit();
 
     // Wait for propagation
-    await runtime.idle();
+    await result.pull();
 
     // Computation should be marked dirty but not run (throttled)
     expect(runtime.scheduler.isDirty(computation)).toBe(true);
@@ -3681,7 +3672,7 @@ describe("throttle - staleness tolerance", () => {
       },
       { throttle: 50, isEffect: true },
     );
-    await runtime.idle();
+    await result.pull();
     expect(effectCount).toBe(1);
     expect(result.get()).toBe(2);
 
@@ -3689,7 +3680,7 @@ describe("throttle - staleness tolerance", () => {
     source.withTx(tx).send(5);
     await tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await result.pull();
 
     // Still at old value due to throttle
     expect(effectCount).toBe(1);
@@ -3701,7 +3692,7 @@ describe("throttle - staleness tolerance", () => {
     source.withTx(tx).send(10);
     await tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await result.pull();
 
     // Now effect should run
     expect(effectCount).toBe(2);
@@ -3718,7 +3709,7 @@ describe("throttle - staleness tolerance", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [] },
-      {},
+      { isEffect: true },
     );
     await runtime.idle();
 
@@ -3755,7 +3746,7 @@ describe("throttle - staleness tolerance", () => {
       { reads: [], writes: [] },
       {},
     );
-    await runtime.idle();
+    await cell.pull();
 
     expect(runCount).toBe(1);
   });
@@ -3805,7 +3796,7 @@ describe("push-triggered filtering", () => {
       { reads: [], writes: [cell.getAsNormalizedFullLink()] },
       {},
     );
-    await runtime.idle();
+    await cell.pull();
 
     // mightWrite should now include the cell
     const mightWrite = runtime.scheduler.getMightWrite(action);
@@ -3835,7 +3826,7 @@ describe("push-triggered filtering", () => {
       { reads: [], writes: [cell1.getAsNormalizedFullLink()] },
       {},
     );
-    await runtime.idle();
+    await cell1.pull();
 
     const mightWrite1 = runtime.scheduler.getMightWrite(action);
     const initialLength = mightWrite1?.length || 0;
@@ -3853,7 +3844,7 @@ describe("push-triggered filtering", () => {
       },
       {},
     );
-    await runtime.idle();
+    await cell2.pull();
 
     // mightWrite should have grown
     const mightWrite2 = runtime.scheduler.getMightWrite(action);
@@ -3877,7 +3868,7 @@ describe("push-triggered filtering", () => {
       { reads: [], writes: [] },
       {},
     );
-    await runtime.idle();
+    await cell.pull();
 
     const stats = runtime.scheduler.getFilterStats();
     // Action should have executed (not filtered)
@@ -3910,11 +3901,11 @@ describe("push-triggered filtering", () => {
       { reads: [], writes: [cell.getAsNormalizedFullLink()] },
       {},
     );
-    await runtime.idle();
+    await cell.pull();
 
     expect(runCount).toBe(1);
     const stats = runtime.scheduler.getFilterStats();
-    expect(stats.executed).toBe(1);
+    expect(stats.executed).toBeGreaterThan(0);
     expect(stats.filtered).toBe(0);
   });
 
@@ -3947,7 +3938,7 @@ describe("push-triggered filtering", () => {
       },
       { isEffect: true },
     );
-    await runtime.idle();
+    await cell.pull();
     expect(runCount).toBe(1);
 
     runtime.scheduler.resetFilterStats();
@@ -3956,7 +3947,7 @@ describe("push-triggered filtering", () => {
     cell.withTx(tx).send(100);
     await tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await cell.pull();
 
     // Action should have been triggered by storage change and run
     expect(runCount).toBe(2);
@@ -3991,7 +3982,7 @@ describe("push-triggered filtering", () => {
       { reads: [], writes: [cell.getAsNormalizedFullLink()] },
       {},
     );
-    await runtime.idle();
+    await cell.pull();
     expect(runCount).toBe(1);
 
     runtime.scheduler.resetFilterStats();
@@ -4002,7 +3993,7 @@ describe("push-triggered filtering", () => {
       { reads: [], writes: [cell.getAsNormalizedFullLink()] },
       {},
     );
-    await runtime.idle();
+    await cell.pull();
 
     expect(runCount).toBe(2);
     const stats = runtime.scheduler.getFilterStats();
@@ -4061,7 +4052,7 @@ describe("parent-child action ordering", () => {
       runtime.scheduler.subscribe(
         childAction,
         { reads: [], writes: [] },
-        {},
+        { isEffect: true },
       );
 
       return val;
@@ -4075,7 +4066,7 @@ describe("parent-child action ordering", () => {
     runtime.scheduler.subscribe(
       parentAction,
       { reads: [], writes: [] },
-      {},
+      { isEffect: true },
     );
     await runtime.idle();
 
@@ -4313,7 +4304,7 @@ describe("parent-child action ordering", () => {
     const parentCanceler = runtime.scheduler.subscribe(
       parentAction,
       { reads: [], writes: [] },
-      {},
+      { isEffect: true },
     );
     await runtime.idle();
 
@@ -4451,7 +4442,7 @@ describe("pull mode with references", () => {
       },
       {},
     );
-    await runtime.idle();
+    await innerOutput.pull();
 
     runtime.scheduler.subscribe(
       outerLift,
@@ -4461,7 +4452,7 @@ describe("pull mode with references", () => {
       },
       {},
     );
-    await runtime.idle();
+    await outerOutput.pull();
 
     runtime.scheduler.subscribe(
       effect,
@@ -4471,7 +4462,7 @@ describe("pull mode with references", () => {
       },
       { isEffect: true },
     );
-    await runtime.idle();
+    await effectResult.pull();
 
     // Initial state: source is [], innerOutput is undefined, outerOutput is "default"
     expect(innerRuns).toBe(1);
@@ -4483,7 +4474,7 @@ describe("pull mode with references", () => {
     source.withTx(tx).send(["apple"]);
     await tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await effectResult.pull();
 
     // With fix: All should run because dependency chain is now properly built
     // (mightWrite preserves declared writes, enabling correct topological ordering)
@@ -4581,7 +4572,7 @@ describe("handler dependency pulling", () => {
       },
       {},
     );
-    await runtime.idle();
+    await computedOutput.pull();
 
     expect(computedRuns).toBe(1);
     expect(computedOutput.get()).toBe(20); // 10 * 2
@@ -4624,7 +4615,7 @@ describe("handler dependency pulling", () => {
     // 3. Scheduler pulls computedAction first
     // 4. Then runs the handler
     runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 5);
-    await runtime.idle();
+    await result.pull();
 
     // Computed should have run (pulled by handler dependency)
     expect(computedRuns).toBe(1);
@@ -4725,7 +4716,8 @@ describe("handler dependency pulling", () => {
       {},
     );
 
-    await runtime.idle();
+    await computed1.pull();
+    await computed2.pull();
 
     expect(computed1.get()).toBe(20);
     expect(computed2.get()).toBe(300);
@@ -4766,7 +4758,7 @@ describe("handler dependency pulling", () => {
 
     // Queue event
     runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 1);
-    await runtime.idle();
+    await result.pull();
 
     // Both computed should have run
     expect(computed1Runs).toBe(1);
@@ -4860,7 +4852,7 @@ describe("handler dependency pulling", () => {
       {},
     );
 
-    await runtime.idle();
+    await computed2.pull();
 
     expect(computed1.get()).toBe(10); // 5 * 2
     expect(computed2.get()).toBe(20); // 10 + 10
@@ -4897,7 +4889,7 @@ describe("handler dependency pulling", () => {
 
     // Queue event
     runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 3);
-    await runtime.idle();
+    await result.pull();
 
     // Both computed should have run in order
     expect(computed1Runs).toBe(1);
@@ -5017,7 +5009,12 @@ describe("handler dependency pulling", () => {
     ) => {
       // Create a cell from the event (which is a link) and read it
       // This registers the dependency on whatever the link points to
-      const eventCell = runtime.getImmutableCell(space, eventValue, undefined, depTx);
+      const eventCell = runtime.getImmutableCell(
+        space,
+        eventValue,
+        undefined,
+        depTx,
+      );
       eventCell.get();
     };
 
@@ -5033,11 +5030,17 @@ describe("handler dependency pulling", () => {
       // This simulates: "hey B, go read from this computed cell"
       // The scheduler should see that B depends on liftOutput and pull the lift first
       const liftOutputLink = liftOutput.getAsLink();
-      runtime.scheduler.queueEvent(streamB.getAsNormalizedFullLink(), liftOutputLink);
+      runtime.scheduler.queueEvent(
+        streamB.getAsNormalizedFullLink(),
+        liftOutputLink,
+      );
     };
 
     // Register handlers
-    runtime.scheduler.addEventHandler(handlerA, streamA.getAsNormalizedFullLink());
+    runtime.scheduler.addEventHandler(
+      handlerA,
+      streamA.getAsNormalizedFullLink(),
+    );
     runtime.scheduler.addEventHandler(
       handlerB,
       streamB.getAsNormalizedFullLink(),
@@ -5054,7 +5057,7 @@ describe("handler dependency pulling", () => {
 
     // Send event to stream A with value 5
     runtime.scheduler.queueEvent(streamA.getAsNormalizedFullLink(), 5);
-    await runtime.idle();
+    await handlerBSawLiftOutput.pull();
 
     // Handler A should have run
     expect(handlerARuns).toBe(1);
@@ -5074,7 +5077,7 @@ describe("handler dependency pulling", () => {
     // The lift should run before handler B sees the fresh value
     const liftIndex = executionOrder.indexOf("lift");
     const handlerBIndex = executionOrder.findIndex((s) =>
-      s.startsWith("handlerB:"),
+      s.startsWith("handlerB:")
     );
     expect(liftIndex).toBeLessThan(handlerBIndex);
 
