@@ -1,8 +1,8 @@
 /// <cts-enable />
 import {
   Cell,
+  computed,
   Default,
-  derive,
   handler,
   ifElse,
   lift,
@@ -31,7 +31,7 @@ type RecipeInOutput = {
 
 // the simple charm (to which we'll store a reference within a cell)
 const SimpleRecipe = recipe(({ id }: { id: string }) => ({
-  [NAME]: derive(id, (idValue) => `SimpleRecipe: ${idValue}`),
+  [NAME]: computed(() => `SimpleRecipe: ${id}`),
   [UI]: <div>Simple Recipe id {id}</div>,
 }));
 
@@ -110,10 +110,10 @@ export default recipe<RecipeInOutput, RecipeInOutput>(
       [UI]: (
         <div>
           <div>
-            Stored charm ID: {derive(cellRef, (innerCell) => {
-              if (!innerCell) return "undefined";
-              if (!innerCell.charm) return "no charm stored yet";
-              return innerCell.charm[UI] || "charm has no UI";
+            Stored charm ID: {computed(() => {
+              if (!cellRef) return "undefined";
+              if (!cellRef.charm) return "no charm stored yet";
+              return cellRef.charm[UI] || "charm has no UI";
             })}
           </div>
           <ct-button

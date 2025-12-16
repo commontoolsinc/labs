@@ -3,7 +3,6 @@ import {
   Cell,
   computed,
   Default,
-  derive,
   ifElse,
   NAME,
   navigateTo,
@@ -37,10 +36,9 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
 
   const contactCount = computed(() => contacts.get().length);
 
-  const contactSelectItems = derive(
-    contacts,
-    (contactList: Contact[]) =>
-      contactList.map((c) => ({ label: c.name || "(unnamed)", value: c.name })),
+  const contactSelectItems = computed(
+    () =>
+      contacts.map((c) => ({ label: c.name || "(unnamed)", value: c.name })),
   );
 
   const matchesSearch = (contact: Contact, query: string): boolean => {
@@ -69,29 +67,19 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="2" style="padding: 1rem;">
             {contacts.map((contact) => {
-              const isVisible = derive(
-                { contact, searchQuery },
-                (
-                  { contact: c, searchQuery: q }: {
-                    contact: Contact;
-                    searchQuery: string;
-                  },
-                ) => matchesSearch(c, q),
+              const isVisible = computed(() =>
+                matchesSearch(contact, searchQuery.get())
               );
 
-              const contactRelations = derive(
-                { name: contact.name, relationships },
-                (
-                  { name, relationships: rels }: {
-                    name: string;
-                    relationships: Relationship[];
-                  },
-                ) => {
-                  return rels.filter((r) =>
-                    r.fromName === name || r.toName === name
+              const contactRelations = computed(() => {
+                const name = contact.name;
+                return relationships
+                  .get()
+                  .filter(
+                    (r: Relationship) =>
+                      r.fromName === name || r.toName === name,
                   );
-                },
-              );
+              });
 
               return ifElse(
                 isVisible,
@@ -118,17 +106,11 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
                         </span>
                       )}
                       {/* Show relationships */}
-                      {contactRelations.map((rel) => (
+                      {contactRelations.map((rel: Relationship) => (
                         <span style="font-size: 0.75rem; color: var(--ct-color-primary-500);">
-                          ↔ {derive(
-                            { rel, name: contact.name },
-                            (
-                              { rel: r, name }: {
-                                rel: Relationship;
-                                name: string;
-                              },
-                            ) => r.fromName === name ? r.toName : r.fromName,
-                          )}
+                          ↔ {rel.fromName === contact.name
+                            ? rel.toName
+                            : rel.fromName}
                           {rel.label && <span>({rel.label})</span>}
                         </span>
                       ))}

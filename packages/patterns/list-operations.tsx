@@ -1,8 +1,8 @@
 /// <cts-enable />
 import {
   Cell,
+  computed,
   Default,
-  derive,
   handler,
   ID,
   lift,
@@ -91,9 +91,8 @@ const show = lift((items: Item[]) => {
 export default recipe<ListInput, ListOutput>(
   "list operations",
   ({ items }) => {
-    const lowerCase = derive(
-      items,
-      (items) => items.map((item) => item.title.toLowerCase()),
+    const lowerCase = computed(
+      () => items.map((item) => item.title.toLowerCase()),
     );
     // const lowerCase = items.map((item) => item.title.toLowerCase()); // fails with 'TypeError: item.title.toLowerCase is not a function'
 
@@ -101,22 +100,18 @@ export default recipe<ListInput, ListOutput>(
     // However, performing them on a ProxyObject (such as within a derive, or calling .get() on a Cell in a handler) will work as expected.
     // caveat: behaviour is only guaranteed to be correct for all operations IF the items include an [ID] property.
     // excluding the [ID] in this recipe leads to item alignment bugs when insertig or removing from items at the FRONT of an array
-    const itemsLessThanB = derive(
-      items,
-      (items) => items.filter((item) => item.title < "B"),
+    const itemsLessThanB = computed(
+      () => items.filter((item) => item.title < "B"),
     );
-    const extendedItems = derive(
-      items,
-      (items) =>
-        items.concat([
+    const extendedItems = computed(
+      () =>
+        items.get().concat([
           { [ID]: 5, title: "E" },
           { [ID]: 6, title: "F" },
         ]),
     );
-    const combinedItems = derive(
-      items,
-      (items) =>
-        items.reduce((acc: string, item: Item) => acc += item.title, ""),
+    const combinedItems = computed(
+      () => items.reduce((acc: string, item: Item) => acc += item.title, ""),
     );
 
     // Notice that you can bind the same cell to many types

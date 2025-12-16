@@ -471,6 +471,8 @@ const summary = computed(() => {
 
 ## Stable Array References with [ID]
 
+> **Important:** Most patterns don't need [ID]. For finding/removing items in arrays, use `Cell.equals()` as shown in the Level 1 pattern in PATTERNS.md. Only use [ID] when you need stable UI state across item reordering (sorting, shuffling, inserting at front).
+
 When working with arrays where items can be inserted, removed, or reordered, you may need stable identity tracking. The `[ID]` symbol provides this.
 
 ### Why [ID] Matters
@@ -502,12 +504,15 @@ const newItem = { [ID]: Math.random(), title: "New task", done: false };
 
 ### When to Use [ID]
 
+`[ID]` is for framework-level identity tracking when UI state needs to follow items as they move. It's NOT for user-level item identification or finding items in arrays.
+
 **Use [ID] when:**
-- Inserting items at the front of arrays
-- Sorting or shuffling arrays
-- Items have independent state that should persist across reordering
+- Inserting items at the front of arrays (framework needs stable references)
+- Sorting or shuffling arrays (UI state must follow items as they move)
+- Items have independent UI state that should persist across reordering (focus, animation state, etc.)
 
 **You DON'T need [ID] for:**
+- Finding/removing items in arrays (use `Cell.equals()` instead - see PATTERNS.md Level 1 example)
 - Simple append-only lists (adding to the end)
 - Lists where items are only removed, never reordered
 - Basic todo lists with simple checkbox binding
@@ -666,6 +671,45 @@ const groupedItems = computed(() => {
 ))}
 ```
 
+### lift() and Closure Limitations
+
+While `computed()` handles closures automatically through CTS transformation, the lower-level `lift()` function requires explicit parameter passing for all reactive dependencies.
+
+**Why this matters:** The reactive graph builder uses frame-based execution contexts. Each `lift()` creates a new frame, and cells from different frames cannot be accessed via closure.
+
+```typescript
+// ❌ WRONG - Closing over reactive value from outer scope
+const date = Cell.of("2024-01-15");
+const grouped = computed(() => {
+  // ... grouping logic
+});
+
+// This FAILS at runtime: "Accessing an opaque ref via closure is not supported"
+const result = lift((g) => g[date])(grouped);
+
+// ✅ CORRECT - Pass all reactive dependencies as parameters
+const result = lift((args) => args.g[args.d])({ g: grouped, d: date });
+```
+
+**When you see this error:**
+- Error: `"Accessing an opaque ref via closure is not supported"`
+- Cause: Using `lift()` and closing over a reactive value from an outer scope
+- Fix: Pass all reactive dependencies as explicit parameters to `lift()`
+
+**Why computed() doesn't have this issue:**
+
+The `/// <cts-enable />` transformer automatically extracts closures from `computed()` functions and rewrites them with explicit parameter passing. This is why `computed()` is the recommended API for patterns.
+
+```typescript
+// computed() handles this automatically
+const result = computed(() => grouped[date]);  // Just works!
+
+// lift() requires manual parameter passing
+const result = lift((args) => args.g[args.d])({ g: grouped, d: date });
+```
+
+**Best practice:** Use `computed()` in patterns. Only use `lift()` if you're working with lower-level reactive graph construction where you need explicit control over the computation structure.
+
 ## Cell.for() - Advanced Cell Creation
 
 `Cell.for(cause)` is for creating cells in reactive contexts (rarely needed):
@@ -741,13 +785,15 @@ const sortedItems = computed(() =>
 
 **Check 1: Is it wrapped in computed() outside JSX?**
 
+The limitation: **inline filtering/transformations in JSX won't update reactively**. You CAN and SHOULD map over `computed()` results - this is the recommended pattern.
+
 ```typescript
-// ❌ Direct filter doesn't create reactive node
+// ❌ WRONG: Inline filtering in JSX doesn't create reactive dependency
 {items.filter(item => !item.done).map(...)}
 
-// ✅ Use computed outside JSX
+// ✅ CORRECT: Use computed() outside JSX, then map over the result
 const activeItems = computed(() => items.filter(item => !item.done));
-{activeItems.map(...)}
+{activeItems.map(...)}  // Mapping over computed() works perfectly!
 ```
 
 **Check 2: Using ternary in JSX (attributes are fine)?**

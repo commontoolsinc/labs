@@ -34,7 +34,7 @@ With `Cell<T>` in your signature:
 | `.push(item)` | Add to array |
 | `.key("property")` | Navigate nested data |
 
-Without `Cell<>`, you can still display values in JSX, use in `computed()`, and map/filter - all reactively.
+Without `Cell<>`, you can still display values in JSX, pass to `computed()`, and map over arrays - all reactively. Note: filtering and transformations must be done in `computed()` outside JSX, then the result can be mapped inside JSX.
 
 ---
 

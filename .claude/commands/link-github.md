@@ -139,7 +139,7 @@ Successfully linked all GitHub repositories
 When this command is invoked, Claude should:
 
 1. **Parse arguments** from .common.json or command line
-2. **Verify prerequisites** (recipes directory, CT binary)
+2. **Verify prerequisites** (recipes directory)
 3. **Execute the Direct Execution Steps** as documented above
 4. **Track progress** using TodoWrite tool
 5. **Report results** concisely

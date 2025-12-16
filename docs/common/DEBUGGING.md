@@ -17,7 +17,8 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | Charm hangs, never renders | ifElse with composed pattern cell | Use local computed cell ([see below](#ifelse-with-composed-pattern-cells)) |
 | Data not updating | Missing `$` prefix or wrong event | Use `$checked`, `$value` ([COMPONENTS](COMPONENTS.md)) |
 | Filtered list not updating | Need computed() | Wrap in `computed()` ([CELLS](CELLS_AND_REACTIVITY.md)) |
-| Can't access variable in nested scope | Variable scoping limitation | Pre-compute grouped data ([see below](#variable-scoping-in-reactive-contexts)) |
+| Can't access variable in nested scope | Variable scoping limitation | Pre-compute grouped data or use lift() with explicit params ([see below](#variable-scoping-in-reactive-contexts)) |
+| "Accessing an opaque ref via closure is not supported" | Using lift() with closure | Pass all reactive deps as params to lift() ([CELLS](CELLS_AND_REACTIVITY.md#lift-and-closure-limitations)) |
 
 ---
 
@@ -257,20 +258,20 @@ Each component has specific event names. Check [COMPONENTS.md](COMPONENTS.md) fo
 
 **Issue:** Filter or sort doesn't update when dependencies change
 
-❌ **Problem:** Direct operations don't create reactive nodes
+❌ **Problem:** Inline filtering/transformations in JSX don't create reactive dependencies
 
 ```typescript
 {items.filter(item => !item.done).map(...)}  {/* Won't update! */}
 ```
 
-✅ **Solution:** Use `computed()` outside JSX
+✅ **Solution:** Use `computed()` outside JSX, then map over the result
 
 ```typescript
 const activeItems = computed(() => items.filter(item => !item.done));
 {activeItems.map(...)}  {/* Updates reactively! */}
 ```
 
-**Remember:** Within JSX, reactivity is automatic for simple expressions. Use `computed()` for transformations outside JSX.
+**The Pattern:** Compute transformations (filter, sort, group) outside JSX using `computed()`, then map over the computed result inside JSX. Mapping over `computed()` results is the canonical pattern.
 
 ### Conditional Rendering Not Working
 
@@ -333,6 +334,10 @@ const groupedItems = computed(() => {
   </div>
 ))}
 ```
+
+**Related issue with lift():**
+
+The same scoping limitation applies to `lift()`. See [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md#lift-and-closure-limitations) for the workaround pattern and explanation of frame-based execution.
 
 ## Runtime Errors
 

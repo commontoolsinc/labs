@@ -16,7 +16,8 @@ to be updated to the current API.
 3. `lift()` → `computed()` or refactor
 4. `handler()` for simple operations → inline handlers
 5. `.equals()` method → `Cell.equals(a, b)`
-6. Unnecessary `[ID]` usage → review if needed
+6. Unnecessary `[ID]` usage → use `Cell.equals()` instead for finding/removing
+   items
 
 ## High Priority Files
 
@@ -339,7 +340,9 @@ to be updated to the current API.
   const percentage = derive(() => {
   ```
 
-- **Line 34**: `[ID]` usage - review if needed
+- **Line 34**: `[ID]` usage - only needed if items are reordered
+  (sorting/shuffling). If just adding/removing without reordering, use
+  `Cell.equals()` for finding items instead.
   ```typescript
   [ID]: step.id
   ```
@@ -354,7 +357,9 @@ to be updated to the current API.
   const badgeText = derive(() => {
   ```
 
-- **Line 28**: `[ID]` usage - review if needed
+- **Line 28**: `[ID]` usage - only needed if items are reordered
+  (sorting/shuffling). If just adding/removing without reordering, use
+  `Cell.equals()` for finding items instead.
   ```typescript
   [ID]: badge.id
   ```
@@ -383,7 +388,8 @@ Update utility components and less frequently used patterns.
 - [ ] Update recipe input types to use `Cell<T>` for cells used in inline
       handlers
 - [ ] Replace `.equals()` with `Cell.equals(a, b)`
-- [ ] Review `[ID]` usage and remove if unnecessary
+- [ ] Review `[ID]` usage - remove if only doing finding/removing (use
+      `Cell.equals()` instead). Keep only for item reordering scenarios.
 - [ ] Test the updated pattern
 - [ ] Verify no TypeScript errors
 - [ ] Deploy and verify functionality

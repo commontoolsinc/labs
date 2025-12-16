@@ -106,6 +106,7 @@ export default pattern<Input, Input>(({ items }) => ({
 **Key points:**
 - `$checked` automatically syncs - no handler needed
 - Inline handlers for add/remove operations
+- **Uses `Cell.equals()` for item identity - no `[ID]` needed for basic list operations**
 - Ternary in `style` attribute works fine
 - Type inference works in `.map()` - no annotations needed
 
@@ -331,12 +332,12 @@ const result = computed(() => {
 ### Filter/Sort Not Updating
 
 ```typescript
-// ❌ Won't update reactively
+// ❌ WRONG: Inline filtering in JSX won't update reactively
 {items.filter(i => !i.done).map(...)}
 
-// ✅ Use computed()
+// ✅ CORRECT: Compute outside JSX, then map over the result
 const active = computed(() => items.filter(i => !i.done));
-{active.map(...)}
+{active.map(...)}  // You CAN map over computed() results!
 ```
 
 ### Template String Access
@@ -348,6 +349,21 @@ const prompt = `Seed: ${seed}`;
 // ✅ Wrap in computed()
 const prompt = computed(() => `Seed: ${seed}`);
 ```
+
+### lift() Closure Pattern
+
+```typescript
+// ❌ Error: "Accessing an opaque ref via closure"
+const result = lift((g) => g[date])(grouped);
+
+// ✅ Pass all reactive dependencies as parameters
+const result = lift((args) => args.g[args.d])({ g: grouped, d: date });
+
+// ✅ Or use computed() instead (handles closures automatically)
+const result = computed(() => grouped[date]);
+```
+
+See [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) section "lift() and Closure Limitations" for details on frame-based execution and why `computed()` doesn't have this issue.
 
 ### Style Syntax
 
