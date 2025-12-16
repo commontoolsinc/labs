@@ -11,17 +11,9 @@ import {
   UI,
 } from "commontools";
 
-import ContactDetail from "./contact-detail.tsx";
+import ContactDetail, { type ContactData } from "./contact-detail.tsx";
 
-interface Contact {
-  name: string;
-  email: Default<string, "">;
-  phone: Default<string, "">;
-  company: Default<string, "">;
-  tags: Default<string[], []>;
-  notes: Default<string, "">;
-  createdAt: number;
-}
+type Contact = ContactData;
 
 interface Relationship {
   fromName: string;

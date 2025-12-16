@@ -1,12 +1,26 @@
 /// <cts-enable />
 import { Cell, Default, NAME, pattern, str, UI } from "commontools";
 
+/** Raw data shape - use in collection patterns */
+export interface ContactData {
+  name: string;
+  email: Default<string, "">;
+  phone: Default<string, "">;
+  company: Default<string, "">;
+  tags: Default<string[], []>;
+  notes: Default<string, "">;
+  createdAt: number;
+}
+
+/** Cell-wrapped for write access in detail view */
 interface Contact {
   name: Cell<string>;
   email: Cell<Default<string, "">>;
   phone: Cell<Default<string, "">>;
   company: Cell<Default<string, "">>;
+  tags: Cell<Default<string[], []>>;
   notes: Cell<Default<string, "">>;
+  createdAt: Cell<number>;
 }
 
 interface Input {

@@ -1,9 +1,23 @@
 /// <cts-enable />
 import { Cell, Default, NAME, pattern, str, UI } from "commontools";
 
-type ItemType = "book" | "article" | "paper" | "video";
-type ItemStatus = "want" | "reading" | "finished" | "abandoned";
+export type ItemType = "book" | "article" | "paper" | "video";
+export type ItemStatus = "want" | "reading" | "finished" | "abandoned";
 
+/** Raw data shape - use in collection patterns */
+export interface ReadingItemData {
+  title: string;
+  author: Default<string, "">;
+  url: Default<string, "">;
+  type: Default<ItemType, "article">;
+  status: Default<ItemStatus, "want">;
+  rating: Default<number | null, null>;
+  notes: Default<string, "">;
+  addedAt: number;
+  finishedAt: Default<number | null, null>;
+}
+
+/** Cell-wrapped for write access in detail view */
 interface ReadingItem {
   title: Cell<string>;
   author: Cell<Default<string, "">>;
@@ -12,6 +26,8 @@ interface ReadingItem {
   status: Cell<Default<ItemStatus, "want">>;
   rating: Cell<Default<number | null, null>>;
   notes: Cell<Default<string, "">>;
+  addedAt: Cell<number>;
+  finishedAt: Cell<Default<number | null, null>>;
 }
 
 interface Input {

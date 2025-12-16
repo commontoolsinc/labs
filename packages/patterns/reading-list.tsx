@@ -11,22 +11,13 @@ import {
   UI,
 } from "commontools";
 
-import ReadingItemDetail from "./reading-item-detail.tsx";
+import ReadingItemDetail, {
+  type ItemStatus,
+  type ItemType,
+  type ReadingItemData,
+} from "./reading-item-detail.tsx";
 
-type ItemType = "book" | "article" | "paper" | "video";
-type ItemStatus = "want" | "reading" | "finished" | "abandoned";
-
-interface ReadingItem {
-  title: string;
-  author: Default<string, "">;
-  url: Default<string, "">;
-  type: Default<ItemType, "article">;
-  status: Default<ItemStatus, "want">;
-  rating: Default<number | null, null>;
-  notes: Default<string, "">;
-  addedAt: number;
-  finishedAt: Default<number | null, null>;
-}
+type ReadingItem = ReadingItemData;
 
 interface Input {
   items: Cell<Default<ReadingItem[], []>>;
@@ -68,6 +59,7 @@ export default pattern<Input, Output>(({ items }) => {
 
   const totalCount = computed(() => items.get().length);
   const filteredItems = filterByStatus({ items, status: filterStatus });
+  const filteredCount = lift((arr: ReadingItem[]) => arr.length)(filteredItems);
 
   return {
     [NAME]: "Reading List",
@@ -142,7 +134,7 @@ export default pattern<Input, Output>(({ items }) => {
             ))}
 
             {ifElse(
-              computed(() => items.get().length === 0),
+              lift((count: number) => count === 0)(filteredCount),
               <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
                 No items yet. Add something to read!
               </div>,
