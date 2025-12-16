@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   Cell,
-  cell,
   Default,
   derive,
   handler,
@@ -161,7 +160,7 @@ const joinChat = handler<
 export default pattern<LobbyInput, LobbyOutput>(
   ({ chatName, messages, users, sessionId }) => {
     // Name input for new users
-    const nameInput = cell("");
+    const nameInput = Cell.of("");
 
     // Derive user list
     const userList = derive(users, (u: User[]) => u || []);

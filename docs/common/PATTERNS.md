@@ -1,1255 +1,436 @@
+<!-- @reviewed 2025-12-11 docs-rationalization -->
+
 # Common Patterns
 
-This guide demonstrates common patterns for building patterns, organized by complexity. Each pattern builds on concepts from previous sections.
+Patterns for building CommonTools applications, organized by complexity.
 
 ## Core Principles
 
-### ⚠️ CRITICAL: Never Directly Access Cell Data in Pattern Body
+### 1. Use computed() for Data Transformations
 
-**You cannot read or manipulate cell data directly in the pattern body.** Always use `computed()` for data transformations.
+Cell references in pattern bodies are "opaque refs" - placeholders that can't be read directly. Wrap transformations in `computed()`:
 
 ```typescript
-// ❌ WRONG - Direct data access
-export default pattern(({ entries }) => {
-  const entriesByDate = {};
-  for (const entry of entries) {  // Error: "Tried to directly access an opaque value"
-    entriesByDate[entry.date] = entry;
+// ❌ WRONG
+const grouped = {};
+for (const entry of entries) {  // Error: "Tried to directly access an opaque value"
+  grouped[entry.date] = entry;
+}
+
+// ✅ CORRECT
+const grouped = computed(() => {
+  const result = {};
+  for (const entry of entries) {
+    result[entry.date] = entry;
   }
-});
-
-// ✅ CORRECT - Use computed()
-export default pattern(({ entries }) => {
-  const entriesByDate = computed(() => {
-    const grouped = {};
-    for (const entry of entries) {
-      grouped[entry.date] = entry;
-    }
-    return grouped;
-  });
+  return result;
 });
 ```
 
-**Why?** Cell references in pattern bodies are "opaque refs" - placeholders for future values. They can't be read directly; they must be transformed through `computed()` which creates reactive computations.
+### 2. Only Declare Cell<> When You Need to Mutate
 
-See [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) for detailed explanation of opaque refs and reactivity.
-
-### Cell<> is for Write Access Only
-
-**The most important rule:** Only declare `Cell<>` in signatures when you need to **mutate** the value.
+Everything is reactive by default. `Cell<>` in type signatures indicates you'll call `.set()`, `.push()`, or `.update()`:
 
 ```typescript
-// ✅ Read-only - No Cell<> needed (still reactive!)
-interface ReadOnlyInput {
-  count: number;        // Just display it
-  items: Item[];        // Just map/display
-}
-
-// ✅ Write access - Cell<> required
-interface WritableInput {
-  count: Cell<number>;  // Will call count.set()
-  items: Cell<Item[]>;  // Will call items.push()
+interface Input {
+  count: number;         // Read-only (still reactive!)
+  items: Cell<Item[]>;   // Will mutate (call .push(), .set())
 }
 ```
 
-**Remember:** Everything is reactive whether you use `Cell<>` or not. `Cell<>` only indicates you'll call `.set()`, `.update()`, `.push()`, or `.key()`.
+### 3. Prefer Bidirectional Binding Over Handlers
 
-See [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) for detailed reactivity guide.
-See [TYPES_AND_SCHEMAS.md](TYPES_AND_SCHEMAS.md) for type system details.
-
-### 🌟 Golden Rule: Prefer Bidirectional Binding
-
-**Before writing any handler, ask yourself**: "Am I just syncing UI ↔ data with no additional logic?"
-
-If yes, use bidirectional binding:
+Before writing a handler, ask: "Am I just syncing UI ↔ data?"
 
 ```typescript
-// ✅ SIMPLE - Just syncing UI and data (no handler needed!)
+// ✅ SIMPLE - No handler needed
 <ct-checkbox $checked={item.done} />
 <ct-input $value={item.name} />
-<ct-select $value={item.category} items={[...]} />
+
+// Use handlers only for side effects, validation, or structural changes
 ```
-
-Only use handlers when you need:
-- **Side effects** (logging, API calls)
-- **Validation logic**
-- **Structural changes** (add/remove from arrays)
-
-**This is the most important pattern to learn.** Most of your UI updates will use bidirectional binding, not handlers.
-
-### Quick Decision Guide
-
-```typescript
-// Simple checkbox toggle?
-<ct-checkbox $checked={item.done} />  // ✅ Bidirectional binding
-
-// Simple text input?
-<ct-input $value={item.title} />  // ✅ Bidirectional binding
-
-// Add item to array?
-const addItem = handler(/* ... */);  // ❌ Need handler
-<ct-button onClick={addItem({ items })}>Add</ct-button>
-
-// Need validation or API call?
-const saveWithValidation = handler(/* ... */);  // ❌ Need handler
-<ct-button onClick={saveWithValidation({ item })}>Save</ct-button>
-```
-
-See `COMPONENTS.md` for detailed bidirectional binding documentation.
 
 ---
 
-## Level 1: Basic List with Bidirectional Binding
+## Levels: Progressive Examples
 
-The simplest and most common pattern: a list where users can check items and edit properties.
+The following examples are complete, self-contained patterns illustrating progressive complexity. For real working patterns, see `packages/patterns/`.
 
-**Key Concepts:**
-- Bidirectional binding with `$checked` and `$value`
-- Inline handlers for simple add/remove operations
+## Level 1: Basic List
+
+The simplest pattern: a list with bidirectional binding and inline handlers.
 
 ```typescript
-/// <cts-enable />
 import { Cell, Default, NAME, pattern, UI } from "commontools";
 
-interface ShoppingItem {
+interface Item {
   title: string;
   done: Default<boolean, false>;
 }
 
-interface ShoppingListInput {
-  items: Cell<ShoppingItem[]>; // Note: Cell<T[]> for inline handlers
+interface Input {
+  items: Cell<Item[]>;
 }
 
-interface ShoppingListOutput {
-  items: Cell<ShoppingItem[]>;
-}
-
-export default pattern<ShoppingListInput, ShoppingListOutput>(
-  ({ items }) => {
-    return {
-      [NAME]: "Shopping List",
-      [UI]: (
-        <div>
-          <h2>Shopping List</h2>
-          <div>
-            {items.map((item) => (
-              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                <ct-checkbox $checked={item.done}>
-                  <span style={item.done ? { textDecoration: "line-through" } : {}}>
-                    {item.title}
-                  </span>
-                </ct-checkbox>
-                {/* Inline handler for remove */}
-                <ct-button onClick={() => {
-                  const current = items.get();
-                  const index = current.findIndex((el) => Cell.equals(item, el));
-                  if (index >= 0) {
-                    items.set(current.toSpliced(index, 1));
-                  }
-                }}>
-                  ×
-                </ct-button>
-              </div>
-            ))}
-          </div>
-
-          {/* Inline handler for add */}
-          <ct-message-input
-            placeholder="Add item..."
-            onct-send={(e) => {
-              const itemName = e.detail?.message?.trim();
-              if (itemName) {
-                items.push({ title: itemName, done: false });
-              }
-            }}
-          />
+export default pattern<Input, Input>(({ items }) => ({
+  [NAME]: "Shopping List",
+  [UI]: (
+    <div>
+      {items.map((item) => (
+        <div style={{ display: "flex", gap: "8px" }}>
+          <ct-checkbox $checked={item.done}>
+            <span style={item.done ? { textDecoration: "line-through" } : {}}>
+              {item.title}
+            </span>
+          </ct-checkbox>
+          <ct-button onClick={() => {
+            const current = items.get();
+            const index = current.findIndex((el) => Cell.equals(item, el));
+            if (index >= 0) items.set(current.toSpliced(index, 1));
+          }}>×</ct-button>
         </div>
-      ),
-      items,
-    };
-  },
-);
+      ))}
+      <ct-message-input
+        placeholder="Add item..."
+        onct-send={(e) => {
+          const text = e.detail?.message?.trim();
+          if (text) items.push({ title: text, done: false });
+        }}
+      />
+    </div>
+  ),
+  items,
+}));
 ```
 
-**What to notice:**
-- ✅ `$checked` automatically updates `item.done` - no handler needed
-- ✅ Ternary operator in `style` attribute works fine
-- ✅ Type inference automatically works in `.map()` - no type annotation needed!
-- ✅ **Inline handlers** for add/remove operations - no `handler()` needed
-- ✅ Declare `items` as `Cell<ShoppingItem[]>` in input type for inline handlers
+**Key points:**
+- `$checked` automatically syncs - no handler needed
+- Inline handlers for add/remove operations
+- **Uses `Cell.equals()` for item identity - no `[ID]` needed for basic list operations**
+- Ternary in `style` attribute works fine
+- Type inference works in `.map()` - no annotations needed
 
-## Level 2: Filtered and Grouped Views
+---
 
-Adding derived data transformations to create multiple views of the same data.
+## Level 2: Derived Views
 
-**Key Concepts:**
-- Using `computed()` for data transformations
-- Direct property access on computed objects with `groupedItems[category]`
-- Inline expressions like `(array ?? []).map(...)`
-- Within JSX, you don't need `computed()` - reactivity is automatic
+Add `computed()` for data transformations:
 
 ```typescript
-/// <cts-enable />
-import { Default, computed, NAME, OpaqueRef, pattern, UI } from "commontools";
+import { computed, Default, NAME, pattern, UI } from "commontools";
 
-interface ShoppingItem {
+interface Item {
   title: string;
   done: Default<boolean, false>;
-  category: Default<string, "Uncategorized">;
+  category: Default<string, "Other">;
 }
 
-interface CategorizedListInput {
-  items: Default<ShoppingItem[], []>;
+interface Input {
+  items: Default<Item[], []>;
 }
 
-interface CategorizedListOutput extends CategorizedListInput {}
-
-export default pattern<CategorizedListInput, CategorizedListOutput>(
-  ({ items }) => {
-    // Group items by category using computed
-    const groupedItems = computed(() => {
-      const groups: Record<string, ShoppingItem[]> = {};
-
-      for (const item of items) {
-        const category = item.category || "Uncategorized";
-        if (!groups[category]) {
-          groups[category] = [];
-        }
-        groups[category].push(item);
-      }
-
-      return groups;
-    });
-
-    // Get sorted category names
-    const categories = computed(() => {
-      return Object.keys(groupedItems).sort();
-    });
-
-    return {
-      [NAME]: "Shopping List (by Category)",
-      [UI]: (
-        <div>
-          <h2>Shopping List by Category</h2>
-          {categories.map((category) => (
-            <div style={{ marginBottom: "1rem" }}>
-              <h3>{category}</h3>
-              {(groupedItems[category] ?? []).map((item) => (
-                <ct-checkbox $checked={item.done}>
-                  <span style={item.done ? { textDecoration: "line-through" } : {}}>
-                    {item.title}
-                  </span>
-                </ct-checkbox>
-              ))}
-            </div>
-          ))}
-        </div>
-      ),
-      items,
-    };
-  },
-);
-```
-
-**What to notice:**
-- ✅ `computed()` creates reactive transformations
-- ✅ `groupedItems[category]` - direct property access on computed object
-- ✅ `(groupedItems[category] ?? [])` - inline null coalescing instead of intermediate variable
-- ✅ Multiple views of same data (categories computed from groupedItems)
-
-## Level 3: Linked Charms (Master-Detail Pattern)
-
-Two separate patterns sharing the same data through charm linking.
-
-**Charm 1: Shopping List Editor**
-
-```typescript
-/// <cts-enable />
-import { Cell, Default, NAME, pattern, UI } from "commontools";
-
-interface ShoppingItem {
-  title: string;
-  done: Default<boolean, false>;
-  category: Default<string, "Uncategorized">;
-}
-
-interface EditorInput {
-  items: Cell<ShoppingItem[]>; // Cell<T[]> for inline handlers
-}
-
-interface EditorOutput {
-  items: Cell<ShoppingItem[]>;
-}
-
-export default pattern<EditorInput, EditorOutput>(
-  ({ items }) => {
-    const newCategory = Cell.of("Uncategorized");
-
-    return {
-      [NAME]: "Editor",
-      [UI]: (
-        <div>
-          <h2>Add Items</h2>
-          <ct-select
-            $value={newCategory}
-            items={[
-              { label: "Produce", value: "Produce" },
-              { label: "Dairy", value: "Dairy" },
-              { label: "Meat", value: "Meat" },
-              { label: "Other", value: "Uncategorized" },
-            ]}
-          />
-          {/* Inline handler */}
-          <ct-message-input
-            placeholder="Add item..."
-            onct-send={(e) => {
-              const itemName = e.detail?.message?.trim();
-              if (itemName) {
-                items.push({
-                  title: itemName,
-                  done: false,
-                  category: newCategory.get(),
-                });
-              }
-            }}
-          />
-        </div>
-      ),
-      items,
-    };
-  },
-);
-```
-
-**Charm 2: Shopping List Viewer (Categorized)**
-
-This would be the Level 2 categorized view from above. When you link them:
-
-```bash
-# Deploy both charms
-deno task ct charm new --identity key.json --api-url ... --space myspace editor.tsx
-# Returns: editor-charm-id
-
-deno task ct charm new --identity key.json --api-url ... --space myspace viewer.tsx
-# Returns: viewer-charm-id
-
-# Link the items from editor to viewer
-deno task ct charm link --identity key.json --api-url ... --space myspace \
-  editor-charm-id/items viewer-charm-id/items
-```
-
-**What to notice:**
-- ✅ Both charms export `items` in their output
-- ✅ Changes in the editor automatically appear in the viewer
-- ✅ Charms can be developed and tested independently
-- ✅ Data flows through the link connection
-
-## Level 4: Pattern Composition
-
-When you want to display multiple patterns together that share the same data **within a single pattern** (without deploying separate charms), use pattern composition.
-
-**Key Concept**: Just reference the other instances directly: {view}.
-
-```typescript
-/// <cts-enable />
-import { pattern, UI, NAME, Default, OpaqueRef } from "commontools";
-import ShoppingList from "./shopping-list.tsx";
-import ShoppingListByCategory from "./shopping-list-by-category.tsx";
-
-interface ShoppingItem {
-  title: string;
-  done: Default<boolean, false>;
-  category: Default<string, "Uncategorized">;
-}
-
-interface ComposedInput {
-  items: Default<ShoppingItem[], []>;
-}
-
-export default pattern<ComposedInput, ComposedInput>(
-  ({ items }) => {
-    // Create pattern instances that share the same items cell
-    const basicView = ShoppingList({ items });
-    const categoryView = ShoppingListByCategory({ items });
-
-    return {
-      [NAME]: "Shopping List - Both Views",
-      [UI]: (
-        <div style={{ display: "flex", gap: "2rem" }}>
-          {/* ✅ CORRECT - Use $cell not charm */}
-          <div style={{ flex: 1 }}>
-            <h3>Basic View</h3>
-            {basicView}
-          </div>
-          <div style={{ flex: 1 }}>
-            <h3>By Category</h3>
-            {categoryView}
-          </div>
-        </div>
-      ),
-      items, // Export shared data
-    };
-  },
-);
-```
-
-**What to notice:**
-- ✅ `ShoppingList({ items })` creates a pattern instance (a cell containing the pattern's output)
-- ✅ Both patterns receive the same `items` cell reference
-- ✅ `<div>...{basicView}</div>` - note the `basicView` use
-- ✅ Changes in one view automatically update the other (they share the same cell)
-- ✅ No charm deployment needed - all composed within one pattern
-
-**When to use Pattern Composition vs Linked Charms:**
-
-| Scenario | Use |
-|----------|-----|
-| Multiple views of same data in one UI | Pattern Composition (Level 4) |
-| Independent charms with data flow | Linked Charms (Level 3) |
-| Reusable components within a pattern | Pattern Composition (Level 4) |
-| Separate deployments that communicate | Linked Charms (Level 3) |
-
-## Common Pattern: Search/Filter with Inline Logic
-
-Filtering a list without creating intermediate variables.
-
-```typescript
-const searchQuery = Cell.of("");
-
-// Filter items inline
-{items
-  .filter((item) => {
-    const query = searchQuery.get().toLowerCase();
-    return item.title.toLowerCase().includes(query);
-  })
-  .map((item) => (
-    <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
-  ))
-}
-
-// Search input
-<ct-input $value={searchQuery} placeholder="Search..." />
-```
-
-**Wait, this looks wrong!** The `.filter()` will execute during pattern definition, not reactively. Here's the **correct** way:
-
-```typescript
-const searchQuery = Cell.of("");
-
-// ✅ CORRECT - Use computed for reactive filtering
-const filteredItems = computed(() => {
-  const query = searchQuery.toLowerCase();
-  return items.filter((item) => item.title.toLowerCase().includes(query));
-});
-
-// Now map over filteredItems
-{filteredItems.map((item) => (
-  <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
-))}
-
-<ct-input $value={searchQuery} placeholder="Search..." />
-```
-
-**What to notice:**
-- ❌ Can't use `.filter()` directly on cells in JSX
-- ✅ Must use `computed()` to create reactive filtered list
-- ✅ The computed list updates when `searchQuery` or `items` changes
-
-## Decision Matrix: When to Use What
-
-### Handlers vs Bidirectional Binding
-
-| Scenario | Use |
-|----------|-----|
-| Toggle checkbox | `$checked` (bidirectional binding) |
-| Edit text field | `$value` (bidirectional binding) |
-| Select dropdown option | `$value` (bidirectional binding) |
-| Add item to array | Inline handler: `onClick={() => items.push(...)}` |
-| Remove item from array | Inline handler: `onClick={() => items.set(...)}` |
-| Simple counter | Inline handler: `onClick={() => count.set(count.get() + 1)}` |
-| Reorder items | Inline handler or `handler()` for complexity |
-| Validate input | Inline handler or `computed()` |
-| Call API on change | Inline handler or `handler()` for complex logic |
-
-### When to Use computed()
-
-| Scenario | Use |
-|----------|-----|
-| Transform data reactively | `computed(() => ...)` |
-| Create derived values | `computed(() => ...)` |
-| Filter or sort lists reactively | `computed(() => ...)` |
-| Complex calculations | `computed(() => ...)` |
-| **Within JSX** | Not needed - reactivity is automatic |
-
-### Intermediate Variables vs Inline
-
-| Scenario | Use |
-|----------|-----|
-| Simple property access | Inline: `obj[prop]` |
-| Null coalescing | Inline: `(arr ?? [])` |
-| Used multiple times | Variable |
-| Complex transformation | Variable with `derive` or `lift` |
-
-## Performance Tips
-
-### When to Optimize
-
-Don't optimize prematurely! Most patterns perform well without optimization. Consider optimizing when:
-
-- Lists have 100+ items and feel sluggish
-- You're doing expensive calculations on every render
-- You notice UI lag during interactions
-
-### Common Optimizations
-
-1. **Limit computed calculations**: Only compute what you need
-
-```typescript
-// ❌ AVOID - Computing entire sorted list when you only need count
-const sortedItems = computed(() => {
-  return items.toSorted((a, b) => a.priority - b.priority);
-});
-const itemCount = computed(() => sortedItems.length);
-
-// ✅ BETTER - Compute just the count
-const itemCount = computed(() => items.length);
-```
-
-2. **Avoid index-based removal, pass item references**
-
-```typescript
-// ✅ EFFICIENT - Already have the index from map
-{items.map((item) => (
-  <ct-button onClick={removeItem({ items, item })}>×</ct-button>
-))}
-
-const removeItem = handler((_, { items, item }: { items: Cell<Array<Cell<Item>>>, item: Cell<Item>}) => {
-  const index = items.get.findIndex((el) => el.equals(item))
-  if (index !== -1) items.set(items.get().toSpliced(index, 1));
-});
-```
-
-3. **Use inline handlers for simple operations**
-
-```typescript
-// ✅ BEST - Inline handler (no overhead)
-{items.map((item) => (
-  <ct-button onClick={() => {
-    const current = items.get();
-    const index = current.findIndex((el) => Cell.equals(item, el));
-    if (index >= 0) items.set(current.toSpliced(index, 1));
-  }}>
-    ×
-  </ct-button>
-))}
-
-// ✅ ALSO GOOD - Module-level handler() for complex/reusable logic
-const removeItem = handler((_, { items, item }) => { /* ... */ });
-
-{items.map((item) => (
-  <ct-button onClick={removeItem({ items, item })}>×</ct-button>
-))}
-
-// ❌ AVOID - Creating handler() inside map
-{items.map((item) => {
-  const remove = handler(() => { /* ... */ });
-  return <ct-button onClick={remove}>×</ct-button>;
-})}
-```
-
-## Debugging Patterns
-
-### Common Issues and Solutions
-
-**Issue: Bidirectional binding not updating**
-
-```typescript
-// ❌ WRONG - Forgot $ prefix and no handler
-<ct-checkbox checked={item.done} />
-
-// ✅ CORRECT - Bidirectional binding via $
-<ct-checkbox $checked={item.done} />
-
-// ✅ CORRECT - Onedirectional binding, handler handles changes
-<ct-checkbox checked={item.done} onct-change={toggle(item)} />
-```
-
-**Issue: Filtering/sorting not updating**
-
-```typescript
-// ❌ WRONG - Direct filter doesn't create reactive node
-{items.filter(item => !item.done).map(...)}
-
-// ✅ CORRECT - Use computed
-const activeItems = computed(() => items.filter(item => !item.done));
-{activeItems.map(...)}
-```
-
-**Issue: Can't access variable from outer map**
-
-```typescript
-// ❌ WRONG - category from outer scope not accessible
-{categories.map((category) => (
-  <div>
-    {computed(() =>
-      items.filter(item => item.category === category) // category not accessible!
-    )}
-  </div>
-))}
-
-// ✅ CORRECT - Pre-group the data
-const groupedItems = computed(() => {
-  const groups = {};
-  for (const item of items) {
-    if (!groups[item.category]) groups[item.category] = [];
-    groups[item.category].push(item);
-  }
-  return groups;
-});
-
-{categories.map((category) => (
-  <div>
-    {(groupedItems[category] ?? []).map(...)}
-  </div>
-))}
-```
-
-### Common Pitfalls from Pattern Development
-
-These are the most frequent mistakes developers make when building patterns:
-
-#### 1. Mixing Style Syntax (String vs Object)
-
-```typescript
-// ❌ WRONG - String style on HTML element
-<div style="flex: 1;">
-  {/* TypeScript error: Type 'string' not assignable to 'CSSProperties' */}
-</div>
-
-// ✅ CORRECT - Object style on HTML element
-<div style={{ flex: 1 }}>
-  {/* Works! */}
-</div>
-
-// ❌ WRONG - Object style on custom element
-<ct-hstack style={{ flex: 1 }}>
-  {/* Error */}
-</ct-hstack>
-
-// ✅ CORRECT - String style on custom element
-<ct-hstack style="flex: 1;">
-  {/* Works! */}
-</ct-hstack>
-```
-
-**Rule:** HTML elements use object styles, custom elements use string styles. See "Styling: String vs Object Syntax" in `COMPONENTS.md` for details.
-
-#### 2. Using handler() Instead of Inline Handlers or Bidirectional Binding
-
-```typescript
-// ❌ AVOID - Unnecessary handler() for simple toggle
-const toggleDone = handler<unknown, { item: Cell<Item> }>(
-  (_, { item }) => {
-    const doneCell = item.key("done");
-    const current = doneCell.get();
-    doneCell.set(!current.done);
-  }
-);
-<ct-checkbox checked={item.done} onct-change={toggleDone({ item })} />
-
-// ✅ BEST - Bidirectional binding (no handler at all)
-<ct-checkbox $checked={item.done} />
-
-// ✅ GOOD - Inline handler if you need custom logic
-<ct-checkbox
-  checked={item.done}
-  onct-change={(e) => {
-    item.key("done").set(e.detail.checked);
-    console.log("Toggled:", item.key("title").get());
-  }}
-/>
-
-// ❌ AVOID - handler() for simple increment
-const increment = handler<never, { count: Cell<number> }>(
-  (_, { count }) => count.set(count.get() + 1)
-);
-<ct-button onClick={increment({ count })}>+1</ct-button>
-
-// ✅ PREFERRED - Inline handler
-<ct-button onClick={() => count.set(count.get() + 1)}>+1</ct-button>
-```
-
-**Why this is a pitfall:** Over-engineering with `handler()` when inline handlers or bidirectional binding suffice.
-
-**Remember:**
-1. **Bidirectional binding** (`$checked`, `$value`) for simple UI ↔ data sync
-2. **Inline handlers** for simple operations with custom logic
-3. **`handler()`** only for complex or reusable logic
-
-#### 3. Incorrect Handler Type Parameters
-
-```typescript
-// ❌ WRONG - OpaqueRef in handler parameters
-const addItem = handler<
-  unknown,
-  { items: Cell<OpaqueRef<ShoppingItem>[]> }
->(/* ... */);
-
-// ✅ CORRECT - Cell<T[]>
-const addItem = handler<
-  unknown,
-  { items: Cell<ShoppingItem[]> }
->((_event, { items }) => {
-  const arr = items.get();  // arr is ShoppingItem[]
-  items.set([...arr, { title: "New", done: false }]);
-});
-
-// ✅ CORRECT - Cell<Array<T>>>
-const addItem = handler<
-  unknown,
-  { items: Cell<Array<Cell<ShoppingItem>>> }
->(/* ... */);
-```
-
-**Rule:** Always use `Cell<T[]>` in handler parameters. The Cell wraps the entire array. You can make the elements cells as well, e.g. to access `.equals`, `.set`, `.update`, etc. directly
-
-## Testing Patterns and Development Workflow
-
-### Quick Development Workflow
-
-When developing patterns, follow this efficient iteration cycle:
-
-**1. Start Simple (5-10 minutes)**
-```typescript
-// Begin with minimal viable pattern
-interface ShoppingItem {
-  title: string;
-}
-
-export default pattern<{ items: Default<ShoppingItem[], []> }, any>(
-  ({ items }) => ({
-    [NAME]: "Shopping List",
+export default pattern<Input, Input>(({ items }) => {
+  const grouped = computed(() => {
+    const groups: Record<string, Item[]> = {};
+    for (const item of items) {
+      const cat = item.category || "Other";
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(item);
+    }
+    return groups;
+  });
+
+  const categories = computed(() => Object.keys(grouped).sort());
+
+  return {
+    [NAME]: "By Category",
     [UI]: (
       <div>
-        {items.map((item) => (
-          <div>{item.title}</div>
+        {categories.map((cat) => (
+          <div>
+            <h3>{cat}</h3>
+            {(grouped[cat] ?? []).map((item) => (
+              <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
+            ))}
+          </div>
         ))}
       </div>
     ),
     items,
-  })
-);
+  };
+});
 ```
 
-**2. Test Locally (2 minutes)**
+**Key points:**
+- `computed()` creates reactive transformations
+- Direct property access: `grouped[cat]`
+- Inline null coalescing: `(grouped[cat] ?? [])`
+
+---
+
+## Level 3: Linked Charms
+
+Separate patterns sharing data through charm linking:
+
 ```bash
-deno task ct dev my-pattern.tsx
+# Deploy both charms
+deno task ct charm new ... editor.tsx   # Returns: editor-id
+deno task ct charm new ... viewer.tsx   # Returns: viewer-id
+
+# Link their data
+deno task ct charm link ... editor-id/items viewer-id/items
 ```
 
-Fix any syntax errors before continuing.
+Changes in the editor automatically appear in the viewer.
 
-**3. Add Interactivity (10-15 minutes)**
+### Cross-Charm Mutations
 
-Add one feature at a time:
-```typescript
-// First: Add bidirectional binding
-<ct-checkbox $checked={item.done}>
-
-// Then: Add handlers for structural changes
-const removeItem = handler(/* ... */);
-```
-
-**4. Deploy and Test (3-5 minutes)**
-Read `./docs/common/PATTERN_DEV_DEPLOY.md` for more information on how to deploy
-```bash
-# Deploy
-deno task ct charm new --identity key.json --api-url ... --space test pattern.tsx
-# Returns: pattern-charm-id
-
-# Test with real data
-echo '{"title": "Test", "done": false}' | \
-  deno task ct charm set --identity key.json --api-url ... \
-  --space test --charm pattern-charm-id testItem
-```
-
-**5. Iterate Quickly (1-2 minutes per iteration)**
-```bash
-# Update existing charm (much faster than creating new)
-deno task ct charm setsrc --identity key.json --api-url ... \
-  --space test --charm pattern-charm-id pattern.tsx
-```
-
-### Testing Commands Reference
-
-Read `./docs/common/PATTERN_DEV_DEPLOY.md` for more information on how to deploy
-```bash
-# Check syntax only (fast)
-deno task ct dev pattern.tsx --no-run
-
-# Test execution locally
-deno task ct dev pattern.tsx
-
-# Deploy and iterate
-deno task ct charm new --identity key.json --api-url ... --space test pattern.tsx
-
-# Update existing charm (faster for iteration)
-deno task ct charm setsrc --identity key.json --api-url ... --space test \
-  --charm charm-id pattern.tsx
-
-# Inspect charm data
-deno task ct charm inspect --identity key.json --api-url ... --space test \
-  --charm charm-id
-
-# Get specific field
-deno task ct charm get --identity key.json --api-url ... --space test \
-  --charm charm-id items/0/title
-
-# Set test data
-echo '{"title": "Test", "done": false}' | \
-  deno task ct charm set --identity key.json --api-url ... --space test \
-  --charm charm-id testItem
-```
-
-### Tips for Fast Iteration
-
-- ✅ Use `deno task ct dev` first to catch TypeScript errors
-- ✅ Deploy once, then use `setsrc` for updates
-- ✅ Test one feature at a time
-- ✅ Use `charm inspect` to debug data issues
-- ❌ Don't deploy a new charm for every change
-- ❌ Don't add multiple features before testing
-
-### Debugging Checklist
-
-When something doesn't work:
-
-1. **Check the console** - Look for TypeScript errors
-2. **Inspect the data** - Use `charm inspect` to see current state
-3. **Simplify** - Comment out code until it works, then add back gradually
-4. **Check types** - Most errors are type-related (OpaqueRef, Cell, style syntax)
-5. **Verify bindings** - Did you use `$` prefix for bidirectional binding?
-6. **Review common pitfalls** - Check the list above
-
-## TypeScript Quick Reference
-
-Understanding TypeScript typing in patterns is crucial for avoiding common errors.
-
-### Why OpaqueRef?
-
-Items in `.map()` are wrapped as `OpaqueRef<T>` to maintain their connection to the Cell system. This enables:
-- **Bidirectional binding** (`$checked`, `$value`)
-- **Reactive updates** when the item changes
-- **Type-safe property access**
-
-### Common Type Errors and Solutions
-
-**Error**: "Type 'OpaqueRef<ShoppingItem>' is not assignable to type 'Cell<boolean>'"
+Direct writes to another charm's cells fail with `WriteIsolationError`. Use `Stream.send()`:
 
 ```typescript
-// ❌ Problem: Trying to bind the whole item
-<ct-checkbox $checked={item} />
+// Charm B: Expose a stream for receiving updates
+interface Input {
+  items: Cell<Item[]>;
+  addItem: Stream<{ title: string }>;
+}
 
-// ✅ Solution: Bind the specific property
+export default pattern<Input>(({ items, addItem }) => {
+  addItem.subscribe(({ title }) => {
+    items.push({ title, done: false });
+  });
+  // ...
+});
+
+// Charm A: Send to Charm B's stream
+const add = handler((_, { linkedStream }) => {
+  linkedStream.send({ title: "New" }, { onCommit: () => console.log("Sent!") });
+});
+```
+
+---
+
+## Level 4: Pattern Composition
+
+Multiple patterns sharing data within a single charm:
+
+```typescript
+import ShoppingList from "./shopping-list.tsx";
+import CategoryView from "./category-view.tsx";
+
+export default pattern<Input, Input>(({ items }) => {
+  const listView = ShoppingList({ items });
+  const catView = CategoryView({ items });
+
+  return {
+    [NAME]: "Both Views",
+    [UI]: (
+      <div style={{ display: "flex", gap: "2rem" }}>
+        <div>{listView}</div>
+        <div>{catView}</div>
+      </div>
+    ),
+    items,
+  };
+});
+```
+
+Both patterns receive the same `items` cell - changes sync automatically.
+
+**When to use which:**
+- **Pattern Composition**: Multiple views in one UI, reusable components
+- **Linked Charms**: Independent deployments that communicate
+
+---
+
+## Making Charms Discoverable
+
+Export a `mentionable` property to make child charms appear in `[[` autocomplete:
+
+```typescript
+export default pattern<Input, Output>(({ ... }) => {
+  const childCharm = ChildPattern({ ... });
+
+  return {
+    [NAME]: "Parent",
+    [UI]: <div>...</div>,
+    mentionable: [childCharm],  // Makes childCharm discoverable via [[
+  };
+});
+```
+
+For dynamic collections, use a Cell:
+
+```typescript
+const createdCharms = Cell.of<any[]>([]);
+
+const create = handler((_, { createdCharms }) => {
+  createdCharms.push(ChildPattern({ name: "New" }));
+});
+
+return {
+  [UI]: <ct-button onClick={create({ createdCharms })}>Create</ct-button>,
+  mentionable: createdCharms,  // Cell is automatically unwrapped
+};
+```
+
+**Notes:**
+- Exported mentionables appear in `[[` autocomplete
+- They do NOT appear in the sidebar charm list
+- Use this instead of writing to `allCharms` directly
+
+---
+
+## Quick Reference
+
+### When to Use What
+
+| Need | Use |
+|------|-----|
+| Toggle checkbox | `$checked` (bidirectional) |
+| Edit text | `$value` (bidirectional) |
+| Add/remove from array | Inline handler |
+| Complex/reusable logic | `handler()` |
+| Transform data | `computed()` |
+| Filter/sort lists | `computed()` |
+| Cross-charm mutation | `Stream.send()` |
+| Make charm discoverable | Export `mentionable` |
+
+### Cell<> in Type Signatures
+
+| Type | Meaning |
+|------|---------|
+| `items: Item[]` | Read-only, reactive |
+| `items: Cell<Item[]>` | Read + write (will mutate) |
+| `items: Default<Item[], []>` | Optional with default |
+
+---
+
+## Common Mistakes
+
+### Direct Data Access
+
+```typescript
+// ❌ Error: "Tried to directly access an opaque value"
+for (const entry of entries) { ... }
+
+// ✅ Wrap in computed()
+const result = computed(() => {
+  for (const entry of entries) { ... }
+});
+```
+
+### Forgetting $ Prefix
+
+```typescript
+// ❌ One-way only - changes don't sync back
+<ct-checkbox checked={item.done} />
+
+// ✅ Bidirectional binding
 <ct-checkbox $checked={item.done} />
 ```
 
-### Handler Type Parameters
-
-**Critical Rule**: Never write `OpaqueRef<...>` in a handler signature.
+### Filter/Sort Not Updating
 
 ```typescript
-// ✅ CORRECT - Cell wraps the entire array
-const addItem = handler<
-  unknown,
-  { items: Cell<ShoppingItem[]> }  // ← Cell<ShoppingItem[]>
->((_event, { items }) => {
-  const currentItems = items.get();  // Returns ShoppingItem[]
-  items.set([...currentItems, { title: "New", done: false }]);
-});
+// ❌ WRONG: Inline filtering in JSX won't update reactively
+{items.filter(i => !i.done).map(...)}
 
-// ✅ CORRECT - Nested cells are supported
-const addItem = handler<
-  unknown,
-  { items: Cell<Array<Cell<ShoppingItem>>> }  // ← Cell of Cell[]
->(/* ... */);
-
-// ❌ WRONG - Don't use OpaqueRef in handler parameters
-const addItem = handler<
-  unknown,
-  { items: Cell<OpaqueRef<ShoppingItem>[]> }  // ← Wrong!
->(/* ... */);
+// ✅ CORRECT: Compute outside JSX, then map over the result
+const active = computed(() => items.filter(i => !i.done));
+{active.map(...)}  // You CAN map over computed() results!
 ```
 
-### Mental Model
+### Template String Access
 
-Think of it this way:
-- **Cell<T[]>**: A box containing an array (handler params, pattern params, returns)
-- **T[]**: The plain array inside the box (result of `.get()`)
-- **OpaqueRef<T>**: A cell-like reference to each item (in JSX `.map()`, auto-inferred!)
+```typescript
+// ❌ Error: "Accessing an opaque ref via closure"
+const prompt = `Seed: ${seed}`;
 
-### Style Attribute Types
+// ✅ Wrap in computed()
+const prompt = computed(() => `Seed: ${seed}`);
+```
 
-Remember: HTML elements use object syntax, custom elements use string syntax.
+### lift() Closure Pattern
+
+```typescript
+// ❌ Error: "Accessing an opaque ref via closure"
+const result = lift((g) => g[date])(grouped);
+
+// ✅ Pass all reactive dependencies as parameters
+const result = lift((args) => args.g[args.d])({ g: grouped, d: date });
+
+// ✅ Or use computed() instead (handles closures automatically)
+const result = computed(() => grouped[date]);
+```
+
+See [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) section "lift() and Closure Limitations" for details on frame-based execution and why `computed()` doesn't have this issue.
+
+### Style Syntax
 
 ```typescript
 // ✅ HTML elements - Object syntax
-<div style={{ flex: 1, padding: "1rem" }} />
-<span style={{ color: "red", fontWeight: "bold" }} />
+<div style={{ flex: 1 }} />
 
 // ✅ Custom elements - String syntax
-<ct-hstack style="flex: 1; padding: 1rem;" />
-<ct-card style="border: 1px solid #ccc;" />
-
-// ❌ Common mistake
-<div style="flex: 1;" />  // Error: Type 'string' not assignable to 'CSSProperties'
+<ct-card style="flex: 1;" />
 ```
 
-See "Styling: String vs Object Syntax" in `COMPONENTS.md` for details.
-
-### Direct Property Access on Computed Objects
-
-When you compute an object (not an array), you can access its properties directly:
+### Conditional Rendering
 
 ```typescript
-const groupedItems = computed(() => {
-  const groups: Record<string, ShoppingItem[]> = {};
-  for (const item of items) {
-    const category = item.category || "Uncategorized";
-    if (!groups[category]) groups[category] = [];
-    groups[category].push(item);
-  }
-  return groups;
-});
+// ❌ Ternary for elements doesn't work
+{show ? <div>Content</div> : null}
 
-const categories = computed(() => Object.keys(groupedItems).sort());
+// ✅ Use ifElse()
+{ifElse(show, <div>Content</div>, null)}
 
-// ✅ Direct property access with inline null coalescing
-{categories.map((category) => (
-  <div>
-    <h3>{category}</h3>
-    {(groupedItems[category] ?? []).map((item) => (
-      <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
-    ))}
-  </div>
-))}
+// ✅ Ternary IS fine for attributes
+<span style={done ? { textDecoration: "line-through" } : {}}>
 ```
 
-**What to notice:**
-- ✅ `groupedItems[category]` - direct property access works on computed objects
-- ✅ `(groupedItems[category] ?? [])` - inline null coalescing for safety
-- ✅ No intermediate `computed()` needed for simple property access
-- ✅ Type inference works automatically, even in nested maps!
-
-## Common Pitfalls and How to Avoid Them
-
-This section covers mistakes that will cost you hours of debugging. Read this before building your first pattern!
-
-### Pitfall 1: Direct Data Access
-
-❌ **WRONG - Trying to loop/transform data directly:**
+### onClick in computed()
 
 ```typescript
-export default pattern(({ entries }) => {
-  // Error: "Tried to directly access an opaque value. Use `derive` instead"
-  const grouped = {};
-  for (const entry of entries) {
-    grouped[entry.date] = entry;
-  }
-});
+// ❌ Causes ReadOnlyAddressError
+const ui = computed(() => (
+  <ct-button onClick={handler}>Click</ct-button>
+));
+
+// ✅ Keep buttons at top level, use disabled for conditional
+<ct-button disabled={!isReady} onClick={handler}>Click</ct-button>
 ```
 
-✅ **CORRECT - Wrap ALL data transformations in computed():**
+---
 
-```typescript
-export default pattern(({ entries }) => {
-  const grouped = computed(() => {
-    const result = {};
-    for (const entry of entries) {
-      result[entry.date] = entry;
-    }
-    return result;
-  });
-});
+## Development Workflow
+
+```bash
+# Check syntax (fast)
+deno task ct dev pattern.tsx --no-run
+
+# Test locally
+deno task ct dev pattern.tsx
+
+# Deploy
+deno task ct charm new ... pattern.tsx
+
+# Update existing (faster iteration)
+deno task ct charm setsrc ... --charm CHARM_ID pattern.tsx
+
+# Inspect data
+deno task ct charm inspect ... --charm CHARM_ID
 ```
 
-**Rule:** NEVER directly read or iterate cell data in pattern body. Always use `computed()`.
-
-### Pitfall 2: Creating Cells Without Cell.of()
-
-❌ **WRONG - Returning plain arrays/objects:**
-
-```typescript
-return {
-  myData: [],           // Not a cell!
-  myCount: 0,          // Not a cell!
-}
-
-// Later trying to mutate:
-onClick={handler({ myData: [] })}  // Won't work!
-```
-
-✅ **CORRECT - Use Cell.of() for new cells:**
-
-```typescript
-return {
-  myData: Cell.of<Item[]>([]),     // Now a cell!
-  myCount: Cell.of(0),             // Now a cell!
-}
-
-// Now mutation works:
-onClick={handler({ myData })}
-```
-
-**Rule:** Use `Cell.of()` when creating NEW cells in pattern body or return values. Input cells are already cells.
-
-### Pitfall 3: Accessing Cells in Template Strings
-
-❌ **WRONG - Direct access in template string:**
-
-```typescript
-const seed = Cell.of(42);
-const prompt = `Generate with seed: ${seed}`;  // Error: "Accessing an opaque ref via closure"
-```
-
-✅ **CORRECT - Use computed() or .get():**
-
-```typescript
-const seed = Cell.of(42);
-
-// Option 1: Wrap in computed()
-const prompt = computed(() => `Generate with seed: ${seed}`);
-
-// Option 2: Use .get() in handler/inline
-const generateWithSeed = () => {
-  const promptText = `Generate with seed: ${seed.get()}`;
-  // Use promptText...
-};
-```
-
-**Rule:** Can't close over cells in strings/functions. Use `computed()` or `.get()` in handlers.
-
-### Pitfall 4: HTML Event Attribute Names
-
-❌ **WRONG - Lowercase HTML-style:**
-
-```typescript
-<button onclick={handler}>      // TypeScript error!
-<input onchange={handler}>      // TypeScript error!
-<div onmouseenter={handler}>    // TypeScript error!
-```
-
-✅ **CORRECT - camelCase React-style:**
-
-```typescript
-<button onClick={handler}>      // ✅ Works
-<input onChange={handler}>      // ✅ Works
-<div onMouseEnter={handler}>    // ✅ Works
-```
-
-**Rule:** JSX uses camelCase for all event handlers (onClick, onChange, onInput, onMouseEnter, etc.)
-
-### Pitfall 5: Plain Arrays in Return Values
-
-❌ **WRONG - Mixing cells and plain values:**
-
-```typescript
-export default pattern(({ inputData }) => {
-  return {
-    [UI]: <div>...</div>,
-    outputData: [],        // Plain array, not reactive!
-  };
-});
-```
-
-✅ **CORRECT - Use Cell.of() for output data:**
-
-```typescript
-export default pattern(({ inputData }) => {
-  const outputData = Cell.of<Item[]>([]);
-
-  return {
-    [UI]: <div>...</div>,
-    outputData,            // Now a reactive cell!
-  };
-});
-```
-
-**Rule:** Output values should be cells if you want them reactive and mutable.
-
-### Pitfall 6: Forgetting computed() for Filters/Sorts
-
-❌ **WRONG - Direct filter in JSX:**
-
-```typescript
-{items.filter(item => !item.done).map(item => ...)}  // Won't update reactively!
-```
-
-✅ **CORRECT - Use computed() outside JSX:**
-
-```typescript
-const activeItems = computed(() => items.filter(item => !item.done));
-{activeItems.map(item => ...)}  // Updates reactively!
-```
-
-**Rule:** Any data transformation (filter, sort, group, etc.) needs `computed()` outside JSX.
-
-### Pitfall 7: Using Ternary for Conditional Rendering
-
-❌ **WRONG - Ternary for elements:**
-
-```typescript
-{showDetails ? <div>Details</div> : null}  // Won't work!
-```
-
-✅ **CORRECT - Use ifElse():**
-
-```typescript
-{ifElse(showDetails, <div>Details</div>, null)}  // Works!
-```
-
-**Note:** Ternaries DO work for simple attribute values:
-```typescript
-<span style={item.done ? { textDecoration: "line-through" } : {}}>  // ✅ This is fine
-```
-
-**Rule:** Use `ifElse()` for conditional rendering, not ternaries.
-
-### Quick Reference: Common Fixes
-
-| Problem | Error Message | Fix |
-|---------|---------------|-----|
-| Direct data access | "Tried to directly access an opaque value" | Wrap in `computed()` |
-| Template string access | "Accessing an opaque ref via closure" | Use `computed()` or `.get()` |
-| Handler mutation fails | "Property 'set' does not exist" | Use `Cell.of()` to create cell |
-| Filter doesn't update | UI not reactive | Use `computed()` outside JSX |
-| Event handler error | "'onclick' does not exist" | Change to camelCase: `onClick` |
-| Conditional rendering | Element doesn't show/hide | Use `ifElse()` not ternary |
-
-## Async Operations and Pending State
-
-CommonTools provides built-in functions for async operations. All return a consistent response structure:
-
-```typescript
-{
-  pending: boolean,        // true while operation is in progress
-  result: T | undefined,   // successful result (undefined while pending or on error)
-  error: any | undefined,  // error (undefined while pending or on success)
-}
-```
-
-This applies to: `fetchData`, `generateText`, `generateObject`, `compileAndRun`.
-
-### Visualizing Pending State with ct-loader
-
-Use `<ct-loader>` to show loading state:
-
-```tsx
-const data = fetchData({ url, mode: "json" });
-
-return {
-  [UI]: (
-    <div>
-      {ifElse(
-        data.pending,
-        <span><ct-loader size="sm" /> Loading...</span>,
-        ifElse(
-          data.error,
-          <ct-alert variant="error">Error: {data.error}</ct-alert>,
-          <pre>{JSON.stringify(data.result, null, 2)}</pre>
-        )
-      )}
-    </div>
-  ),
-};
-```
-
-### With Elapsed Time
-
-For long-running operations, show elapsed time:
-
-```tsx
-{ifElse(
-  response.pending,
-  <span><ct-loader show-elapsed /> Generating...</span>,
-  <div>{response.result}</div>
-)}
-```
-
-### With Stop Button
-
-For cancellable operations (like LLM generation), add a stop button:
-
-```tsx
-const { result, pending, cancel } = generateText({ prompt });
-
-{ifElse(
-  pending,
-  <span><ct-loader show-elapsed show-stop onct-stop={cancel} /> Generating...</span>,
-  <div>{result}</div>
-)}
-```
-
-### Inline Per-Item Loading
-
-For per-item async operations in lists:
-
-```tsx
-{items.map((item) => {
-  const summary = generateText({ prompt: `Summarize: ${item.content}` });
-
-  return (
-    <div>
-      <h3>{item.title}</h3>
-      {ifElse(
-        summary.pending,
-        <span><ct-loader size="sm" /> Summarizing...</span>,
-        <p>{summary.result}</p>
-      )}
-    </div>
-  );
-})}
-```
-
-### Disable Actions While Pending
-
-Prevent user actions during async operations:
-
-```tsx
-<ct-button disabled={analysis.pending} onClick={regenerate}>
-  {ifElse(
-    analysis.pending,
-    <span><ct-loader size="sm" /> Analyzing...</span>,
-    "Analyze"
-  )}
-</ct-button>
-```
-
-## Summary
-
-**Level 1 patterns:**
-- Bidirectional binding for simple UI updates
-- Handlers for structural changes (add/remove)
-- Automatic type inference in `.map()` (no manual annotations needed!)
-
-**Level 2 patterns:**
-- `computed()` for data transformations
-- Inline expressions for simple operations
-- Multiple views of same data
-- Within JSX, reactivity is automatic - no need for `computed()`
-
-**Level 3 patterns:**
-- Charm linking for data sharing
-- Master-detail relationships
-- Independent development and deployment
-
-**Level 4 patterns:**
-- Pattern composition with ct-render
-- Multiple views in single pattern
-- Shared cell references between patterns
-
-**Key principles:**
-1. Use `computed()` for ALL data transformations in pattern body
-2. Use `Cell.of()` when creating new cells
-3. Use bidirectional binding when possible
-4. Use handlers for side effects and structural changes
-5. Keep it simple - don't over-engineer
-6. Test incrementally with `deno task ct dev` and `deno task ct charm setsrc`
+**Tips:**
+- Use `dev` first to catch TypeScript errors
+- Deploy once, then use `setsrc` for updates
+- Test one feature at a time
+
+---
+
+## See Also
+
+- [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) - Deep dive on reactivity
+- [COMPONENTS.md](COMPONENTS.md) - UI component reference
+- [TYPES_AND_SCHEMAS.md](TYPES_AND_SCHEMAS.md) - Type system details
+- [DEBUGGING.md](DEBUGGING.md) - Troubleshooting guide

@@ -8,7 +8,7 @@ export default recipe("LogicalAndSimpleRef", (_state) => {
   return {
     [UI]: (
       <div>
-        {/* Simple opaque ref - should NOT use when, just derive the whole expression */}
+        {/* Simple opaque ref with JSX on right - SHOULD use when for short-circuit optimization */}
         {showPanel && <div>Panel content</div>}
 
         {/* Another simple ref */}

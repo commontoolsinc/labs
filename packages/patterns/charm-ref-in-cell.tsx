@@ -1,9 +1,8 @@
 /// <cts-enable />
 import {
   Cell,
-  cell,
+  computed,
   Default,
-  derive,
   handler,
   ifElse,
   lift,
@@ -32,7 +31,7 @@ type RecipeInOutput = {
 
 // the simple charm (to which we'll store a reference within a cell)
 const SimpleRecipe = recipe(({ id }: { id: string }) => ({
-  [NAME]: derive(id, (idValue) => `SimpleRecipe: ${idValue}`),
+  [NAME]: computed(() => `SimpleRecipe: ${id}`),
   [UI]: <div>Simple Recipe id {id}</div>,
 }));
 
@@ -77,7 +76,7 @@ const storeCharmAndNavigate = lift(
 // 3. Uses storeCharmAndNavigate lift to save reference and navigate
 const createSimpleRecipe = handler<unknown, { cellRef: Cell<{ charm: any }> }>(
   (_, { cellRef }) => {
-    const isInitialized = cell(false);
+    const isInitialized = Cell.of(false);
 
     // Create a random 5-digit ID
     const randomId = Math.floor(10000 + Math.random() * 90000).toString();
@@ -111,10 +110,10 @@ export default recipe<RecipeInOutput, RecipeInOutput>(
       [UI]: (
         <div>
           <div>
-            Stored charm ID: {derive(cellRef, (innerCell) => {
-              if (!innerCell) return "undefined";
-              if (!innerCell.charm) return "no charm stored yet";
-              return innerCell.charm[UI] || "charm has no UI";
+            Stored charm ID: {computed(() => {
+              if (!cellRef) return "undefined";
+              if (!cellRef.charm) return "no charm stored yet";
+              return cellRef.charm[UI] || "charm has no UI";
             })}
           </div>
           <ct-button

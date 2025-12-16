@@ -1,4 +1,4 @@
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
 import { type AnyCell, type JSONSchema } from "./builder/types.ts";
 import {
   type Cell,
@@ -7,15 +7,7 @@ import {
   type MemorySpace,
   type Stream,
 } from "./cell.ts";
-import {
-  type LegacyAlias,
-  type LegacyJSONCellLink,
-  LINK_V1_TAG,
-  type SigilLink,
-  type SigilValue,
-  type SigilWriteRedirectLink,
-  type URI,
-} from "./sigil-types.ts";
+import { LINK_V1_TAG, type SigilLink, type URI } from "./sigil-types.ts";
 import { getJSONFromDataURI, toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
 import {
@@ -23,35 +15,20 @@ import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
-import type {
-  IMemorySpaceAddress,
-  MemoryAddressPathComponent,
-} from "./storage/interface.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { IExtendedStorageTransaction } from "./storage/interface.ts";
 import type { Runtime } from "./runtime.ts";
+import {
+  isNormalizedLink,
+  isPrimitiveCellLink,
+  NormalizedFullLink,
+  NormalizedLink,
+  parseLinkPrimitive,
+  PrimitiveCellLink,
+} from "./link-types.ts";
 
-/**
- * Normalized link structure returned by parsers
- */
-export type NormalizedLink = {
-  id?: URI; // URI format with "of:" prefix
-  path: readonly MemoryAddressPathComponent[];
-  space?: MemorySpace;
-  type?: string; // Default is "application/json"
-  schema?: JSONSchema;
-  rootSchema?: JSONSchema;
-  overwrite?: "redirect"; // "this" gets normalized away to undefined
-};
-
-/**
- * Full normalized link that from a complete link, i.e. with required id, space
- * and type. Gets created by parseLink if a base is provided.
- *
- * Any such link can be used as a memory address.
- */
-export type NormalizedFullLink = NormalizedLink & IMemorySpaceAddress;
+export * from "./link-types.ts";
 
 /**
  * A type reflecting all possible link formats, including cells themselves.
@@ -59,93 +36,18 @@ export type NormalizedFullLink = NormalizedLink & IMemorySpaceAddress;
 export type CellLink =
   | Cell<any>
   | Stream<any>
-  | SigilLink
   | CellResultInternals
-  | LegacyJSONCellLink // @deprecated
-  | LegacyAlias // @deprecated
-  | { "/": string }; // @deprecated
-
-/**
- * Check if value is a sigil value with any type
- *
- * Any object that is strictly `{ "/": Record<string, any> }`, no other props
- */
-export function isSigilValue(value: any): value is SigilValue<any> {
-  return isRecord(value) &&
-    "/" in value &&
-    Object.keys(value).length === 1 &&
-    isObject(value["/"]);
-}
-
-/**
- * Check if value is a legacy cell link.
- *
- * @deprecated Switch to isLink instead.
- *
- * @param {any} value - The value to check.
- * @returns {boolean}
- */
-export function isLegacyCellLink(
-  value: any,
-): value is LegacyJSONCellLink {
-  return isJSONCellLink(value);
-}
-
-/**
- * Check if value is a JSON cell link (storage format).
- *
- * @deprecated Switch to isLink instead.
- *
- * @param {any} value - The value to check.
- * @returns {boolean}
- */
-export function isJSONCellLink(value: any): value is LegacyJSONCellLink {
-  return (
-    isRecord(value) &&
-    isRecord(value.cell) &&
-    typeof value.cell["/"] === "string" &&
-    Array.isArray(value.path)
-  );
-}
-
-/**
- * Check if value is a sigil link.
- */
-export function isSigilLink(value: any): value is SigilLink {
-  return (isSigilValue(value) && LINK_V1_TAG in value["/"]);
-}
-
-/**
- * Check if value is a sigil alias (link with overwrite field).
- */
-export function isSigilWriteRedirectLink(
-  value: any,
-): value is SigilWriteRedirectLink {
-  return isSigilLink(value) &&
-    value["/"][LINK_V1_TAG].overwrite === "redirect";
-}
-
-/**
- * Check if value is any kind of cell link format.
- *
- * @param {any} value - The value to check.
- * @returns {boolean}
- */
-export function isAnyCellLink(
-  value: any,
-): value is SigilLink | LegacyJSONCellLink | LegacyAlias {
-  return isJSONCellLink(value) || isSigilLink(value) || isLegacyAlias(value);
-}
+  | PrimitiveCellLink;
 
 /**
  * Check if value is any kind of link or linkable entity
  */
-export function isLink(
+export function isCellLink(
   value: any,
 ): value is CellLink {
   return (
     isCellResultForDereferencing(value) ||
-    isAnyCellLink(value) ||
+    isPrimitiveCellLink(value) ||
     isCell(value) ||
     (isRecord(value) && "/" in value && typeof value["/"] === "string") // EntityId format
   );
@@ -166,38 +68,6 @@ export function isNormalizedFullLink(value: any): value is NormalizedFullLink {
     typeof value.type === "string" &&
     Array.isArray(value.path)
   );
-}
-
-/**
- * Check if value is an alias in any format (old $alias or new sigil)
- */
-export function isWriteRedirectLink(
-  value: any,
-): value is LegacyAlias | SigilWriteRedirectLink {
-  // Check legacy $alias format
-  if (isLegacyAlias(value)) {
-    return true;
-  }
-
-  // Check new sigil format (link@1 with overwrite field)
-  if (isSigilLink(value)) {
-    return value["/"][LINK_V1_TAG].overwrite === "redirect";
-  }
-
-  return false;
-}
-
-/**
- * Check if value is a legacy alias.
- *
- * @deprecated Switch to isWriteRedirectLink instead.
- *
- * @param {any} value - The value to check.
- * @returns {boolean}
- */
-export function isLegacyAlias(value: any): value is LegacyAlias {
-  return isRecord(value) && "$alias" in value && isRecord(value.$alias) &&
-    Array.isArray(value.$alias.path);
 }
 
 /**
@@ -235,80 +105,16 @@ export function parseLink(
 
   if (isCell(value)) return value.getAsNormalizedFullLink();
 
-  // Handle new sigil format
-  if (isSigilLink(value)) {
-    const link = value["/"][LINK_V1_TAG];
-
-    // Resolve relative references
-    let id = link.id;
-    const path = link.path || [];
-    const resolvedSpace = link.space || base?.space;
-
-    // If no id provided, use base cell's document
-    if (!id && base) {
-      id = isAnyCell(base) ? toURI(base.entityId) : base.id;
+  if (isPrimitiveCellLink(value)) {
+    if (!base) {
+      return parseLinkPrimitive(value);
+    } else if (isAnyCell(base)) {
+      return parseLinkPrimitive(value, base.getAsNormalizedFullLink());
+    } else if (isNormalizedLink(base)) {
+      return parseLinkPrimitive(value, base);
     }
-
-    return {
-      ...(id && { id }),
-      path: path.map((p) => p.toString()),
-      ...(resolvedSpace && { space: resolvedSpace }),
-      type: "application/json",
-      ...(link.schema !== undefined && { schema: link.schema }),
-      ...(link.rootSchema !== undefined && { rootSchema: link.rootSchema }),
-      ...(link.overwrite === "redirect" && { overwrite: "redirect" }),
-    };
+    throw new Error(`Unexpected link base: ${base}`);
   }
-
-  // Handle JSON CellLink format (storage format with { "/": string })
-  if (isJSONCellLink(value)) {
-    return {
-      id: toURI(value.cell["/"]),
-      path: value.path.map((p) => p.toString()),
-      ...(base?.space && { space: base.space }),
-      type: "application/json",
-    };
-  }
-
-  if (isRecord(value) && "/" in value) {
-    return {
-      id: toURI(value["/"]),
-      path: [],
-      ...(base?.space && { space: base.space }), // Space must come from context for JSON links
-      type: "application/json",
-    };
-  }
-
-  // Handle legacy alias format
-  if (isLegacyAlias(value)) {
-    const alias = value.$alias;
-    let id: URI | undefined;
-
-    // If cell is provided, convert to URI
-    if (alias.cell) {
-      if (isRecord(alias.cell) && "/" in alias.cell) {
-        id = toURI(alias.cell);
-      }
-    }
-
-    // If no cell provided, use base cell's document
-    if (!id && base) {
-      id = isAnyCell(base) ? toURI(base.entityId) : base.id;
-    }
-
-    return {
-      ...(id && { id }),
-      path: Array.isArray(alias.path)
-        ? alias.path.map((p) => p.toString())
-        : [],
-      ...(base?.space && { space: base.space }),
-      type: "application/json",
-      ...(alias.schema !== undefined && { schema: alias.schema }),
-      ...(alias.rootSchema !== undefined && { rootSchema: alias.rootSchema }),
-      overwrite: "redirect",
-    };
-  }
-
   return undefined;
 }
 
@@ -457,7 +263,7 @@ export function createSigilLinkFromParsedLink(
  * @returns The value with any data: URI links inlined.
  */
 export function findAndInlineDataURILinks(value: any): any {
-  if (isLink(value)) {
+  if (isCellLink(value)) {
     const dataLink = parseLink(value)!;
 
     if (dataLink.id?.startsWith("data:")) {
@@ -472,7 +278,7 @@ export function findAndInlineDataURILinks(value: any): any {
       // If there is a link on the way to `path`, follow it, appending remaining
       // path to the target link.
       while (dataValue !== undefined) {
-        if (isAnyCellLink(dataValue)) {
+        if (isPrimitiveCellLink(dataValue)) {
           // Parse the link found in the data URI
           // Do NOT pass parsedLink as base to avoid inheriting the data: URI id
           const newLink = parseLink(dataValue);
@@ -540,7 +346,7 @@ export function createDataCellURI(
     }
     seen.add(value);
     try {
-      if (isAnyCellLink(value)) {
+      if (isPrimitiveCellLink(value)) {
         const link = parseLink(value);
         if (!link.id) {
           return createSigilLinkFromParsedLink({ ...link, id: baseId });
@@ -626,92 +432,4 @@ function recursiveStripAsCellAndStreamFromSchema(
   }
 
   return result;
-}
-
-/**
- * Encodes a JSON Pointer path according to RFC 6901.
- * Each token has ~ replaced with ~0 and / replaced with ~1, then joined with /.
- * @param path - Array of path tokens to encode
- * @returns The encoded JSON Pointer string
- */
-export function encodeJsonPointer(path: readonly string[]): string {
-  return path
-    .map((token) => token.replace(/~/g, "~0").replace(/\//g, "~1"))
-    .join("/");
-}
-
-/**
- * Decodes a JSON Pointer string according to RFC 6901.
- * Splits by / then replaces ~1 with / and ~0 with ~ in each token.
- * @param pointer - The JSON Pointer string to decode
- * @returns Array of decoded path tokens
- */
-export function decodeJsonPointer(pointer: string): string[] {
-  return pointer
-    .split("/")
-    .map((token) => token.replace(/~1/g, "/").replace(/~0/g, "~"));
-}
-
-export const matchLLMFriendlyLink = new RegExp("^/[a-zA-Z0-9]+:");
-
-/**
- * Parses a LLM friendly link from a target string.
- *
- * @param target - The target string to parse
- * @param space - The space to use to get the cells
- * @returns The parsed LLM friendly link
- */
-export function parseLLMFriendlyLink(
-  target: string,
-  space: MemorySpace,
-): NormalizedFullLink;
-export function parseLLMFriendlyLink(
-  target: string,
-  space?: MemorySpace,
-): NormalizedLink;
-export function parseLLMFriendlyLink(
-  target: string,
-  space?: MemorySpace,
-): NormalizedLink {
-  target = target.trim();
-
-  if (!matchLLMFriendlyLink.test(target)) {
-    throw new Error(
-      'Target must include a charm handle, e.g. "/of:bafyabc123/path".',
-    );
-  }
-
-  const [empty, id, ...path] = decodeJsonPointer(target);
-
-  if (empty !== "") {
-    throw new Error("Target must start with a slash.");
-  }
-
-  // Check if first segment looks like a CID/handle by length
-  //
-  // CIDs are long encoded strings (typically 40+ chars), whereas human names
-  // are short. Use a conservative threshold to distinguish handles from
-  // human-readable names Handle format is "/of:..." (the internal storage
-  // format)
-  if (id === undefined || id.length < 20) {
-    throw new Error(
-      `Charm references must use handles (e.g., "/of:bafyabc123/path"), not human names (e.g., "${id}").`,
-    );
-  }
-
-  // Remove path element from trailing slash
-  if (path.length > 0 && path[path.length - 1] === "") {
-    path.pop();
-  }
-
-  return {
-    id: id as `${string}:${string}`,
-    path,
-    ...(space && { space }),
-    type: "application/json",
-  };
-}
-
-export function createLLMFriendlyLink(link: NormalizedFullLink): string {
-  return encodeJsonPointer(["", link.id, ...link.path]);
 }

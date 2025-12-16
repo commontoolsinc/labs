@@ -12,7 +12,6 @@
 
 import {
   Cell,
-  cell,
   Default,
   derive,
   handler,
@@ -259,8 +258,8 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
     },
   ) => {
     // Separate name inputs for each player slot
-    const player1NameInput = cell("");
-    const player2NameInput = cell("");
+    const player1NameInput = Cell.of("");
+    const player2NameInput = Cell.of("");
 
     // Derive player data reactively from playersJson
     const player1 = derive(playersJson, (json: string) => {

@@ -14,7 +14,7 @@ import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { isCell, isStream } from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
-import { isAnyCellLink, parseLink } from "../src/link-utils.ts";
+import { isPrimitiveCellLink, parseLink } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -800,7 +800,7 @@ describe("Recipe Runner", () => {
     const recipeId = sourceCellValue?.[TYPE];
     expect(recipeId).toBeDefined();
     expect(lastError?.recipeId).toBe(recipeId);
-    expect(isAnyCellLink(sourceCellValue?.["spell"])).toBe(true);
+    expect(isPrimitiveCellLink(sourceCellValue?.["spell"])).toBe(true);
     const spellLink = parseLink(sourceCellValue["spell"]);
     const spellId = spellLink?.id;
     expect(spellId).toBeDefined();

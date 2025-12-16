@@ -16,14 +16,16 @@ import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { JSONObject, JSONSchema, JSONValue } from "./builder/types.ts";
 import type {
+  MemorySpace,
+  Result,
   SchemaContext,
   SchemaPathSelector,
+  Unit,
 } from "@commontools/memory/interface";
 import { deepEqual } from "./path-utils.ts";
 import {
   createDataCellURI,
-  isAnyCellLink,
-  isLink,
+  isPrimitiveCellLink,
   NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
@@ -31,6 +33,7 @@ import type {
   Activity,
   CommitError,
   IAttestation,
+  IExtendedStorageTransaction,
   IMemoryAddress,
   IMemorySpaceAddress,
   InactiveTransactionError,
@@ -39,17 +42,13 @@ import type {
   ITransactionJournal,
   ITransactionReader,
   ITransactionWriter,
-  MemorySpace,
   ReaderError,
   ReadError,
-  Result,
   StorageTransactionStatus,
-  Unit,
   WriteError,
   WriterError,
 } from "./storage/interface.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
-import { IExtendedStorageTransaction } from "./runtime.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
@@ -489,7 +488,7 @@ export abstract class BaseObjectTraverser<
         };
         // TODO(@ubik2): We follow the first link in array elements so we
         // don't have strangeness with setting item at 0 to item at 1
-        if (isLink(item)) {
+        if (isPrimitiveCellLink(item)) {
           const [next, _selector] = getAtPath(
             this.tx,
             docItem,
@@ -517,7 +516,7 @@ export abstract class BaseObjectTraverser<
       return this.objectCreator.createObject(newLink, newValue);
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
-      if (isAnyCellLink(doc.value)) {
+      if (isPrimitiveCellLink(doc.value)) {
         // FIXME(@ubik2): A cell link with a schema should go back into traverseSchema behavior
         // Check if target doc is already tracked BEFORE calling getAtPath,
         // since getAtPath/followPointer will add it to schemaTracker
@@ -641,7 +640,7 @@ export function getAtPath(
 ): [IMemorySpaceAttestation, SchemaPathSelector | undefined] {
   let curDoc = doc;
   let remaining = [...path];
-  while (isAnyCellLink(curDoc.value)) {
+  while (isPrimitiveCellLink(curDoc.value)) {
     [curDoc, selector] = followPointer(
       tx,
       curDoc,
@@ -683,7 +682,7 @@ export function getAtPath(
       }, selector];
     }
     // If this next value is a pointer, use the pointer resolution code
-    while (isAnyCellLink(curDoc.value)) {
+    while (isPrimitiveCellLink(curDoc.value)) {
       [curDoc, selector] = followPointer(
         tx,
         curDoc,
@@ -1175,7 +1174,7 @@ function loadLinkedRecipe(
   let address: IMemorySpaceAddress | undefined;
   // Check for a spell link first, since this is more efficient
   // Older recipes will only have a $TYPE
-  if ("spell" in value && isAnyCellLink(value["spell"])) {
+  if ("spell" in value && isPrimitiveCellLink(value["spell"])) {
     const link = parseLink(value["spell"], valueEntry.address)!;
     address = {
       space: link.space,
@@ -1592,7 +1591,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       }
       return undefined;
     } else if (isObject(doc.value)) {
-      if (isAnyCellLink(doc.value)) {
+      if (isPrimitiveCellLink(doc.value)) {
         return this.traversePointerWithSchema(doc, {
           schema: schemaObj,
           rootSchema: schemaContext.rootSchema,
@@ -1748,7 +1747,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       // work as expected. Handle boolean items values for element schema
       // let createdDataURI = false;
       // const maybeLink = parseLink(item, arrayLink);
-      if (isLink(item)) {
+      if (isPrimitiveCellLink(item)) {
         const [next, selector] = getAtPath(
           this.tx,
           curDoc,
@@ -1791,7 +1790,8 @@ export class SchemaObjectTraverser<V extends JSONValue>
       // add the created cell instead.
       if (
         !this.traverseCells &&
-        SchemaObjectTraverser.asCellOrStream(itemSchema) && isLink(item)
+        SchemaObjectTraverser.asCellOrStream(itemSchema) &&
+        isPrimitiveCellLink(item)
       ) {
         // This is redundant, since the getAtPath that happened earlier
         // already did this work, but I don't have easy access here.

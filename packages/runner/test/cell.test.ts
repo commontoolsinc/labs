@@ -13,7 +13,11 @@ import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
 import { addCommonIDfromObjectID } from "../src/data-updating.ts";
-import { areLinksSame, isAnyCellLink, parseLink } from "../src/link-utils.ts";
+import {
+  areLinksSame,
+  isPrimitiveCellLink,
+  parseLink,
+} from "../src/link-utils.ts";
 import { areNormalizedLinksSame } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -391,8 +395,8 @@ describe("Cell utility functions", () => {
     );
     c.set({ x: 10 });
     const ref = c.key("x").getAsLink();
-    expect(isAnyCellLink(ref)).toBe(true);
-    expect(isAnyCellLink({})).toBe(false);
+    expect(isPrimitiveCellLink(ref)).toBe(true);
+    expect(isPrimitiveCellLink({})).toBe(false);
   });
 
   it("should identify a cell proxy", () => {
@@ -2191,8 +2195,8 @@ describe("asCell with schema", () => {
     testCell.set(initialDataCopy);
     popFrame(frame1);
 
-    expect(isAnyCellLink(testCell.getRaw()[0])).toBe(true);
-    expect(isAnyCellLink(testCell.getRaw()[1])).toBe(true);
+    expect(isPrimitiveCellLink(testCell.getRaw()[0])).toBe(true);
+    expect(isPrimitiveCellLink(testCell.getRaw()[1])).toBe(true);
     expect(testCell.get()[0].name).toEqual("First Item");
     expect(testCell.get()[1].name).toEqual("Second Item");
     expect(testCell.key("0").key("nested").key("0").key("id").get()).toEqual(
@@ -2216,8 +2220,8 @@ describe("asCell with schema", () => {
     testCell.set(returnedData);
     popFrame(frame2);
 
-    expect(isAnyCellLink(testCell.getRaw()[0])).toBe(true);
-    expect(isAnyCellLink(testCell.getRaw()[1])).toBe(true);
+    expect(isPrimitiveCellLink(testCell.getRaw()[0])).toBe(true);
+    expect(isPrimitiveCellLink(testCell.getRaw()[1])).toBe(true);
     expect(testCell.get()[0].name).toEqual("First Item");
     expect(testCell.get()[1].name).toEqual("Second Item");
 
@@ -2294,8 +2298,8 @@ describe("asCell with schema", () => {
     arrayCell.push({ [ID]: "test", value: 43 });
     expect(frame.generatedIdCounter).toEqual(1); // No increment = no ID generated from it
     popFrame(frame);
-    expect(isAnyCellLink(c.getRaw()?.items[0])).toBe(true);
-    expect(isAnyCellLink(c.getRaw()?.items[1])).toBe(true);
+    expect(isPrimitiveCellLink(c.getRaw()?.items[0])).toBe(true);
+    expect(isPrimitiveCellLink(c.getRaw()?.items[1])).toBe(true);
     expect(arrayCell.get()).toEqualIgnoringSymbols([
       { value: 42 },
       { value: 43 },
@@ -3757,6 +3761,196 @@ describe("Cell success callbacks", () => {
       const link0 = result[0].getAsNormalizedFullLink();
       const link1 = result[1].getAsNormalizedFullLink();
       expect(link0.id).not.toBe(link1.id);
+    });
+  });
+
+  describe("remove and removeAll operations", () => {
+    it("should remove first matching primitive from array", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<number[]>(
+        space,
+        "remove-primitive-test",
+        { type: "array", items: { type: "number" } },
+        tx,
+      );
+
+      cell.set([1, 2, 3, 2, 4]);
+      cell.remove(2);
+      popFrame(frame);
+
+      const result = cell.get();
+      expect(result).toEqual([1, 3, 2, 4]);
+    });
+
+    it("should remove all matching primitives from array", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<number[]>(
+        space,
+        "removeall-primitive-test",
+        { type: "array", items: { type: "number" } },
+        tx,
+      );
+
+      cell.set([1, 2, 3, 2, 4, 2]);
+      cell.removeAll(2);
+      popFrame(frame);
+
+      const result = cell.get();
+      expect(result).toEqual([1, 3, 4]);
+    });
+
+    it("should remove first matching object from array using link comparison", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<{ name: string }[]>(
+        space,
+        "remove-object-test",
+        {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { name: { type: "string" } },
+            asCell: true,
+          },
+        },
+        tx,
+      );
+
+      cell.push({ name: "alice" }, { name: "bob" }, { name: "charlie" });
+
+      // Get the cell reference for bob
+      const items = cell.get();
+      const bobCell = items[1];
+
+      cell.remove(bobCell);
+      popFrame(frame);
+
+      const result = cell.asSchema({
+        type: "array",
+        items: { type: "object", properties: { name: { type: "string" } } },
+      }).get();
+      expect(result.length).toBe(2);
+      expect(result[0].name).toBe("alice");
+      expect(result[1].name).toBe("charlie");
+    });
+
+    it("should remove all matching objects from array using link comparison", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<{ name: string }[]>(
+        space,
+        "removeall-object-test",
+        {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { name: { type: "string" } },
+            asCell: true,
+          },
+        },
+        tx,
+      );
+
+      cell.push({ name: "alice" }, { name: "bob" }, { name: "alice-copy" });
+
+      // Get the cell reference for alice
+      const items = cell.get();
+      const aliceCell = items[0];
+
+      // Remove all instances of alice (should only remove the first one since they're different cells)
+      cell.removeAll(aliceCell);
+      popFrame(frame);
+
+      const result = cell.asSchema({
+        type: "array",
+        items: { type: "object", properties: { name: { type: "string" } } },
+      }).get();
+      expect(result.length).toBe(2);
+      expect(result[0].name).toBe("bob");
+      expect(result[1].name).toBe("alice-copy");
+    });
+
+    it("should do nothing when removing element not in array", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<number[]>(
+        space,
+        "remove-not-found-test",
+        { type: "array", items: { type: "number" } },
+        tx,
+      );
+
+      cell.set([1, 2, 3]);
+      cell.remove(5);
+      popFrame(frame);
+
+      const result = cell.get();
+      expect(result).toEqual([1, 2, 3]);
+    });
+
+    it("should do nothing when removeAll finds no matches", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<number[]>(
+        space,
+        "removeall-not-found-test",
+        { type: "array", items: { type: "number" } },
+        tx,
+      );
+
+      cell.set([1, 2, 3]);
+      cell.removeAll(5);
+      popFrame(frame);
+
+      const result = cell.get();
+      expect(result).toEqual([1, 2, 3]);
+    });
+
+    it("should throw error when removing from non-array", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<{ value: number }>(
+        space,
+        "remove-non-array-test",
+        { type: "object", properties: { value: { type: "number" } } },
+        tx,
+      );
+
+      cell.set({ value: 42 });
+
+      expect(() => (cell as any).remove(42)).toThrow(
+        "Can't remove from non-array value",
+      );
+      popFrame(frame);
+    });
+
+    it("should handle removing null from array", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<(number | null)[]>(
+        space,
+        "remove-null-test",
+        { type: "array" },
+        tx,
+      );
+
+      cell.set([1, null, 2, 3, null]);
+      cell.remove(null);
+      popFrame(frame);
+
+      const result = cell.get();
+      expect(result).toEqual([1, 2, 3, null]);
+    });
+
+    it("should handle removing strings from array", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<string[]>(
+        space,
+        "remove-string-test",
+        { type: "array", items: { type: "string" } },
+        tx,
+      );
+
+      cell.set(["apple", "banana", "cherry", "banana"]);
+      cell.removeAll("banana");
+      popFrame(frame);
+
+      const result = cell.get();
+      expect(result).toEqual(["apple", "cherry"]);
     });
   });
 

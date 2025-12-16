@@ -61,11 +61,12 @@ import {
   type SigilWriteRedirectLink,
   type URI,
 } from "./sigil-types.ts";
-import { areLinksSame, isLink } from "./link-utils.ts";
 import type { Runtime } from "./runtime.ts";
 import {
+  areLinksSame,
   createSigilLinkFromParsedLink,
   findAndInlineDataURILinks,
+  isCellLink,
   type NormalizedFullLink,
   type NormalizedLink,
 } from "./link-utils.ts";
@@ -219,6 +220,8 @@ const cellMethods = new Set<keyof ICell<unknown>>([
   "send",
   "update",
   "push",
+  "remove",
+  "removeAll",
   "equals",
   "equalLinks",
   "key",
@@ -715,6 +718,57 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       recursivelyAddIDIfNeeded([...array, ...value], this._frame),
       cause,
     );
+  }
+
+  remove(
+    ref: T extends (infer U)[] ? (U | AnyCell<U>) : never,
+  ): void {
+    const array = this.get();
+    if (!Array.isArray(array)) {
+      throw new Error("Can't remove from non-array value");
+    }
+    const index = typeof ref === "object"
+      ? array.findIndex((item) =>
+        areLinksSame(
+          item,
+          ref,
+          this as unknown as Cell<any>,
+          true, // resolveBeforeComparing
+          this.tx,
+          this.runtime,
+        )
+      )
+      : array.indexOf(ref);
+    if (index === -1) {
+      return;
+    }
+    const newArray = [
+      ...array.slice(0, index),
+      ...array.slice(index + 1),
+    ] as T;
+    this.set(newArray);
+  }
+
+  removeAll(
+    ref: T extends (infer U)[] ? (U | AnyCell<U>) : never,
+  ): void {
+    const array = this.get();
+    if (!Array.isArray(array)) {
+      throw new Error("Can't remove from non-array value");
+    }
+    const newArray = array.filter((item) =>
+      typeof ref === "object"
+        ? !areLinksSame(
+          item,
+          ref,
+          this as unknown as Cell<any>,
+          true, // resolveBeforeComparing
+          this.tx,
+          this.runtime,
+        )
+        : item !== ref
+    ) as T;
+    this.set(newArray);
   }
 
   equals(other: any): boolean {
@@ -1341,7 +1395,7 @@ function recursivelyAddIDIfNeeded<T>(
   if (!frame) return value;
 
   // Not a record, no need to add IDs. Already a link, no need to add IDs.
-  if (!isRecord(value) || isLink(value)) return value;
+  if (!isRecord(value) || isCellLink(value)) return value;
 
   // Already seen, return previously annotated result.
   if (seen.has(value)) return seen.get(value) as T;
@@ -1356,7 +1410,7 @@ function recursivelyAddIDIfNeeded<T>(
       const value = recursivelyAddIDIfNeeded(v, frame, seen);
       // For objects on arrays only: Add ID if not already present.
       if (
-        isObject(value) && !isLink(value) && !(ID in value)
+        isObject(value) && !isCellLink(value) && !(ID in value)
       ) {
         return { [ID]: frame.generatedIdCounter++, ...value };
       } else {

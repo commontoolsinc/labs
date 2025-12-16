@@ -1,3 +1,5 @@
+<!-- @reviewed 2025-12-10 docs-rationalization -->
+
 # Runtime Development Guide
 
 This guide covers working on CommonTools runtime components including the backend (Toolshed), frontend (Shell), and core runtime packages.
@@ -39,8 +41,10 @@ The frontend runs on port 5173 by default.
 
 ```bash
 cd packages/shell
-deno task dev
+deno task dev-local
 ```
+
+**Note:** Use `dev-local` (not `dev`) when running against a local Toolshed backend. The `dev` task points to the production backend.
 
 ### Background charm service
 This is only needed if you are working on either the background charm service or need to support running background charms.
@@ -57,7 +61,7 @@ OPERATOR_PASS="implicit trust" API_URL="http://localhost:8000" deno task start
 
 ### Restarting Servers
 
-**Critical: After making edits to runtime code, you MUST restart the shell server.**
+After making edits to runtime code, restart the shell server.
 
 ## Testing
 

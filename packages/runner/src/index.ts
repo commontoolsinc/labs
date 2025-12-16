@@ -10,7 +10,7 @@ export type {
 export * from "./interface.ts";
 export { raw } from "./module.ts";
 export type { Cell, Stream } from "./cell.ts";
-export type { NormalizedLink } from "./link-utils.ts";
+export type { NormalizedLink } from "./link-types.ts";
 export type { SigilLink, URI } from "./sigil-types.ts";
 export { createRef, type EntityId, getEntityId } from "./create-ref.ts";
 export type { CellResult as QueryResult } from "./query-result-proxy.ts";
@@ -47,8 +47,7 @@ export { addCommonIDfromObjectID } from "./data-updating.ts";
 export { resolveLink } from "./link-resolution.ts";
 export {
   areLinksSame,
-  isLegacyCellLink,
-  isLink,
+  isCellLink as isLink,
   isWriteRedirectLink,
   parseLink,
   parseLinkOrThrow,

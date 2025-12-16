@@ -5,12 +5,13 @@ import {
   unsafe_originalRecipe,
   unsafe_parentRecipe,
 } from "./builder/types.ts";
-import { isLegacyAlias, isLink } from "./link-utils.ts";
 import { type AnyCell, type Cell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
   areNormalizedLinksSame,
+  isCellLink,
+  isLegacyAlias,
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
@@ -165,13 +166,13 @@ export function findAllWriteRedirectCells<T>(
       );
       if (!linkCell) throw new Error("Link cell not found");
       find(linkCell.getRaw({ meta: ignoreReadForScheduling }), baseCell);
-    } else if (isLink(binding)) {
+    } else if (isCellLink(binding)) {
       // Links that are not write redirects: Ignore them.
       return;
     } else if (Array.isArray(binding)) {
       // If the binding is an array, recurse into each element.
       for (const value of binding) find(value, baseCell);
-    } else if (isRecord(binding) && !isLink(binding)) {
+    } else if (isRecord(binding) && !isCellLink(binding)) {
       // If the binding is an object, recurse into each value.
       for (const value of Object.values(binding)) find(value, baseCell);
     }

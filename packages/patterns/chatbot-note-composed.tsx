@@ -2,7 +2,6 @@
 import {
   BuiltInLLMMessage,
   Cell,
-  cell,
   Default,
   handler,
   NAME,
@@ -174,7 +173,7 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
       "#mentionable",
     );
 
-    const list = cell<ListItem[]>([]);
+    const list = Cell.of<ListItem[]>([]);
 
     const tools = {
       searchWeb: {
