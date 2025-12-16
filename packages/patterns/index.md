@@ -315,3 +315,151 @@ type Input = Record<string, never>;
 // Uses wish<Array<Favorite>>({ query: "#favorites" }) internally
 // Displays favorited charms with remove functionality
 ```
+
+## `contact-book.tsx`
+
+Manage contacts with search, notes, and relationships between contacts.
+Contacts can be linked together with labels (friend, spouse, colleague, etc.).
+
+**Keywords:** contacts, relationships, search, lift
+
+### Input Schema
+
+```ts
+interface Contact {
+  name: string;
+  email: Default<string, "">;
+  phone: Default<string, "">;
+  company: Default<string, "">;
+  tags: Default<string[], []>;
+  notes: Default<string, "">;
+  createdAt: number;
+}
+
+interface Relationship {
+  fromName: string;
+  toName: string;
+  label: Default<string, "">;
+}
+
+interface Input {
+  contacts: Cell<Default<Contact[], []>>;
+  relationships: Cell<Default<Relationship[], []>>;
+}
+```
+
+### Output Schema
+
+```ts
+interface Output {
+  contacts: Contact[];
+  relationships: Relationship[];
+}
+```
+
+## `habit-tracker.tsx`
+
+Track daily habits with streak counting and 7-day history visualization.
+Mark habits complete for today and see your progress over time.
+
+**Keywords:** habits, streaks, daily-tracking, lift
+
+### Input Schema
+
+```ts
+interface Habit {
+  name: string;
+  icon: Default<string, "✓">;
+  color: Default<string, "#3b82f6">;
+}
+
+interface HabitLog {
+  habitName: string;
+  date: string;  // YYYY-MM-DD
+  completed: boolean;
+}
+
+interface Input {
+  habits: Cell<Default<Habit[], []>>;
+  logs: Cell<Default<HabitLog[], []>>;
+}
+```
+
+### Output Schema
+
+```ts
+interface Output {
+  habits: Habit[];
+  logs: HabitLog[];
+  todayDate: string;
+}
+```
+
+## `calendar.tsx`
+
+Minimal calendar for managing events with date and time. Events are grouped by
+date with today highlighted.
+
+**Keywords:** calendar, events, dates, lift
+
+### Input Schema
+
+```ts
+interface Event {
+  title: string;
+  date: string;      // YYYY-MM-DD
+  time: Default<string, "">;  // HH:MM or empty for all-day
+  notes: Default<string, "">;
+}
+
+interface Input {
+  events: Cell<Default<Event[], []>>;
+}
+```
+
+### Output Schema
+
+```ts
+interface Output {
+  events: Event[];
+  todayDate: string;
+}
+```
+
+## `reading-list.tsx`
+
+Track books, articles, papers, and videos you want to read or have read.
+Filter by status (want/reading/finished/abandoned) and rate items.
+
+**Keywords:** reading, books, articles, status-tracking, lift
+
+### Input Schema
+
+```ts
+type ItemType = "book" | "article" | "paper" | "video";
+type ItemStatus = "want" | "reading" | "finished" | "abandoned";
+
+interface ReadingItem {
+  title: string;
+  author: Default<string, "">;
+  url: Default<string, "">;
+  type: Default<ItemType, "article">;
+  status: Default<ItemStatus, "want">;
+  rating: Default<number | null, null>;  // 1-5 stars
+  notes: Default<string, "">;
+  addedAt: number;
+  finishedAt: Default<number | null, null>;
+}
+
+interface Input {
+  items: Cell<Default<ReadingItem[], []>>;
+}
+```
+
+### Output Schema
+
+```ts
+interface Output {
+  items: ReadingItem[];
+}
+```
