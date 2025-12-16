@@ -658,10 +658,9 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       const log = txToReactivityLog(tx);
       tx.commit();
 
-      // Subscribe as an effect with scheduleImmediately so it runs in the next cycle
+      // Subscribe as an effect so it runs in the next cycle
       const cancel = this.runtime.scheduler.subscribe(action, log, {
         isEffect: true,
-        scheduleImmediately: true,
       });
 
       // Wait for the scheduler to process all pending work, then resolve
@@ -1509,7 +1508,8 @@ function subscribeToReferencedDocs<T>(
   tx.commit();
 
   // Mark as effect since sink() is a side-effectful consumer (FRP effect/sink)
-  const cancel = runtime.scheduler.subscribe(action, log, { isEffect: true });
+  // Use rescheduling:true since we already ran the action above
+  const cancel = runtime.scheduler.subscribe(action, log, { isEffect: true, rescheduling: true });
 
   return () => {
     cancel();

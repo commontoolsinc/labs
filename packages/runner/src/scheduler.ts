@@ -170,8 +170,8 @@ export class Scheduler {
   private mightWrite = new WeakMap<Action, IMemorySpaceAddress[]>();
   // Track what push mode triggered this execution cycle
   private pushTriggered = new Set<Action>();
-  // Track actions scheduled with scheduleImmediately (bypass filter)
-  private scheduledImmediately = new Set<Action>();
+  // Track actions scheduled for first time (bypass filter)
+  private scheduledFirstTime = new Set<Action>();
   // Filter stats for diagnostics
   private filterStats = { filtered: 0, executed: 0 };
 
@@ -238,7 +238,12 @@ export class Scheduler {
     action: Action,
     log: ReactivityLog,
     options: {
-      scheduleImmediately?: boolean;
+      /**
+       * Set to true when re-subscribing after an action has already run.
+       * When false (default), the action is scheduled to run immediately.
+       * When true, only registers triggers and waits for changes.
+       */
+      rescheduling?: boolean;
       isEffect?: boolean;
       debounce?: number;
       autoDebounce?: boolean;
@@ -246,7 +251,7 @@ export class Scheduler {
     } = {},
   ): Cancel {
     const {
-      scheduleImmediately = false,
+      rescheduling = false,
       isEffect = false,
       debounce,
       autoDebounce,
@@ -311,14 +316,14 @@ export class Scheduler {
         "Subscribing to action:",
         action,
         reads,
-        scheduleImmediately,
+        rescheduling ? "rescheduling" : "first-time",
         isEffect ? "effect" : "computation",
       ],
     );
 
-    if (scheduleImmediately) {
-      // Track that this action was scheduled immediately (bypasses push-triggered filter)
-      this.scheduledImmediately.add(action);
+    if (!rescheduling) {
+      // Track that this action was scheduled for first time (bypasses push-triggered filter)
+      this.scheduledFirstTime.add(action);
       this.scheduleWithDebounce(action);
     } else {
       const pathsByEntity = addressesToPathByEntity(reads);
@@ -456,7 +461,8 @@ export class Scheduler {
                 // Must re-subscribe to ensure dependencies are set before
                 // topologicalSort runs in execute(). Use the log from below
                 // which has the correct dependencies from the previous run.
-                this.subscribe(action, log, { scheduleImmediately: true });
+                // Note: not passing rescheduling:true since we want to run immediately
+                this.subscribe(action, log);
               }
             } else {
               // Clear retries after successful commit.
@@ -472,7 +478,7 @@ export class Scheduler {
             `Elapsed: ${elapsed.toFixed(2)}ms`,
           ]);
 
-          this.subscribe(action, log);
+          this.subscribe(action, log, { rescheduling: true });
           resolve(result);
         }
       };
@@ -1484,8 +1490,8 @@ export class Scheduler {
    * Returns true if the action should be skipped.
    */
   private shouldFilterAction(action: Action): boolean {
-    // Always run if scheduled immediately (initial run, explicit scheduling)
-    if (this.scheduledImmediately.has(action)) {
+    // Always run if scheduled for first time (initial run, explicit scheduling)
+    if (this.scheduledFirstTime.has(action)) {
       return false;
     }
 
@@ -1810,7 +1816,7 @@ export class Scheduler {
 
       // Clear push-triggered tracking sets at end of execution cycle
       this.pushTriggered.clear();
-      this.scheduledImmediately.clear();
+      this.scheduledFirstTime.clear();
     } else {
       // Keep scheduled = true since we're queuing another execution
       queueTask(() => this.execute());

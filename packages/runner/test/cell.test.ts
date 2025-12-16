@@ -4363,7 +4363,7 @@ describe("Cell success callbacks", () => {
       await setupTx.commit();
 
       // Subscribe the computation
-      runtime.scheduler.subscribe(action, log, { scheduleImmediately: true });
+      runtime.scheduler.subscribe(action, log, {});
 
       // Pull should wait for the computation to run
       const value = await computed.pull();
