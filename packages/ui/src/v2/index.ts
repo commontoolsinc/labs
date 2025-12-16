@@ -35,6 +35,7 @@ export * from "./components/ct-chat-message/index.ts";
 export * from "./components/ct-checkbox/index.ts";
 export * from "./components/ct-chevron-button/index.ts";
 export * from "./components/ct-code-editor/index.ts";
+export * from "./components/ct-richtext-editor/index.ts";
 export * from "./components/ct-collapsible/index.ts";
 export * from "./components/ct-copy-button/index.ts";
 export * from "./components/ct-draggable/index.ts";
