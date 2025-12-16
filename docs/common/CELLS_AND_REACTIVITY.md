@@ -746,13 +746,15 @@ const sortedItems = computed(() =>
 
 **Check 1: Is it wrapped in computed() outside JSX?**
 
+The limitation: **inline filtering/transformations in JSX won't update reactively**. You CAN and SHOULD map over `computed()` results - this is the recommended pattern.
+
 ```typescript
-// ❌ Direct filter doesn't create reactive node
+// ❌ WRONG: Inline filtering in JSX doesn't create reactive dependency
 {items.filter(item => !item.done).map(...)}
 
-// ✅ Use computed outside JSX
+// ✅ CORRECT: Use computed() outside JSX, then map over the result
 const activeItems = computed(() => items.filter(item => !item.done));
-{activeItems.map(...)}
+{activeItems.map(...)}  // Mapping over computed() works perfectly!
 ```
 
 **Check 2: Using ternary in JSX (attributes are fine)?**

@@ -257,20 +257,20 @@ Each component has specific event names. Check [COMPONENTS.md](COMPONENTS.md) fo
 
 **Issue:** Filter or sort doesn't update when dependencies change
 
-❌ **Problem:** Direct operations don't create reactive nodes
+❌ **Problem:** Inline filtering/transformations in JSX don't create reactive dependencies
 
 ```typescript
 {items.filter(item => !item.done).map(...)}  {/* Won't update! */}
 ```
 
-✅ **Solution:** Use `computed()` outside JSX
+✅ **Solution:** Use `computed()` outside JSX, then map over the result
 
 ```typescript
 const activeItems = computed(() => items.filter(item => !item.done));
 {activeItems.map(...)}  {/* Updates reactively! */}
 ```
 
-**Remember:** Within JSX, reactivity is automatic for simple expressions. Use `computed()` for transformations outside JSX.
+**The Pattern:** Compute transformations (filter, sort, group) outside JSX using `computed()`, then map over the computed result inside JSX. Mapping over `computed()` results is the canonical pattern.
 
 ### Conditional Rendering Not Working
 

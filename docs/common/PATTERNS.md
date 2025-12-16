@@ -332,12 +332,12 @@ const result = computed(() => {
 ### Filter/Sort Not Updating
 
 ```typescript
-// ❌ Won't update reactively
+// ❌ WRONG: Inline filtering in JSX won't update reactively
 {items.filter(i => !i.done).map(...)}
 
-// ✅ Use computed()
+// ✅ CORRECT: Compute outside JSX, then map over the result
 const active = computed(() => items.filter(i => !i.done));
-{active.map(...)}
+{active.map(...)}  // You CAN map over computed() results!
 ```
 
 ### Template String Access
