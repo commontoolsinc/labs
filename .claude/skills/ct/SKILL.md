@@ -83,9 +83,12 @@ alias ct="deno task ct"
 
 deno task ct charm new path/to/pattern.tsx \
   -i claude.key -a http://localhost:8000 -s my-space
+# Returns charm ID like: baedrei...
 
-# Then open: http://localhost:8000/my-space
+# Then open: http://localhost:8000/my-space/baedrei...
 ```
+
+**Charm URL format:** Use a slash between space and charm ID: `http://localhost:8000/my-space/baedrei...`
 
 If scripts fail, see `docs/common/LOCAL_DEV_SERVERS.md` for troubleshooting.
 

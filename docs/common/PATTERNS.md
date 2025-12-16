@@ -294,6 +294,21 @@ return {
 | Filter/sort lists | `computed()` |
 | Cross-charm mutation | `Stream.send()` |
 | Make charm discoverable | Export `mentionable` |
+| Expand/collapse UI | Native `<details>/<summary>` |
+
+**Tip: Native HTML for Expand/Collapse**
+
+Use native `<details>/<summary>` instead of custom state + handlers:
+
+```typescript
+// ✅ Simple, accessible, no state management needed
+<details>
+  <summary style={{ cursor: "pointer" }}>Click to expand</summary>
+  <div>Hidden content here</div>
+</details>
+```
+
+Only use custom state if you need programmatic control (e.g., "expand all" button).
 
 ### Cell<> in Type Signatures
 
@@ -388,6 +403,39 @@ See [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) section "lift() and Closu
 <span style={done ? { textDecoration: "line-through" } : {}}>
 ```
 
+### Handlers Inside Conditional Branches
+
+**Important:** Inside conditional branches (`ifElse()` or ternary), cells become opaque proxies. Inline closures that access cells will fail:
+
+```typescript
+// ❌ FAILS inside ifElse - "Tried to directly access an opaque value"
+{ifElse(
+  showButtons,
+  <ct-button onClick={() => counter.set(counter.get() + 1)}>Inc</ct-button>,
+  null
+)}
+
+// ❌ ALSO FAILS with ternary - same error
+{showButtons ? (
+  <ct-button onClick={() => counter.set(counter.get() + 1)}>Inc</ct-button>
+) : null}
+
+// ✅ WORKS - Pass cells as handler state params
+const increment = handler<unknown, { cell: Cell<number> }>(
+  (_, { cell }) => cell.set(cell.get() + 1)
+);
+
+{ifElse(
+  showButtons,
+  <ct-button onClick={increment({ cell: counter })}>Inc</ct-button>,
+  null
+)}
+```
+
+**Why:** The transformer has closure extraction for `.map()`, `computed()`, and `handler()`, but not for conditional branches. This is a known limitation.
+
+**The rule:** Inside conditional branches (`ifElse()` or ternary), always use `handler()` with explicit cell params. In all other contexts (top-level, `.map()`, `computed()`), inline closures work fine.
+
 ### onClick in computed()
 
 ```typescript
@@ -398,6 +446,18 @@ const ui = computed(() => (
 
 // ✅ Keep buttons at top level, use disabled for conditional
 <ct-button disabled={!isReady} onClick={handler}>Click</ct-button>
+```
+
+### React Differences
+
+CommonTools uses Lit for rendering, not React. Key differences:
+
+```typescript
+// ❌ key prop causes compiler error - not needed
+{items.map(item => <div key={item.id}>{item.name}</div>)}
+
+// ✅ No key needed - Lit handles reconciliation differently
+{items.map(item => <div>{item.name}</div>)}
 ```
 
 ---
