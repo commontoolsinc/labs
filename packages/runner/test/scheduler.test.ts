@@ -73,9 +73,7 @@ describe("scheduler", () => {
         a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, {
-      scheduleImmediately: true,
-    });
+    runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, {});
     await runtime.idle();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
@@ -124,7 +122,7 @@ describe("scheduler", () => {
         b.getAsNormalizedFullLink(),
       ],
       writes: [c.getAsNormalizedFullLink()],
-    }, { scheduleImmediately: true });
+    }, {});
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
     a.withTx(tx).send(2); // No log, simulate external change
@@ -166,9 +164,7 @@ describe("scheduler", () => {
         a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, {
-      scheduleImmediately: true,
-    });
+    runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, {});
     await runtime.idle();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
@@ -226,7 +222,7 @@ describe("scheduler", () => {
         b.getAsNormalizedFullLink(),
       ],
       writes: [c.getAsNormalizedFullLink()],
-    }, { scheduleImmediately: true });
+    }, {});
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
     a.withTx(tx).send(2);
@@ -295,13 +291,9 @@ describe("scheduler", () => {
         c.withTx(tx).get() + d.withTx(tx).get(),
       );
     };
-    runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, {
-      scheduleImmediately: true,
-    });
+    runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, {});
     await runtime.idle();
-    runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, {
-      scheduleImmediately: true,
-    });
+    runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, {});
     await runtime.idle();
     expect(runs.join(",")).toBe("adder1,adder2");
     expect(c.get()).toBe(3);
@@ -386,17 +378,11 @@ describe("scheduler", () => {
     const stopped = spy(stopper, "stop");
     runtime.scheduler.onError(() => stopper.stop());
 
-    runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, {
-      scheduleImmediately: true,
-    });
+    runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, {});
     await runtime.idle();
-    runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, {
-      scheduleImmediately: true,
-    });
+    runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, {});
     await runtime.idle();
-    runtime.scheduler.subscribe(adder3, { reads: [], writes: [] }, {
-      scheduleImmediately: true,
-    });
+    runtime.scheduler.subscribe(adder3, { reads: [], writes: [] }, {});
     await runtime.idle();
 
     await runtime.idle();
@@ -433,9 +419,7 @@ describe("scheduler", () => {
     const stopped = spy(stopper, "stop");
     runtime.scheduler.onError(() => stopper.stop());
 
-    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, {
-      scheduleImmediately: true,
-    });
+    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, {});
     await runtime.idle();
     expect(counter.get()).toBe(1);
     await runtime.idle();
@@ -453,9 +437,7 @@ describe("scheduler", () => {
   it("should immediately run actions that have no dependencies", async () => {
     let runs = 0;
     const inc: Action = () => runs++;
-    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, {
-      scheduleImmediately: true,
-    });
+    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, {});
     await runtime.idle();
     expect(runs).toBe(1);
   });
@@ -504,7 +486,7 @@ describe("scheduler", () => {
     runtime.scheduler.subscribe(
       ignoredReadAction,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
     expect(actionRunCount).toBe(1);
@@ -818,9 +800,7 @@ describe("event handling", () => {
       actionCount++;
       lastEventSeen = eventResultCell.withTx(tx).get();
     };
-    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {
-      scheduleImmediately: true,
-    });
+    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {});
     await runtime.idle();
 
     runtime.scheduler.addEventHandler(
@@ -966,7 +946,7 @@ describe("reactive retries", () => {
       runtime.scheduler.subscribe(
         reactiveAction,
         { reads: [], writes: [] },
-        { scheduleImmediately: true },
+        {},
       );
 
       // Allow retries to process. Idle may resolve before re-queue occurs,
@@ -1063,7 +1043,7 @@ describe("reactive retries", () => {
           reads: [source.getAsNormalizedFullLink()],
           writes: [intermediate.getAsNormalizedFullLink()],
         },
-        { scheduleImmediately: true },
+        {},
       );
       runtime.scheduler.subscribe(
         action2,
@@ -1071,7 +1051,7 @@ describe("reactive retries", () => {
           reads: [intermediate.getAsNormalizedFullLink()],
           writes: [output.getAsNormalizedFullLink()],
         },
-        { scheduleImmediately: true },
+        {},
       );
 
       // Allow all actions to complete (action1 will retry twice)
@@ -1410,9 +1390,7 @@ describe("effect/computation tracking", () => {
     expect(stats1.effects).toBe(0);
 
     const action: Action = () => {};
-    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {
-      scheduleImmediately: true,
-    });
+    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {});
     await runtime.idle();
 
     const stats2 = runtime.scheduler.getStats();
@@ -1440,7 +1418,7 @@ describe("effect/computation tracking", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [] },
-      { scheduleImmediately: true, isEffect: true },
+      { isEffect: true },
     );
     await runtime.idle();
 
@@ -1468,12 +1446,12 @@ describe("effect/computation tracking", () => {
     runtime.scheduler.subscribe(
       computation,
       { reads: [], writes: [] },
-      { scheduleImmediately: true, isEffect: false },
+      { isEffect: false },
     );
     runtime.scheduler.subscribe(
       effect,
       { reads: [], writes: [] },
-      { scheduleImmediately: true, isEffect: true },
+      { isEffect: true },
     );
     await runtime.idle();
 
@@ -1571,7 +1549,7 @@ describe("effect/computation tracking", () => {
         reads: [source.getAsNormalizedFullLink()],
         writes: [intermediate.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -1582,7 +1560,7 @@ describe("effect/computation tracking", () => {
         reads: [intermediate.getAsNormalizedFullLink()],
         writes: [output.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -1644,7 +1622,7 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       computation,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -1700,7 +1678,7 @@ describe("pull-based scheduling", () => {
         reads: [source.getAsNormalizedFullLink()],
         writes: [result.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -1779,7 +1757,7 @@ describe("pull-based scheduling", () => {
         reads: [source.getAsNormalizedFullLink()],
         writes: [intermediate.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -1790,7 +1768,7 @@ describe("pull-based scheduling", () => {
         reads: [intermediate.getAsNormalizedFullLink()],
         writes: [effectResult.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true, isEffect: true },
+      { isEffect: true },
     );
     await runtime.idle();
 
@@ -1873,7 +1851,7 @@ describe("pull-based scheduling", () => {
         reads: [source.getAsNormalizedFullLink()],
         writes: [intermediate1.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -1883,7 +1861,7 @@ describe("pull-based scheduling", () => {
         reads: [intermediate1.getAsNormalizedFullLink()],
         writes: [intermediate2.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -1893,7 +1871,7 @@ describe("pull-based scheduling", () => {
         reads: [intermediate2.getAsNormalizedFullLink()],
         writes: [effectResult.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true, isEffect: true },
+      { isEffect: true },
     );
     await runtime.idle();
 
@@ -1979,7 +1957,7 @@ describe("pull-based scheduling", () => {
         ],
         writes: [intermediate.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -1989,7 +1967,7 @@ describe("pull-based scheduling", () => {
         reads: [intermediate.getAsNormalizedFullLink()],
         writes: [effectResult.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true, isEffect: true },
+      { isEffect: true },
     );
     await runtime.idle();
 
@@ -2046,7 +2024,7 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.subscribe(
       computation,
       { reads: [source.getAsNormalizedFullLink()], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -2113,7 +2091,7 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -2152,7 +2130,7 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -2216,7 +2194,7 @@ describe("cycle-aware convergence", () => {
         reads: [cellA.getAsNormalizedFullLink()],
         writes: [cellB.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -2226,7 +2204,7 @@ describe("cycle-aware convergence", () => {
         reads: [cellB.getAsNormalizedFullLink()],
         writes: [cellA.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -2243,7 +2221,7 @@ describe("cycle-aware convergence", () => {
 
   it("should run fast cycle convergence method", async () => {
     // This test verifies the fast cycle convergence logic by directly
-    // testing with scheduleImmediately (which bypasses pull mode complexity)
+    // testing with default scheduling (which bypasses pull mode complexity)
     runtime.scheduler.enablePullMode();
 
     // Create a simple dependency chain
@@ -2270,14 +2248,14 @@ describe("cycle-aware convergence", () => {
       doubled.withTx(actionTx).send(val * 2);
     };
 
-    // Subscribe with scheduleImmediately to ensure it runs
+    // Subscribe to ensure it runs immediately (default behavior)
     runtime.scheduler.subscribe(
       computation,
       {
         reads: [counter.getAsNormalizedFullLink()],
         writes: [doubled.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -2296,7 +2274,7 @@ describe("cycle-aware convergence", () => {
         reads: [counter.getAsNormalizedFullLink()],
         writes: [doubled.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -2355,7 +2333,7 @@ describe("cycle-aware convergence", () => {
         reads: [cellB.getAsNormalizedFullLink()],
         writes: [cellA.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
 
     runtime.scheduler.subscribe(
@@ -2364,7 +2342,7 @@ describe("cycle-aware convergence", () => {
         reads: [cellA.getAsNormalizedFullLink()],
         writes: [cellB.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
 
     // Let the cycle run - it should stop after hitting the limit
@@ -2413,7 +2391,7 @@ describe("cycle-aware convergence", () => {
         reads: [source.getAsNormalizedFullLink()],
         writes: [result.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -2432,7 +2410,7 @@ describe("cycle-aware convergence", () => {
         reads: [source.getAsNormalizedFullLink()],
         writes: [result.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
 
     // Wait for updates
@@ -2495,7 +2473,7 @@ describe("cycle-aware convergence", () => {
         reads: [cellC.getAsNormalizedFullLink()],
         writes: [cellA.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -2505,7 +2483,7 @@ describe("cycle-aware convergence", () => {
         reads: [cellA.getAsNormalizedFullLink()],
         writes: [cellB.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -2515,7 +2493,7 @@ describe("cycle-aware convergence", () => {
         reads: [cellB.getAsNormalizedFullLink()],
         writes: [cellC.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -2551,7 +2529,7 @@ describe("cycle-aware convergence", () => {
         reads: [cell.getAsNormalizedFullLink()],
         writes: [cell.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -2590,7 +2568,7 @@ describe("cycle-aware convergence", () => {
         reads: [cellA.getAsNormalizedFullLink()],
         writes: [cellB.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -2600,7 +2578,7 @@ describe("cycle-aware convergence", () => {
         reads: [cellB.getAsNormalizedFullLink()],
         writes: [cellC.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -2681,7 +2659,7 @@ describe("cycle-aware convergence", () => {
         ],
         writes: [cellB1.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
 
     runtime.scheduler.subscribe(
@@ -2693,7 +2671,7 @@ describe("cycle-aware convergence", () => {
         ],
         writes: [cellA1.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
 
     runtime.scheduler.subscribe(
@@ -2705,7 +2683,7 @@ describe("cycle-aware convergence", () => {
         ],
         writes: [cellB2.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
 
     runtime.scheduler.subscribe(
@@ -2717,7 +2695,7 @@ describe("cycle-aware convergence", () => {
         ],
         writes: [cellA2.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
 
     await runtime.idle();
@@ -2766,7 +2744,7 @@ describe("cycle-aware convergence", () => {
         reads: [source.getAsNormalizedFullLink()],
         writes: [midA.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -2776,7 +2754,7 @@ describe("cycle-aware convergence", () => {
         reads: [source.getAsNormalizedFullLink()],
         writes: [midB.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -2789,7 +2767,7 @@ describe("cycle-aware convergence", () => {
         ],
         writes: [sink.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -2823,7 +2801,7 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       errorAction,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
 
     await runtime.idle();
@@ -2860,7 +2838,7 @@ describe("cycle-aware convergence", () => {
       runtime.scheduler.subscribe(
         action,
         { reads: [], writes: [] },
-        { scheduleImmediately: true },
+        {},
       );
       await runtime.idle();
     }
@@ -2916,7 +2894,7 @@ describe("cycle-aware convergence", () => {
       runtime.scheduler.subscribe(
         action,
         { reads: [], writes: [] },
-        { scheduleImmediately: true },
+        {},
       );
       await runtime.idle();
     }
@@ -2959,7 +2937,7 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       selfRefAction,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
 
     // Let it run for a while
@@ -2997,7 +2975,7 @@ describe("cycle-aware convergence", () => {
         reads: [cell.getAsNormalizedFullLink()],
         writes: [cell.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -3016,7 +2994,7 @@ describe("cycle-aware convergence", () => {
         reads: [cell.getAsNormalizedFullLink()],
         writes: [cell.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -3086,21 +3064,21 @@ describe("cycle-aware convergence", () => {
     runtime.scheduler.subscribe(
       acyclicAction,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
     runtime.scheduler.subscribe(
       cycleActionA,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
     runtime.scheduler.subscribe(
       cycleActionB,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -3180,11 +3158,11 @@ describe("debounce and throttling", () => {
     // Set a short debounce
     runtime.scheduler.setDebounce(action, 50);
 
-    // Subscribe with scheduleImmediately
+    // Subscribe with default scheduling (runs immediately)
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
 
     // Action should NOT have run immediately
@@ -3223,7 +3201,7 @@ describe("debounce and throttling", () => {
       runtime.scheduler.subscribe(
         action,
         { reads: [], writes: [] },
-        { scheduleImmediately: true },
+        {},
       );
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
@@ -3260,7 +3238,7 @@ describe("debounce and throttling", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [] },
-      { scheduleImmediately: true, debounce: 50 },
+      { debounce: 50 },
     );
 
     // Verify debounce was set
@@ -3296,11 +3274,11 @@ describe("debounce and throttling", () => {
     // Set debounce
     runtime.scheduler.setDebounce(action, 100);
 
-    // Subscribe with scheduleImmediately
+    // Subscribe with default scheduling (runs immediately)
     const cancel = runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
 
     // Action should not have run yet
@@ -3356,7 +3334,7 @@ describe("debounce and throttling", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [] },
-      { scheduleImmediately: true, autoDebounce: true },
+      { autoDebounce: true },
     );
     await runtime.idle();
 
@@ -3383,7 +3361,7 @@ describe("debounce and throttling", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [] },
-      { scheduleImmediately: true, autoDebounce: true },
+      { autoDebounce: true },
     );
     await runtime.idle();
 
@@ -3392,7 +3370,7 @@ describe("debounce and throttling", () => {
       runtime.scheduler.subscribe(
         action,
         { reads: [], writes: [] },
-        { scheduleImmediately: true },
+        {},
       );
       await runtime.idle();
     }
@@ -3445,7 +3423,7 @@ describe("debounce and throttling", () => {
         reads: [source.getAsNormalizedFullLink()],
         writes: [result.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true, isEffect: true },
+      { isEffect: true },
     );
 
     // Should not run immediately due to debounce
@@ -3542,7 +3520,7 @@ describe("throttle - staleness tolerance", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
     expect(runCount).toBe(1);
@@ -3554,7 +3532,7 @@ describe("throttle - staleness tolerance", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -3585,7 +3563,7 @@ describe("throttle - staleness tolerance", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
     expect(runCount).toBe(1);
@@ -3594,7 +3572,7 @@ describe("throttle - staleness tolerance", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
     expect(runCount).toBe(1);
@@ -3606,7 +3584,7 @@ describe("throttle - staleness tolerance", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
     expect(runCount).toBe(2);
@@ -3646,7 +3624,7 @@ describe("throttle - staleness tolerance", () => {
         reads: [source.getAsNormalizedFullLink()],
         writes: [result.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
     expect(computeCount).toBe(1);
@@ -3701,7 +3679,7 @@ describe("throttle - staleness tolerance", () => {
         reads: [source.getAsNormalizedFullLink()],
         writes: [result.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true, throttle: 50, isEffect: true },
+      { throttle: 50, isEffect: true },
     );
     await runtime.idle();
     expect(effectCount).toBe(1);
@@ -3740,7 +3718,7 @@ describe("throttle - staleness tolerance", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -3775,7 +3753,7 @@ describe("throttle - staleness tolerance", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -3825,7 +3803,7 @@ describe("push-triggered filtering", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [cell.getAsNormalizedFullLink()] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -3855,7 +3833,7 @@ describe("push-triggered filtering", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [cell1.getAsNormalizedFullLink()] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -3873,7 +3851,7 @@ describe("push-triggered filtering", () => {
           cell2.getAsNormalizedFullLink(),
         ],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -3897,7 +3875,7 @@ describe("push-triggered filtering", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -3906,7 +3884,7 @@ describe("push-triggered filtering", () => {
     expect(stats.executed).toBeGreaterThan(0);
   });
 
-  it("should allow first run even without pushTriggered (scheduleImmediately)", async () => {
+  it("should allow first run even without pushTriggered (default scheduling)", async () => {
     runtime.scheduler.enablePullMode();
     runtime.scheduler.resetFilterStats();
 
@@ -3926,11 +3904,11 @@ describe("push-triggered filtering", () => {
       cell.withTx(actionTx).send(runCount);
     };
 
-    // First run with scheduleImmediately should work
+    // First run with default scheduling should work
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [cell.getAsNormalizedFullLink()] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -3967,7 +3945,7 @@ describe("push-triggered filtering", () => {
         reads: [cell.getAsNormalizedFullLink()],
         writes: [cell.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true, isEffect: true },
+      { isEffect: true },
     );
     await runtime.idle();
     expect(runCount).toBe(1);
@@ -3988,7 +3966,7 @@ describe("push-triggered filtering", () => {
     expect(stats.executed).toBeGreaterThan(0);
   });
 
-  it("should not filter actions scheduled with scheduleImmediately", async () => {
+  it("should not filter actions scheduled with default scheduling", async () => {
     runtime.scheduler.enablePullMode();
 
     const cell = runtime.getCell<number>(
@@ -4011,18 +3989,18 @@ describe("push-triggered filtering", () => {
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [cell.getAsNormalizedFullLink()] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
     expect(runCount).toBe(1);
 
     runtime.scheduler.resetFilterStats();
 
-    // Run again with scheduleImmediately - should bypass filter
+    // Run again with default scheduling - should bypass filter
     runtime.scheduler.subscribe(
       action,
       { reads: [], writes: [cell.getAsNormalizedFullLink()] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -4083,7 +4061,7 @@ describe("parent-child action ordering", () => {
       runtime.scheduler.subscribe(
         childAction,
         { reads: [], writes: [] },
-        { scheduleImmediately: true },
+        {},
       );
 
       return val;
@@ -4097,7 +4075,7 @@ describe("parent-child action ordering", () => {
     runtime.scheduler.subscribe(
       parentAction,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -4136,7 +4114,7 @@ describe("parent-child action ordering", () => {
         childCanceler = runtime.scheduler.subscribe(
           childAction,
           { reads: [], writes: [] },
-          { scheduleImmediately: true },
+          {},
         );
       } else if (!shouldHaveChild && childCanceler) {
         childCanceler();
@@ -4152,7 +4130,7 @@ describe("parent-child action ordering", () => {
     runtime.scheduler.subscribe(
       parentAction,
       { reads: [], writes: [] },
-      { scheduleImmediately: true, isEffect: true },
+      { isEffect: true },
     );
     await runtime.idle();
 
@@ -4195,7 +4173,7 @@ describe("parent-child action ordering", () => {
         runtime.scheduler.subscribe(
           childAction,
           { reads: [], writes: [] },
-          { scheduleImmediately: true, isEffect: true },
+          { isEffect: true },
         );
       }
 
@@ -4212,7 +4190,7 @@ describe("parent-child action ordering", () => {
     runtime.scheduler.subscribe(
       parentAction,
       { reads: [], writes: [] },
-      { scheduleImmediately: true, isEffect: true },
+      { isEffect: true },
     );
     await runtime.idle();
 
@@ -4255,7 +4233,7 @@ describe("parent-child action ordering", () => {
         runtime.scheduler.subscribe(
           parentAction,
           { reads: [], writes: [] },
-          { scheduleImmediately: true, isEffect: true },
+          { isEffect: true },
         );
       }
     };
@@ -4270,7 +4248,7 @@ describe("parent-child action ordering", () => {
         runtime.scheduler.subscribe(
           childAction,
           { reads: [], writes: [] },
-          { scheduleImmediately: true, isEffect: true },
+          { isEffect: true },
         );
       }
     };
@@ -4284,7 +4262,7 @@ describe("parent-child action ordering", () => {
     runtime.scheduler.subscribe(
       grandparentAction,
       { reads: [], writes: [] },
-      { scheduleImmediately: true, isEffect: true },
+      { isEffect: true },
     );
     await runtime.idle();
 
@@ -4322,7 +4300,7 @@ describe("parent-child action ordering", () => {
         childCanceler = runtime.scheduler.subscribe(
           childAction,
           { reads: [], writes: [] },
-          { scheduleImmediately: true },
+          {},
         );
       }
     };
@@ -4335,7 +4313,7 @@ describe("parent-child action ordering", () => {
     const parentCanceler = runtime.scheduler.subscribe(
       parentAction,
       { reads: [], writes: [] },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -4471,7 +4449,7 @@ describe("pull mode with references", () => {
         reads: [source.getAsNormalizedFullLink()],
         writes: [innerOutput.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -4481,7 +4459,7 @@ describe("pull mode with references", () => {
         reads: [innerOutput.getAsNormalizedFullLink()],
         writes: [outerOutput.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -4491,7 +4469,7 @@ describe("pull mode with references", () => {
         reads: [outerOutput.getAsNormalizedFullLink()],
         writes: [effectResult.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true, isEffect: true },
+      { isEffect: true },
     );
     await runtime.idle();
 
@@ -4601,7 +4579,7 @@ describe("handler dependency pulling", () => {
         reads: [source.getAsNormalizedFullLink()],
         writes: [computedOutput.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
     await runtime.idle();
 
@@ -4735,7 +4713,7 @@ describe("handler dependency pulling", () => {
         reads: [source1.getAsNormalizedFullLink()],
         writes: [computed1.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
 
     runtime.scheduler.subscribe(
@@ -4744,7 +4722,7 @@ describe("handler dependency pulling", () => {
         reads: [source2.getAsNormalizedFullLink()],
         writes: [computed2.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
 
     await runtime.idle();
@@ -4870,7 +4848,7 @@ describe("handler dependency pulling", () => {
         reads: [source.getAsNormalizedFullLink()],
         writes: [computed1.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
 
     runtime.scheduler.subscribe(
@@ -4879,7 +4857,7 @@ describe("handler dependency pulling", () => {
         reads: [computed1.getAsNormalizedFullLink()],
         writes: [computed2.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      {},
     );
 
     await runtime.idle();
@@ -5013,11 +4991,11 @@ describe("handler dependency pulling", () => {
         reads: [liftInput.getAsNormalizedFullLink()],
         writes: [liftOutput.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: false },
+      { rescheduling: true },
     );
 
     await runtime.idle();
-    expect(liftRuns).toBe(0); // NOT run yet - no scheduleImmediately
+    expect(liftRuns).toBe(0); // NOT run yet - using rescheduling mode
     expect(liftOutput.get()).toBe(0); // Still initial value
 
     // Handler B: receives a LINK to liftOutput as the event, reads from it
