@@ -22,8 +22,10 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | Handler binding: unknown property | Passing event data at binding time | Use inline handler for test buttons ([see below](#handler-binding-error-unknown-property)) |
 | Stream.subscribe doesn't exist | Using Stream.of()/subscribe() | Bound handler IS the stream ([see below](#streamof--subscribe-dont-exist)) |
 | Can't access variable in nested scope | Variable scoping limitation | Pre-compute grouped data or use lift() with explicit params ([see below](#variable-scoping-in-reactive-contexts)) |
-| "Cannot access cell via closure" | Using lift() with closure | Pass all reactive deps as params to lift() ([REACTIVITY](REACTIVITY.md#lift-and-closure-limitations)) |
+| "Cannot access cell via closure" / "Accessing an opaque ref via closure is not supported" | Using lift() with closure | Pass all reactive deps as params to lift() ([REACTIVITY](REACTIVITY.md#lift-and-closure-limitations)) |
 | CLI `get` returns stale computed values | `charm set` doesn't trigger recompute | Run `charm step` after `set` to trigger re-evaluation ([see below](#stale-computed-values-after-charm-set)) |
+| "Property 'onMouseEnter' does not exist" | Hover events not supported | Use click handlers instead ([see below](#hover-events-not-supported)) |
+| ct-tabs panels all hidden | Value attribute reflection issue | Use custom tabs with ifElse ([see below](#ct-tabs-panels-not-showing)) |
 
 ---
 
@@ -239,6 +241,55 @@ return { addItem };
 ```
 
 **Why:** Streams aren't created directly - they're the result of binding a handler with state. The bound handler IS the stream that can receive events.
+
+### Hover Events Not Supported
+
+**Error:** "Property 'onMouseEnter' does not exist on type..."
+
+Hover events (`onMouseEnter`, `onMouseLeave`) are not supported on div elements:
+
+```typescript
+// ❌ Hover events don't work
+<div onMouseEnter={handler}>Hover me</div>
+
+// ✅ Use click handlers instead
+<button
+  style={{ background: "transparent", border: "none", cursor: "pointer" }}
+  onClick={handleSelect}
+>
+  Click to select
+</button>
+```
+
+**Why:** The framework JSX types don't include these events (marked as `@TODO`).
+**Benefit:** Click-based interactions are more mobile-friendly anyway.
+
+### ct-tabs Panels Not Showing
+
+**Symptom:** All ct-tab-panel elements stay hidden, even though tab values are set correctly.
+
+```typescript
+// ❌ May not work - panels stay hidden
+<ct-tabs value={activeTab} onct-change={handleChange}>
+  <ct-tab-list>
+    <ct-tab value="a">Tab A</ct-tab>
+  </ct-tab-list>
+  <ct-tab-panel value="a">Content A</ct-tab-panel>
+</ct-tabs>
+
+// ✅ Use custom tabs with ifElse instead
+const activeTab = Cell.of("dashboard");
+const isDashboard = computed(() => activeTab === "dashboard");
+
+<div>
+  <ct-button onClick={() => activeTab.set("dashboard")}>Dashboard</ct-button>
+  <ct-button onClick={() => activeTab.set("settings")}>Settings</ct-button>
+</div>
+
+{ifElse(isDashboard, <div>Dashboard content</div>, <div>Settings content</div>)}
+```
+
+**Why:** Value attribute reflection issue between JSX properties and HTML attributes.
 
 ---
 
