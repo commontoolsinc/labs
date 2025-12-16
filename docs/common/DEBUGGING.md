@@ -337,20 +337,7 @@ const groupedItems = computed(() => {
 
 **Related issue with lift():**
 
-When using `lift()` directly, the same scoping limitation applies but requires a different workaround:
-
-```typescript
-// ❌ Error: "Accessing an opaque ref via closure is not supported"
-const result = lift((g) => g[date])(grouped);
-
-// ✅ Pass all reactive dependencies as parameters
-const result = lift((args) => args.g[args.d])({ g: grouped, d: date });
-
-// ✅ Or use computed() instead (recommended for patterns)
-const result = computed(() => grouped[date]);
-```
-
-See [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) section "lift() and Closure Limitations" for details on why this happens and when to use `lift()` vs `computed()`.
+The same scoping limitation applies to `lift()`. See [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md#lift-and-closure-limitations) for the workaround pattern and explanation of frame-based execution.
 
 ## Runtime Errors
 
