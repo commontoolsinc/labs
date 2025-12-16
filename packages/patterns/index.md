@@ -479,7 +479,9 @@ interface Contact {
   email: Default<string, "">;
   phone: Default<string, "">;
   company: Default<string, "">;
+  tags: Default<string[], []>;
   notes: Default<string, "">;
+  createdAt: number;
 }
 
 interface Input {
@@ -546,6 +548,8 @@ interface ReadingItem {
   status: Default<ItemStatus, "want">;
   rating: Default<number | null, null>;
   notes: Default<string, "">;
+  addedAt: number;
+  finishedAt: Default<number | null, null>;
 }
 
 interface Input {
