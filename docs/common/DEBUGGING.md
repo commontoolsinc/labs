@@ -17,7 +17,8 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | Charm hangs, never renders | ifElse with composed pattern cell | Use local computed cell ([see below](#ifelse-with-composed-pattern-cells)) |
 | Data not updating | Missing `$` prefix or wrong event | Use `$checked`, `$value` ([COMPONENTS](COMPONENTS.md)) |
 | Filtered list not updating | Need computed() | Wrap in `computed()` ([CELLS](CELLS_AND_REACTIVITY.md)) |
-| Can't access variable in nested scope | Variable scoping limitation | Pre-compute grouped data ([see below](#variable-scoping-in-reactive-contexts)) |
+| Can't access variable in nested scope | Variable scoping limitation | Pre-compute grouped data or use lift() with explicit params ([see below](#variable-scoping-in-reactive-contexts)) |
+| "Accessing an opaque ref via closure is not supported" | Using lift() with closure | Pass all reactive deps as params to lift() ([CELLS](CELLS_AND_REACTIVITY.md#lift-and-closure-limitations)) |
 
 ---
 
@@ -333,6 +334,23 @@ const groupedItems = computed(() => {
   </div>
 ))}
 ```
+
+**Related issue with lift():**
+
+When using `lift()` directly, the same scoping limitation applies but requires a different workaround:
+
+```typescript
+// ❌ Error: "Accessing an opaque ref via closure is not supported"
+const result = lift((g) => g[date])(grouped);
+
+// ✅ Pass all reactive dependencies as parameters
+const result = lift((args) => args.g[args.d])({ g: grouped, d: date });
+
+// ✅ Or use computed() instead (recommended for patterns)
+const result = computed(() => grouped[date]);
+```
+
+See [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) section "lift() and Closure Limitations" for details on why this happens and when to use `lift()` vs `computed()`.
 
 ## Runtime Errors
 

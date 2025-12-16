@@ -671,6 +671,45 @@ const groupedItems = computed(() => {
 ))}
 ```
 
+### lift() and Closure Limitations
+
+While `computed()` handles closures automatically through CTS transformation, the lower-level `lift()` function requires explicit parameter passing for all reactive dependencies.
+
+**Why this matters:** The reactive graph builder uses frame-based execution contexts. Each `lift()` creates a new frame, and cells from different frames cannot be accessed via closure.
+
+```typescript
+// ❌ WRONG - Closing over reactive value from outer scope
+const date = Cell.of("2024-01-15");
+const grouped = computed(() => {
+  // ... grouping logic
+});
+
+// This FAILS at runtime: "Accessing an opaque ref via closure is not supported"
+const result = lift((g) => g[date])(grouped);
+
+// ✅ CORRECT - Pass all reactive dependencies as parameters
+const result = lift((args) => args.g[args.d])({ g: grouped, d: date });
+```
+
+**When you see this error:**
+- Error: `"Accessing an opaque ref via closure is not supported"`
+- Cause: Using `lift()` and closing over a reactive value from an outer scope
+- Fix: Pass all reactive dependencies as explicit parameters to `lift()`
+
+**Why computed() doesn't have this issue:**
+
+The `/// <cts-enable />` transformer automatically extracts closures from `computed()` functions and rewrites them with explicit parameter passing. This is why `computed()` is the recommended API for patterns.
+
+```typescript
+// computed() handles this automatically
+const result = computed(() => grouped[date]);  // Just works!
+
+// lift() requires manual parameter passing
+const result = lift((args) => args.g[args.d])({ g: grouped, d: date });
+```
+
+**Best practice:** Use `computed()` in patterns. Only use `lift()` if you're working with lower-level reactive graph construction where you need explicit control over the computation structure.
+
 ## Cell.for() - Advanced Cell Creation
 
 `Cell.for(cause)` is for creating cells in reactive contexts (rarely needed):

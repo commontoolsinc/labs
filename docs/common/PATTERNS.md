@@ -350,6 +350,21 @@ const prompt = `Seed: ${seed}`;
 const prompt = computed(() => `Seed: ${seed}`);
 ```
 
+### lift() Closure Pattern
+
+```typescript
+// ❌ Error: "Accessing an opaque ref via closure"
+const result = lift((g) => g[date])(grouped);
+
+// ✅ Pass all reactive dependencies as parameters
+const result = lift((args) => args.g[args.d])({ g: grouped, d: date });
+
+// ✅ Or use computed() instead (handles closures automatically)
+const result = computed(() => grouped[date]);
+```
+
+See [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) section "lift() and Closure Limitations" for details on frame-based execution and why `computed()` doesn't have this issue.
+
 ### Style Syntax
 
 ```typescript
