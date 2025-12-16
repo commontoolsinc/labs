@@ -60,8 +60,9 @@ export type EventHandler =
      * Called by the scheduler to discover what cells the handler will read.
      * The callback should read all cells (using .get({ traverseCells: true })) that
      * the handler will access, so the transaction captures all dependencies.
+     * The event is passed so dependencies can be resolved from links in the event.
      */
-    populateDependencies?: (tx: IExtendedStorageTransaction) => void;
+    populateDependencies?: (tx: IExtendedStorageTransaction, event: any) => void;
   };
 export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
 
@@ -121,6 +122,7 @@ export class Scheduler {
   private eventQueue: {
     action: Action;
     handler: EventHandler;
+    event: any;
     retriesLeft: number;
     onCommit?: (tx: IExtendedStorageTransaction) => void;
   }[] = [];
@@ -543,6 +545,7 @@ export class Scheduler {
         this.eventQueue.push({
           action: (tx: IExtendedStorageTransaction) => handler(tx, event),
           handler,
+          event,
           retriesLeft: retries,
           onCommit,
         });
@@ -567,7 +570,7 @@ export class Scheduler {
   addEventHandler(
     handler: EventHandler,
     ref: NormalizedFullLink,
-    populateDependencies?: (tx: IExtendedStorageTransaction) => void,
+    populateDependencies?: (tx: IExtendedStorageTransaction, event: any) => void,
   ): Cancel {
     if (populateDependencies) {
       handler.populateDependencies = populateDependencies;
@@ -1540,9 +1543,10 @@ export class Scheduler {
     // based on the newest state. OTOH, if it has no dependencies and changes
     // data, then this causes redundant runs. So really we should add this to
     // the topological sort in the right way.
-    const event = this.eventQueue.shift();
-    if (event) {
-      const { action, handler, retriesLeft, onCommit } = event;
+    const queuedEvent = this.eventQueue.shift();
+    if (queuedEvent) {
+      const { action, handler, event: eventValue, retriesLeft, onCommit } =
+        queuedEvent;
       this.runtime.telemetry.submit({
         type: "scheduler.invocation",
         handler: action,
@@ -1552,29 +1556,15 @@ export class Scheduler {
       if (this.pullMode && handler.populateDependencies) {
         // Get the handler's dependencies (read-only, just capturing what will be read)
         const depTx = this.runtime.edit();
-        handler.populateDependencies(depTx);
+        handler.populateDependencies(depTx, eventValue);
         const deps = txToReactivityLog(depTx);
         // Commit even though we only read - the tx has no writes so this is safe
         depTx.commit();
 
         // Check if any dependencies are dirty (have pending computations)
-        // We need to find actions that WRITE to the entities we're reading
+        // We need to find dirty actions that WRITE to the entities we're reading
         const dirtyDeps: Action[] = [];
         for (const read of deps.reads) {
-          const spaceAndURI = `${read.space}/${read.id}` as SpaceAndURI;
-
-          // Check triggers (actions that READ from this entity - for push-based chains)
-          const actionsForEntity = this.triggers.get(spaceAndURI);
-          if (actionsForEntity) {
-            for (const [depAction] of actionsForEntity) {
-              if (this.dirty.has(depAction)) {
-                dirtyDeps.push(depAction);
-              }
-            }
-          }
-
-          // Also check dirty actions to find any that WRITE to this entity
-          // This is needed for pull-based dependency resolution
           for (const action of this.dirty) {
             const writes = this.mightWrite.get(action);
             if (writes) {
@@ -1596,7 +1586,7 @@ export class Scheduler {
             this.pending.add(dep);
           }
           // Re-queue the event to be processed after dependencies compute
-          this.eventQueue.unshift(event);
+          this.eventQueue.unshift(queuedEvent);
           shouldSkipEvent = true;
         }
       }
@@ -1620,6 +1610,7 @@ export class Scheduler {
                 this.eventQueue.unshift({
                   action,
                   handler,
+                  event: eventValue,
                   retriesLeft: retriesLeft - 1,
                   onCommit,
                 });

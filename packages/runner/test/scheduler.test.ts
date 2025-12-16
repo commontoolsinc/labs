@@ -5031,11 +5031,16 @@ describe("handler dependency pulling", () => {
       handlerBSawLiftOutput.withTx(handlerTx).send([...saw, liftVal]);
     };
 
-    // Handler B's populateDependencies - reads liftOutput to capture dependency
-    // In a real scenario, this would read from the event (which is a link to liftOutput)
-    // For this test, we directly read liftOutput since we know that's what the event points to
-    const handlerBPopulateDeps = (depTx: IExtendedStorageTransaction) => {
-      liftOutput.withTx(depTx).get();
+    // Handler B's populateDependencies - resolves the event link to capture dependency
+    // The event IS a link to liftOutput, so we create a cell from it and read
+    const handlerBPopulateDeps = (
+      depTx: IExtendedStorageTransaction,
+      eventValue: { "/": string },
+    ) => {
+      // Create a cell from the event (which is a link) and read it
+      // This registers the dependency on whatever the link points to
+      const eventCell = runtime.getImmutableCell(space, eventValue, undefined, depTx);
+      eventCell.get();
     };
 
     // Handler A: writes to liftInput and queues a LINK to liftOutput as event to B
