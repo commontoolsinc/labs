@@ -1,11 +1,9 @@
 /// <cts-enable />
-import { NAME, recipe, UI } from "commontools";
+import { NAME, pattern, UI } from "commontools";
 
 // note: you may need to zoom in our out in the browser to see the
 // content and/or tabs
-export default recipe(
-  "Aside",
-  () => {
+export default pattern(() => {
     return {
       [NAME]: "Aside",
       [UI]: (
