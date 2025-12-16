@@ -5005,36 +5005,40 @@ describe("handler dependency pulling", () => {
       liftOutput.withTx(actionTx).send(input * 2);
     };
 
-    // Subscribe the lift
+    // Subscribe the lift - NOT scheduled immediately
+    // This tests that the lift is pulled when handler B needs it
     runtime.scheduler.subscribe(
       liftAction,
       {
         reads: [liftInput.getAsNormalizedFullLink()],
         writes: [liftOutput.getAsNormalizedFullLink()],
       },
-      { scheduleImmediately: true },
+      { scheduleImmediately: false },
     );
 
     await runtime.idle();
-    expect(liftRuns).toBe(1);
-    expect(liftOutput.get()).toBe(0); // 0 * 2
+    expect(liftRuns).toBe(0); // NOT run yet - no scheduleImmediately
+    expect(liftOutput.get()).toBe(0); // Still initial value
 
-    // Handler B: reads liftOutput and logs what it sees
-    const handlerB: EventHandler = (handlerTx, event: number) => {
+    // Handler B: receives a LINK to liftOutput as the event, reads from it
+    const handlerB: EventHandler = (handlerTx, event: { "/": string }) => {
       handlerBRuns++;
-      // Read the lift output - this is the key: B depends on the lift output
+      // The event IS a link to liftOutput - read from it
+      // This simulates a handler receiving a reference to computed data
       const liftVal = liftOutput.withTx(handlerTx).get();
-      executionOrder.push(`handlerB:event=${event},lift=${liftVal}`);
+      executionOrder.push(`handlerB:lift=${liftVal}`);
       const saw = handlerBSawLiftOutput.withTx(handlerTx).get();
       handlerBSawLiftOutput.withTx(handlerTx).send([...saw, liftVal]);
     };
 
-    // Handler B's populateDependencies - tells scheduler that B reads liftOutput
+    // Handler B's populateDependencies - reads liftOutput to capture dependency
+    // In a real scenario, this would read from the event (which is a link to liftOutput)
+    // For this test, we directly read liftOutput since we know that's what the event points to
     const handlerBPopulateDeps = (depTx: IExtendedStorageTransaction) => {
       liftOutput.withTx(depTx).get();
     };
 
-    // Handler A: writes to liftInput and queues an event to stream B
+    // Handler A: writes to liftInput and queues a LINK to liftOutput as event to B
     const handlerA: EventHandler = (handlerTx, event: number) => {
       handlerARuns++;
       executionOrder.push(`handlerA:${event}`);
@@ -5042,12 +5046,11 @@ describe("handler dependency pulling", () => {
       // Write to lift input - this will make the lift dirty
       liftInput.withTx(handlerTx).send(event);
 
-      // Queue an event to stream B
-      // At this point, the lift hasn't run yet, but the scheduler should
-      // see that B depends on liftOutput (via populateDependencies) and
-      // that liftOutput's producer (the lift) is dirty, so it should
-      // pull the lift before running B
-      runtime.scheduler.queueEvent(streamB.getAsNormalizedFullLink(), event);
+      // Queue an event to stream B where the event VALUE is a link to liftOutput
+      // This simulates: "hey B, go read from this computed cell"
+      // The scheduler should see that B depends on liftOutput and pull the lift first
+      const liftOutputLink = liftOutput.getAsLink();
+      runtime.scheduler.queueEvent(streamB.getAsNormalizedFullLink(), liftOutputLink);
     };
 
     // Register handlers
@@ -5094,7 +5097,7 @@ describe("handler dependency pulling", () => {
 
     // Handler B should have seen lift=10 (the fresh value, not stale 0)
     expect(executionOrder.find((s) => s.startsWith("handlerB:"))).toBe(
-      "handlerB:event=5,lift=10",
+      "handlerB:lift=10",
     );
   });
 });

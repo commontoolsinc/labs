@@ -1558,14 +1558,33 @@ export class Scheduler {
         depTx.commit();
 
         // Check if any dependencies are dirty (have pending computations)
+        // We need to find actions that WRITE to the entities we're reading
         const dirtyDeps: Action[] = [];
         for (const read of deps.reads) {
           const spaceAndURI = `${read.space}/${read.id}` as SpaceAndURI;
+
+          // Check triggers (actions that READ from this entity - for push-based chains)
           const actionsForEntity = this.triggers.get(spaceAndURI);
           if (actionsForEntity) {
             for (const [depAction] of actionsForEntity) {
               if (this.dirty.has(depAction)) {
                 dirtyDeps.push(depAction);
+              }
+            }
+          }
+
+          // Also check dirty actions to find any that WRITE to this entity
+          // This is needed for pull-based dependency resolution
+          for (const action of this.dirty) {
+            const writes = this.mightWrite.get(action);
+            if (writes) {
+              for (const write of writes) {
+                if (write.space === read.space && write.id === read.id) {
+                  if (!dirtyDeps.includes(action)) {
+                    dirtyDeps.push(action);
+                  }
+                  break;
+                }
               }
             }
           }
