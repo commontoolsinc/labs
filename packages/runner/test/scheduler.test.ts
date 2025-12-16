@@ -4931,4 +4931,170 @@ describe("handler dependency pulling", () => {
     expect(handlerRuns).toBe(1);
     expect(result.get()).toBe(33); // 30 + 3
   });
+
+  it("should wait for dynamically created lift before dispatching to downstream handler", async () => {
+    // This test validates that when handler A triggers a lift and handler B
+    // depends on that lift's output, the scheduler waits for the lift to
+    // compute before running handler B.
+    //
+    // Setup:
+    // - Stream B: handler B reads liftOutput (via populateDependencies)
+    // - Stream A: handler A writes to liftInput (triggering lift) and queues event to B
+    // - Lift: reads liftInput, writes to liftOutput
+    // - Send event to A's stream
+    //
+    // Expected: A runs -> lift runs -> B runs (with fresh lift output)
+
+    // Stream B - the downstream handler
+    const streamB = runtime.getCell<number>(
+      space,
+      "dynamic-lift-streamB",
+      undefined,
+      tx,
+    );
+    streamB.set(0);
+
+    // Cell to store what handler B sees from the lift output
+    const handlerBSawLiftOutput = runtime.getCell<number[]>(
+      space,
+      "dynamic-lift-B-saw",
+      undefined,
+      tx,
+    );
+    handlerBSawLiftOutput.set([]);
+
+    // Stream A - the upstream handler
+    const streamA = runtime.getCell<number>(
+      space,
+      "dynamic-lift-streamA",
+      undefined,
+      tx,
+    );
+    streamA.set(0);
+
+    // Lift input/output cells
+    const liftInput = runtime.getCell<number>(
+      space,
+      "dynamic-lift-input",
+      undefined,
+      tx,
+    );
+    liftInput.set(0);
+
+    const liftOutput = runtime.getCell<number>(
+      space,
+      "dynamic-lift-output",
+      undefined,
+      tx,
+    );
+    liftOutput.set(0);
+
+    await tx.commit();
+    tx = runtime.edit();
+
+    let handlerARuns = 0;
+    let handlerBRuns = 0;
+    let liftRuns = 0;
+    const executionOrder: string[] = [];
+
+    // Lift action: transforms input by doubling it
+    const liftAction: Action = (actionTx) => {
+      liftRuns++;
+      executionOrder.push("lift");
+      const input = liftInput.withTx(actionTx).get();
+      liftOutput.withTx(actionTx).send(input * 2);
+    };
+
+    // Subscribe the lift
+    runtime.scheduler.subscribe(
+      liftAction,
+      {
+        reads: [liftInput.getAsNormalizedFullLink()],
+        writes: [liftOutput.getAsNormalizedFullLink()],
+      },
+      { scheduleImmediately: true },
+    );
+
+    await runtime.idle();
+    expect(liftRuns).toBe(1);
+    expect(liftOutput.get()).toBe(0); // 0 * 2
+
+    // Handler B: reads liftOutput and logs what it sees
+    const handlerB: EventHandler = (handlerTx, event: number) => {
+      handlerBRuns++;
+      // Read the lift output - this is the key: B depends on the lift output
+      const liftVal = liftOutput.withTx(handlerTx).get();
+      executionOrder.push(`handlerB:event=${event},lift=${liftVal}`);
+      const saw = handlerBSawLiftOutput.withTx(handlerTx).get();
+      handlerBSawLiftOutput.withTx(handlerTx).send([...saw, liftVal]);
+    };
+
+    // Handler B's populateDependencies - tells scheduler that B reads liftOutput
+    const handlerBPopulateDeps = (depTx: IExtendedStorageTransaction) => {
+      liftOutput.withTx(depTx).get();
+    };
+
+    // Handler A: writes to liftInput and queues an event to stream B
+    const handlerA: EventHandler = (handlerTx, event: number) => {
+      handlerARuns++;
+      executionOrder.push(`handlerA:${event}`);
+
+      // Write to lift input - this will make the lift dirty
+      liftInput.withTx(handlerTx).send(event);
+
+      // Queue an event to stream B
+      // At this point, the lift hasn't run yet, but the scheduler should
+      // see that B depends on liftOutput (via populateDependencies) and
+      // that liftOutput's producer (the lift) is dirty, so it should
+      // pull the lift before running B
+      runtime.scheduler.queueEvent(streamB.getAsNormalizedFullLink(), event);
+    };
+
+    // Register handlers
+    runtime.scheduler.addEventHandler(handlerA, streamA.getAsNormalizedFullLink());
+    runtime.scheduler.addEventHandler(
+      handlerB,
+      streamB.getAsNormalizedFullLink(),
+      handlerBPopulateDeps,
+    );
+
+    await runtime.idle();
+
+    // Reset tracking
+    executionOrder.length = 0;
+    handlerARuns = 0;
+    handlerBRuns = 0;
+    liftRuns = 0;
+
+    // Send event to stream A with value 5
+    runtime.scheduler.queueEvent(streamA.getAsNormalizedFullLink(), 5);
+    await runtime.idle();
+
+    // Handler A should have run
+    expect(handlerARuns).toBe(1);
+
+    // Lift should have run (its input changed from 0 to 5)
+    expect(liftRuns).toBe(1);
+    expect(liftOutput.get()).toBe(10); // 5 * 2
+
+    // Handler B should have run and seen the FRESH lift output (10, not stale 0)
+    expect(handlerBRuns).toBe(1);
+    expect(handlerBSawLiftOutput.get()).toEqual([10]);
+
+    // Verify execution order
+    expect(executionOrder).toContain("handlerA:5");
+    expect(executionOrder).toContain("lift");
+
+    // The lift should run before handler B sees the fresh value
+    const liftIndex = executionOrder.indexOf("lift");
+    const handlerBIndex = executionOrder.findIndex((s) =>
+      s.startsWith("handlerB:"),
+    );
+    expect(liftIndex).toBeLessThan(handlerBIndex);
+
+    // Handler B should have seen lift=10 (the fresh value, not stale 0)
+    expect(executionOrder.find((s) => s.startsWith("handlerB:"))).toBe(
+      "handlerB:event=5,lift=10",
+    );
+  });
 });
