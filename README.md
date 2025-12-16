@@ -44,7 +44,7 @@ written in Deno2, that provides the distributed runtime and storage.
 **Frontend ([Shell](./packages/shell))**: A web client interface written with
 Lit Web Components for interacting with CommonTools spaces.
 
-**CLI (CT Binary)**: Command-line interface for managing charms, linking
+**CLI (ct)**: Command-line interface for managing charms, linking
 patterns, and deploying to spaces. Run `deno task ct --help` for command
 reference.
 

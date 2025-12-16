@@ -8,7 +8,7 @@ description: Guide for developing CommonTools patterns (TypeScript modules that 
 
 ## Overview
 
-Develop CommonTools patterns using the `ct` binary and the reactive pattern framework. Patterns are TypeScript/JSX programs that define data transformations with interactive UIs, deployed as "charms" that can be linked together for complex workflows.
+Develop CommonTools patterns using the `ct` CLI and the reactive pattern framework. Patterns are TypeScript/JSX programs that define data transformations with interactive UIs, deployed as "charms" that can be linked together for complex workflows.
 
 ## When to Use This Skill
 
@@ -19,13 +19,13 @@ Use this skill when:
 - Troubleshooting type errors or runtime issues
 - Working with multi-file pattern structures
 
-**For ct binary commands** (deploying, linking, inspecting charms), use the **ct** skill instead.
+**For ct commands** (deploying, linking, inspecting charms), use the **ct** skill instead.
 
 ## Prerequisites
 
 Before starting pattern development:
 
-1. **Know the ct binary** - Use the **ct** skill for ct command reference
+1. **Know the ct CLI** - Use the **ct** skill for ct command reference
 2. **Read the documentation** - Key docs to reference:
    - `docs/common/PATTERNS.md` - Main tutorial with examples and common patterns
    - `docs/common/CELLS_AND_REACTIVITY.md` - Cell system, computed(), reactivity
@@ -281,7 +281,7 @@ When working with patterns, consult these docs based on your task:
 | Component usage and bidirectional binding | `docs/common/COMPONENTS.md` |
 | Error reference and debugging | `docs/common/DEBUGGING.md` |
 | LLM integration (generateObject, etc.) | `docs/common/LLM.md` |
-| ct binary commands | Use **ct** skill |
+| ct commands | Use **ct** skill |
 | Working examples | `packages/patterns/` directory |
 
 ## Resources
@@ -292,7 +292,7 @@ High-level workflow patterns and best practices for pattern development. Consult
 
 ## Remember
 
-- **Use the ct skill** for ct binary commands and deployment details
+- **Use the ct skill** for ct commands and deployment details
 - **Read `docs/common/` files** for pattern framework concepts - don't ask for duplicated information
 - **Check `packages/patterns/`** for working examples before building from scratch
 - **Start simple** - minimal viable pattern first, then add features
