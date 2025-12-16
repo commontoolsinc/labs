@@ -1,11 +1,11 @@
 /// <cts-enable />
 import {
   Cell,
+  computed,
   handler,
   NAME,
   navigateTo,
-  recipe,
-  str,
+  pattern,
   UI,
   wish,
 } from "commontools";
@@ -97,9 +97,7 @@ const spawnNote = handler<void, void>((_, __) => {
   }));
 });
 
-export default recipe<CharmsListInput, CharmsListOutput>(
-  "DefaultCharmList",
-  (_) => {
+export default pattern<CharmsListInput, CharmsListOutput>((_) => {
     const { allCharms } = wish<{ allCharms: MentionableCharm[] }>("/");
     const index = BacklinksIndex({ allCharms });
 
@@ -109,7 +107,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
 
     return {
       backlinksIndex: index,
-      [NAME]: str`DefaultCharmList (${allCharms.length})`,
+      [NAME]: computed(() => `DefaultCharmList (${allCharms.length})`),
       [UI]: (
         <ct-screen>
           <ct-keybind

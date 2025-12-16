@@ -18,7 +18,6 @@ import {
   handler,
   NAME,
   pattern,
-  str,
   UI,
 } from "commontools";
 
@@ -1237,7 +1236,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
     const message = Cell.of("");
 
     return {
-      [NAME]: str`Scrabble: ${myName}`,
+      [NAME]: computed(() => `Scrabble: ${myName}`),
       [UI]: (
         <div
           style={{

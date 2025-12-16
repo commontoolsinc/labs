@@ -1,8 +1,8 @@
 /// <cts-enable />
 import {
   Cell,
+  computed,
   Default,
-  derive,
   handler,
   ID,
   ifElse,
@@ -10,7 +10,7 @@ import {
   NAME,
   navigateTo,
   OpaqueRef,
-  recipe,
+  pattern,
   toSchema,
   UI,
   wish,
@@ -233,14 +233,11 @@ const extractLocalMentionable = lift<
   return out;
 });
 
-// create the named cell inside the recipe body, so we do it just once
-export default recipe<Input, Output>(
-  "Launcher",
+// create the named cell inside the pattern body, so we do it just once
+export default pattern<Input, Output>(
   ({ selectedCharm, charmsList, theme }) => {
-    const allCharms = derive<MentionableCharm[], MentionableCharm[]>(
-      wish<MentionableCharm[]>("#allCharms"),
-      (c) => c ?? [],
-    );
+    const wishedCharms = wish<MentionableCharm[]>("#allCharms");
+    const allCharms = computed(() => wishedCharms ?? []);
     logCharmsList({ charmsList: charmsList as unknown as Cell<CharmEntry[]> });
 
     populateChatList({
