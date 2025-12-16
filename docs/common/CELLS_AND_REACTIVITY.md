@@ -471,6 +471,8 @@ const summary = computed(() => {
 
 ## Stable Array References with [ID]
 
+> **Important:** Most patterns don't need [ID]. For finding/removing items in arrays, use `Cell.equals()` as shown in the Level 1 pattern in PATTERNS.md. Only use [ID] when you need stable UI state across item reordering (sorting, shuffling, inserting at front).
+
 When working with arrays where items can be inserted, removed, or reordered, you may need stable identity tracking. The `[ID]` symbol provides this.
 
 ### Why [ID] Matters
@@ -502,12 +504,15 @@ const newItem = { [ID]: Math.random(), title: "New task", done: false };
 
 ### When to Use [ID]
 
+`[ID]` is for framework-level identity tracking when UI state needs to follow items as they move. It's NOT for user-level item identification or finding items in arrays.
+
 **Use [ID] when:**
-- Inserting items at the front of arrays
-- Sorting or shuffling arrays
-- Items have independent state that should persist across reordering
+- Inserting items at the front of arrays (framework needs stable references)
+- Sorting or shuffling arrays (UI state must follow items as they move)
+- Items have independent UI state that should persist across reordering (focus, animation state, etc.)
 
 **You DON'T need [ID] for:**
+- Finding/removing items in arrays (use `Cell.equals()` instead - see PATTERNS.md Level 1 example)
 - Simple append-only lists (adding to the end)
 - Lists where items are only removed, never reordered
 - Basic todo lists with simple checkbox binding
