@@ -384,6 +384,9 @@ class StandardObjectCreator implements IObjectCreator<JSONValue> {
     key: string,
     value: JSONValue,
   ) {
+    // It's fine to include this non-matching data, since we're not returning
+    // the final object to a user. This lets us see the contents better if we
+    // need to debug things.
     obj[key] = value;
   }
   applyDefault(

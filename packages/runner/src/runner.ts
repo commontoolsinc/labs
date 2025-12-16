@@ -1019,7 +1019,7 @@ export class Runner {
             argument !== undefined;
 
           if (!isValidArgument) {
-            logger.debug(
+            logger.info(
               "stream",
               () => [
                 "action argument is undefined (potential schema mismatch) -- not running",
@@ -1126,7 +1126,7 @@ export class Runner {
             argument !== undefined;
 
           if (!isValidArgument) {
-            logger.debug(
+            logger.info(
               "action",
               () => [
                 "action argument is undefined (potential schema mismatch) -- not running",

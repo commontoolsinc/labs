@@ -24,7 +24,7 @@ import {
 } from "@commontools/runner/traverse";
 
 const logger = getLogger("validateAndTransform", {
-  enabled: false,
+  enabled: true,
   level: "debug",
 });
 
@@ -458,7 +458,9 @@ class TransformObjectCreator
     _key: string,
     _value: JSONValue,
   ) {
-    //obj[key] = value;
+    // We want to exclude properties when we have a properties map provided
+    // in the schema, but it doesn't include our property, and we don't have
+    // additionalProperties set. So we don't do `obj[key] = value`;
   }
   applyDefault<T>(
     link: NormalizedFullLink,
