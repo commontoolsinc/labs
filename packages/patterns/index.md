@@ -463,3 +463,100 @@ interface Output {
   items: ReadingItem[];
 }
 ```
+
+## `contact-detail.tsx`
+
+Detail/edit view for a single contact. Use with `navigateTo()` from contact-book
+or as a standalone contact editor.
+
+**Keywords:** contact, detail, edit, form, navigateTo
+
+### Input Schema
+
+```ts
+interface Contact {
+  name: string;
+  email: Default<string, "">;
+  phone: Default<string, "">;
+  company: Default<string, "">;
+  notes: Default<string, "">;
+}
+
+interface Input {
+  contact: Contact;
+}
+```
+
+### Output Schema
+
+```ts
+interface Output {
+  contact: Contact;
+}
+```
+
+## `event-detail.tsx`
+
+Detail/edit view for a single calendar event. Use with `navigateTo()` from
+calendar or as a standalone event editor.
+
+**Keywords:** event, detail, edit, form, navigateTo
+
+### Input Schema
+
+```ts
+interface Event {
+  title: string;
+  date: string;
+  time: Default<string, "">;
+  notes: Default<string, "">;
+}
+
+interface Input {
+  event: Event;
+}
+```
+
+### Output Schema
+
+```ts
+interface Output {
+  event: Event;
+}
+```
+
+## `reading-item-detail.tsx`
+
+Detail/edit view for a single reading list item. Use with `navigateTo()` from
+reading-list or as a standalone item editor.
+
+**Keywords:** reading, book, article, detail, edit, form, navigateTo
+
+### Input Schema
+
+```ts
+type ItemType = "book" | "article" | "paper" | "video";
+type ItemStatus = "want" | "reading" | "finished" | "abandoned";
+
+interface ReadingItem {
+  title: string;
+  author: Default<string, "">;
+  url: Default<string, "">;
+  type: Default<ItemType, "article">;
+  status: Default<ItemStatus, "want">;
+  rating: Default<number | null, null>;
+  notes: Default<string, "">;
+}
+
+interface Input {
+  item: ReadingItem;
+}
+```
+
+### Output Schema
+
+```ts
+interface Output {
+  item: ReadingItem;
+}
+```
