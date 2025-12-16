@@ -130,3 +130,188 @@ interface Input {
   gpaStats: Default<Stats | null, null>; // null until linked
 }
 ```
+
+## `chatbot.tsx`
+
+Full-featured AI chat assistant with tool support, model selection, and
+mentionables. Deploy this to have a conversational AI interface.
+
+**Keywords:** llm, chat, tools, llmDialog, generateObject
+
+### Input Schema
+
+```ts
+type ChatInput = {
+  messages?: Cell<Default<Array<BuiltInLLMMessage>, []>>;
+  tools?: any;
+  theme?: any;
+  system?: string;
+};
+```
+
+### Output Schema
+
+```ts
+type ChatOutput = {
+  messages: Array<BuiltInLLMMessage>;
+  pending: boolean | undefined;
+  addMessage: Stream<BuiltInLLMMessage>;
+  clearChat: Stream<void>;
+  cancelGeneration: Stream<void>;
+  title?: string;
+  pinnedCells: Array<PromptAttachment>;
+  tools: any;
+};
+```
+
+## `voice-note.tsx`
+
+Record voice notes with automatic transcription and note history. Hold the
+microphone button to record, release to transcribe.
+
+**Keywords:** voice, transcription, audio, ct-voice-input
+
+### Input Schema
+
+```ts
+type Input = {
+  title?: Cell<Default<string, "Voice Note">>;
+};
+```
+
+### Output Schema
+
+```ts
+interface TranscriptionData {
+  id: string;
+  text: string;
+  chunks?: TranscriptionChunk[];
+  audioData?: string;
+  duration: number;
+  timestamp: number;
+}
+
+type Output = {
+  transcription: Default<TranscriptionData | null, null>;
+  notes: Default<TranscriptionData[], []>;
+};
+```
+
+## `image-analysis.tsx`
+
+Upload images and get AI-powered analysis and descriptions. Supports multiple
+images with customizable prompts.
+
+**Keywords:** vision, image, generateText, ct-image-input
+
+### Input Schema
+
+```ts
+type ImageChatInput = {
+  systemPrompt?: string;
+  model?: string;
+};
+```
+
+### Output Schema
+
+```ts
+type ImageChatOutput = {
+  images: Cell<ImageData[]>;
+  prompt: Cell<string>;
+  response: string | undefined;
+  pending: boolean | undefined;
+};
+```
+
+## `chatbot-outliner.tsx`
+
+Structured outliner with integrated AI chat that can manipulate the outline via
+tools. The AI assistant can add nodes to your outline.
+
+**Keywords:** outliner, chat, tools, ct-outliner
+
+### Input Schema
+
+```ts
+type OutlinerNode = {
+  body: Default<string, "">;
+  children: Default<OutlinerNode[], []>;
+  attachments: Default<OpaqueRef<any>[], []>;
+};
+
+type LLMTestInput = {
+  title?: Cell<Default<string, "LLM Test">>;
+  messages?: Cell<Default<Array<BuiltInLLMMessage>, []>>;
+  expandChat?: Cell<Default<boolean, false>>;
+  outline?: Default<
+    { root: OutlinerNode },
+    { root: { body: "Untitled Page"; children: []; attachments: [] } }
+  >;
+};
+```
+
+### Output Schema
+
+```ts
+type LLMTestResult = {
+  messages: Default<Array<BuiltInLLMMessage>, []>;
+};
+```
+
+## `scrabble.tsx`
+
+Free-for-all multiplayer Scrabble game with lobby, tile bag, game board, and
+scoring. Two players can join and play simultaneously.
+
+**Keywords:** game, multiplayer, scrabble, navigateTo
+
+### Input Schema
+
+```ts
+interface LobbyInput {
+  gameName: Default<string, "Scrabble Match">;
+  boardJson: Cell<Default<string, "">>;
+  bagJson: Cell<Default<string, "">>;
+  bagIndex: Cell<Default<number, 0>>;
+  playersJson: Cell<Default<string, "[]">>;
+  gameEventsJson: Cell<Default<string, "[]">>;
+  allRacksJson: Cell<Default<string, "{}">>;
+  allPlacedJson: Cell<Default<string, "{}">>;
+}
+```
+
+### Output Schema
+
+```ts
+interface LobbyOutput {
+  gameName: string;
+  boardJson: string;
+  bagJson: string;
+  bagIndex: number;
+  playersJson: string;
+  gameEventsJson: string;
+  allRacksJson: string;
+  allPlacedJson: string;
+}
+```
+
+## `favorites-manager.tsx`
+
+View and manage favorited charms with tags. Uses the wish system to query
+`#favorites` and allows removing items.
+
+**Keywords:** favorites, wish, ct-cell-link
+
+### Input Schema
+
+```ts
+type Input = Record<string, never>;
+```
+
+### Output Schema
+
+```ts
+// Uses wish<Array<Favorite>>({ query: "#favorites" }) internally
+// Displays favorited charms with remove functionality
+```
