@@ -6,9 +6,12 @@ import {
   derive,
   ifElse,
   NAME,
+  navigateTo,
   pattern,
   UI,
 } from "commontools";
+
+import ContactDetail from "./contact-detail.tsx";
 
 interface Contact {
   name: string;
@@ -23,7 +26,7 @@ interface Contact {
 interface Relationship {
   fromName: string;
   toName: string;
-  label: Default<string, "">;  // "spouse", "colleague", "friend", etc.
+  label: Default<string, "">;
 }
 
 interface Input {
@@ -44,24 +47,10 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
 
   const contactCount = computed(() => contacts.get().length);
 
-  // Build contact select items (need derive to resolve names)
   const contactSelectItems = derive(contacts, (contactList: Contact[]) =>
     contactList.map((c) => ({ label: c.name || "(unnamed)", value: c.name }))
   );
 
-  // Get relationships for a specific contact
-  const getRelationshipsFor = (contactName: string): string => {
-    const rels = relationships.get().filter(
-      (r) => r.fromName === contactName || r.toName === contactName
-    );
-    if (rels.length === 0) return "";
-    return rels.map((r) => {
-      const other = r.fromName === contactName ? r.toName : r.fromName;
-      return `${other}${r.label ? ` (${r.label})` : ""}`;
-    }).join(", ");
-  };
-
-  // Check if a contact matches the search query
   const matchesSearch = (contact: Contact, query: string): boolean => {
     if (!query) return true;
     const q = query.toLowerCase();
@@ -93,7 +82,6 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
                 ({ contact: c, searchQuery: q }: { contact: Contact; searchQuery: string }) => matchesSearch(c, q)
               );
 
-              // Get relationships for this contact
               const contactRelations = derive(
                 { name: contact.name, relationships },
                 ({ name, relationships: rels }: { name: string; relationships: Relationship[] }) => {
@@ -103,77 +91,53 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
 
               return ifElse(
                 isVisible,
-                <ct-card>
-                  <ct-vstack gap="2">
-                    <ct-hstack justify="between" align="start">
-                      <ct-vstack gap="1" style="flex: 1;">
-                        <ct-input
-                          $value={contact.name}
-                          placeholder="Name"
-                          style="font-weight: 600;"
-                        />
-                        <ct-hstack gap="2">
-                          <ct-input
-                            $value={contact.email}
-                            placeholder="Email"
-                            style="flex: 1;"
-                          />
-                          <ct-input
-                            $value={contact.phone}
-                            placeholder="Phone"
-                            style="flex: 1;"
-                          />
-                        </ct-hstack>
-                        <ct-input
-                          $value={contact.company}
-                          placeholder="Company"
-                        />
-                        <ct-textarea
-                          $value={contact.notes}
-                          placeholder="Notes..."
-                          rows={2}
-                        />
-                        {/* Show relationships */}
-                        {contactRelations.map((rel) => (
-                          <ct-hstack gap="1" align="center">
-                            <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
-                              {derive(
-                                { rel, name: contact.name },
-                                ({ rel: r, name }: { rel: Relationship; name: string }) =>
-                                  r.fromName === name ? r.toName : r.fromName
-                              )}
-                              {rel.label && <span> ({rel.label})</span>}
-                            </span>
-                            <ct-button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                const current = relationships.get();
-                                const idx = current.findIndex((r) => Cell.equals(rel, r));
-                                if (idx >= 0) {
-                                  relationships.set(current.toSpliced(idx, 1));
-                                }
-                              }}
-                            >
-                              ×
-                            </ct-button>
-                          </ct-hstack>
-                        ))}
-                      </ct-vstack>
-                      <ct-button
-                        variant="ghost"
-                        onClick={() => {
-                          const current = contacts.get();
-                          const idx = current.findIndex((c) => Cell.equals(contact, c));
-                          if (idx >= 0) {
-                            contacts.set(current.toSpliced(idx, 1));
-                          }
-                        }}
-                      >
-                        Delete
-                      </ct-button>
-                    </ct-hstack>
-                  </ct-vstack>
+                <ct-card
+                  style="cursor: pointer;"
+                  onClick={() => {
+                    const detail = ContactDetail({ contact });
+                    return navigateTo(detail);
+                  }}
+                >
+                  <ct-hstack gap="2" align="start">
+                    <ct-vstack gap="1" style="flex: 1;">
+                      <span style="font-weight: 600; font-size: 1rem;">
+                        {contact.name || "(unnamed)"}
+                      </span>
+                      {contact.email && (
+                        <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
+                          {contact.email}
+                        </span>
+                      )}
+                      {contact.company && (
+                        <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+                          {contact.company}
+                        </span>
+                      )}
+                      {/* Show relationships */}
+                      {contactRelations.map((rel) => (
+                        <span style="font-size: 0.75rem; color: var(--ct-color-primary-500);">
+                          ↔ {derive(
+                            { rel, name: contact.name },
+                            ({ rel: r, name }: { rel: Relationship; name: string }) =>
+                              r.fromName === name ? r.toName : r.fromName
+                          )}
+                          {rel.label && <span> ({rel.label})</span>}
+                        </span>
+                      ))}
+                    </ct-vstack>
+                    <ct-button
+                      variant="ghost"
+                      onClick={() => {
+                        const current = contacts.get();
+                        const idx = current.findIndex((c) => Cell.equals(contact, c));
+                        if (idx >= 0) {
+                          contacts.set(current.toSpliced(idx, 1));
+                        }
+                      }}
+                    >
+                      ×
+                    </ct-button>
+                  </ct-hstack>
                 </ct-card>,
                 null
               );
@@ -209,31 +173,24 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
             </ct-button>
           </ct-hstack>
 
-          {/* Add relationship section */}
-          <ct-hstack gap="1" align="end">
-            <ct-vstack gap="0" style="flex: 1;">
-              <label style="font-size: 0.75rem; color: var(--ct-color-gray-500);">From</label>
-              <ct-select
-                $value={newRelationFrom}
-                items={contactSelectItems}
-                placeholder="From..."
-              />
-            </ct-vstack>
-            <ct-vstack gap="0" style="flex: 1;">
-              <label style="font-size: 0.75rem; color: var(--ct-color-gray-500);">To</label>
-              <ct-select
-                $value={newRelationTo}
-                items={contactSelectItems}
-                placeholder="To..."
-              />
-            </ct-vstack>
-            <ct-vstack gap="0" style="flex: 1;">
-              <label style="font-size: 0.75rem; color: var(--ct-color-gray-500);">Label</label>
-              <ct-input
-                $value={newRelationLabel}
-                placeholder="friend, spouse..."
-              />
-            </ct-vstack>
+          <ct-hstack gap="2">
+            <ct-select
+              $value={newRelationFrom}
+              items={contactSelectItems}
+              placeholder="From..."
+              style="flex: 1;"
+            />
+            <ct-select
+              $value={newRelationTo}
+              items={contactSelectItems}
+              placeholder="To..."
+              style="flex: 1;"
+            />
+            <ct-input
+              $value={newRelationLabel}
+              placeholder="Label..."
+              style="width: 100px;"
+            />
             <ct-button
               onClick={() => {
                 const from = newRelationFrom.get();

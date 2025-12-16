@@ -6,14 +6,17 @@ import {
   ifElse,
   lift,
   NAME,
+  navigateTo,
   pattern,
   UI,
 } from "commontools";
 
+import EventDetail from "./event-detail.tsx";
+
 interface Event {
   title: string;
-  date: string;      // YYYY-MM-DD
-  time: Default<string, "">;  // HH:MM or empty for all-day
+  date: string;
+  time: Default<string, "">;
   notes: Default<string, "">;
 }
 
@@ -26,30 +29,25 @@ interface Output {
   todayDate: string;
 }
 
-// Get today's date as YYYY-MM-DD
 const getTodayDate = (): string => {
   const now = new Date();
   return now.toISOString().split("T")[0];
 };
 
-// Format date for display
 const formatDate = lift((date: string): string => {
   if (!date) return "";
   const d = new Date(date + "T00:00:00");
   return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 });
 
-// Check if date is today
 const isToday = lift((date: string): boolean => {
   return date === getTodayDate();
 });
 
-// Check if date is in the past
 const isPast = lift((date: string): boolean => {
   return date < getTodayDate();
 });
 
-// Sort and group events by date
 const groupEventsByDate = lift((events: Event[]): Record<string, Event[]> => {
   if (!Array.isArray(events)) return {};
 
@@ -66,7 +64,6 @@ const groupEventsByDate = lift((events: Event[]): Record<string, Event[]> => {
   return groups;
 });
 
-// Get sorted dates from grouped events
 const getSortedDates = lift((grouped: Record<string, Event[]>): string[] => {
   return Object.keys(grouped).sort();
 });
@@ -74,7 +71,6 @@ const getSortedDates = lift((grouped: Record<string, Event[]>): string[] => {
 export default pattern<Input, Output>(({ events }) => {
   const todayDate = getTodayDate();
 
-  // Form state
   const newTitle = Cell.of("");
   const newDate = Cell.of(todayDate);
   const newTime = Cell.of("");
@@ -123,21 +119,20 @@ export default pattern<Input, Output>(({ events }) => {
                   </ct-hstack>
 
                   {dateEvents.map((event) => (
-                    <ct-card>
+                    <ct-card
+                      style="cursor: pointer;"
+                      onClick={() => {
+                        const detail = EventDetail({ event });
+                        return navigateTo(detail);
+                      }}
+                    >
                       <ct-hstack gap="2" align="center">
                         {event.time && (
                           <span style="font-size: 0.875rem; color: var(--ct-color-gray-500); min-width: 50px;">
                             {event.time}
                           </span>
                         )}
-                        <ct-vstack gap="0" style="flex: 1;">
-                          <span style="font-weight: 500;">{event.title || "(untitled)"}</span>
-                          {event.notes && (
-                            <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
-                              {event.notes}
-                            </span>
-                          )}
-                        </ct-vstack>
+                        <span style="flex: 1; font-weight: 500;">{event.title || "(untitled)"}</span>
                         <ct-button
                           variant="ghost"
                           onClick={() => {

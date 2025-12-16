@@ -6,9 +6,12 @@ import {
   ifElse,
   lift,
   NAME,
+  navigateTo,
   pattern,
   UI,
 } from "commontools";
+
+import ReadingItemDetail from "./reading-item-detail.tsx";
 
 type ItemType = "book" | "article" | "paper" | "video";
 type ItemStatus = "want" | "reading" | "finished" | "abandoned";
@@ -19,7 +22,7 @@ interface ReadingItem {
   url: Default<string, "">;
   type: Default<ItemType, "article">;
   status: Default<ItemStatus, "want">;
-  rating: Default<number | null, null>;  // 1-5 stars
+  rating: Default<number | null, null>;
   notes: Default<string, "">;
   addedAt: number;
   finishedAt: Default<number | null, null>;
@@ -40,14 +43,6 @@ const typeEmoji: Record<ItemType, string> = {
   video: "🎬",
 };
 
-const statusColors: Record<ItemStatus, string> = {
-  want: "var(--ct-color-gray-500)",
-  reading: "var(--ct-color-primary-500)",
-  finished: "var(--ct-color-success-500)",
-  abandoned: "var(--ct-color-gray-400)",
-};
-
-// Filter items by status
 const filterByStatus = lift((args: { items: ReadingItem[]; status: ItemStatus | "all" }): ReadingItem[] => {
   const { items, status } = args;
   if (!Array.isArray(items)) return [];
@@ -55,10 +50,14 @@ const filterByStatus = lift((args: { items: ReadingItem[]; status: ItemStatus | 
   return items.filter((item) => item.status === status);
 });
 
+const renderStars = lift((rating: number | null): string => {
+  if (!rating) return "";
+  return "★".repeat(rating) + "☆".repeat(5 - rating);
+});
+
 export default pattern<Input, Output>(({ items }) => {
   const filterStatus = Cell.of<ItemStatus | "all">("all");
 
-  // Form state
   const newTitle = Cell.of("");
   const newAuthor = Cell.of("");
   const newType = Cell.of<ItemType>("article");
@@ -75,7 +74,6 @@ export default pattern<Input, Output>(({ items }) => {
             <ct-heading level={4}>Reading List ({totalCount})</ct-heading>
           </ct-hstack>
 
-          {/* Status filter tabs */}
           <ct-tabs $value={filterStatus}>
             <ct-tab-list>
               <ct-tab value="all">All</ct-tab>
@@ -90,64 +88,35 @@ export default pattern<Input, Output>(({ items }) => {
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="2" style="padding: 1rem;">
             {filteredItems.map((item) => (
-              <ct-card>
-                <ct-hstack gap="2" align="start">
+              <ct-card
+                style="cursor: pointer;"
+                onClick={() => {
+                  const detail = ReadingItemDetail({ item });
+                  return navigateTo(detail);
+                }}
+              >
+                <ct-hstack gap="2" align="center">
                   <span style="font-size: 1.5rem;">
                     {lift((t: ItemType) => typeEmoji[t] || "📄")(item.type)}
                   </span>
-                  <ct-vstack gap="1" style="flex: 1;">
+                  <ct-vstack gap="0" style="flex: 1;">
+                    <span style="font-weight: 500;">{item.title || "(untitled)"}</span>
+                    {item.author && (
+                      <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+                        by {item.author}
+                      </span>
+                    )}
                     <ct-hstack gap="2" align="center">
-                      <span style="font-weight: 500;">{item.title || "(untitled)"}</span>
-                      {item.author && (
-                        <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
-                          by {item.author}
+                      <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
+                        {item.status}
+                      </span>
+                      {item.rating && (
+                        <span style="font-size: 0.75rem; color: var(--ct-color-warning-500);">
+                          {renderStars(item.rating)}
                         </span>
                       )}
                     </ct-hstack>
-
-                    <ct-hstack gap="2" align="center">
-                      <ct-select
-                        $value={item.status}
-                        items={[
-                          { label: "Want to read", value: "want" },
-                          { label: "Reading", value: "reading" },
-                          { label: "Finished", value: "finished" },
-                          { label: "Abandoned", value: "abandoned" },
-                        ]}
-                        style="width: 130px;"
-                      />
-                      <ct-select
-                        $value={item.rating}
-                        items={[
-                          { label: "No rating", value: null },
-                          { label: "★☆☆☆☆", value: 1 },
-                          { label: "★★☆☆☆", value: 2 },
-                          { label: "★★★☆☆", value: 3 },
-                          { label: "★★★★☆", value: 4 },
-                          { label: "★★★★★", value: 5 },
-                        ]}
-                        style="width: 100px;"
-                      />
-                    </ct-hstack>
-
-                    {item.url && (
-                      <a
-                        href={item.url}
-                        target="_blank"
-                        style="font-size: 0.75rem; color: var(--ct-color-primary-500);"
-                      >
-                        {item.url}
-                      </a>
-                    )}
-
-                    <ct-textarea
-                      $value={item.notes}
-                      placeholder="Notes..."
-                      rows={2}
-                      style="font-size: 0.875rem;"
-                    />
                   </ct-vstack>
-
                   <ct-button
                     variant="ghost"
                     onClick={() => {
