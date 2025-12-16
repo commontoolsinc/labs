@@ -98,7 +98,9 @@ export default pattern<Input, Output>(({ prompt }) => {
 
   // Step 2: Compile the generated code when ready
   const compileParams = computed(() => ({
-    files: processedResult ? [{ name: "/main.tsx", contents: processedResult }] : [],
+    files: processedResult
+      ? [{ name: "/main.tsx", contents: processedResult }]
+      : [],
     main: processedResult ? "/main.tsx" : "",
   }));
 

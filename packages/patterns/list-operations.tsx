@@ -111,8 +111,7 @@ export default recipe<ListInput, ListOutput>(
         ]),
     );
     const combinedItems = computed(
-      () =>
-        items.reduce((acc: string, item: Item) => acc += item.title, ""),
+      () => items.reduce((acc: string, item: Item) => acc += item.title, ""),
     );
 
     // Notice that you can bind the same cell to many types
