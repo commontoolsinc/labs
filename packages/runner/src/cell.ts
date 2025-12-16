@@ -1311,7 +1311,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
         : this._initialValue,
       name: this._causeContainer.cause as string | undefined,
       external: this._link.id
-        ? this.getAsLink({
+        ? this.getAsWriteRedirectLink({
           baseSpace: this._frame.space,
           includeSchema: true,
         })
