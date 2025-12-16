@@ -1508,8 +1508,12 @@ function subscribeToReferencedDocs<T>(
   tx.commit();
 
   // Mark as effect since sink() is a side-effectful consumer (FRP effect/sink)
-  // Use rescheduling:true since we already ran the action above
-  const cancel = runtime.scheduler.subscribe(action, log, { isEffect: true, rescheduling: true });
+  // Use rescheduling: true since we already ran action() synchronously above.
+  // The scheduler will re-run this action when its dependencies change.
+  const cancel = runtime.scheduler.subscribe(action, log, {
+    isEffect: true,
+    rescheduling: true,
+  });
 
   return () => {
     cancel();
