@@ -843,6 +843,33 @@ const activeItems = computed(() => items.filter(item => !item.done));
 <ct-checkbox $checked={item.done} />
 ```
 
+**Check 4: Using $checked on computed results?**
+
+The `$checked` binding only works when mapping over direct `Cell<T[]>` inputs, not computed results (which use read-only data URIs):
+
+```typescript
+// ❌ FAILS with ReadOnlyAddressError - computed results are read-only
+const activeItems = computed(() => items.filter(i => i.active));
+{activeItems.map(item => <ct-checkbox $checked={item.done} />)}
+
+// ✅ WORKS - direct Cell map
+{items.map(item => <ct-checkbox $checked={item.done} />)}
+
+// ✅ WORKS for filtered lists - use separate selection state
+const selections = Cell.of<Record<string, boolean>>({});
+{activeItems.map(item => (
+  <ct-checkbox
+    checked={selections.key(item.id)}
+    onClick={() => {
+      const sel = selections.get();
+      selections.set({ ...sel, [item.id]: !sel[item.id] });
+    }}
+  />
+))}
+```
+
+**Rule:** For checkboxes on computed/filtered lists, separate selection state into a writable Cell.
+
 ## Summary
 
 **Key Takeaways:**
