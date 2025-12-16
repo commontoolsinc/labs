@@ -318,8 +318,8 @@ type Input = Record<string, never>;
 
 ## `contact-book.tsx`
 
-Manage contacts with search, notes, and relationships between contacts.
-Contacts can be linked together with labels (friend, spouse, colleague, etc.).
+Manage contacts with search, notes, and relationships between contacts. Contacts
+can be linked together with labels (friend, spouse, colleague, etc.).
 
 **Keywords:** contacts, relationships, search, lift
 
@@ -359,8 +359,8 @@ interface Output {
 
 ## `habit-tracker.tsx`
 
-Track daily habits with streak counting and 7-day history visualization.
-Mark habits complete for today and see your progress over time.
+Track daily habits with streak counting and 7-day history visualization. Mark
+habits complete for today and see your progress over time.
 
 **Keywords:** habits, streaks, daily-tracking, lift
 
@@ -375,7 +375,7 @@ interface Habit {
 
 interface HabitLog {
   habitName: string;
-  date: string;  // YYYY-MM-DD
+  date: string; // YYYY-MM-DD
   completed: boolean;
 }
 
@@ -407,8 +407,8 @@ date with today highlighted.
 ```ts
 interface Event {
   title: string;
-  date: string;      // YYYY-MM-DD
-  time: Default<string, "">;  // HH:MM or empty for all-day
+  date: string; // YYYY-MM-DD
+  time: Default<string, "">; // HH:MM or empty for all-day
   notes: Default<string, "">;
 }
 
@@ -428,8 +428,8 @@ interface Output {
 
 ## `reading-list.tsx`
 
-Track books, articles, papers, and videos you want to read or have read.
-Filter by status (want/reading/finished/abandoned) and rate items.
+Track books, articles, papers, and videos you want to read or have read. Filter
+by status (want/reading/finished/abandoned) and rate items.
 
 **Keywords:** reading, books, articles, status-tracking, lift
 
@@ -445,7 +445,7 @@ interface ReadingItem {
   url: Default<string, "">;
   type: Default<ItemType, "article">;
   status: Default<ItemStatus, "want">;
-  rating: Default<number | null, null>;  // 1-5 stars
+  rating: Default<number | null, null>; // 1-5 stars
   notes: Default<string, "">;
   addedAt: number;
   finishedAt: Default<number | null, null>;

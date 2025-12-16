@@ -1,12 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  Default,
-  NAME,
-  pattern,
-  str,
-  UI,
-} from "commontools";
+import { Cell, Default, NAME, pattern, str, UI } from "commontools";
 
 interface Event {
   title: Cell<string>;
@@ -38,18 +31,24 @@ export default pattern<Input, Output>(({ event }) => {
             <ct-card>
               <ct-vstack gap="2">
                 <ct-vstack gap="1">
-                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">Title</label>
+                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                    Title
+                  </label>
                   <ct-input $value={event.title} placeholder="Event title" />
                 </ct-vstack>
 
                 <ct-hstack gap="2">
                   <ct-vstack gap="1" style="flex: 1;">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">Date</label>
+                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                      Date
+                    </label>
                     <ct-input $value={event.date} type="date" />
                   </ct-vstack>
 
                   <ct-vstack gap="1" style="flex: 1;">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">Time</label>
+                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                      Time
+                    </label>
                     <ct-input $value={event.time} type="time" />
                   </ct-vstack>
                 </ct-hstack>
@@ -58,8 +57,14 @@ export default pattern<Input, Output>(({ event }) => {
 
             <ct-card>
               <ct-vstack gap="1">
-                <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">Notes</label>
-                <ct-textarea $value={event.notes} placeholder="Add details about this event..." rows={6} />
+                <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                  Notes
+                </label>
+                <ct-textarea
+                  $value={event.notes}
+                  placeholder="Add details about this event..."
+                  rows={6}
+                />
               </ct-vstack>
             </ct-card>
           </ct-vstack>

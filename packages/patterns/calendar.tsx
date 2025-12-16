@@ -37,7 +37,11 @@ const getTodayDate = (): string => {
 const formatDate = lift((date: string): string => {
   if (!date) return "";
   const d = new Date(date + "T00:00:00");
-  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  return d.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
 });
 
 const isToday = lift((date: string): boolean => {
@@ -95,26 +99,38 @@ export default pattern<Input, Output>(({ events }) => {
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="3" style="padding: 1rem;">
             {dates.map((date) => {
-              const dateEvents = lift((args: { g: Record<string, Event[]>; d: string }) => args.g[args.d] || [])({ g: grouped, d: date });
+              const dateEvents = lift((
+                args: { g: Record<string, Event[]>; d: string },
+              ) => args.g[args.d] || [])({ g: grouped, d: date });
               const dateIsToday = isToday(date);
               const dateIsPast = isPast(date);
 
               return (
                 <ct-vstack gap="1">
                   <ct-hstack gap="2" align="center">
-                    <span style={{
-                      fontWeight: "600",
-                      fontSize: "0.875rem",
-                      color: ifElse(dateIsToday, "var(--ct-color-primary-500)",
-                             ifElse(dateIsPast, "var(--ct-color-gray-400)", "var(--ct-color-gray-700)")),
-                    }}>
+                    <span
+                      style={{
+                        fontWeight: "600",
+                        fontSize: "0.875rem",
+                        color: ifElse(
+                          dateIsToday,
+                          "var(--ct-color-primary-500)",
+                          ifElse(
+                            dateIsPast,
+                            "var(--ct-color-gray-400)",
+                            "var(--ct-color-gray-700)",
+                          ),
+                        ),
+                      }}
+                    >
                       {formatDate(date)}
                     </span>
-                    {ifElse(dateIsToday,
+                    {ifElse(
+                      dateIsToday,
                       <span style="font-size: 0.75rem; background: var(--ct-color-primary-100); color: var(--ct-color-primary-700); padding: 0.125rem 0.5rem; border-radius: 999px;">
                         Today
                       </span>,
-                      null
+                      null,
                     )}
                   </ct-hstack>
 
@@ -132,12 +148,16 @@ export default pattern<Input, Output>(({ events }) => {
                             {event.time}
                           </span>
                         )}
-                        <span style="flex: 1; font-weight: 500;">{event.title || "(untitled)"}</span>
+                        <span style="flex: 1; font-weight: 500;">
+                          {event.title || "(untitled)"}
+                        </span>
                         <ct-button
                           variant="ghost"
                           onClick={() => {
                             const current = events.get();
-                            const idx = current.findIndex((e) => Cell.equals(event, e));
+                            const idx = current.findIndex((e) =>
+                              Cell.equals(event, e)
+                            );
                             if (idx >= 0) {
                               events.set(current.toSpliced(idx, 1));
                             }
@@ -157,14 +177,18 @@ export default pattern<Input, Output>(({ events }) => {
               <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
                 No events yet. Add one below!
               </div>,
-              null
+              null,
             )}
           </ct-vstack>
         </ct-vscroll>
 
         <ct-vstack slot="footer" gap="2" style="padding: 1rem;">
           <ct-hstack gap="2">
-            <ct-input $value={newTitle} placeholder="Event title..." style="flex: 1;" />
+            <ct-input
+              $value={newTitle}
+              placeholder="Event title..."
+              style="flex: 1;"
+            />
             <ct-input $value={newDate} type="date" style="width: 140px;" />
             <ct-input $value={newTime} type="time" style="width: 100px;" />
             <ct-button

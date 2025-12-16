@@ -1,12 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  Default,
-  NAME,
-  pattern,
-  str,
-  UI,
-} from "commontools";
+import { Cell, Default, NAME, pattern, str, UI } from "commontools";
 
 type ItemType = "book" | "article" | "paper" | "video";
 type ItemStatus = "want" | "reading" | "finished" | "abandoned";
@@ -44,23 +37,35 @@ export default pattern<Input, Output>(({ item }) => {
             <ct-card>
               <ct-vstack gap="2">
                 <ct-vstack gap="1">
-                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">Title</label>
+                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                    Title
+                  </label>
                   <ct-input $value={item.title} placeholder="Title" />
                 </ct-vstack>
 
                 <ct-vstack gap="1">
-                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">Author</label>
+                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                    Author
+                  </label>
                   <ct-input $value={item.author} placeholder="Author name" />
                 </ct-vstack>
 
                 <ct-vstack gap="1">
-                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">URL</label>
-                  <ct-input $value={item.url} placeholder="https://..." type="url" />
+                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                    URL
+                  </label>
+                  <ct-input
+                    $value={item.url}
+                    placeholder="https://..."
+                    type="url"
+                  />
                 </ct-vstack>
 
                 <ct-hstack gap="2">
                   <ct-vstack gap="1" style="flex: 1;">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">Type</label>
+                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                      Type
+                    </label>
                     <ct-select
                       $value={item.type}
                       items={[
@@ -73,7 +78,9 @@ export default pattern<Input, Output>(({ item }) => {
                   </ct-vstack>
 
                   <ct-vstack gap="1" style="flex: 1;">
-                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">Status</label>
+                    <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                      Status
+                    </label>
                     <ct-select
                       $value={item.status}
                       items={[
@@ -87,7 +94,9 @@ export default pattern<Input, Output>(({ item }) => {
                 </ct-hstack>
 
                 <ct-vstack gap="1">
-                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">Rating</label>
+                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                    Rating
+                  </label>
                   <ct-select
                     $value={item.rating}
                     items={[
@@ -105,8 +114,14 @@ export default pattern<Input, Output>(({ item }) => {
 
             <ct-card>
               <ct-vstack gap="1">
-                <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">Notes</label>
-                <ct-textarea $value={item.notes} placeholder="Your thoughts, highlights, quotes..." rows={8} />
+                <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                  Notes
+                </label>
+                <ct-textarea
+                  $value={item.notes}
+                  placeholder="Your thoughts, highlights, quotes..."
+                  rows={8}
+                />
               </ct-vstack>
             </ct-card>
           </ct-vstack>

@@ -1,12 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  Default,
-  NAME,
-  pattern,
-  str,
-  UI,
-} from "commontools";
+import { Cell, Default, NAME, pattern, str, UI } from "commontools";
 
 interface Contact {
   name: Cell<string>;
@@ -39,31 +32,56 @@ export default pattern<Input, Output>(({ contact }) => {
             <ct-card>
               <ct-vstack gap="2">
                 <ct-vstack gap="1">
-                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">Name</label>
+                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                    Name
+                  </label>
                   <ct-input $value={contact.name} placeholder="Full name" />
                 </ct-vstack>
 
                 <ct-vstack gap="1">
-                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">Email</label>
-                  <ct-input $value={contact.email} placeholder="email@example.com" type="email" />
+                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                    Email
+                  </label>
+                  <ct-input
+                    $value={contact.email}
+                    placeholder="email@example.com"
+                    type="email"
+                  />
                 </ct-vstack>
 
                 <ct-vstack gap="1">
-                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">Phone</label>
-                  <ct-input $value={contact.phone} placeholder="+1 (555) 123-4567" type="tel" />
+                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                    Phone
+                  </label>
+                  <ct-input
+                    $value={contact.phone}
+                    placeholder="+1 (555) 123-4567"
+                    type="tel"
+                  />
                 </ct-vstack>
 
                 <ct-vstack gap="1">
-                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">Company</label>
-                  <ct-input $value={contact.company} placeholder="Company name" />
+                  <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                    Company
+                  </label>
+                  <ct-input
+                    $value={contact.company}
+                    placeholder="Company name"
+                  />
                 </ct-vstack>
               </ct-vstack>
             </ct-card>
 
             <ct-card>
               <ct-vstack gap="1">
-                <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">Notes</label>
-                <ct-textarea $value={contact.notes} placeholder="Add notes about this contact..." rows={6} />
+                <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
+                  Notes
+                </label>
+                <ct-textarea
+                  $value={contact.notes}
+                  placeholder="Add notes about this contact..."
+                  rows={6}
+                />
               </ct-vstack>
             </ct-card>
           </ct-vstack>

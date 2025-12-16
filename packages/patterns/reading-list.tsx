@@ -43,12 +43,16 @@ const typeEmoji: Record<ItemType, string> = {
   video: "🎬",
 };
 
-const filterByStatus = lift((args: { items: ReadingItem[]; status: ItemStatus | "all" }): ReadingItem[] => {
-  const { items, status } = args;
-  if (!Array.isArray(items)) return [];
-  if (status === "all") return items;
-  return items.filter((item) => item.status === status);
-});
+const filterByStatus = lift(
+  (
+    args: { items: ReadingItem[]; status: ItemStatus | "all" },
+  ): ReadingItem[] => {
+    const { items, status } = args;
+    if (!Array.isArray(items)) return [];
+    if (status === "all") return items;
+    return items.filter((item) => item.status === status);
+  },
+);
 
 const renderStars = lift((rating: number | null): string => {
   if (!rating) return "";
@@ -100,7 +104,9 @@ export default pattern<Input, Output>(({ items }) => {
                     {lift((t: ItemType) => typeEmoji[t] || "📄")(item.type)}
                   </span>
                   <ct-vstack gap="0" style="flex: 1;">
-                    <span style="font-weight: 500;">{item.title || "(untitled)"}</span>
+                    <span style="font-weight: 500;">
+                      {item.title || "(untitled)"}
+                    </span>
                     {item.author && (
                       <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
                         by {item.author}
@@ -121,7 +127,9 @@ export default pattern<Input, Output>(({ items }) => {
                     variant="ghost"
                     onClick={() => {
                       const current = items.get();
-                      const idx = current.findIndex((i) => Cell.equals(item, i));
+                      const idx = current.findIndex((i) =>
+                        Cell.equals(item, i)
+                      );
                       if (idx >= 0) {
                         items.set(current.toSpliced(idx, 1));
                       }
@@ -138,15 +146,23 @@ export default pattern<Input, Output>(({ items }) => {
               <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
                 No items yet. Add something to read!
               </div>,
-              null
+              null,
             )}
           </ct-vstack>
         </ct-vscroll>
 
         <ct-vstack slot="footer" gap="2" style="padding: 1rem;">
           <ct-hstack gap="2">
-            <ct-input $value={newTitle} placeholder="Title..." style="flex: 1;" />
-            <ct-input $value={newAuthor} placeholder="Author..." style="width: 150px;" />
+            <ct-input
+              $value={newTitle}
+              placeholder="Title..."
+              style="flex: 1;"
+            />
+            <ct-input
+              $value={newAuthor}
+              placeholder="Author..."
+              style="width: 150px;"
+            />
             <ct-select
               $value={newType}
               items={[

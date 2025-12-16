@@ -18,7 +18,7 @@ interface Habit {
 
 interface HabitLog {
   habitName: string;
-  date: string;  // YYYY-MM-DD
+  date: string; // YYYY-MM-DD
   completed: boolean;
 }
 
@@ -47,13 +47,15 @@ const getDateDaysAgo = (daysAgo: number): string => {
 };
 
 // Pure functions wrapped with lift() - use object arg for multiple params
-const checkCompleted = lift((args: { logs: HabitLog[]; name: string; date: string }): boolean => {
-  const { logs, name, date } = args;
-  if (!Array.isArray(logs)) return false;
-  return logs.some(
-    (log) => log.habitName === name && log.date === date && log.completed
-  );
-});
+const checkCompleted = lift(
+  (args: { logs: HabitLog[]; name: string; date: string }): boolean => {
+    const { logs, name, date } = args;
+    if (!Array.isArray(logs)) return false;
+    return logs.some(
+      (log) => log.habitName === name && log.date === date && log.completed,
+    );
+  },
+);
 
 const calcStreak = lift((args: { logs: HabitLog[]; name: string }): number => {
   const { logs, name } = args;
@@ -64,7 +66,8 @@ const calcStreak = lift((args: { logs: HabitLog[]; name: string }): number => {
   for (let i = 0; i < 365; i++) {
     const dateToCheck = getDateDaysAgo(i);
     const completed = logs.some(
-      (log) => log.habitName === name && log.date === dateToCheck && log.completed
+      (log) =>
+        log.habitName === name && log.date === dateToCheck && log.completed,
     );
 
     if (completed) {
@@ -105,7 +108,11 @@ export default pattern<Input, Output>(({ habits, logs }) => {
           <ct-vstack gap="2" style="padding: 1rem;">
             {habits.map((habit) => {
               // Use lift() - just call with reactive args in an object
-              const isCompletedToday = checkCompleted({ logs, name: habit.name, date: todayDate });
+              const isCompletedToday = checkCompleted({
+                logs,
+                name: habit.name,
+                date: todayDate,
+              });
               const streak = calcStreak({ logs, name: habit.name });
 
               return (
@@ -113,7 +120,9 @@ export default pattern<Input, Output>(({ habits, logs }) => {
                   <ct-hstack gap="2" align="center">
                     <span style="font-size: 1.5rem;">{habit.icon}</span>
                     <ct-vstack gap="0" style="flex: 1;">
-                      <span style="font-weight: 500;">{habit.name || "(unnamed)"}</span>
+                      <span style="font-weight: 500;">
+                        {habit.name || "(unnamed)"}
+                      </span>
                       <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                         Streak: {streak} days
                       </span>
@@ -124,13 +133,17 @@ export default pattern<Input, Output>(({ habits, logs }) => {
                         const habitName = habit.name;
                         const currentLogs = logs.get();
                         const existingIdx = currentLogs.findIndex(
-                          (log) => log.habitName === habitName && log.date === todayDate
+                          (log) =>
+                            log.habitName === habitName &&
+                            log.date === todayDate,
                         );
 
                         if (existingIdx >= 0) {
                           // Toggle existing
                           const updated = currentLogs.map((log, i) =>
-                            i === existingIdx ? { ...log, completed: !log.completed } : log
+                            i === existingIdx
+                              ? { ...log, completed: !log.completed }
+                              : log
                           );
                           logs.set(updated);
                         } else {
@@ -149,7 +162,9 @@ export default pattern<Input, Output>(({ habits, logs }) => {
                       variant="ghost"
                       onClick={() => {
                         const current = habits.get();
-                        const idx = current.findIndex((h) => Cell.equals(habit, h));
+                        const idx = current.findIndex((h) =>
+                          Cell.equals(habit, h)
+                        );
                         if (idx >= 0) {
                           habits.set(current.toSpliced(idx, 1));
                         }
@@ -163,7 +178,11 @@ export default pattern<Input, Output>(({ habits, logs }) => {
                   <ct-hstack gap="1" style="margin-top: 0.5rem;">
                     {[6, 5, 4, 3, 2, 1, 0].map((daysAgo) => {
                       const dateStr = getDateDaysAgo(daysAgo);
-                      const wasCompleted = checkCompleted({ logs, name: habit.name, date: dateStr });
+                      const wasCompleted = checkCompleted({
+                        logs,
+                        name: habit.name,
+                        date: dateStr,
+                      });
 
                       return (
                         <div
@@ -171,12 +190,20 @@ export default pattern<Input, Output>(({ habits, logs }) => {
                             width: "24px",
                             height: "24px",
                             borderRadius: "4px",
-                            backgroundColor: ifElse(wasCompleted, habit.color, "var(--ct-color-gray-200)"),
+                            backgroundColor: ifElse(
+                              wasCompleted,
+                              habit.color,
+                              "var(--ct-color-gray-200)",
+                            ),
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
                             fontSize: "0.625rem",
-                            color: ifElse(wasCompleted, "white", "var(--ct-color-gray-400)"),
+                            color: ifElse(
+                              wasCompleted,
+                              "white",
+                              "var(--ct-color-gray-400)",
+                            ),
                           }}
                         >
                           {dateStr.slice(-2)}
@@ -193,7 +220,7 @@ export default pattern<Input, Output>(({ habits, logs }) => {
               <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
                 No habits yet. Add one below!
               </div>,
-              null
+              null,
             )}
           </ct-vstack>
         </ct-vscroll>

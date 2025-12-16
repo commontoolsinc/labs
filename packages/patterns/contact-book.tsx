@@ -47,8 +47,10 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
 
   const contactCount = computed(() => contacts.get().length);
 
-  const contactSelectItems = derive(contacts, (contactList: Contact[]) =>
-    contactList.map((c) => ({ label: c.name || "(unnamed)", value: c.name }))
+  const contactSelectItems = derive(
+    contacts,
+    (contactList: Contact[]) =>
+      contactList.map((c) => ({ label: c.name || "(unnamed)", value: c.name })),
   );
 
   const matchesSearch = (contact: Contact, query: string): boolean => {
@@ -79,14 +81,26 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
             {contacts.map((contact) => {
               const isVisible = derive(
                 { contact, searchQuery },
-                ({ contact: c, searchQuery: q }: { contact: Contact; searchQuery: string }) => matchesSearch(c, q)
+                (
+                  { contact: c, searchQuery: q }: {
+                    contact: Contact;
+                    searchQuery: string;
+                  },
+                ) => matchesSearch(c, q),
               );
 
               const contactRelations = derive(
                 { name: contact.name, relationships },
-                ({ name, relationships: rels }: { name: string; relationships: Relationship[] }) => {
-                  return rels.filter((r) => r.fromName === name || r.toName === name);
-                }
+                (
+                  { name, relationships: rels }: {
+                    name: string;
+                    relationships: Relationship[];
+                  },
+                ) => {
+                  return rels.filter((r) =>
+                    r.fromName === name || r.toName === name
+                  );
+                },
               );
 
               return ifElse(
@@ -118,10 +132,14 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
                         <span style="font-size: 0.75rem; color: var(--ct-color-primary-500);">
                           ↔ {derive(
                             { rel, name: contact.name },
-                            ({ rel: r, name }: { rel: Relationship; name: string }) =>
-                              r.fromName === name ? r.toName : r.fromName
+                            (
+                              { rel: r, name }: {
+                                rel: Relationship;
+                                name: string;
+                              },
+                            ) => r.fromName === name ? r.toName : r.fromName,
                           )}
-                          {rel.label && <span> ({rel.label})</span>}
+                          {rel.label && <span>({rel.label})</span>}
                         </span>
                       ))}
                     </ct-vstack>
@@ -129,7 +147,9 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
                       variant="ghost"
                       onClick={() => {
                         const current = contacts.get();
-                        const idx = current.findIndex((c) => Cell.equals(contact, c));
+                        const idx = current.findIndex((c) =>
+                          Cell.equals(contact, c)
+                        );
                         if (idx >= 0) {
                           contacts.set(current.toSpliced(idx, 1));
                         }
@@ -139,7 +159,7 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
                     </ct-button>
                   </ct-hstack>
                 </ct-card>,
-                null
+                null,
               );
             })}
 
@@ -148,7 +168,7 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
               <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
                 No contacts yet. Add one below!
               </div>,
-              null
+              null,
             )}
           </ct-vstack>
         </ct-vscroll>
