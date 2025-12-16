@@ -1066,9 +1066,11 @@ export class Runner {
       });
 
       // Create callback to populate dependencies for pull mode scheduling.
-      // This reads all cells the handler will access (except the event itself).
+      // This reads all cells the handler will access (from the argument schema).
+      // The event parameter is available but not used here - event-based dependencies
+      // would be added by calling runtime.getImmutableCell(space, event).get()
       const populateDependencies = module.argumentSchema
-        ? (depTx: IExtendedStorageTransaction) => {
+        ? (depTx: IExtendedStorageTransaction, _event: any) => {
           const inputsCell = this.runtime.getImmutableCell(
             processCell.space,
             inputs,
