@@ -14,10 +14,8 @@ import {
 import ReadingItemDetail, {
   type ItemStatus,
   type ItemType,
-  type ReadingItemData,
+  type ReadingItem,
 } from "./reading-item-detail.tsx";
-
-type ReadingItem = ReadingItemData;
 
 interface Input {
   items: Cell<Default<ReadingItem[], []>>;

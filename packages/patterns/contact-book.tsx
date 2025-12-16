@@ -11,9 +11,7 @@ import {
   UI,
 } from "commontools";
 
-import ContactDetail, { type ContactData } from "./contact-detail.tsx";
-
-type Contact = ContactData;
+import ContactDetail, { type Contact } from "./contact-detail.tsx";
 
 interface Relationship {
   fromName: string;

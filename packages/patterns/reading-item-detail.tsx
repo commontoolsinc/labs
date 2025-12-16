@@ -1,11 +1,14 @@
 /// <cts-enable />
 import { Cell, Default, NAME, pattern, str, UI } from "commontools";
 
+/** Wrap all fields of T in Cell<> for write access */
+type Cellify<T> = { [K in keyof T]: Cell<T[K]> };
+
 export type ItemType = "book" | "article" | "paper" | "video";
 export type ItemStatus = "want" | "reading" | "finished" | "abandoned";
 
 /** Raw data shape - use in collection patterns */
-export interface ReadingItemData {
+export interface ReadingItem {
   title: string;
   author: Default<string, "">;
   url: Default<string, "">;
@@ -17,21 +20,8 @@ export interface ReadingItemData {
   finishedAt: Default<number | null, null>;
 }
 
-/** Cell-wrapped for write access in detail view */
-interface ReadingItem {
-  title: Cell<string>;
-  author: Cell<Default<string, "">>;
-  url: Cell<Default<string, "">>;
-  type: Cell<Default<ItemType, "article">>;
-  status: Cell<Default<ItemStatus, "want">>;
-  rating: Cell<Default<number | null, null>>;
-  notes: Cell<Default<string, "">>;
-  addedAt: Cell<number>;
-  finishedAt: Cell<Default<number | null, null>>;
-}
-
 interface Input {
-  item: ReadingItem;
+  item: Cellify<ReadingItem>;
 }
 
 /** #book #article #reading */

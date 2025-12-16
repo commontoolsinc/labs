@@ -1,8 +1,11 @@
 /// <cts-enable />
 import { Cell, Default, NAME, pattern, str, UI } from "commontools";
 
+/** Wrap all fields of T in Cell<> for write access */
+type Cellify<T> = { [K in keyof T]: Cell<T[K]> };
+
 /** Raw data shape - use in collection patterns */
-export interface ContactData {
+export interface Contact {
   name: string;
   email: Default<string, "">;
   phone: Default<string, "">;
@@ -12,19 +15,8 @@ export interface ContactData {
   createdAt: number;
 }
 
-/** Cell-wrapped for write access in detail view */
-interface Contact {
-  name: Cell<string>;
-  email: Cell<Default<string, "">>;
-  phone: Cell<Default<string, "">>;
-  company: Cell<Default<string, "">>;
-  tags: Cell<Default<string[], []>>;
-  notes: Cell<Default<string, "">>;
-  createdAt: Cell<number>;
-}
-
 interface Input {
-  contact: Contact;
+  contact: Cellify<Contact>;
 }
 
 /** #contact #person */
