@@ -7,7 +7,7 @@ import {
   ifElse,
   NAME,
   navigateTo,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 
@@ -46,9 +46,7 @@ const handleEditContent = handler<
   },
 );
 
-export default recipe<Input>(
-  "Compiler",
-  ({ code }) => {
+export default pattern<Input>(({ code }) => {
     const { result, error, errors: _ } = compileAndRun({
       files: [{ name: "/main.tsx", contents: code }],
       main: "/main.tsx",

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, NAME, recipe, str, UI } from "commontools";
+import { Cell, computed, Default, handler, NAME, pattern, UI } from "commontools";
 
 interface RecipeState {
   value: Default<number, 0>;
@@ -33,10 +33,10 @@ function nth(value: number) {
   return `${value}th`;
 }
 
-export const Counter = recipe<RecipeState>((state) => {
+export const Counter = pattern<RecipeState>((state) => {
   return {
-    // str is used so we can directly interpolate the OpaqueRef<number> into the string
-    [NAME]: str`Simple counter: ${state.value}`,
+    // computed() is used to create reactive derived values
+    [NAME]: computed(() => `Simple counter: ${state.value}`),
     [UI]: (
       <div>
         {
@@ -59,11 +59,11 @@ export const Counter = recipe<RecipeState>((state) => {
   };
 });
 
-export default recipe<RecipeState>((state) => {
+export default pattern<RecipeState>((state) => {
   const counter = Counter({ value: state.value });
 
   return {
-    [NAME]: str`Counters: ${state.value}`,
+    [NAME]: computed(() => `Counters: ${state.value}`),
     // These three methods are all functionally equivalent
     [UI]: (
       <div>
