@@ -77,7 +77,7 @@ export default pattern<Input>(({ messages }) => {
                     The derive result doesn't pass the OpaqueRef type check.
                     Accessing msg.id causes runtime error. */}
                 {messageReactions.map((reaction) => (
-                  <button data-msg-id={msg.id}>
+                  <button type="button" data-msg-id={msg.id}>
                     {reaction.emoji} ({reaction.userNames.length})
                   </button>
                 ))}

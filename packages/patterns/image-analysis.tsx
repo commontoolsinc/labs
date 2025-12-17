@@ -51,7 +51,7 @@ export default pattern<ImageChatInput, ImageChatOutput>(
     });
 
     // Generate text from the content parts
-    const { result, pending, requestHash } = generateText({
+    const { result, pending, requestHash: _requestHash } = generateText({
       system: computed(() =>
         systemPrompt ||
         "You are a helpful assistant that can analyze images. Describe what you see."

@@ -33,7 +33,7 @@ export interface Message {
   timestamp: number;
   type: "chat" | "system" | "image";
   imageUrl?: string;
-  reactions: Reaction[];  // Required - workaround for transformer bug
+  reactions: Reaction[]; // Required - workaround for transformer bug
 }
 
 export interface User {
