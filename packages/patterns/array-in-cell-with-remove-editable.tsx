@@ -60,6 +60,7 @@ export default pattern<InputSchema>(({ title, items }) => {
         >
           {items.map((item, index) => (
             <div
+              key={index}
               style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
             >
               <ct-button
