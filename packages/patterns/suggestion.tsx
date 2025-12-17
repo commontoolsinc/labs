@@ -33,7 +33,7 @@ export default pattern<
     result,
     [UI]: (
       <ct-cell-context $cell={result}>
-        {result ? result : "Searching..."}
+        {computed(() => result ?? "Searching...")}
       </ct-cell-context>
     ),
   };
