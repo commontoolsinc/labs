@@ -1,8 +1,9 @@
 /// <cts-enable />
 import {
   Cell,
-  derive,
+  computed,
   generateObject,
+  NAME,
   pattern,
   patternTool,
   str,
@@ -65,20 +66,20 @@ Be thorough - search for multiple aspects of the question and read several sourc
           $value={question}
           placeholder="Enter your research question..."
         />
-        {derive(research, ({ pending, error, result }) => {
-          if (pending) return <div>Researching...</div>;
-          if (error) return <div>Error: {error}</div>;
-          if (!result) return <div>No results</div>;
+        {computed(() => {
+          if (research.pending) return <div>Researching...</div>;
+          if (research.error) return <div>Error: {research.error}</div>;
+          if (!research.result) return <div>No results</div>;
           return (
             <div>
               <h3>Summary</h3>
-              <p>{result.summary}</p>
+              <p>{research.result.summary}</p>
               <p>
-                <em>Confidence: {result.confidence}</em>
+                <em>Confidence: {research.result.confidence}</em>
               </p>
               <h3>Sources</h3>
               <ul>
-                {result.sources.map((url: string) => (
+                {research.result.sources.map((url: string) => (
                   <li>
                     <a href={url} target="_blank">
                       {url}
