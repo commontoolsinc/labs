@@ -106,7 +106,7 @@ export default pattern<Input, Input>(({ items }) => ({
 **Key points:**
 - `$checked` automatically syncs - no handler needed
 - Inline handlers for add/remove operations
-- **Uses `Cell.equals()` for item identity - no `[ID]` needed for basic list operations**
+- **Uses `Cell.equals()` for item identity**
 - Ternary in `style` attribute works fine
 - Type inference works in `.map()` - no annotations needed
 

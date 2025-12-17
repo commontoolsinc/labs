@@ -58,21 +58,20 @@ function getMentionable() {
 }
 
 export const Page = pattern<PageInput>(({ outline }) => {
-    const mentionable = getMentionable();
+  const mentionable = getMentionable();
 
-    return {
-      [NAME]: "Page",
-      [UI]: (
-        <ct-outliner
-          $value={outline as any}
-          $mentionable={mentionable}
-          oncharm-link-click={handleCharmLinkClick({})}
-        />
-      ),
-      outline,
-    };
-  },
-);
+  return {
+    [NAME]: "Page",
+    [UI]: (
+      <ct-outliner
+        $value={outline as any}
+        $mentionable={mentionable}
+        oncharm-link-click={handleCharmLinkClick({})}
+      />
+    ),
+    outline,
+  };
+});
 
 type LLMTestInput = {
   title?: Cell<Default<string, "LLM Test">>;

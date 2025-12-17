@@ -98,66 +98,66 @@ const spawnNote = handler<void, void>((_, __) => {
 });
 
 export default pattern<CharmsListInput, CharmsListOutput>((_) => {
-    const { allCharms } = wish<{ allCharms: MentionableCharm[] }>("/");
-    const index = BacklinksIndex({ allCharms });
+  const { allCharms } = wish<{ allCharms: MentionableCharm[] }>("/");
+  const index = BacklinksIndex({ allCharms });
 
-    const fab = OmniboxFAB({
-      mentionable: index.mentionable as unknown as Cell<MentionableCharm[]>,
-    });
+  const fab = OmniboxFAB({
+    mentionable: index.mentionable as unknown as Cell<MentionableCharm[]>,
+  });
 
-    return {
-      backlinksIndex: index,
-      [NAME]: computed(() => `DefaultCharmList (${allCharms.length})`),
-      [UI]: (
-        <ct-screen>
-          <ct-keybind
-            code="KeyN"
-            alt
-            preventDefault
-            onct-keybind={spawnChatList()}
-          />
-          <ct-keybind
-            code="KeyO"
-            meta
-            preventDefault
-            onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
-          />
-          <ct-keybind
-            code="KeyO"
-            ctrl
-            preventDefault
-            onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
-          />
+  return {
+    backlinksIndex: index,
+    [NAME]: computed(() => `DefaultCharmList (${allCharms.length})`),
+    [UI]: (
+      <ct-screen>
+        <ct-keybind
+          code="KeyN"
+          alt
+          preventDefault
+          onct-keybind={spawnChatList()}
+        />
+        <ct-keybind
+          code="KeyO"
+          meta
+          preventDefault
+          onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
+        />
+        <ct-keybind
+          code="KeyO"
+          ctrl
+          preventDefault
+          onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
+        />
 
-          <ct-toolbar slot="header" sticky>
-            <div slot="start">
-              <ct-button
-                onClick={spawnChatList()}
-              >
-                📂 Chat List
-              </ct-button>
-              <ct-button
-                onClick={spawnChatbot()}
-              >
-                💬 Chatbot
-              </ct-button>
-              <ct-button
-                onClick={spawnChatbotOutliner()}
-              >
-                📝 Chatbot Outliner
-              </ct-button>
-              <ct-button
-                onClick={spawnNote()}
-              >
-                📄 Note
-              </ct-button>
-            </div>
-          </ct-toolbar>
+        <ct-toolbar slot="header" sticky>
+          <div slot="start">
+            <ct-button
+              onClick={spawnChatList()}
+            >
+              📂 Chat List
+            </ct-button>
+            <ct-button
+              onClick={spawnChatbot()}
+            >
+              💬 Chatbot
+            </ct-button>
+            <ct-button
+              onClick={spawnChatbotOutliner()}
+            >
+              📝 Chatbot Outliner
+            </ct-button>
+            <ct-button
+              onClick={spawnNote()}
+            >
+              📄 Note
+            </ct-button>
+          </div>
+        </ct-toolbar>
 
-          <ct-vscroll flex showScrollbar>
-            <ct-vstack gap="4" padding="6">
-              <style>
-                {`
+        <ct-vscroll flex showScrollbar>
+          <ct-vstack gap="4" padding="6">
+            <style>
+              {`
                 .pattern-link {
                   cursor: pointer;
                   color: inherit;
@@ -167,37 +167,36 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
                   text-decoration: underline;
                 }
               `}
-              </style>
-              <h2>Pages</h2>
+            </style>
+            <h2>Pages</h2>
 
-              <ct-table full-width hover>
-                <tbody>
-                  {allCharms.map((charm) => (
-                    <tr>
-                      <td>
-                        <ct-cell-context $cell={charm}>
-                          <ct-cell-link $cell={charm} />
-                        </ct-cell-context>
-                      </td>
-                      <td>
-                        <ct-button
-                          size="sm"
-                          variant="ghost"
-                          onClick={removeCharm({ charm, allCharms })}
-                        >
-                          🗑️
-                        </ct-button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </ct-table>
-            </ct-vstack>
-          </ct-vscroll>
-        </ct-screen>
-      ),
-      sidebarUI: undefined,
-      fabUI: fab[UI],
-    };
-  },
-);
+            <ct-table full-width hover>
+              <tbody>
+                {allCharms.map((charm) => (
+                  <tr>
+                    <td>
+                      <ct-cell-context $cell={charm}>
+                        <ct-cell-link $cell={charm} />
+                      </ct-cell-context>
+                    </td>
+                    <td>
+                      <ct-button
+                        size="sm"
+                        variant="ghost"
+                        onClick={removeCharm({ charm, allCharms })}
+                      >
+                        🗑️
+                      </ct-button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </ct-table>
+          </ct-vstack>
+        </ct-vscroll>
+      </ct-screen>
+    ),
+    sidebarUI: undefined,
+    fabUI: fab[UI],
+  };
+});

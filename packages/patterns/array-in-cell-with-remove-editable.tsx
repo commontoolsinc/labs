@@ -49,50 +49,49 @@ const updateItem = handler<
 });
 
 export default pattern<InputSchema>(({ title, items }) => {
-    return {
-      [NAME]: title,
-      [UI]: (
-        <div style={{ padding: "1rem", maxWidth: "600px" }}>
-          <h3>{title}</h3>
-          <p>Editable Array with Remove</p>
-          <div
-            style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
-          >
-            {items.map((item, index) => (
-              <div
-                style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+  return {
+    [NAME]: title,
+    [UI]: (
+      <div style={{ padding: "1rem", maxWidth: "600px" }}>
+        <h3>{title}</h3>
+        <p>Editable Array with Remove</p>
+        <div
+          style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
+        >
+          {items.map((item, index) => (
+            <div
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+            >
+              <ct-button
+                variant="destructive"
+                size="sm"
+                onClick={removeItem({ items, item })}
               >
-                <ct-button
-                  variant="destructive"
-                  size="sm"
-                  onClick={removeItem({ items, item })}
-                >
-                  Remove
-                </ct-button>
-                <div style={{ flex: 1 }}>
-                  <ct-input
-                    value={item.text}
-                    onct-change={updateItem({ items, index })}
-                    placeholder="Enter text..."
-                  />
-                </div>
+                Remove
+              </ct-button>
+              <div style={{ flex: 1 }}>
+                <ct-input
+                  value={item.text}
+                  onct-change={updateItem({ items, index })}
+                  placeholder="Enter text..."
+                />
               </div>
-            ))}
-          </div>
-          <div style={{ marginTop: "1rem" }}>
-            <ct-message-input
-              name="Send"
-              placeholder="Type a message..."
-              appearance="rounded"
-              onct-send={addItem({ items })}
-            />
-          </div>
+            </div>
+          ))}
         </div>
-      ),
-      title,
-      items,
-      addItem: addItem({ items }),
-      updateItem,
-    };
-  },
-);
+        <div style={{ marginTop: "1rem" }}>
+          <ct-message-input
+            name="Send"
+            placeholder="Type a message..."
+            appearance="rounded"
+            onct-send={addItem({ items })}
+          />
+        </div>
+      </div>
+    ),
+    title,
+    items,
+    addItem: addItem({ items }),
+    updateItem,
+  };
+});

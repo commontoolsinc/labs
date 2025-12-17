@@ -1204,7 +1204,11 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
     const myRack = parseRack({ allRacksJson, myName });
     const currentPlayers = parsePlayers({ playersJson });
     const currentGameEvents = parseEvents({ gameEventsJson });
-    const myPlaced = parsePlaced({ allPlacedJson, myName, cellWithGap: CELL_WITH_GAP });
+    const myPlaced = parsePlaced({
+      allPlacedJson,
+      myName,
+      cellWithGap: CELL_WITH_GAP,
+    });
     const currentBoard = parseBoard({ boardJson, cellWithGap: CELL_WITH_GAP });
     const _boardVersion = getBoardVersion({ boardJson });
     const rackCount = getRackCount({ rack: myRack });

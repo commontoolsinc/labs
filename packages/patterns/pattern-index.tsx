@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Default, NAME, pattern, str, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 
 type Input = { url: Default<string, "/api/patterns/index.md"> };
 
@@ -9,7 +9,7 @@ type Output = { url: string };
 const PatternIndexUrl = pattern<Input, Output>(
   ({ url }) => {
     return {
-      [NAME]: str`Pattern Index: ${url}`,
+      [NAME]: computed(() => `Pattern Index: ${url}`),
       [UI]: (
         <ct-screen>
           <ct-input $value={url} />

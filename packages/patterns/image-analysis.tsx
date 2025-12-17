@@ -1,11 +1,12 @@
 /// <cts-enable />
 import {
   Cell,
-  derive,
+  computed,
   generateText,
+  ifElse,
   ImageData,
   NAME,
-  recipe,
+  pattern,
   UI,
   VNode,
 } from "commontools";
@@ -27,39 +28,36 @@ type ImageChatOutput = {
   ui: VNode;
 };
 
-export default recipe<ImageChatInput, ImageChatOutput>(
-  "Image Chat",
+export default pattern<ImageChatInput, ImageChatOutput>(
   ({ systemPrompt, model }) => {
     const images = Cell.of<ImageData[]>([]);
     const prompt = Cell.of<string>("");
 
     // Build content parts array with text and images
-    const contentParts = derive(
-      [prompt, images],
-      ([promptText, imgs]: [string, ImageData[]]) => {
-        const parts: Array<
-          { type: "text"; text: string } | { type: "image"; image: string }
-        > = [];
+    const contentParts = computed(() => {
+      const parts: Array<
+        { type: "text"; text: string } | { type: "image"; image: string }
+      > = [];
 
-        if (promptText) {
-          parts.push({ type: "text", text: promptText });
-        }
+      if (prompt.get()) {
+        parts.push({ type: "text", text: prompt.get() });
+      }
 
-        for (const img of imgs || []) {
-          parts.push({ type: "image", image: img.data });
-        }
+      for (const img of images.get() || []) {
+        parts.push({ type: "image", image: img.data });
+      }
 
-        return parts;
-      },
-    );
+      return parts;
+    });
 
     // Generate text from the content parts
     const { result, pending, requestHash } = generateText({
-      system: derive(systemPrompt, (s) =>
-        s ||
-        "You are a helpful assistant that can analyze images. Describe what you see."),
+      system: computed(() =>
+        systemPrompt ||
+        "You are a helpful assistant that can analyze images. Describe what you see."
+      ),
       prompt: contentParts,
-      model: derive(model, (m) => m || "anthropic:claude-sonnet-4-5"),
+      model: computed(() => model || "anthropic:claude-sonnet-4-5"),
     });
 
     const ui = (
@@ -105,36 +103,21 @@ export default recipe<ImageChatInput, ImageChatOutput>(
               $cell={result as unknown as any}
               label="LLM Response"
             >
-              {derive(
-                [result, pending, requestHash],
-                (
-                  [res, pend, _hash]: [
-                    string | undefined,
-                    boolean | undefined,
-                    string | undefined,
-                  ],
-                ) => {
-                  if (pend) {
-                    return (
-                      <ct-card>
-                        <div>Analyzing...</div>
-                      </ct-card>
-                    );
-                  }
-
-                  if (res) {
-                    return (
-                      <ct-card>
-                        <ct-vstack gap="2">
-                          <ct-heading level={5}>Response</ct-heading>
-                          <div style="white-space: pre-wrap;">{res}</div>
-                        </ct-vstack>
-                      </ct-card>
-                    );
-                  }
-
-                  return null;
-                },
+              {ifElse(
+                pending,
+                <ct-card>
+                  <div>Analyzing...</div>
+                </ct-card>,
+                ifElse(
+                  result,
+                  <ct-card>
+                    <ct-vstack gap="2">
+                      <ct-heading level={5}>Response</ct-heading>
+                      <div style="white-space: pre-wrap;">{result}</div>
+                    </ct-vstack>
+                  </ct-card>,
+                  null,
+                ),
               )}
             </ct-cell-context>
           </ct-vstack>

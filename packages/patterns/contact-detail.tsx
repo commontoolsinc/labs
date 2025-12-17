@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, NAME, pattern, str, UI } from "commontools";
+import { Cell, computed, Default, NAME, pattern, UI } from "commontools";
 
 /** Wrap all fields of T in Cell<> for write access */
 type Cellify<T> = { [K in keyof T]: Cell<T[K]> };
@@ -26,7 +26,7 @@ interface Output {
 
 export default pattern<Input, Output>(({ contact }) => {
   return {
-    [NAME]: str`Contact: ${contact.name}`,
+    [NAME]: computed(() => `Contact: ${contact.name}`),
     [UI]: (
       <ct-screen>
         <ct-vstack slot="header">

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, NAME, pattern, str, UI } from "commontools";
+import { Cell, computed, Default, NAME, pattern, UI } from "commontools";
 
 interface Event {
   title: Cell<string>;
@@ -19,7 +19,7 @@ interface Output {
 
 export default pattern<Input, Output>(({ event }) => {
   return {
-    [NAME]: str`Event: ${event.title}`,
+    [NAME]: computed(() => `Event: ${event.title}`),
     [UI]: (
       <ct-screen>
         <ct-vstack slot="header">
