@@ -36,7 +36,8 @@ export default pattern<
   }
 >(({ question, context }) => {
   const research = generateObject({
-    system: `You are a deep research agent. Given a question, use the available tools to:
+    system:
+      `You are a deep research agent. Given a question, use the available tools to:
 1. Search the web for relevant information
 2. Read promising web pages to gather detailed content
 3. Synthesize your findings into a comprehensive answer
@@ -60,7 +61,10 @@ Be thorough - search for multiple aspects of the question and read several sourc
     question,
     [UI]: (
       <div>
-        <ct-textarea $value={question} placeholder="Enter your research question..." />
+        <ct-textarea
+          $value={question}
+          placeholder="Enter your research question..."
+        />
         {derive(research, ({ pending, error, result }) => {
           if (pending) return <div>Researching...</div>;
           if (error) return <div>Error: {error}</div>;
