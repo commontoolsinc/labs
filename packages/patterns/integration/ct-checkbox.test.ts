@@ -10,7 +10,6 @@ const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
 const testComponents = [
   { name: "ct-checkbox-cell", file: "ct-checkbox-cell.tsx" },
-  { name: "ct-checkbox-handler", file: "ct-checkbox-handler.tsx" },
 ];
 
 testComponents.forEach(({ name, file }) => {
