@@ -105,10 +105,10 @@ export default recipe<ListInput, ListOutput>(
     );
     const extendedItems = computed(
       () =>
-        items.get().concat([
+        items.concat([
           { [ID]: 5, title: "E" },
           { [ID]: 6, title: "F" },
-        ]),
+        ] as any),
     );
     const combinedItems = computed(
       () => items.reduce((acc: string, item: Item) => acc += item.title, ""),

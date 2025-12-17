@@ -137,7 +137,12 @@ function handlerInternal<E, T>(
   };
 
   const factory = Object.assign((props: Opaque<StripCell<T>>): Stream<E> => {
-    const eventStream = stream<E>(eventSchema);
+    // If the event schema is false, we actually set it to true here, since
+    // otherwise we won't think it needs to be handled. Ditto for state.
+    const flexibleEventSchema = eventSchema
+      ? eventSchema
+      : { type: "object", properties: {} } as JSONSchema;
+    const eventStream = stream<E>(flexibleEventSchema);
 
     // Set stream marker (cast to E as stream is typed for the events it accepts)
     const node: NodeRef = {
