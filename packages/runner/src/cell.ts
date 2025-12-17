@@ -433,8 +433,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     if (!space) {
       throw new Error(
         "Cannot create cell link: space is required.\n" +
-          "This can happen when closing over (opaque) cells in a lift or derive.\n" +
-          "Instead pass those cells into the lift or derive directly as Cell<> inputs.\n",
+          "This can happen when accessing closed-over cells e.g. with .get().\n" +
+          "Use `computed()` for reactive computations - it handles closures automatically.\n",
       );
     }
 
@@ -1208,7 +1208,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
         } else if (prop === Symbol.toPrimitive) {
           return () => {
             throw new Error(
-              "Tried to directly access an opaque value. Use `derive` instead, passing this variable in as parameter to derive, not closing over it",
+              "Tried to directly access an opaque value. Use `computed()` to perform operations on reactive values - it handles closures automatically.",
             );
           };
         } else if (prop === toCell) {
