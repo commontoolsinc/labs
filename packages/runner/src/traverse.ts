@@ -1453,6 +1453,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
           ),
           ...anyOf.filter(SchemaObjectTraverser.asCellOrStream),
         ];
+        const matches = [];
         for (const optionSchema of sortedAnyOf) {
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
             continue;
@@ -1464,12 +1465,21 @@ export class SchemaObjectTraverser<V extends JSONValue>
             rootSchema: schemaContext.rootSchema,
           }, link);
           if (val !== undefined) {
-            // FIXME(@ubik2): these value objects should be merged. While this
-            // isn't JSONSchema spec, when we have an anyOf with branches where
-            // name is set in one schema, but the address is ignored, and a
-            // second option where address is set, and name is ignored, we want
-            // to include both.
-            return val;
+            matches.push(val);
+          }
+          // These value objects should be merged. While this isn't
+          // JSONSchema spec, when we have an anyOf with branches where
+          // name is set in one schema, but the address is ignored, and a
+          // second option where address is set, and name is ignored, we want
+          // to include both.
+          if (matches.every((v) => isRecord(v))) {
+            const unified: Record<string, JSONValue> = {};
+            for (const match of matches) {
+              Object.assign(unified, match);
+            }
+            return unified;
+          } else if (matches.length > 0) {
+            return matches[0];
           }
         }
         // None of the anyOf patterns matched
