@@ -564,3 +564,40 @@ interface Output {
   item: ReadingItem;
 }
 ```
+
+## `deep-research.tsx`
+
+Deep research agent that searches the web and synthesizes findings into a
+structured response. Give it a question and optional context, and it will
+search, read sources, and provide a comprehensive answer.
+
+**Keywords:** llm, research, web-search, tools, generateObject, agent
+
+### Input Schema
+
+```ts
+type Input = {
+  /** The research question to investigate */
+  question: string;
+  /** Optional context to provide to the agent */
+  context?: { [id: string]: any };
+};
+```
+
+### Output Schema
+
+```ts
+type ResearchResult = {
+  summary: string;
+  findings: { title: string; source: string; content: string }[];
+  sources: string[];
+  confidence: "high" | "medium" | "low";
+};
+
+type Output = {
+  question: string;
+  result: Cell<ResearchResult | undefined>;
+  pending: boolean;
+  error: string | undefined;
+};
+```
