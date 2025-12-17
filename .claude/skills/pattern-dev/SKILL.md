@@ -1,4 +1,3 @@
-<!-- @reviewed 2025-12-10 docs-rationalization -->
 ---
 name: pattern-dev
 description: Guide for developing CommonTools patterns (TypeScript modules that define reactive data transformations with UI). Use this skill when creating patterns, modifying existing patterns, linking patches (instantiated patterns), debugging pattern errors, or working with the pattern framework. Triggers include requests like "build a pattern", "fix this pattern error", "deploy this charm/patch", "link these charms", or questions about handlers, cells, and reactive patterns.
