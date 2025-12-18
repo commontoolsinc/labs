@@ -178,8 +178,11 @@ export class Scheduler {
   // Throttle infrastructure - "value can be stale by T ms"
   private actionThrottle = new WeakMap<Action, number>();
 
-  // Push-triggered filtering
-  // Track what each action has ever written (grows over time)
+  // Track what each action has ever written (grows over time, includes potentialWrites).
+  // Unlike dependencies.writes (current run only), mightWrite is cumulative and used
+  // for building the dependency graph conservatively - if an action ever wrote to a path,
+  // we assume it might write there again. This prevents missed dependencies when an
+  // action's write behavior varies between runs.
   private mightWrite = new WeakMap<Action, IMemorySpaceAddress[]>();
   // Track actions scheduled for first time (bypass filter)
   private scheduledFirstTime = new Set<Action>();
@@ -1117,6 +1120,9 @@ export class Scheduler {
 
       // Check if otherAction reads what this action writes
       // We need to check both space/id AND path overlap
+      // NOTE: Use .writes (current run) not mightWrite (historical) here.
+      // mightWrite includes all paths ever written, which creates false
+      // dependency edges for writes that no longer happen, causing cycles.
       let found = false;
       for (const write of actionLog.writes) {
         if (found) break;
@@ -1678,6 +1684,8 @@ export class Scheduler {
     // dependency collection process above. We'll have to re-run it whenever
     // inputs change, as they might change what they can write to. We hope that
     // for now this will be sufficiently captured in mightWrite.
+    // NOTE: Use .writes (current run) not mightWrite (historical) here.
+    // We want to know if action currently writes, not if it ever wrote.
     const newActionsWithoutDependencies = [...this.pendingDependencyCollection]
       .filter(
         (action) =>
