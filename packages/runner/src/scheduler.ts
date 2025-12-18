@@ -1981,6 +1981,7 @@ export class Scheduler {
         logger.debug("schedule-throttle", () => [
           `[THROTTLE] Skipping throttled action: ${fn.name || "anonymous"}`,
         ]);
+        this.filterStats.filtered++;
         // Don't clear from pending or dirty - action stays in its current state
         // but we remove from pending so it doesn't run this cycle
         this.pending.delete(fn);
