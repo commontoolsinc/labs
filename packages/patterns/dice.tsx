@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, NAME, recipe, Stream, UI } from "commontools";
+import { Default, NAME, pattern, Stream, UI } from "commontools";
 import { getValue, roll } from "./dice-handlers.ts";
 
 interface RecipeState {
@@ -14,7 +14,7 @@ interface RecipeOutput {
   roll: Stream<{ sides?: number }>;
 }
 
-export default recipe<RecipeState, RecipeOutput>((state) => {
+export default pattern<RecipeState, RecipeOutput>((state) => {
   return {
     [NAME]: `Dice Roller`,
     [UI]: (

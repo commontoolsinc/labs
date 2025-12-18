@@ -1,14 +1,13 @@
 /// <cts-enable />
 import {
   Cell,
+  computed,
   Default,
-  derive,
   handler,
   ifElse,
   ImageData,
   NAME,
   pattern,
-  str,
   UI,
 } from "commontools";
 
@@ -34,7 +33,7 @@ export interface Message {
   timestamp: number;
   type: "chat" | "system" | "image";
   imageUrl?: string;
-  reactions?: Reaction[];
+  reactions: Reaction[]; // Required - workaround for transformer bug
 }
 
 export interface User {
@@ -85,6 +84,7 @@ const sendMessage = handler<
     content,
     timestamp: Date.now(),
     type: "chat",
+    reactions: [],
   });
 
   contentInput.set("");
@@ -106,6 +106,7 @@ const sendImageMessage = handler<
     imageUrl: image.url,
     timestamp: Date.now(),
     type: "image",
+    reactions: [],
   });
 
   chatImages.set([]);
@@ -204,70 +205,49 @@ export default pattern<RoomInput, RoomOutput>(
     const chatImages = Cell.of<ImageData[]>([]);
     const emojiPickerMessageId = Cell.of<string>("");
 
-    const userList = derive(
-      users,
-      (u: User[]) => (u || []).filter((user: User) => user && user.name),
+    const userList = computed(
+      () => (users.get() || []).filter((user: User) => user && user.name),
     );
-    const myNameResolved = derive(myName, (n: string) => n || "");
+    const myNameResolved = computed(() => myName || "");
 
-    const hasPendingAvatar = derive(
-      avatarImages,
-      (imgs: ImageData[]) => imgs && imgs.length > 0,
+    const hasPendingAvatar = computed(
+      () => avatarImages.get() && avatarImages.get().length > 0,
     );
-    const pendingAvatarUrl = derive(avatarImages, (imgs: ImageData[]) => {
+    const pendingAvatarUrl = computed(() => {
+      const imgs = avatarImages.get();
       if (!imgs || imgs.length === 0) {
         return "";
       }
       return imgs[0].url || imgs[0].data || "";
     });
 
-    const hasPendingChatImage = derive(
-      chatImages,
-      (imgs: ImageData[]) => imgs && imgs.length > 0,
+    const hasPendingChatImage = computed(
+      () => chatImages.get() && chatImages.get().length > 0,
     );
-    const pendingChatImageUrl = derive(chatImages, (imgs: ImageData[]) => {
+    const pendingChatImageUrl = computed(() => {
+      const imgs = chatImages.get();
       if (!imgs || imgs.length === 0) {
         return "";
       }
       return imgs[0].url || imgs[0].data || "";
     });
 
-    const isSessionValid = derive(
-      { mySessionId, currentSessionId },
-      (
-        { mySessionId: mine, currentSessionId: current }: {
-          mySessionId: string;
-          currentSessionId: string;
-        },
-      ) => {
-        if (!mine || !current) return true;
-        return mine === current;
-      },
-    );
+    const isSessionValid = computed(() => {
+      const currentSessId = currentSessionId.get();
+      if (!mySessionId || !currentSessId) return true;
+      return mySessionId === currentSessId;
+    });
 
-    const myUser = derive(
-      { users, myNameResolved },
-      (
-        { users: u, myNameResolved: n }: {
-          users: User[];
-          myNameResolved: string;
-        },
-      ) => {
-        return (u || []).find((user) => user.name === n);
-      },
-    );
+    const myUser = computed(() => {
+      const resolved = myNameResolved;
+      return (users.get() || []).find((user: User) => user.name === resolved);
+    });
 
-    const myAvatarUrl = derive(
-      myUser,
-      (u: User | undefined) => u?.avatarImage?.url || "",
-    );
-    const myColor = derive(
-      myUser,
-      (u: User | undefined) => u?.color || "#007AFF",
-    );
+    const myAvatarUrl = computed(() => myUser?.avatarImage?.url || "");
+    const myColor = computed(() => myUser?.color || "#007AFF");
 
     return {
-      [NAME]: str`Chat: ${myName}`,
+      [NAME]: computed(() => `Chat: ${myName}`),
       [UI]: (
         <div
           style={{
@@ -319,9 +299,8 @@ export default pattern<RoomInput, RoomOutput>(
                     }}
                   >
                     {userList.map((user) => {
-                      const hasAvatar = derive(
-                        user,
-                        (u: User) => u && !!u.avatarImage?.url,
+                      const hasAvatar = computed(() =>
+                        user && !!user.avatarImage?.url
                       );
                       return (
                         <div
@@ -359,9 +338,8 @@ export default pattern<RoomInput, RoomOutput>(
                                 fontSize: "11px",
                               }}
                             >
-                              {derive(
-                                user,
-                                (u: User) => u ? getInitials(u.name) : "?",
+                              {computed(() =>
+                                user ? getInitials(user.name) : "?"
                               )}
                             </div>,
                           )}
@@ -393,154 +371,91 @@ export default pattern<RoomInput, RoomOutput>(
                 >
                   {messages.map((msg) => {
                     // Guard against undefined messages in the array
-                    const isValidMessage = derive(
-                      msg,
-                      (m: Message) => m && m.id,
+                    const isValidMessage = computed(() => msg && msg.id);
+                    const isMyMessage = computed(() =>
+                      msg && msg.author === myNameResolved
                     );
-                    const isMyMessage = derive(
-                      { msg, myNameResolved },
-                      (
-                        { msg: m, myNameResolved: n }: {
-                          msg: Message;
-                          myNameResolved: string;
-                        },
-                      ) => m && m.author === n,
+                    const isSystemMessage = computed(() =>
+                      msg && msg.type === "system"
                     );
-                    const isSystemMessage = derive(
-                      msg,
-                      (m: Message) => m && m.type === "system",
+                    const isImageMessage = computed(() =>
+                      msg && msg.type === "image"
                     );
-                    const isImageMessage = derive(
-                      msg,
-                      (m: Message) => m && m.type === "image",
-                    );
-                    const authorColor = derive(
-                      { msg, users },
-                      (
-                        { msg: m, users: u }: { msg: Message; users: User[] },
-                      ) => {
-                        if (!m) return "#6b7280";
-                        const user = (u || []).find((usr) =>
-                          usr && usr.name === m.author
-                        );
-                        return user?.color || "#6b7280";
-                      },
-                    );
-                    const authorAvatarUrl = derive(
-                      { msg, users },
-                      (
-                        { msg: m, users: u }: { msg: Message; users: User[] },
-                      ) => {
-                        if (!m) return "";
-                        const user = (u || []).find((usr) =>
-                          usr && usr.name === m.author
-                        );
-                        return user?.avatarImage?.url || "";
-                      },
-                    );
-                    const isFirstInAuthorBlock = derive(
-                      { messages, msg },
-                      (
-                        { messages: msgs, msg: m }: {
-                          messages: Message[];
-                          msg: Message;
-                        },
-                      ) => {
-                        if (!m) return true;
-                        const msgArray = (msgs || []).filter((
-                          message: Message,
-                        ) => message && message.id);
-                        const currentIndex = msgArray.findIndex((
-                          message: Message,
-                        ) => message && message.id === m.id);
-                        if (currentIndex <= 0) return true;
-                        const prevMessage = msgArray[currentIndex - 1];
-                        if (!prevMessage) return true;
-                        return prevMessage.author !== m.author ||
-                          prevMessage.type === "system";
-                      },
-                    );
-                    const shouldShowAvatar = derive(
-                      { isMyMessage, isFirstInAuthorBlock },
-                      (
-                        { isMyMessage: isMine, isFirstInAuthorBlock: isFirst }:
-                          {
-                            isMyMessage: boolean;
-                            isFirstInAuthorBlock: boolean;
-                          },
-                      ) => !isMine && isFirst,
+                    const authorColor = computed(() => {
+                      if (!msg) return "#6b7280";
+                      const user = (users.get() || []).find((usr: User) =>
+                        usr && usr.name === msg.author
+                      );
+                      return user?.color || "#6b7280";
+                    });
+                    const authorAvatarUrl = computed(() => {
+                      if (!msg) return "";
+                      const user = (users.get() || []).find((usr: User) =>
+                        usr && usr.name === msg.author
+                      );
+                      return user?.avatarImage?.url || "";
+                    });
+                    const isFirstInAuthorBlock = computed(() => {
+                      if (!msg) return true;
+                      const msgArray = (messages.get() || []).filter((
+                        message: Message,
+                      ) => message && message.id);
+                      const currentIndex = msgArray.findIndex((
+                        message: Message,
+                      ) => message && message.id === msg.id);
+                      if (currentIndex <= 0) return true;
+                      const prevMessage = msgArray[currentIndex - 1];
+                      if (!prevMessage) return true;
+                      return prevMessage.author !== msg.author ||
+                        prevMessage.type === "system";
+                    });
+                    const shouldShowAvatar = computed(() =>
+                      !isMyMessage && isFirstInAuthorBlock
                     );
 
                     // Check if emoji picker is open for this message
-                    const isPickerOpen = derive(
-                      { emojiPickerMessageId, msgId: msg.id },
-                      (
-                        { emojiPickerMessageId: openId, msgId }: {
-                          emojiPickerMessageId: string;
-                          msgId: string;
-                        },
-                      ) => msgId && openId === msgId,
+                    const isPickerOpen = computed(
+                      () => msg.id && emojiPickerMessageId.get() === msg.id,
                     );
 
-                    // Get reactions for display
-                    const messageReactions = derive(
-                      msg,
-                      (m: Message) => (m && m.reactions) || [],
-                    );
-                    const _hasReactions = derive(
-                      messageReactions,
-                      (r: Reaction[]) => r.length > 0,
-                    );
+                    // Note: Use direct property access to avoid transformer bug
+                    // with || [] fallback (see computed-var-then-map.issue.md)
 
                     return (
                       <div
                         style={{
-                          display: derive(isValidMessage, (valid: boolean) =>
-                            valid ? "flex" : "none"),
-                          marginBottom: derive(
-                            { msg, messages },
-                            (
-                              { msg: m, messages: msgs }: {
-                                msg: Message;
-                                messages: Message[];
-                              },
-                            ) => {
-                              if (!m) {
-                                return "8px";
-                              }
-                              const msgArray = (msgs || []).filter((
-                                message: Message,
-                              ) =>
-                                message && message.id
-                              );
-                              const currentIndex = msgArray.findIndex((
-                                message: Message,
-                              ) => message && message.id === m.id);
-                              if (
-                                currentIndex < 0 ||
-                                currentIndex >= msgArray.length - 1
-                              ) return "8px";
-                              const nextMessage = msgArray[currentIndex + 1];
-                              if (!nextMessage) return "8px";
-                              return nextMessage.author === m.author &&
-                                  nextMessage.type !== "system"
-                                ? "2px"
-                                : "8px";
-                            },
+                          display: computed(() =>
+                            isValidMessage ? "flex" : "none"
                           ),
-                          flexDirection: derive(
-                            { msg, myNameResolved },
-                            (
-                              { msg: m, myNameResolved: n }: {
-                                msg: Message;
-                                myNameResolved: string;
-                              },
-                            ) =>
-                              !m
-                                ? "row"
-                                : (m.type === "system"
-                                  ? "column"
-                                  : (m.author === n ? "row-reverse" : "row")),
+                          marginBottom: computed(() => {
+                            if (!msg) {
+                              return "8px";
+                            }
+                            const msgArray = (messages.get() || []).filter((
+                              message: Message,
+                            ) => message && message.id);
+                            const currentIndex = msgArray.findIndex((
+                              message: Message,
+                            ) => message && message.id === msg.id);
+                            if (
+                              currentIndex < 0 ||
+                              currentIndex >= msgArray.length - 1
+                            ) return "8px";
+                            const nextMessage = msgArray[currentIndex + 1];
+                            if (!nextMessage) return "8px";
+                            return nextMessage.author === msg.author &&
+                                nextMessage.type !== "system"
+                              ? "2px"
+                              : "8px";
+                          }),
+                          flexDirection: computed(() =>
+                            !msg
+                              ? "row"
+                              : (msg.type === "system"
+                                ? "column"
+                                : (msg.author === myNameResolved
+                                  ? "row-reverse"
+                                  : "row"))
                           ),
                           alignItems: "flex-end",
                           gap: "8px",
@@ -594,8 +509,9 @@ export default pattern<RoomInput, RoomOutput>(
                                       flexShrink: "0",
                                     }}
                                   >
-                                    {derive(msg, (m: Message) =>
-                                      m ? getInitials(m.author) : "?")}
+                                    {computed(() =>
+                                      msg ? getInitials(msg.author) : "?"
+                                    )}
                                   </div>,
                                 ),
                                 <div
@@ -609,17 +525,10 @@ export default pattern<RoomInput, RoomOutput>(
                               style={{
                                 display: "flex",
                                 flexDirection: "column",
-                                alignItems: derive(
-                                  { msg, myNameResolved },
-                                  (
-                                    { msg: m, myNameResolved: n }: {
-                                      msg: Message;
-                                      myNameResolved: string;
-                                    },
-                                  ) =>
-                                    m && m.author === n
-                                      ? "flex-end"
-                                      : "flex-start",
+                                alignItems: computed(() =>
+                                  msg && msg.author === myNameResolved
+                                    ? "flex-end"
+                                    : "flex-start"
                                 ),
                               }}
                             >
@@ -658,48 +567,25 @@ export default pattern<RoomInput, RoomOutput>(
                                     maxWidth: "66%",
                                     padding: "10px 14px",
                                     borderRadius: "18px",
-                                    borderBottomRightRadius: derive(
-                                      { msg, myNameResolved },
-                                      (
-                                        { msg: m, myNameResolved: n }: {
-                                          msg: Message;
-                                          myNameResolved: string;
-                                        },
-                                      ) =>
-                                        m && m.author === n ? "4px" : "18px",
+                                    borderBottomRightRadius: computed(() =>
+                                      msg && msg.author === myNameResolved
+                                        ? "4px"
+                                        : "18px"
                                     ),
-                                    borderBottomLeftRadius: derive(
-                                      { msg, myNameResolved },
-                                      (
-                                        { msg: m, myNameResolved: n }: {
-                                          msg: Message;
-                                          myNameResolved: string;
-                                        },
-                                      ) => m && m.author === n ? "18px" : "4px",
+                                    borderBottomLeftRadius: computed(() =>
+                                      msg && msg.author === myNameResolved
+                                        ? "18px"
+                                        : "4px"
                                     ),
-                                    backgroundColor: derive(
-                                      { msg, myNameResolved },
-                                      (
-                                        { msg: m, myNameResolved: n }: {
-                                          msg: Message;
-                                          myNameResolved: string;
-                                        },
-                                      ) =>
-                                        m && m.author === n
-                                          ? "#007AFF"
-                                          : "#E5E5EA",
+                                    backgroundColor: computed(() =>
+                                      msg && msg.author === myNameResolved
+                                        ? "#007AFF"
+                                        : "#E5E5EA"
                                     ),
-                                    color: derive(
-                                      { msg, myNameResolved },
-                                      (
-                                        { msg: m, myNameResolved: n }: {
-                                          msg: Message;
-                                          myNameResolved: string;
-                                        },
-                                      ) =>
-                                        m && m.author === n
-                                          ? "white"
-                                          : "#1d1d1f",
+                                    color: computed(() =>
+                                      msg && msg.author === myNameResolved
+                                        ? "white"
+                                        : "#1d1d1f"
                                     ),
                                     fontSize: "15px",
                                     lineHeight: "1.4",
@@ -721,7 +607,7 @@ export default pattern<RoomInput, RoomOutput>(
                                 }}
                               >
                                 {/* Existing reactions */}
-                                {messageReactions.map((reaction) => (
+                                {msg.reactions.map((reaction) => (
                                   <button
                                     type="button"
                                     onClick={toggleReaction({
@@ -750,12 +636,10 @@ export default pattern<RoomInput, RoomOutput>(
                                         color: "#666",
                                       }}
                                     >
-                                      {derive(
-                                        reaction,
-                                        (r: Reaction) =>
-                                          r && r.userNames
-                                            ? r.userNames.length
-                                            : 0,
+                                      {computed(() =>
+                                        reaction && reaction.userNames
+                                          ? reaction.userNames.length
+                                          : 0
                                       )}
                                     </span>
                                   </button>
@@ -876,10 +760,7 @@ export default pattern<RoomInput, RoomOutput>(
                             border: "2px solid #bae6fd",
                           }}
                         >
-                          {derive(
-                            myNameResolved,
-                            (n: string) => getInitials(n),
-                          )}
+                          {computed(() => getInitials(myNameResolved))}
                         </div>,
                       )}
                       {/* Hidden ct-image-input overlaid on avatar */}

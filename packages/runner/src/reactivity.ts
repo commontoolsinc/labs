@@ -1,5 +1,13 @@
 import { Cancel, isCancel, noOp } from "./cancel.ts";
-import { Cell, isCell } from "./cell.ts";
+
+export type SinkableCell<T = unknown> = {
+  sink: (callback: (value: T) => Cancel | undefined | void) => Cancel;
+};
+
+export function isSinkableCell(value: unknown): value is SinkableCell {
+  return typeof value === "object" && !!value && "sink" in value &&
+    typeof value.sink === "function";
+}
 
 /**
  * Effect that runs a callback when the value changes. The callback is also
@@ -11,10 +19,10 @@ import { Cell, isCell } from "./cell.ts";
  * @returns {function} - A function to cancel the effect.
  */
 export const effect = <T>(
-  value: Cell<T> | T,
+  value: SinkableCell<T> | T,
   callback: (value: T) => Cancel | undefined | void,
 ): Cancel => {
-  if (isCell(value)) {
+  if (isSinkableCell(value)) {
     return value.sink(callback);
   } else {
     const cancel = callback(value as T);

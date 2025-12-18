@@ -7,14 +7,14 @@ import {
   ifElse,
   NAME,
   navigateTo,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 
 type Input = {
   code: Default<
     string,
-    '// deno-lint-ignore-file jsx-no-useless-fragment\nimport { derive, h, handler, NAME, recipe, schema, str, UI } from "commontools";\n\n// Different way to define the same schema, using \'schema\' helper function,\n// let\'s as leave off `as const satisfies JSONSchema`.\nconst model = schema({\n  type: "object",\n  properties: {\n    value: { type: "number", default: 0, asCell: true },\n  },\n  default: { value: 0 },\n});\n\nconst increment = handler({}, model, (_, state) => {\n  state.value.set(state.value.get() + 1);\n});\n\nconst decrement = handler({}, model, (_, state) => {\n  state.value.set(state.value.get() - 1);\n});\n\nexport default recipe(model, model, (cell) => {\n  return {\n    [NAME]: str`Simple counter: ${derive(cell.value, String)}`,\n    [UI]: (\n      <div>\n        <ct-button onClick={decrement(cell)}>-</ct-button>\n        {/* use html fragment to test that it works  */}\n          <b>{cell.value}</b>\n        <ct-button onClick={increment(cell)}>+</ct-button>\n      </div>\n    ),\n    value: cell.value,\n  };\n});\n'
+    '/// <cts-enable />\nimport { Cell, computed, Default, handler, NAME, pattern, UI } from "commontools";\n\ninterface Input {\n  value: Default<number, 0>;\n}\n\nconst increment = handler<unknown, { value: Cell<number> }>((_, state) => {\n  state.value.set(state.value.get() + 1);\n});\n\nconst decrement = handler<unknown, { value: Cell<number> }>((_, state) => {\n  state.value.set(state.value.get() - 1);\n});\n\nexport default pattern<Input>(({ value }) => {\n  return {\n    [NAME]: computed(() => `Simple counter: ${value}`),\n    [UI]: (\n      <div>\n        <ct-button onClick={decrement({ value })}>-</ct-button>\n        <b>{value}</b>\n        <ct-button onClick={increment({ value })}>+</ct-button>\n      </div>\n    ),\n    value,\n  };\n});\n'
   >;
 };
 
@@ -46,42 +46,39 @@ const handleEditContent = handler<
   },
 );
 
-export default recipe<Input>(
-  "Compiler",
-  ({ code }) => {
-    const { result, error, errors: _ } = compileAndRun({
-      files: [{ name: "/main.tsx", contents: code }],
-      main: "/main.tsx",
-    });
+export default pattern<Input>(({ code }) => {
+  const { result, error, errors: _ } = compileAndRun({
+    files: [{ name: "/main.tsx", contents: code }],
+    main: "/main.tsx",
+  });
 
-    return {
-      [NAME]: "My First Compiler",
-      [UI]: (
-        <div>
-          <ct-cell-context $cell={code} label="Source Code">
-            <ct-code-editor
-              value={code}
-              language="text/x.typescript"
-              onChange={updateCode({ code })}
-              //errors={errors}
-            />
-          </ct-cell-context>
-          <ct-cell-context $cell={result} label="Compile Result">
-            {ifElse(
-              error,
-              <b>fix the error: {error}</b>,
-              <ct-button
-                onClick={visit({ result })}
-              >
-                Navigate To Charm
-              </ct-button>,
-            )}
-          </ct-cell-context>
-        </div>
-      ),
-      code,
-      updateCode: handleEditContent({ code }),
-      visit: visit({ result }),
-    };
-  },
-);
+  return {
+    [NAME]: "My First Compiler",
+    [UI]: (
+      <div>
+        <ct-cell-context $cell={code} label="Source Code">
+          <ct-code-editor
+            value={code}
+            language="text/x.typescript"
+            onChange={updateCode({ code })}
+            //errors={errors}
+          />
+        </ct-cell-context>
+        <ct-cell-context $cell={result} label="Compile Result">
+          {ifElse(
+            error,
+            <b>fix the error: {error}</b>,
+            <ct-button
+              onClick={visit({ result })}
+            >
+              Navigate To Charm
+            </ct-button>,
+          )}
+        </ct-cell-context>
+      </div>
+    ),
+    code,
+    updateCode: handleEditContent({ code }),
+    visit: visit({ result }),
+  };
+});

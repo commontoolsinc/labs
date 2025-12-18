@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, derive, lift, NAME, OpaqueRef, recipe, UI } from "commontools";
+import { Cell, lift, NAME, OpaqueRef, pattern, UI } from "commontools";
 
 export type MentionableCharm = {
   [NAME]?: string;
@@ -56,39 +56,41 @@ const computeIndex = lift<
  * its `[NAME]`). This mirrors how existing note patterns identify notes when
  * computing backlinks locally.
  */
-const BacklinksIndex = recipe<Input, Output>(
-  "BacklinksIndex",
-  ({ allCharms }) => {
-    computeIndex({
-      allCharms: allCharms as unknown as OpaqueRef<WriteableBacklinks[]>,
-    });
+const computeMentionable = lift<
+  { allCharms: MentionableCharm[] },
+  MentionableCharm[]
+>(({ allCharms: charmList }) => {
+  const cs = charmList ?? [];
+  const out: MentionableCharm[] = [];
+  for (const c of cs) {
+    out.push(c);
+    const exported = (c as unknown as {
+      mentionable?: MentionableCharm[] | { get?: () => MentionableCharm[] };
+    }).mentionable;
+    if (Array.isArray(exported)) {
+      for (const m of exported) if (m) out.push(m);
+    } else if (exported && typeof (exported as any).get === "function") {
+      const arr = (exported as { get: () => MentionableCharm[] }).get() ??
+        [];
+      for (const m of arr) if (m) out.push(m);
+    }
+  }
+  return out;
+});
 
-    // Compute mentionable list from allCharms reactively
-    const mentionable = derive(allCharms, (charmList) => {
-      const cs = charmList ?? [];
-      const out: MentionableCharm[] = [];
-      for (const c of cs) {
-        out.push(c);
-        const exported = (c as unknown as {
-          mentionable?: MentionableCharm[] | { get?: () => MentionableCharm[] };
-        }).mentionable;
-        if (Array.isArray(exported)) {
-          for (const m of exported) if (m) out.push(m);
-        } else if (exported && typeof (exported as any).get === "function") {
-          const arr = (exported as { get: () => MentionableCharm[] }).get() ??
-            [];
-          for (const m of arr) if (m) out.push(m);
-        }
-      }
-      return out;
-    });
+const BacklinksIndex = pattern<Input, Output>(({ allCharms }) => {
+  computeIndex({
+    allCharms: allCharms as unknown as OpaqueRef<WriteableBacklinks[]>,
+  });
 
-    return {
-      [NAME]: "BacklinksIndex",
-      [UI]: undefined,
-      mentionable,
-    };
-  },
-);
+  // Compute mentionable list from allCharms reactively
+  const mentionable = computeMentionable({ allCharms });
+
+  return {
+    [NAME]: "BacklinksIndex",
+    [UI]: undefined,
+    mentionable,
+  };
+});
 
 export default BacklinksIndex;

@@ -179,7 +179,7 @@ export function compileAndRun(
     }
 
     // Main file not found => Error, not pending
-    if (!program.files.some((file) => file.name === program.main)) {
+    if (!program.files.some((file) => file?.name === program.main)) {
       errorWithLog.set(`"${program.main}" not found in files`);
       pendingWithLog.set(false);
       return;

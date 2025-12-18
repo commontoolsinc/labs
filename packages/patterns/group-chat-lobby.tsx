@@ -1,14 +1,13 @@
 /// <cts-enable />
 import {
   Cell,
+  computed,
   Default,
-  derive,
   handler,
   ifElse,
   NAME,
   navigateTo,
   pattern,
-  str,
   UI,
 } from "commontools";
 import GroupChatRoom, { Message, User } from "./group-chat-room.tsx";
@@ -133,6 +132,7 @@ const joinChat = handler<
         content: `${name} joined the chat`,
         timestamp: Date.now(),
         type: "system",
+        reactions: [],
       },
     ]);
   }
@@ -162,12 +162,12 @@ export default pattern<LobbyInput, LobbyOutput>(
     // Name input for new users
     const nameInput = Cell.of("");
 
-    // Derive user list
-    const userList = derive(users, (u: User[]) => u || []);
-    const userCount = derive(userList, (u: User[]) => u.length);
+    // Note: Use direct property access to avoid transformer bug
+    // with || [] fallback (see computed-var-then-map.issue.md)
+    const userCount = computed(() => users.get().length);
 
     return {
-      [NAME]: str`${chatName} - Lobby`,
+      [NAME]: computed(() => `${chatName} - Lobby`),
       [UI]: (
         <div
           style={{
@@ -300,7 +300,7 @@ export default pattern<LobbyInput, LobbyOutput>(
                     gap: "0.5rem",
                   }}
                 >
-                  {userList.map((user) => (
+                  {users.map((user) => (
                     <div
                       style={{
                         display: "flex",
@@ -325,10 +325,7 @@ export default pattern<LobbyInput, LobbyOutput>(
                           fontSize: "11px",
                         }}
                       >
-                        {derive(
-                          user,
-                          (u: User) => u ? getInitials(u.name) : "?",
-                        )}
+                        {computed(() => user ? getInitials(user.name) : "?")}
                       </div>
                       <span
                         style={{

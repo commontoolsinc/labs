@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./utils": "./src/utils.ts",
     "./jsx-runtime": "./src/jsx-runtime.ts",
-    "./jsx-dev-runtime": "./src/jsx-dev-runtime.ts"
+    "./jsx-dev-runtime": "./src/jsx-dev-runtime.ts",
+    "./mock-doc": "./src/mock-doc.ts"
   },
   "imports": {
     "htmlparser2": "npm:htmlparser2",

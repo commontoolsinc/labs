@@ -2,7 +2,6 @@
 import {
   Cell,
   computed,
-  derive,
   generateObject,
   pattern,
   patternTool,
@@ -34,7 +33,7 @@ export default pattern<
     result,
     [UI]: (
       <ct-cell-context $cell={result}>
-        {derive(result, (r) => r ?? "Searching...")}
+        {computed(() => result ?? "Searching...")}
       </ct-cell-context>
     ),
   };

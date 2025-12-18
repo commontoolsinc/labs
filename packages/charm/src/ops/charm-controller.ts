@@ -23,6 +23,7 @@ import {
 interface CharmCellIo {
   get(path?: CellPath): unknown;
   set(value: unknown, path?: CellPath): Promise<void>;
+  getCell(): Cell<unknown>;
 }
 
 type CharmPropIoType = "result" | "input";
@@ -38,6 +39,10 @@ class CharmPropIo implements CharmCellIo {
   get(path?: CellPath) {
     const targetCell = this.#getTargetCell();
     return resolveCellPath(targetCell, path ?? []);
+  }
+
+  getCell(): Cell<unknown> {
+    return this.#getTargetCell();
   }
 
   async set(value: unknown, path?: CellPath) {

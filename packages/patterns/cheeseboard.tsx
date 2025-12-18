@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { fetchData, lift, NAME, recipe, UI } from "commontools";
+import { fetchData, lift, NAME, pattern, UI } from "commontools";
 
 /**
  * Fetch the Cheeseboard pizza schedule via Toolshed's web-read endpoint and
@@ -82,7 +82,7 @@ const createPizzaListCell = lift<{ result: WebReadResult }, CheeseboardEntry[]>(
   },
 );
 
-export default recipe(() => {
+export default pattern(() => {
   const cheeseBoardUrl =
     "https://cheeseboardcollective.coop/home/pizza/pizza-schedule/";
   const { result } = fetchData<WebReadResult>({

@@ -14,11 +14,10 @@ import {
   Cell,
   computed,
   Default,
-  derive,
   handler,
+  lift,
   NAME,
   pattern,
-  str,
   UI,
 } from "commontools";
 
@@ -1084,6 +1083,87 @@ const submitTurn = handler<
 });
 
 // =============================================================================
+// LIFT FUNCTIONS FOR REACTIVE PARSING
+// =============================================================================
+
+// Parse racks from JSON - receives unwrapped string values
+const parseRack = lift<
+  { allRacksJson: string; myName: string },
+  Letter[]
+>(({ allRacksJson, myName }) => {
+  const racks = parseAllRacksJson(allRacksJson);
+  const name = String(myName || "");
+  const rack = racks[name] || [];
+  // Deep clone to ensure clean objects for render
+  return rack.map((letter: Letter) => ({
+    char: String(letter.char || ""),
+    points: Number(letter.points || 0),
+    id: String(letter.id || ""),
+    isBlank: Boolean(letter.isBlank),
+  }));
+});
+
+// Parse players from JSON
+const parsePlayers = lift<{ playersJson: string }, Player[]>(
+  ({ playersJson }) => parsePlayersJson(playersJson),
+);
+
+// Parse game events from JSON
+const parseEvents = lift<{ gameEventsJson: string }, GameEvent[]>(
+  ({ gameEventsJson }) => parseGameEventsJson(gameEventsJson),
+);
+
+// Parse placed tiles from JSON
+const parsePlaced = lift<
+  { allPlacedJson: string; myName: string; cellWithGap: number },
+  { letter: Letter; row: number; col: number; leftPx: string; topPx: string }[]
+>(({ allPlacedJson, myName, cellWithGap }) => {
+  const placed = parseAllPlacedJson(allPlacedJson);
+  const name = String(myName || "");
+  const tiles = placed[name] || [];
+  return tiles.map((t: PlacedTile) => ({
+    letter: t.letter,
+    row: t.row,
+    col: t.col,
+    leftPx: `${t.col * cellWithGap}px`,
+    topPx: `${t.row * cellWithGap}px`,
+  }));
+});
+
+// Parse board tiles from JSON
+const parseBoard = lift<
+  { boardJson: string; cellWithGap: number },
+  { letter: Letter; row: number; col: number; leftPx: string; topPx: string }[]
+>(({ boardJson, cellWithGap }) => {
+  const tiles = parseBoardJson(boardJson);
+  return tiles.map((t) => ({
+    letter: t.letter,
+    row: t.row,
+    col: t.col,
+    leftPx: `${t.col * cellWithGap}px`,
+    topPx: `${t.row * cellWithGap}px`,
+  }));
+});
+
+// Get board version (length of boardJson for re-render tracking)
+const getBoardVersion = lift<{ boardJson: string }, number>(
+  ({ boardJson }) => boardJson?.length || 0,
+);
+
+// Get rack count
+const getRackCount = lift<{ rack: Letter[] }, number>(
+  ({ rack }) => (Array.isArray(rack) ? rack.length : 0),
+);
+
+// Get bag count
+const getBagCount = lift<{ bagJson: string; bagIndex: number }, number>(
+  ({ bagJson, bagIndex }) => {
+    const bag = parseBagJson(bagJson);
+    return Math.max(0, bag.length - bagIndex);
+  },
+);
+
+// =============================================================================
 // GAME PATTERN
 // =============================================================================
 
@@ -1117,115 +1197,22 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
       myName,
     },
   ) => {
-    // Parse racks - use derive() for reactivity
-    // IMPORTANT: derive() may pass a Cell proxy instead of the value - need to unwrap
-    // Also ensure we return CLEAN objects to avoid Cell proxy leaking into render
-    const myRack = derive(allRacksJson, (input: any) => {
-      // If input is a Cell proxy, get its actual value
-      const actualInput =
-        typeof input === "object" && input && typeof input.get === "function"
-          ? input.get()
-          : input;
-      const racks = parseAllRacksJson(actualInput);
-      // myName is also a Cell - need to unwrap it
-      const nameValue = typeof myName === "object" && myName &&
-          typeof (myName as any).get === "function"
-        ? (myName as any).get()
-        : myName;
-      const name = String(nameValue || "");
-      const rack = racks[name] || [];
-      // Deep clone to ensure no Cell proxies leak into render
-      return rack.map((letter: Letter) => ({
-        char: String(letter.char || ""),
-        points: Number(letter.points || 0),
-        id: String(letter.id || ""),
-        isBlank: Boolean(letter.isBlank),
-      }));
-    });
-
-    // Parse players and game events from JSON - use derive() for proper reactivity
-    // IMPORTANT: derive() may pass a Cell proxy instead of the value - need to unwrap
-    const currentPlayers = derive(playersJson, (input: any) => {
-      const actualInput =
-        typeof input === "object" && input && typeof input.get === "function"
-          ? input.get()
-          : input;
-      return parsePlayersJson(actualInput);
-    });
-    const currentGameEvents = derive(gameEventsJson, (input: any) => {
-      const actualInput =
-        typeof input === "object" && input && typeof input.get === "function"
-          ? input.get()
-          : input;
-      return parseGameEventsJson(actualInput);
-    });
-    // Pre-compute position styles to avoid Cell proxy issues in JSX
+    // Pre-compute position styles constant
     const CELL_WITH_GAP = CELL_SIZE + 2;
-    // Parse placed tiles - use derive() for reactivity, handle both string and object
-    // IMPORTANT: derive() may pass a Cell proxy instead of the value - need to unwrap
-    const myPlaced = derive(allPlacedJson, (input: any) => {
-      // If input is a Cell proxy, get its actual value
-      const actualInput =
-        typeof input === "object" && input && typeof input.get === "function"
-          ? input.get()
-          : input;
-      const placed = parseAllPlacedJson(actualInput);
-      // myName is actually a Cell, not a string - need to unwrap it
-      const nameValue = typeof myName === "object" && myName &&
-          typeof (myName as any).get === "function"
-        ? (myName as any).get()
-        : myName;
-      const name = String(nameValue || "");
-      const tiles = placed[name] || [];
-      // Pre-compute position strings like we do for committed tiles
-      return tiles.map((t: PlacedTile) => ({
-        letter: t.letter,
-        row: t.row,
-        col: t.col,
-        leftPx: `${t.col * CELL_WITH_GAP}px`,
-        topPx: `${t.row * CELL_WITH_GAP}px`,
-      }));
-    });
-    // Board tiles parsed from JSON - use computed() with explicit .get() for reliable value access
-    const currentBoard = computed(() => {
-      const json = boardJson.get();
-      const tiles = parseBoardJson(json);
-      return tiles.map((t) => {
-        const leftPx = `${t.col * CELL_WITH_GAP}px`;
-        const topPx = `${t.row * CELL_WITH_GAP}px`;
-        return {
-          letter: t.letter,
-          row: t.row,
-          col: t.col,
-          leftPx,
-          topPx,
-        };
-      });
-    });
 
-    // Board version for forcing re-render (changes when boardJson length changes)
-    // IMPORTANT: derive() may pass a Cell proxy instead of the value - need to unwrap
-    const _boardVersion = derive(boardJson, (input: any) => {
-      const actualInput =
-        typeof input === "object" && input && typeof input.get === "function"
-          ? input.get()
-          : input;
-      const len = actualInput?.length || 0;
-      return len;
+    // Use lift functions for reactive parsing
+    const myRack = parseRack({ allRacksJson, myName });
+    const currentPlayers = parsePlayers({ playersJson });
+    const currentGameEvents = parseEvents({ gameEventsJson });
+    const myPlaced = parsePlaced({
+      allPlacedJson,
+      myName,
+      cellWithGap: CELL_WITH_GAP,
     });
-
-    const rackCount = derive(myRack, (input: any) => {
-      const actualInput =
-        typeof input === "object" && input && typeof input.get === "function"
-          ? input.get()
-          : input;
-      return Array.isArray(actualInput) ? actualInput.length : 0;
-    });
-    const bagCount = computed(() => {
-      const bag = parseBagJson(bagJson.get());
-      const drawnCount = bagIndex.get();
-      return Math.max(0, bag.length - drawnCount);
-    });
+    const currentBoard = parseBoard({ boardJson, cellWithGap: CELL_WITH_GAP });
+    const _boardVersion = getBoardVersion({ boardJson });
+    const rackCount = getRackCount({ rack: myRack });
+    const bagCount = getBagCount({ bagJson, bagIndex });
 
     const boardCells: { row: number; col: number; bonus: BonusType }[] = [];
     for (let row = 0; row < BOARD_SIZE; row++) {
@@ -1237,7 +1224,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
     const message = Cell.of("");
 
     return {
-      [NAME]: str`Scrabble: ${myName}`,
+      [NAME]: computed(() => `Scrabble: ${myName}`),
       [UI]: (
         <div
           style={{

@@ -1,12 +1,11 @@
 /// <cts-enable />
 import {
   Cell,
+  computed,
   Default,
-  derive,
   fetchData,
-  lift,
   NAME,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 
@@ -151,94 +150,87 @@ function parseUrl(url: string): { org: string; user: string } {
   return { org: "", user: "" };
 }
 
-export default recipe<
+export default pattern<
   { repoUrl: Cell<Default<string, "https://github.com/vercel/next.js">> }
->(
-  "Github Fetcher Demo",
-  (state) => {
-    // lift() takes a pure function and 'lifts' it into the Cell domain, allowing it to be bound to reactive values
-    const output = lift(parseUrl)(state.repoUrl);
+>((state) => {
+  // Parse URL and create API endpoint
+  const output = computed(() => parseUrl(state.repoUrl.get()));
+  const apiUrl = computed(() => {
+    const { org, user } = output;
+    if (org && user) {
+      return `https://api.github.com/repos/${org}/${user}`;
+    }
+    return "";
+  });
 
-    // Parse URL and create API endpoint
-    const apiUrl = derive(output, (output) => {
-      const { org, user } = output;
-      if (org && user) {
-        return `https://api.github.com/repos/${org}/${user}`;
-      }
-      return "";
-    });
+  // Fetch repository data
+  const repoData = fetchData<GithubResponse>({
+    url: apiUrl,
+    mode: "json",
+  });
+  const data = repoData.result;
 
-    // Fetch repository data
-    const repoData = fetchData<GithubResponse>({
-      url: apiUrl,
-      mode: "json",
-    });
-    const data = repoData.result;
+  const validData = computed(() =>
+    data ?? {
+      name: "Unknown",
+      owner: { login: "Unknown" },
+      description: "No description provided",
+      stargazers_count: 0,
+      forks_count: 0,
+      watchers_count: 0,
+      open_issues_count: 0,
+      network_count: 0,
+      subscribers_count: 0,
+    }
+  );
 
-    const validData = derive(data, (data) => {
-      return (
-        data ?? {
-          name: "Unknown",
-          owner: { login: "Unknown" },
-          description: "No description provided",
-          stargazers_count: 0,
-          forks_count: 0,
-          watchers_count: 0,
-          open_issues_count: 0,
-          network_count: 0,
-          subscribers_count: 0,
-        }
-      );
-    });
-
-    return {
-      [NAME]: "GitHub Repository Details",
-      [UI]: (
+  return {
+    [NAME]: "GitHub Repository Details",
+    [UI]: (
+      <div>
         <div>
-          <div>
-            <ct-input
-              $value={state.repoUrl}
-              placeholder="https://github.com/owner/repo"
-              customStyle="width: 100%; padding: 8px; font-size: 14px;"
-            />
-          </div>
+          <ct-input
+            $value={state.repoUrl}
+            placeholder="https://github.com/owner/repo"
+            customStyle="width: 100%; padding: 8px; font-size: 14px;"
+          />
+        </div>
 
-          <ct-cell-context $cell={validData}>
+        <ct-cell-context $cell={validData}>
+          <div>
+            <h3 id="github-title">
+              {validData.name}
+            </h3>
+            <p>
+              by {validData.owner.login}
+            </p>
+            <p>{validData.description}</p>
             <div>
-              <h3 id="github-title">
-                {validData.name}
-              </h3>
-              <p>
-                by {validData.owner.login}
-              </p>
-              <p>{validData.description}</p>
               <div>
-                <div>
-                  <span>⭐</span>
-                  <strong>{validData.stargazers_count}</strong> stars
-                </div>
-                <div>
-                  <span>🍴</span>
-                  <strong>{validData.forks_count}</strong> forks
-                </div>
-                <div>
-                  <span>🔤</span>
-                  <strong>{validData.language}</strong>
-                </div>
-                <div>
-                  <a
-                    href={validData.html_url}
-                    target="_blank"
-                  >
-                    View on GitHub →
-                  </a>
-                </div>
+                <span>⭐</span>
+                <strong>{validData.stargazers_count}</strong> stars
+              </div>
+              <div>
+                <span>🍴</span>
+                <strong>{validData.forks_count}</strong> forks
+              </div>
+              <div>
+                <span>🔤</span>
+                <strong>{validData.language}</strong>
+              </div>
+              <div>
+                <a
+                  href={validData.html_url}
+                  target="_blank"
+                >
+                  View on GitHub →
+                </a>
               </div>
             </div>
-          </ct-cell-context>
-        </div>
-      ),
-      repo: validData,
-    };
-  },
-);
+          </div>
+        </ct-cell-context>
+      </div>
+    ),
+    repo: validData,
+  };
+});

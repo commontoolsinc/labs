@@ -1,6 +1,6 @@
 /// <cts-enable />
 
-import { Cell, Default, NAME, recipe, UI } from "commontools";
+import { Cell, Default, NAME, pattern, UI } from "commontools";
 
 type Input = {
   selected: Cell<Default<string, "opt_1">>;
@@ -16,8 +16,7 @@ type Result = {
   activeTab: string;
 };
 
-export default recipe<Input, Result>(
-  "ct-select demo",
+export default pattern<Input, Result>(
   ({ selected, numericChoice, category, activeTab }) => {
     return {
       [NAME]: "ct-select demo",

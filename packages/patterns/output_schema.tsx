@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, NAME, recipe, UI, VNode } from "commontools";
+import { Cell, Default, handler, NAME, pattern, UI, VNode } from "commontools";
 
 const increment = handler<unknown, { value: Cell<number> }>((_, state) => {
   state.value.set(state.value.get() + 1);
@@ -13,7 +13,7 @@ interface Output {
   [UI]: VNode;
 }
 
-export default recipe<Input, Output>(({ value }) => {
+export default pattern<Input, Output>(({ value }) => {
   return {
     [NAME]: "recipe output issue",
     [UI]: (

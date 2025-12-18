@@ -1,15 +1,14 @@
 /// <cts-enable />
 import {
   Cell,
+  computed,
   type Default,
-  derive,
   generateText,
   handler,
   NAME,
   navigateTo,
+  pattern,
   patternTool,
-  recipe,
-  str,
   Stream,
   UI,
   wish,
@@ -99,91 +98,88 @@ const handleCharmLinkClicked = handler<void, { charm: Cell<MentionableCharm> }>(
   },
 );
 
-const Note = recipe<Input, Output>(
-  "Note",
-  ({ title, content }) => {
-    const mentionable = wish<Default<MentionableCharm[], []>>(
-      "#mentionable",
-    );
-    const mentioned = Cell.of<MentionableCharm[]>([]);
+const Note = pattern<Input, Output>(({ title, content }) => {
+  const mentionable = wish<Default<MentionableCharm[], []>>(
+    "#mentionable",
+  );
+  const mentioned = Cell.of<MentionableCharm[]>([]);
 
-    // populated in backlinks-index.tsx
-    const backlinks = Cell.of<MentionableCharm[]>([]);
+  // populated in backlinks-index.tsx
+  const backlinks = Cell.of<MentionableCharm[]>([]);
 
-    // The only way to serialize a pattern, apparently?
-    const pattern = derive(undefined, () => JSON.stringify(Note));
+  // The only way to serialize a pattern, apparently?
+  const patternJson = computed(() => JSON.stringify(Note));
 
-    return {
-      [NAME]: title,
-      [UI]: (
-        <ct-screen>
-          <div slot="header">
-            <ct-input
-              $value={title}
-              placeholder="Enter title..."
-            />
-          </div>
-
-          <ct-code-editor
-            $value={content}
-            $mentionable={mentionable}
-            $mentioned={mentioned}
-            $pattern={pattern}
-            onbacklink-click={handleCharmLinkClick({})}
-            onbacklink-create={handleNewBacklink({ mentionable })}
-            language="text/markdown"
-            theme="light"
-            wordWrap
-            tabIndent
-            lineNumbers
+  return {
+    [NAME]: title,
+    [UI]: (
+      <ct-screen>
+        <div slot="header">
+          <ct-input
+            $value={title}
+            placeholder="Enter title..."
           />
+        </div>
 
-          <ct-hstack slot="footer">
-            {backlinks?.map((charm) => (
-              <ct-button
-                onClick={handleCharmLinkClicked({ charm })}
-              >
-                {charm?.[NAME]}
-              </ct-button>
-            ))}
-          </ct-hstack>
-        </ct-screen>
-      ),
-      title,
-      content,
-      mentioned,
-      backlinks,
-      grep: patternTool(
-        ({ query, content }: { query: string; content: string }) => {
-          return derive({ query, content }, ({ query, content }) => {
-            return content.split("\n").filter((c) => c.includes(query));
-          });
-        },
-        { content },
-      ),
-      translate: patternTool(
-        (
-          { language, content }: {
-            language: string;
-            content: string;
-          },
-        ) => {
-          const result = generateText({
-            system: str`Translate the content to ${language}.`,
-            prompt: str`<to_translate>${content}</to_translate>`,
-          });
+        <ct-code-editor
+          $value={content}
+          $mentionable={mentionable}
+          $mentioned={mentioned}
+          $pattern={patternJson}
+          onbacklink-click={handleCharmLinkClick({})}
+          onbacklink-create={handleNewBacklink({ mentionable })}
+          language="text/markdown"
+          theme="light"
+          wordWrap
+          tabIndent
+          lineNumbers
+        />
 
-          return derive(result, ({ pending, result }) => {
-            if (pending) return undefined;
-            if (result == null) return "Error occured";
-            return result;
-          });
+        <ct-hstack slot="footer">
+          {backlinks?.map((charm) => (
+            <ct-button
+              onClick={handleCharmLinkClicked({ charm })}
+            >
+              {charm?.[NAME]}
+            </ct-button>
+          ))}
+        </ct-hstack>
+      </ct-screen>
+    ),
+    title,
+    content,
+    mentioned,
+    backlinks,
+    grep: patternTool(
+      ({ query, content }: { query: string; content: string }) => {
+        return computed(() => {
+          return content.split("\n").filter((c) => c.includes(query));
+        });
+      },
+      { content },
+    ),
+    translate: patternTool(
+      (
+        { language, content }: {
+          language: string;
+          content: string;
         },
-        { content },
-      ),
-      editContent: handleEditContent({ content }),
-    };
-  },
-);
+      ) => {
+        const genResult = generateText({
+          system: computed(() => `Translate the content to ${language}.`),
+          prompt: computed(() => `<to_translate>${content}</to_translate>`),
+        });
+
+        return computed(() => {
+          if (genResult.pending) return undefined;
+          if (genResult.result == null) return "Error occured";
+          return genResult.result;
+        });
+      },
+      { content },
+    ),
+    editContent: handleEditContent({ content }),
+  };
+});
 
 export default Note;

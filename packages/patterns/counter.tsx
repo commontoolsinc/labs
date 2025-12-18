@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, NAME, recipe, str, Stream, UI } from "commontools";
+import { computed, Default, NAME, pattern, Stream, UI } from "commontools";
 import { decrement, increment, nth, previous } from "./counter-handlers.ts";
 
 interface RecipeState {
@@ -13,9 +13,9 @@ interface RecipeOutput {
   decrement: Stream<void>;
 }
 
-export default recipe<RecipeState, RecipeOutput>((state) => {
+export default pattern<RecipeState, RecipeOutput>((state) => {
   return {
-    [NAME]: str`Simple counter: ${state.value}`,
+    [NAME]: computed(() => `Simple counter: ${state.value}`),
     [UI]: (
       <div>
         <ct-button id="counter-decrement" onClick={decrement(state)}>
