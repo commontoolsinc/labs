@@ -26,6 +26,14 @@ import { generateHandlerSchema } from "../schema.ts";
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,
 ): ModuleFactory<T, R> {
+  // Attach source location to function implementations for debugging
+  if (typeof moduleSpec.implementation === "function") {
+    const location = getExternalSourceLocation();
+    if (location) {
+      (moduleSpec.implementation as { src?: string }).src = location;
+    }
+  }
+
   const module: Module & toJSON = {
     ...moduleSpec,
     toJSON: () => moduleToJSON(module),
@@ -45,6 +53,53 @@ export function createNodeFactory<T = any, R = any>(
 
     return outputs;
   }, module);
+}
+
+/** Extract file path and location from a stack frame line
+ * Handles formats like:
+ *   "    at functionName (file:///path/to/file.ts:42:15)"
+ *   "    at file:///path/to/file.ts:42:15"
+ */
+function parseStackFrame(
+  line: string,
+): { file: string; line: number; col: number } | null {
+  // Match file path (with optional file:// prefix) followed by :line:col
+  const match = line.match(/((?:file:\/\/)?(?:\/|[A-Z]:)[^:]+):(\d+):(\d+)/);
+  if (!match) return null;
+  const [, filePath, lineNum, col] = match;
+  return {
+    file: filePath.replace(/^file:\/\//, ""),
+    line: parseInt(lineNum, 10),
+    col: parseInt(col, 10),
+  };
+}
+
+/** Extract the first source location from a stack trace that isn't from this file */
+function getExternalSourceLocation(): string | null {
+  const stack = new Error().stack;
+  if (!stack) return null;
+
+  const lines = stack.split("\n");
+
+  // Find this file from the first real stack frame
+  let thisFile: string | null = null;
+  for (const line of lines) {
+    const frame = parseStackFrame(line);
+    if (frame) {
+      thisFile = frame.file;
+      break;
+    }
+  }
+  if (!thisFile) return null;
+
+  // Find first frame not from this file
+  for (const line of lines) {
+    const frame = parseStackFrame(line);
+    if (frame && frame.file !== thisFile) {
+      return `${frame.file}:${frame.line}:${frame.col}`;
+    }
+  }
+  return null;
 }
 
 /** Declare a module
@@ -115,6 +170,14 @@ function handlerInternal<E, T>(
         "Handler requires schemas or CTS transformer\n" +
           "help: enable CTS with /// <cts-enable /> for automatic schema inference, or provide explicit schemas",
       );
+    }
+  }
+
+  // Attach source location to handler function for debugging
+  if (typeof handler === "function") {
+    const location = getExternalSourceLocation();
+    if (location) {
+      (handler as { src?: string }).src = location;
     }
   }
 
