@@ -282,6 +282,38 @@ describe("Attestation Module", () => {
       expect(resultValue.items[3]).toBeUndefined();
       expect(resultValue.items[9]).toBeUndefined();
     });
+
+    it("should share sibling references (structural sharing)", () => {
+      // CT-1123 Phase 2: Verify structural sharing optimization
+      const source = {
+        address: { id: "test:structural", type: "application/json", path: [] },
+        value: {
+          unchanged: { nested: { deep: "value" } },
+          modified: { target: "old" },
+        },
+      } as const;
+
+      const result = Attestation.write(source, {
+        id: "test:structural",
+        type: "application/json",
+        path: ["modified", "target"],
+      }, "new");
+
+      expect(result.ok).toBeDefined();
+      const resultValue = result.ok!.value as Record<string, unknown>;
+
+      // Modified path should have new value
+      expect((resultValue.modified as Record<string, unknown>).target).toBe("new");
+
+      // Sibling 'unchanged' should be EXACT SAME reference (structural sharing)
+      expect(resultValue.unchanged).toBe(source.value.unchanged);
+
+      // Modified 'modified' object should be NEW reference
+      expect(resultValue.modified).not.toBe(source.value.modified);
+
+      // Original source should be unmodified
+      expect(source.value.modified.target).toBe("old");
+    });
   });
 
   describe("read function", () => {
