@@ -387,20 +387,7 @@ class StandardObjectCreator implements IObjectCreator<JSONValue> {
     // spec, when we have an anyOf with branches where name is set in one
     // schema, but the address is ignored, and a second option where
     // address is set, and name is ignored, we want to include both.
-    if (matches.length > 1) {
-      // If all our matches are objects, merge the properties.
-      if (matches.every((v) => isRecord(v))) {
-        const unified: Record<string, JSONValue> = {};
-        for (const match of matches) {
-          Object.assign(unified, match);
-        }
-        return unified;
-      }
-    }
-    // If we have any match, return that.
-    if (matches.length > 0) {
-      return matches[0];
-    }
+    return mergeAnyOfMatches(matches);
   }
 
   addOptionalProperty(
@@ -431,6 +418,40 @@ class StandardObjectCreator implements IObjectCreator<JSONValue> {
     value: JSONValue[] | Record<string, JSONValue> | JSONValue | undefined,
   ): JSONValue {
     return value === undefined ? null : value;
+  }
+}
+
+/**
+ * When we match on multiple clauses of an anyOf, we want to merge the results
+ * If they aren't objects, we can't really do this, but if they are, we can
+ * combine the properties from the various matches.
+ *
+ * This isn't perfectly aligned with JSONSchema spec, but it's generally useful.
+ *
+ * @param matches the list of matched values
+ * @returns an object created by combining properties from the matches, or the first
+ *  match if they aren't all objects, or undefined if there are no matches.
+ */
+export function mergeAnyOfMatches<T>(
+  matches: T[],
+): T | Record<string, T> | undefined {
+  // These value objects should be merged. While this isn't JSONSchema
+  // spec, when we have an anyOf with branches where name is set in one
+  // schema, but the address is ignored, and a second option where
+  // address is set, and name is ignored, we want to include both.
+  if (matches.length > 1) {
+    // If all our matches are objects, merge the properties.
+    if (matches.every((v) => isRecord(v))) {
+      const unified: Record<string, T> = {};
+      for (const match of matches) {
+        Object.assign(unified, match);
+      }
+      return unified;
+    }
+  }
+  // If we have any match, return that.
+  if (matches.length > 0) {
+    return matches[0];
   }
 }
 

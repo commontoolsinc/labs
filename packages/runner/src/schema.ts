@@ -18,6 +18,7 @@ import { toCell } from "./back-to-cell.ts";
 import {
   combineSchema,
   IObjectCreator,
+  mergeAnyOfMatches,
   mergeSchemaFlags,
   OptJSONValue,
   SchemaObjectTraverser,
@@ -459,23 +460,14 @@ class TransformObjectCreator
     // address is set, and name is ignored, we want to include both.
     if (matches.length > 1) {
       // If more than one match, but we have a cell, return that
+      // If we tried to combine the objects, the result would not be a cell
+      // anymore.
       const cellMatch = matches.find((v) => isCell(v));
       if (cellMatch !== undefined) {
         return cellMatch;
       }
-      // If all our matches are objects, merge the properties.
-      if (matches.every((v) => isRecord(v))) {
-        const unified: Record<string, T> = {};
-        for (const match of matches) {
-          Object.assign(unified, match);
-        }
-        return unified;
-      }
     }
-    // If we have any match, return that.
-    if (matches.length > 0) {
-      return matches[0];
-    }
+    return mergeAnyOfMatches(matches);
   }
 
   // This controls the behavior when properties is specified, but
