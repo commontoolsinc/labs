@@ -347,6 +347,9 @@ interface OptJSONObject {
 // I think this callback system is a bit of a kludge, but it lets me
 // use the core traversal together with different object types for the runner.
 export interface IObjectCreator<T> {
+  // When we have multiple matches, we may need to do something special to
+  // combine them (for example, merging properties)
+  mergeMatches(matches: T[]): T | undefined;
   // In the SchemaObjectTraverser system, we'll copy the object's value into
   // the new version
   // In the validateAndTransform system, we'll skip these properties
@@ -379,6 +382,27 @@ export interface IObjectCreator<T> {
  * queries. We don't need to do anything special here.
  */
 class StandardObjectCreator implements IObjectCreator<JSONValue> {
+  mergeMatches(matches: JSONValue[]): JSONValue | undefined {
+    // These value objects should be merged. While this isn't JSONSchema
+    // spec, when we have an anyOf with branches where name is set in one
+    // schema, but the address is ignored, and a second option where
+    // address is set, and name is ignored, we want to include both.
+    if (matches.length > 1) {
+      // If all our matches are objects, merge the properties.
+      if (matches.every((v) => isRecord(v))) {
+        const unified: Record<string, JSONValue> = {};
+        for (const match of matches) {
+          Object.assign(unified, match);
+        }
+        return unified;
+      }
+    }
+    // If we have any match, return that.
+    if (matches.length > 0) {
+      return matches[0];
+    }
+  }
+
   addOptionalProperty(
     obj: Record<string, unknown>,
     key: string,
@@ -1465,22 +1489,16 @@ export class SchemaObjectTraverser<V extends JSONValue>
             rootSchema: schemaContext.rootSchema,
           }, link);
           if (val !== undefined) {
+            // We may just have a cell match, so the first match is what we
+            // will return, but in this case, we still want to evaluate with
+            // all the schema options, so we know to include all the potential
+            // docs needed.
             matches.push(val);
           }
-          // These value objects should be merged. While this isn't
-          // JSONSchema spec, when we have an anyOf with branches where
-          // name is set in one schema, but the address is ignored, and a
-          // second option where address is set, and name is ignored, we want
-          // to include both.
-          if (matches.every((v) => isRecord(v))) {
-            const unified: Record<string, JSONValue> = {};
-            for (const match of matches) {
-              Object.assign(unified, match);
-            }
-            return unified;
-          } else if (matches.length > 0) {
-            return matches[0];
-          }
+        }
+        const merged = this.objectCreator.mergeMatches(matches);
+        if (merged !== undefined) {
+          return merged;
         }
         // None of the anyOf patterns matched
         logger.debug(
