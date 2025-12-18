@@ -5,7 +5,6 @@ import type {
   URI,
 } from "@commontools/memory/interface";
 import type { Cancel } from "../cancel.ts";
-import { log } from "../log.ts";
 import { IStorageProvider, StorageValue } from "./interface.ts";
 export type { Result, Unit };
 
@@ -45,7 +44,6 @@ export abstract class BaseStorageProvider implements IStorageProvider {
   }
 
   protected notifySubscribers(key: string, value: StorageValue): void {
-    log(() => [`notify subscribers ${key} ${JSON.stringify(value)}`]);
     const listeners = this.subscribers.get(key);
     if (this.waitingForSync.has(key) && listeners && listeners.size > 0) {
       throw new Error(
@@ -63,7 +61,6 @@ export abstract class BaseStorageProvider implements IStorageProvider {
         new Promise((r) => this.waitingForSyncResolvers.set(key, r)),
       );
     }
-    log(() => [`waiting for sync ${key} ${[...this.waitingForSync.keys()]}`]);
     return this.waitingForSync.get(key)!;
   }
 

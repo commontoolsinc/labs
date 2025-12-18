@@ -46,14 +46,17 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
   }
 
   // Derive a new `Identity` given a seed string.
-  async derive<ID extends DIDKey>(name: string): Promise<Identity<ID>> {
+  async derive<ID extends DIDKey>(
+    name: string,
+    config: IdentityCreateConfig = {},
+  ): Promise<Identity<ID>> {
     const seed = textEncoder.encode(name);
     const { ok: signed, error } = await this.sign(seed);
     if (error) {
       throw error;
     }
     const signedHash = await hash(signed);
-    return await Identity.fromRaw(new Uint8Array(signedHash));
+    return await Identity.fromRaw(new Uint8Array(signedHash), config);
   }
 
   // Derive PKCS8/PEM bytes from this identity.

@@ -10,7 +10,6 @@ import {
   useCancelGroup,
 } from "@commontools/runner";
 import { isVNode, type Props, type RenderNode, type VNode } from "./jsx.ts";
-import * as logger from "./logger.ts";
 
 export type SetPropHandler = <T>(
   target: T,
@@ -102,16 +101,13 @@ export const renderImpl = (
     return () => {};
   }
   if (!isVNode(view)) {
-    logger.debug("render", "No valid vnode to render", view);
     return () => {};
   }
   const [root, cancel] = renderNode(view, options, visited);
   if (!root) {
-    logger.warn("render", "Could not render view", view);
     return cancel;
   }
   parent.append(root);
-  logger.debug("render", "Rendered root", root);
   return () => {
     root.remove();
     cancel();
@@ -160,7 +156,6 @@ const renderNode = (
   while (node[UI]) {
     // Detect cycles in UI chain
     if (visited.has(node)) {
-      logger.warn("render", "Cycle detected in [UI] chain", node);
       return [
         createCyclePlaceholder(document),
         cancel,
@@ -172,7 +167,6 @@ const renderNode = (
 
   // Check if the final node creates a cycle (for child -> parent references)
   if (visited.has(node)) {
-    logger.warn("render", "Cycle detected in render tree", node);
     return [
       createCyclePlaceholder(document),
       cancel,
@@ -236,7 +230,6 @@ const bindChildren = (
 
     // Check for cell cycle before setting up effect (using .equals() for comparison)
     if (isCell(child) && hasVisitedCell(visited, child)) {
-      logger.warn("render", "Cycle detected in cell graph", child);
       return { node: createCyclePlaceholder(document), cancel: () => {} };
     }
 
@@ -348,8 +341,6 @@ const bindChildren = (
       }
     }
 
-    logger.debug("render", "new element order", { newKeyOrder });
-
     keyedChildren = newMapping;
   };
 
@@ -387,8 +378,6 @@ const bindProps = (
             propValue.send(sanitizedEvent);
           });
           addCancel(cancel);
-        } else {
-          logger.warn("render", "Could not bind event", propKey, propValue);
         }
       } else if (propKey.startsWith("$")) {
         // Properties starting with $ get passed in as raw values, useful for
@@ -397,7 +386,6 @@ const bindProps = (
         setProperty(element, key, propValue);
       } else {
         const cancel = effect(propValue, (replacement) => {
-          logger.debug("render", "prop update", propKey, replacement);
           // Replacements are set as properties not attributes to avoid
           // string serialization of complex datatypes.
           setProperty(element, propKey, replacement);
