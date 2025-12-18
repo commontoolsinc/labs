@@ -652,14 +652,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
         }
       };
 
-      // Run the action once to capture dependencies
-      const tx = this.runtime.edit();
-      action(tx);
-      const log = txToReactivityLog(tx);
-      tx.commit();
-
-      // Subscribe as an effect so it runs in the next cycle
-      const cancel = this.runtime.scheduler.subscribe(action, log, {
+      // Subscribe as an effect so it runs in the next cycle.
+      const cancel = this.runtime.scheduler.subscribe(action, action, {
         isEffect: true,
       });
 
@@ -1508,15 +1502,14 @@ function subscribeToReferencedDocs<T>(
   tx.commit();
 
   // Mark as effect since sink() is a side-effectful consumer (FRP effect/sink)
-  // Use rescheduling: true since we already ran action() synchronously above.
-  // The scheduler will re-run this action when its dependencies change.
-  const cancel = runtime.scheduler.subscribe(action, log, {
-    isEffect: true,
-    rescheduling: true,
-  });
+  // Use resubscribe because we've already run it once above
+  runtime.scheduler.resubscribe(action, log, { isEffect: true });
+
+  // Make sure scheduler runs, since resubscribe doesn't trigger a run
+  runtime.scheduler.queueExecution();
 
   return () => {
-    cancel();
+    runtime.scheduler.unsubscribe(action);
     if (isCancel(cleanup)) cleanup();
   };
 }

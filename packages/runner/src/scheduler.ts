@@ -70,6 +70,16 @@ export type EventHandler =
 export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
 
 /**
+ * Callback to populate a transaction with an action's read dependencies.
+ * Called by the scheduler to discover what cells the action will read.
+ * The callback should read all cells (using .get({ traverseCells: true })) that
+ * the action will access, so the transaction captures all dependencies.
+ * The transaction will be aborted after this callback returns, so it's safe
+ * to simulate writes.
+ */
+export type PopulateDependencies = (tx: IExtendedStorageTransaction) => void;
+
+/**
  * Reactivity log.
  *
  * Used to log reads and writes to docs. Used by scheduler to keep track of
@@ -184,6 +194,15 @@ export class Scheduler {
   private actionParent = new WeakMap<Action, Action>();
   private actionChildren = new WeakMap<Action, Set<Action>>();
 
+  // Dependency population callbacks for first-time subscriptions
+  // Called in execute() to discover what cells the action will read
+  private populateDependenciesCallbacks = new WeakMap<
+    Action,
+    PopulateDependencies
+  >();
+  // Actions that need dependency population before first run
+  private pendingDependencyCollection = new Set<Action>();
+
   private idlePromises: (() => void)[] = [];
   private loopCounter = new WeakMap<Action, number>();
   private errorHandlers = new Set<ErrorHandler>();
@@ -237,24 +256,46 @@ export class Scheduler {
     });
   }
 
+  /**
+   * Subscribes an action to run when its dependencies change.
+   *
+   * The action will be scheduled to run immediately. Before running, the
+   * populateDependencies callback will be called to discover what cells the
+   * action will read. After running, the scheduler automatically re-subscribes
+   * using the reactivity log from the run.
+   *
+   * @param action The action to subscribe
+   * @param populateDependencies Callback to discover the action's read dependencies,
+   *   or a ReactivityLog for backwards compatibility (deprecated)
+   * @param options Configuration options for the subscription
+   * @returns A cancel function to unsubscribe
+   */
   subscribe(
     action: Action,
-    log: ReactivityLog,
+    populateDependencies: PopulateDependencies | ReactivityLog,
     options: {
-      /**
-       * Set to true when re-subscribing after an action has already run.
-       * When false (default), the action is scheduled to run immediately.
-       * When true, only registers triggers and waits for changes.
-       */
-      rescheduling?: boolean;
       isEffect?: boolean;
       debounce?: number;
       autoDebounce?: boolean;
       throttle?: number;
     } = {},
   ): Cancel {
+    // Handle backwards-compatible ReactivityLog argument
+    let populateDependenciesCallback: PopulateDependencies;
+    let immediateLog: ReactivityLog | undefined;
+    if (typeof populateDependencies === "function") {
+      populateDependenciesCallback = populateDependencies;
+    } else {
+      // ReactivityLog provided directly - set up dependencies immediately
+      // (for backwards compatibility with code that passes reads/writes)
+      immediateLog = populateDependencies;
+      populateDependenciesCallback = (depTx: IExtendedStorageTransaction) => {
+        for (const read of immediateLog!.reads) {
+          depTx.readOrThrow(read);
+        }
+      };
+    }
     const {
-      rescheduling = false,
       isEffect = false,
       debounce,
       autoDebounce,
@@ -273,8 +314,6 @@ export class Scheduler {
       this.setThrottle(action, throttle);
     }
 
-    const reads = this.setDependencies(action, log);
-
     // Track action type for pull-based scheduling
     // Once an action is marked as an effect, it stays an effect (persists across re-subscriptions)
     if (isEffect) {
@@ -290,9 +329,6 @@ export class Scheduler {
       this.computations.add(action);
       this.effects.delete(action);
     }
-
-    // Update reverse dependency graph
-    this.updateDependents(action, log);
 
     // Track parent-child relationship if action is created during another action's execution
     if (this.executingAction && this.executingAction !== action) {
@@ -319,60 +355,114 @@ export class Scheduler {
       () => [
         "Subscribing to action:",
         action,
-        reads,
-        rescheduling ? "rescheduling" : "first-time",
         isEffect ? "effect" : "computation",
       ],
     );
 
-    if (!rescheduling) {
-      // If we see this the first time, it's dirty and pending. In pull mode this
-      // still doesn't mean execution: There needs to be an effect to trigger it.
-      this.dirty.add(action);
-      this.pending.add(action);
-      this.scheduledFirstTime.add(action);
+    // Store the populateDependencies callback for use in execute()
+    this.populateDependenciesCallbacks.set(
+      action,
+      populateDependenciesCallback,
+    );
+
+    // If a ReactivityLog was provided directly, set up dependencies immediately.
+    // This ensures writes are tracked right away for reverse dependency graph.
+    // The callback will still be called in execute() to potentially discover more reads.
+    if (immediateLog) {
+      this.setDependencies(action, immediateLog);
+      this.updateDependents(action, immediateLog);
     } else {
-      const pathsByEntity = addressesToPathByEntity(reads);
-
-      logger.debug("schedule", () => [
-        `[SUBSCRIBE] Action: ${action.name || "anonymous"}`,
-        `Entities: ${pathsByEntity.size}`,
-        `Reads: ${reads.length}`,
-      ]);
-
-      const entities = new Set<SpaceAndURI>();
-
-      for (const [spaceAndURI, paths] of pathsByEntity) {
-        entities.add(spaceAndURI);
-        if (!this.triggers.has(spaceAndURI)) {
-          this.triggers.set(spaceAndURI, new Map());
-        }
-        const pathsWithValues = paths.map((path) =>
-          [
-            "value",
-            ...path,
-          ] as readonly MemoryAddressPathComponent[]
-        );
-        this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
-
-        logger.debug("schedule", () => [
-          `[SUBSCRIBE] Registered action for ${spaceAndURI}`,
-          `Paths: ${pathsWithValues.map((p) => p.join("/")).join(", ")}`,
-        ]);
-      }
-
-      this.cancels.set(action, () => {
-        logger.debug("schedule", () => [
-          `[UNSUBSCRIBE] Action: ${action.name || "anonymous"}`,
-          `Entities: ${entities.size}`,
-        ]);
-        for (const spaceAndURI of entities) {
-          this.triggers.get(spaceAndURI)?.delete(action);
-        }
-      });
+      // Mark action for dependency collection before first run
+      this.pendingDependencyCollection.add(action);
     }
 
+    // Mark as dirty and pending for first-time execution
+    // In pull mode this still doesn't mean execution: There needs to be an effect to trigger it.
+    this.dirty.add(action);
+    this.pending.add(action);
+    this.scheduledFirstTime.add(action);
+
     return () => this.unsubscribe(action);
+  }
+
+  /**
+   * Re-subscribes an action after it has already run, using the reactivity log
+   * from the completed run. This sets up triggers for future changes without
+   * scheduling the action to run immediately.
+   *
+   * Use this method when:
+   * - An action has just completed running and you have its reactivity log
+   * - You want to register triggers for future changes
+   *
+   * @param action The action to re-subscribe
+   * @param log The reactivity log from the action's previous run
+   * @param options Optional configuration (e.g., isEffect to mark as side-effectful)
+   */
+  resubscribe(
+    action: Action,
+    log: ReactivityLog,
+    options: { isEffect?: boolean } = {},
+  ): void {
+    const { isEffect } = options;
+
+    const reads = this.setDependencies(action, log);
+
+    // Update reverse dependency graph
+    this.updateDependents(action, log);
+
+    // Track action type for pull-based scheduling
+    // Once an action is marked as an effect, it stays an effect
+    if (isEffect) {
+      this.isEffectAction.set(action, true);
+    }
+
+    // Use the persistent effect status for tracking
+    if (this.isEffectAction.get(action)) {
+      this.effects.add(action);
+      this.computations.delete(action);
+    } else {
+      this.computations.add(action);
+      this.effects.delete(action);
+    }
+
+    const pathsByEntity = addressesToPathByEntity(reads);
+
+    logger.debug("schedule", () => [
+      `[RESUBSCRIBE] Action: ${action.name || "anonymous"}`,
+      `Entities: ${pathsByEntity.size}`,
+      `Reads: ${reads.length}`,
+    ]);
+
+    const entities = new Set<SpaceAndURI>();
+
+    for (const [spaceAndURI, paths] of pathsByEntity) {
+      entities.add(spaceAndURI);
+      if (!this.triggers.has(spaceAndURI)) {
+        this.triggers.set(spaceAndURI, new Map());
+      }
+      const pathsWithValues = paths.map((path) =>
+        [
+          "value",
+          ...path,
+        ] as readonly MemoryAddressPathComponent[]
+      );
+      this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
+
+      logger.debug("schedule", () => [
+        `[RESUBSCRIBE] Registered action for ${spaceAndURI}`,
+        `Paths: ${pathsWithValues.map((p) => p.join("/")).join(", ")}`,
+      ]);
+    }
+
+    this.cancels.set(action, () => {
+      logger.debug("schedule", () => [
+        `[UNSUBSCRIBE] Action: ${action.name || "anonymous"}`,
+        `Entities: ${entities.size}`,
+      ]);
+      for (const spaceAndURI of entities) {
+        this.triggers.get(spaceAndURI)?.delete(action);
+      }
+    });
   }
 
   unsubscribe(action: Action): void {
@@ -407,6 +497,9 @@ export class Scheduler {
     this.actionChildren.delete(action);
     // Cancel any pending debounce timer
     this.cancelDebounceTimer(action);
+    // Clean up dependency collection tracking
+    this.populateDependenciesCallbacks.delete(action);
+    this.pendingDependencyCollection.delete(action);
   }
 
   async run(action: Action): Promise<any> {
@@ -464,11 +557,12 @@ export class Scheduler {
               this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
               if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
                 // Re-schedule the action to run again on conflict failure.
-                // Must re-subscribe to ensure dependencies are set before
-                // topologicalSort runs in execute(). Use the log from below
-                // which has the correct dependencies from the previous run.
-                // Note: not passing rescheduling:true since we want to run immediately
-                this.subscribe(action, log);
+                // Use resubscribe to set up dependencies/triggers from the log,
+                // then mark as dirty/pending to ensure it runs again.
+                this.resubscribe(action, log);
+                this.dirty.add(action);
+                this.pending.add(action);
+                this.queueExecution();
               }
             } else {
               // Clear retries after successful commit.
@@ -484,7 +578,7 @@ export class Scheduler {
             `Elapsed: ${elapsed.toFixed(2)}ms`,
           ]);
 
-          this.subscribe(action, log, { rescheduling: true });
+          this.resubscribe(action, log);
           resolve(result);
         }
       };
@@ -726,7 +820,11 @@ export class Scheduler {
     const existingMightWrite = this.mightWrite.get(action) ?? [];
     this.mightWrite.set(
       action,
-      sortAndCompactPaths([...existingMightWrite, ...writes]),
+      sortAndCompactPaths([
+        ...existingMightWrite,
+        ...writes,
+        ...(log.potentialWrites ?? []),
+      ]),
     );
 
     return reads;
@@ -754,35 +852,29 @@ export class Scheduler {
 
     // For each read of the new action, find other actions that write to it
     for (const read of reads) {
-      // Check all registered actions (via triggers) for ones that write to this read
-      for (const [_spaceAndURI, actionPaths] of this.triggers) {
-        for (const [otherAction] of actionPaths) {
-          if (otherAction === action) continue;
+      // Check all registered actions for ones that write to this read
+      for (const otherAction of [...this.computations, ...this.effects]) {
+        if (otherAction === action) continue;
 
-          const otherLog = this.dependencies.get(otherAction);
-          if (!otherLog) continue;
+        // Use mightWrite (accumulates all paths action has ever written)
+        // This ensures dependency chain is built even if first run writes undefined
+        const otherWrites = this.mightWrite.get(otherAction) ?? [];
 
-          // Use mightWrite if available (accumulates all paths action has ever written)
-          // This ensures dependency chain is built even if first run writes undefined
-          const otherWrites = this.mightWrite.get(otherAction) ??
-            otherLog.writes;
-
-          // Check if otherAction writes to this entity we're reading
-          for (const write of otherWrites) {
-            if (
-              read.space === write.space &&
-              read.id === write.id &&
-              arraysOverlap(write.path, read.path)
-            ) {
-              // otherAction writes → this action reads, so this action depends on otherAction
-              let deps = this.dependents.get(otherAction);
-              if (!deps) {
-                deps = new Set();
-                this.dependents.set(otherAction, deps);
-              }
-              deps.add(action);
-              newDependencies.add(otherAction);
+        // Check if otherAction writes to this entity we're reading
+        for (const write of otherWrites) {
+          if (
+            read.space === write.space &&
+            read.id === write.id &&
+            arraysOverlap(write.path, read.path)
+          ) {
+            // otherAction writes → this action reads, so this action depends on otherAction
+            let deps = this.dependents.get(otherAction);
+            if (!deps) {
+              deps = new Set();
+              this.dependents.set(otherAction, deps);
             }
+            deps.add(action);
+            newDependencies.add(otherAction);
           }
         }
       }
@@ -899,7 +991,9 @@ export class Scheduler {
     cycleMembers: Set<Action> = new Set(),
   ): Set<Action> {
     const log = this.dependencies.get(action);
-    if (!log) return cycleMembers;
+    if (!log) {
+      return cycleMembers;
+    }
 
     // Check for cycle: if action is already in the collection stack, we've found a cycle
     if (this.collectStack.has(action)) {
@@ -916,12 +1010,11 @@ export class Scheduler {
       if (computation === action) continue;
 
       const computationLog = this.dependencies.get(computation);
-      if (!computationLog) continue;
-
-      // Use mightWrite if available (tracks all paths computation has ever written)
-      // This ensures we pull the computation even if its last run threw before writing
       const computationWrites = this.mightWrite.get(computation) ??
-        computationLog.writes;
+        computationLog?.writes ?? [];
+      if (!computationLog) {
+        continue;
+      }
 
       // Check if computation writes to something action reads (document-level match)
       let found = false;
@@ -1543,6 +1636,92 @@ export class Scheduler {
     // In case a directly invoked `run` is still running, wait for it to finish.
     if (this.runningPromise) await this.runningPromise;
 
+    // Process pending dependency collection for newly subscribed actions.
+    // This discovers what cells each action will read before it runs.
+    for (const action of this.pendingDependencyCollection) {
+      const populateDependencies = this.populateDependenciesCallbacks.get(
+        action,
+      );
+      if (populateDependencies) {
+        // Create a transaction to capture reads
+        const depTx = this.runtime.edit();
+        try {
+          populateDependencies(depTx);
+        } catch (error) {
+          // If populateDependencies fails, log and continue
+          // The action will still run and discover its real dependencies
+          logger.debug("schedule", () => [
+            `[DEP-COLLECT] Error populating dependencies for ${
+              action.name || "anonymous"
+            }: ${error}`,
+          ]);
+        }
+        const log = txToReactivityLog(depTx);
+        // Abort the transaction - we only wanted to capture reads
+        depTx.abort();
+
+        // Set up dependencies and update reverse dependency graph
+        const reads = this.setDependencies(action, log);
+        this.updateDependents(action, log);
+
+        // Set up triggers so this action gets notified when its dependencies change
+        // This is the same logic as in resubscribe() - we need triggers for storage
+        // notifications to mark this action as dirty when inputs change.
+        const pathsByEntity = addressesToPathByEntity(reads);
+        const entities = new Set<SpaceAndURI>();
+
+        for (const [spaceAndURI, paths] of pathsByEntity) {
+          entities.add(spaceAndURI);
+          if (!this.triggers.has(spaceAndURI)) {
+            this.triggers.set(spaceAndURI, new Map());
+          }
+          const pathsWithValues = paths.map((path) =>
+            [
+              "value",
+              ...path,
+            ] as readonly MemoryAddressPathComponent[]
+          );
+          this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
+        }
+
+        // Set up cancel function to clean up triggers
+        this.cancels.set(action, () => {
+          for (const spaceAndURI of entities) {
+            this.triggers.get(spaceAndURI)?.delete(action);
+          }
+        });
+
+        logger.debug("schedule", () => [
+          `[DEP-COLLECT] Collected dependencies for ${
+            action.name || "anonymous"
+          }: ${log.reads.length} reads, ${log.writes.length} writes, ${entities.size} entities`,
+        ]);
+      }
+    }
+
+    // Now mark downstream nodes as dirty if we introduced new dependencies for them
+    this.pendingDependencyCollection.forEach((action) => {
+      this.scheduleAffectedEffects(action);
+    });
+
+    // Find computation actions with no dependencies. We run them on the first
+    // run to capture any writes they might perform to cells pass into them.
+    //
+    // TODO(seefeld): Once we more reliably capture what they can write via
+    // WriteableCell or so, then we can treat this more deliberately via the
+    // dependency collection process above. We'll have to re-run it whenever
+    // inputs change, as they might change what they can write to. We hope that
+    // for now this will be sufficiently captured in mightWrite.
+    const newActionsWithoutDependencies = [...this.pendingDependencyCollection]
+      .filter(
+        (action) =>
+          !this.dependencies.get(action)?.writes.length &&
+          !this.effects.has(action),
+      );
+
+    // Clear the pending collection set - dependencies have been collected
+    this.pendingDependencyCollection.clear();
+
     // Track dirty dependencies that block events - these must be added to workSet
     const eventBlockingDeps = new Set<Action>();
 
@@ -1671,6 +1850,65 @@ export class Scheduler {
       } // Close else block for shouldSkipEvent
     }
 
+    // Process any newly subscribed actions that were added during event handling.
+    // This handles cases like event handlers that create sub-recipes whose
+    // computations need their dependencies discovered before we build the workSet.
+    if (this.pendingDependencyCollection.size > 0) {
+      for (const action of this.pendingDependencyCollection) {
+        const populateDependencies = this.populateDependenciesCallbacks.get(
+          action,
+        );
+        if (populateDependencies) {
+          const depTx = this.runtime.edit();
+          try {
+            populateDependencies(depTx);
+          } catch (error) {
+            logger.debug("schedule", () => [
+              `[DEP-COLLECT-POST-EVENT] Error populating dependencies for ${
+                action.name || "anonymous"
+              }: ${error}`,
+            ]);
+          }
+          const log = txToReactivityLog(depTx);
+          depTx.abort();
+
+          const reads = this.setDependencies(action, log);
+          this.updateDependents(action, log);
+
+          // Set up triggers
+          const pathsByEntity = addressesToPathByEntity(reads);
+          const entities = new Set<SpaceAndURI>();
+
+          for (const [spaceAndURI, paths] of pathsByEntity) {
+            entities.add(spaceAndURI);
+            if (!this.triggers.has(spaceAndURI)) {
+              this.triggers.set(spaceAndURI, new Map());
+            }
+            const pathsWithValues = paths.map((path) =>
+              [
+                "value",
+                ...path,
+              ] as readonly MemoryAddressPathComponent[]
+            );
+            this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
+          }
+
+          this.cancels.set(action, () => {
+            for (const spaceAndURI of entities) {
+              this.triggers.get(spaceAndURI)?.delete(action);
+            }
+          });
+
+          logger.debug("schedule", () => [
+            `[DEP-COLLECT-POST-EVENT] Collected dependencies for ${
+              action.name || "anonymous"
+            }`,
+          ]);
+        }
+      }
+      this.pendingDependencyCollection.clear();
+    }
+
     // Build the work set based on scheduling mode
     let workSet: Set<Action>;
 
@@ -1683,6 +1921,11 @@ export class Scheduler {
         if (this.effects.has(action)) {
           workSet.add(action);
         }
+      }
+
+      // Add any actions that need to write to capture possible writes
+      for (const action of newActionsWithoutDependencies) {
+        workSet.add(action);
       }
 
       // Add computations that are blocking deferred events
@@ -1815,6 +2058,103 @@ export class Scheduler {
         );
       } else {
         await this.run(fn);
+      }
+    }
+
+    // In pull mode, process any newly subscribed actions and check if they
+    // affect the effects we just ran. This handles dynamic sub-recipes created
+    // during execution (e.g., lift nodes that return opaque refs).
+    if (this.pullMode && this.pendingDependencyCollection.size > 0) {
+      // Process dependency collection for new subscriptions
+      for (const action of this.pendingDependencyCollection) {
+        const populateDependencies = this.populateDependenciesCallbacks.get(
+          action,
+        );
+        if (populateDependencies) {
+          const depTx = this.runtime.edit();
+          try {
+            populateDependencies(depTx);
+          } catch (error) {
+            logger.debug("schedule", () => [
+              `[DEP-COLLECT-POST-EXEC] Error: ${error}`,
+            ]);
+          }
+          const log = txToReactivityLog(depTx);
+          depTx.abort();
+
+          // Set up dependencies and mightWrite
+          this.setDependencies(action, log);
+          this.updateDependents(action, log);
+
+          // Set up triggers
+          const reads = log.reads;
+          const pathsByEntity = addressesToPathByEntity(reads);
+          const entities = new Set<SpaceAndURI>();
+
+          for (const [spaceAndURI, paths] of pathsByEntity) {
+            entities.add(spaceAndURI);
+            if (!this.triggers.has(spaceAndURI)) {
+              this.triggers.set(spaceAndURI, new Map());
+            }
+            const pathsWithValues = paths.map((path) =>
+              [
+                "value",
+                ...path,
+              ] as readonly MemoryAddressPathComponent[]
+            );
+            this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
+          }
+
+          this.cancels.set(action, () => {
+            for (const spaceAndURI of entities) {
+              this.triggers.get(spaceAndURI)?.delete(action);
+            }
+          });
+        }
+      }
+      this.pendingDependencyCollection.clear();
+
+      // Now re-run collectDirtyDependencies for effects to find the new computations
+      const additionalWork = new Set<Action>();
+      for (const effect of this.effects) {
+        if (this.dependencies.has(effect)) {
+          this.collectDirtyDependencies(effect, additionalWork);
+        }
+      }
+
+      // If we found new work, execute it
+      if (additionalWork.size > 0) {
+        const additionalOrder = topologicalSort(
+          additionalWork,
+          this.dependencies,
+          this.mightWrite,
+          this.actionParent,
+        );
+
+        // Track actions that already ran in the main loop
+        const alreadyRunThisCycle = new Set(order);
+
+        for (const fn of additionalOrder) {
+          if (!this.dirty.has(fn)) continue;
+          if (alreadyRunThisCycle.has(fn)) continue;
+
+          this.pending.delete(fn);
+          this.clearDirty(fn);
+          this.unsubscribe(fn);
+
+          this.filterStats.executed++;
+          await this.run(fn);
+        }
+
+        // After POST-LOOP, clear dirty flags for any computations that already
+        // ran in the main loop but got re-dirtied by POST-LOOP storage writes.
+        // This prevents cascading re-runs - the main loop computations have
+        // already produced their outputs, so they don't need to run again.
+        for (const fn of alreadyRunThisCycle) {
+          if (this.dirty.has(fn) && !this.effects.has(fn)) {
+            this.clearDirty(fn);
+          }
+        }
       }
     }
 
