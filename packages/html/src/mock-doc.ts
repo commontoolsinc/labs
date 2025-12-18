@@ -80,6 +80,11 @@ export class MockDoc {
           return DomUtils.removeElement(this as any);
         },
       },
+      replaceWith: {
+        value(newNode: any) {
+          return DomUtils.replaceElement(this as any, newNode);
+        },
+      },
       innerHTML: {
         get() {
           return domserializer.render((this as any).children);
