@@ -210,6 +210,100 @@ deno task ct charm map -i claude.key -a https://toolshed.saga-castor.ts.net/ -s 
 deno task ct charm map -i claude.key -a https://toolshed.saga-castor.ts.net/ -s space --format dot
 ```
 
+### 6. Testing Patterns via CLI
+
+The CLI provides faster feedback than browser-based testing and isolates data logic from UI rendering issues.
+
+#### Why CLI Testing Matters
+
+- **Faster feedback** than browser refresh cycles
+- **Isolates data logic** from UI rendering issues
+- **Scriptable and repeatable** for regression testing
+- **Easier edge case testing** - just pipe JSON
+- **Verifies reactivity** - see computed values update immediately
+
+#### The setsrc Workflow
+
+**Critical:** After initial deployment, **always use `setsrc` instead of `new`**:
+
+```bash
+# First deployment only
+deno task ct charm new pattern.tsx -i claude.key -a http://localhost:8000 -s my-space
+# Output: Created charm bafy... ← Note this ID!
+
+# ALL subsequent iterations - update in place
+deno task ct charm setsrc bafy... pattern.tsx -i claude.key -a http://localhost:8000 -s my-space
+```
+
+**Why this matters:** Using `new` repeatedly clutters the space with multiple versions of the same pattern. `setsrc` updates the existing charm in place, keeping one authoritative version you can iterate on.
+
+#### Complete Testing Workflow
+
+**1. Deploy initial version:**
+```bash
+deno task ct charm new 01-data-layer.tsx -i claude.key -a http://localhost:8000 -s my-space
+# Output: Created charm bafyreia...
+# Save this ID for all subsequent commands
+```
+
+**2. Set test input data:**
+```bash
+# Set an array of expenses
+echo '[{"description":"Coffee","amount":5,"category":"food"},{"description":"Gas","amount":40,"category":"transport"}]' | \
+  deno task ct charm set bafyreia... expenses -i claude.key -a http://localhost:8000 -s my-space
+```
+
+**3. Verify computed outputs:**
+```bash
+# Check total calculation
+deno task ct charm get bafyreia... totalSpent -i claude.key -a http://localhost:8000 -s my-space
+# Expected: 45
+
+# Check category breakdown
+deno task ct charm get bafyreia... byCategory -i claude.key -a http://localhost:8000 -s my-space
+# Expected: {"food":5,"transport":40}
+```
+
+**4. Test handlers:**
+```bash
+# Call addExpense handler
+echo '{"description":"Lunch","amount":12,"category":"food"}' | \
+  deno task ct charm call bafyreia... addExpense -i claude.key -a http://localhost:8000 -s my-space
+
+# Verify it worked
+deno task ct charm get bafyreia... totalSpent -i claude.key -a http://localhost:8000 -s my-space
+# Expected: 57
+```
+
+**5. Inspect full state:**
+```bash
+deno task ct charm inspect bafyreia... -i claude.key -a http://localhost:8000 -s my-space
+```
+
+**6. Iterate on code:**
+```bash
+# Edit pattern file, then update the deployed charm:
+deno task ct charm setsrc bafyreia... 01-data-layer.tsx -i claude.key -a http://localhost:8000 -s my-space
+
+# Repeat from step 2 to verify changes
+```
+
+#### Testing Each Layer
+
+When following the layered development methodology (see **pattern-dev** skill):
+
+**Layer 1 (Data + Computeds):**
+- Set input data → verify all computed values are correct
+- Test edge cases: empty arrays, missing fields, large numbers
+
+**Layer 2 (Handlers):**
+- Call each handler → inspect state before/after
+- Test validation: invalid inputs, boundary conditions
+
+**Layer 3 (UI):**
+- Now use browser to verify visual rendering
+- Data flow is already verified, so UI issues are isolated
+
 ## Common Patterns and Gotchas
 
 ### Path Format

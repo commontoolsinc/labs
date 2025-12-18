@@ -43,7 +43,119 @@ Before starting pattern development:
 → **Deploy/link charms** → Use **ct** skill
 → **Understand pattern concepts** → Read `docs/common/PATTERNS.md` and `CELLS_AND_REACTIVITY.md`
 
+## Development Methodology
+
+For non-trivial patterns, follow a layered approach rather than building everything at once. This makes each piece independently testable and isolates bugs to specific layers.
+
+### Build in Layers
+
+Pattern development should proceed through distinct layers, each verified before moving to the next:
+
+**Layer 1: Data Model + Reactive Derivations**
+- Define schemas/interfaces
+- Build computed values and transformations
+- Create debug UI showing all cell values (see below)
+- Test via CLI: set inputs, verify computed outputs (see **ct** skill)
+
+**Layer 2: Mutation Handlers**
+- Add handlers one at a time
+- Test each handler via `charm call` before adding more
+- Debug UI shows before/after state
+- Verify handlers don't break existing computeds
+
+**Layer 3: Real UI**
+- Replace debug UI with production interface
+- Bidirectional bindings connect to already-verified cells
+- If UI misbehaves, issue is isolated to UI layer
+
+### Debug Visibility
+
+Every sub-pattern should include inline debug display that shows cell values:
+
+```typescript
+// Debug UI panel - include in every sub-pattern during development
+const DebugPanel = (
+  <div style={{ fontFamily: "monospace", fontSize: "12px", padding: "1rem", background: "#f5f5f5", marginTop: "1rem" }}>
+    <strong>Debug State</strong>
+    <div>items count: {computed(() => items.length)}</div>
+    <div>total: {totalAmount}</div>
+    <div>filtered count: {computed(() => filteredItems.length)}</div>
+    <hr />
+    <details>
+      <summary>Raw Data</summary>
+      <pre>{computed(() => JSON.stringify(items.get(), null, 2))}</pre>
+    </details>
+  </div>
+);
+
+// Include in pattern UI
+return {
+  [UI]: (
+    <div>
+      {/* ... your actual UI ... */}
+      {DebugPanel}
+    </div>
+  ),
+};
+```
+
+This makes reactivity **visible**. When you `charm set` input data via CLI, you immediately see which computed values update. Strip debug UI when moving to production.
+
+### Project Organization
+
+Complex patterns get their own subfolder with numbered files indicating build order:
+
+```
+packages/patterns/expense-tracker/
+├── 01-data-and-totals.tsx    # Layer 1: schemas + computeds
+├── 02-budget-tracking.tsx    # Layer 1b: adds budget logic
+├── 03-handlers.tsx           # Layer 2: mutation handlers
+├── 04-full-ui.tsx            # Layer 3: production UI
+└── schemas.tsx               # Shared type definitions (optional)
+```
+
+Each numbered file is a deployable sub-pattern. Build and verify each before moving to the next.
+
+### CLI-First Testing
+
+**Critical:** Use the ct CLI to verify each layer before touching browser.
+
+See the **ct** skill's "Testing Patterns via CLI" section for the complete workflow, but the key principle is:
+
+**Use `setsrc` not `new`** after initial deployment. This updates the existing charm rather than creating duplicates that clutter the space.
+
+```bash
+# First deployment
+deno task ct charm new 01-data-and-totals.tsx -i claude.key -a URL -s space
+# Note the charm ID
+
+# All subsequent iterations
+deno task ct charm setsrc <charm-id> 01-data-and-totals.tsx -i claude.key -a URL -s space
+```
+
+### Session Continuity
+
+**Important:** If context compacts during pattern development, immediately reload the **pattern-dev** and **ct** skills before continuing work.
+
 ## Building a New Pattern
+
+**Before you start:** Review the Development Methodology section above. For non-trivial patterns (multiple data types, computed values, handlers), follow the layered approach rather than building everything at once.
+
+### For Simple Patterns (single concern)
+
+Follow Steps 1-4 below for straightforward patterns.
+
+### For Complex Patterns (multiple concerns)
+
+Follow the layered methodology:
+1. Create project subfolder: `packages/patterns/[name]/`
+2. Build Layer 1: data + computeds + debug UI
+3. Deploy, test via CLI (see **ct** skill)
+4. Build Layer 2: handlers, test via CLI
+5. Build Layer 3: production UI
+6. Final deployment
+
+---
 
 ### Step 1: Start Simple
 
