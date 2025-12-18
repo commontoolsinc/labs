@@ -91,7 +91,8 @@ export const counterNestedComputedTotalsScenario: PatternIntegrationScenario<
     },
     {
       events: [
-        { stream: "groups.0.append", payload: { value: Number.NaN } },
+        { stream: "groups.0.append", payload: { value: Number.NaN } }, // fails
+        { stream: "groups.0.append", payload: { value: 0 } },
         { stream: "appendToGroup", payload: { index: 9, value: 100 } },
       ],
       expect: [
