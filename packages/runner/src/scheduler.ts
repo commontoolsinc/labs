@@ -1003,8 +1003,7 @@ export class Scheduler {
       if (computation === action) continue;
 
       const computationLog = this.dependencies.get(computation);
-      const computationWrites = this.mightWrite.get(computation) ??
-        computationLog?.writes ?? [];
+      const computationWrites = this.mightWrite.get(computation) ?? [];
       if (!computationLog) {
         continue;
       }
@@ -2147,8 +2146,7 @@ function topologicalSort(
   for (const actionA of actions) {
     const log = dependencies.get(actionA);
     if (!log) continue;
-    // Use mightWrite if available (includes declared writes even if first run writes undefined)
-    const writes = mightWrite.get(actionA) ?? log.writes;
+    const writes = mightWrite.get(actionA) ?? [];
     const graphA = graph.get(actionA)!;
     for (const write of writes) {
       for (const actionB of actions) {
