@@ -181,8 +181,6 @@ export class Scheduler {
   // Push-triggered filtering
   // Track what each action has ever written (grows over time)
   private mightWrite = new WeakMap<Action, IMemorySpaceAddress[]>();
-  // Track what push mode triggered this execution cycle
-  private pushTriggered = new Set<Action>();
   // Track actions scheduled for first time (bypass filter)
   private scheduledFirstTime = new Set<Action>();
   // Filter stats for diagnostics
@@ -761,9 +759,6 @@ export class Scheduler {
               ]);
 
               for (const action of triggeredActions) {
-                // Track what push mode triggered (for push-triggered filtering)
-                this.pushTriggered.add(action);
-
                 logger.debug("schedule", () => [
                   `[TRIGGERED] Action for ${spaceAndURI}/${
                     change.address.path.join("/")
@@ -954,8 +949,6 @@ export class Scheduler {
     if (this.dirty.has(action)) return; // Already dirty, avoid infinite recursion
 
     this.dirty.add(action);
-    // Treat dirty computations as triggered so they bypass filtering
-    this.pushTriggered.add(action);
 
     // Propagate to dependents transitively
     const deps = this.dependents.get(action);
@@ -1349,7 +1342,6 @@ export class Scheduler {
     findEffects(computation);
 
     for (const effect of toSchedule) {
-      this.pushTriggered.add(effect);
       this.scheduleWithDebounce(effect);
     }
   }
@@ -1582,31 +1574,6 @@ export class Scheduler {
   resetFilterStats(): void {
     this.filterStats = { filtered: 0, executed: 0 };
   }
-
-  /**
-   * Checks if an action should be filtered out (not run) based on push-triggered info.
-   * Returns true if the action should be skipped.
-   */
-  private shouldFilterAction(action: Action): boolean {
-    // Always run if no prior mightWrite (first time this action writes anything)
-    if (!this.mightWrite.has(action)) {
-      return false;
-    }
-
-    // In pull mode, filter based on pushTriggered
-    if (this.pullMode) {
-      if (this.dirty.has(action)) {
-        return false;
-      }
-      // If not triggered by actual storage changes, filter it out
-      if (!this.pushTriggered.has(action)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
   private handleError(error: Error, action: any) {
     const { charmId, spellId, recipeId, space } = getCharmMetadataFromFrame(
       (error as Error & { frame?: Frame }).frame,
@@ -1726,11 +1693,6 @@ export class Scheduler {
     const eventBlockingDeps = new Set<Action>();
 
     // Process next event from the event queue.
-
-    // TODO(seefeld): This should maybe run _after_ all pending actions, so it's
-    // based on the newest state. OTOH, if it has no dependencies and changes
-    // data, then this causes redundant runs. So really we should add this to
-    // the topological sort in the right way.
     const queuedEvent = this.eventQueue.shift();
     if (queuedEvent) {
       const { action, handler, event: eventValue, retriesLeft, onCommit } =
@@ -2026,20 +1988,6 @@ export class Scheduler {
         continue;
       }
 
-      // Push-triggered filtering:
-      // Skip actions not triggered by actual storage changes (but keep them dirty)
-      if (this.shouldFilterAction(fn)) {
-        logger.debug("schedule-filter", () => [
-          `[FILTER] Skipping action not triggered by actual changes: ${
-            fn.name || "anonymous"
-          }`,
-        ]);
-        this.filterStats.filtered++;
-        this.pending.delete(fn);
-        // Keep dirty flag - action may be needed in a future cycle
-        continue;
-      }
-
       // Clean up from pending/dirty before running
       this.pending.delete(fn);
       if (this.pullMode) {
@@ -2171,8 +2119,6 @@ export class Scheduler {
       this.loopCounter = new WeakMap();
       this.scheduled = false;
 
-      // Clear push-triggered tracking sets at end of execution cycle
-      this.pushTriggered.clear();
       this.scheduledFirstTime.clear();
     } else {
       // Keep scheduled = true since we're queuing another execution
