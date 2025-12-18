@@ -69,7 +69,7 @@ export function diffAndUpdate(
   return changes.length > 0;
 }
 
-type ChangeSet = {
+export type ChangeSet = {
   location: NormalizedFullLink;
   value: JSONValue | undefined;
 }[];
@@ -578,6 +578,34 @@ export function normalizeAndDiff(
 }
 
 /**
+ * Checks if a value contains data at a given path.
+ * Returns true if the path exists in the value (even if the value at that path is undefined).
+ */
+function hasPath(value: unknown, path: readonly string[]): boolean {
+  if (path.length === 0) return true;
+
+  if (value === null || value === undefined || typeof value !== "object") {
+    return false;
+  }
+
+  const [first, ...rest] = path;
+
+  if (Array.isArray(value)) {
+    const index = parseInt(first, 10);
+    if (isNaN(index) || index < 0 || index >= value.length) {
+      // Special case: "length" is always present on arrays
+      if (first === "length" && rest.length === 0) return true;
+      return false;
+    }
+    return hasPath(value[index], rest);
+  }
+
+  const obj = value as Record<string, unknown>;
+  if (!(first in obj)) return false;
+  return hasPath(obj[first], rest);
+}
+
+/**
  * Compacts a ChangeSet by removing redundant child path changes when a
  * parent path change already includes that data.
  *
@@ -588,12 +616,12 @@ export function normalizeAndDiff(
  * Key rules:
  * - Empty objects `{}` or arrays `[]` do NOT subsume children (children populate them)
  * - Parent deletions (`value: undefined`) DO subsume child changes
- * - Only non-empty parent values with actual content subsume children
+ * - Parent must actually CONTAIN the child's path for subsumption to occur
  *
  * @param changes - The original change set
  * @returns A compacted change set with redundant child paths removed
  */
-function compactChangeSet(changes: ChangeSet): ChangeSet {
+export function compactChangeSet(changes: ChangeSet): ChangeSet {
   if (changes.length <= 1) return changes;
 
   // Group by document using safe separator (JSON.stringify avoids key collisions)
@@ -628,15 +656,16 @@ function compactChangeSet(changes: ChangeSet): ChangeSet {
         if (parent.path.length >= path.length) return false;
         if (!parent.path.every((seg, i) => seg === path[i])) return false;
 
-        // Parent path is prefix - but does parent VALUE contain this child?
-        // Only subsume if parent has non-empty value
+        // Parent path is prefix - check if parent VALUE contains this child's path
         const parentVal = parent.value;
         if (parentVal === null || parentVal === undefined) return false;
         if (typeof parentVal !== "object") return false;
-        if (Array.isArray(parentVal) && parentVal.length === 0) return false;
-        if (Object.keys(parentVal as object).length === 0) return false;
 
-        return true; // Parent has content, subsumes child
+        // Calculate the relative path from parent to child
+        const relativePath = path.slice(parent.path.length);
+
+        // Only subsume if parent's value actually contains data at the child's relative path
+        return hasPath(parentVal, relativePath);
       });
 
       // Also check: is this child subsumed by a DELETION of parent?

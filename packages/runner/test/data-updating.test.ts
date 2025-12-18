@@ -4,6 +4,8 @@ import { ID, ID_FIELD, JSONSchema } from "../src/builder/types.ts";
 import {
   addCommonIDfromObjectID,
   applyChangeSet,
+  type ChangeSet,
+  compactChangeSet,
   diffAndUpdate,
   normalizeAndDiff,
 } from "../src/data-updating.ts";
@@ -1216,6 +1218,227 @@ describe("data-updating", () => {
           .name,
       )
         .toBe("New Item");
+    });
+  });
+});
+
+/**
+ * Tests for compactChangeSet - a pure function that removes redundant child
+ * path changes when a parent path change already includes that data.
+ */
+describe("compactChangeSet", () => {
+  // Helper to create a change at a specific path
+  const makeChange = (
+    path: string[],
+    value: unknown,
+    docId: `${string}:${string}` = "test:doc",
+    docSpace: `did:${string}:${string}` = "did:test:space",
+  ): ChangeSet[0] => ({
+    location: {
+      id: docId,
+      space: docSpace,
+      type: "application/json",
+      path,
+    },
+    value: value as any,
+  });
+
+  describe("basic cases", () => {
+    it("should return single change unchanged", () => {
+      const changes: ChangeSet = [makeChange(["foo"], { a: 1 })];
+      const result = compactChangeSet(changes);
+      expect(result).toHaveLength(1);
+      expect(result[0]).toBe(changes[0]);
+    });
+
+    it("should return empty array for empty input", () => {
+      const result = compactChangeSet([]);
+      expect(result).toHaveLength(0);
+    });
+
+    it("should return all changes when paths are siblings (no parent-child)", () => {
+      const changes: ChangeSet = [
+        makeChange(["a"], 1),
+        makeChange(["b"], 2),
+        makeChange(["c"], 3),
+      ];
+      const result = compactChangeSet(changes);
+      expect(result).toHaveLength(3);
+    });
+  });
+
+  describe("subsumption cases", () => {
+    it("should subsume child when parent has matching content", () => {
+      // Parent writes {a: 1} to 'foo', child writes 1 to 'foo.a'
+      // Child write IS redundant because parent already sets 'a'
+      const changes: ChangeSet = [
+        makeChange(["foo"], { a: 1 }),
+        makeChange(["foo", "a"], 1),
+      ];
+      const result = compactChangeSet(changes);
+      expect(result).toHaveLength(1);
+      expect(result[0].location.path).toEqual(["foo"]);
+    });
+
+    it("should NOT subsume child when parent sets different key (BUG TEST)", () => {
+      // Parent writes {a: 1} to 'foo', child writes 99 to 'foo.b' (DIFFERENT key!)
+      // Child write is NOT redundant - it sets a key not in parent!
+      //
+      // IMPORTANT: This test documents the EXPECTED behavior.
+      // If this fails, it reveals the bug in compactChangeSet.
+      const changes: ChangeSet = [
+        makeChange(["foo"], { a: 1 }),
+        makeChange(["foo", "b"], 99),
+      ];
+      const result = compactChangeSet(changes);
+
+      // We EXPECT both changes to be kept because parent doesn't include 'b'
+      // If this assertion fails with length 1, the bug exists.
+      expect(result).toHaveLength(2);
+      expect(result[0].location.path).toEqual(["foo"]);
+      expect(result[1].location.path).toEqual(["foo", "b"]);
+    });
+
+    it("should subsume child when parent is deleted (undefined)", () => {
+      // Deleting parent also deletes all children
+      const changes: ChangeSet = [
+        makeChange(["foo"], undefined),
+        makeChange(["foo", "a"], 1),
+        makeChange(["foo", "b", "c"], 2),
+      ];
+      const result = compactChangeSet(changes);
+      expect(result).toHaveLength(1);
+      expect(result[0].location.path).toEqual(["foo"]);
+      expect(result[0].value).toBeUndefined();
+    });
+  });
+
+  describe("empty parent cases", () => {
+    it("should NOT subsume when parent is empty object {}", () => {
+      // Empty object doesn't include any children
+      const changes: ChangeSet = [
+        makeChange(["foo"], {}),
+        makeChange(["foo", "a"], 1),
+      ];
+      const result = compactChangeSet(changes);
+      expect(result).toHaveLength(2);
+    });
+
+    it("should NOT subsume when parent is empty array []", () => {
+      // Empty array doesn't include any children
+      const changes: ChangeSet = [
+        makeChange(["items"], []),
+        makeChange(["items", "0"], "first"),
+      ];
+      const result = compactChangeSet(changes);
+      expect(result).toHaveLength(2);
+    });
+
+    it("should NOT subsume when parent is null", () => {
+      const changes: ChangeSet = [
+        makeChange(["foo"], null),
+        makeChange(["foo", "a"], 1),
+      ];
+      const result = compactChangeSet(changes);
+      expect(result).toHaveLength(2);
+    });
+
+    it("should NOT subsume when parent is primitive", () => {
+      // Primitive can't have children
+      const changes: ChangeSet = [
+        makeChange(["foo"], 42),
+        makeChange(["foo", "a"], 1),
+      ];
+      const result = compactChangeSet(changes);
+      expect(result).toHaveLength(2);
+    });
+  });
+
+  describe("multi-document cases", () => {
+    it("should not subsume across different documents", () => {
+      const changes: ChangeSet = [
+        makeChange(["foo"], { a: 1 }, "test:doc1"),
+        makeChange(["foo", "a"], 1, "test:doc2"),
+      ];
+      const result = compactChangeSet(changes);
+      expect(result).toHaveLength(2);
+    });
+
+    it("should not subsume across different spaces", () => {
+      const changes: ChangeSet = [
+        makeChange(["foo"], { a: 1 }, "test:doc", "did:test:space1"),
+        makeChange(["foo", "a"], 1, "test:doc", "did:test:space2"),
+      ];
+      const result = compactChangeSet(changes);
+      expect(result).toHaveLength(2);
+    });
+  });
+
+  describe("deep nesting", () => {
+    it("should subsume grandchild when grandparent has content", () => {
+      const changes: ChangeSet = [
+        makeChange(["a"], { b: { c: 1 } }),
+        makeChange(["a", "b"], { c: 1 }),
+        makeChange(["a", "b", "c"], 1),
+      ];
+      const result = compactChangeSet(changes);
+      expect(result).toHaveLength(1);
+      expect(result[0].location.path).toEqual(["a"]);
+    });
+
+    it("should handle mixed nesting depths correctly", () => {
+      // Parent sets {x: 1}, children set other keys at various depths
+      const changes: ChangeSet = [
+        makeChange(["root"], { x: 1 }),
+        makeChange(["root", "y"], 2), // NOT in parent - should be kept
+        makeChange(["root", "z", "deep"], 3), // NOT in parent - should be kept
+      ];
+      const result = compactChangeSet(changes);
+
+      // With the fix, only children whose paths exist in parent are subsumed
+      // Parent {x: 1} doesn't contain 'y' or 'z', so all 3 changes are kept
+      expect(result).toHaveLength(3);
+      expect(result[0].location.path).toEqual(["root"]);
+      expect(result[1].location.path).toEqual(["root", "y"]);
+      expect(result[2].location.path).toEqual(["root", "z", "deep"]);
+    });
+  });
+
+  describe("array index paths", () => {
+    it("should handle array index paths correctly", () => {
+      const changes: ChangeSet = [
+        makeChange(["items"], [1, 2, 3]),
+        makeChange(["items", "0"], 1),
+        makeChange(["items", "1"], 2),
+      ];
+      const result = compactChangeSet(changes);
+      // Parent array has content, so children should be subsumed
+      expect(result).toHaveLength(1);
+      expect(result[0].location.path).toEqual(["items"]);
+    });
+
+    it("should handle array length changes", () => {
+      const changes: ChangeSet = [
+        makeChange(["items"], [1, 2]),
+        makeChange(["items", "length"], 2),
+      ];
+      const result = compactChangeSet(changes);
+      // Array has content, length change is subsumed
+      expect(result).toHaveLength(1);
+    });
+  });
+
+  describe("order independence", () => {
+    it("should work regardless of input order (child before parent)", () => {
+      // Changes provided in child-first order
+      const changes: ChangeSet = [
+        makeChange(["foo", "a"], 1),
+        makeChange(["foo"], { a: 1 }),
+      ];
+      const result = compactChangeSet(changes);
+      // Should still compact to just the parent
+      expect(result).toHaveLength(1);
+      expect(result[0].location.path).toEqual(["foo"]);
     });
   });
 });
