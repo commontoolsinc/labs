@@ -2,7 +2,7 @@
 import { Cell, Default, handler, lift, recipe, str } from "commontools";
 
 interface FallbackDefaultsArgs {
-  slots: Default<(number | undefined)[], []>;
+  slots: Default<(number | null)[], []>;
   fallback: Default<number, 0>;
   expectedLength: Default<number, 0>;
 }
@@ -38,7 +38,7 @@ const updateSlot = handler(
   (
     event: SlotUpdateEvent | undefined,
     context: {
-      slots: Cell<(number | undefined)[]>;
+      slots: Cell<(number | null)[]>;
       fallback: Cell<number>;
       expectedLength: Cell<number>;
     },
@@ -76,10 +76,10 @@ const updateSlot = handler(
 export const counterWithFallbackDefaults = recipe<FallbackDefaultsArgs>(
   "Counter With Fallback Defaults",
   ({ slots, fallback, expectedLength }) => {
-    const normalizedFallback = lift((value: number | undefined) =>
+    const normalizedFallback = lift((value: number | null) =>
       sanitizeNumber(value, 0)
     )(fallback);
-    const normalizedExpected = lift((value: number | undefined) => {
+    const normalizedExpected = lift((value: number | null) => {
       if (isFiniteNumber(value) && value >= 0) {
         return Math.floor(value);
       }

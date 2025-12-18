@@ -3,13 +3,13 @@ import { Cell, derive, lift, NAME, OpaqueRef, recipe, UI } from "commontools";
 
 export type MentionableCharm = {
   [NAME]?: string;
-  mentioned: MentionableCharm[];
-  backlinks: MentionableCharm[];
+  mentioned?: MentionableCharm[];
+  backlinks?: MentionableCharm[];
 };
 
 export type WriteableBacklinks = {
-  mentioned: WriteableBacklinks[];
-  backlinks: Cell<WriteableBacklinks[]>;
+  mentioned?: WriteableBacklinks[];
+  backlinks?: Cell<WriteableBacklinks[]>;
 };
 
 type Input = {
