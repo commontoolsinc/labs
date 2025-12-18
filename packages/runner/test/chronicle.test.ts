@@ -563,15 +563,16 @@ describe("Chronicle", () => {
       freshChronicle.write({ ...rootAddress, path: ["age"] }, 35);
       freshChronicle.write({ ...rootAddress, path: ["city"] }, "NYC");
 
-      // Check novelty contains our writes
+      // Check novelty contains merged root (CT-1123 optimization)
+      // With merged root optimization, all writes are accumulated into a single root attestation
       const noveltyEntries = [...freshChronicle.novelty()];
-      expect(noveltyEntries).toHaveLength(3);
-      expect(noveltyEntries.map((n) => n.address.path)).toEqual([
-        ["name"],
-        ["age"],
-        ["city"],
-      ]);
-      expect(noveltyEntries.map((n) => n.value)).toEqual(["Bob", 35, "NYC"]);
+      expect(noveltyEntries).toHaveLength(1);
+      expect(noveltyEntries[0].address.path).toEqual([]);
+      expect(noveltyEntries[0].value).toEqual({
+        name: "Bob",
+        age: 35,
+        city: "NYC",
+      });
 
       // History should still be empty (no reads yet)
       expect([...freshChronicle.history()]).toEqual([]);

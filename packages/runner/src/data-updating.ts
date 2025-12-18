@@ -578,6 +578,92 @@ export function normalizeAndDiff(
 }
 
 /**
+ * Compacts a ChangeSet by removing redundant child path changes when a
+ * parent path change already includes that data.
+ *
+ * This optimization reduces the number of writes when setting nested structures.
+ * For example, if we set `foo = {a: 1, b: 2}` and also set `foo/a = 1`,
+ * the child write is redundant since the parent already contains it.
+ *
+ * Key rules:
+ * - Empty objects `{}` or arrays `[]` do NOT subsume children (children populate them)
+ * - Parent deletions (`value: undefined`) DO subsume child changes
+ * - Only non-empty parent values with actual content subsume children
+ *
+ * @param changes - The original change set
+ * @returns A compacted change set with redundant child paths removed
+ */
+function compactChangeSet(changes: ChangeSet): ChangeSet {
+  if (changes.length <= 1) return changes;
+
+  // Group by document using safe separator (JSON.stringify avoids key collisions)
+  const byDocument = new Map<string, ChangeSet>();
+  for (const change of changes) {
+    const key = JSON.stringify([
+      change.location.space,
+      change.location.id,
+      change.location.type,
+    ]);
+    if (!byDocument.has(key)) byDocument.set(key, []);
+    byDocument.get(key)!.push(change);
+  }
+
+  const result: ChangeSet = [];
+  for (const docChanges of byDocument.values()) {
+    // Sort by path length (shortest first - parents before children)
+    const sorted = docChanges.toSorted(
+      (a, b) => a.location.path.length - b.location.path.length,
+    );
+
+    // Track parent paths that can subsume children
+    // Empty {} or [] don't subsume - children populate them!
+    const subsumingPaths: Array<{ path: readonly string[]; value: unknown }> =
+      [];
+
+    for (const change of sorted) {
+      const path = change.location.path;
+
+      // Check if subsumed by a parent with actual content
+      const isSubsumed = subsumingPaths.some((parent) => {
+        if (parent.path.length >= path.length) return false;
+        if (!parent.path.every((seg, i) => seg === path[i])) return false;
+
+        // Parent path is prefix - but does parent VALUE contain this child?
+        // Only subsume if parent has non-empty value
+        const parentVal = parent.value;
+        if (parentVal === null || parentVal === undefined) return false;
+        if (typeof parentVal !== "object") return false;
+        if (Array.isArray(parentVal) && parentVal.length === 0) return false;
+        if (Object.keys(parentVal as object).length === 0) return false;
+
+        return true; // Parent has content, subsumes child
+      });
+
+      // Also check: is this child subsumed by a DELETION of parent?
+      const isDeletedByParent = subsumingPaths.some((parent) => {
+        if (parent.path.length >= path.length) return false;
+        if (!parent.path.every((seg, i) => seg === path[i])) return false;
+        return parent.value === undefined; // Parent deletion subsumes child
+      });
+
+      if (!isSubsumed && !isDeletedByParent) {
+        result.push(change);
+        // Track this path for potential child subsumption
+        subsumingPaths.push({ path, value: change.value });
+      }
+    }
+  }
+
+  diffLogger.debug(
+    "compact",
+    () =>
+      `[compactChangeSet] Compacted ${changes.length} changes to ${result.length}`,
+  );
+
+  return result;
+}
+
+/**
  * Apply a change set to all mentioned documents.
  *
  * @param changes - The change set to apply.
@@ -587,7 +673,9 @@ export function applyChangeSet(
   tx: IExtendedStorageTransaction,
   changes: ChangeSet,
 ) {
-  for (const change of changes) {
+  // Compact changes to reduce redundant writes
+  const compacted = compactChangeSet(changes);
+  for (const change of compacted) {
     tx.writeValueOrThrow(change.location, change.value);
   }
 }
