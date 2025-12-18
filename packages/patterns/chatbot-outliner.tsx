@@ -2,15 +2,15 @@
 import {
   BuiltInLLMMessage,
   Cell,
+  computed,
   Default,
-  derive,
   handler,
   ifElse,
   JSONSchema,
   NAME,
   navigateTo,
   OpaqueRef,
-  recipe,
+  pattern,
   UI,
   wish,
 } from "commontools";
@@ -53,30 +53,25 @@ const handleCharmLinkClick = handler<
 });
 
 function getMentionable() {
-  return derive<MentionableCharm[], MentionableCharm[]>(
-    wish<MentionableCharm[]>("#mentionable"),
-    (i) => i,
-  );
+  const mentionable = wish<MentionableCharm[]>("#mentionable");
+  return computed(() => mentionable);
 }
 
-export const Page = recipe<PageInput>(
-  "Page",
-  ({ outline }) => {
-    const mentionable = getMentionable();
+export const Page = pattern<PageInput>(({ outline }) => {
+  const mentionable = getMentionable();
 
-    return {
-      [NAME]: "Page",
-      [UI]: (
-        <ct-outliner
-          $value={outline as any}
-          $mentionable={mentionable}
-          oncharm-link-click={handleCharmLinkClick({})}
-        />
-      ),
-      outline,
-    };
-  },
-);
+  return {
+    [NAME]: "Page",
+    [UI]: (
+      <ct-outliner
+        $value={outline as any}
+        $mentionable={mentionable}
+        oncharm-link-click={handleCharmLinkClick({})}
+      />
+    ),
+    outline,
+  };
+});
 
 type LLMTestInput = {
   title?: Cell<Default<string, "LLM Test">>;
@@ -119,8 +114,7 @@ const appendOutlinerNode = handler<
   },
 );
 
-export default recipe<LLMTestInput, LLMTestResult>(
-  "Outliner",
+export default pattern<LLMTestInput, LLMTestResult>(
   ({ title, expandChat, messages, outline }) => {
     const tools = {
       appendOutlinerNode: {

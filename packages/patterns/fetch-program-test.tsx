@@ -2,10 +2,10 @@
 import {
   Cell,
   compileAndRun,
-  derive,
+  computed,
   fetchProgram,
   NAME,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 
@@ -13,7 +13,7 @@ import {
  * Test pattern for fetchProgram builtin.
  * Fetches a program from a URL and compiles it.
  */
-export default recipe("Fetch Program Test", () => {
+export default pattern(() => {
   // URL to a simple pattern file
   const url = Cell.of(
     "https://raw.githubusercontent.com/commontoolsinc/labs/main/packages/patterns/counter.tsx",
@@ -25,9 +25,9 @@ export default recipe("Fetch Program Test", () => {
 
   // Step 2: Compile and run the fetched program
   // Explicitly map program fields to compileAndRun params
-  const compileParams = derive(program, (p) => ({
-    files: p?.files ?? [],
-    main: p?.main ?? "",
+  const compileParams = computed(() => ({
+    files: program?.files ?? [],
+    main: program?.main ?? "",
     input: { value: 10 },
   }));
   const { pending: compilePending, result, error: compileError } =
@@ -51,7 +51,7 @@ export default recipe("Fetch Program Test", () => {
         {result && (
           <div style="color: green">
             Successfully compiled recipe! Charm ID: {result}
-            <pre>{derive(result, r => JSON.stringify(r, null, 2))}</pre>
+            <pre>{computed(() => JSON.stringify(result, null, 2))}</pre>
           </div>
         )}
       </div>

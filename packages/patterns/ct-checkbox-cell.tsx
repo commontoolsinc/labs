@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, ifElse, NAME, recipe, UI } from "commontools";
+import { Cell, Default, handler, ifElse, NAME, pattern, UI } from "commontools";
 
 interface CheckboxDemoInput {
   simpleEnabled: Cell<Default<boolean, false>>;
@@ -8,8 +8,7 @@ interface CheckboxDemoInput {
 
 interface CheckboxDemoOutput extends CheckboxDemoInput {}
 
-export default recipe<CheckboxDemoInput, CheckboxDemoOutput>(
-  "ct-checkbox demo",
+export default pattern<CheckboxDemoInput, CheckboxDemoOutput>(
   ({ simpleEnabled, trackedEnabled }) => {
     // Handler for checkbox changes - only needed when you want additional logic
     const toggleWithLogging = handler<

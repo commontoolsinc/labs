@@ -7,7 +7,7 @@ import {
   NAME,
   navigateTo,
   OpaqueRef,
-  recipe,
+  pattern,
   wish,
 } from "commontools";
 
@@ -162,8 +162,7 @@ type BacklinksIndex = {
   mentionable: MentionableCharm[];
 };
 
-export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
-  "Chatbot + Note",
+export default pattern<ChatbotNoteInput, ChatbotNoteResult>(
   ({ title, messages }) => {
     const allCharms = wish<Default<MentionableCharm[], []>>("#allCharms");
     const index = wish<Default<BacklinksIndex, { mentionable: [] }>>(

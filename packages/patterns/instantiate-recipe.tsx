@@ -1,12 +1,12 @@
 /// <cts-enable />
 import {
   Cell,
+  computed,
   Default,
   handler,
   NAME,
   navigateTo,
-  recipe,
-  str,
+  pattern,
   UI,
 } from "commontools";
 
@@ -39,9 +39,9 @@ function nth(value: number) {
   return `${value}th`;
 }
 
-export const Counter = recipe<RecipeState>((state) => {
+export const Counter = pattern<RecipeState>((state) => {
   return {
-    [NAME]: str`Simple counter: ${state.value}`,
+    [NAME]: computed(() => `Simple counter: ${state.value}`),
     [UI]: (
       <div>
         <ct-button onClick={decrement(state)}>
@@ -77,21 +77,18 @@ const newCounter = handler<InputEvent, Record<string, never>>((_, __) => {
   return navigateTo(charm);
 });
 
-export default recipe<FactoryInput, FactoryOutput>(
-  "Counter Factory",
-  (_) => {
-    return {
-      [NAME]: "Counter Factory",
-      [UI]: (
-        <div>
-          <ct-message-input
-            button-text="Add"
-            placeholder="New counter"
-            appearance="rounded"
-            onct-send={newCounter({})}
-          />
-        </div>
-      ),
-    };
-  },
-);
+export default pattern<FactoryInput, FactoryOutput>((_) => {
+  return {
+    [NAME]: "Counter Factory",
+    [UI]: (
+      <div>
+        <ct-message-input
+          button-text="Add"
+          placeholder="New counter"
+          appearance="rounded"
+          onct-send={newCounter({})}
+        />
+      </div>
+    ),
+  };
+});

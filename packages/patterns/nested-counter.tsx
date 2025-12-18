@@ -1,15 +1,15 @@
 /// <cts-enable />
-import { Default, NAME, recipe, str, UI } from "commontools";
+import { computed, Default, NAME, pattern, UI } from "commontools";
 import { decrement, increment, nth, previous } from "./counter-handlers.ts";
 
 interface RecipeState {
   value: Default<number, 0>;
 }
 
-export const Counter = recipe<RecipeState>((state) => {
+export const Counter = pattern<RecipeState>((state) => {
   return {
-    // str is used so we can directly interpolate the OpaqueRef<number> into the string
-    [NAME]: str`Simple counter: ${state.value}`,
+    // computed() is used to create reactive derived values
+    [NAME]: computed(() => `Simple counter: ${state.value}`),
     [UI]: (
       <div>
         {
@@ -33,19 +33,19 @@ export const Counter = recipe<RecipeState>((state) => {
 });
 
 /*
-This demonstrates a pattern of passing a Cell to a sub-recipe and keeping the value in sync between all locations.
-It also demonstrates that any recipe can be invoked using JSX syntax.
+This demonstrates a pattern of passing a Cell to a sub-pattern and keeping the value in sync between all locations.
+It also demonstrates that any pattern can be invoked using JSX syntax.
 */
-export default recipe<RecipeState>((state) => {
-  // A recipe can be 'invoked' directly
+export default pattern<RecipeState>((state) => {
+  // A pattern can be 'invoked' directly
   const counter = Counter({ value: state.value });
 
   return {
-    [NAME]: str`Double counter: ${state.value}`,
+    [NAME]: computed(() => `Double counter: ${state.value}`),
     [UI]: (
       <div>
-        {/* Recipes can also be 'invoked' via JSX*/}
-        {/* These methods of rendering are functionally equivalent, you may prefer the explicit case for non-UI recipes */}
+        {/* Patterns can also be 'invoked' via JSX*/}
+        {/* These methods of rendering are functionally equivalent, you may prefer the explicit case for non-UI patterns */}
         <Counter value={state.value} />
         {counter}
       </div>

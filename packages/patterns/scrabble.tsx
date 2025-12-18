@@ -12,13 +12,12 @@
 
 import {
   Cell,
+  computed,
   Default,
-  derive,
   handler,
   NAME,
   navigateTo,
   pattern,
-  str,
   UI,
 } from "commontools";
 
@@ -262,19 +261,19 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
     const player2NameInput = Cell.of("");
 
     // Derive player data reactively from playersJson
-    const player1 = derive(playersJson, (json: string) => {
-      const players = parsePlayersJson(json);
+    const player1 = computed(() => {
+      const players = parsePlayersJson(playersJson.get());
       return players[0] || null;
     });
-    const player2 = derive(playersJson, (json: string) => {
-      const players = parsePlayersJson(json);
+    const player2 = computed(() => {
+      const players = parsePlayersJson(playersJson.get());
       return players[1] || null;
     });
-    const player1Name = derive(player1, (p: Player | null) => p?.name || null);
-    const player2Name = derive(player2, (p: Player | null) => p?.name || null);
+    const player1Name = computed(() => player1?.name || null);
+    const player2Name = computed(() => player2?.name || null);
 
     return {
-      [NAME]: str`${gameName} - Lobby`,
+      [NAME]: computed(() => `${gameName} - Lobby`),
       [UI]: (
         <div
           style={{

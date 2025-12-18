@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, derive, NAME, pattern, UI } from "commontools";
+import { Cell, Default, NAME, pattern, UI } from "commontools";
 import Suggestion from "./suggestion.tsx";
 
 export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
@@ -24,16 +24,12 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
           <h1>Suggestion Tester</h1>
           <h2>Counter</h2>
           <ct-cell-context $cell={suggestion} label="Counter Suggestion">
-            {derive(suggestion, (s) => {
-              return s?.result ?? "waiting...";
-            })}
+            {suggestion.result ? suggestion.result : "waiting..."}
           </ct-cell-context>
 
           <h2>Note</h2>
           <ct-cell-context $cell={suggestion2} label="Note Suggestion">
-            {derive(suggestion2, (s) => {
-              return s?.result ?? "waiting...";
-            })}
+            {suggestion2.result ? suggestion2.result : "waiting..."}
           </ct-cell-context>
         </div>
       ),

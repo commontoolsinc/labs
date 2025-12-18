@@ -4,13 +4,12 @@ import {
   Cell,
   compileAndRun,
   computed,
-  derive,
   fetchData,
   fetchProgram,
   handler,
   ifElse,
   navigateTo,
-  recipe,
+  pattern,
   wish,
 } from "commontools";
 
@@ -27,11 +26,11 @@ type CalculatorRequest = {
   base?: number;
 };
 
-export const calculator = recipe<
+export const calculator = pattern<
   CalculatorRequest,
   string | { error: string }
 >(({ expression, base }) => {
-  return derive({ expression, base }, ({ expression, base }) => {
+  return computed(() => {
     const sanitized = expression.replace(/[^0-9+\-*/().\s]/g, "");
     let sanitizedBase = Number(base);
     if (
@@ -116,7 +115,7 @@ type SearchWebResult = {
   }[];
 };
 
-export const searchWeb = recipe<
+export const searchWeb = pattern<
   SearchQuery,
   SearchWebResult | { error: string }
 >(({ query }) => {
@@ -157,7 +156,7 @@ type ReadWebResult = {
   };
 };
 
-export const readWebpage = recipe<
+export const readWebpage = pattern<
   ReadWebRequest,
   ReadWebResult | { error: string }
 >(({ url }) => {
@@ -184,7 +183,7 @@ type ToolsInput = {
   list: ListItem[];
 };
 
-export default recipe<ToolsInput>(({ list }) => {
+export default pattern<ToolsInput>(({ list }) => {
   const tools: Record<string, BuiltInLLMTool> = {
     search_web: {
       pattern: searchWeb,
@@ -217,20 +216,21 @@ type FetchAndRunPatternInput = {
   url: string;
   args: Cell<any>;
 };
-export const fetchAndRunPattern = recipe<FetchAndRunPatternInput>(
+
+export const fetchAndRunPattern = pattern<FetchAndRunPatternInput>(
   ({ url, args }) => {
     const { pending: _fetchPending, result: program, error: _fetchError } =
       fetchProgram({ url });
 
-    // Use derive to safely handle when program is undefined/pending
+    // Use computed to safely handle when program is undefined/pending
     // Filter out undefined elements to handle race condition where array proxy
     // pre-allocates with undefined before populating elements
-    const compileParams = derive(program, (p) => ({
-      files: (p?.files ?? []).filter(
-        (f): f is { name: string; contents: string } =>
-          f !== undefined && f !== null && typeof f.name === "string",
+    const compileParams = computed(() => ({
+      // Note: Type predicate removed - doesn't work with OpaqueCell types after transformation
+      files: (program?.files ?? []).filter(
+        (f) => f !== undefined && f !== null && typeof f.name === "string",
       ),
-      main: p?.main ?? "",
+      main: program?.main ?? "",
       input: args,
     }));
 
@@ -254,7 +254,7 @@ export const fetchAndRunPattern = recipe<FetchAndRunPatternInput>(
  * Pass the "@link" you get at `cell` to navigate to the pattern's view.
  */
 type NavigateToPatternInput = { cell: Cell<any> }; // Hack to steer LLM
-export const navigateToPattern = recipe<NavigateToPatternInput>(
+export const navigateToPattern = pattern<NavigateToPatternInput>(
   ({ cell }) => {
     const success = navigateTo(cell);
 
@@ -269,7 +269,7 @@ export const navigateToPattern = recipe<NavigateToPatternInput>(
  */
 type ListPatternIndexInput = Record<string, never>;
 
-export const listPatternIndex = recipe<ListPatternIndexInput>(
+export const listPatternIndex = pattern<ListPatternIndexInput>(
   ({ _ }) => {
     const patternIndexUrl = wish<{ url: string }>({ query: "#pattern-index" });
 

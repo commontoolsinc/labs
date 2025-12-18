@@ -15,7 +15,7 @@ import {
 
 // Template for the AI to reference
 const TEMPLATE = `/// <cts-enable />
-import { Cell, derive, handler, Default, NAME, pattern, UI } from "commontools";
+import { Cell, computed, handler, Default, NAME, pattern, UI } from "commontools";
 
 interface Input {
   value: Default<number, 0>;
@@ -31,7 +31,7 @@ const decrement = handler<unknown, { value: Cell<number> }>(
 
 export default pattern<Input>(({ value }) => {
   return {
-    [NAME]: derive(value, (v) => \`Counter: \${v}\`),
+    [NAME]: computed(() => \`Counter: \${value}\`),
     [UI]: (
       <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
         <ct-button onClick={decrement({ value })}>-</ct-button>
@@ -48,12 +48,13 @@ const SYSTEM_PROMPT =
 
 IMPORTANT RULES:
 1. Start with: /// <cts-enable />
-2. Import from "commontools": Cell, Default, derive, handler, NAME, pattern, UI, computed, ifElse
+2. Import from "commontools": Cell, Default, computed, handler, NAME, pattern, UI, ifElse
 3. Use the pattern<Input>() or pattern<Input, Output>() API
 4. For arrays that need mutation, use Cell<T[]> in the interface
 5. Use $checked, $value for bidirectional binding on ct-checkbox, ct-input
 6. Use inline handlers for simple operations, handler() for complex ones
 7. Always return [NAME] and [UI] from the pattern
+8. Use computed() for derived values and data transformations
 
 TEMPLATE FOR REFERENCE:
 ${TEMPLATE}
