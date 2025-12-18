@@ -53,7 +53,10 @@ import type {
   MemorySpace,
   URI,
 } from "./storage/interface.ts";
-import { ignoreReadForScheduling } from "./scheduler.ts";
+import {
+  ignoreReadForScheduling,
+  markReadAsPotentialWrite,
+} from "./scheduler.ts";
 import { FunctionCache } from "./function-cache.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
@@ -1045,11 +1048,28 @@ export class Runner {
                   tx,
                 ),
               );
-              // Create a sink to make this an effect that re-runs when inputs change
+
+              const rawResult = tx.readValueOrThrow(
+                resultCell.getAsNormalizedFullLink(),
+                { meta: ignoreReadForScheduling },
+              );
+
+              const resultRedirects = findAllWriteRedirectCells(
+                rawResult,
+                processCell,
+              );
+
+              // Create effect that re-runs when inputs change
               // (nothing else would read from it, otherwise)
-              const cancelSink = resultCell.sink(() => {});
+              const readResultAction: Action = (tx) =>
+                resultRedirects.forEach((link) => tx.readValueOrThrow(link));
+              const cancel = this.runtime.scheduler.subscribe(
+                readResultAction,
+                readResultAction,
+                { isEffect: true },
+              );
               addCancel(() => {
-                cancelSink();
+                cancel();
                 this.stop(resultCell);
               });
             }
@@ -1222,11 +1242,30 @@ export class Runner {
         module,
         recipe,
       });
+
+      // Create populateDependencies callback to discover what cells the action reads
+      // and writes. Both are needed for pull-based scheduling:
+      // - reads: to know when to re-run the action (input dependencies)
+      // - writes: so collectDirtyDependencies() can find this computation when
+      //   an effect needs its outputs
+      const populateDependencies = (depTx: IExtendedStorageTransaction) => {
+        // Capture read dependencies - use the pre-computed reads list
+        // Note: We DON'T run fn(depTx) here because that would execute
+        // user code with side effects during dependency discovery
+        for (const read of reads) {
+          this.runtime.getCellFromLink(read, undefined, depTx)?.get();
+        }
+        // Capture write dependencies by marking outputs as potential writes
+        for (const output of writes) {
+          // Reading with markReadAsPotentialWrite registers this as a write dependency
+          this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
+            meta: markReadAsPotentialWrite,
+          });
+        }
+      };
+
       addCancel(
-        this.runtime.scheduler.subscribe(
-          wrappedAction,
-          { reads, writes },
-        ),
+        this.runtime.scheduler.subscribe(wrappedAction, populateDependencies),
       );
     }
   }
@@ -1263,6 +1302,9 @@ export class Runner {
       mappedInputBindings,
       processCell,
     );
+    // outputCells tracks what cells this action writes to. This is needed for
+    // pull-based scheduling so collectDirtyDependencies() can find computations
+    // that write to cells being read by effects.
     const outputCells = findAllWriteRedirectCells(
       mappedOutputBindings,
       processCell,
@@ -1291,12 +1333,29 @@ export class Runner {
       this.runtime,
     );
 
+    // Create populateDependencies callback to discover what cells the action reads
+    // and writes. Both are needed for pull-based scheduling:
+    // - reads: to know when to re-run the action (input dependencies)
+    // - writes: so collectDirtyDependencies() can find this computation when
+    //   an effect needs its outputs
+    const populateDependencies = (depTx: IExtendedStorageTransaction) => {
+      // Capture read dependencies
+      for (const input of inputCells) {
+        this.runtime.getCellFromLink(input, undefined, depTx)?.get();
+      }
+      // Capture write dependencies by marking outputs as potential writes
+      for (const output of outputCells) {
+        // Reading with markReadAsPotentialWrite registers this as a write dependency
+        this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
+          meta: markReadAsPotentialWrite,
+        });
+      }
+    };
+
     addCancel(
-      this.runtime.scheduler.subscribe(
-        action,
-        { reads: inputCells, writes: outputCells },
-        { isEffect: module.isEffect },
-      ),
+      this.runtime.scheduler.subscribe(action, populateDependencies, {
+        isEffect: module.isEffect,
+      }),
     );
   }
 

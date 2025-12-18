@@ -664,7 +664,7 @@ describe("queueEvent with auto-start", () => {
     runtime.scheduler.queueEvent(eventsLink, { type: "click", x: 10 });
 
     // Wait for processing
-    await runtime.idle();
+    await resultCell.pull();
     await new Promise((resolve) => setTimeout(resolve, 100));
     await runtime.idle();
 

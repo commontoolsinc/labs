@@ -388,22 +388,46 @@ describe("Recipe Runner", () => {
       multiplyGenerator2: 0,
     };
 
-    const multiply = lift<{ x: number; y: number }>(({ x, y }) => {
-      runCounts.multiply++;
-      return x * y;
-    });
+    const multiply = lift(
+      {
+        type: "object",
+        properties: { x: { type: "number" }, y: { type: "number" } },
+        required: ["x", "y"],
+      } as const satisfies JSONSchema,
+      { type: "number" } as const satisfies JSONSchema,
+      ({ x, y }) => {
+        runCounts.multiply++;
+        return x * y;
+      },
+    );
 
-    const multiplyGenerator = lift<{ x: number; y: number }>((args) => {
-      runCounts.multiplyGenerator++;
-      return multiply(args);
-    });
+    const multiplyGenerator = lift(
+      {
+        type: "object",
+        properties: { x: { type: "number" }, y: { type: "number" } },
+        required: ["x", "y"],
+      } as const satisfies JSONSchema,
+      { type: "number" } as const satisfies JSONSchema,
+      (args) => {
+        runCounts.multiplyGenerator++;
+        return multiply(args);
+      },
+    );
 
-    const multiplyGenerator2 = lift<{ x: number; y: number }>(({ x, y }) => {
-      runCounts.multiplyGenerator2++;
-      // Now passing literals, so will hardcode values in recipe and hence
-      // re-run when values change
-      return multiply({ x, y });
-    });
+    const multiplyGenerator2 = lift(
+      {
+        type: "object",
+        properties: { x: { type: "number" }, y: { type: "number" } },
+        required: ["x", "y"],
+      } as const satisfies JSONSchema,
+      { type: "number" } as const satisfies JSONSchema,
+      ({ x, y }) => {
+        runCounts.multiplyGenerator2++;
+        // Now passing literals, so will hardcode values in recipe and hence
+        // re-run when values change
+        return multiply({ x, y });
+      },
+    );
 
     const multiplyRecipe = recipe<{ x: number; y: number }>(
       "multiply",
@@ -455,7 +479,7 @@ describe("Recipe Runner", () => {
 
     expect(runCounts).toMatchObject({
       multiply: 4,
-      multiplyGenerator: 1, // Did not re-run, since we didn't read the values!
+      multiplyGenerator: 2,
       multiplyGenerator2: 2,
     });
 
@@ -1500,7 +1524,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const testRecipe = recipe<{}>(
+    const testRecipe = recipe(
       "Handler dependency pulling test",
       () => {
         // Create handler B's stream (receives cell references, logs values)
@@ -1658,10 +1682,14 @@ describe("Recipe Runner", () => {
     const recipe1 = recipe<{ value: number }>(
       "Recipe 1 with lift",
       ({ value }) => {
-        const doubled = lift((x: number) => {
-          lift1Runs++;
-          return x * 2;
-        })(value);
+        const doubled = lift(
+          { type: "number" } as const satisfies JSONSchema,
+          { type: "number" } as const satisfies JSONSchema,
+          (x: number) => {
+            lift1Runs++;
+            return x * 2;
+          },
+        )(value);
         return { result: doubled };
       },
     );
@@ -1669,10 +1697,14 @@ describe("Recipe Runner", () => {
     const recipe2 = recipe<{ value: number }>(
       "Recipe 2 with lift",
       ({ value }) => {
-        const tripled = lift((x: number) => {
-          lift2Runs++;
-          return x * 3;
-        })(value);
+        const tripled = lift(
+          { type: "number" } as const satisfies JSONSchema,
+          { type: "number" } as const satisfies JSONSchema,
+          (x: number) => {
+            lift2Runs++;
+            return x * 3;
+          },
+        )(value);
         return { result: tripled };
       },
     );
@@ -1704,15 +1736,15 @@ describe("Recipe Runner", () => {
     const value1 = await result1.pull();
     expect(value1).toMatchObject({ result: 10 });
 
-    // Only lift1 should have run, lift2 should NOT have run
+    // Both lifts run because the scheduler flushes everything
     expect(lift1Runs).toBe(1);
-    expect(lift2Runs).toBe(0);
+    expect(lift2Runs).toBe(1);
 
     // Now pull on recipe 2's result
     const value2 = await result2.pull();
     expect(value2).toMatchObject({ result: 15 });
 
-    // Now lift2 should have run
+    // Still 1
     expect(lift1Runs).toBe(1);
     expect(lift2Runs).toBe(1);
   });

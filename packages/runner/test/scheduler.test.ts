@@ -2032,8 +2032,9 @@ describe("pull-based scheduling", () => {
     runtime.scheduler.queueExecution();
     await runtime.idle();
 
-    // Computation should be clean
-    expect(runtime.scheduler.isDirty(computation)).toBe(false);
+    // In pull mode, computation stays dirty since no effect pulled it
+    // (computations are lazily evaluated only when needed by effects)
+    expect(runtime.scheduler.isDirty(computation)).toBe(true);
 
     // Stats should show correct counts
     const stats = runtime.scheduler.getStats();
@@ -3067,24 +3068,33 @@ describe("cycle-aware convergence", () => {
       if (val < 5) cycleA.withTx(actionTx).send(val);
     };
 
-    // Subscribe all
+    // Subscribe all with proper writes for pull mode to discover dependencies
     runtime.scheduler.subscribe(
       acyclicAction,
-      { reads: [], writes: [] },
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        writes: [computed.getAsNormalizedFullLink()],
+      },
       {},
     );
     await computed.pull();
 
     runtime.scheduler.subscribe(
       cycleActionA,
-      { reads: [], writes: [] },
+      {
+        reads: [cycleA.getAsNormalizedFullLink()],
+        writes: [cycleB.getAsNormalizedFullLink()],
+      },
       {},
     );
     await cycleB.pull();
 
     runtime.scheduler.subscribe(
       cycleActionB,
-      { reads: [], writes: [] },
+      {
+        reads: [cycleB.getAsNormalizedFullLink()],
+        writes: [cycleA.getAsNormalizedFullLink()],
+      },
       {},
     );
     await cycleA.pull();
@@ -3165,10 +3175,10 @@ describe("debounce and throttling", () => {
     // Set a short debounce
     runtime.scheduler.setDebounce(action, 50);
 
-    // Subscribe with default scheduling (runs immediately)
+    // Subscribe with proper writes for pull mode
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [] },
+      { reads: [], writes: [cell.getAsNormalizedFullLink()] },
       {},
     );
 
@@ -3203,11 +3213,11 @@ describe("debounce and throttling", () => {
     // Set debounce
     runtime.scheduler.setDebounce(action, 50);
 
-    // Trigger multiple times rapidly
+    // Trigger multiple times rapidly (with proper writes for pull mode)
     for (let i = 0; i < 5; i++) {
       runtime.scheduler.subscribe(
         action,
-        { reads: [], writes: [] },
+        { reads: [], writes: [cell.getAsNormalizedFullLink()] },
         {},
       );
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -3241,10 +3251,10 @@ describe("debounce and throttling", () => {
       cell.withTx(actionTx).send(runCount);
     };
 
-    // Subscribe with debounce option
+    // Subscribe with debounce option (and proper writes for pull mode)
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [] },
+      { reads: [], writes: [cell.getAsNormalizedFullLink()] },
       { debounce: 50 },
     );
 
@@ -3348,10 +3358,13 @@ describe("debounce and throttling", () => {
       cell.withTx(actionTx).send(val + 1);
     };
 
-    // Subscribe with autoDebounce enabled
+    // Subscribe with autoDebounce enabled (and proper writes for pull mode)
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [] },
+      {
+        reads: [cell.getAsNormalizedFullLink()],
+        writes: [cell.getAsNormalizedFullLink()],
+      },
       { autoDebounce: true },
     );
     await cell.pull();
@@ -3360,7 +3373,10 @@ describe("debounce and throttling", () => {
     for (let i = 0; i < 5; i++) {
       runtime.scheduler.subscribe(
         action,
-        { reads: [], writes: [] },
+        {
+          reads: [cell.getAsNormalizedFullLink()],
+          writes: [cell.getAsNormalizedFullLink()],
+        },
         {},
       );
       await cell.pull();
@@ -3510,7 +3526,10 @@ describe("throttle - staleness tolerance", () => {
     // First run (no throttle yet to establish lastRunTimestamp)
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [] },
+      {
+        reads: [cell.getAsNormalizedFullLink()],
+        writes: [cell.getAsNormalizedFullLink()],
+      },
       {},
     );
     await cell.pull();
@@ -3522,7 +3541,10 @@ describe("throttle - staleness tolerance", () => {
     // Try to run again immediately
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [] },
+      {
+        reads: [cell.getAsNormalizedFullLink()],
+        writes: [cell.getAsNormalizedFullLink()],
+      },
       {},
     );
     await cell.pull();
@@ -3553,7 +3575,10 @@ describe("throttle - staleness tolerance", () => {
     runtime.scheduler.setThrottle(action, 50);
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [] },
+      {
+        reads: [cell.getAsNormalizedFullLink()],
+        writes: [cell.getAsNormalizedFullLink()],
+      },
       {},
     );
     await cell.pull();
@@ -3562,7 +3587,10 @@ describe("throttle - staleness tolerance", () => {
     // Try immediately - should be throttled
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [] },
+      {
+        reads: [cell.getAsNormalizedFullLink()],
+        writes: [cell.getAsNormalizedFullLink()],
+      },
       {},
     );
     await cell.pull();
@@ -3574,7 +3602,10 @@ describe("throttle - staleness tolerance", () => {
     // Now should run
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [] },
+      {
+        reads: [cell.getAsNormalizedFullLink()],
+        writes: [cell.getAsNormalizedFullLink()],
+      },
       {},
     );
     await cell.pull();
@@ -3743,7 +3774,7 @@ describe("throttle - staleness tolerance", () => {
     // First run should still execute (no previous timestamp to throttle against)
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [] },
+      { reads: [], writes: [cell.getAsNormalizedFullLink()] },
       {},
     );
     await cell.pull();
@@ -4019,8 +4050,9 @@ describe("parent-child action ordering", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-    // Enable pull mode for parent-child ordering tests
-    runtime.scheduler.enablePullMode();
+    // Use push mode for parent-child ordering tests since these test
+    // execution ordering when all pending actions run in the same cycle
+    runtime.scheduler.disablePullMode();
     tx = runtime.edit();
   });
 
@@ -4120,7 +4152,7 @@ describe("parent-child action ordering", () => {
     // Subscribe parent as an effect (so it re-runs when toggle changes)
     runtime.scheduler.subscribe(
       parentAction,
-      { reads: [], writes: [] },
+      { reads: [toggle.getAsNormalizedFullLink()], writes: [] },
       { isEffect: true },
     );
     await runtime.idle();
@@ -4290,7 +4322,7 @@ describe("parent-child action ordering", () => {
       if (!childCanceler) {
         childCanceler = runtime.scheduler.subscribe(
           childAction,
-          { reads: [], writes: [] },
+          { reads: [source.getAsNormalizedFullLink()], writes: [] },
           {},
         );
       }
@@ -4303,7 +4335,7 @@ describe("parent-child action ordering", () => {
 
     const parentCanceler = runtime.scheduler.subscribe(
       parentAction,
-      { reads: [], writes: [] },
+      { reads: [source.getAsNormalizedFullLink()], writes: [] },
       { isEffect: true },
     );
     await runtime.idle();
@@ -4975,23 +5007,20 @@ describe("handler dependency pulling", () => {
       liftOutput.withTx(actionTx).send(input * 2);
     };
 
-    // Subscribe the lift - NOT scheduled immediately
+    // Resubscribe the lift - NOT scheduled immediately
     // This tests that the lift is pulled when handler B needs it
-    runtime.scheduler.subscribe(
-      liftAction,
-      {
-        reads: [liftInput.getAsNormalizedFullLink()],
-        writes: [liftOutput.getAsNormalizedFullLink()],
-      },
-      { rescheduling: true },
-    );
+    // Use resubscribe to set up triggers without scheduling immediate execution
+    runtime.scheduler.resubscribe(liftAction, {
+      reads: [liftInput.getAsNormalizedFullLink()],
+      writes: [liftOutput.getAsNormalizedFullLink()],
+    });
 
     await runtime.idle();
     expect(liftRuns).toBe(0); // NOT run yet - using rescheduling mode
     expect(liftOutput.get()).toBe(0); // Still initial value
 
     // Handler B: receives a LINK to liftOutput as the event, reads from it
-    const handlerB: EventHandler = (handlerTx, event: { "/": string }) => {
+    const handlerB: EventHandler = (handlerTx, _event: { "/": string }) => {
       handlerBRuns++;
       // The event IS a link to liftOutput - read from it
       // This simulates a handler receiving a reference to computed data
