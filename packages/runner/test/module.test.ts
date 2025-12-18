@@ -10,7 +10,7 @@ import {
   type Module,
   type OpaqueRef,
 } from "../src/builder/types.ts";
-import { action, handler, lift } from "../src/builder/module.ts";
+import { action, derive, handler, lift } from "../src/builder/module.ts";
 import { opaqueRef } from "../src/builder/opaque-ref.ts";
 import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -253,6 +253,33 @@ describe("module", () => {
           void data;
         });
       }).toThrow("action() must be used with CTS enabled");
+    });
+  });
+
+  describe("source location tracking", () => {
+    it("attaches source location to function implementation via .src", () => {
+      const fn = (x: number) => x * 2;
+      lift(fn);
+
+      // The implementation's .src should now be the source location
+      expect((fn as { src?: string }).src).toMatch(/module\.test\.ts:\d+:\d+$/);
+    });
+
+    it("attaches source location to handler implementations", () => {
+      const fn = (event: MouseEvent, props: { x: number }) => {
+        props.x = event.clientX;
+      };
+      handler(fn, { proxy: true });
+
+      expect((fn as { src?: string }).src).toMatch(/module\.test\.ts:\d+:\d+$/);
+    });
+
+    it("attaches source location through derive", () => {
+      const fn = (x: number) => x * 2;
+      derive(opaqueRef(5), fn);
+
+      // derive calls lift internally, should still track the original function
+      expect((fn as { src?: string }).src).toMatch(/module\.test\.ts:\d+:\d+$/);
     });
   });
 });
