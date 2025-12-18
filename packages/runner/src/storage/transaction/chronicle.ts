@@ -110,9 +110,6 @@ export class Chronicle {
    * state in the replica, and if it is, it adds this change to the set of
    * claims in the `#novelty` map.
    *
-   * OPTIMIZATION (CT-1123): Merges writes immediately into a single root
-   * attestation instead of storing individual path writes.
-   *
    * @param address the address for the value being written
    * @param value the value to add to the #novelty map
    * @returns a Result containing the new attestation or error
@@ -136,40 +133,33 @@ export class Chronicle {
     const state = this.load(address);
     const loaded = attest(state);
 
-    // Get or create Changes for this document
-    const changes = this.#novelty.edit(address);
+    // Validate against current state (replica + any overlapping novelty)
+    const rebase = this.rebase(loaded);
 
-    // Get the current merged state: either from existing novelty or from replica
-    // This is the base we'll apply the write to
-    const existingRoot = changes.getRoot();
-    const baseState = existingRoot ?? loaded;
+    if (rebase.error) {
+      return rebase;
+    }
 
     // Check if document exists when trying to write to nested path
     // Only return NotFound if we're accessing a path on a non-existent document
     // and there's no novelty write that would have created it
-    if (baseState.value === undefined && address.path.length > 0) {
-      const path = baseState.address.path;
+    if (rebase.ok.value === undefined && address.path.length > 0) {
+      const path = rebase.ok.address.path;
       return {
         error: NotFound(
-          baseState,
+          rebase.ok,
           address,
           path.length > 0 ? path.slice(0, -1) : undefined,
         ),
       };
     }
 
-    // Apply the write to the merged state
-    const writeResult = write(baseState, address, value);
-    if (writeResult.error) {
-      return { error: writeResult.error };
+    const { error } = write(rebase.ok, address, value);
+    if (error) {
+      return { error };
     }
 
-    // Store the merged root (writeResult.ok already has path: [] from baseState)
-    // Track the written path for proper read short-circuiting
-    changes.setRoot(writeResult.ok, address.path);
-
-    // Return the merged root attestation
-    return { ok: writeResult.ok };
+    return this.#novelty.claim({ address, value });
   }
 
   read(
@@ -487,11 +477,8 @@ class Novelty {
   }
 
   /**
-   * Claims a new write invariant by merging it into the document's root.
-   *
-   * OPTIMIZATION (CT-1123): Simplified to just call put() which now handles
-   * all merging internally. The Changes class maintains a single merged root
-   * attestation instead of multiple path-based entries.
+   * Claims a new write invariant, merging it with existing parent invariants
+   * when possible instead of keeping both parent and child separately.
    */
   claim(
     invariant: IAttestation,
@@ -499,14 +486,40 @@ class Novelty {
     IAttestation,
     IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
   > {
-    const changes = this.edit(invariant.address);
+    const candidates = this.edit(invariant.address);
 
-    // Changes.put() handles all merging into the root
-    changes.put(invariant);
+    for (const candidate of candidates) {
+      // If the candidate is a parent of the new invariant, merge the new invariant
+      // into the existing parent invariant.
+      if (Address.includes(candidate.address, invariant.address)) {
+        const { error, ok: merged } = write(
+          candidate,
+          invariant.address,
+          invariant.value,
+        );
 
-    // Return the merged root state
-    const root = changes.getRoot();
-    return { ok: root ?? invariant };
+        if (error) {
+          return { error };
+        } else {
+          candidates.put(merged);
+          return { ok: merged };
+        }
+      }
+    }
+
+    // If we did not find any parents we may have some children
+    // that will be replaced by this invariant
+    // Since we are altering the collection, we iterate over a copy.
+    for (const candidate of [...candidates]) {
+      if (Address.includes(invariant.address, candidate.address)) {
+        candidates.delete(candidate);
+      }
+    }
+
+    // Store this invariant
+    candidates.put(invariant);
+
+    return { ok: invariant };
   }
 
   [Symbol.iterator]() {
@@ -528,124 +541,68 @@ class Novelty {
 }
 
 /**
- * Changes tracks all writes to a single document as a merged root attestation.
- *
- * OPTIMIZATION (CT-1123): Instead of storing individual writes at different paths
- * and replaying them on read/commit (O(N²)), we merge all writes immediately into
- * a single root attestation. This makes each write O(1) instead of O(N).
+ * Changes is essentially a map whose keys are the path, and whose values
+ * are the IAttestation objects.
  */
 class Changes {
-  #root: IAttestation | undefined; // Single merged state at root path
-  #writtenPaths: Set<string> = new Set(); // Track which paths were explicitly written
+  #model: Map<string, IAttestation> = new Map();
   address: IMemoryAddress;
-
   constructor(address: Omit<IMemoryAddress, "path">) {
     this.address = { ...address, path: [] };
   }
 
-  /**
-   * Gets the current merged root attestation, or undefined if no writes yet.
-   */
-  getRoot(): IAttestation | undefined {
-    return this.#root;
-  }
-
-  /**
-   * Sets the merged root attestation after applying a write.
-   * The attestation's address is normalized to root path [].
-   */
-  setRoot(attestation: IAttestation, writtenPath: readonly string[]): void {
-    this.#root = {
-      ...attestation,
-      address: { ...attestation.address, path: [] },
-    };
-    // Track the path that was written to
-    this.#writtenPaths.add(JSON.stringify(writtenPath));
-  }
-
-  /**
-   * Gets attestation covering the requested path by reading from merged root.
-   * Only returns if:
-   * 1. We have a merged root
-   * 2. There's a write at or above the requested path (parent path covers children)
-   *
-   * This preserves the original behavior where reads only short-circuit if
-   * there's an overlapping write, ensuring history capture works correctly.
-   */
   get(at: IMemoryAddress["path"]): IAttestation | undefined {
-    if (!this.#root) return undefined;
-
-    // Check if any written path is a prefix of (or equal to) the requested path
-    // This matches the original behavior where parent writes cover child reads
-    for (const pathStr of this.#writtenPaths) {
-      const writtenPath = JSON.parse(pathStr) as string[];
-      // Check if writtenPath is a prefix of 'at'
-      if (
-        writtenPath.length <= at.length &&
-        writtenPath.every((p, i) => p === at[i])
-      ) {
-        return this.#root;
+    let candidate: undefined | IAttestation = undefined;
+    for (const invariant of this.#model.values()) {
+      // For exact match or if invariant is parent of requested path
+      if (invariant.address.path.every((p, i) => p === at[i])) {
+        const size = invariant.address.path.length;
+        if ((candidate?.address?.path?.length ?? -1) < size) {
+          candidate = invariant;
+        }
       }
     }
 
-    return undefined;
+    return candidate;
   }
 
-  // Legacy methods for compatibility during transition - kept for Novelty.claim()
   put(invariant: IAttestation) {
-    const path = invariant.address.path;
-    // Merge into root instead of storing separately
-    if (!this.#root) {
-      this.setRoot(invariant, path);
-    } else {
-      // Apply write to existing root
-      const { ok } = write(this.#root, invariant.address, invariant.value);
-      if (ok) {
-        this.setRoot(ok, path);
-      } else {
-        // Fallback: just set as root (shouldn't happen in normal flow)
-        this.setRoot(invariant, path);
-      }
-    }
+    this.#model.set(JSON.stringify(invariant.address.path), invariant);
   }
-
-  delete(_invariant: IAttestation) {
-    // With single root, delete is a no-op - the root contains everything
-    // If caller wants to delete a path, they should write undefined to it
+  delete(invariant: IAttestation) {
+    this.#model.delete(JSON.stringify(invariant.address.path));
   }
 
   /**
-   * Returns the merged root state. No rebase needed since we merge on write.
-   * This method is kept for compatibility but just returns the root.
+   * Applies all the overlapping write invariants onto a given source invariant.
    */
+
   rebase(
     source: IAttestation,
   ): Result<
     IAttestation,
     IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
   > {
-    if (!this.#root) {
-      return { ok: source };
+    let merged = source;
+    for (const change of this.#model.values()) {
+      if (Address.includes(source.address, change.address)) {
+        const { error, ok } = write(
+          merged,
+          change.address,
+          change.value,
+        );
+        if (error) {
+          return { error };
+        } else {
+          merged = ok;
+        }
+      }
     }
 
-    // The root already contains all merged writes, but we need to apply
-    // the root's value onto the source (in case source was loaded fresh)
-    const { error, ok } = write(
-      source,
-      this.#root.address,
-      this.#root.value,
-    );
-
-    if (error) {
-      return { error };
-    }
-
-    return { ok };
+    return { ok: merged };
   }
 
-  *[Symbol.iterator](): IterableIterator<IAttestation> {
-    if (this.#root) {
-      yield this.#root;
-    }
+  [Symbol.iterator](): IterableIterator<IAttestation> {
+    return this.#model.values();
   }
 }
