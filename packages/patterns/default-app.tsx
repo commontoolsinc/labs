@@ -10,11 +10,8 @@ import {
   wish,
 } from "commontools";
 
-import Chatbot from "./chatbot.tsx";
-import ChatbotOutliner from "./chatbot-outliner.tsx";
 import { default as Note } from "./note.tsx";
 import BacklinksIndex, { type MentionableCharm } from "./backlinks-index.tsx";
-import ChatList from "./chatbot-list-view.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
 import NotesImportExport from "./notes-import-export.tsx";
 
@@ -66,31 +63,6 @@ const toggleFab = handler<any, { fabExpanded: Cell<boolean> }>(
   },
 );
 
-const spawnChatList = handler<void, void>((_, __) => {
-  return navigateTo(ChatList({
-    selectedCharm: { charm: undefined },
-    charmsList: [],
-  }));
-});
-
-const spawnChatbot = handler<void, void>((_, __) => {
-  return navigateTo(Chatbot({
-    messages: [],
-    tools: undefined,
-  }));
-});
-
-const spawnChatbotOutliner = handler<void, void>((_, __) => {
-  return navigateTo(ChatbotOutliner({
-    title: "Chatbot Outliner",
-    expandChat: false,
-    messages: [],
-    outline: {
-      root: { body: "", children: [], attachments: [] },
-    },
-  }));
-});
-
 const spawnNote = handler<void, void>((_, __) => {
   return navigateTo(Note({
     title: "New Note",
@@ -118,12 +90,6 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
     [UI]: (
       <ct-screen>
         <ct-keybind
-          code="KeyN"
-          alt
-          preventDefault
-          onct-keybind={spawnChatList()}
-        />
-        <ct-keybind
           code="KeyO"
           meta
           preventDefault
@@ -139,29 +105,30 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
         <ct-toolbar slot="header" sticky>
           <div slot="start">
             <ct-button
-              onClick={spawnChatList()}
-            >
-              📂 Chat List
-            </ct-button>
-            <ct-button
-              onClick={spawnChatbot()}
-            >
-              💬 Chatbot
-            </ct-button>
-            <ct-button
-              onClick={spawnChatbotOutliner()}
-            >
-              📝 Chatbot Outliner
-            </ct-button>
-            <ct-button
+              variant="ghost"
               onClick={spawnNote()}
+              style={{
+                padding: "12px 20px",
+                fontSize: "22px",
+                borderRadius: "12px",
+                minHeight: "48px",
+              }}
             >
-              📄 Note
+              📄 New Note
             </ct-button>
           </div>
           <div slot="end">
-            <ct-button onClick={spawnNotesImportExport()}>
-              📦
+            <ct-button
+              variant="ghost"
+              onClick={spawnNotesImportExport()}
+              style={{
+                padding: "12px 20px",
+                fontSize: "22px",
+                borderRadius: "12px",
+                minHeight: "48px",
+              }}
+            >
+              ⚙️ Import/Export
             </ct-button>
           </div>
         </ct-toolbar>
