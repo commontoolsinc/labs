@@ -105,7 +105,7 @@ const removeItem = handler<
 
 ## Handler Types in Output Interfaces
 
-**Critical Rule:** Handlers exposed in Output interfaces must be typed as `Stream<T>`, NOT `OpaqueRef<T>`.
+Handlers exposed in Output interfaces must be typed as `Stream<T>`, NOT `OpaqueRef<T>`.
 
 ```typescript
 // ✅ CORRECT - Use Stream<T> for handlers in Output
@@ -125,6 +125,34 @@ interface Output {
 - `Stream<T>` represents a write-only channel for triggering actions
 - Other charms can call these handlers via `.send()` when linked
 - `OpaqueRef<T>` is for reactive references in `.map()` contexts, not handlers
+
+### Creating Streams (Bound Handlers)
+
+A bound handler IS a `Stream<EventType>`. Don't try to create streams directly:
+
+```typescript
+// ❌ WRONG - Stream.of() and .subscribe() don't exist
+const addItem: Stream<{ title: string }> = Stream.of();
+addItem.subscribe(({ title }) => { ... });  // Error!
+
+// ✅ CORRECT - Define handler, bind with state
+const addItemHandler = handler<
+  { title: string },      // Event type
+  { items: Cell<Item[]> } // State type
+>(({ title }, { items }) => {
+  items.push({ title });
+});
+
+// Binding returns Stream<{ title: string }>
+const addItem = addItemHandler({ items });
+
+// Export in return
+return {
+  addItem,  // This IS Stream<{ title: string }>
+};
+```
+
+The bound handler is the stream. Other patterns or charms can send events to it via linking.
 
 ---
 

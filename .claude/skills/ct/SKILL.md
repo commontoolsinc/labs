@@ -232,10 +232,33 @@ deno task ct charm new pattern.tsx -i claude.key -a http://localhost:8000 -s my-
 # Output: Created charm bafy... ← Note this ID!
 
 # ALL subsequent iterations - update in place
-deno task ct charm setsrc bafy... pattern.tsx -i claude.key -a http://localhost:8000 -s my-space
+deno task ct charm setsrc --charm bafy... pattern.tsx -i claude.key -a http://localhost:8000 -s my-space
 ```
 
-**Why this matters:** Using `new` repeatedly clutters the space with multiple versions of the same pattern. `setsrc` updates the existing charm in place, keeping one authoritative version you can iterate on.
+**Why this matters:** Using `new` repeatedly on the same file clutters the space with duplicate charms. `setsrc` updates the existing charm in place.
+
+**When to use each:**
+- **`setsrc`**: Iterating on a single file/charm (same code evolving)
+- **`charm new`**: Deploying separate sub-patterns for independent testing
+
+See the **pattern-dev** skill for guidance on single-file evolution vs pattern composition approaches.
+
+#### Stale Computed Values After `charm set`
+
+**Gotcha:** `charm set` updates data but does NOT trigger computed re-evaluation. The CLI may return stale computed values until you run `charm step`.
+
+```bash
+# This workflow returns STALE computed values:
+echo '[...]' | deno task ct charm set --charm ID expenses ...
+deno task ct charm get --charm ID totalSpent ...  # May return old value!
+
+# Fix: Run charm step after set to trigger re-evaluation
+echo '[...]' | deno task ct charm set --charm ID expenses ...
+deno task ct charm step --charm ID ...  # Runs scheduling step, triggers recompute
+deno task ct charm get --charm ID totalSpent ...  # Now returns correct value
+```
+
+`charm step` runs a single scheduling step (start → idle → synced → stop) which pushes changes through the reactive graph.
 
 #### Complete Testing Workflow
 
@@ -246,21 +269,24 @@ deno task ct charm new 01-data-layer.tsx -i claude.key -a http://localhost:8000 
 # Save this ID for all subsequent commands
 ```
 
-**2. Set test input data:**
+**2. Set test input data + trigger recompute:**
 ```bash
 # Set an array of expenses
 echo '[{"description":"Coffee","amount":5,"category":"food"},{"description":"Gas","amount":40,"category":"transport"}]' | \
-  deno task ct charm set bafyreia... expenses -i claude.key -a http://localhost:8000 -s my-space
+  deno task ct charm set --charm bafyreia... expenses -i claude.key -a http://localhost:8000 -s my-space
+
+# Trigger computed re-evaluation (required for fresh values!)
+deno task ct charm step --charm bafyreia... -i claude.key -a http://localhost:8000 -s my-space
 ```
 
 **3. Verify computed outputs:**
 ```bash
 # Check total calculation
-deno task ct charm get bafyreia... totalSpent -i claude.key -a http://localhost:8000 -s my-space
+deno task ct charm get --charm bafyreia... totalSpent -i claude.key -a http://localhost:8000 -s my-space
 # Expected: 45
 
 # Check category breakdown
-deno task ct charm get bafyreia... byCategory -i claude.key -a http://localhost:8000 -s my-space
+deno task ct charm get --charm bafyreia... byCategory -i claude.key -a http://localhost:8000 -s my-space
 # Expected: {"food":5,"transport":40}
 ```
 
@@ -268,22 +294,22 @@ deno task ct charm get bafyreia... byCategory -i claude.key -a http://localhost:
 ```bash
 # Call addExpense handler
 echo '{"description":"Lunch","amount":12,"category":"food"}' | \
-  deno task ct charm call bafyreia... addExpense -i claude.key -a http://localhost:8000 -s my-space
+  deno task ct charm call --charm bafyreia... addExpense -i claude.key -a http://localhost:8000 -s my-space
 
 # Verify it worked
-deno task ct charm get bafyreia... totalSpent -i claude.key -a http://localhost:8000 -s my-space
+deno task ct charm get --charm bafyreia... totalSpent -i claude.key -a http://localhost:8000 -s my-space
 # Expected: 57
 ```
 
 **5. Inspect full state:**
 ```bash
-deno task ct charm inspect bafyreia... -i claude.key -a http://localhost:8000 -s my-space
+deno task ct charm inspect --charm bafyreia... -i claude.key -a http://localhost:8000 -s my-space
 ```
 
 **6. Iterate on code:**
 ```bash
 # Edit pattern file, then update the deployed charm:
-deno task ct charm setsrc bafyreia... 01-data-layer.tsx -i claude.key -a http://localhost:8000 -s my-space
+deno task ct charm setsrc --charm bafyreia... 01-data-layer.tsx -i claude.key -a http://localhost:8000 -s my-space
 
 # Repeat from step 2 to verify changes
 ```

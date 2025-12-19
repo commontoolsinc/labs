@@ -25,13 +25,14 @@ Use this skill when:
 Before starting pattern development:
 
 1. **Know the ct CLI** - Use the **ct** skill for ct command reference
-2. **Read the documentation** - Key docs to reference:
+2. **Read the core documentation** - These two docs are essential; read them before starting:
    - `docs/common/PATTERNS.md` - Main tutorial with examples and common patterns
-   - `docs/common/CELLS_AND_REACTIVITY.md` - Cell system, computed(), reactivity
+   - `docs/common/CELLS_AND_REACTIVITY.md` - Cell system, computed(), lift(), frame-based execution
+3. **Reference docs as needed:**
    - `docs/common/COMPONENTS.md` - UI components and bidirectional binding
    - `docs/common/TYPES_AND_SCHEMAS.md` - Type system, Cell<> vs OpaqueRef<>
    - `docs/common/DEBUGGING.md` - Error reference and troubleshooting
-3. **Check example patterns** - Look in `packages/patterns/` for working examples
+4. **Check example patterns** - Look in `packages/patterns/` for working examples
 
 ## Quick Decision Tree
 
@@ -47,187 +48,123 @@ Before starting pattern development:
 
 For non-trivial patterns, follow a layered approach rather than building everything at once. This makes each piece independently testable and isolates bugs to specific layers.
 
+### Two Development Approaches
+
+Choose based on pattern complexity:
+
+**Approach A: Single-File Evolution** (simple patterns)
+- One file that evolves through git commits
+- Build incrementally: schemas → computeds → handlers → UI
+- Use `setsrc` to update the same deployed charm
+- Git history provides rollback points
+
+**Approach B: Pattern Composition** (multi-component patterns)
+- Shared schemas in separate file
+- Sub-patterns that can be independently tested
+- Main pattern composes sub-patterns, passing shared cells
+- Use `charm new` to deploy sub-patterns for isolated testing
+
 ### Build in Layers
 
-Pattern development should proceed through distinct layers, each verified before moving to the next:
+Whether using single-file or composition, build in this order:
 
 **Layer 1: Data Model + Reactive Derivations**
 - Define schemas/interfaces
 - Build computed values and transformations
-- Create debug UI showing all cell values (see below)
-- Test via CLI: set inputs, verify computed outputs (see **ct** skill)
+- Create debug UI showing all cell values
+- Test via CLI: set inputs, verify computed outputs
+- **Read:** `PATTERNS.md`, `CELLS_AND_REACTIVITY.md`
 
 **Layer 2: Mutation Handlers**
 - Add handlers one at a time
 - Test each handler via `charm call` before adding more
 - Debug UI shows before/after state
-- Verify handlers don't break existing computeds
+- **Read:** `TYPES_AND_SCHEMAS.md` for handler typing (especially `Stream<T>` for Output interfaces)
 
 **Layer 3: Real UI**
 - Replace debug UI with production interface
 - Bidirectional bindings connect to already-verified cells
-- If UI misbehaves, issue is isolated to UI layer
+- **Read:** `COMPONENTS.md` for component reference
 
 ### Debug Visibility
 
-Every sub-pattern should include inline debug display that shows cell values:
+Include inline debug display showing cell values during development. This makes reactivity visible - you can see which computed values update when inputs change. Strip debug UI when moving to production.
 
-```typescript
-// Debug UI panel - include in every sub-pattern during development
-const DebugPanel = (
-  <div style={{ fontFamily: "monospace", fontSize: "12px", padding: "1rem", background: "#f5f5f5", marginTop: "1rem" }}>
-    <strong>Debug State</strong>
-    <div>items count: {computed(() => items.length)}</div>
-    <div>total: {totalAmount}</div>
-    <div>filtered count: {computed(() => filteredItems.length)}</div>
-    <hr />
-    <details>
-      <summary>Raw Data</summary>
-      <pre>{computed(() => JSON.stringify(items.get(), null, 2))}</pre>
-    </details>
-  </div>
-);
-
-// Include in pattern UI
-return {
-  [UI]: (
-    <div>
-      {/* ... your actual UI ... */}
-      {DebugPanel}
-    </div>
-  ),
-};
-```
-
-This makes reactivity **visible**. When you `charm set` input data via CLI, you immediately see which computed values update. Strip debug UI when moving to production.
+See `packages/patterns/` for examples of debug panels.
 
 ### Project Organization
 
-Complex patterns get their own subfolder with numbered files indicating build order:
-
+**Single-File Evolution:**
 ```
 packages/patterns/expense-tracker/
-├── 01-data-and-totals.tsx    # Layer 1: schemas + computeds
-├── 02-budget-tracking.tsx    # Layer 1b: adds budget logic
-├── 03-handlers.tsx           # Layer 2: mutation handlers
-├── 04-full-ui.tsx            # Layer 3: production UI
-└── schemas.tsx               # Shared type definitions (optional)
+└── expense-tracker.tsx     # Single file, evolves through layers via git commits
 ```
 
-Each numbered file is a deployable sub-pattern. Build and verify each before moving to the next.
+**Pattern Composition:**
+```
+packages/patterns/expense-tracker/
+├── schemas.tsx           # Shared types
+├── data-view.tsx         # Sub-pattern: computeds + display
+├── expense-form.tsx      # Sub-pattern: form + handlers
+└── main.tsx              # Composes sub-patterns, passes shared cells
+```
+
+Each sub-pattern imports from `schemas.tsx` and can be deployed independently. See `PATTERNS.md` Level 4 for composition examples.
+
+### Version Control
+
+- Create a new git branch: `git checkout -b pattern/[name]`
+- Commit after each successful phase (verified via CLI)
+- Git commits are your rollback points - each should represent a working state
 
 ### CLI-First Testing
 
-**Critical:** Use the ct CLI to verify each layer before touching browser.
-
-See the **ct** skill's "Testing Patterns via CLI" section for the complete workflow, but the key principle is:
-
-**Use `setsrc` not `new`** after initial deployment. This updates the existing charm rather than creating duplicates that clutter the space.
-
-```bash
-# First deployment
-deno task ct charm new 01-data-and-totals.tsx -i claude.key -a URL -s space
-# Note the charm ID
-
-# All subsequent iterations
-deno task ct charm setsrc <charm-id> 01-data-and-totals.tsx -i claude.key -a URL -s space
-```
+Use the ct CLI to verify each layer before touching browser. See **ct** skill for:
+- `charm new` to deploy, `setsrc` to update
+- `charm get/set/call` to test data and handlers
+- `charm inspect` to view full state
 
 ### Session Continuity
 
-**Important:** If context compacts during pattern development, immediately reload the **pattern-dev** and **ct** skills before continuing work.
+If context compacts during pattern development, immediately reload the **pattern-dev** and **ct** skills before continuing work.
 
 ## Building a New Pattern
 
-**Before you start:** Review the Development Methodology section above. For non-trivial patterns (multiple data types, computed values, handlers), follow the layered approach rather than building everything at once.
+**Before you start:** Review the Development Methodology section above.
 
-### For Simple Patterns (single concern)
+### For Simple Patterns
 
-Follow Steps 1-4 below for straightforward patterns.
-
-### For Complex Patterns (multiple concerns)
-
-Follow the layered methodology:
-1. Create project subfolder: `packages/patterns/[name]/`
-2. Build Layer 1: data + computeds + debug UI
-3. Deploy, test via CLI (see **ct** skill)
-4. Build Layer 2: handlers, test via CLI
-5. Build Layer 3: production UI
-6. Final deployment
-
----
-
-### Step 1: Start Simple
-
-Begin with minimal viable pattern:
+See `PATTERNS.md` Level 1-2 for complete examples. The basic structure:
 
 ```typescript
 /// <cts-enable />
 import { Default, NAME, pattern, UI } from "commontools";
 
-interface Item {
-  title: string;
-  done: Default<boolean, false>;
-}
+interface Input { items: Default<Item[], []>; }
 
-interface Input {
-  items: Default<Item[], []>;
-}
-
-export default pattern<Input, Input>(({ items }) => {
-  return {
-    [NAME]: "My Pattern",  // Optional: displayed in UI
-    [UI]: (
-      <div>
-        {items.map((item) => (
-          <div>{item.title}</div>
-        ))}
-      </div>
-    ),
-    items,
-  };
-});
+export default pattern<Input, Input>(({ items }) => ({
+  [NAME]: "My Pattern",
+  [UI]: <div>{items.map(item => <div>{item.title}</div>)}</div>,
+  items,
+}));
 ```
 
-### Step 2: Add Interactivity
+### For Complex Patterns
 
-Add bidirectional binding for simple updates:
+Follow the layered methodology:
+1. Create project subfolder: `packages/patterns/[name]/`
+2. Build Layer 1: data + computeds + debug UI
+3. Deploy, test via CLI
+4. Build Layer 2: handlers, test via CLI
+5. Build Layer 3: production UI
 
-```typescript
-{items.map((item) => (
-  <ct-checkbox $checked={item.done}>
-    {item.title}
-  </ct-checkbox>
-))}
-```
+### Key Principles
 
-**Golden Rule:** Use bidirectional binding (`$prop`) for simple value updates. Only use handlers for structural changes, validation, or side effects.
+- **Bidirectional binding (`$prop`)** for simple value updates
+- **Handlers** for structural changes, validation, side effects
+- **Test with CLI** before touching browser
 
-### Step 3: Add Handlers for Structural Changes
-
-```typescript
-import { Cell, handler } from "commontools";
-
-const addItem = handler<
-  { detail: { message: string } },
-  { items: Cell<Item[]> }
->(({ detail }, { items }) => {
-  const title = detail?.message?.trim();
-  if (!title) return;
-
-  items.push({ title, done: false });
-});
-
-// In UI
-<ct-message-input
-  placeholder="Add item..."
-  onct-send={addItem({ items })}
-/>
-```
-
-### Step 4: Test and Deploy
-
-Use the **ct** skill for testing with `deno task ct dev` and deploying with `deno task ct charm new/setsrc`.
+See `PATTERNS.md` for complete examples at each level.
 
 ## Modifying Patterns
 
@@ -246,42 +183,10 @@ Use the **ct** skill to retrieve source:
 
 ## Debugging Patterns
 
-### Common Error Categories
-
-**Type Errors** (see `TYPES_AND_SCHEMAS.md` and `PATTERNS.md` for details):
-- Wrong style syntax (object vs string, see `COMPONENTS.md`)
-- Using `Cell<OpaqueRef<T>[]>` instead of `Cell<T[]>` in handlers
-- Forgetting `Cell<>` wrapper in handler state types
-
-**Runtime Errors** (see `PATTERNS.md` and `DEBUGGING.md` for details):
-- DOM access (use cells instead)
-- Conditionals in JSX (use `ifElse()`)
-- Calling `generateText()`/`generateObject()` from handlers (only works in pattern body)
-
-**Data Not Updating** (see `COMPONENTS.md` for details):
-- Forgot `$` prefix for bidirectional binding
-- Handler event name mismatch
-- Cell not passed correctly to handler
-
-### Debugging Process
-
-1. **Check TypeScript errors first** - Use **ct** skill for `deno task ct dev pattern.tsx --no-run`
-2. **Consult the docs** - Match error pattern to relevant doc:
-   - Type errors → `TYPES_AND_SCHEMAS.md`
-   - Component issues → `COMPONENTS.md`
-   - Pattern questions → `PATTERNS.md`
-   - Reactivity issues → `CELLS_AND_REACTIVITY.md`
-   - General debugging → `DEBUGGING.md`
-3. **Inspect deployed charm** - Use **ct** skill for inspection commands
-4. **Check examples** - Look in `packages/patterns/` for similar patterns
-
-### Quick Error Reference
-
-| Error Message | Check |
-|---------------|-------|
-| "Type 'string' is not assignable to type 'CSSProperties'" | Using string style on HTML element - See `COMPONENTS.md` |
-| Handler type mismatch | Check `Cell<T[]>` vs `Cell<Array<Cell<T>>>` - See `TYPES_AND_SCHEMAS.md` |
-| Data not updating | Missing `$` prefix or wrong event name - See `COMPONENTS.md` |
+1. **Check TypeScript errors first:** `deno task ct dev pattern.tsx --no-run`
+2. **Consult `DEBUGGING.md`** - comprehensive error reference with solutions
+3. **Use CLI inspection:** `charm inspect`, `charm get` (see **ct** skill)
+4. **Check examples:** `packages/patterns/` for similar patterns
 
 ## Key Concepts Summary
 
@@ -301,88 +206,50 @@ See `COMPONENTS.md` for full details.
 
 ### Handlers
 
-**Use for structural changes and side effects:**
+Handlers have **two-step binding**: define with `handler<EventType, StateType>`, then bind with state only.
 
 ```typescript
-const removeItem = handler<
-  unknown,
-  { items: Cell<Array<Cell<Item>>>; item: Cell<Item> }
->((_event, { items, item }) => {
-  const currentItems = items.get();
-  const index = currentItems.findIndex(el => el.equals(item));
-  if (index >= 0) {
-    items.set(currentItems.toSpliced(index, 1));
-  }
-});
+const addItem = handler<{ detail: { message: string } }, { items: Cell<Item[]> }>(
+  ({ detail }, { items }) => { items.push({ title: detail.message }); }
+);
+
+<ct-message-input onct-send={addItem({ items })} />  // Bind with state only
 ```
 
-**Critical Rule:** Use `Cell<T[]>` in handler parameters, not `Cell<OpaqueRef<T>[]>`.
+**Key rules:**
+- Pass **state only** when binding - event data comes at runtime
+- For test buttons with hardcoded data, use **inline handlers**: `onClick={() => items.push(...)}`
+- A bound handler IS a `Stream<T>` - don't use `Stream.of()` or `.subscribe()`
+- Use `Cell<T[]>` in handler state, not `Cell<OpaqueRef<T>[]>`
 
-See `PATTERNS.md` for complete handler patterns.
+See `PATTERNS.md` for handler patterns, `TYPES_AND_SCHEMAS.md` for Stream typing, `DEBUGGING.md` for common errors.
 
 ### Reactive Transformations
 
-**computed() for derived values:**
+**Use `computed()` by default** - it handles closures automatically:
 
 ```typescript
-const filteredItems = computed(() =>
-  items.filter(item => !item.done)
-);
+const filteredItems = computed(() => items.filter(item => !item.done));
+const totalAmount = computed(() => expenses.get().reduce((sum, e) => sum + e.amount, 0));
 ```
 
-**lift() for reusable functions:**
+**Key rules:**
+- `computed()` handles closures automatically via CTS transformer
+- `lift()` requires passing all deps as object parameter: `lift((args) => ...)({ cell1, cell2 })`
+- Passing cells directly to `lift()` returns stale/empty data
 
-```typescript
-const groupByCategory = lift((items: Item[]) => {
-  // grouping logic
-});
-
-const grouped = groupByCategory(items);
-```
-
-See `CELLS_AND_REACTIVITY.md` for reactive programming details.
+See `CELLS_AND_REACTIVITY.md` for details on frame-based execution and lift() limitations.
 
 ## Multi-File Patterns
 
-When building complex patterns across multiple files:
-
-**Structure:**
-```
-patterns/feature/
-  main.tsx       # Entry point
-  schemas.tsx    # Shared types
-  utils.tsx      # Helper functions
-```
-
-**Best Practices:**
+See Project Organization in Development Methodology above. Key points:
 - Use relative imports: `import { Schema } from "./schemas.tsx"`
-- Export shared schemas for reuse
 - ct bundles all dependencies automatically on deployment
-- Export all sub-patterns and functions
-
-**Common Pitfall:**
-- Schema mismatches between linked charms
-- Solution: Export shared schemas from common file
+- Export shared schemas to avoid mismatches between linked charms
 
 See `PATTERNS.md` Level 3-4 for linking and composition patterns.
 
-## Development Tips
-
-**DO:**
-- Start simple, add features incrementally
-- Use bidirectional binding when possible
-- Reference `packages/patterns/` for examples
-- Use `charm inspect` frequently when debugging (via **ct** skill)
-- Read relevant doc files before asking questions
-
-**DON'T:**
-- Test syntax before deploying (unless deployment fails)
-- Add multiple features before testing
-- Use handlers for simple value updates
-
 ## Documentation Map
-
-When working with patterns, consult these docs based on your task:
 
 | Task | Read |
 |------|------|
@@ -395,16 +262,9 @@ When working with patterns, consult these docs based on your task:
 | ct commands | Use **ct** skill |
 | Working examples | `packages/patterns/` directory |
 
-## Resources
-
-### references/workflow-guide.md
-
-High-level workflow patterns and best practices for pattern development. Consult for development methodology and common patterns.
-
 ## Remember
 
-- **Use the ct skill** for ct commands and deployment details
-- **Read `docs/common/` files** for pattern framework concepts - don't ask for duplicated information
-- **Check `packages/patterns/`** for working examples before building from scratch
-- **Start simple** - minimal viable pattern first, then add features
-- **Bidirectional binding first** - only use handlers when truly needed
+- Read docs before building - start with `PATTERNS.md` and `CELLS_AND_REACTIVITY.md`
+- Check `packages/patterns/` for working examples
+- Use **ct** skill for deployment commands
+- Start simple, test incrementally, use bidirectional binding when possible
