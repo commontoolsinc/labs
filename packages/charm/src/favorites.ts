@@ -77,20 +77,26 @@ export async function addFavorite(
   if (!initialTag) {
     const schemaCell = charm.asSchemaFromLinks();
     schemaCell.sink(() => {
-      const newTag = getCellDescription(charm);
-      if (newTag) {
-        runtime.editWithRetry((tx) => {
-          const favoritesWithTx = favorites.withTx(tx);
-          const list = favoritesWithTx.get() || [];
-          const idx = list.findIndex((e) =>
-            e.cell.resolveAsCell().equals(resolvedCharm)
-          );
-          // Only update if entry still exists and tag is still empty
-          if (idx >= 0 && !list[idx].tag) {
-            favoritesWithTx.key(idx).key("tag").set(newTag);
-          }
-        });
-        return () => {}; // Cancel subscription after successful update
+      // Read schema from schemaCell directly (not getCellDescription which creates a new cell)
+      try {
+        const { schema } = schemaCell.getAsNormalizedFullLink();
+        if (schema !== undefined) {
+          const newTag = JSON.stringify(schema);
+          runtime.editWithRetry((tx) => {
+            const favoritesWithTx = favorites.withTx(tx);
+            const list = favoritesWithTx.get() || [];
+            const idx = list.findIndex((e) =>
+              e.cell.resolveAsCell().equals(resolvedCharm)
+            );
+            // Only update if entry still exists and tag is still empty
+            if (idx >= 0 && !list[idx].tag) {
+              favoritesWithTx.key(idx).key("tag").set(newTag);
+            }
+          });
+          return () => {}; // Cancel subscription after successful update
+        }
+      } catch (e) {
+        console.error("Failed to get schema for favorite tag:", e);
       }
     });
   }
