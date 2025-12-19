@@ -51,6 +51,11 @@ export async function addFavorite(
   const favorites = getHomeFavorites(runtime);
   await favorites.sync();
 
+  // Ensure schema data is available before computing tag.
+  // Required for cross-space charms where data may not be local yet.
+  // Follows the pattern used by CharmManager.get().
+  await charm.sync();
+
   const resolvedCharm = charm.resolveAsCell();
 
   await runtime.editWithRetry((tx) => {
