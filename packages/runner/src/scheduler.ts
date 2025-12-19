@@ -1589,11 +1589,61 @@ export class Scheduler {
 
     // Settle loop: runs until no more dirty work is found.
     // First iteration processes initial seeds + their dirty deps.
-    // Subsequent iterations re-collect dirty deps since running computations
-    // may expose new dependencies (e.g., ifElse branch changes).
+    // Subsequent iterations process new subscriptions and re-collect dirty deps.
     const maxSettleIterations = this.pullMode ? 10 : 1;
-    const alreadyRan: Action[] = []; // Track all actions that ran across iterations
     for (let settleIter = 0; settleIter < maxSettleIterations; settleIter++) {
+      // Process any newly subscribed actions from previous iteration.
+      // This sets up their dependencies so collectDirtyDependencies can find them.
+      if (this.pullMode && this.pendingDependencyCollection.size > 0) {
+        for (const action of this.pendingDependencyCollection) {
+          const populateDependencies = this.populateDependenciesCallbacks.get(
+            action,
+          );
+          if (populateDependencies) {
+            const depTx = this.runtime.edit();
+            try {
+              populateDependencies(depTx);
+            } catch (error) {
+              logger.debug("schedule", () => [
+                `[DEP-COLLECT] Error collecting deps for ${action.name}: ${error}`,
+              ]);
+            }
+            const log = txToReactivityLog(depTx);
+            depTx.abort();
+
+            // Set up dependencies and mightWrite
+            this.setDependencies(action, log);
+            this.updateDependents(action, log);
+
+            // Set up triggers for reactivity
+            const reads = log.reads;
+            const pathsByEntity = addressesToPathByEntity(reads);
+            const entities = new Set<SpaceAndURI>();
+
+            for (const [spaceAndURI, paths] of pathsByEntity) {
+              entities.add(spaceAndURI);
+              if (!this.triggers.has(spaceAndURI)) {
+                this.triggers.set(spaceAndURI, new Map());
+              }
+              const pathsWithValues = paths.map((path) =>
+                [
+                  "value",
+                  ...path,
+                ] as readonly MemoryAddressPathComponent[]
+              );
+              this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
+            }
+
+            this.cancels.set(action, () => {
+              for (const spaceAndURI of entities) {
+                this.triggers.get(spaceAndURI)?.delete(action);
+              }
+            });
+          }
+        }
+        this.pendingDependencyCollection.clear();
+      }
+
       // Build the work set for this iteration
       let workSet: Set<Action>;
 
@@ -1711,7 +1761,6 @@ export class Scheduler {
         this.unsubscribe(fn);
 
         this.filterStats.executed++;
-        alreadyRan.push(fn);
         this.loopCounter.set(fn, (this.loopCounter.get(fn) || 0) + 1);
         if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
           this.handleError(
@@ -1722,108 +1771,6 @@ export class Scheduler {
           );
         } else {
           await this.run(fn);
-        }
-      }
-    }
-
-    // In pull mode, process any newly subscribed actions and check if they
-    // affect the effects we just ran. This handles dynamic sub-recipes created
-    // during execution (e.g., lift nodes that return opaque refs).
-    if (this.pullMode && this.pendingDependencyCollection.size > 0) {
-      // Process dependency collection for new subscriptions
-      for (const action of this.pendingDependencyCollection) {
-        const populateDependencies = this.populateDependenciesCallbacks.get(
-          action,
-        );
-        if (populateDependencies) {
-          const depTx = this.runtime.edit();
-          try {
-            populateDependencies(depTx);
-          } catch (error) {
-            logger.debug("schedule", () => [
-              `[DEP-COLLECT-POST-EXEC] Error: ${error}`,
-            ]);
-          }
-          const log = txToReactivityLog(depTx);
-          depTx.abort();
-
-          // Set up dependencies and mightWrite
-          this.setDependencies(action, log);
-          this.updateDependents(action, log);
-
-          // Set up triggers
-          const reads = log.reads;
-          const pathsByEntity = addressesToPathByEntity(reads);
-          const entities = new Set<SpaceAndURI>();
-
-          for (const [spaceAndURI, paths] of pathsByEntity) {
-            entities.add(spaceAndURI);
-            if (!this.triggers.has(spaceAndURI)) {
-              this.triggers.set(spaceAndURI, new Map());
-            }
-            const pathsWithValues = paths.map((path) =>
-              [
-                "value",
-                ...path,
-              ] as readonly MemoryAddressPathComponent[]
-            );
-            this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
-          }
-
-          this.cancels.set(action, () => {
-            for (const spaceAndURI of entities) {
-              this.triggers.get(spaceAndURI)?.delete(action);
-            }
-          });
-        }
-      }
-      this.pendingDependencyCollection.clear();
-
-      // Collect dirty dependencies for effects (newly created during main loop)
-      const additionalWork = new Set<Action>();
-      for (const effect of this.effects) {
-        if (this.dependencies.has(effect)) {
-          this.collectDirtyDependencies(effect, additionalWork);
-        }
-      }
-
-      // If we found new work, execute it
-      if (additionalWork.size > 0) {
-        const additionalOrder = topologicalSort(
-          additionalWork,
-          this.dependencies,
-          this.mightWrite,
-          this.actionParent,
-        );
-
-        // Track actions that already ran in the settle loop
-        const alreadyRunThisCycle = new Set(alreadyRan);
-
-        for (const fn of additionalOrder) {
-          // Check if action is still scheduled (not unsubscribed during post-loop)
-          const isStillScheduled = this.computations.has(fn) ||
-            this.effects.has(fn);
-          if (!isStillScheduled) continue;
-
-          if (!this.dirty.has(fn)) continue;
-          if (alreadyRunThisCycle.has(fn)) continue;
-
-          this.pending.delete(fn);
-          this.clearDirty(fn);
-          this.unsubscribe(fn);
-
-          this.filterStats.executed++;
-          await this.run(fn);
-        }
-
-        // After POST-LOOP, clear dirty flags for any computations that already
-        // ran in the main loop but got re-dirtied by POST-LOOP storage writes.
-        // This prevents cascading re-runs - the main loop computations have
-        // already produced their outputs, so they don't need to run again.
-        for (const fn of alreadyRunThisCycle) {
-          if (this.dirty.has(fn) && !this.effects.has(fn)) {
-            this.clearDirty(fn);
-          }
         }
       }
     }
