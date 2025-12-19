@@ -1743,8 +1743,8 @@ export class Scheduler {
       for (const fn of order) {
         // Check if action is still scheduled (not unsubscribed during this tick).
         // Running an action might unsubscribe other actions in the workSet.
-        const isStillScheduled =
-          this.computations.has(fn) || this.effects.has(fn);
+        const isStillScheduled = this.computations.has(fn) ||
+          this.effects.has(fn);
         if (!isStillScheduled) continue;
 
         // Check if action is still valid
@@ -1804,7 +1804,9 @@ export class Scheduler {
         if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
           this.handleError(
             new Error(
-              `Too many iterations: ${this.loopCounter.get(fn)} ${fn.name ?? ""}`,
+              `Too many iterations: ${this.loopCounter.get(fn)} ${
+                fn.name ?? ""
+              }`,
             ),
             fn,
           );
@@ -1827,9 +1829,14 @@ export class Scheduler {
       // (present in early iterations AND still in the last workSet)
       // But don't clear throttled computations - they should stay dirty
       for (const comp of earlyIterationComputations) {
-        if (lastWorkSet.has(comp) && this.dirty.has(comp) && !this.isThrottled(comp)) {
+        if (
+          lastWorkSet.has(comp) && this.dirty.has(comp) &&
+          !this.isThrottled(comp)
+        ) {
           logger.debug("schedule-cycle", () => [
-            `[CYCLE-BREAK] Clearing cyclic computation: ${comp.name || "anonymous"}`,
+            `[CYCLE-BREAK] Clearing cyclic computation: ${
+              comp.name || "anonymous"
+            }`,
           ]);
           this.clearDirty(comp);
           this.pending.delete(comp);
