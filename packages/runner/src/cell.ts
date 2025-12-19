@@ -861,6 +861,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
    * @returns Cell with schema from links
    */
   asSchemaFromLinks<T = unknown>(): Cell<T> {
+    if (!this.synced) this.sync(); // Auto-sync like .get() - matches framework pattern
+
     let { schema, rootSchema } = resolveLink(
       this.runtime,
       this.runtime.readTx(this.tx),
