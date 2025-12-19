@@ -1568,183 +1568,159 @@ export class Scheduler {
       this.pendingDependencyCollection.clear();
     }
 
-    // Build the work set based on scheduling mode
-    let workSet: Set<Action>;
-
+    // Build initial seeds for pull mode (effects + special actions)
+    const initialSeeds = new Set<Action>();
     if (this.pullMode) {
-      // Pull mode: only schedule effects, pull their dirty dependencies
-      workSet = new Set<Action>();
-
-      // Add only pending effects (not computations) to workSet
+      // Add only pending effects (not computations)
       for (const action of this.pending) {
         if (this.effects.has(action)) {
-          workSet.add(action);
+          initialSeeds.add(action);
         }
       }
-
       // Add any actions that need to write to capture possible writes
       for (const action of newActionsWithoutDependencies) {
-        workSet.add(action);
+        initialSeeds.add(action);
       }
-
       // Add computations that are blocking deferred events
       for (const action of eventBlockingDeps) {
-        workSet.add(action);
+        initialSeeds.add(action);
+      }
+    }
+
+    // Settle loop: runs until no more dirty work is found.
+    // First iteration processes initial seeds + their dirty deps.
+    // Subsequent iterations re-collect dirty deps since running computations
+    // may expose new dependencies (e.g., ifElse branch changes).
+    const maxSettleIterations = this.pullMode ? 10 : 1;
+    const alreadyRan: Action[] = []; // Track all actions that ran across iterations
+    for (let settleIter = 0; settleIter < maxSettleIterations; settleIter++) {
+      // Build the work set for this iteration
+      let workSet: Set<Action>;
+
+      if (this.pullMode) {
+        workSet = new Set<Action>();
+
+        // On first iteration, add initial seeds and collect their dirty deps
+        if (settleIter === 0) {
+          for (const seed of initialSeeds) {
+            workSet.add(seed);
+          }
+          // Collect dirty dependencies from initial seeds
+          for (const seed of initialSeeds) {
+            this.collectDirtyDependencies(seed, workSet);
+          }
+          logger.debug("schedule", () => [
+            `[EXECUTE PULL MODE] Effects: ${initialSeeds.size}, Dirty deps added: ${
+              workSet.size - initialSeeds.size
+            }`,
+          ]);
+        } else {
+          // On subsequent iterations, re-collect from all effects
+          for (const effect of this.effects) {
+            if (this.dependencies.has(effect)) {
+              this.collectDirtyDependencies(effect, workSet);
+            }
+          }
+        }
+      } else {
+        // Push mode: work set is just the pending actions
+        workSet = this.pending;
       }
 
-      // Collect dirty dependencies that effects currently depend on
-      for (const action of [...workSet]) {
-        this.collectDirtyDependencies(action, workSet);
-      }
+      if (workSet.size === 0) break;
+
+      const order = topologicalSort(
+        workSet,
+        this.dependencies,
+        this.mightWrite,
+        this.actionParent,
+      );
 
       logger.debug("schedule", () => [
-        `[EXECUTE PULL MODE] Effects: ${this.pending.size}, Dirty deps added: ${
-          workSet.size - this.pending.size
-        }`,
+        `[EXECUTE] Running ${order.length} actions (settle iteration ${settleIter})`,
       ]);
-    } else {
-      // Push mode: as-is - work set is just the pending actions
-      workSet = this.pending;
-    }
 
-    const order = topologicalSort(
-      workSet,
-      this.dependencies,
-      this.mightWrite,
-      this.actionParent,
-    );
-
-    logger.debug("schedule", () => [
-      `[EXECUTE] Running ${order.length} actions`,
-    ]);
-
-    // Implicit cycle detection for effects:
-    // Clear dirty flags for all effects upfront. If an effect becomes dirty again
-    // by the time we run it, something in the execution re-dirtied it → cycle.
-    if (this.pullMode) {
-      for (const fn of order) {
-        if (this.effects.has(fn)) {
-          this.clearDirty(fn);
-        }
-      }
-    }
-
-    // Now run all functions. This will resubscribe actions with their new
-    // dependencies.
-    for (const fn of order) {
-      // Check if action is still scheduled (not unsubscribed during this tick).
-      // Running an action might unsubscribe other actions in the workSet.
-      const isStillScheduled =
-        this.computations.has(fn) || this.effects.has(fn);
-      if (!isStillScheduled) continue;
-
-      // Check if action is still valid (not unsubscribed since added)
-      // In pull mode, check both pending (effects) and dirty (computations)
-      const isInPending = this.pending.has(fn);
-      const isInDirty = this.dirty.has(fn);
-
+      // Implicit cycle detection for effects:
+      // Clear dirty flags for all effects upfront. If an effect becomes dirty again
+      // by the time we run it, something in the execution re-dirtied it → cycle.
       if (this.pullMode) {
-        // For effects: we cleared dirty upfront, so check if re-dirtied (cycle)
-        if (this.effects.has(fn)) {
-          if (this.dirty.has(fn)) {
-            // Effect was re-dirtied during this tick → cycle detected
-            logger.debug("schedule-cycle", () => [
-              `[CYCLE] Effect ${
-                fn.name || "anonymous"
-              } re-dirtied, skipping (cycle detected)`,
-            ]);
-            // Skip this effect - it will run on a future tick after cycle settles
-            // TODO(seefeld): add debounce to break the cycle
-            this.pending.delete(fn);
-            continue;
-          }
-          if (!isInPending) continue;
-        } else {
-          // For computations: must be pending or dirty
-          if (!isInPending && !isInDirty) continue;
-        }
-      } else {
-        // Push mode: action must be in pending
-        if (!isInPending) continue;
-      }
-
-      // Check throttle: skip recently-run actions but keep them dirty
-      // They'll be pulled next time an effect needs them (if throttle expired)
-      if (this.isThrottled(fn)) {
-        logger.debug("schedule-throttle", () => [
-          `[THROTTLE] Skipping throttled action: ${fn.name || "anonymous"}`,
-        ]);
-        this.filterStats.filtered++;
-        // Don't clear from pending or dirty - action stays in its current state
-        // but we remove from pending so it doesn't run this cycle
-        this.pending.delete(fn);
-        // Keep dirty flag so it can be pulled later
-        continue;
-      }
-
-      // Clean up from pending/dirty before running
-      this.pending.delete(fn);
-      if (this.pullMode) {
-        this.clearDirty(fn);
-      }
-      this.unsubscribe(fn);
-
-      this.filterStats.executed++;
-      this.loopCounter.set(fn, (this.loopCounter.get(fn) || 0) + 1);
-      if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
-        this.handleError(
-          new Error(
-            `Too many iterations: ${this.loopCounter.get(fn)} ${fn.name ?? ""}`,
-          ),
-          fn,
-        );
-      } else {
-        await this.run(fn);
-      }
-    }
-
-    // Settle loop: after running computations, their dependencies might have changed.
-    // Re-collect dirty dependencies and run any newly needed computations.
-    // This handles conditional dependencies (ifElse) where the active branch changes.
-    if (this.pullMode) {
-      const maxSettleIterations = 10;
-      for (let settleIter = 0; settleIter < maxSettleIterations; settleIter++) {
-        const moreWork = new Set<Action>();
-        for (const effect of this.effects) {
-          if (this.dependencies.has(effect)) {
-            this.collectDirtyDependencies(effect, moreWork);
-          }
-        }
-
-        // Filter out actions we already ran
         for (const fn of order) {
-          moreWork.delete(fn);
+          if (this.effects.has(fn)) {
+            this.clearDirty(fn);
+          }
+        }
+      }
+
+      // Run all functions. This will resubscribe actions with their new dependencies.
+      for (const fn of order) {
+        // Check if action is still scheduled (not unsubscribed during this tick).
+        // Running an action might unsubscribe other actions in the workSet.
+        const isStillScheduled =
+          this.computations.has(fn) || this.effects.has(fn);
+        if (!isStillScheduled) continue;
+
+        // Check if action is still valid
+        // In pull mode, check both pending (effects) and dirty (computations)
+        const isInPending = this.pending.has(fn);
+        const isInDirty = this.dirty.has(fn);
+
+        if (this.pullMode) {
+          // For effects: we cleared dirty upfront, so check if re-dirtied (cycle)
+          if (this.effects.has(fn)) {
+            if (this.dirty.has(fn)) {
+              // Effect was re-dirtied during this tick → cycle detected
+              logger.debug("schedule-cycle", () => [
+                `[CYCLE] Effect ${
+                  fn.name || "anonymous"
+                } re-dirtied, skipping (cycle detected)`,
+              ]);
+              // Skip this effect - it will run on a future tick after cycle settles
+              // TODO(seefeld): add debounce to break the cycle
+              this.pending.delete(fn);
+              continue;
+            }
+            if (!isInPending) continue;
+          } else {
+            // For computations: must be pending or dirty
+            if (!isInPending && !isInDirty) continue;
+          }
+        } else {
+          // Push mode: action must be in pending
+          if (!isInPending) continue;
         }
 
-        if (moreWork.size === 0) break;
-
-        // Run the newly needed computations
-        const moreOrder = topologicalSort(
-          moreWork,
-          this.dependencies,
-          this.mightWrite,
-          this.actionParent,
-        );
-
-        for (const fn of moreOrder) {
-          // Check if action is still scheduled (not unsubscribed during settle)
-          const isStillScheduled =
-            this.computations.has(fn) || this.effects.has(fn);
-          if (!isStillScheduled) continue;
-
-          if (!this.dirty.has(fn)) continue;
-
+        // Check throttle: skip recently-run actions but keep them dirty
+        // They'll be pulled next time an effect needs them (if throttle expired)
+        if (this.isThrottled(fn)) {
+          logger.debug("schedule-throttle", () => [
+            `[THROTTLE] Skipping throttled action: ${fn.name || "anonymous"}`,
+          ]);
+          this.filterStats.filtered++;
+          // Don't clear from pending or dirty - action stays in its current state
+          // but we remove from pending so it doesn't run this cycle
           this.pending.delete(fn);
-          this.clearDirty(fn);
-          this.unsubscribe(fn);
+          // Keep dirty flag so it can be pulled later
+          continue;
+        }
 
-          this.filterStats.executed++;
-          order.push(fn); // Track that we ran this
+        // Clean up from pending/dirty before running
+        this.pending.delete(fn);
+        if (this.pullMode) {
+          this.clearDirty(fn);
+        }
+        this.unsubscribe(fn);
+
+        this.filterStats.executed++;
+        alreadyRan.push(fn);
+        this.loopCounter.set(fn, (this.loopCounter.get(fn) || 0) + 1);
+        if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
+          this.handleError(
+            new Error(
+              `Too many iterations: ${this.loopCounter.get(fn)} ${fn.name ?? ""}`,
+            ),
+            fn,
+          );
+        } else {
           await this.run(fn);
         }
       }
@@ -1820,13 +1796,13 @@ export class Scheduler {
           this.actionParent,
         );
 
-        // Track actions that already ran in the main loop
-        const alreadyRunThisCycle = new Set(order);
+        // Track actions that already ran in the settle loop
+        const alreadyRunThisCycle = new Set(alreadyRan);
 
         for (const fn of additionalOrder) {
           // Check if action is still scheduled (not unsubscribed during post-loop)
-          const isStillScheduled =
-            this.computations.has(fn) || this.effects.has(fn);
+          const isStillScheduled = this.computations.has(fn) ||
+            this.effects.has(fn);
           if (!isStillScheduled) continue;
 
           if (!this.dirty.has(fn)) continue;
