@@ -118,6 +118,11 @@ const AUTO_DEBOUNCE_THRESHOLD_MS = 50;
 const AUTO_DEBOUNCE_MIN_RUNS = 3;
 const AUTO_DEBOUNCE_DELAY_MS = 100;
 
+// Cycle-aware debounce: applies adaptive debounce to actions cycling within one execute()
+const CYCLE_DEBOUNCE_THRESHOLD_MS = 100; // Min iteration time to trigger cycle debounce
+const CYCLE_DEBOUNCE_MIN_RUNS = 3; // Action must run this many times to be considered cycling
+const CYCLE_DEBOUNCE_MULTIPLIER = 2; // Debounce delay = multiplier × iteration time
+
 /**
  * Statistics tracked for each action's execution performance.
  */
@@ -159,6 +164,10 @@ export class Scheduler {
   private actionStats = new WeakMap<Action, ActionStats>();
   // Cycle detection during dependency collection
   private collectStack = new Set<Action>();
+
+  // Cycle-aware debounce: track runs per action within current execute() call
+  private runsThisExecute = new Map<Action, number>();
+  private executeStartTime = 0;
 
   // Debounce infrastructure for throttling slow actions
   private debounceTimers = new WeakMap<
@@ -1298,6 +1307,10 @@ export class Scheduler {
     // In case a directly invoked `run` is still running, wait for it to finish.
     if (this.runningPromise) await this.runningPromise;
 
+    // Track timing for cycle-aware debounce
+    this.executeStartTime = performance.now();
+    this.runsThisExecute.clear();
+
     // Process pending dependency collection for newly subscribed actions.
     // This discovers what cells each action will read before it runs.
     for (const action of this.pendingDependencyCollection) {
@@ -1786,6 +1799,8 @@ export class Scheduler {
 
         this.filterStats.executed++;
         this.loopCounter.set(fn, (this.loopCounter.get(fn) || 0) + 1);
+        // Track runs for cycle-aware debounce
+        this.runsThisExecute.set(fn, (this.runsThisExecute.get(fn) ?? 0) + 1);
         if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
           this.handleError(
             new Error(
@@ -1833,6 +1848,28 @@ export class Scheduler {
           this.unsubscribe(effect);
           this.filterStats.executed++;
           await this.run(effect);
+        }
+      }
+    }
+
+    // Apply cycle-aware debounce to actions that ran multiple times this execute()
+    const executeElapsed = performance.now() - this.executeStartTime;
+    if (executeElapsed >= CYCLE_DEBOUNCE_THRESHOLD_MS) {
+      for (const [action, runs] of this.runsThisExecute) {
+        if (runs >= CYCLE_DEBOUNCE_MIN_RUNS && !this.noDebounce.get(action)) {
+          // This action is cycling - apply adaptive debounce
+          const adaptiveDelay = Math.round(
+            CYCLE_DEBOUNCE_MULTIPLIER * executeElapsed,
+          );
+          const currentDebounce = this.actionDebounce.get(action) ?? 0;
+          if (adaptiveDelay > currentDebounce) {
+            this.actionDebounce.set(action, adaptiveDelay);
+            logger.debug("schedule-cycle-debounce", () => [
+              `[CYCLE-DEBOUNCE] Action ${action.name || "anonymous"} ` +
+              `ran ${runs}x in ${executeElapsed.toFixed(1)}ms, ` +
+              `setting debounce to ${adaptiveDelay}ms`,
+            ]);
+          }
         }
       }
     }
