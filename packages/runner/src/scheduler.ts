@@ -1571,8 +1571,15 @@ export class Scheduler {
     // Build initial seeds for pull mode (effects + special actions)
     const initialSeeds = new Set<Action>();
     if (this.pullMode) {
-      // Add only pending effects (not computations)
+      // Add pending effects (not computations)
       for (const action of this.pending) {
+        if (this.effects.has(action)) {
+          initialSeeds.add(action);
+        }
+      }
+      // Add dirty effects - these may have been skipped due to cycle detection
+      // or throttling but still need to run
+      for (const action of this.dirty) {
         if (this.effects.has(action)) {
           initialSeeds.add(action);
         }
@@ -1591,6 +1598,11 @@ export class Scheduler {
     // First iteration processes initial seeds + their dirty deps.
     // Subsequent iterations process new subscriptions and re-collect dirty deps.
     const maxSettleIterations = this.pullMode ? 10 : 1;
+    const EARLY_ITERATION_THRESHOLD = 5;
+    const earlyIterationComputations = new Set<Action>(); // Track computations in first N iterations
+    let lastWorkSet: Set<Action> = new Set();
+    let settledEarly = false;
+
     for (let settleIter = 0; settleIter < maxSettleIterations; settleIter++) {
       // Process any newly subscribed actions from previous iteration.
       // This sets up their dependencies so collectDirtyDependencies can find them.
@@ -1677,7 +1689,20 @@ export class Scheduler {
         workSet = this.pending;
       }
 
-      if (workSet.size === 0) break;
+      if (workSet.size === 0) {
+        settledEarly = true;
+        break;
+      }
+
+      // Track computations in early iterations for cycle detection
+      if (this.pullMode && settleIter < EARLY_ITERATION_THRESHOLD) {
+        for (const fn of workSet) {
+          if (!this.effects.has(fn)) {
+            earlyIterationComputations.add(fn);
+          }
+        }
+      }
+      lastWorkSet = workSet;
 
       const order = topologicalSort(
         workSet,
@@ -1725,7 +1750,6 @@ export class Scheduler {
                 } re-dirtied, skipping (cycle detected)`,
               ]);
               // Skip this effect - it will run on a future tick after cycle settles
-              // TODO(seefeld): add debounce to break the cycle
               this.pending.delete(fn);
               continue;
             }
@@ -1775,13 +1799,57 @@ export class Scheduler {
       }
     }
 
-    // In pull mode, we consider ourselves done when there are no effects to execute
-    // (pending computations won't run without an effect pulling them)
-    const effectivePendingSize = this.pullMode
-      ? [...this.pending].filter((a) => this.effects.has(a)).length
-      : this.pending.size;
+    // If we hit max iterations without settling, break the cycle:
+    // 1. Clear dirty/pending for computations that were in early iterations AND still in last workSet
+    // 2. Run all remaining dirty effects so they don't get lost
+    if (this.pullMode && !settledEarly && lastWorkSet.size > 0) {
+      logger.debug("schedule-cycle", () => [
+        `[CYCLE-BREAK] Hit max iterations (${maxSettleIterations}), breaking cycle`,
+        `Early computations: ${earlyIterationComputations.size}, Last workSet: ${lastWorkSet.size}`,
+      ]);
 
-    if (effectivePendingSize === 0 && this.eventQueue.length === 0) {
+      // Clear computations that appear to be in the cycle
+      // (present in early iterations AND still in the last workSet)
+      // But don't clear throttled computations - they should stay dirty
+      for (const comp of earlyIterationComputations) {
+        if (lastWorkSet.has(comp) && this.dirty.has(comp) && !this.isThrottled(comp)) {
+          logger.debug("schedule-cycle", () => [
+            `[CYCLE-BREAK] Clearing cyclic computation: ${comp.name || "anonymous"}`,
+          ]);
+          this.clearDirty(comp);
+          this.pending.delete(comp);
+        }
+      }
+
+      // Run all remaining dirty effects - these shouldn't be lost
+      // But skip throttled effects - they should stay dirty for later
+      for (const effect of this.effects) {
+        if (this.dirty.has(effect) && !this.isThrottled(effect)) {
+          logger.debug("schedule-cycle", () => [
+            `[CYCLE-BREAK] Running dirty effect: ${effect.name || "anonymous"}`,
+          ]);
+          this.clearDirty(effect);
+          this.pending.delete(effect);
+          this.unsubscribe(effect);
+          this.filterStats.executed++;
+          await this.run(effect);
+        }
+      }
+    }
+
+    // In pull mode, we consider ourselves done when there are no effects to execute.
+    // Check both pending AND dirty effects - dirty effects may exist from:
+    // - Cycle detection (effect re-dirtied, skipped to prevent infinite loop)
+    // - Throttling (effect throttled, kept dirty for later)
+    const hasPendingEffects = this.pullMode
+      ? [...this.pending].some((a) => this.effects.has(a))
+      : this.pending.size > 0;
+    const hasDirtyEffects = this.pullMode &&
+      [...this.dirty].some((a) => this.effects.has(a));
+
+    if (
+      !hasPendingEffects && !hasDirtyEffects && this.eventQueue.length === 0
+    ) {
       const promises = this.idlePromises;
       for (const resolve of promises) resolve();
       this.idlePromises.length = 0;
