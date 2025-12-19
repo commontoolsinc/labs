@@ -39,10 +39,12 @@ const NOTE_END_MARKER = "<!-- COMMON_NOTE_END -->";
 
 // Filter charms to only include notes and format as markdown with HTML comment blocks
 const filterAndFormatNotes = lift(
-  (charms: NoteCharm[]): { notes: NoteCharm[]; markdown: string; count: number } => {
+  (
+    charms: NoteCharm[],
+  ): { notes: NoteCharm[]; markdown: string; count: number } => {
     // Filter to only note charms (have title and content properties)
     const notes = charms.filter(
-      (charm) => charm?.title !== undefined && charm?.content !== undefined
+      (charm) => charm?.title !== undefined && charm?.content !== undefined,
     );
 
     if (notes.length === 0) {
@@ -68,14 +70,15 @@ const filterAndFormatNotes = lift(
 
 // Parse markdown with HTML comment blocks into individual notes (plain function for use in handlers)
 function parseMarkdownToNotesPlain(
-  markdown: string
+  markdown: string,
 ): Array<{ title: string; content: string }> {
   if (!markdown || markdown.trim() === "") return [];
 
   const notes: Array<{ title: string; content: string }> = [];
 
   // Regex to match COMMON_NOTE blocks with title attribute
-  const noteBlockRegex = /<!-- COMMON_NOTE_START title="([^"]*)" -->([\s\S]*?)<!-- COMMON_NOTE_END -->/g;
+  const noteBlockRegex =
+    /<!-- COMMON_NOTE_START title="([^"]*)" -->([\s\S]*?)<!-- COMMON_NOTE_END -->/g;
 
   let match;
   while ((match = noteBlockRegex.exec(markdown)) !== null) {
@@ -153,8 +156,8 @@ export default pattern<Input, Output>(({ importMarkdown }) => {
               <ct-vstack gap="4">
                 <h2>Export Notes</h2>
                 <p>
-                  Found <strong>{noteCount}</strong> notes in this space.
-                  Select all text below and copy to export.
+                  Found <strong>{noteCount}</strong>{" "}
+                  notes in this space. Select all text below and copy to export.
                 </p>
                 <ct-code-editor
                   $value={exportedMarkdown}
@@ -162,7 +165,11 @@ export default pattern<Input, Output>(({ importMarkdown }) => {
                   theme="light"
                   wordWrap
                   lineNumbers
-                  style={{ minHeight: "150px", maxHeight: "300px", overflow: "auto" }}
+                  style={{
+                    minHeight: "150px",
+                    maxHeight: "300px",
+                    overflow: "auto",
+                  }}
                   readonly
                 />
               </ct-vstack>
@@ -182,7 +189,11 @@ export default pattern<Input, Output>(({ importMarkdown }) => {
                   theme="light"
                   wordWrap
                   lineNumbers
-                  style={{ minHeight: "150px", maxHeight: "300px", overflow: "auto" }}
+                  style={{
+                    minHeight: "150px",
+                    maxHeight: "300px",
+                    overflow: "auto",
+                  }}
                   placeholder={`<!-- COMMON_NOTE_START title="Note Title" -->
 
 Note content here with any markdown...
