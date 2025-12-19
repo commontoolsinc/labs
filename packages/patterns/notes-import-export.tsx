@@ -33,11 +33,11 @@ interface Output {
   noteCount: number;
 }
 
-// Delimiter used to separate notes in the exported markdown
-const NOTE_DELIMITER = "\n\n---\n\n";
-const NOTE_HEADER_PREFIX = "# ";
+// HTML comment markers for bulletproof note delimiting
+const NOTE_START_MARKER = "<!-- COMMON_NOTE_START";
+const NOTE_END_MARKER = "<!-- COMMON_NOTE_END -->";
 
-// Filter charms to only include notes and format as markdown
+// Filter charms to only include notes and format as markdown with HTML comment blocks
 const filterAndFormatNotes = lift(
   (charms: NoteCharm[]): { notes: NoteCharm[]; markdown: string; count: number } => {
     // Filter to only note charms (have title and content properties)
@@ -49,49 +49,39 @@ const filterAndFormatNotes = lift(
       return { notes: [], markdown: "No notes found in this space.", count: 0 };
     }
 
-    // Format each note as markdown
+    // Format each note with HTML comment block markers
     const formatted = notes.map((note) => {
       const title = note?.title || "Untitled Note";
       const content = note?.content || "";
-      return `${NOTE_HEADER_PREFIX}${title}\n\n${content}`;
+      // Escape quotes in title for the attribute
+      const escapedTitle = title.replace(/"/g, "&quot;");
+      return `${NOTE_START_MARKER} title="${escapedTitle}" -->\n\n${content}\n\n${NOTE_END_MARKER}`;
     });
 
     return {
       notes,
-      markdown: formatted.join(NOTE_DELIMITER),
+      markdown: formatted.join("\n\n"),
       count: notes.length,
     };
   },
 );
 
-// Parse markdown into individual notes (plain function for use in handlers)
+// Parse markdown with HTML comment blocks into individual notes (plain function for use in handlers)
 function parseMarkdownToNotesPlain(
   markdown: string
 ): Array<{ title: string; content: string }> {
   if (!markdown || markdown.trim() === "") return [];
 
   const notes: Array<{ title: string; content: string }> = [];
-  const sections = markdown.split("\n\n---\n\n");
 
-  for (const section of sections) {
-    const trimmed = section.trim();
-    if (!trimmed) continue;
+  // Regex to match COMMON_NOTE blocks with title attribute
+  const noteBlockRegex = /<!-- COMMON_NOTE_START title="([^"]*)" -->([\s\S]*?)<!-- COMMON_NOTE_END -->/g;
 
-    // Extract title from first line if it starts with #
-    const lines = trimmed.split("\n");
-    let title = "Imported Note";
-    let contentStart = 0;
-
-    if (lines[0]?.startsWith("# ")) {
-      title = lines[0].slice(2).trim();
-      contentStart = 1;
-      // Skip empty line after title if present
-      if (lines[contentStart]?.trim() === "") {
-        contentStart++;
-      }
-    }
-
-    const content = lines.slice(contentStart).join("\n").trim();
+  let match;
+  while ((match = noteBlockRegex.exec(markdown)) !== null) {
+    // Unescape HTML entities in title
+    const title = match[1].replace(/&quot;/g, '"') || "Imported Note";
+    const content = match[2].trim();
     notes.push({ title, content });
   }
 
@@ -183,8 +173,8 @@ export default pattern<Input, Output>(({ importMarkdown }) => {
               <ct-vstack gap="4">
                 <h2>Import Notes</h2>
                 <p>
-                  Paste markdown below with notes separated by <code>---</code>.
-                  Each note should start with <code># Title</code>.
+                  Paste exported markdown below. Notes are wrapped in{" "}
+                  <code>&lt;!-- COMMON_NOTE_START --&gt;</code> blocks.
                 </p>
                 <ct-code-editor
                   $value={importMarkdown}
@@ -193,15 +183,20 @@ export default pattern<Input, Output>(({ importMarkdown }) => {
                   wordWrap
                   lineNumbers
                   style={{ minHeight: "150px", maxHeight: "300px", overflow: "auto" }}
-                  placeholder="# Note Title
+                  placeholder={`<!-- COMMON_NOTE_START title="Note Title" -->
 
-Note content here...
-
+Note content here with any markdown...
+# Headings are fine
 ---
+Separators too
 
-# Another Note
+<!-- COMMON_NOTE_END -->
 
-More content..."
+<!-- COMMON_NOTE_START title="Another Note" -->
+
+More content...
+
+<!-- COMMON_NOTE_END -->`}
                 />
                 <ct-button onClick={importNotes({ importMarkdown, allCharms })}>
                   Import Notes
