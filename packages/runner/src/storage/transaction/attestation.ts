@@ -80,7 +80,9 @@ const setAtPath = (
   root: JSONValue | undefined,
   path: readonly MemoryAddressPathComponent[],
   value: JSONValue | undefined,
-): { ok: JSONValue | undefined } | { error: { at: number; type: string; notFound?: boolean } } => {
+): { ok: JSONValue | undefined } | {
+  error: { at: number; type: string; notFound?: boolean };
+} => {
   // Base case: empty path = replace root
   if (path.length === 0) {
     return { ok: value };
@@ -139,7 +141,13 @@ const setAtPath = (
     const nested = root[index];
     const result = setAtPath(nested, rest, value);
     if ("error" in result) {
-      return { error: { at: result.error.at + 1, type: result.error.type, notFound: result.error.notFound } };
+      return {
+        error: {
+          at: result.error.at + 1,
+          type: result.error.type,
+          notFound: result.error.notFound,
+        },
+      };
     }
     if (result.ok === nested) return { ok: root }; // noop propagation
     const newArray = [...root];
@@ -165,7 +173,13 @@ const setAtPath = (
   const nested = obj[key];
   const result = setAtPath(nested, rest, value);
   if ("error" in result) {
-    return { error: { at: result.error.at + 1, type: result.error.type, notFound: result.error.notFound } };
+    return {
+      error: {
+        at: result.error.at + 1,
+        type: result.error.type,
+        notFound: result.error.notFound,
+      },
+    };
   }
   if (result.ok === nested) return { ok: root }; // noop propagation
   return { ok: { ...obj, [key]: result.ok as JSONValue } };
@@ -222,7 +236,11 @@ export const write = (
       };
     }
     return {
-      error: TypeMismatchError({ ...address, path: errorPath }, result.error.type, "write"),
+      error: TypeMismatchError(
+        { ...address, path: errorPath },
+        result.error.type,
+        "write",
+      ),
     };
   }
 

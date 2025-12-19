@@ -303,7 +303,9 @@ describe("Attestation Module", () => {
       const resultValue = result.ok!.value as Record<string, unknown>;
 
       // Modified path should have new value
-      expect((resultValue.modified as Record<string, unknown>).target).toBe("new");
+      expect((resultValue.modified as Record<string, unknown>).target).toBe(
+        "new",
+      );
 
       // Sibling 'unchanged' should be EXACT SAME reference (structural sharing)
       expect(resultValue.unchanged).toBe(source.value.unchanged);
@@ -354,7 +356,11 @@ describe("Attestation Module", () => {
     // 2. NaN HANDLING
     it("should handle NaN values (NaN === NaN is false)", () => {
       const source = {
-        address: { id: "test:nan" as const, type: "application/json" as const, path: [] as const },
+        address: {
+          id: "test:nan" as const,
+          type: "application/json" as const,
+          path: [] as const,
+        },
         value: { x: NaN },
       };
       // Writing NaN to a field that already has NaN
@@ -370,7 +376,11 @@ describe("Attestation Module", () => {
 
     it("should handle -0 vs 0 comparison (should be noop)", () => {
       const source = {
-        address: { id: "test:zero" as const, type: "application/json" as const, path: [] as const },
+        address: {
+          id: "test:zero" as const,
+          type: "application/json" as const,
+          path: [] as const,
+        },
         value: { x: -0 },
       };
       const result = Attestation.write(
@@ -385,7 +395,11 @@ describe("Attestation Module", () => {
     // 3. ARRAY.LENGTH EDGE CASES
     it("should handle negative array length (slice behavior removes last element)", () => {
       const source = {
-        address: { id: "test:arrlen" as const, type: "application/json" as const, path: [] as const },
+        address: {
+          id: "test:arrlen" as const,
+          type: "application/json" as const,
+          path: [] as const,
+        },
         value: { items: [1, 2, 3] },
       };
       const result = Attestation.write(
@@ -402,7 +416,11 @@ describe("Attestation Module", () => {
 
     it("should handle NaN as array length (produces empty array)", () => {
       const source = {
-        address: { id: "test:arrnan" as const, type: "application/json" as const, path: [] as const },
+        address: {
+          id: "test:arrnan" as const,
+          type: "application/json" as const,
+          path: [] as const,
+        },
         value: { items: [1, 2, 3] },
       };
       const result = Attestation.write(
@@ -419,7 +437,11 @@ describe("Attestation Module", () => {
     // 4. LARGE ARRAY INDEX
     it("should handle large array indices as sparse arrays", () => {
       const source = {
-        address: { id: "test:bigidx" as const, type: "application/json" as const, path: [] as const },
+        address: {
+          id: "test:bigidx" as const,
+          type: "application/json" as const,
+          path: [] as const,
+        },
         // deno-lint-ignore no-explicit-any
         value: { items: [] as any[] },
       };
@@ -447,7 +469,11 @@ describe("Attestation Module", () => {
       // Index 1 is a hole (not undefined, actually missing)
 
       const source = {
-        address: { id: "test:sparse" as const, type: "application/json" as const, path: [] as const },
+        address: {
+          id: "test:sparse" as const,
+          type: "application/json" as const,
+          path: [] as const,
+        },
         value: { items: sparseArray },
       };
       const result = Attestation.write(
