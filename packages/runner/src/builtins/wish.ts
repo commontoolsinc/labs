@@ -183,10 +183,26 @@ function resolveBase(
       );
       const favorites = favoritesCell.get() || [];
 
-      // Case-insensitive search in tag
-      const match = favorites.find((entry) =>
-        entry.tag?.toLowerCase().includes(searchTerm)
-      );
+      // Case-insensitive search in tag.
+      // If tag is empty, try to compute it lazily from the cell's schema.
+      const match = favorites.find((entry) => {
+        let tag = entry.tag;
+
+        // Fallback: compute tag lazily if not stored
+        if (!tag) {
+          try {
+            const { schema } = entry.cell.asSchemaFromLinks()
+              .getAsNormalizedFullLink();
+            if (schema !== undefined) {
+              tag = JSON.stringify(schema);
+            }
+          } catch {
+            // Schema not available yet
+          }
+        }
+
+        return tag?.toLowerCase().includes(searchTerm);
+      });
 
       if (!match) {
         throw new WishError(`No favorite found matching "${searchTerm}"`);
@@ -241,10 +257,26 @@ function resolveBase(
         const favorites = favoritesCell.get() || [];
 
         // Match hash tags in tag field (the schema), all lowercase.
+        // If tag is empty, try to compute it lazily from the cell's schema.
+        // This handles existing favorites that were saved before schema was synced.
         const searchTerm = parsed.key.toLowerCase();
         const matches = favorites.filter((entry) => {
-          const hashtags =
-            entry.tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
+          let tag = entry.tag;
+
+          // Fallback: compute tag lazily if not stored
+          if (!tag) {
+            try {
+              const { schema } = entry.cell.asSchemaFromLinks()
+                .getAsNormalizedFullLink();
+              if (schema !== undefined) {
+                tag = JSON.stringify(schema);
+              }
+            } catch {
+              // Schema not available yet
+            }
+          }
+
+          const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
           return [...hashtags].some((m) => m[0] === searchTerm);
         });
 
