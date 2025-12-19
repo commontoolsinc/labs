@@ -181,6 +181,7 @@ function resolveBase(
       const favoritesCell = homeSpaceCell.key("favorites").asSchema(
         favoriteListSchema,
       );
+      favoritesCell.sync(); // Kick off sync (non-blocking, reactive system handles re-runs)
       const favorites = favoritesCell.get() || [];
 
       // Case-insensitive search in tag
@@ -238,6 +239,7 @@ function resolveBase(
         const favoritesCell = homeSpaceCell.key("favorites").asSchema(
           favoriteListSchema,
         );
+        favoritesCell.sync(); // Kick off sync (non-blocking, reactive system handles re-runs)
         const favorites = favoritesCell.get() || [];
 
         // Match hash tags in tag field (the schema), all lowercase.

@@ -52,6 +52,7 @@ export async function addFavorite(
   await favorites.sync();
 
   const resolvedCharm = charm.resolveAsCell();
+  await charm.sync(); // Ensure charm metadata is loaded before reading schema
 
   await runtime.editWithRetry((tx) => {
     const favoritesWithTx = favorites.withTx(tx);
