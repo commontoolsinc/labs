@@ -59,10 +59,141 @@ export const UnsupportedMediaTypeError = (
 });
 
 /**
+ * Checks if a string is a valid non-negative integer array index.
+ * Valid: "0", "1", "123"
+ * Invalid: "-1", "1.5", "abc", "", "01" (leading zeros except "0"), "length"
+ */
+const isValidArrayIndex = (key: string): boolean => {
+  if (key === "" || key === "length") return false;
+  const num = Number(key);
+  return Number.isInteger(num) && num >= 0 && String(num) === key;
+};
+
+/**
+ * Sets a value at path using structural sharing. Only clones along the path.
+ * Returns original reference if nothing changed (noop propagation).
+ *
+ * CT-1123 Phase 2: This replaces the O(N) JSON.parse(JSON.stringify()) deep clone
+ * with O(D) structural sharing where D is path depth.
+ */
+const setAtPath = (
+  root: JSONValue | undefined,
+  path: readonly MemoryAddressPathComponent[],
+  value: JSONValue | undefined,
+): { ok: JSONValue | undefined } | {
+  error: { at: number; type: string; notFound?: boolean };
+} => {
+  // Base case: empty path = replace root
+  if (path.length === 0) {
+    return { ok: value };
+  }
+
+  const [key, ...rest] = path;
+
+  // Type check: can't traverse through non-objects
+  if (root === null || root === undefined || typeof root !== "object") {
+    // Distinguish between undefined (path not found) vs primitive (type mismatch)
+    if (root === undefined) {
+      return { error: { at: 0, type: "undefined", notFound: true } };
+    }
+    const actualType = root === null ? "null" : typeof root;
+    return { error: { at: 0, type: actualType } };
+  }
+
+  // Handle arrays
+  if (Array.isArray(root)) {
+    // Special: array.length property
+    if (key === "length" && rest.length === 0) {
+      const newLen = value as number;
+      if (root.length === newLen) return { ok: root }; // noop
+      // Use slice for truncation, negative values, and non-finite values (NaN, Infinity)
+      // slice handles these edge cases correctly and matches previous behavior
+      if (newLen < root.length || newLen < 0 || !Number.isFinite(newLen)) {
+        return { ok: root.slice(0, newLen) };
+      } else {
+        // Extension: create array with new length (sparse slots become undefined in JSON)
+        const extended = [...root];
+        extended.length = newLen;
+        return { ok: extended };
+      }
+    }
+
+    // Validate array key
+    if (!isValidArrayIndex(key)) {
+      return { error: { at: 0, type: "array" } };
+    }
+
+    const index = Number(key);
+
+    // Terminal case
+    if (rest.length === 0) {
+      if (root[index] === value) return { ok: root }; // noop
+      const newArray = [...root];
+      if (value === undefined) {
+        delete newArray[index]; // creates hole, not splice
+      } else {
+        newArray[index] = value;
+      }
+      return { ok: newArray };
+    }
+
+    // Recursive case
+    const nested = root[index];
+    const result = setAtPath(nested, rest, value);
+    if ("error" in result) {
+      return {
+        error: {
+          at: result.error.at + 1,
+          type: result.error.type,
+          notFound: result.error.notFound,
+        },
+      };
+    }
+    if (result.ok === nested) return { ok: root }; // noop propagation
+    const newArray = [...root];
+    newArray[index] = result.ok as JSONValue;
+    return { ok: newArray };
+  }
+
+  // Handle objects
+  const obj = root as Record<string, JSONValue>;
+
+  // Terminal case
+  if (rest.length === 0) {
+    if (obj[key] === value) return { ok: root }; // noop
+    if (value === undefined) {
+      if (!(key in obj)) return { ok: root }; // delete non-existent = noop
+      const { [key]: _, ...without } = obj;
+      return { ok: without as JSONValue };
+    }
+    return { ok: { ...obj, [key]: value } };
+  }
+
+  // Recursive case
+  const nested = obj[key];
+  const result = setAtPath(nested, rest, value);
+  if ("error" in result) {
+    return {
+      error: {
+        at: result.error.at + 1,
+        type: result.error.type,
+        notFound: result.error.notFound,
+      },
+    };
+  }
+  if (result.ok === nested) return { ok: root }; // noop propagation
+  return { ok: { ...obj, [key]: result.ok as JSONValue } };
+};
+
+/**
  * Takes `source` attestation, `address` and `value` and produces derived
  * attestation with `value` set to a property that given `address` leads to
  * in the `source`. Fails with type mismatch error if provided `address` leads
  * to a non-object target, or NotFound error if the document doesn't exist.
+ *
+ * CT-1123 Phase 2: Now uses structural sharing via setAtPath() instead of
+ * JSON.parse(JSON.stringify()) deep clone. Only clones objects along the
+ * modified path, leaving siblings shared.
  */
 export const write = (
   source: IAttestation,
@@ -72,64 +203,53 @@ export const write = (
   IAttestation,
   IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
 > => {
-  if (address.path.length === source.address.path.length) {
+  // Calculate relative path from source
+  const relativePath = address.path.slice(source.address.path.length);
+
+  // Root write: path lengths equal (empty relative path)
+  if (relativePath.length === 0) {
+    if (source.value === value) return { ok: source }; // noop
     return { ok: { ...source, value } };
-  } else {
-    const path = [...address.path];
-    const key = path.pop()!;
-    const patch = {
-      ...source,
-      value: source.value === undefined
-        ? source.value
-        : JSON.parse(JSON.stringify(source.value)),
-    };
-
-    const { ok, error } = resolve(patch, { ...address, path });
-
-    if (error) {
-      return { error };
-    } else if (ok.value === undefined) {
-      return {
-        error: NotFound(source, address, path),
-      };
-    } else {
-      const type = ok.value === null
-        ? "null"
-        : Array.isArray(ok.value)
-        ? "array"
-        : typeof ok.value;
-      if (
-        type === "object" ||
-        (type === "array" &&
-          ((Number.isInteger(Number(key)) && Number(key) >= 0) ||
-            key === "length"))
-      ) {
-        const target = ok.value as Record<string, JSONValue>;
-
-        // If target value is same as desired value this write is a noop
-        if (target[key] === value) {
-          return { ok: source };
-        } else if (value === undefined) {
-          // If value is `undefined` we delete property from the tagret
-          delete target[key];
-        } else {
-          // Otherwise we assign value to the target
-          target[key] = value;
-        }
-
-        return { ok: patch };
-      } else {
-        // Type mismatch - trying to write property on non-object
-        return {
-          error: TypeMismatchError(
-            address,
-            type,
-            "write",
-          ),
-        };
-      }
-    }
   }
+
+  // Can't write nested path on undefined document
+  if (source.value === undefined) {
+    return {
+      error: NotFound(source, address, source.address.path),
+    };
+  }
+
+  // Apply structural sharing via setAtPath
+  const result = setAtPath(source.value, relativePath, value);
+
+  if ("error" in result) {
+    // Map error position to full address path
+    const errorPath = address.path.slice(
+      0,
+      source.address.path.length + result.error.at + 1,
+    );
+
+    // Distinguish between NotFound (path doesn't exist) and TypeMismatch (wrong type)
+    if (result.error.notFound) {
+      return {
+        error: NotFound(source, address, errorPath.slice(0, -1)),
+      };
+    }
+    return {
+      error: TypeMismatchError(
+        { ...address, path: errorPath },
+        result.error.type,
+        "write",
+      ),
+    };
+  }
+
+  // Noop: setAtPath returns original reference if nothing changed
+  if (result.ok === source.value) {
+    return { ok: source };
+  }
+
+  return { ok: { ...source, value: result.ok } };
 };
 
 /**

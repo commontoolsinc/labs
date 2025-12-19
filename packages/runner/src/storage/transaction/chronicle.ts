@@ -110,6 +110,10 @@ export class Chronicle {
    * state in the replica, and if it is, it adds this change to the set of
    * claims in the `#novelty` map.
    *
+   * CT-1123: Simplified to use working copy pattern. Instead of loading and
+   * rebasing on every write (O(N²)), we initialize a working copy once and
+   * apply writes directly to it (O(N)).
+   *
    * @param address the address for the value being written
    * @param value the value to add to the #novelty map
    * @returns a Result containing the new attestation or error
@@ -129,37 +133,33 @@ export class Chronicle {
       return { error: ReadOnlyAddressError(address) };
     }
 
-    // Load the fact from replica
-    const state = this.load(address);
-    const loaded = attest(state);
+    // Get or create the Changes object for this document
+    const changes = this.#novelty.edit(address);
 
-    // Validate against current state (replica + any overlapping novelty)
-    const rebase = this.rebase(loaded);
-
-    if (rebase.error) {
-      return rebase;
+    // Initialize working copy from replica if needed (only happens once per document)
+    if (!changes.getWorkingCopy()) {
+      const state = this.load({ id: address.id, type: address.type });
+      const loaded = attest(state);
+      changes.initFromReplica(loaded);
     }
 
+    // Get the current working copy state
+    const workingCopy = changes.getWorkingCopy()!;
+
     // Check if document exists when trying to write to nested path
-    // Only return NotFound if we're accessing a path on a non-existent document
-    // and there's no novelty write that would have created it
-    if (rebase.ok.value === undefined && address.path.length > 0) {
-      const path = rebase.ok.address.path;
+    if (workingCopy.value === undefined && address.path.length > 0) {
+      const path = workingCopy.address.path;
       return {
         error: NotFound(
-          rebase.ok,
+          workingCopy,
           address,
           path.length > 0 ? path.slice(0, -1) : undefined,
         ),
       };
     }
 
-    const { error } = write(rebase.ok, address, value);
-    if (error) {
-      return { error };
-    }
-
-    return this.#novelty.claim({ address, value });
+    // Apply the write directly to the working copy - O(1) instead of O(N)
+    return changes.applyWrite(address, value);
   }
 
   read(
@@ -183,15 +183,13 @@ export class Chronicle {
       }
     }
 
-    // If we previously wrote into overlapping memory address we simply
-    // read from it.
+    // Check if we previously wrote to this exact path or a parent path
     const written = this.#novelty.get(address);
     if (written) {
       return read(written, address);
     }
 
-    // If we have not read nor written into overlapping memory address so
-    // we'll read it from the local replica.
+    // No matching writes - read from the replica
     const state = this.load(address);
 
     // Check if document exists when trying to read from nested path
@@ -218,12 +216,13 @@ export class Chronicle {
       }
 
       // Apply any overlapping writes from novelty and return merged result
-      const rebase = this.rebase(invariant);
-      if (rebase.error) {
-        return rebase;
-      } else {
-        return read(rebase.ok, address);
+      const changes = this.#novelty.select(address);
+      const workingCopy = changes?.getWorkingCopy();
+      if (workingCopy) {
+        return read(workingCopy, address);
       }
+
+      return { ok: invariant };
     }
   }
 
@@ -232,6 +231,8 @@ export class Chronicle {
    * replica. Function fails with {@link IStorageTransactionInconsistent} if
    * this contains somer read invariant that no longer holds, that is same
    * read produces different result.
+   *
+   * CT-1123: Simplified to use working copy directly instead of rebasing.
    */
   commit(): Result<
     ITransaction,
@@ -253,30 +254,14 @@ export class Chronicle {
 
     for (const changes of this.#novelty) {
       const loaded = this.load(changes.address);
-      const source = attest(loaded);
-      const { error, ok: merged } = changes.rebase(source);
-      if (error) {
-        // During commit, NotFound and TypeMismatch errors should be treated as inconsistencies
-        // because we're trying to apply changes to something that has changed state
-        if (error.name === "NotFoundError") {
-          return {
-            error: StateInconsistency({
-              address: changes.address,
-              expected: "document to exist",
-              actual: undefined,
-            }),
-          };
-        } else if (error.name === "TypeMismatchError") {
-          return {
-            error: StateInconsistency({
-              address: error.address,
-              expected: "object",
-              actual: error.actualType,
-            }),
-          };
-        }
-        return { error };
+
+      // Get the working copy directly - no more O(N) rebase
+      const merged = changes.getWorkingCopy();
+      if (!merged) {
+        // No working copy means no writes - shouldn't happen but handle gracefully
+        continue;
       }
+
       if (
         merged.value === loaded.is ||
         JSON.stringify(merged.value) === JSON.stringify(loaded.is)
@@ -541,68 +526,154 @@ class Novelty {
 }
 
 /**
- * Changes is essentially a map whose keys are the path, and whose values
- * are the IAttestation objects.
+ * Changes tracks modifications to a single document using a "working copy" pattern.
+ *
+ * Instead of storing individual path writes and replaying them on every read/write
+ * (which was O(N²)), we maintain a single merged state that gets updated directly.
+ *
+ * CT-1123: This eliminates the O(N²) behavior where N writes each replayed all
+ * previous writes via rebase().
  */
 class Changes {
-  #model: Map<string, IAttestation> = new Map();
+  /** The current merged state of all writes to this document */
+  #workingCopy: IAttestation | undefined;
+  /** Individual path attestations for novelty() iterator (backwards compatibility) */
+  #pathAttestations: Map<string, IAttestation> = new Map();
   address: IMemoryAddress;
+
   constructor(address: Omit<IMemoryAddress, "path">) {
     this.address = { ...address, path: [] };
   }
 
-  get(at: IMemoryAddress["path"]): IAttestation | undefined {
-    let candidate: undefined | IAttestation = undefined;
-    for (const invariant of this.#model.values()) {
-      // For exact match or if invariant is parent of requested path
-      if (invariant.address.path.every((p, i) => p === at[i])) {
-        const size = invariant.address.path.length;
-        if ((candidate?.address?.path?.length ?? -1) < size) {
-          candidate = invariant;
-        }
-      }
+  /**
+   * Initialize the working copy from replica data.
+   * Called on first access to ensure we have a base to apply writes to.
+   */
+  initFromReplica(loaded: IAttestation): void {
+    if (!this.#workingCopy) {
+      this.#workingCopy = loaded;
     }
-
-    return candidate;
-  }
-
-  put(invariant: IAttestation) {
-    this.#model.set(JSON.stringify(invariant.address.path), invariant);
-  }
-  delete(invariant: IAttestation) {
-    this.#model.delete(JSON.stringify(invariant.address.path));
   }
 
   /**
-   * Applies all the overlapping write invariants onto a given source invariant.
+   * Get the attestation covering the requested path.
+   * Returns the working copy if we have a write at or above the requested path.
    */
+  get(at: IMemoryAddress["path"]): IAttestation | undefined {
+    if (!this.#workingCopy) return undefined;
 
+    // Check if any written path is a prefix of or equal to the requested path
+    for (const invariant of this.#pathAttestations.values()) {
+      // For exact match or if invariant is parent of requested path
+      if (invariant.address.path.every((p, i) => p === at[i])) {
+        // Return the working copy which has the merged state
+        return this.#workingCopy;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Apply a write directly to the working copy - O(1) amortized.
+   * This replaces the old put() + rebase() pattern that was O(N).
+   */
+  applyWrite(
+    address: IMemoryAddress,
+    value: JSONValue | undefined,
+  ): Result<
+    IAttestation,
+    IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
+  > {
+    if (!this.#workingCopy) {
+      return {
+        error: {
+          name: "StorageTransactionInconsistent",
+          message: "Cannot apply write without initialized working copy",
+          address,
+          from: () => ({
+            name: "StorageTransactionInconsistent",
+            message: "Cannot apply write without initialized working copy",
+            address,
+            from: function () {
+              return this;
+            },
+          }),
+        },
+      };
+    }
+
+    const result = write(this.#workingCopy, address, value);
+    if (result.ok) {
+      this.#workingCopy = result.ok;
+      // Store individual path attestation for novelty() iterator
+      const pathKey = JSON.stringify(address.path);
+      this.#pathAttestations.set(pathKey, { address, value });
+    }
+    return result;
+  }
+
+  /** Legacy put() for compatibility - applies write to working copy */
+  put(invariant: IAttestation) {
+    if (!this.#workingCopy) {
+      // First write initializes the working copy
+      this.#workingCopy = invariant;
+    } else {
+      // Apply write to working copy
+      const result = write(
+        this.#workingCopy,
+        invariant.address,
+        invariant.value,
+      );
+      if (result.ok) {
+        this.#workingCopy = result.ok;
+      }
+    }
+    // Store individual path attestation for novelty() iterator
+    const pathKey = JSON.stringify(invariant.address.path);
+    this.#pathAttestations.set(pathKey, invariant);
+  }
+
+  /** Legacy delete() - removes from path attestations */
+  delete(invariant: IAttestation) {
+    const pathKey = JSON.stringify(invariant.address.path);
+    this.#pathAttestations.delete(pathKey);
+  }
+
+  /**
+   * Get the working copy. Used for commit and reads.
+   */
+  getWorkingCopy(): IAttestation | undefined {
+    return this.#workingCopy;
+  }
+
+  /**
+   * Returns the working copy as the rebased result.
+   * With the working copy pattern, no replay is needed - O(1).
+   *
+   * CT-1123: This was the O(N²) hotspot - each call iterated all changes
+   * and deep-cloned. Now it just returns the already-merged state.
+   */
   rebase(
     source: IAttestation,
   ): Result<
     IAttestation,
     IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
   > {
-    let merged = source;
-    for (const change of this.#model.values()) {
-      if (Address.includes(source.address, change.address)) {
-        const { error, ok } = write(
-          merged,
-          change.address,
-          change.value,
-        );
-        if (error) {
-          return { error };
-        } else {
-          merged = ok;
-        }
-      }
+    if (this.#workingCopy) {
+      return { ok: this.#workingCopy };
     }
-
-    return { ok: merged };
+    // If no working copy, return the source unchanged
+    return { ok: source };
   }
 
-  [Symbol.iterator](): IterableIterator<IAttestation> {
-    return this.#model.values();
+  *[Symbol.iterator](): IterableIterator<IAttestation> {
+    // If there's a write to root path [], yield the merged working copy
+    // Otherwise, yield individual path attestations (old behavior for non-root writes)
+    const hasRootWrite = this.#pathAttestations.has(JSON.stringify([]));
+    if (hasRootWrite && this.#workingCopy) {
+      yield this.#workingCopy;
+    } else {
+      yield* this.#pathAttestations.values();
+    }
   }
 }
