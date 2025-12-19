@@ -704,9 +704,10 @@ export function applyChangeSet(
   tx: IExtendedStorageTransaction,
   changes: ChangeSet,
 ) {
-  // Compact changes to reduce redundant writes
-  const compacted = compactChangeSet(changes);
-  for (const change of compacted) {
+  // CT-1123: Removed compactChangeSet - structural sharing makes redundant writes
+  // cheap (O(path_depth) with noop detection), while compaction added O(N²) overhead.
+  // Benchmarks showed 2.5-4.4x slowdown with compactChangeSet enabled.
+  for (const change of changes) {
     tx.writeValueOrThrow(change.location, change.value);
   }
 }
