@@ -93,7 +93,8 @@ const removeBudgetHandler = handler<
 
 // ============ PATTERN ============
 
-export default pattern<Input, Output>(({ expenses, budgets }) => {
+// Use single type param to avoid conflict bug when composed
+export default pattern<Input>(({ expenses, budgets }) => {
   const todayDate = getTodayDate();
 
   // Local state for form inputs
@@ -101,8 +102,13 @@ export default pattern<Input, Output>(({ expenses, budgets }) => {
   const newAmount = Cell.of("");
   const newCategory = Cell.of("Other");
 
-  // Expense count for display
+  // Budget form inputs
+  const budgetCategory = Cell.of("");
+  const budgetLimit = Cell.of("");
+
+  // Counts for display
   const expenseCount = computed(() => expenses.get().length);
+  const budgetCount = computed(() => budgets.get().length);
 
   // Bound handlers
   const addExpense = addExpenseHandler({ expenses });
@@ -185,6 +191,78 @@ export default pattern<Input, Output>(({ expenses, budgets }) => {
           ))}
         </div>
 
+        {/* Budget Management */}
+        <h3 style={{ margin: "1rem 0 0.5rem 0" }}>Set Budget Limit</h3>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.5rem",
+            marginBottom: "1rem",
+          }}
+        >
+          <ct-input $value={budgetCategory} placeholder="Category (e.g. Food)" />
+          <ct-input $value={budgetLimit} placeholder="Monthly limit" />
+          <ct-button
+            onClick={() => {
+              const cat = budgetCategory.get().trim();
+              const limitVal = parseFloat(budgetLimit.get());
+
+              if (cat && !isNaN(limitVal) && limitVal >= 0) {
+                const current = budgets.get();
+                const existingIndex = current.findIndex((b) => b.category === cat);
+
+                if (existingIndex >= 0) {
+                  budgets.set(
+                    current.map((b, i) => (i === existingIndex ? { ...b, limit: limitVal } : b))
+                  );
+                } else {
+                  budgets.push({ category: cat, limit: limitVal });
+                }
+                // Clear form
+                budgetCategory.set("");
+                budgetLimit.set("");
+              }
+            }}
+          >
+            Set Budget
+          </ct-button>
+        </div>
+
+        {/* Budget List */}
+        <h4 style={{ margin: "0 0 0.5rem 0" }}>Budgets ({budgetCount})</h4>
+        <div style={{ marginBottom: "1rem" }}>
+          {budgets.map((budget) => (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "0.5rem",
+                borderBottom: "1px solid #eee",
+              }}
+            >
+              <span>
+                {budget.category}: ${budget.limit}
+              </span>
+              <ct-button
+                variant="ghost"
+                onClick={() => {
+                  const current = budgets.get();
+                  const index = current.findIndex((b) =>
+                    Cell.equals(budget, b)
+                  );
+                  if (index >= 0) {
+                    budgets.set(current.toSpliced(index, 1));
+                  }
+                }}
+              >
+                ×
+              </ct-button>
+            </div>
+          ))}
+        </div>
+
         {/* Debug */}
         <details>
           <summary style={{ cursor: "pointer", color: "#666" }}>
@@ -203,6 +281,32 @@ export default pattern<Input, Output>(({ expenses, budgets }) => {
                   newDescription: newDescription.get(),
                   newAmount: newAmount.get(),
                   newCategory: newCategory.get(),
+                  budgetCategory: budgetCategory.get(),
+                  budgetLimit: budgetLimit.get(),
+                },
+                null,
+                2
+              )
+            )}
+          </pre>
+        </details>
+
+        <details>
+          <summary style={{ cursor: "pointer", color: "#666" }}>
+            Debug: Raw Data
+          </summary>
+          <pre
+            style={{
+              fontSize: "11px",
+              background: "#f5f5f5",
+              padding: "0.5rem",
+            }}
+          >
+            {computed(() =>
+              JSON.stringify(
+                {
+                  expenses: expenses.get(),
+                  budgets: budgets.get(),
                 },
                 null,
                 2

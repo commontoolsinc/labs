@@ -2,55 +2,30 @@
 /**
  * Budget Tracker - Data View Sub-Pattern
  *
- * Displays expense data and computed budget status.
- * No mutations - this is a read-only view.
- *
- * Can be deployed standalone for testing computed values,
- * or composed into a larger pattern.
+ * Displays computed summaries: totals, by-category breakdown, budget status.
+ * Read-only view - uses OpaqueRef<> since it only reads data.
  */
-import {
-  Cell,
-  computed,
-  ifElse,
-  NAME,
-  pattern,
-  UI,
-} from "commontools";
-import {
-  type BudgetStatusItem,
-  type CategoryBudget,
-  type Expense,
-  getTodayDate,
-} from "./schemas.tsx";
+import { computed, NAME, OpaqueRef, pattern, UI } from "commontools";
+import { type CategoryBudget, type Expense } from "./schemas.tsx";
 
-// ============ INPUT/OUTPUT TYPES ============
-
-// Sub-patterns don't use Default<> - the parent pattern owns initialization
+// Sub-patterns use OpaqueRef for read-only access (no Cell<> needed)
 interface Input {
-  expenses: Cell<Expense[]>;
-  budgets: Cell<CategoryBudget[]>;
+  expenses: OpaqueRef<Expense[]>;
+  budgets: OpaqueRef<CategoryBudget[]>;
 }
 
-interface Output {
-  // Don't re-export shared cells - parent owns them
-  totalSpent: number;
-  spentByCategory: Record<string, number>;
-  budgetStatus: BudgetStatusItem[];
-}
-
-// ============ PATTERN ============
-
-export default pattern<Input, Output>(({ expenses, budgets }) => {
-  const todayDate = getTodayDate();
-
-  // Computed values - use .get() to access array values inside computed()
+// Use single type param to avoid conflict bug
+export default pattern<Input>(({ expenses, budgets }) => {
+  // Computed values
   const totalSpent = computed(() => {
-    const exp = expenses.get();
+    const exp = expenses as unknown as Expense[];
+    if (!Array.isArray(exp)) return 0;
     return exp.reduce((sum, e) => sum + (e.amount || 0), 0);
   });
 
   const spentByCategory = computed(() => {
-    const exp = expenses.get();
+    const exp = expenses as unknown as Expense[];
+    if (!Array.isArray(exp)) return {};
     const result: Record<string, number> = {};
     for (const expense of exp) {
       const cat = expense.category || "Other";
@@ -59,19 +34,23 @@ export default pattern<Input, Output>(({ expenses, budgets }) => {
     return result;
   });
 
-  const budgetStatus = computed((): BudgetStatusItem[] => {
+  const budgetStatus = computed(() => {
     const spent = spentByCategory;
-    const budgetList = budgets.get();
+    const budgetList = budgets as unknown as CategoryBudget[];
+    if (!spent || typeof spent !== "object") return [];
 
-    // Get all categories (from spending + budgets)
     const allCategories = new Set<string>(Object.keys(spent));
-    for (const b of budgetList) {
-      allCategories.add(b.category);
+    if (Array.isArray(budgetList)) {
+      for (const b of budgetList) {
+        allCategories.add(b.category);
+      }
     }
 
     const budgetMap = new Map<string, number>();
-    for (const b of budgetList) {
-      budgetMap.set(b.category, b.limit);
+    if (Array.isArray(budgetList)) {
+      for (const b of budgetList) {
+        budgetMap.set(b.category, b.limit);
+      }
     }
 
     return Array.from(allCategories)
@@ -87,66 +66,54 @@ export default pattern<Input, Output>(({ expenses, budgets }) => {
       });
   });
 
-  const expenseCount = computed(() => expenses.get().length);
-
   return {
     [NAME]: "Budget Data View",
     [UI]: (
       <div style={{ fontFamily: "system-ui", padding: "1rem" }}>
-        <h3 style={{ margin: "0 0 0.5rem 0" }}>Budget Summary</h3>
-        <div style={{ marginBottom: "1rem", color: "#666" }}>
-          <div>Date: {todayDate}</div>
-          <div>Expenses: {expenseCount}</div>
-          <div>Total Spent: ${computed(() => totalSpent.toFixed(2))}</div>
-        </div>
+        <h3 style={{ margin: "0 0 1rem 0" }}>Summary</h3>
 
-        {/* Budget Status Display */}
         <div style={{ marginBottom: "1rem" }}>
-          <h4 style={{ margin: "0 0 0.5rem 0" }}>By Category</h4>
-          {budgetStatus.map((status) => (
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                padding: "0.5rem",
-                borderBottom: "1px solid #eee",
-              }}
-            >
-              <span>{status.category}</span>
-              <span>
-                ${status.spent}
-                {ifElse(
-                  computed(() => status.limit !== null),
-                  <span style={{ color: "#666" }}>
-                    {" "}/ ${status.limit} ({status.percentUsed}%)
-                  </span>,
-                  null
-                )}
-              </span>
-            </div>
-          ))}
+          <strong>Total Spent:</strong> ${computed(() => totalSpent.toFixed(2))}
         </div>
 
-        {/* Debug Panel */}
-        <details>
-          <summary style={{ cursor: "pointer", color: "#666" }}>
-            Debug: Raw Data
-          </summary>
-          <pre
-            style={{
-              fontSize: "11px",
-              background: "#f5f5f5",
-              padding: "0.5rem",
-              overflow: "auto",
-            }}
-          >
-            {computed(() => JSON.stringify({ expenses: expenses.get(), budgets: budgets.get() }, null, 2))}
-          </pre>
-        </details>
+        <h4 style={{ margin: "0 0 0.5rem 0" }}>By Category</h4>
+        <div style={{ marginBottom: "1rem" }}>
+          {computed(() =>
+            Object.entries(spentByCategory).map(([cat, amount]) => (
+              <div>
+                {cat}: ${(amount as number).toFixed(2)}
+              </div>
+            ))
+          )}
+        </div>
+
+        <h4 style={{ margin: "0 0 0.5rem 0" }}>Budget Status</h4>
+        <div>
+          {computed(() =>
+            budgetStatus.map((status) => (
+              <div
+                style={{
+                  padding: "0.5rem",
+                  marginBottom: "0.25rem",
+                  background:
+                    status.percentUsed !== null && status.percentUsed > 100
+                      ? "#fee"
+                      : "#efe",
+                  borderRadius: "4px",
+                }}
+              >
+                <strong>{status.category}</strong>: ${status.spent.toFixed(2)}
+                {status.limit !== null && (
+                  <span>
+                    {" "}/ ${status.limit} ({status.percentUsed?.toFixed(0)}%)
+                  </span>
+                )}
+              </div>
+            ))
+          )}
+        </div>
       </div>
     ),
-
-    // Export computed values only (not shared cells - those are owned by parent)
     totalSpent,
     spentByCategory,
     budgetStatus,
