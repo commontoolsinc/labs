@@ -1,13 +1,15 @@
 // PROPER A/B benchmark - measures actual write costs, not just iteration
 import { ChangeSet, compactChangeSet } from "../src/data-updating.ts";
 import * as Attestation from "../src/storage/transaction/attestation.ts";
+import type { IAttestation } from "../src/storage/interface.ts";
+import type { JSONValue } from "../src/builder/types.ts";
 
 const space = "did:test:space" as `did:${string}:${string}`;
 const docId = "test:doc" as `${string}:${string}`;
 
 // Create a source document to write to
-function makeSource(size: number) {
-  const value: Record<string, unknown> = {};
+function makeSource(size: number): IAttestation {
+  const value: Record<string, JSONValue> = {};
   for (let i = 0; i < size; i++) {
     value["item" + i] = { a: 1, b: 2, c: 3 };
   }
@@ -58,7 +60,7 @@ function makeChanges(count: number, overlapPercent: number): ChangeSet {
 
 // Simulate what happens WITHOUT compactChangeSet
 function writesWithoutCompact(
-  source: ReturnType<typeof makeSource>,
+  source: IAttestation,
   changes: ChangeSet,
 ) {
   let current = source;
@@ -68,14 +70,14 @@ function writesWithoutCompact(
       { ...current.address, path: change.location.path },
       change.value,
     );
-    if (result.ok) current = result.ok as typeof source;
+    if (result.ok) current = result.ok;
   }
   return current;
 }
 
 // Simulate what happens WITH compactChangeSet
 function writesWithCompact(
-  source: ReturnType<typeof makeSource>,
+  source: IAttestation,
   changes: ChangeSet,
 ) {
   const compacted = compactChangeSet(changes);
@@ -86,7 +88,7 @@ function writesWithCompact(
       { ...current.address, path: change.location.path },
       change.value,
     );
-    if (result.ok) current = result.ok as typeof source;
+    if (result.ok) current = result.ok;
   }
   return current;
 }
