@@ -1,4 +1,4 @@
-import { createSession, DID, Identity } from "@commontools/identity";
+import { createSession, DID, Identity, isDID } from "@commontools/identity";
 import {
   Runtime,
   RuntimeTelemetry,
@@ -202,17 +202,35 @@ export class RuntimeInternals extends EventTarget {
           throw new Error(`Could not navigate to cell that is not a charm.`);
         }
 
-        // Extract and compare spaces to detect cross-space navigation
-        const targetSpace = target.space;
+        // Safely extract target space, catching any errors from the getter
+        let targetSpace: string | undefined;
+        try {
+          targetSpace = target.space;
+        } catch (err) {
+          console.error(
+            "[navigateCallback] Failed to get target cell space:",
+            err,
+          );
+          // Fall back to same-space navigation
+          targetSpace = undefined;
+        }
+
         const currentSpace = session.space;
         const currentSpaceName = charmManager.getSpaceName();
-        const isCrossSpace = targetSpace !== currentSpace;
+
+        // Determine if this is cross-space navigation:
+        // - targetSpace must be defined
+        // - targetSpace must differ from currentSpace
+        // - targetSpace must be a valid DID for cross-space navigation
+        const isCrossSpace = targetSpace !== undefined &&
+          targetSpace !== currentSpace &&
+          isDID(targetSpace);
 
         // Helper to perform the actual navigation
         const doNavigate = () => {
-          if (isCrossSpace) {
-            // Cross-space: must use target's space DID (no way to know its name)
-            navigate({ spaceDid: targetSpace as DID, charmId: id });
+          if (isCrossSpace && isDID(targetSpace)) {
+            // Cross-space: use target's space DID (validated above)
+            navigate({ spaceDid: targetSpace, charmId: id });
           } else if (currentSpaceName) {
             // Same space with name: use readable URL format
             navigate({ spaceName: currentSpaceName, charmId: id });
