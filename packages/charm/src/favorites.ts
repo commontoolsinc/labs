@@ -44,9 +44,8 @@ export function getHomeFavorites(runtime: Runtime): Cell<FavoriteList> {
 /**
  * Add a charm to the user's favorites (in home space).
  *
- * For cross-space charms, the tag may be empty initially if schema hasn't
- * synced yet. This is fine because wish.ts computes tags lazily when
- * searching favorites (see fallback in wish.ts).
+ * Syncs the charm before computing the tag to ensure schema is available.
+ * wish.ts has a fallback for computing tags lazily if needed.
  */
 export async function addFavorite(
   runtime: Runtime,
@@ -57,7 +56,9 @@ export async function addFavorite(
 
   const resolvedCharm = charm.resolveAsCell();
 
-  // Compute tag (might be empty for cross-space charms - wish.ts handles this)
+  // Sync to ensure schema is available for tag computation
+  await resolvedCharm.sync();
+
   const tag = getCellDescription(charm);
 
   await runtime.editWithRetry((tx) => {
