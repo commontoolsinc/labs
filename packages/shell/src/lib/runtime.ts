@@ -1,4 +1,4 @@
-import { createSession, DID, Identity, isDID } from "@commontools/identity";
+import { createSession, Identity, isDID } from "@commontools/identity";
 import {
   Runtime,
   RuntimeTelemetry,
