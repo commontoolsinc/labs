@@ -10,6 +10,8 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./shared": "./src/shared.ts",
+    "./schemas": "./src/schemas.ts",
     "./storage/inspector": "./src/storage/inspector.ts",
     "./storage/telemetry": "./src/storage/telemetry.ts",
     "./traverse": "./src/traverse.ts",

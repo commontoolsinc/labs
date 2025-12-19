@@ -5,11 +5,11 @@ import {
   convertCellsToLinks,
   effect,
   isCell,
-  type JSONSchema,
   UI,
   useCancelGroup,
 } from "@commontools/runner";
 import { isVNode, type Props, type RenderNode, type VNode } from "./jsx.ts";
+import { vdomSchema } from "@commontools/runner/schemas";
 
 export type SetPropHandler = <T>(
   target: T,
@@ -23,32 +23,6 @@ export interface RenderOptions {
   /** The root cell for auto-wrapping with ct-cell-context on [UI] traversal */
   rootCell?: Cell;
 }
-
-export const vdomSchema: JSONSchema = {
-  type: "object",
-  properties: {
-    type: { type: "string" },
-    name: { type: "string" },
-    props: {
-      type: "object",
-      additionalProperties: { asCell: true },
-    },
-    children: {
-      type: "array",
-      items: {
-        anyOf: [
-          { $ref: "#", asCell: true },
-          { type: "string", asCell: true },
-          { type: "number", asCell: true },
-          { type: "boolean", asCell: true },
-          { type: "array", items: { $ref: "#", asCell: true } },
-        ],
-      },
-      asCell: true,
-    },
-    [UI]: { $ref: "#" },
-  },
-} as const;
 
 /**
  * Renders a view into a parent element, supporting both static VNodes and reactive cells.
