@@ -16,6 +16,7 @@ import { default as Note } from "./note.tsx";
 import BacklinksIndex, { type MentionableCharm } from "./backlinks-index.tsx";
 import ChatList from "./chatbot-list-view.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
+import NotesImportExport from "./notes-import-export.tsx";
 
 type MinimalCharm = {
   [NAME]?: string;
@@ -97,6 +98,12 @@ const spawnNote = handler<void, void>((_, __) => {
   }));
 });
 
+const spawnNotesImportExport = handler<void, void>((_, __) => {
+  return navigateTo(NotesImportExport({
+    importMarkdown: "",
+  }));
+});
+
 export default pattern<CharmsListInput, CharmsListOutput>((_) => {
   const { allCharms } = wish<{ allCharms: MentionableCharm[] }>("/");
   const index = BacklinksIndex({ allCharms });
@@ -150,6 +157,11 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
               onClick={spawnNote()}
             >
               📄 Note
+            </ct-button>
+          </div>
+          <div slot="end">
+            <ct-button onClick={spawnNotesImportExport()}>
+              📦
             </ct-button>
           </div>
         </ct-toolbar>
