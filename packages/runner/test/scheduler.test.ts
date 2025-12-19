@@ -2369,12 +2369,6 @@ describe("cycle-aware convergence", () => {
       output.withTx(actionTx).send(val);
     };
 
-    // Set up error handler to catch the cycle error
-    let errorCaught = false;
-    runtime.scheduler.onError(() => {
-      errorCaught = true;
-    });
-
     // Subscribe both computations
     runtime.scheduler.subscribe(
       actionA,
