@@ -112,7 +112,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
                 <strong>{status.category}</strong>: ${status.spent.toFixed(2)}
                 {status.limit !== null && (
                   <span>
-                     / ${status.limit} ({status.percentUsed?.toFixed(0)}%)
+                    / ${status.limit} ({status.percentUsed?.toFixed(0)}%)
                   </span>
                 )}
               </div>
