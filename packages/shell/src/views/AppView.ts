@@ -9,7 +9,7 @@ import { Task, TaskStatus } from "@lit/task";
 import { CharmController } from "@commontools/charm/ops";
 import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
 import { NAME } from "@commontools/runner";
-import { type NameSchema } from "@commontools/charm";
+import { type NameSchema } from "@commontools/runner/schemas";
 import { updatePageTitle } from "../lib/navigate.ts";
 import { KeyboardController } from "../lib/keyboard-router.ts";
 

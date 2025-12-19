@@ -5,12 +5,8 @@ import {
   RuntimeTelemetryEvent,
   RuntimeTelemetryMarkerResult,
 } from "@commontools/runner";
-import {
-  charmId,
-  CharmManager,
-  NameSchema,
-  nameSchema,
-} from "@commontools/charm";
+import { charmId, CharmManager } from "@commontools/charm";
+import { NameSchema, nameSchema } from "@commontools/runner/schemas";
 import { CharmController, CharmsController } from "@commontools/charm/ops";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { navigate } from "./navigate.ts";

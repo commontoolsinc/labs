@@ -1,5 +1,8 @@
 import { type Cell, type Runtime } from "@commontools/runner";
-import { type FavoriteList, favoriteListSchema } from "./manager.ts";
+import {
+  type FavoriteList,
+  favoriteListSchema,
+} from "@commontools/runner/schemas";
 
 /**
  * Get cell description (schema as string) for tag-based search.

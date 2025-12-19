@@ -1,7 +1,7 @@
 import { CharmController, CharmsController } from "@commontools/charm/ops";
 import { HttpProgramResolver } from "@commontools/js-compiler";
 import { API_URL } from "./env.ts";
-import { NameSchema } from "@commontools/charm";
+import { type NameSchema } from "@commontools/runner/schemas";
 
 export type BuiltinPatternType = "home" | "space-root";
 

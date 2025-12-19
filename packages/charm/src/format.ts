@@ -1,5 +1,6 @@
 import { Module, NAME, Recipe } from "@commontools/runner";
-import { CharmManager, nameSchema } from "./manager.ts";
+import { CharmManager } from "./manager.ts";
+import { nameSchema } from "@commontools/runner/schemas";
 import { Cell } from "@commontools/runner";
 
 /**
