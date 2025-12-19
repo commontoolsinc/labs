@@ -56,7 +56,15 @@ export function navigateTo(
         throw new Error("navigateCallback is not set");
       }
 
-      runtime.navigateCallback(target);
+      // Early exit: if already at root, navigate directly.
+      // Otherwise resolve to root charm first (handles cells from wish().result
+      // which have non-empty paths like ["result"]).
+      const link = target.getAsNormalizedFullLink();
+      const resolvedTarget = link.path.length === 0
+        ? target
+        : target.resolveToRoot();
+
+      runtime.navigateCallback(resolvedTarget);
 
       navigated = true;
       resultCell.set(true);

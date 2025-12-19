@@ -41,6 +41,7 @@ import {
 } from "./query-result-proxy.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
+import { isNormalizedFullLink, parseLink } from "./link-utils.ts";
 import {
   type Action,
   ignoreReadForScheduling,
@@ -129,6 +130,7 @@ declare module "@commontools/api" {
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
     sink(callback: (value: Readonly<T>) => Cancel | undefined | void): Cancel;
     sync(): Promise<Cell<T>> | Cell<T>;
+    resolveToRoot(): Cell<unknown>;
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
@@ -946,6 +948,63 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       this.link,
     );
     return createCell(this.runtime, link, this.tx, this.synced);
+  }
+
+  /**
+   * Resolve this cell to a root document by following link values until path.length === 0.
+   *
+   * Unlike resolveAsCell() which follows storage-layer aliases, this follows
+   * link VALUES embedded in documents. Used when a cell points to a path like
+   * ["result"] that contains a link to an actual charm.
+   *
+   * @throws Error if a non-link value is encountered at a non-empty path
+   * @throws Error if a cycle is detected
+   * @throws Error if max iterations exceeded
+   */
+  resolveToRoot(): Cell<unknown> {
+    // Cycle detection like resolveLink() does
+    const seen = new Set<string>();
+    const MAX_ITERATIONS = 100;
+
+    // Double cast needed: CellImpl lacks [CELL_BRAND] that Cell<T> requires
+    let current: Cell<any> = this as unknown as Cell<any>;
+
+    for (let i = 0; i < MAX_ITERATIONS; i++) {
+      const link = current.getAsNormalizedFullLink();
+
+      // If path is empty, we've found the root
+      if (link.path.length === 0) {
+        return current;
+      }
+
+      // Cycle detection
+      const key = JSON.stringify([link.space, link.id, link.path]);
+      if (seen.has(key)) {
+        throw new Error(
+          `resolveToRoot: Link cycle detected at path ` +
+            `${JSON.stringify(link.path)}`,
+        );
+      }
+      seen.add(key);
+
+      // Get the raw value at this path (should be a link)
+      const rawValue = current.getRaw();
+      const maybeLink = parseLink(rawValue, current);
+
+      if (!maybeLink || !isNormalizedFullLink(maybeLink)) {
+        throw new Error(
+          `resolveToRoot: Cannot resolve to root. ` +
+            `Value at path ${JSON.stringify(link.path)} is not a link.`,
+        );
+      }
+
+      // Follow the link to the next cell
+      current = this.runtime.getCellFromLink(maybeLink, undefined, this.tx);
+    }
+
+    throw new Error(
+      `resolveToRoot: Max iterations (${MAX_ITERATIONS}) reached`,
+    );
   }
 
   getAsQueryResult<Path extends PropertyKey[]>(
