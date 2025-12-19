@@ -353,12 +353,10 @@ export class CTCodeEditor extends BaseElement {
         // where findCharmById returns null because the array hasn't synced yet
         // (common when clicking a backlink immediately after creating it).
         if (backlinkId) {
-          const runtime =
-            this.pattern?.runtime ??
+          const runtime = this.pattern?.runtime ??
             this.mentionable?.runtime ??
             this.mentioned?.runtime;
-          const space =
-            this.pattern?.space ??
+          const space = this.pattern?.space ??
             this.mentionable?.space ??
             this.mentioned?.space;
 
