@@ -44,9 +44,9 @@ export function getHomeFavorites(runtime: Runtime): Cell<FavoriteList> {
 /**
  * Add a charm to the user's favorites (in home space).
  *
- * Uses a reactive pattern for cross-space charms: adds immediately with
- * whatever tag is available (might be empty), then reactively updates
- * the tag when schema data arrives. This keeps UI snappy and works offline.
+ * For cross-space charms, the tag may be empty initially if schema hasn't
+ * synced yet. This is fine because wish.ts computes tags lazily when
+ * searching favorites (see fallback in wish.ts).
  */
 export async function addFavorite(
   runtime: Runtime,
@@ -57,8 +57,8 @@ export async function addFavorite(
 
   const resolvedCharm = charm.resolveAsCell();
 
-  // Compute tag immediately (might be empty for cross-space charms)
-  const initialTag = getCellDescription(charm);
+  // Compute tag (might be empty for cross-space charms - wish.ts handles this)
+  const tag = getCellDescription(charm);
 
   await runtime.editWithRetry((tx) => {
     const favoritesWithTx = favorites.withTx(tx);
@@ -69,37 +69,8 @@ export async function addFavorite(
       current.some((entry) => entry.cell.resolveAsCell().equals(resolvedCharm))
     ) return;
 
-    // Add immediately with whatever tag we have (UI stays snappy)
-    favoritesWithTx.push({ cell: charm, tag: initialTag });
+    favoritesWithTx.push({ cell: charm, tag });
   });
-
-  // If tag was empty, reactively update when schema arrives
-  if (!initialTag) {
-    const schemaCell = charm.asSchemaFromLinks();
-    schemaCell.sink(() => {
-      // Read schema from schemaCell directly (not getCellDescription which creates a new cell)
-      try {
-        const { schema } = schemaCell.getAsNormalizedFullLink();
-        if (schema !== undefined) {
-          const newTag = JSON.stringify(schema);
-          runtime.editWithRetry((tx) => {
-            const favoritesWithTx = favorites.withTx(tx);
-            const list = favoritesWithTx.get() || [];
-            const idx = list.findIndex((e) =>
-              e.cell.resolveAsCell().equals(resolvedCharm)
-            );
-            // Only update if entry still exists and tag is still empty
-            if (idx >= 0 && !list[idx].tag) {
-              favoritesWithTx.key(idx).key("tag").set(newTag);
-            }
-          });
-          return () => {}; // Cancel subscription after successful update
-        }
-      } catch (e) {
-        console.error("Failed to get schema for favorite tag:", e);
-      }
-    });
-  }
 
   await runtime.idle();
 }
