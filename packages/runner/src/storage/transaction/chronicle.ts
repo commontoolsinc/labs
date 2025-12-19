@@ -654,7 +654,7 @@ class Changes {
    * and deep-cloned. Now it just returns the already-merged state.
    */
   rebase(
-    _source: IAttestation,
+    source: IAttestation,
   ): Result<
     IAttestation,
     IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
@@ -663,7 +663,7 @@ class Changes {
       return { ok: this.#workingCopy };
     }
     // If no working copy, return the source unchanged
-    return { ok: _source };
+    return { ok: source };
   }
 
   *[Symbol.iterator](): IterableIterator<IAttestation> {
