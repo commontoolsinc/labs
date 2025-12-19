@@ -347,19 +347,40 @@ export class CTCodeEditor extends BaseElement {
         // Extract ID from "Name (id)" format
         const idMatch = backlinkText.match(/\(([^)]+)\)$/);
         const backlinkId = idMatch ? idMatch[1] : undefined;
-        const charm = backlinkId ? this.findCharmById(backlinkId) : null;
 
-        if (charm) {
-          this.emit("backlink-click", {
-            id: backlinkId,
-            text: backlinkText,
-            charm: charm,
-          });
-          return true;
+        // If we have a valid ID, navigate directly using getCellFromEntityId
+        // This bypasses the mentionable array and eliminates the race condition
+        // where findCharmById returns null due to sync lag
+        if (backlinkId) {
+          // Get runtime and space from available cells
+          const runtime = this.pattern?.runtime ??
+            this.mentionable?.runtime ?? this.mentioned?.runtime;
+          const space = this.pattern?.space ??
+            this.mentionable?.space ?? this.mentioned?.space;
+
+          if (runtime && space) {
+            // Get cell directly by entity ID - no need to search mentionable array
+            const charmCell = runtime.getCellFromEntityId(space, {
+              "/": backlinkId,
+            });
+
+            // Use navigateCallback (like ct-cell-link does)
+            if (runtime.navigateCallback) {
+              runtime.navigateCallback(charmCell);
+            }
+
+            // Always emit backlink-click for backwards compatibility
+            this.emit("backlink-click", {
+              id: backlinkId,
+              text: backlinkText,
+              charm: charmCell,
+            });
+            return true;
+          }
         }
 
-        // Instantiate the pattern and pass the ID so we can insert it into the text
-        if (this.pattern) {
+        // Only create new backlink if there's NO ID (text-only backlink like [[Thomas]])
+        if (!backlinkId && this.pattern) {
           this.createBacklinkFromPattern(backlinkText, true);
         }
 
