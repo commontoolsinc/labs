@@ -17,11 +17,7 @@ import {
   Stream,
   UI,
 } from "commontools";
-import {
-  type CategoryBudget,
-  type Expense,
-  getTodayDate,
-} from "./schemas.tsx";
+import { type CategoryBudget, type Expense, getTodayDate } from "./schemas.tsx";
 
 // ============ INPUT/OUTPUT TYPES ============
 
@@ -69,11 +65,13 @@ const setBudgetHandler = handler<
     return;
   }
   const current = budgets.get();
-  const existingIndex = current.findIndex((b) => b.category === category.trim());
+  const existingIndex = current.findIndex((b) =>
+    b.category === category.trim()
+  );
 
   if (existingIndex >= 0) {
     budgets.set(
-      current.map((b, i) => (i === existingIndex ? { ...b, limit } : b))
+      current.map((b, i) => (i === existingIndex ? { ...b, limit } : b)),
     );
   } else {
     budgets.push({ category: category.trim(), limit });
@@ -201,7 +199,10 @@ export default pattern<Input>(({ expenses, budgets }) => {
             marginBottom: "1rem",
           }}
         >
-          <ct-input $value={budgetCategory} placeholder="Category (e.g. Food)" />
+          <ct-input
+            $value={budgetCategory}
+            placeholder="Category (e.g. Food)"
+          />
           <ct-input $value={budgetLimit} placeholder="Monthly limit" />
           <ct-button
             onClick={() => {
@@ -210,11 +211,16 @@ export default pattern<Input>(({ expenses, budgets }) => {
 
               if (cat && !isNaN(limitVal) && limitVal >= 0) {
                 const current = budgets.get();
-                const existingIndex = current.findIndex((b) => b.category === cat);
+                const existingIndex = current.findIndex((b) =>
+                  b.category === cat
+                );
 
                 if (existingIndex >= 0) {
                   budgets.set(
-                    current.map((b, i) => (i === existingIndex ? { ...b, limit: limitVal } : b))
+                    current.map((
+                      b,
+                      i,
+                    ) => (i === existingIndex ? { ...b, limit: limitVal } : b)),
                   );
                 } else {
                   budgets.push({ category: cat, limit: limitVal });

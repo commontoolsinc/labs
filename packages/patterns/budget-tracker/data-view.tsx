@@ -59,10 +59,17 @@ export default pattern<Input>(({ expenses, budgets }) => {
         const categorySpent = spent[category] || 0;
         const limit = budgetMap.get(category) ?? null;
         const remaining = limit !== null ? limit - categorySpent : null;
-        const percentUsed =
-          limit !== null && limit > 0 ? (categorySpent / limit) * 100 : null;
+        const percentUsed = limit !== null && limit > 0
+          ? (categorySpent / limit) * 100
+          : null;
 
-        return { category, spent: categorySpent, limit, remaining, percentUsed };
+        return {
+          category,
+          spent: categorySpent,
+          limit,
+          remaining,
+          percentUsed,
+        };
       });
   });
 
@@ -105,7 +112,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
                 <strong>{status.category}</strong>: ${status.spent.toFixed(2)}
                 {status.limit !== null && (
                   <span>
-                    {" "}/ ${status.limit} ({status.percentUsed?.toFixed(0)}%)
+                     / ${status.limit} ({status.percentUsed?.toFixed(0)}%)
                   </span>
                 )}
               </div>
