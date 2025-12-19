@@ -276,8 +276,7 @@ function resolveBase(
             }
           }
 
-          const hashtags =
-            tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
+          const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
           return [...hashtags].some((m) => m[0] === searchTerm);
         });
 
