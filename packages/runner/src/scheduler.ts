@@ -1632,6 +1632,12 @@ export class Scheduler {
     // Now run all functions. This will resubscribe actions with their new
     // dependencies.
     for (const fn of order) {
+      // Check if action is still scheduled (not unsubscribed during this tick).
+      // Running an action might unsubscribe other actions in the workSet.
+      const isStillScheduled =
+        this.computations.has(fn) || this.effects.has(fn);
+      if (!isStillScheduled) continue;
+
       // Check if action is still valid (not unsubscribed since added)
       // In pull mode, check both pending (effects) and dirty (computations)
       const isInPending = this.pending.has(fn);
@@ -1656,26 +1662,6 @@ export class Scheduler {
         } else {
           // For computations: must be pending or dirty
           if (!isInPending && !isInDirty) continue;
-
-          // Skip this computation if its parent created a replacement during its run.
-          // This happens when parent is in workSet and has already run (topo order),
-          // and it subscribed a new child (in pendingDependencyCollection).
-
-          // TODO(seefeld): That feels a bit haphazard. Is there a better way?
-          const parent = this.actionParent.get(fn);
-          if (parent && workSet.has(parent)) {
-            // Check if parent created a new child during its run
-            const newChildCreated = [...this.pendingDependencyCollection].some(
-              (newChild) => this.actionParent.get(newChild) === parent,
-            );
-            if (newChildCreated) {
-              // Parent created replacement, skip old child
-              this.clearDirty(fn);
-              this.pending.delete(fn);
-              continue;
-            }
-            // Parent reused old child, run it
-          }
         }
       } else {
         // Push mode: action must be in pending
@@ -1746,6 +1732,11 @@ export class Scheduler {
         );
 
         for (const fn of moreOrder) {
+          // Check if action is still scheduled (not unsubscribed during settle)
+          const isStillScheduled =
+            this.computations.has(fn) || this.effects.has(fn);
+          if (!isStillScheduled) continue;
+
           if (!this.dirty.has(fn)) continue;
 
           this.pending.delete(fn);
@@ -1833,25 +1824,17 @@ export class Scheduler {
         const alreadyRunThisCycle = new Set(order);
 
         for (const fn of additionalOrder) {
+          // Check if action is still scheduled (not unsubscribed during post-loop)
+          const isStillScheduled =
+            this.computations.has(fn) || this.effects.has(fn);
+          if (!isStillScheduled) continue;
+
           if (!this.dirty.has(fn)) continue;
           if (alreadyRunThisCycle.has(fn)) continue;
 
           this.pending.delete(fn);
           this.clearDirty(fn);
           this.unsubscribe(fn);
-
-          // When running a new child action, clean up old siblings that already ran
-          // (they're obsolete since parent created this new version)
-          const parent = this.actionParent.get(fn);
-          if (parent) {
-            for (const sibling of alreadyRunThisCycle) {
-              if (this.actionParent.get(sibling) === parent && sibling !== fn) {
-                // Sibling ran in MAIN-LOOP but is now obsolete
-                // Clear any dirty flag to prevent future runs
-                this.clearDirty(sibling);
-              }
-            }
-          }
 
           this.filterStats.executed++;
           await this.run(fn);
