@@ -387,9 +387,10 @@ export class CTPicker extends BaseElement {
                           aria-selected="${index === currentIndex}"
                           id="picker-item-${index}"
                         >
-                          <ct-render .cell="${this.items.key(
-                            index,
-                          )}"></ct-render>
+                          <ct-render
+                            .cell="${this.items.key(index)}"
+                            variant="preview"
+                          ></ct-render>
                         </div>
                       `
                     )
