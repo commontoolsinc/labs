@@ -383,7 +383,7 @@ describe("Attestation Module", () => {
     });
 
     // 3. ARRAY.LENGTH EDGE CASES
-    it("should handle negative array length (produces empty array)", () => {
+    it("should handle negative array length (slice behavior removes last element)", () => {
       const source = {
         address: { id: "test:arrlen" as const, type: "application/json" as const, path: [] as const },
         value: { items: [1, 2, 3] },

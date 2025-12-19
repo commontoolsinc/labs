@@ -104,7 +104,16 @@ const setAtPath = (
     if (key === "length" && rest.length === 0) {
       const newLen = value as number;
       if (root.length === newLen) return { ok: root }; // noop
-      return { ok: root.slice(0, newLen) };
+      // Use slice for truncation, negative values, and NaN (produces empty array behavior)
+      // slice handles these edge cases correctly and matches previous behavior
+      if (newLen < root.length || newLen < 0 || Number.isNaN(newLen)) {
+        return { ok: root.slice(0, newLen) };
+      } else {
+        // Extension: create array with new length (sparse slots become undefined in JSON)
+        const extended = [...root];
+        extended.length = newLen;
+        return { ok: extended };
+      }
     }
 
     // Validate array key

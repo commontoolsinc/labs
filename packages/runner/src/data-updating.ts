@@ -597,6 +597,8 @@ function hasPath(value: unknown, path: readonly string[]): boolean {
       if (first === "length" && rest.length === 0) return true;
       return false;
     }
+    // Check if index actually exists (handles sparse arrays with holes)
+    if (!(index in value)) return false;
     return hasPath(value[index], rest);
   }
 
