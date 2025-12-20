@@ -204,8 +204,8 @@ export const AgeCategoryModule = recipe<
 
   // Age group options for radio
   const ageGroupOptions = [
-    { label: "Adult (18+)", value: "adult" },
-    { label: "Child (0-17)", value: "child" },
+    { label: "Adult", value: "adult" },
+    { label: "Child", value: "child" },
   ];
 
   return {
