@@ -1,8 +1,8 @@
 // template-registry.ts - Pre-assembled module sets ("lego sets")
 // Defines common record types and their associated modules
 
-import { createSubCharm } from "../sub-charms/registry.ts";
-import type { SubCharmEntry } from "../types/record-types.ts";
+import { createSubCharm } from "./registry.ts";
+import type { SubCharmEntry } from "./types.ts";
 
 // ===== Template Types =====
 

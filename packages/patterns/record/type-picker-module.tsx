@@ -27,10 +27,10 @@ import {
   createTemplateModules,
   getTemplateList,
   type TemplateDefinition,
-} from "../templates/template-registry.ts";
-import type { SubCharmEntry, TrashedSubCharmEntry } from "../types/record-types.ts";
+} from "./template-registry.ts";
+import type { SubCharmEntry, TrashedSubCharmEntry } from "./types.ts";
 // Import Note directly for creating with correct linkPattern
-import Note from "../../note.tsx";
+import Note from "../note.tsx";
 
 // ===== Types =====
 

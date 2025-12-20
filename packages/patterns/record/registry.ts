@@ -3,25 +3,25 @@
 // Includes pattern constructors for true sub-charm architecture
 
 import type { Cell } from "commontools";
-import type { SubCharmType } from "../types/record-types.ts";
+import type { SubCharmType } from "./types.ts";
 
 // NOTE: Note is NOT imported here - it's created directly in record.tsx
 // with the correct linkPattern (avoids global state for passing Record's pattern JSON)
 
-// Import all sub-charm patterns
-import { BirthdayModule } from "./birthday-module.tsx";
-import { RatingModule } from "./rating-module.tsx";
-import { TagsModule } from "./tags-module.tsx";
-import { ContactModule } from "./contact-module.tsx";
-import { StatusModule } from "./status-module.tsx";
-import { AddressModule } from "./address-module.tsx";
-import { TimelineModule } from "./timeline-module.tsx";
-import { SocialModule } from "./social-module.tsx";
-import { LinkModule } from "./link-module.tsx";
-import { LocationModule } from "./location-module.tsx";
-import { RelationshipModule } from "./relationship-module.tsx";
-import { GiftPrefsModule } from "./giftprefs-module.tsx";
-import { TimingModule } from "./timing-module.tsx";
+// Import all module patterns
+import { BirthdayModule } from "./modules/birthday-module.tsx";
+import { RatingModule } from "./modules/rating-module.tsx";
+import { TagsModule } from "./modules/tags-module.tsx";
+import { ContactModule } from "./modules/contact-module.tsx";
+import { StatusModule } from "./modules/status-module.tsx";
+import { AddressModule } from "./modules/address-module.tsx";
+import { TimelineModule } from "./modules/timeline-module.tsx";
+import { SocialModule } from "./modules/social-module.tsx";
+import { LinkModule } from "./modules/link-module.tsx";
+import { LocationModule } from "./modules/location-module.tsx";
+import { RelationshipModule } from "./modules/relationship-module.tsx";
+import { GiftPrefsModule } from "./modules/giftprefs-module.tsx";
+import { TimingModule } from "./modules/timing-module.tsx";
 // NOTE: TypePickerModule is NOT imported here to avoid circular dependency
 // (registry → type-picker → template-registry → registry)
 // Instead, record.tsx imports it directly.

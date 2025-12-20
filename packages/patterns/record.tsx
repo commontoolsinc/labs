@@ -29,15 +29,15 @@ import {
   createSubCharm,
   getAddableTypes,
   getDefinition,
-} from "./sub-charms/registry.ts";
+} from "./record/registry.ts";
 // Import Note directly - we create it inline with proper linkPattern
 // (avoids global state for passing Record's pattern JSON)
-import Note from "../note.tsx";
+import Note from "./note.tsx";
 import {
   inferTypeFromModules,
-} from "./templates/template-registry.ts";
-import { TypePickerModule } from "./sub-charms/type-picker-module.tsx";
-import type { SubCharmEntry, TrashedSubCharmEntry } from "./types/record-types.ts";
+} from "./record/template-registry.ts";
+import { TypePickerModule } from "./record/type-picker-module.tsx";
+import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 
 // ===== Types =====
 
