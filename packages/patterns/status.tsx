@@ -24,8 +24,13 @@ export const MODULE_METADATA: ModuleMetadata = {
 };
 
 // ===== Types =====
+
+/** Project/task status values */
+type StatusValue = "planned" | "active" | "blocked" | "done" | "archived";
+
 export interface StatusModuleInput {
-  status: Default<string, "">;
+  /** Project status */
+  status: Default<StatusValue | "", "">;
 }
 
 // ===== Constants =====

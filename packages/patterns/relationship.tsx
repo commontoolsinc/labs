@@ -39,10 +39,18 @@ export const MODULE_METADATA: ModuleMetadata = {
 };
 
 // ===== Types =====
+
+/** Closeness level for relationships */
+type ClosenessLevel = "intimate" | "close" | "casual" | "distant";
+
 export interface RelationshipModuleInput {
+  /** Relationship types (e.g., friend, family, colleague) */
   relationTypes: Default<string[], []>;
-  closeness: Default<string, "">;
+  /** Closeness level */
+  closeness: Default<ClosenessLevel | "", "">;
+  /** How we met */
   howWeMet: Default<string, "">;
+  /** Inner circle member */
   innerCircle: Default<boolean, false>;
 }
 

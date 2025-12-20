@@ -30,16 +30,32 @@ export const MODULE_METADATA: ModuleMetadata = {
       description: "Social platform",
     },
     handle: { type: "string", description: "Username/handle" },
-    url: { type: "string", format: "uri", description: "Profile URL" },
+    profileUrl: { type: "string", format: "uri", description: "Profile URL" },
   },
-  fieldMapping: ["platform", "handle", "url"],
+  fieldMapping: ["platform", "handle", "profileUrl"],
 };
 
 // ===== Types =====
+
+/** Supported social platforms */
+type SocialPlatform =
+  | "twitter"
+  | "linkedin"
+  | "github"
+  | "instagram"
+  | "facebook"
+  | "youtube"
+  | "tiktok"
+  | "mastodon"
+  | "bluesky";
+
 export interface SocialModuleInput {
-  platform: Default<string, "">;
+  /** Social platform (normalize: Insta→instagram, X→twitter) */
+  platform: Default<SocialPlatform | "", "">;
+  /** Username/handle without @ prefix */
   handle: Default<string, "">;
-  url: Default<string, "">;
+  /** Profile URL */
+  profileUrl: Default<string, "">;
 }
 
 // ===== Constants =====
@@ -59,7 +75,7 @@ const PLATFORM_OPTIONS = [
 // ===== The Pattern =====
 export const SocialModule = recipe<SocialModuleInput, SocialModuleInput>(
   "SocialModule",
-  ({ platform, handle, url }) => {
+  ({ platform, handle, profileUrl }) => {
     const displayText = computed(() => {
       const opt = PLATFORM_OPTIONS.find((o) => o.value === platform);
       return handle ? `${opt?.label || platform}: @${handle}` : "Not set";
@@ -83,13 +99,17 @@ export const SocialModule = recipe<SocialModuleInput, SocialModuleInput>(
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Profile URL
             </label>
-            <ct-input type="url" $value={url} placeholder="https://..." />
+            <ct-input
+              type="url"
+              $value={profileUrl}
+              placeholder="https://..."
+            />
           </ct-vstack>
         </ct-vstack>
       ),
       platform,
       handle,
-      url,
+      profileUrl,
     };
   },
 );
