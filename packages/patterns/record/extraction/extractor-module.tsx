@@ -25,11 +25,7 @@ import {
   recipe,
   UI,
 } from "commontools";
-import {
-  buildExtractionSchema,
-  getDefinition,
-  getFieldToTypeMapping,
-} from "../registry.ts";
+import { getDefinition, getFieldToTypeMapping } from "../registry.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "../types.ts";
 import type { ExtractedField, ExtractionPreview } from "./types.ts";
 
@@ -63,6 +59,61 @@ Rules:
 7. Be conservative - only extract what you're confident about
 
 Return a JSON object with the extracted fields. Use null for fields without data.`;
+
+// Static extraction schema - inlined to avoid dynamic registry calls that don't survive compilation
+const EXTRACTION_SCHEMA = {
+  type: "object",
+  properties: {
+    // Notes
+    notes: { type: "string", description: "Free-form notes" },
+    // Contact
+    email: { type: "string", description: "Email address" },
+    phone: { type: "string", description: "Phone number" },
+    website: { type: "string", description: "Website URL" },
+    // Birthday
+    birthDate: { type: "string", description: "Birthday YYYY-MM-DD or MM-DD" },
+    birthYear: { type: "number", description: "Birth year" },
+    // Tags
+    tags: { type: "array", items: { type: "string" }, description: "Tags or interests" },
+    // Rating
+    rating: { type: "number", minimum: 1, maximum: 5, description: "Rating 1-5" },
+    // Status
+    status: {
+      type: "string",
+      enum: ["planned", "active", "blocked", "done", "archived"],
+      description: "Project status",
+    },
+    // Address
+    street: { type: "string", description: "Street address" },
+    city: { type: "string", description: "City" },
+    state: { type: "string", description: "State/Province" },
+    postalCode: { type: "string", description: "Postal/ZIP code" },
+    country: { type: "string", description: "Country" },
+    // Timeline
+    startDate: { type: "string", format: "date", description: "Start date" },
+    targetDate: { type: "string", format: "date", description: "Target date" },
+    // Social
+    platform: { type: "string", description: "Social platform name" },
+    handle: { type: "string", description: "Social handle/username" },
+    profileUrl: { type: "string", description: "Profile URL" },
+    // Link
+    url: { type: "string", format: "uri", description: "URL" },
+    linkTitle: { type: "string", description: "Link title" },
+    // Location
+    locationName: { type: "string", description: "Location name" },
+    locationAddress: { type: "string", description: "Full address" },
+    coordinates: { type: "string", description: "Coordinates (lat,lng)" },
+    // Relationship
+    relationTypes: { type: "array", items: { type: "string" }, description: "Relationship types" },
+    closeness: { type: "string", description: "Closeness level" },
+    howWeMet: { type: "string", description: "How we met" },
+    // Gift Prefs
+    giftTier: { type: "string", description: "Gift giving tier" },
+    giftBudget: { type: "number", description: "Gift budget" },
+    giftNotes: { type: "string", description: "Gift notes" },
+    favorites: { type: "array", items: { type: "string" }, description: "Favorites list" },
+  },
+} as const;
 
 // ===== Helper Functions =====
 
@@ -197,18 +248,21 @@ const applySelected = handler<
   const selected = selections.get() || {};
 
   // Apply each selected field
+  // Use parentSubCharms.key(index).key("charm").key(fieldName).set(value) pattern
+  // This is the same pattern used in chatbot-note-composed.tsx for editing sub-charm fields
   for (const field of preview.fields) {
     const fieldKey = `${field.targetModule}.${field.fieldName}`;
     // Default to selected (true) unless explicitly unchecked
     if (selected[fieldKey] === false) continue;
 
-    const entry = current.find((e) => e?.type === field.targetModule);
-    if (!entry?.charm) continue;
+    // Find the index of the entry with matching type
+    const entryIndex = current.findIndex((e) => e?.type === field.targetModule);
+    if (entryIndex < 0) continue;
 
     try {
-      // Use .key().set() to write to the module's field
-      const charm = entry.charm as { key: (k: string) => { set: (v: unknown) => void } };
-      charm.key(field.fieldName).set(field.extractedValue);
+      // Navigate through the Cell hierarchy: subCharms[index].charm.fieldName
+      // This gives us write access to the underlying Cell
+      (parentSubCharms as any).key(entryIndex).key("charm").key(field.fieldName).set(field.extractedValue);
     } catch (e) {
       console.warn(`Failed to set ${field.targetModule}.${field.fieldName}:`, e);
     }
@@ -230,18 +284,21 @@ const applySelected = handler<
 export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutput>(
   "ExtractorModule",
   ({ parentSubCharms, parentTrashedSubCharms, inputText, selections }) => {
-    // Build the extraction schema from registry
-    const extractionSchema = buildExtractionSchema();
-
-    // Check if we have enough text to extract
-    const hasText = computed(() => (inputText?.trim()?.length || 0) > 20);
-
-    // Reactive extraction - only runs when inputText has content
+    // Reactive extraction - runs when inputText has content
     // The framework caches by content hash, so same text won't re-extract
+    // Using static EXTRACTION_SCHEMA (dynamic buildExtractionSchema doesn't survive compilation)
     const extraction = generateObject<Record<string, unknown>>({
       system: EXTRACTION_SYSTEM_PROMPT,
-      prompt: computed(() => (hasText ? inputText?.trim() : "")),
-      schema: extractionSchema as Record<string, unknown>,
+      prompt: inputText,  // Direct Cell reference
+      schema: EXTRACTION_SCHEMA,
+      model: "anthropic:claude-haiku-4-5",  // Fast & cheap model for extraction
+    });
+
+    // Check if we have enough text to extract (for UI display)
+    // inputText is a reactive reference - must use computed() to track changes
+    const hasText = computed(() => {
+      const text = inputText || "";
+      return text.trim().length > 20;
     });
 
     // Build preview from extraction result
@@ -269,6 +326,20 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
       if (extraction.error) return "error";
       if (preview?.fields?.length) return "preview";
       return "idle";
+    });
+
+    // Format extracted fields as text for preview display
+    // Build directly from extraction.result to avoid double-computed issues
+    const previewText = computed(() => {
+      if (!extraction.result) return "No fields extracted";
+      const subCharms = parentSubCharms.get() || [];
+      const previewData = buildPreview(extraction.result, subCharms);
+      if (!previewData?.fields?.length) return "No fields extracted";
+      return previewData.fields.map((f: ExtractedField) => {
+        const current = formatValue(f.currentValue);
+        const extracted = formatValue(f.extractedValue);
+        return `${f.targetModule}.${f.fieldName}: ${current} → ${extracted}`;
+      }).join("\n");
     });
 
     return {
@@ -373,112 +444,22 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
           {ifElse(
             computed(() => phase === "preview"),
             <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              {/* Module groups */}
-              {computed(() => {
-                const p = preview;
-                if (!p) return null;
-
-                return Object.entries(p.byModule).map(([moduleType, fields]) => {
-                  const def = getDefinition(moduleType);
-                  const icon = def?.icon || "📋";
-                  const label = def?.label || moduleType;
-
-                  return (
-                    <div
-                      style={{
-                        background: "white",
-                        borderRadius: "6px",
-                        border: "1px solid #e5e7eb",
-                        overflow: "hidden",
-                      }}
-                    >
-                      {/* Module header */}
-                      <div
-                        style={{
-                          padding: "8px 12px",
-                          background: "#f9fafb",
-                          borderBottom: "1px solid #e5e7eb",
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                        }}
-                      >
-                        <span style={{ fontWeight: "500" }}>
-                          {icon} {label}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: "11px",
-                            padding: "2px 6px",
-                            background: "#dbeafe",
-                            color: "#1d4ed8",
-                            borderRadius: "4px",
-                          }}
-                        >
-                          UPDATE
-                        </span>
-                      </div>
-
-                      {/* Field list */}
-                      <div style={{ padding: "8px 12px" }}>
-                        {fields.map((field: ExtractedField) => {
-                          const key = `${moduleType}.${field.fieldName}`;
-                          const isSelected = computed(() => {
-                            const sel = selections || {};
-                            return sel[key] !== false;
-                          });
-                          const currentFormatted = formatValue(field.currentValue);
-                          const extractedFormatted = formatValue(field.extractedValue);
-                          const isAdding = isEmpty(field.currentValue);
-
-                          return (
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "flex-start",
-                                gap: "8px",
-                                padding: "6px 0",
-                                borderBottom: "1px solid #f3f4f6",
-                              }}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() =>
-                                  toggleField({ selections, fieldKey: key })
-                                }
-                                style={{ marginTop: "2px" }}
-                              />
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div
-                                  style={{
-                                    fontSize: "13px",
-                                    fontWeight: "500",
-                                    color: "#374151",
-                                  }}
-                                >
-                                  {field.fieldName}
-                                </div>
-                                <div
-                                  style={{
-                                    fontSize: "12px",
-                                    color: isAdding ? "#059669" : "#d97706",
-                                    wordBreak: "break-word",
-                                  }}
-                                >
-                                  {currentFormatted}{" "}
-                                  <span style={{ color: "#9ca3af" }}>→</span>{" "}
-                                  {extractedFormatted}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                });
-              })}
+              {/* Simple field list - render flat list of extracted fields */}
+              <div
+                style={{
+                  background: "white",
+                  borderRadius: "6px",
+                  border: "1px solid #e5e7eb",
+                  padding: "12px",
+                }}
+              >
+                <div style={{ marginBottom: "8px", fontWeight: "500", color: "#374151" }}>
+                  Extracted Fields:
+                </div>
+                <div style={{ fontSize: "13px", color: "#6b7280", whiteSpace: "pre-wrap" }}>
+                  {previewText}
+                </div>
+              </div>
 
               {/* Action buttons */}
               <div
