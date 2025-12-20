@@ -96,7 +96,42 @@ interface RecordCharm {
 // ===== Data Extraction =====
 
 /**
+ * Coerce data types to match schema expectations
+ * Handles common type mismatches (e.g., "1986" string → 1986 number)
+ * Used by both export (to fix ct-input storing numbers as strings)
+ * and import (to handle JSON that may have wrong types)
+ */
+function coerceDataTypes(
+  type: string,
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  const def = getDefinition(type);
+  if (!def?.schema) return data;
+
+  const coerced = { ...data };
+
+  for (const [field, schema] of Object.entries(def.schema)) {
+    const value = coerced[field];
+    // deno-lint-ignore no-explicit-any
+    const fieldSchema = schema as any;
+
+    if (value === undefined || value === null || value === "") continue;
+
+    // Coerce string to number if schema expects number
+    if (fieldSchema.type === "number" && typeof value === "string") {
+      const parsed = Number(value);
+      if (!isNaN(parsed)) {
+        coerced[field] = parsed;
+      }
+    }
+  }
+
+  return coerced;
+}
+
+/**
  * Extract data from a module using the registry's fieldMapping
+ * Also coerces types to match schema (e.g., string "1986" → number 1986)
  */
 function extractModuleData(
   charm: unknown,
@@ -127,7 +162,9 @@ function extractModuleData(
       data[field] = null;
     }
   }
-  return data;
+
+  // Coerce types to match schema (fixes ct-input storing numbers as strings)
+  return coerceDataTypes(type, data);
 }
 
 /**
@@ -363,8 +400,11 @@ function createModuleFromData(
     return null; // Unknown type - handled by caller
   }
 
+  // Coerce data types to match schema
+  const coercedData = coerceDataTypes(type, data);
+
   // Create module with imported data
-  const charm = createSubCharm(type, data);
+  const charm = createSubCharm(type, coercedData);
   if (!charm) {
     throw new Error(`createSubCharm for "${type}" returned null/undefined`);
   }
@@ -539,6 +579,59 @@ const clearImportResult = handler<
   importResult.set(null);
 });
 
+/**
+ * Handler to trigger JSON download via ct-button
+ * Uses globalThis to access DOM APIs at runtime (pattern runs in browser)
+ */
+const triggerDownload = handler<
+  Record<string, never>,
+  { json: string }
+>((_, { json }) => {
+  // Access DOM via globalThis (available at runtime in browser)
+  // deno-lint-ignore no-explicit-any
+  const win = globalThis as any;
+
+  // Unwrap Cell if needed
+  // deno-lint-ignore no-explicit-any
+  const jsonStr = typeof json === "string" ? json : (json as any)?.get?.() ?? "";
+  const filename = `records-backup-${new Date().toISOString().split("T")[0]}.json`;
+
+  // Create blob and download
+  const blob = new win.Blob([jsonStr], { type: "application/json" });
+  const url = win.URL.createObjectURL(blob);
+  const a = win.document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  win.document.body.appendChild(a);
+  a.click();
+  win.document.body.removeChild(a);
+  win.URL.revokeObjectURL(url);
+});
+
+/**
+ * Handler to process uploaded file
+ */
+const handleFileUpload = handler<
+  { detail: { files: Array<{ data: string; name: string }> } },
+  { importJson: Cell<string> }
+>(({ detail }, { importJson }) => {
+  const files = detail?.files;
+  if (!files || files.length === 0) return;
+
+  const file = files[0];
+  // data is a data URL, need to extract the JSON content
+  const dataUrl = file.data;
+  const base64Match = dataUrl.match(/base64,(.+)/);
+  if (base64Match) {
+    try {
+      const jsonContent = atob(base64Match[1]);
+      importJson.set(jsonContent);
+    } catch (e) {
+      console.error("Failed to decode file:", e);
+    }
+  }
+});
+
 // ===== The Pattern =====
 
 export default pattern<Input, Output>(({ importJson }) => {
@@ -597,8 +690,15 @@ export default pattern<Input, Output>(({ importJson }) => {
                 <h2>Export Records</h2>
                 <p>
                   Found <strong>{recordCount}</strong>{" "}
-                  records in this space. Copy the JSON below to save your data.
+                  records in this space. Download or copy the JSON to save your
+                  data.
                 </p>
+                <ct-button
+                  onClick={triggerDownload({ json: exportedJson })}
+                  variant="primary"
+                >
+                  📥 Download Backup
+                </ct-button>
                 <ct-code-editor
                   $value={exportedJson}
                   language="application/json"
@@ -620,8 +720,14 @@ export default pattern<Input, Output>(({ importJson }) => {
               <ct-vstack gap="4">
                 <h2>Import Records</h2>
                 <p>
-                  Paste previously exported JSON below to restore your records.
+                  Upload a backup file or paste JSON to restore your records.
                 </p>
+                <ct-file-input
+                  accept=".json,application/json"
+                  buttonText="📤 Upload Backup File"
+                  showPreview={false}
+                  onct-change={handleFileUpload({ importJson })}
+                />
                 <ct-code-editor
                   $value={importJson}
                   language="application/json"
@@ -645,6 +751,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                     allCharms,
                     importResult,
                   })}
+                  variant="primary"
                 >
                   Import Records
                 </ct-button>
