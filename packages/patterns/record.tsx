@@ -34,7 +34,8 @@ import {
 // (avoids global state for passing Record's pattern JSON)
 import Note from "./note.tsx";
 import { inferTypeFromModules } from "./record/template-registry.ts";
-import { TypePickerModule } from "./record/type-picker-module.tsx";
+import { TypePickerModule } from "./type-picker.tsx";
+import type { ContainerCoordinationContext } from "./container-protocol.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 
 // ===== Types =====
@@ -82,7 +83,7 @@ const storeInitialCharms = lift(
 );
 
 // Outer lift: checks if empty, creates charms, calls inner lift
-// TypePicker receives parent Cells so it can modify subCharms when template selected
+// TypePicker uses ContainerCoordinationContext protocol for parent access
 // Note: We receive recordPatternJson as input to avoid capturing Record before it's defined
 const initializeRecord = lift(
   toSchema<{
@@ -109,13 +110,27 @@ const initializeRecord = lift(
         embedded: true,
         linkPattern: recordPatternJson,
       } as any);
-      // TypePicker receives parent Cells + recordPatternJson for creating Notes
+
+      // Build ContainerCoordinationContext for TypePicker
+      const context: ContainerCoordinationContext<SubCharmEntry> = {
+        entries: subCharms,
+        trashedEntries: trashedSubCharms as Cell<
+          (SubCharmEntry & { trashedAt: string })[]
+        >,
+        createModule: (type: string) => {
+          if (type === "notes") {
+            // deno-lint-ignore no-explicit-any
+            return Note(
+              { embedded: true, linkPattern: recordPatternJson } as any,
+            );
+          }
+          return createSubCharm(type);
+        },
+      };
+
+      // TypePicker uses the ContainerCoordinationContext protocol
       // deno-lint-ignore no-explicit-any
-      const typePickerCharm = TypePickerModule({
-        parentSubCharms: subCharms,
-        parentTrashedSubCharms: trashedSubCharms,
-        recordPatternJson,
-      } as any);
+      const typePickerCharm = TypePickerModule({ context } as any);
       return storeInitialCharms({
         notesCharm,
         typePickerCharm,

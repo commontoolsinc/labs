@@ -1,9 +1,28 @@
 /// <cts-enable />
 /**
- * Address Module - Sub-charm for physical address
+ * Address Module - Pattern for physical address
+ *
+ * A composable pattern that can be used standalone or embedded in containers
+ * like Record. Stores street, city, state, and ZIP.
  */
 import { computed, type Default, NAME, recipe, UI } from "commontools";
+import type { ModuleMetadata } from "./container-protocol.ts";
 
+// ===== Self-Describing Metadata =====
+export const MODULE_METADATA: ModuleMetadata = {
+  type: "address",
+  label: "Address",
+  icon: "\u{1F4CD}", // pin emoji
+  schema: {
+    street: { type: "string", description: "Street address" },
+    city: { type: "string", description: "City" },
+    state: { type: "string", description: "State/Province" },
+    zip: { type: "string", description: "ZIP/Postal code" },
+  },
+  fieldMapping: ["street", "city", "state", "zip"],
+};
+
+// ===== Types =====
 export interface AddressModuleInput {
   street: Default<string, "">;
   city: Default<string, "">;
@@ -11,6 +30,7 @@ export interface AddressModuleInput {
   zip: Default<string, "">;
 }
 
+// ===== The Pattern =====
 export const AddressModule = recipe<AddressModuleInput, AddressModuleInput>(
   "AddressModule",
   ({ street, city, state, zip }) => {
@@ -21,7 +41,7 @@ export const AddressModule = recipe<AddressModuleInput, AddressModuleInput>(
     });
 
     return {
-      [NAME]: computed(() => `📍 Address: ${displayText}`),
+      [NAME]: computed(() => `${MODULE_METADATA.icon} Address: ${displayText}`),
       [UI]: (
         <ct-vstack style={{ gap: "12px" }}>
           <ct-vstack style={{ gap: "4px" }}>

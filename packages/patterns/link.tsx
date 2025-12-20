@@ -1,22 +1,41 @@
 /// <cts-enable />
 /**
- * Link Module - Sub-charm for web links/resources
+ * Link Module - Pattern for web links/resources
+ *
+ * A composable pattern that can be used standalone or embedded in containers
+ * like Record. Stores URL, title, and description.
  */
 import { computed, type Default, NAME, recipe, UI } from "commontools";
+import type { ModuleMetadata } from "./container-protocol.ts";
 
+// ===== Self-Describing Metadata =====
+export const MODULE_METADATA: ModuleMetadata = {
+  type: "link",
+  label: "Link",
+  icon: "\u{1F310}", // globe emoji
+  schema: {
+    url: { type: "string", format: "uri", description: "URL" },
+    linkTitle: { type: "string", description: "Link title" },
+    description: { type: "string", description: "Description" },
+  },
+  fieldMapping: ["url", "linkTitle", "description"],
+};
+
+// ===== Types =====
 export interface LinkModuleInput {
   url: Default<string, "">;
   linkTitle: Default<string, "">;
   description: Default<string, "">;
 }
 
+// ===== The Pattern =====
 export const LinkModule = recipe<LinkModuleInput, LinkModuleInput>(
   "LinkModule",
   ({ url, linkTitle, description }) => {
     const displayText = computed(() => linkTitle || url || "Not set");
 
     return {
-      [NAME]: computed(() => `🌐 Link: ${displayText}`),
+      [NAME]: computed(() => `${MODULE_METADATA.icon} Link: ${displayText}`),
       [UI]: (
         <ct-vstack style={{ gap: "12px" }}>
           <ct-vstack style={{ gap: "4px" }}>

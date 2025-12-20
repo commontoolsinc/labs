@@ -1,6 +1,9 @@
 /// <cts-enable />
 /**
- * Relationship Module - Sub-charm for people connections
+ * Relationship Module - Pattern for people connections
+ *
+ * A composable pattern that can be used standalone or embedded in containers
+ * like Record. Tracks relationship types, closeness, and inner circle status.
  */
 import {
   Cell,
@@ -11,7 +14,31 @@ import {
   recipe,
   UI,
 } from "commontools";
+import type { ModuleMetadata } from "./container-protocol.ts";
 
+// ===== Self-Describing Metadata =====
+export const MODULE_METADATA: ModuleMetadata = {
+  type: "relationship",
+  label: "Relationship",
+  icon: "\u{1F465}", // busts in silhouette emoji
+  schema: {
+    relationTypes: {
+      type: "array",
+      items: { type: "string" },
+      description: "Relationship types",
+    },
+    closeness: {
+      type: "string",
+      enum: ["intimate", "close", "casual", "distant"],
+      description: "Closeness level",
+    },
+    howWeMet: { type: "string", description: "How we met" },
+    innerCircle: { type: "boolean", description: "Inner circle member" },
+  },
+  fieldMapping: ["relationTypes", "closeness", "howWeMet", "innerCircle"],
+};
+
+// ===== Types =====
 export interface RelationshipModuleInput {
   relationTypes: Default<string[], []>;
   closeness: Default<string, "">;
@@ -19,6 +46,7 @@ export interface RelationshipModuleInput {
   innerCircle: Default<boolean, false>;
 }
 
+// ===== Constants =====
 const RELATION_TYPE_OPTIONS = [
   "friend",
   "family",
@@ -36,6 +64,8 @@ const CLOSENESS_OPTIONS = [
   { value: "casual", label: "💚 Casual" },
   { value: "distant", label: "🤍 Distant" },
 ];
+
+// ===== Handlers =====
 
 // Handler to toggle a relation type - type is in context
 const toggleRelationType = handler<
@@ -58,6 +88,7 @@ const toggleInnerCircle = handler<
   innerCircle.set(!innerCircle.get());
 });
 
+// ===== The Pattern =====
 export const RelationshipModule = recipe<
   RelationshipModuleInput,
   RelationshipModuleInput
@@ -73,7 +104,9 @@ export const RelationshipModule = recipe<
     });
 
     return {
-      [NAME]: computed(() => `👥 Relationship: ${displayText}`),
+      [NAME]: computed(() =>
+        `${MODULE_METADATA.icon} Relationship: ${displayText}`
+      ),
       [UI]: (
         <ct-vstack style={{ gap: "16px" }}>
           {/* Relation types (multi-select chips) */}

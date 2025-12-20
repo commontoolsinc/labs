@@ -1,15 +1,48 @@
 /// <cts-enable />
 /**
- * Social Module - Sub-charm for social media profiles
+ * Social Module - Pattern for social media profiles
+ *
+ * A composable pattern that can be used standalone or embedded in containers
+ * like Record. Stores social platform, handle, and profile URL.
  */
 import { computed, type Default, NAME, recipe, UI } from "commontools";
+import type { ModuleMetadata } from "./container-protocol.ts";
 
+// ===== Self-Describing Metadata =====
+export const MODULE_METADATA: ModuleMetadata = {
+  type: "social",
+  label: "Social",
+  icon: "\u{1F517}", // link emoji
+  schema: {
+    platform: {
+      type: "string",
+      enum: [
+        "twitter",
+        "linkedin",
+        "github",
+        "instagram",
+        "facebook",
+        "youtube",
+        "tiktok",
+        "mastodon",
+        "bluesky",
+      ],
+      description: "Social platform",
+    },
+    handle: { type: "string", description: "Username/handle" },
+    url: { type: "string", format: "uri", description: "Profile URL" },
+  },
+  fieldMapping: ["platform", "handle", "url"],
+};
+
+// ===== Types =====
 export interface SocialModuleInput {
   platform: Default<string, "">;
   handle: Default<string, "">;
   url: Default<string, "">;
 }
 
+// ===== Constants =====
 const PLATFORM_OPTIONS = [
   { value: "", label: "Select platform" },
   { value: "twitter", label: "𝕏 Twitter/X" },
@@ -23,6 +56,7 @@ const PLATFORM_OPTIONS = [
   { value: "bluesky", label: "🦋 Bluesky" },
 ];
 
+// ===== The Pattern =====
 export const SocialModule = recipe<SocialModuleInput, SocialModuleInput>(
   "SocialModule",
   ({ platform, handle, url }) => {
@@ -32,7 +66,7 @@ export const SocialModule = recipe<SocialModuleInput, SocialModuleInput>(
     });
 
     return {
-      [NAME]: computed(() => `🔗 Social: ${displayText}`),
+      [NAME]: computed(() => `${MODULE_METADATA.icon} Social: ${displayText}`),
       [UI]: (
         <ct-vstack style={{ gap: "12px" }}>
           <ct-vstack style={{ gap: "4px" }}>

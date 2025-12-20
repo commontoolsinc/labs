@@ -1,15 +1,42 @@
 /// <cts-enable />
 /**
- * Timeline Module - Sub-charm for project dates (start, target, completed)
+ * Timeline Module - Pattern for project dates (start, target, completed)
+ *
+ * A composable pattern that can be used standalone or embedded in containers
+ * like Record. Tracks project timeline with multiple date fields.
  */
 import { computed, type Default, NAME, recipe, UI } from "commontools";
+import type { ModuleMetadata } from "./container-protocol.ts";
 
+// ===== Self-Describing Metadata =====
+export const MODULE_METADATA: ModuleMetadata = {
+  type: "timeline",
+  label: "Timeline",
+  icon: "\u{1F4C5}", // calendar emoji
+  schema: {
+    startDate: { type: "string", format: "date", description: "Start date" },
+    targetDate: {
+      type: "string",
+      format: "date",
+      description: "Target completion date",
+    },
+    completedDate: {
+      type: "string",
+      format: "date",
+      description: "Actual completion date",
+    },
+  },
+  fieldMapping: ["startDate", "targetDate", "completedDate"],
+};
+
+// ===== Types =====
 export interface TimelineModuleInput {
   startDate: Default<string, "">;
   targetDate: Default<string, "">;
   completedDate: Default<string, "">;
 }
 
+// ===== The Pattern =====
 export const TimelineModule = recipe<TimelineModuleInput, TimelineModuleInput>(
   "TimelineModule",
   ({ startDate, targetDate, completedDate }) => {
@@ -22,7 +49,9 @@ export const TimelineModule = recipe<TimelineModuleInput, TimelineModuleInput>(
     });
 
     return {
-      [NAME]: computed(() => `📅 Timeline: ${displayText}`),
+      [NAME]: computed(() =>
+        `${MODULE_METADATA.icon} Timeline: ${displayText}`
+      ),
       [UI]: (
         <ct-vstack style={{ gap: "12px" }}>
           <ct-vstack style={{ gap: "4px" }}>

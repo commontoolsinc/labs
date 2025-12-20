@@ -1,39 +1,45 @@
 /// <cts-enable />
 /**
- * TypePicker Module - Controller sub-charm for selecting record type
+ * TypePicker Module - Controller pattern for selecting record type
  *
  * This is a "controller module" - it doesn't just store data, it ACTS on
- * the parent record's state. It receives the parent's Cells as INPUT,
- * which allows it to modify the parent's subCharms list.
+ * the parent container's state. It uses the ContainerCoordinationContext
+ * protocol to modify the parent's entries list.
  *
- * Key architecture decisions:
- * - Receives parentSubCharms and parentTrashedSubCharms as INPUT Cells
- * - Cells passed as INPUT survive serialization (SigilLinks with overwrite: redirect)
- * - Can call .get() and .set() on parent Cells from handlers
+ * Key architecture:
+ * - Receives ContainerCoordinationContext as INPUT
+ * - Context's entries/trashedEntries are Cells that survive serialization
+ * - Can call .get() and .set() on context Cells from handlers
  * - Trashes itself after applying a template
  *
  * See: community-docs/superstitions/2025-12-19-auto-init-use-two-lift-pattern.md
  */
 
 import { Cell, type Default, handler, NAME, pattern, UI } from "commontools";
+import type {
+  ContainerCoordinationContext,
+  ModuleMetadata,
+} from "./container-protocol.ts";
 import {
   createTemplateModules,
   getTemplateList,
   type TemplateDefinition,
-} from "./template-registry.ts";
-import type { SubCharmEntry, TrashedSubCharmEntry } from "./types.ts";
-// Import Note directly for creating with correct linkPattern
-import Note from "../note.tsx";
+} from "./record/template-registry.ts";
+import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
+
+// ===== Self-Describing Metadata =====
+export const MODULE_METADATA: ModuleMetadata = {
+  type: "type-picker",
+  label: "Type Picker",
+  icon: "\u{1F3AF}", // target emoji
+  internal: true, // Don't show in Add dropdown
+};
 
 // ===== Types =====
 
 interface TypePickerInput {
-  // Parent's Cells - passed as INPUT so they survive serialization
-  parentSubCharms: Cell<SubCharmEntry[]>;
-  parentTrashedSubCharms: Cell<TrashedSubCharmEntry[]>;
-  // Record pattern JSON for creating Notes with correct wiki-link target
-  // deno-lint-ignore no-explicit-any
-  recordPatternJson?: any;
+  // Container coordination context - passed from parent
+  context: ContainerCoordinationContext<SubCharmEntry>;
   // Internal state
   dismissed?: Default<boolean, false>;
 }
@@ -46,20 +52,18 @@ interface TypePickerOutput {
 
 // Apply a template and trash self
 // Note: We find self by type "type-picker" since there should only be one
+// Handler receives the context components separately for proper typing
 const applyTemplate = handler<
   unknown,
   {
-    parentSubCharms: Cell<SubCharmEntry[]>;
-    parentTrashedSubCharms: Cell<TrashedSubCharmEntry[]>;
-    templateId: string;
+    entries: Cell<SubCharmEntry[]>;
+    trashedEntries: Cell<TrashedSubCharmEntry[]>;
     // deno-lint-ignore no-explicit-any
-    recordPatternJson?: any;
+    createModule: any;
+    templateId: string;
   }
->((
-  _event,
-  { parentSubCharms, parentTrashedSubCharms, templateId, recordPatternJson },
-) => {
-  const current = parentSubCharms.get() || [];
+>((_event, { entries, trashedEntries, createModule, templateId }) => {
+  const current = entries.get() || [];
 
   // Find and keep the notes module (should be first)
   const notesEntry = current.find((e) => e?.type === "notes");
@@ -71,13 +75,8 @@ const applyTemplate = handler<
   // Find self by type (there should only be one type-picker)
   const selfEntry = current.find((e) => e?.type === "type-picker");
 
-  // Create factory for Notes with correct linkPattern
-  // deno-lint-ignore no-explicit-any
-  const createNotesCharm = () =>
-    Note({
-      embedded: true,
-      linkPattern: recordPatternJson,
-    } as any);
+  // Create factory for Notes using context's createModule
+  const createNotesCharm = () => createModule("notes");
 
   // Create template modules (skip notes since we keep existing one)
   const templateEntries = createTemplateModules(templateId, createNotesCharm);
@@ -90,7 +89,7 @@ const applyTemplate = handler<
     ...current.filter((e) => e?.type !== "notes" && e?.type !== "type-picker"),
   ];
 
-  parentSubCharms.set(updatedList);
+  entries.set(updatedList);
 
   // Trash self
   if (selfEntry) {
@@ -98,7 +97,7 @@ const applyTemplate = handler<
       ...selfEntry,
       trashedAt: new Date().toISOString(),
     };
-    parentTrashedSubCharms.push(trashedSelf);
+    trashedEntries.push(trashedSelf);
   }
 });
 
@@ -107,33 +106,34 @@ const applyTemplate = handler<
 const dismiss = handler<
   unknown,
   {
-    parentSubCharms: Cell<SubCharmEntry[]>;
-    parentTrashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+    entries: Cell<SubCharmEntry[]>;
+    trashedEntries: Cell<TrashedSubCharmEntry[]>;
   }
->((_event, { parentSubCharms, parentTrashedSubCharms }) => {
-  const current = parentSubCharms.get() || [];
+>((_event, { entries, trashedEntries }) => {
+  const current = entries.get() || [];
 
   // Find self by type
   const selfEntry = current.find((e) => e?.type === "type-picker");
   if (!selfEntry) return;
 
   // Remove from active list
-  parentSubCharms.set(current.filter((e) => e?.type !== "type-picker"));
+  entries.set(current.filter((e) => e?.type !== "type-picker"));
 
   // Add to trash
   const trashedSelf: TrashedSubCharmEntry = {
     ...selfEntry,
     trashedAt: new Date().toISOString(),
   };
-  parentTrashedSubCharms.push(trashedSelf);
+  trashedEntries.push(trashedSelf);
 });
 
 // ===== The Pattern =====
 
 export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
-  (
-    { parentSubCharms, parentTrashedSubCharms, recordPatternJson, dismissed },
-  ) => {
+  ({ context, dismissed }) => {
+    // Extract context components for handlers
+    const { entries, trashedEntries, createModule } = context;
+
     // Get templates to display (excluding blank)
     const templates = getTemplateList().filter(
       (t: TemplateDefinition) => t.id !== "blank",
@@ -162,7 +162,7 @@ export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
             <span>What kind of record is this?</span>
             <button
               type="button"
-              onClick={dismiss({ parentSubCharms, parentTrashedSubCharms })}
+              onClick={dismiss({ entries, trashedEntries })}
               style={{
                 background: "transparent",
                 border: "none",
@@ -187,10 +187,10 @@ export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
               <button
                 type="button"
                 onClick={applyTemplate({
-                  parentSubCharms,
-                  parentTrashedSubCharms,
+                  entries,
+                  trashedEntries,
+                  createModule,
                   templateId: template.id,
-                  recordPatternJson,
                 })}
                 style={{
                   display: "flex",

@@ -1,15 +1,34 @@
 /// <cts-enable />
 /**
- * Location Module - Sub-charm for places/venues
+ * Location Module - Pattern for places/venues
+ *
+ * A composable pattern that can be used standalone or embedded in containers
+ * like Record. Stores location name, address, and optional coordinates.
  */
 import { computed, type Default, NAME, recipe, UI } from "commontools";
+import type { ModuleMetadata } from "./container-protocol.ts";
 
+// ===== Self-Describing Metadata =====
+export const MODULE_METADATA: ModuleMetadata = {
+  type: "location",
+  label: "Location",
+  icon: "\u{1F5FA}", // world map emoji
+  schema: {
+    locationName: { type: "string", description: "Location name" },
+    locationAddress: { type: "string", description: "Full address" },
+    coordinates: { type: "string", description: "Coordinates (lat,lng)" },
+  },
+  fieldMapping: ["locationName", "locationAddress", "coordinates"],
+};
+
+// ===== Types =====
 export interface LocationModuleInput {
   locationName: Default<string, "">;
   locationAddress: Default<string, "">;
   coordinates: Default<string, "">;
 }
 
+// ===== The Pattern =====
 export const LocationModule = recipe<LocationModuleInput, LocationModuleInput>(
   "LocationModule",
   ({ locationName, locationAddress, coordinates }) => {
@@ -18,7 +37,9 @@ export const LocationModule = recipe<LocationModuleInput, LocationModuleInput>(
     );
 
     return {
-      [NAME]: computed(() => `🗺️ Location: ${displayText}`),
+      [NAME]: computed(() =>
+        `${MODULE_METADATA.icon} Location: ${displayText}`
+      ),
       [UI]: (
         <ct-vstack style={{ gap: "12px" }}>
           <ct-vstack style={{ gap: "4px" }}>
