@@ -162,17 +162,20 @@ export function inferCategoryFromAge(age: number): AgeCategory {
 
 // ===== Handlers =====
 
-// Set age group (Adult or Child), only changes if switching groups
-const setAgeGroup = handler<
-  unknown,
-  { ageCategory: Cell<AgeCategory>; toAdult: boolean }
->((_event, { ageCategory, toAdult }) => {
+// Handle age group radio change
+const handleGroupChange = handler<
+  { detail: { value: string } },
+  { ageCategory: Cell<AgeCategory> }
+>(({ detail }, { ageCategory }) => {
+  const newGroup = detail.value;
   const current = ageCategory.get();
   const currentIsAdult = isAdultCategory(current);
 
   // Only change if switching groups
-  if (currentIsAdult !== toAdult) {
-    ageCategory.set(toAdult ? "adult" : "child");
+  if (newGroup === "adult" && !currentIsAdult) {
+    ageCategory.set("adult");
+  } else if (newGroup === "child" && currentIsAdult) {
+    ageCategory.set("child");
   }
 });
 
@@ -196,66 +199,30 @@ export const AgeCategoryModule = recipe<
     currentIsAdult ? ADULT_CATEGORY_OPTIONS : CHILD_CATEGORY_OPTIONS
   );
 
+  // Compute current group for radio display
+  const currentGroup = computed(() => (currentIsAdult ? "adult" : "child"));
+
+  // Age group options for radio
+  const ageGroupOptions = [
+    { label: "Adult (18+)", value: "adult" },
+    { label: "Child (0-17)", value: "child" },
+  ];
+
   return {
     [NAME]: computed(() => `${MODULE_METADATA.icon} Age: ${displayText}`),
     [UI]: (
       <ct-vstack style={{ gap: "16px" }}>
         {/* Main category toggle */}
         <ct-vstack style={{ gap: "8px" }}>
-          <label
-            id="age-group-label"
-            style={{ fontSize: "12px", color: "#6b7280" }}
-          >
+          <label style={{ fontSize: "12px", color: "#6b7280" }}>
             Age Group
           </label>
-          <ct-hstack
-            role="radiogroup"
-            aria-labelledby="age-group-label"
-            style={{ gap: "8px" }}
-          >
-            <button
-              type="button"
-              role="radio"
-              aria-checked={currentIsAdult}
-              onClick={setAgeGroup({ ageCategory, toAdult: true })}
-              style={{
-                flex: "1",
-                padding: "12px 16px",
-                borderRadius: "8px",
-                border: currentIsAdult
-                  ? "2px solid #3b82f6"
-                  : "1px solid #d1d5db",
-                background: currentIsAdult ? "#eff6ff" : "white",
-                color: currentIsAdult ? "#1d4ed8" : "#374151",
-                cursor: "pointer",
-                fontSize: "14px",
-                fontWeight: currentIsAdult ? "600" : "400",
-              }}
-            >
-              Adult (18+)
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={computed(() => !currentIsAdult)}
-              onClick={setAgeGroup({ ageCategory, toAdult: false })}
-              style={{
-                flex: "1",
-                padding: "12px 16px",
-                borderRadius: "8px",
-                border: currentIsAdult
-                  ? "1px solid #d1d5db"
-                  : "2px solid #3b82f6",
-                background: currentIsAdult ? "white" : "#eff6ff",
-                color: currentIsAdult ? "#374151" : "#1d4ed8",
-                cursor: "pointer",
-                fontSize: "14px",
-                fontWeight: currentIsAdult ? "400" : "600",
-              }}
-            >
-              Child (0-17)
-            </button>
-          </ct-hstack>
+          <ct-radio-group
+            orientation="horizontal"
+            items={ageGroupOptions}
+            value={currentGroup}
+            onct-change={handleGroupChange({ ageCategory })}
+          />
         </ct-vstack>
 
         {/* Specific category selection */}
