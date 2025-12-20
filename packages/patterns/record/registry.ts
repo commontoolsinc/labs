@@ -62,7 +62,7 @@ import type { ModuleMetadata } from "../container-protocol.ts";
 // and because it needs ContainerCoordinationContext
 
 // Type for pattern constructors - returns unknown since we store heterogeneous charm types
-// Now accepts optional initial values
+// Now accepts optional initial values for import/restore functionality
 type PatternConstructor = (initialValues?: Record<string, unknown>) => unknown;
 
 export interface SubCharmDefinition {
@@ -185,6 +185,7 @@ export function getDefinition(
 }
 
 // Create a new sub-charm instance by type, optionally with initial values
+// Used for import/restore functionality
 export function createSubCharm(
   type: string,
   initialValues?: Record<string, unknown>,
