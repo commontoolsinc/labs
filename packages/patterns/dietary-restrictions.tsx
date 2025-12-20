@@ -1100,7 +1100,7 @@ function getAllSearchableItems(): string[] {
  * - If query matches a group, also suggests its members
  * - If query matches a member, also suggests its parent groups
  */
-function searchRestrictions(input: string, existing: string[]): string[] {
+function _searchRestrictions(input: string, existing: string[]): string[] {
   const query = input.toLowerCase().trim();
   if (!query || query.length < 2) return [];
 
@@ -1231,7 +1231,7 @@ const legendContent = (
 
 // ===== Handlers =====
 
-const addRestriction = handler<
+const _addRestriction = handler<
   unknown,
   {
     restrictions: Cell<RestrictionEntry[]>;
@@ -1285,7 +1285,7 @@ const cycleLevel = handler<
   restrictions.set(updated);
 });
 
-const selectSuggestion = handler<
+const _selectSuggestion = handler<
   unknown,
   {
     restrictions: Cell<RestrictionEntry[]>;
@@ -1540,7 +1540,7 @@ export const DietaryRestrictionsModule = recipe<
           <ct-autocomplete
             items={getAutocompleteItems()}
             placeholder="Search allergies, diets, intolerances..."
-            allowCustom={true}
+            allowCustom
             onct-select={onSelectRestriction({ restrictions, selectedLevel })}
             style="flex: 1;"
           />

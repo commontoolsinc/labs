@@ -466,7 +466,10 @@ export class CTAutocomplete extends BaseElement {
         this._lastSelectedValues,
       );
 
-      if (!queryChanged && !selectionChanged && this._cachedFilteredItems.length > 0) {
+      if (
+        !queryChanged && !selectionChanged &&
+        this._cachedFilteredItems.length > 0
+      ) {
         return; // No change, use cached values
       }
 
@@ -476,8 +479,8 @@ export class CTAutocomplete extends BaseElement {
       // Compute filtered items
       const selectableProcessed = this.multiple
         ? this._processedItems.filter(
-            (p) => !currentSelectedValues.has(p.item.value),
-          )
+          (p) => !currentSelectedValues.has(p.item.value),
+        )
         : this._processedItems;
 
       if (!this._query.trim()) {
@@ -510,7 +513,8 @@ export class CTAutocomplete extends BaseElement {
               (p) => p.item === item,
             );
             return (
-              processed && this._processedItemMatchesQuery(processed, queryWords)
+              processed &&
+              this._processedItemMatchesQuery(processed, queryWords)
             );
           });
         }
