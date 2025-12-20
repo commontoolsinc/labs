@@ -804,6 +804,24 @@ export class CTAutocomplete extends BaseElement {
     }
 
     // Event handlers
+    //
+    // PERFORMANCE NOTE (Dec 2025):
+    // We use setTimeout(0) here instead of synchronous state updates. This was extensively
+    // investigated and verified:
+    //
+    // 1. VERIFIED: Typing does NOT trigger pattern/cell recomputation - filtering is purely
+    //    internal Lit state (_query). Console instrumentation confirmed no framework overhead.
+    //
+    // 2. WHY setTimeout(0) FEELS FASTER than synchronous updates:
+    //    - Synchronous: Lit queues microtasks → blocks rendering → user sees lag
+    //    - setTimeout(0): Returns immediately → browser paints keystroke → dropdown updates next frame
+    //    The browser event loop order is: Task → Microtasks → Render → Next Task
+    //    By deferring to the next task, we let the browser paint the input first.
+    //
+    // 3. clearTimeout prevents "flashing" when typing quickly by canceling stale updates.
+    //
+    // See commit history for detailed performance investigation with Oracle agents.
+    //
     private _handleInput(e: Event) {
       const input = e.target as HTMLInputElement;
       const newValue = input.value;
@@ -814,8 +832,6 @@ export class CTAutocomplete extends BaseElement {
       }
 
       // Defer state updates to next task, allowing input to render immediately
-      // This lets the browser paint the typed character FIRST, then update dropdown
-      // User perceives instant keystroke feedback even though dropdown is 1 frame behind
       this._debounceTimer = setTimeout(() => {
         if (!this._isOpen && newValue) {
           this._isOpen = true;

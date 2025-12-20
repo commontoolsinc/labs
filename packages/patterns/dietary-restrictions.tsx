@@ -1353,6 +1353,8 @@ export const DietaryRestrictionsModule = recipe<
   let _lastRestrictionsHash = "";
 
   // Compute implied items (expanded from groups) - memoized
+  // VERIFIED: This computed() only runs when restrictions change, not on autocomplete keypress.
+  // Console instrumentation confirmed memoization works correctly (Dec 2025).
   const impliedItems = computed(() => {
     const current = (restrictions || []) as RestrictionEntry[];
 
@@ -1408,6 +1410,7 @@ export const DietaryRestrictionsModule = recipe<
 
   // Use lift() for UI transforms that need handler bindings
   // lift() preserves the Cell reference for handlers while allowing value access
+  // VERIFIED: These lift() functions only run when restrictions change, not on autocomplete keypress (Dec 2025).
   const restrictionsUI = lift(
     ({
       list,
