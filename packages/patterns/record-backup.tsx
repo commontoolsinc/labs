@@ -579,9 +579,6 @@ const clearImportResult = handler<
   importResult.set(null);
 });
 
-// TODO(CT-1129): Add triggerDownload handler once runtime provides downloadFile capability
-// Currently removed because globalThis DOM access will break with sandboxing
-
 /**
  * Handler to process uploaded file
  */
@@ -666,7 +663,16 @@ export default pattern<Input, Output>(({ importJson }) => {
                   Found <strong>{recordCount}</strong>{" "}
                   records in this space. Copy the JSON below to save your data.
                 </p>
-                {/* TODO(CT-1129): Add download button once runtime provides downloadFile capability */}
+                <ct-file-download
+                  $data={exportedJson}
+                  filename={`record-backup-${
+                    new Date().toISOString().slice(0, 10)
+                  }.json`}
+                  mime-type="application/json"
+                  variant="primary"
+                >
+                  Download Backup
+                </ct-file-download>
                 <ct-code-editor
                   $value={exportedJson}
                   language="application/json"
