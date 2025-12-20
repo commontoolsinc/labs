@@ -441,6 +441,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                             }}
                           >
                             <button
+                              type="button"
                               onClick={togglePin({ subCharms, entry })}
                               style={{
                                 background: "#e0f2fe",
@@ -456,6 +457,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                               📌
                             </button>
                             <button
+                              type="button"
                               onClick={trashSubCharm({
                                 subCharms,
                                 trashedSubCharms,
@@ -535,6 +537,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                               }}
                             >
                               <button
+                                type="button"
                                 onClick={togglePin({ subCharms, entry })}
                                 style={{
                                   background: "transparent",
@@ -550,6 +553,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 📌
                               </button>
                               <button
+                                type="button"
                                 onClick={trashSubCharm({
                                   subCharms,
                                   trashedSubCharms,
@@ -627,6 +631,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                           }}
                         >
                           <button
+                            type="button"
                             onClick={togglePin({ subCharms, entry })}
                             style={{
                               background: "transparent",
@@ -642,6 +647,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                             📌
                           </button>
                           <button
+                            type="button"
                             onClick={trashSubCharm({
                               subCharms,
                               trashedSubCharms,
@@ -682,6 +688,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                 }}
               >
                 <button
+                  type="button"
                   onClick={toggleTrashExpanded({ expanded: trashExpanded })}
                   style={{
                     background: "none",
@@ -747,6 +754,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                               }}
                             >
                               <button
+                                type="button"
                                 onClick={restoreSubCharm({
                                   subCharms,
                                   trashedSubCharms,
@@ -766,6 +774,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 ↩️
                               </button>
                               <button
+                                type="button"
                                 onClick={permanentlyDelete({
                                   trashedSubCharms,
                                   entry,
@@ -790,6 +799,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                     )}
 
                     <button
+                      type="button"
                       onClick={emptyTrash({ trashedSubCharms })}
                       style={{
                         marginTop: "8px",
