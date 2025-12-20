@@ -128,6 +128,7 @@ export const GiftPrefsModule = recipe<
                 >
                   {item}
                   <button
+                    type="button"
                     onClick={removeFavorite({ favorites, index })}
                     style={{
                       background: "none",
@@ -174,6 +175,7 @@ export const GiftPrefsModule = recipe<
                 >
                   {item}
                   <button
+                    type="button"
                     onClick={removeAvoid({ avoid, index })}
                     style={{
                       background: "none",

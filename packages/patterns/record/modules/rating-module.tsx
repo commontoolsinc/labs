@@ -38,6 +38,7 @@ export const RatingModule = recipe<RatingModuleInput, RatingModuleInput>(
           <ct-hstack style={{ gap: "4px", justifyContent: "center" }}>
             {[1, 2, 3, 4, 5].map((value, index) => (
               <button
+                type="button"
                 key={index}
                 onClick={setRating({ rating, value })}
                 style={{

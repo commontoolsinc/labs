@@ -80,6 +80,7 @@ export const TagsModule = recipe<TagsModuleInput, TagsModuleInput>(
               >
                 {tag}
                 <button
+                  type="button"
                   onClick={removeTag({ tags, index })}
                   style={{
                     background: "none",

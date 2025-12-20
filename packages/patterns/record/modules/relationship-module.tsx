@@ -88,6 +88,7 @@ export const RelationshipModule = recipe<
                 );
                 return (
                   <button
+                    type="button"
                     key={index}
                     onClick={toggleRelationType({ relationTypes, type })}
                     style={{
@@ -132,6 +133,7 @@ export const RelationshipModule = recipe<
           {/* Inner circle toggle */}
           <ct-hstack style={{ alignItems: "center", gap: "8px" }}>
             <button
+              type="button"
               onClick={toggleInnerCircle({ innerCircle })}
               style={{
                 width: "24px",

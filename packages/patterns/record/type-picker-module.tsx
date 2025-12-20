@@ -161,6 +161,7 @@ export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
           >
             <span>What kind of record is this?</span>
             <button
+              type="button"
               onClick={dismiss({ parentSubCharms, parentTrashedSubCharms })}
               style={{
                 background: "transparent",
@@ -184,6 +185,7 @@ export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
           >
             {templates.map((template: TemplateDefinition) => (
               <button
+                type="button"
                 onClick={applyTemplate({
                   parentSubCharms,
                   parentTrashedSubCharms,
