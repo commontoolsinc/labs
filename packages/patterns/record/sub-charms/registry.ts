@@ -5,8 +5,8 @@
 import type { Cell } from "commontools";
 import type { SubCharmType } from "../types/record-types.ts";
 
-// Import Note from labs (uses embedded mode with linkPattern)
-import Note from "../../note.tsx";
+// NOTE: Note is NOT imported here - it's created directly in record.tsx
+// with the correct linkPattern (avoids global state for passing Record's pattern JSON)
 
 // Import all sub-charm patterns
 import { BirthdayModule } from "./birthday-module.tsx";
@@ -25,22 +25,6 @@ import { TimingModule } from "./timing-module.tsx";
 // NOTE: TypePickerModule is NOT imported here to avoid circular dependency
 // (registry → type-picker → template-registry → registry)
 // Instead, record.tsx imports it directly.
-
-// ===== Record Pattern JSON (set by record.tsx) =====
-// This holds the pattern JSON for creating new Records from [[wiki-links]] in Notes
-// Using any type since OpaqueCell and Cell have the same runtime behavior
-// deno-lint-ignore no-explicit-any
-let _recordPatternJson: any = null;
-
-// deno-lint-ignore no-explicit-any
-export function setRecordPatternJson(patternJson: any) {
-  _recordPatternJson = patternJson;
-}
-
-// deno-lint-ignore no-explicit-any
-function getRecordPatternJson(): any {
-  return _recordPatternJson;
-}
 
 // Type for pattern constructors - uses any to bypass Opaque type requirements
 // deno-lint-ignore no-explicit-any
@@ -62,15 +46,20 @@ export interface SubCharmDefinition {
 // Static registry - defines available sub-charm types
 // Note: createInstance uses {} as any to bypass Opaque type requirements
 // The framework will provide defaults for all fields
+//
+// NOTE: "notes" is special - createInstance throws because it must be created
+// in record.tsx with the correct linkPattern. The metadata is here for
+// getDefinition() and getAddableTypes() to work.
 export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
   notes: {
     type: "notes",
     label: "Notes",
     icon: "\u{1F4DD}", // 📝
-    createInstance: () => Note({
-      embedded: true,
-      linkPattern: getRecordPatternJson(),
-    } as any),
+    // createInstance throws - Notes must be created directly in record.tsx
+    // with the correct linkPattern for wiki-links to work
+    createInstance: () => {
+      throw new Error("Notes must be created directly with linkPattern, not through registry");
+    },
     schema: {
       notes: { type: "string", description: "Free-form notes" },
     },

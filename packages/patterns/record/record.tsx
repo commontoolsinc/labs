@@ -29,8 +29,10 @@ import {
   createSubCharm,
   getAddableTypes,
   getDefinition,
-  setRecordPatternJson,
 } from "./sub-charms/registry.ts";
+// Import Note directly - we create it inline with proper linkPattern
+// (avoids global state for passing Record's pattern JSON)
+import Note from "../note.tsx";
 import {
   inferTypeFromModules,
 } from "./templates/template-registry.ts";
@@ -83,22 +85,31 @@ const storeInitialCharms = lift(
 
 // Outer lift: checks if empty, creates charms, calls inner lift
 // TypePicker receives parent Cells so it can modify subCharms when template selected
+// Note: We receive recordPatternJson as input to avoid capturing Record before it's defined
 const initializeRecord = lift(
   toSchema<{
     currentCharms: SubCharmEntry[];  // Unwrapped value, not Cell
     subCharms: Cell<SubCharmEntry[]>;
     trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
     isInitialized: Cell<boolean>;
+    // deno-lint-ignore no-explicit-any
+    recordPatternJson: any;  // Computed that returns Record JSON string
   }>(),
   undefined,
-  ({ currentCharms, subCharms, trashedSubCharms, isInitialized }) => {
+  ({ currentCharms, subCharms, trashedSubCharms, isInitialized, recordPatternJson }) => {
     if ((currentCharms || []).length === 0) {
-      const notesCharm = createSubCharm("notes");
-      // TypePicker receives parent Cells as input (survives serialization)
+      // Create Note directly with Record's pattern JSON for wiki-links
+      // deno-lint-ignore no-explicit-any
+      const notesCharm = Note({
+        embedded: true,
+        linkPattern: recordPatternJson,
+      } as any);
+      // TypePicker receives parent Cells + recordPatternJson for creating Notes
       // deno-lint-ignore no-explicit-any
       const typePickerCharm = TypePickerModule({
         parentSubCharms: subCharms,
         parentTrashedSubCharms: trashedSubCharms,
+        recordPatternJson,
       } as any);
       return storeInitialCharms({ notesCharm, typePickerCharm, subCharms, isInitialized });
     }
@@ -138,16 +149,25 @@ const togglePin = handler<
 });
 
 // Add a new sub-charm
+// Note: Receives recordPatternJson to create Notes with correct wiki-link target
 const addSubCharm = handler<
   { detail: { value: string } },
-  { subCharms: Cell<SubCharmEntry[]>; selectedAddType: Cell<string> }
->(({ detail }, { subCharms: sc, selectedAddType: sat }) => {
+  // deno-lint-ignore no-explicit-any
+  { subCharms: Cell<SubCharmEntry[]>; selectedAddType: Cell<string>; recordPatternJson: any }
+>(({ detail }, { subCharms: sc, selectedAddType: sat, recordPatternJson }) => {
   const type = detail?.value;
   if (!type) return;
 
   // Create the sub-charm and add it (multiple modules of same type allowed)
   const current = sc.get() || [];
-  const charm = createSubCharm(type);
+  // Special case: create Note directly with Record pattern for wiki-links
+  // deno-lint-ignore no-explicit-any
+  const charm = type === "notes"
+    ? Note({
+        embedded: true,
+        linkPattern: recordPatternJson,
+      } as any)
+    : createSubCharm(type);
   sc.set([...current, { type, pinned: false, charm }]);
   sat.set("");
 });
@@ -206,9 +226,13 @@ const Record = pattern<RecordInput, RecordOutput>(
     const selectedAddType = Cell.of<string>("");
     const trashExpanded = Cell.of(false);
 
+    // Create Record pattern JSON for wiki-links in Notes
+    // Using computed() defers evaluation until render time, avoiding circular dependency
+    const recordPatternJson = computed(() => JSON.stringify(Record));
+
     // ===== Auto-initialize Notes + TypePicker =====
     const isInitialized = Cell.of(false);
-    initializeRecord({ currentCharms: subCharms, subCharms, trashedSubCharms, isInitialized });
+    initializeRecord({ currentCharms: subCharms, subCharms, trashedSubCharms, isInitialized, recordPatternJson });
 
     // ===== Computed Values =====
 
@@ -318,7 +342,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                 $value={selectedAddType}
                 placeholder="+ Add"
                 items={addSelectItems}
-                onct-change={addSubCharm({ subCharms, selectedAddType })}
+                onct-change={addSubCharm({ subCharms, selectedAddType, recordPatternJson })}
                 style={{ width: "130px" }}
               />
             )}
@@ -690,10 +714,5 @@ const Record = pattern<RecordInput, RecordOutput>(
     };
   }
 );
-
-// Register Record pattern JSON for backlink creation in NotesModule
-// This allows [[New Name]] in Notes to create new Record charms
-// Using computed() defers evaluation until render time, avoiding circular dependency
-setRecordPatternJson(computed(() => JSON.stringify(Record)));
 
 export default Record;

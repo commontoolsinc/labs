@@ -147,8 +147,16 @@ export function inferTypeFromModules(moduleTypes: string[]): InferredType {
  *
  * Gracefully handles module creation failures - skips failed modules
  * and logs a warning rather than crashing the entire template application.
+ *
+ * @param templateId - ID of the template to create modules for
+ * @param createNotesCharm - Factory function to create Notes charm with correct linkPattern.
+ *                           Required because Notes needs the Record pattern JSON for wiki-links,
+ *                           which avoids global state.
  */
-export function createTemplateModules(templateId: string): SubCharmEntry[] {
+export function createTemplateModules(
+  templateId: string,
+  createNotesCharm?: () => unknown
+): SubCharmEntry[] {
   const template = TEMPLATE_REGISTRY[templateId];
   if (!template) return [];
 
@@ -156,7 +164,18 @@ export function createTemplateModules(templateId: string): SubCharmEntry[] {
 
   for (const moduleType of template.modules) {
     try {
-      const charm = createSubCharm(moduleType);
+      // Special case: use factory for notes if provided
+      // Notes needs linkPattern which requires Record's pattern JSON
+      let charm: unknown;
+      if (moduleType === "notes") {
+        if (!createNotesCharm) {
+          console.warn(`Template "${templateId}" includes notes but no createNotesCharm factory provided`);
+          continue;
+        }
+        charm = createNotesCharm();
+      } else {
+        charm = createSubCharm(moduleType);
+      }
       entries.push({
         type: moduleType,
         pinned: template.defaultPinned.includes(moduleType),

@@ -29,6 +29,8 @@ import {
   type TemplateDefinition,
 } from "../templates/template-registry.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "../types/record-types.ts";
+// Import Note directly for creating with correct linkPattern
+import Note from "../../note.tsx";
 
 // ===== Types =====
 
@@ -36,6 +38,9 @@ interface TypePickerInput {
   // Parent's Cells - passed as INPUT so they survive serialization
   parentSubCharms: Cell<SubCharmEntry[]>;
   parentTrashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+  // Record pattern JSON for creating Notes with correct wiki-link target
+  // deno-lint-ignore no-explicit-any
+  recordPatternJson?: any;
   // Internal state
   dismissed?: Default<boolean, false>;
 }
@@ -54,8 +59,10 @@ const applyTemplate = handler<
     parentSubCharms: Cell<SubCharmEntry[]>;
     parentTrashedSubCharms: Cell<TrashedSubCharmEntry[]>;
     templateId: string;
+    // deno-lint-ignore no-explicit-any
+    recordPatternJson?: any;
   }
->((_event, { parentSubCharms, parentTrashedSubCharms, templateId }) => {
+>((_event, { parentSubCharms, parentTrashedSubCharms, templateId, recordPatternJson }) => {
   const current = parentSubCharms.get() || [];
 
   // Find and keep the notes module (should be first)
@@ -68,8 +75,15 @@ const applyTemplate = handler<
   // Find self by type (there should only be one type-picker)
   const selfEntry = current.find((e) => e?.type === "type-picker");
 
+  // Create factory for Notes with correct linkPattern
+  // deno-lint-ignore no-explicit-any
+  const createNotesCharm = () => Note({
+    embedded: true,
+    linkPattern: recordPatternJson,
+  } as any);
+
   // Create template modules (skip notes since we keep existing one)
-  const templateEntries = createTemplateModules(templateId);
+  const templateEntries = createTemplateModules(templateId, createNotesCharm);
   const newModules = templateEntries.filter((e) => e.type !== "notes");
 
   // Build new list: notes + new template modules (excluding type-picker)
@@ -120,7 +134,7 @@ const dismiss = handler<
 // ===== The Pattern =====
 
 export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
-  ({ parentSubCharms, parentTrashedSubCharms, dismissed }) => {
+  ({ parentSubCharms, parentTrashedSubCharms, recordPatternJson, dismissed }) => {
     // Get templates to display (excluding blank)
     const templates = getTemplateList().filter(
       (t: TemplateDefinition) => t.id !== "blank"
@@ -175,6 +189,7 @@ export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
                   parentSubCharms,
                   parentTrashedSubCharms,
                   templateId: template.id,
+                  recordPatternJson,
                 })}
                 style={{
                   display: "flex",
