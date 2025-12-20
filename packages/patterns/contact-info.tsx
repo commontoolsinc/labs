@@ -23,8 +23,11 @@ export const MODULE_METADATA: ModuleMetadata = {
 
 // ===== Types =====
 export interface ContactModuleInput {
+  /** Email address */
   email: Default<string, "">;
+  /** Phone number (preserve original formatting) */
   phone: Default<string, "">;
+  /** Website URL */
   website: Default<string, "">;
 }
 

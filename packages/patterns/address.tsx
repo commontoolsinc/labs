@@ -24,9 +24,13 @@ export const MODULE_METADATA: ModuleMetadata = {
 
 // ===== Types =====
 export interface AddressModuleInput {
+  /** Street address */
   street: Default<string, "">;
+  /** City */
   city: Default<string, "">;
+  /** State/Province */
   state: Default<string, "">;
+  /** ZIP/Postal code */
   zip: Default<string, "">;
 }
 

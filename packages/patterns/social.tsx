@@ -36,9 +36,25 @@ export const MODULE_METADATA: ModuleMetadata = {
 };
 
 // ===== Types =====
+
+/** Supported social platforms */
+type SocialPlatform =
+  | "twitter"
+  | "linkedin"
+  | "github"
+  | "instagram"
+  | "facebook"
+  | "youtube"
+  | "tiktok"
+  | "mastodon"
+  | "bluesky";
+
 export interface SocialModuleInput {
-  platform: Default<string, "">;
+  /** Social platform (normalize: Insta→instagram, X→twitter) */
+  platform: Default<SocialPlatform | "", "">;
+  /** Username/handle without @ prefix */
   handle: Default<string, "">;
+  /** Profile URL */
   url: Default<string, "">;
 }
 

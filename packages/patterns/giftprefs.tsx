@@ -42,9 +42,16 @@ export const MODULE_METADATA: ModuleMetadata = {
 };
 
 // ===== Types =====
+
+/** Gift giving tier (always=give often, occasions=holidays/birthdays, reciprocal=if they give, none=don't give) */
+type GiftTier = "always" | "occasions" | "reciprocal" | "none";
+
 export interface GiftPrefsModuleInput {
-  giftTier: Default<string, "">;
+  /** Gift giving tier */
+  giftTier: Default<GiftTier | "", "">;
+  /** Favorite things (interests, hobbies, brands) */
   favorites: Default<string[], []>;
+  /** Things to avoid (allergies, dislikes) */
   avoid: Default<string[], []>;
 }
 

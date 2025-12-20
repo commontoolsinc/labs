@@ -22,7 +22,9 @@ export const MODULE_METADATA: ModuleMetadata = {
 
 // ===== Types =====
 export interface BirthdayModuleInput {
+  /** Birthday in YYYY-MM-DD or MM-DD format */
   birthDate: Default<string, "">;
+  /** Birth year (optional) */
   birthYear: Default<number | null, null>;
 }
 
