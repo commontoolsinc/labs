@@ -95,8 +95,12 @@ const EXTRACTION_SCHEMA = {
     startDate: { type: "string", format: "date", description: "Start date" },
     targetDate: { type: "string", format: "date", description: "Target date" },
     // Social
-    platform: { type: "string", description: "Social platform name" },
-    handle: { type: "string", description: "Social handle/username" },
+    platform: {
+      type: "string",
+      enum: ["twitter", "linkedin", "github", "instagram", "facebook", "youtube", "tiktok", "mastodon", "bluesky"],
+      description: "Social platform (normalize: Insta→instagram, X→twitter, etc.)",
+    },
+    handle: { type: "string", description: "Social handle/username (without @ prefix)" },
     profileUrl: { type: "string", description: "Profile URL" },
     // Link
     url: { type: "string", format: "uri", description: "URL" },
