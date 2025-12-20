@@ -107,6 +107,7 @@ export {
   type SchemaContext,
   type SchemaWithoutCell,
   type StreamValue,
+  TAGS,
   type toJSON,
   TYPE,
   UI,

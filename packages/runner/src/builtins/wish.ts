@@ -1,4 +1,5 @@
 import {
+  type HashtagQuery,
   type VNode,
   type WishParams,
   type WishState,
@@ -18,14 +19,57 @@ import { ALL_CHARMS_ID } from "./well-known.ts";
 import { type JSONSchema, type Recipe, UI } from "../builder/types.ts";
 
 // Define locally to avoid circular dependency with @commontools/charm
+// Note: Keep in sync with packages/runner/src/schemas.ts favoriteEntrySchema
 const favoriteEntrySchema = {
   type: "object",
   properties: {
     cell: { not: true, asCell: true },
-    tag: { type: "string", default: "" },
+    tagsCell: { not: true, asCell: true }, // Reference to [TAGS] Cell<string[]> export
+    tag: { type: "string", default: "" }, // Legacy: single tag string (backward compatibility)
   },
   required: ["cell"],
 } as const satisfies JSONSchema;
+
+/**
+ * Check if a value is a HashtagQuery (AND/OR compound query)
+ */
+function isHashtagQuery(query: unknown): query is HashtagQuery {
+  if (!query || typeof query !== "object") return false;
+  return "and" in query || "or" in query;
+}
+
+/**
+ * Check if a favorite entry matches a tag (exact match, case-insensitive).
+ * Reads from tagsCell if available AND has data, falls back to legacy tag field.
+ */
+function favoriteMatchesTag(
+  entry: { cell: Cell<unknown>; tagsCell?: Cell<string[]>; tag?: string },
+  searchTag: string,
+): boolean {
+  // Read from tagsCell (new) OR tag (legacy)
+  let tags: string[] = [];
+
+  // Try tagsCell first - only use if it has actual data
+  if (entry.tagsCell) {
+    try {
+      const cellTags = entry.tagsCell.get();
+      if (Array.isArray(cellTags) && cellTags.length > 0) {
+        tags = cellTags;
+      }
+    } catch {
+      // Cell read error, fallback to legacy tag
+    }
+  }
+
+  // If no tags from tagsCell, fall back to legacy tag field
+  if (tags.length === 0 && entry.tag) {
+    tags = [entry.tag];
+  }
+
+  return tags.some(
+    (t) => typeof t === "string" && t.toLowerCase() === searchTag,
+  );
+}
 
 const favoriteListSchema = {
   type: "array",
@@ -176,32 +220,35 @@ function resolveBase(
         return [{ cell: homeSpaceCell, pathPrefix: ["favorites"] }];
       }
 
-      // Path provided = search by tag
+      // Path provided = search by tag in tagsCell
       const searchTerm = parsed.path[0].toLowerCase();
       const favoritesCell = homeSpaceCell.key("favorites").asSchema(
         favoriteListSchema,
       );
       const favorites = favoritesCell.get() || [];
 
-      // Case-insensitive search in tag.
-      // If tag is empty, try to compute it lazily from the cell's schema.
+      // Case-insensitive substring search in [TAGS] values.
+      // Only patterns with [TAGS] export are searchable.
       const match = favorites.find((entry) => {
-        let tag = entry.tag;
-
-        // Fallback: compute tag lazily if not stored
-        if (!tag) {
-          try {
-            const { schema } = entry.cell.asSchemaFromLinks()
-              .getAsNormalizedFullLink();
-            if (schema !== undefined) {
-              tag = JSON.stringify(schema);
-            }
-          } catch {
-            // Schema not available yet
-          }
+        if (!entry.tagsCell) {
+          return false;
         }
-
-        return tag?.toLowerCase().includes(searchTerm);
+        try {
+          const tags = entry.tagsCell.get();
+          if (Array.isArray(tags)) {
+            return tags.some(
+              (t) =>
+                typeof t === "string" && t.toLowerCase().includes(searchTerm),
+            );
+          }
+        } catch (error) {
+          // Log at debug level - Cell errors shouldn't crash favorites search
+          console.debug(
+            `[wish] Error reading tagsCell in #favorites search:`,
+            error,
+          );
+        }
+        return false;
       });
 
       if (!match) {
@@ -256,29 +303,12 @@ function resolveBase(
         );
         const favorites = favoritesCell.get() || [];
 
-        // Match hash tags in tag field (the schema), all lowercase.
-        // If tag is empty, try to compute it lazily from the cell's schema.
-        // This handles existing favorites that were saved before schema was synced.
+        // Match exact tag in tagsCell (case-insensitive).
+        // Only patterns with [TAGS] export are searchable.
         const searchTerm = parsed.key.toLowerCase();
-        const matches = favorites.filter((entry) => {
-          let tag = entry.tag;
-
-          // Fallback: compute tag lazily if not stored
-          if (!tag) {
-            try {
-              const { schema } = entry.cell.asSchemaFromLinks()
-                .getAsNormalizedFullLink();
-              if (schema !== undefined) {
-                tag = JSON.stringify(schema);
-              }
-            } catch {
-              // Schema not available yet
-            }
-          }
-
-          const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
-          return [...hashtags].some((m) => m[0] === searchTerm);
-        });
+        const matches = favorites.filter((entry) =>
+          favoriteMatchesTag(entry, searchTerm)
+        );
 
         if (matches.length === 0) {
           throw new WishError(`No favorite found matching "${searchTerm}"`);
@@ -523,8 +553,95 @@ export function wish(
         return;
       }
 
-      // If the query is a path or a hash tag, resolve it directly
-      if (query.startsWith("/") || /^#[a-zA-Z0-9-]+$/.test(query)) {
+      // Handle HashtagQuery (AND/OR compound queries)
+      if (isHashtagQuery(query)) {
+        try {
+          // Get favorites from home space
+          const userDID = runtime.userIdentityDID;
+          if (!userDID) {
+            throw new WishError(
+              "User identity DID not available for tag search",
+            );
+          }
+          const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+          const favoritesCell = homeSpaceCell.key("favorites").asSchema(
+            favoriteListSchema,
+          );
+          const favorites = favoritesCell.get() || [];
+
+          // Resolve AND/OR query using tagsCell
+          const queryTags = "and" in query ? query.and : query.or;
+          const isAnd = "and" in query;
+
+          // Empty array edge case: AND matches nothing, OR matches nothing
+          // (JavaScript .every([]) returns true, which would be wrong for AND)
+          if (queryTags.length === 0) {
+            throw new WishError(
+              `Empty ${isAnd ? "AND" : "OR"} query matches no favorites`,
+            );
+          }
+
+          const matches = favorites.filter((entry) => {
+            if (isAnd) {
+              // AND: all tags must match
+              return queryTags.every((tag) =>
+                favoriteMatchesTag(entry, tag.toLowerCase())
+              );
+            } else {
+              // OR: any tag can match
+              return queryTags.some((tag) =>
+                favoriteMatchesTag(entry, tag.toLowerCase())
+              );
+            }
+          });
+
+          const queryDesc = isAnd
+            ? `all of [${queryTags.join(", ")}]`
+            : `any of [${queryTags.join(", ")}]`;
+
+          if (matches.length === 0) {
+            throw new WishError(`No favorite found matching ${queryDesc}`);
+          }
+
+          // Apply path to the matched cells
+          const resultCells = matches.map((match) => {
+            const resolvedCell = path && path.length > 0
+              ? resolvePath(match.cell, path)
+              : match.cell;
+            return schema ? resolvedCell.asSchema(schema) : resolvedCell;
+          });
+
+          if (resultCells.length === 1) {
+            sendResult(tx, {
+              result: resultCells[0],
+              [UI]: cellLinkUI(resultCells[0]),
+            });
+          } else {
+            sendResult(
+              tx,
+              launchWishPattern({
+                ...targetValue as WishParams,
+                candidates: resultCells,
+              }, tx),
+            );
+          }
+        } catch (e) {
+          const errorMsg = e instanceof WishError ? e.message : String(e);
+          sendResult(
+            tx,
+            { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<
+              any
+            >,
+          );
+        }
+        return;
+      }
+
+      // If the query is a string path or a hash tag, resolve it directly
+      if (
+        typeof query === "string" &&
+        (query.startsWith("/") || /^#[a-zA-Z0-9-]+$/.test(query))
+      ) {
         try {
           const parsed: ParsedWishTarget = {
             key: query as WishTag,

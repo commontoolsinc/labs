@@ -881,7 +881,7 @@ describe("wish built-in", () => {
       );
       favoriteItem.set({ name: "My Favorite", value: 42 });
       favoritesCell.set([
-        { cell: favoriteItem, tag: "test favorite" },
+        { cell: favoriteItem },
       ]);
 
       await tx.commit();
@@ -910,7 +910,7 @@ describe("wish built-in", () => {
       const favorites = result.key("favorites").get()?.result;
       expect(favorites).toBeDefined();
       expect(Array.isArray(favorites)).toBe(true);
-      expect((favorites as any[])[0].tag).toEqual("test favorite");
+      expect((favorites as any[])[0].cell).toBeDefined();
     });
 
     it("resolves #default from pattern space, not home space", async () => {
@@ -983,7 +983,7 @@ describe("wish built-in", () => {
         tx,
       );
       favoriteItem.set({ type: "favorite" });
-      favoritesCell.set([{ cell: favoriteItem, tag: "mixed test" }]);
+      favoritesCell.set([{ cell: favoriteItem }]);
 
       await tx.commit();
       await runtime.idle();
@@ -1027,12 +1027,12 @@ describe("wish built-in", () => {
       const patternData = result.key("patternData").get()?.result;
 
       expect(Array.isArray(favorites)).toBe(true);
-      expect((favorites as any[])[0].tag).toEqual("mixed test");
+      expect((favorites as any[])[0].cell).toBeDefined();
       expect(patternData).toEqual({ type: "pattern" });
     });
 
     it("resolves hashtag search in home space favorites from different pattern space", async () => {
-      // Setup: Favorites with tags in home space
+      // Setup: Favorites with tagsCell in home space
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
       const favoritesCell = homeSpaceCell.key("favorites");
       const favoriteItem1 = runtime.getCell(
@@ -1042,6 +1042,14 @@ describe("wish built-in", () => {
         tx,
       );
       favoriteItem1.set({ name: "Item with #myTag" });
+      const tagsCell1 = runtime.getCell<string[]>(
+        userIdentity.did(),
+        "hashtag-item-1-tags",
+        undefined,
+        tx,
+      );
+      tagsCell1.set(["#myTag", "#awesome"]);
+
       const favoriteItem2 = runtime.getCell(
         userIdentity.did(),
         "hashtag-item-2",
@@ -1049,10 +1057,11 @@ describe("wish built-in", () => {
         tx,
       );
       favoriteItem2.set({ name: "Different item" });
+      // No tagsCell for item2 - won't match hashtag searches
 
       favoritesCell.set([
-        { cell: favoriteItem1, tag: "#myTag #awesome" },
-        { cell: favoriteItem2, tag: "no hashtag here" },
+        { cell: favoriteItem1, tagsCell: tagsCell1 },
+        { cell: favoriteItem2 },
       ]);
 
       await tx.commit();
@@ -1104,11 +1113,18 @@ describe("wish built-in", () => {
       // Setup the charm (but don't start it yet)
       runtime.setup(tx, counterRecipe, {}, charmCell);
 
-      // Setup 3: Add charm to favorites
+      // Setup 3: Add charm to favorites with tagsCell
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
       const favoritesCell = homeSpaceCell.key("favorites");
+      const charmTagsCell = runtime.getCell<string[]>(
+        userIdentity.did(),
+        "counter-charm-tags",
+        undefined,
+        tx,
+      );
+      charmTagsCell.set(["#counterCharm"]);
       favoritesCell.set([
-        { cell: charmCell, tag: "#counterCharm test charm" },
+        { cell: charmCell, tagsCell: charmTagsCell },
       ]);
 
       await tx.commit();
@@ -1143,6 +1159,307 @@ describe("wish built-in", () => {
       if (typeof charmData === "object" && charmData !== null) {
         expect("count" in charmData || "increment" in charmData).toBe(true);
       }
+    });
+
+    it("resolves AND query requiring all tags to match", async () => {
+      // Setup: Add favorites with different tag combinations
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const favoritesCell = homeSpaceCell.key("favorites");
+
+      // Item 1: has both #auth and #google
+      const item1 = runtime.getCell(
+        userIdentity.did(),
+        "both-tags",
+        undefined,
+        tx,
+      );
+      item1.set({ name: "Has both tags" });
+      const tags1 = runtime.getCell<string[]>(
+        userIdentity.did(),
+        "both-tags-cell",
+        undefined,
+        tx,
+      );
+      tags1.set(["#auth", "#google"]);
+
+      // Item 2: only has #auth
+      const item2 = runtime.getCell(
+        userIdentity.did(),
+        "auth-only",
+        undefined,
+        tx,
+      );
+      item2.set({ name: "Auth only" });
+      const tags2 = runtime.getCell<string[]>(
+        userIdentity.did(),
+        "auth-only-cell",
+        undefined,
+        tx,
+      );
+      tags2.set(["#auth"]);
+
+      favoritesCell.set([
+        { cell: item1, tagsCell: tags1 },
+        { cell: item2, tagsCell: tags2 },
+      ]);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: AND query for both #auth AND #google
+      const wishRecipe = recipe("wish AND query", () => {
+        return {
+          result: wish({ query: { and: ["#auth", "#google"] } }),
+        };
+      });
+
+      const resultCell = runtime.getCell<{
+        result?: { result?: unknown };
+      }>(patternSpace.did(), "wish-and-result", undefined, tx);
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Verify: Only item with both tags is returned
+      const wishResult = result.key("result").get();
+      expect(wishResult?.result).toEqual({ name: "Has both tags" });
+    });
+
+    it("resolves OR query matching any of the tags", async () => {
+      // Setup: Add favorites with different tags
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const favoritesCell = homeSpaceCell.key("favorites");
+
+      const item1 = runtime.getCell(
+        userIdentity.did(),
+        "gmail-item",
+        undefined,
+        tx,
+      );
+      item1.set({ name: "Gmail" });
+      const tags1 = runtime.getCell<string[]>(
+        userIdentity.did(),
+        "gmail-tags",
+        undefined,
+        tx,
+      );
+      tags1.set(["#gmail"]); // Matches OR query
+
+      const item2 = runtime.getCell(
+        userIdentity.did(),
+        "notes-item",
+        undefined,
+        tx,
+      );
+      item2.set({ name: "Notes" });
+      const tags2 = runtime.getCell<string[]>(
+        userIdentity.did(),
+        "notes-tags",
+        undefined,
+        tx,
+      );
+      tags2.set(["#notes"]); // Doesn't match OR query
+
+      favoritesCell.set([
+        { cell: item1, tagsCell: tags1 },
+        { cell: item2, tagsCell: tags2 },
+      ]);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: OR query for #gmail OR #outlook
+      const wishRecipe = recipe("wish OR query", () => {
+        return {
+          result: wish({ query: { or: ["#gmail", "#outlook"] } }),
+        };
+      });
+
+      const resultCell = runtime.getCell<{
+        result?: { result?: unknown };
+      }>(patternSpace.did(), "wish-or-result", undefined, tx);
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Verify: Gmail matches (has #gmail)
+      const wishResult = result.key("result").get();
+      expect(wishResult?.result).toEqual({ name: "Gmail" });
+    });
+
+    it("returns error when no favorites match AND query", async () => {
+      // Setup: Add favorites without matching tags
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const favoritesCell = homeSpaceCell.key("favorites");
+      const item = runtime.getCell(
+        userIdentity.did(),
+        "unmatched-item",
+        undefined,
+        tx,
+      );
+      item.set({ name: "Unmatched" });
+      const tags = runtime.getCell<string[]>(
+        userIdentity.did(),
+        "unmatched-tags",
+        undefined,
+        tx,
+      );
+      tags.set(["#other"]);
+      favoritesCell.set([{ cell: item, tagsCell: tags }]);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: AND query with no matches
+      const wishRecipe = recipe("wish no match", () => {
+        return {
+          result: wish({ query: { and: ["#nonexistent", "#alsomissing"] } }),
+        };
+      });
+
+      const resultCell = runtime.getCell<{
+        result?: { error?: string };
+      }>(patternSpace.did(), "wish-nomatch-result", undefined, tx);
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Verify: Error about no matches
+      const wishResult = result.key("result").get();
+      expect(wishResult?.error).toMatch(/No favorite found matching/);
+    });
+
+    it("returns error for empty AND array (edge case)", async () => {
+      // Setup: Add favorites with tags (shouldn't match empty AND)
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const favoritesCell = homeSpaceCell.key("favorites");
+      const item = runtime.getCell(
+        userIdentity.did(),
+        "empty-and-item",
+        undefined,
+        tx,
+      );
+      item.set({ name: "Should not match empty AND" });
+      const tags = runtime.getCell<string[]>(
+        userIdentity.did(),
+        "empty-and-tags",
+        undefined,
+        tx,
+      );
+      tags.set(["#sometag"]);
+      favoritesCell.set([{ cell: item, tagsCell: tags }]);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: Empty AND array (edge case - should NOT match everything)
+      const wishRecipe = recipe("wish empty AND", () => {
+        return {
+          result: wish({ query: { and: [] } }),
+        };
+      });
+
+      const resultCell = runtime.getCell<{
+        result?: { error?: string };
+      }>(patternSpace.did(), "wish-empty-and-result", undefined, tx);
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Verify: Empty AND should return error, not match all favorites
+      const wishResult = result.key("result").get();
+      expect(wishResult?.error).toMatch(/Empty AND query/);
+    });
+
+    it("returns error for empty OR array (edge case)", async () => {
+      // Setup: Add favorites with tags
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const favoritesCell = homeSpaceCell.key("favorites");
+      const item = runtime.getCell(
+        userIdentity.did(),
+        "empty-or-item",
+        undefined,
+        tx,
+      );
+      item.set({ name: "Should not match empty OR" });
+      const tags = runtime.getCell<string[]>(
+        userIdentity.did(),
+        "empty-or-tags",
+        undefined,
+        tx,
+      );
+      tags.set(["#sometag"]);
+      favoritesCell.set([{ cell: item, tagsCell: tags }]);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: Empty OR array (edge case - should match nothing)
+      const wishRecipe = recipe("wish empty OR", () => {
+        return {
+          result: wish({ query: { or: [] } }),
+        };
+      });
+
+      const resultCell = runtime.getCell<{
+        result?: { error?: string };
+      }>(patternSpace.did(), "wish-empty-or-result", undefined, tx);
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Verify: Empty OR should return error, not match nothing silently
+      const wishResult = result.key("result").get();
+      expect(wishResult?.error).toMatch(/Empty OR query/);
+    });
+
+    it("matches favorites with legacy tag field (backward compat)", async () => {
+      // Setup: Add favorite with legacy tag field (not tagsCell)
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const favoritesCell = homeSpaceCell.key("favorites");
+      const item = runtime.getCell(
+        userIdentity.did(),
+        "legacy-tag-item",
+        undefined,
+        tx,
+      );
+      item.set({ name: "Legacy tagged item" });
+
+      // Use legacy format: tag field instead of tagsCell
+      favoritesCell.set([{ cell: item, tag: "#legacytag" }]);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: Search for legacy tag
+      const wishRecipe = recipe("wish legacy tag", () => {
+        return {
+          result: wish({ query: "#legacytag" }),
+        };
+      });
+
+      const resultCell = runtime.getCell<{
+        result?: { result?: unknown };
+      }>(patternSpace.did(), "wish-legacy-result", undefined, tx);
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Verify: Legacy tag field is read correctly
+      const wishResult = result.key("result").get();
+      expect(wishResult?.result).toEqual({ name: "Legacy tagged item" });
     });
   });
 });

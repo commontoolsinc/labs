@@ -278,6 +278,42 @@ return {
 - They do NOT appear in the sidebar charm list
 - Use this instead of writing to `allCharms` directly
 
+### Making Patterns Searchable with Tags
+
+Export `[TAGS]` to make your pattern findable via `wish({ query: "#tag" })`:
+
+```typescript
+import { TAGS, NAME, UI, pattern } from "commontools";
+
+export default pattern<Input, Output>(({ ... }) => ({
+  [NAME]: "Gmail Client",
+  [TAGS]: ["#gmail", "#email-client"],  // Static tags
+  [UI]: <div>...</div>,
+}));
+```
+
+**Dynamic Tags** - advertise capabilities based on state:
+```typescript
+[TAGS]: computed(() => [
+  "#oauth",
+  ...(isLoggedIn.get() ? ["#authenticated"] : []),
+])
+```
+
+**Compound Queries** - combine multiple tag requirements:
+```typescript
+// AND: Must have both tags
+wish({ query: { and: ["#auth", "#google"] } })
+
+// OR: Any of these tags
+wish({ query: { or: ["#gmail", "#outlook"] } })
+```
+
+**Notes:**
+- Tags must start with `#` (e.g., `#auth`, `#gmail`)
+- Patterns must be **favorited** before they're searchable via tags
+- `[TAGS]` accepts `string[]` or `Cell<string[]>` (for reactive tags)
+
 ---
 
 ## Quick Reference
@@ -294,6 +330,8 @@ return {
 | Filter/sort lists | `computed()` |
 | Cross-charm mutation | `Stream.send()` |
 | Make charm discoverable | Export `mentionable` |
+| Make pattern searchable | Export `[TAGS]` |
+| Find pattern by tag | `wish({ query: "#tag" })` |
 
 ### Cell<> in Type Signatures
 

@@ -68,6 +68,31 @@ export const TYPE = "$TYPE";
 export const NAME = "$NAME";
 export const UI = "$UI";
 
+/**
+ * Export [TAGS] to make a pattern discoverable via wish({ query: ... }).
+ *
+ * Tags must be strings starting with '#'. Supports:
+ * - Static tags: `[TAGS]: ["#googleAuth", "#oauth2"]`
+ * - Dynamic tags: `[TAGS]: computed(() => isActive.get() ? ["#active"] : [])`
+ *
+ * Patterns are only searchable after being favorited by the user.
+ *
+ * @example
+ * // Static tags
+ * export default pattern(({ ... }) => ({
+ *   [NAME]: "Gmail Client",
+ *   [TAGS]: ["#gmail", "#email-client"],
+ *   [UI]: <div>...</div>,
+ * }));
+ *
+ * // Dynamic tags based on state
+ * [TAGS]: computed(() => [
+ *   "#oauth",
+ *   ...(isLoggedIn.get() ? ["#authenticated"] : []),
+ * ]),
+ */
+export const TAGS = "$TAGS";
+
 export const schema: typeof schemaFunction = (schema) => schema;
 
 export { AuthSchema } from "./schema-lib.ts";
