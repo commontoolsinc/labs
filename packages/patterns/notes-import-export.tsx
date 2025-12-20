@@ -157,8 +157,16 @@ export default pattern<Input, Output>(({ importMarkdown }) => {
                 <h2>Export Notes</h2>
                 <p>
                   Found <strong>{noteCount}</strong>{" "}
-                  notes in this space. Select all text below and copy to export.
+                  notes in this space. Download or copy the markdown below.
                 </p>
+                <ct-file-download
+                  $data={exportedMarkdown}
+                  filename="notes-export.md"
+                  mime-type="text/markdown"
+                  variant="primary"
+                >
+                  Download Notes
+                </ct-file-download>
                 <ct-code-editor
                   $value={exportedMarkdown}
                   language="text/markdown"
