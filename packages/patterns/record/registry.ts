@@ -1,29 +1,48 @@
 // registry.ts - Sub-charm registry with type definitions and pattern constructors
-// Defines available sub-charm types and their metadata
-// Includes pattern constructors for true sub-charm architecture
+// Now imports from peer patterns in packages/patterns/
 
 import type { SubCharmType } from "./types.ts";
+
+// Import metadata and patterns from peer patterns
+import {
+  BirthdayModule,
+  MODULE_METADATA as BirthdayMeta,
+} from "../birthday.tsx";
+import { MODULE_METADATA as RatingMeta, RatingModule } from "../rating.tsx";
+import { MODULE_METADATA as TagsMeta, TagsModule } from "../tags.tsx";
+import {
+  ContactModule,
+  MODULE_METADATA as ContactMeta,
+} from "../contact-info.tsx";
+import { MODULE_METADATA as StatusMeta, StatusModule } from "../status.tsx";
+import { AddressModule, MODULE_METADATA as AddressMeta } from "../address.tsx";
+import {
+  MODULE_METADATA as TimelineMeta,
+  TimelineModule,
+} from "../timeline.tsx";
+import { MODULE_METADATA as SocialMeta, SocialModule } from "../social.tsx";
+import { LinkModule, MODULE_METADATA as LinkMeta } from "../link.tsx";
+import {
+  LocationModule,
+  MODULE_METADATA as LocationMeta,
+} from "../location.tsx";
+import {
+  MODULE_METADATA as RelationshipMeta,
+  RelationshipModule,
+} from "../relationship.tsx";
+import {
+  GiftPrefsModule,
+  MODULE_METADATA as GiftPrefsMeta,
+} from "../giftprefs.tsx";
+import { MODULE_METADATA as TimingMeta, TimingModule } from "../timing.tsx";
+import { MODULE_METADATA as TypePickerMeta } from "../type-picker.tsx";
+import type { ModuleMetadata } from "../container-protocol.ts";
 
 // NOTE: Note is NOT imported here - it's created directly in record.tsx
 // with the correct linkPattern (avoids global state for passing Record's pattern JSON)
 
-// Import all module patterns
-import { BirthdayModule } from "./modules/birthday-module.tsx";
-import { RatingModule } from "./modules/rating-module.tsx";
-import { TagsModule } from "./modules/tags-module.tsx";
-import { ContactModule } from "./modules/contact-module.tsx";
-import { StatusModule } from "./modules/status-module.tsx";
-import { AddressModule } from "./modules/address-module.tsx";
-import { TimelineModule } from "./modules/timeline-module.tsx";
-import { SocialModule } from "./modules/social-module.tsx";
-import { LinkModule } from "./modules/link-module.tsx";
-import { LocationModule } from "./modules/location-module.tsx";
-import { RelationshipModule } from "./modules/relationship-module.tsx";
-import { GiftPrefsModule } from "./modules/giftprefs-module.tsx";
-import { TimingModule } from "./modules/timing-module.tsx";
-// NOTE: TypePickerModule is NOT imported here to avoid circular dependency
-// (registry → type-picker → template-registry → registry)
-// Instead, record.tsx imports it directly.
+// NOTE: TypePickerModule is imported directly in record.tsx to avoid circular dependency
+// and because it needs ContainerCoordinationContext
 
 // Type for pattern constructors - returns unknown since we store heterogeneous charm types
 type PatternConstructor = () => unknown;
@@ -41,20 +60,30 @@ export interface SubCharmDefinition {
   fieldMapping?: string[];
 }
 
+// Helper to create SubCharmDefinition from ModuleMetadata
+function fromMetadata(
+  meta: ModuleMetadata,
+  createInstance: PatternConstructor,
+): SubCharmDefinition {
+  return {
+    type: meta.type as SubCharmType,
+    label: meta.label,
+    icon: meta.icon,
+    createInstance,
+    internal: meta.internal,
+    schema: meta.schema,
+    fieldMapping: meta.fieldMapping,
+  };
+}
+
 // Static registry - defines available sub-charm types
-// Note: createInstance uses {} as any to bypass Opaque type requirements
-// The framework will provide defaults for all fields
-//
-// NOTE: "notes" is special - createInstance throws because it must be created
-// in record.tsx with the correct linkPattern. The metadata is here for
-// getDefinition() and getAddableTypes() to work.
+// Now built from peer pattern metadata
 export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
+  // Notes is special - must be created in record.tsx with linkPattern
   notes: {
     type: "notes",
     label: "Notes",
     icon: "\u{1F4DD}", // 📝
-    // createInstance throws - Notes must be created directly in record.tsx
-    // with the correct linkPattern for wiki-links to work
     createInstance: () => {
       throw new Error(
         "Notes must be created directly with linkPattern, not through registry",
@@ -65,221 +94,36 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     },
     fieldMapping: ["notes", "content"],
   },
-  birthday: {
-    type: "birthday",
-    label: "Birthday",
-    icon: "\u{1F382}", // 🎂
-    createInstance: () => BirthdayModule({} as any),
-    schema: {
-      birthDate: { type: "string", description: "Birthday YYYY-MM-DD" },
-      birthYear: { type: "number", description: "Birth year" },
-    },
-    fieldMapping: ["birthDate", "birthYear"],
-  },
-  rating: {
-    type: "rating",
-    label: "Rating",
-    icon: "\u{2B50}", // ⭐
-    createInstance: () => RatingModule({} as any),
-    schema: {
-      rating: {
-        type: "number",
-        minimum: 1,
-        maximum: 5,
-        description: "Rating 1-5",
-      },
-    },
-    fieldMapping: ["rating"],
-  },
-  tags: {
-    type: "tags",
-    label: "Tags",
-    icon: "\u{1F3F7}", // 🏷️
-    createInstance: () => TagsModule({} as any),
-    schema: {
-      tags: { type: "array", items: { type: "string" }, description: "Tags" },
-    },
-    fieldMapping: ["tags"],
-  },
-  contact: {
-    type: "contact",
-    label: "Contact",
-    icon: "\u{1F4E7}", // 📧
-    createInstance: () => ContactModule({} as any),
-    schema: {
-      email: { type: "string", description: "Email address" },
-      phone: { type: "string", description: "Phone number" },
-      website: { type: "string", description: "Website URL" },
-    },
-    fieldMapping: ["email", "phone", "website"],
-  },
-  // Wave 2 modules
-  status: {
-    type: "status",
-    label: "Status",
-    icon: "\u{1F4CA}", // 📊
-    createInstance: () => StatusModule({} as any),
-    schema: {
-      status: {
-        type: "string",
-        enum: ["planned", "active", "blocked", "done", "archived"],
-        description: "Project status",
-      },
-    },
-    fieldMapping: ["status"],
-  },
-  address: {
-    type: "address",
-    label: "Address",
-    icon: "\u{1F4CD}", // 📍
-    createInstance: () => AddressModule({} as any),
-    schema: {
-      street: { type: "string", description: "Street address" },
-      city: { type: "string", description: "City" },
-      state: { type: "string", description: "State/Province" },
-      zip: { type: "string", description: "ZIP/Postal code" },
-    },
-    fieldMapping: ["street", "city", "state", "zip"],
-  },
-  timeline: {
-    type: "timeline",
-    label: "Timeline",
-    icon: "\u{1F4C5}", // 📅
-    createInstance: () => TimelineModule({} as any),
-    schema: {
-      startDate: { type: "string", format: "date", description: "Start date" },
-      targetDate: {
-        type: "string",
-        format: "date",
-        description: "Target completion date",
-      },
-      completedDate: {
-        type: "string",
-        format: "date",
-        description: "Actual completion date",
-      },
-    },
-    fieldMapping: ["startDate", "targetDate", "completedDate"],
-  },
-  social: {
-    type: "social",
-    label: "Social",
-    icon: "\u{1F517}", // 🔗
-    createInstance: () => SocialModule({} as any),
-    schema: {
-      platform: {
-        type: "string",
-        enum: [
-          "twitter",
-          "linkedin",
-          "github",
-          "instagram",
-          "facebook",
-          "youtube",
-          "tiktok",
-          "mastodon",
-          "bluesky",
-        ],
-        description: "Social platform",
-      },
-      handle: { type: "string", description: "Username/handle" },
-      url: { type: "string", format: "uri", description: "Profile URL" },
-    },
-    fieldMapping: ["platform", "handle"],
-  },
-  link: {
-    type: "link",
-    label: "Link",
-    icon: "\u{1F310}", // 🌐
-    createInstance: () => LinkModule({} as any),
-    schema: {
-      url: { type: "string", format: "uri", description: "URL" },
-      linkTitle: { type: "string", description: "Link title" },
-      description: { type: "string", description: "Description" },
-    },
-    fieldMapping: ["url", "linkTitle", "description"],
-  },
-  // Wave 3 modules
-  location: {
-    type: "location",
-    label: "Location",
-    icon: "\u{1F5FA}", // 🗺️
-    createInstance: () => LocationModule({} as any),
-    schema: {
-      locationName: { type: "string", description: "Location name" },
-      locationAddress: { type: "string", description: "Full address" },
-      coordinates: { type: "string", description: "Coordinates (lat,lng)" },
-    },
-    fieldMapping: ["locationName", "locationAddress", "coordinates"],
-  },
-  relationship: {
-    type: "relationship",
-    label: "Relationship",
-    icon: "\u{1F465}", // 👥
-    createInstance: () => RelationshipModule({} as any),
-    schema: {
-      relationTypes: {
-        type: "array",
-        items: { type: "string" },
-        description: "Relationship types",
-      },
-      closeness: {
-        type: "string",
-        enum: ["intimate", "close", "casual", "distant"],
-        description: "Closeness level",
-      },
-      howWeMet: { type: "string", description: "How we met" },
-      innerCircle: { type: "boolean", description: "Inner circle member" },
-    },
-    fieldMapping: ["relationTypes", "closeness", "howWeMet", "innerCircle"],
-  },
-  giftprefs: {
-    type: "giftprefs",
-    label: "Gift Prefs",
-    icon: "\u{1F381}", // 🎁
-    createInstance: () => GiftPrefsModule({} as any),
-    schema: {
-      giftTier: {
-        type: "string",
-        enum: ["always", "occasions", "reciprocal", "none"],
-        description: "Gift giving tier",
-      },
-      favorites: {
-        type: "array",
-        items: { type: "string" },
-        description: "Favorite things",
-      },
-      avoid: {
-        type: "array",
-        items: { type: "string" },
-        description: "Things to avoid",
-      },
-    },
-    fieldMapping: ["giftTier", "favorites", "avoid"],
-  },
-  timing: {
-    type: "timing",
-    label: "Timing",
-    icon: "\u{23F1}", // ⏱️
-    createInstance: () => TimingModule({} as any),
-    schema: {
-      prepTime: { type: "number", description: "Prep time in minutes" },
-      cookTime: { type: "number", description: "Cook time in minutes" },
-      restTime: { type: "number", description: "Rest time in minutes" },
-    },
-    fieldMapping: ["prepTime", "cookTime", "restTime"],
-  },
-  // Controller modules - metadata only (no createInstance to avoid circular deps)
-  // TypePickerModule is imported directly in record.tsx
+
+  // Data modules - imported from peer patterns
+  birthday: fromMetadata(BirthdayMeta, () => BirthdayModule({} as any)),
+  rating: fromMetadata(RatingMeta, () => RatingModule({} as any)),
+  tags: fromMetadata(TagsMeta, () => TagsModule({} as any)),
+  contact: fromMetadata(ContactMeta, () => ContactModule({} as any)),
+  status: fromMetadata(StatusMeta, () => StatusModule({} as any)),
+  address: fromMetadata(AddressMeta, () => AddressModule({} as any)),
+  timeline: fromMetadata(TimelineMeta, () => TimelineModule({} as any)),
+  social: fromMetadata(SocialMeta, () => SocialModule({} as any)),
+  link: fromMetadata(LinkMeta, () => LinkModule({} as any)),
+  location: fromMetadata(LocationMeta, () => LocationModule({} as any)),
+  relationship: fromMetadata(
+    RelationshipMeta,
+    () => RelationshipModule({} as any),
+  ),
+  giftprefs: fromMetadata(GiftPrefsMeta, () => GiftPrefsModule({} as any)),
+  timing: fromMetadata(TimingMeta, () => TimingModule({} as any)),
+
+  // Controller modules - TypePicker needs special handling in record.tsx
   "type-picker": {
     type: "type-picker",
-    label: "Type Picker",
-    icon: "\u{1F3AF}", // 🎯
-    // createInstance is a no-op - record.tsx imports TypePickerModule directly
+    label: TypePickerMeta.label,
+    icon: TypePickerMeta.icon,
     createInstance: () => {
-      throw new Error("Use TypePickerModule directly, not through registry");
+      throw new Error(
+        "Use TypePickerModule directly with ContainerCoordinationContext",
+      );
     },
-    internal: true, // Don't show in Add dropdown
+    internal: true,
   },
 };
 

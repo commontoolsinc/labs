@@ -1,14 +1,34 @@
 /// <cts-enable />
 /**
- * Timing Module - Sub-charm for cooking/prep times
+ * Timing Module - Pattern for cooking/prep times
+ *
+ * A composable pattern that can be used standalone or embedded in containers
+ * like Record. Tracks prep, cook, and rest times with auto-calculated total.
  */
 import { computed, type Default, NAME, recipe, UI } from "commontools";
+import type { ModuleMetadata } from "./container-protocol.ts";
 
+// ===== Self-Describing Metadata =====
+export const MODULE_METADATA: ModuleMetadata = {
+  type: "timing",
+  label: "Timing",
+  icon: "\u{23F1}", // stopwatch emoji
+  schema: {
+    prepTime: { type: "number", description: "Prep time in minutes" },
+    cookTime: { type: "number", description: "Cook time in minutes" },
+    restTime: { type: "number", description: "Rest time in minutes" },
+  },
+  fieldMapping: ["prepTime", "cookTime", "restTime"],
+};
+
+// ===== Types =====
 export interface TimingModuleInput {
   prepTime: Default<number | null, null>;
   cookTime: Default<number | null, null>;
   restTime: Default<number | null, null>;
 }
+
+// ===== Helpers =====
 
 // Format minutes as "Xh Ym"
 function formatTime(minutes: number | null): string {
@@ -19,6 +39,7 @@ function formatTime(minutes: number | null): string {
   return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
 }
 
+// ===== The Pattern =====
 export const TimingModule = recipe<TimingModuleInput, TimingModuleInput>(
   "TimingModule",
   ({ prepTime, cookTime, restTime }) => {
@@ -33,7 +54,7 @@ export const TimingModule = recipe<TimingModuleInput, TimingModuleInput>(
     const displayText = computed(() => formatTime(totalTime));
 
     return {
-      [NAME]: computed(() => `⏱️ Timing: ${displayText}`),
+      [NAME]: computed(() => `${MODULE_METADATA.icon} Timing: ${displayText}`),
       [UI]: (
         <ct-vstack style={{ gap: "16px" }}>
           <div

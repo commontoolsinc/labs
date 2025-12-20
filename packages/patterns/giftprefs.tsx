@@ -1,6 +1,9 @@
 /// <cts-enable />
 /**
- * Gift Preferences Module - Sub-charm for gift giving preferences
+ * Gift Preferences Module - Pattern for gift giving preferences
+ *
+ * A composable pattern that can be used standalone or embedded in containers
+ * like Record. Tracks gift tier, favorites, and items to avoid.
  */
 import {
   Cell,
@@ -11,13 +14,41 @@ import {
   recipe,
   UI,
 } from "commontools";
+import type { ModuleMetadata } from "./container-protocol.ts";
 
+// ===== Self-Describing Metadata =====
+export const MODULE_METADATA: ModuleMetadata = {
+  type: "giftprefs",
+  label: "Gift Prefs",
+  icon: "\u{1F381}", // gift emoji
+  schema: {
+    giftTier: {
+      type: "string",
+      enum: ["always", "occasions", "reciprocal", "none"],
+      description: "Gift giving tier",
+    },
+    favorites: {
+      type: "array",
+      items: { type: "string" },
+      description: "Favorite things",
+    },
+    avoid: {
+      type: "array",
+      items: { type: "string" },
+      description: "Things to avoid",
+    },
+  },
+  fieldMapping: ["giftTier", "favorites", "avoid"],
+};
+
+// ===== Types =====
 export interface GiftPrefsModuleInput {
   giftTier: Default<string, "">;
   favorites: Default<string[], []>;
   avoid: Default<string[], []>;
 }
 
+// ===== Constants =====
 const TIER_OPTIONS = [
   { value: "", label: "Not set" },
   { value: "always", label: "🎁 Always (exchange gifts)" },
@@ -25,6 +56,8 @@ const TIER_OPTIONS = [
   { value: "reciprocal", label: "↔️ Reciprocal (if they give)" },
   { value: "none", label: "⛔ None (no gift exchange)" },
 ];
+
+// ===== Handlers =====
 
 // Handler to add a favorite
 const addFavorite = handler<
@@ -70,6 +103,7 @@ const removeAvoid = handler<
   avoid.set((avoid.get() || []).toSpliced(index, 1));
 });
 
+// ===== The Pattern =====
 export const GiftPrefsModule = recipe<
   GiftPrefsModuleInput,
   GiftPrefsModuleInput
@@ -85,7 +119,9 @@ export const GiftPrefsModule = recipe<
     });
 
     return {
-      [NAME]: computed(() => `🎁 Gift Prefs: ${displayText}`),
+      [NAME]: computed(() =>
+        `${MODULE_METADATA.icon} Gift Prefs: ${displayText}`
+      ),
       [UI]: (
         <ct-vstack style={{ gap: "16px" }}>
           {/* Gift tier */}

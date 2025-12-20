@@ -1,6 +1,9 @@
 /// <cts-enable />
 /**
- * Tags Module - Sub-charm for tag/label management
+ * Tags Module - Pattern for tag/label management
+ *
+ * A composable pattern that can be used standalone or embedded in containers
+ * like Record. Provides add/remove tag functionality with chip display.
  */
 import {
   Cell,
@@ -11,10 +14,25 @@ import {
   recipe,
   UI,
 } from "commontools";
+import type { ModuleMetadata } from "./container-protocol.ts";
 
+// ===== Self-Describing Metadata =====
+export const MODULE_METADATA: ModuleMetadata = {
+  type: "tags",
+  label: "Tags",
+  icon: "\u{1F3F7}", // label emoji
+  schema: {
+    tags: { type: "array", items: { type: "string" }, description: "Tags" },
+  },
+  fieldMapping: ["tags"],
+};
+
+// ===== Types =====
 export interface TagsModuleInput {
   tags: Default<string[], []>;
 }
+
+// ===== Handlers =====
 
 // Handler to add a new tag
 const addTag = handler<
@@ -40,6 +58,7 @@ const removeTag = handler<
   tags.set(current.toSpliced(index, 1));
 });
 
+// ===== The Pattern =====
 export const TagsModule = recipe<TagsModuleInput, TagsModuleInput>(
   "TagsModule",
   ({ tags }) => {
@@ -50,7 +69,7 @@ export const TagsModule = recipe<TagsModuleInput, TagsModuleInput>(
     });
 
     return {
-      [NAME]: computed(() => `🏷️ Tags: ${displayText}`),
+      [NAME]: computed(() => `${MODULE_METADATA.icon} Tags: ${displayText}`),
       [UI]: (
         <ct-vstack style={{ gap: "12px" }}>
           {/* Tag input */}

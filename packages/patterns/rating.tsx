@@ -1,6 +1,9 @@
 /// <cts-enable />
 /**
- * Rating Module - Sub-charm for 1-5 star ratings
+ * Rating Module - Pattern for 1-5 star ratings
+ *
+ * A composable pattern that can be used standalone or embedded in containers
+ * like Record. Provides interactive star rating with toggle-off support.
  */
 import {
   Cell,
@@ -11,10 +14,30 @@ import {
   recipe,
   UI,
 } from "commontools";
+import type { ModuleMetadata } from "./container-protocol.ts";
 
+// ===== Self-Describing Metadata =====
+export const MODULE_METADATA: ModuleMetadata = {
+  type: "rating",
+  label: "Rating",
+  icon: "\u{2B50}", // star emoji
+  schema: {
+    rating: {
+      type: "number",
+      minimum: 1,
+      maximum: 5,
+      description: "Rating 1-5",
+    },
+  },
+  fieldMapping: ["rating"],
+};
+
+// ===== Types =====
 export interface RatingModuleInput {
   rating: Default<number | null, null>;
 }
+
+// ===== Handlers =====
 
 // Handler for rating selection - value is passed in context
 const setRating = handler<
@@ -26,13 +49,14 @@ const setRating = handler<
   rating.set(current === value ? null : value);
 });
 
+// ===== The Pattern =====
 export const RatingModule = recipe<RatingModuleInput, RatingModuleInput>(
   "RatingModule",
   ({ rating }) => {
     const displayText = computed(() => rating ? `${rating}/5` : "Not rated");
 
     return {
-      [NAME]: computed(() => `⭐ Rating: ${displayText}`),
+      [NAME]: computed(() => `${MODULE_METADATA.icon} Rating: ${displayText}`),
       [UI]: (
         <ct-vstack style={{ gap: "8px" }}>
           <ct-hstack style={{ gap: "4px", justifyContent: "center" }}>
@@ -52,7 +76,7 @@ export const RatingModule = recipe<RatingModuleInput, RatingModuleInput>(
                 }}
                 title={`Rate ${value} star${value > 1 ? "s" : ""}`}
               >
-                ⭐
+                {MODULE_METADATA.icon}
               </button>
             ))}
           </ct-hstack>
