@@ -114,8 +114,11 @@ const Note = pattern<Input, Output>(
     const backlinks = Cell.of<MentionableCharm[]>([]);
 
     // Use provided linkPattern or default to creating new Notes
+    // linkPattern is a Cell<string> - access reactively, not as raw string
     const patternJson = computed(() => {
-      const custom = (linkPattern as unknown as string)?.trim?.();
+      // deno-lint-ignore no-explicit-any
+      const lpValue = (linkPattern as any)?.get?.() ?? linkPattern;
+      const custom = typeof lpValue === "string" ? lpValue.trim() : "";
       return custom || JSON.stringify(Note);
     });
 
