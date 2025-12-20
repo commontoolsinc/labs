@@ -23,7 +23,7 @@ describe("CTFileDownload", () => {
     const element = new CTFileDownload();
     expect(element.data).toBe("");
     expect(element.filename).toBe("");
-    expect(element.mimeType).toBe("text/plain");
+    expect(element.mimeType).toBe("application/octet-stream");
     expect(element.base64).toBe(false);
     expect(element.variant).toBe("secondary");
     expect(element.size).toBe("default");

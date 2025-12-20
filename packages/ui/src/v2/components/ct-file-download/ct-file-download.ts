@@ -30,7 +30,7 @@ const MIME_EXTENSIONS: Record<string, string> = {
  *
  * @attr {string|Cell<string>} data - Content to download (required)
  * @attr {string|Cell<string>} filename - Download filename (auto-generated if not provided)
- * @attr {string} mime-type - MIME type for the file (default: "text/plain")
+ * @attr {string} mime-type - MIME type for the file (default: "application/octet-stream")
  * @attr {boolean} base64 - If true, decode data as base64 before downloading (default: false)
  * @attr {string} variant - Button style variant (default: "secondary")
  *   Options: "primary" | "secondary" | "destructive" | "outline" | "ghost" | "link" | "pill"
@@ -117,15 +117,19 @@ export class CTFileDownload extends BaseElement {
   declare iconOnly: boolean;
 
   private _downloaded = false;
+  private _downloading = false;
   private _resetTimeout?: number;
   private _dataUnsubscribe: (() => void) | null = null;
   private _filenameUnsubscribe: (() => void) | null = null;
+
+  /** Maximum file size in bytes (100MB) */
+  private static readonly MAX_FILE_SIZE = 100 * 1024 * 1024;
 
   constructor() {
     super();
     this.data = "";
     this.filename = "";
-    this.mimeType = "text/plain";
+    this.mimeType = "application/octet-stream";
     this.base64 = false;
     this.variant = "secondary";
     this.size = "default";
@@ -153,18 +157,30 @@ export class CTFileDownload extends BaseElement {
   }
 
   /**
+   * Sanitize filename to remove potentially problematic characters
+   */
+  private _sanitizeFilename(filename: string): string {
+    // Remove path traversal attempts and problematic characters
+    return filename
+      .replace(/\.\./g, "_") // No path traversal
+      // deno-lint-ignore no-control-regex
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_") // No special chars
+      .slice(0, 255); // Max filename length
+  }
+
+  /**
    * Get the filename, auto-generating if not provided
    */
   private _getFilename(): string {
     const fn = this._getValue(this.filename);
-    if (fn) return fn;
+    if (fn) return this._sanitizeFilename(fn);
 
     // Auto-generate filename with timestamp
     const timestamp = new Date()
       .toISOString()
       .replace(/[:.]/g, "-")
       .slice(0, 19);
-    const ext = MIME_EXTENSIONS[this.mimeType] || "txt";
+    const ext = MIME_EXTENSIONS[this.mimeType] || "bin";
     return `download-${timestamp}.${ext}`;
   }
 
@@ -246,10 +262,11 @@ export class CTFileDownload extends BaseElement {
     e.preventDefault();
     e.stopPropagation();
 
+    // Guard against rapid clicks and disabled state
+    if (this.disabled || this._downloading) return;
+
     const data = this._getDataValue();
     const filename = this._getFilename();
-
-    if (this.disabled) return;
 
     // Check for empty data
     if (!data) {
@@ -260,9 +277,25 @@ export class CTFileDownload extends BaseElement {
       return;
     }
 
+    // Set downloading state to prevent rapid clicks
+    this._downloading = true;
+    this.requestUpdate();
+
     try {
       // Create blob from data
       const blob = this._createBlob(data);
+
+      // Check file size limit
+      if (blob.size > CTFileDownload.MAX_FILE_SIZE) {
+        throw new Error(
+          `File size (${
+            Math.round(blob.size / 1024 / 1024)
+          }MB) exceeds maximum allowed (${
+            Math.round(CTFileDownload.MAX_FILE_SIZE / 1024 / 1024)
+          }MB)`,
+        );
+      }
+
       const url = URL.createObjectURL(blob);
 
       try {
@@ -276,6 +309,7 @@ export class CTFileDownload extends BaseElement {
 
         // Update state for visual feedback
         this._downloaded = true;
+        this._downloading = false;
         this.requestUpdate();
 
         this.emit("ct-download-success", {
@@ -297,6 +331,8 @@ export class CTFileDownload extends BaseElement {
         URL.revokeObjectURL(url);
       }
     } catch (error) {
+      this._downloading = false;
+      this.requestUpdate();
       this.emit("ct-download-error", {
         error: error as Error,
         filename,
@@ -305,25 +341,39 @@ export class CTFileDownload extends BaseElement {
   }
 
   override render() {
-    const title = this._downloaded ? "Downloaded!" : "Download file";
-    const ariaLabel = this._downloaded ? "File downloaded" : "Download file";
+    const title = this._downloading
+      ? "Downloading..."
+      : this._downloaded
+      ? "Downloaded!"
+      : "Download file";
+    const ariaLabel = this._downloading
+      ? "Downloading file"
+      : this._downloaded
+      ? "File downloaded"
+      : "Download file";
     const hasData = !!this._getDataValue();
 
     return html`
       <ct-button
         variant="${this.variant || "secondary"}"
         size="${this.size || "default"}"
-        ?disabled="${this.disabled || !hasData}"
+        ?disabled="${this.disabled || !hasData || this._downloading}"
         @click="${this._handleClick}"
         title="${title}"
         aria-label="${ariaLabel}"
       >
         ${this.iconOnly
           ? html`
-            ${this._downloaded ? "\u2713" : "\u2B07"}
+            ${this._downloading
+              ? "\u23F3"
+              : this._downloaded
+              ? "\u2713"
+              : "\u2B07"}
           `
           : html`
-            <slot> ${this._downloaded
+            <slot> ${this._downloading
+              ? "\u23F3 Downloading..."
+              : this._downloaded
               ? "\u2713 Downloaded!"
               : "\u2B07 Download"} </slot>
           `}
