@@ -37,11 +37,13 @@ interface ExtractorModuleInput {
   parentTrashedSubCharms: Cell<TrashedSubCharmEntry[]>;
   // Internal state
   inputText?: Default<string, "">;
+  extractionPrompt?: Default<string, "">; // Only set when user clicks Extract
   selections?: Default<Record<string, boolean>, {}>;
 }
 
 interface ExtractorModuleOutput {
   inputText?: Default<string, "">;
+  extractionPrompt?: Default<string, "">;
   selections?: Default<Record<string, boolean>, {}>;
 }
 
@@ -233,6 +235,18 @@ const toggleField = handler<
 });
 
 /**
+ * Trigger extraction - copies inputText to extractionPrompt
+ * This is the only way extraction starts (not automatic on typing)
+ */
+const triggerExtraction = handler<
+  unknown,
+  { inputText: Cell<string>; extractionPrompt: Cell<string> }
+>((_event, { inputText, extractionPrompt }) => {
+  const text = inputText.get() || "";
+  extractionPrompt.set(text);
+});
+
+/**
  * Apply selected extractions to modules, then auto-trash self
  */
 const applySelected = handler<
@@ -283,13 +297,13 @@ const applySelected = handler<
 
 export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutput>(
   "ExtractorModule",
-  ({ parentSubCharms, parentTrashedSubCharms, inputText, selections }) => {
-    // Reactive extraction - runs when inputText has content
+  ({ parentSubCharms, parentTrashedSubCharms, inputText, extractionPrompt, selections }) => {
+    // Reactive extraction - only runs when extractionPrompt is set (user clicked Extract)
     // The framework caches by content hash, so same text won't re-extract
     // Using static EXTRACTION_SCHEMA (dynamic buildExtractionSchema doesn't survive compilation)
     const extraction = generateObject<Record<string, unknown>>({
       system: EXTRACTION_SYSTEM_PROMPT,
-      prompt: inputText,  // Direct Cell reference
+      prompt: extractionPrompt,  // Only triggers when user clicks Extract button
       schema: EXTRACTION_SCHEMA,
       model: "anthropic:claude-haiku-4-5",  // Fast & cheap model for extraction
     });
@@ -299,6 +313,12 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
     const hasText = computed(() => {
       const text = inputText || "";
       return text.trim().length > 20;
+    });
+
+    // Check if extraction has been triggered
+    const hasTriggered = computed(() => {
+      const prompt = extractionPrompt || "";
+      return prompt.trim().length > 0;
     });
 
     // Build preview from extraction result
@@ -321,7 +341,11 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
 
     // Determine current phase
     const phase = computed(() => {
+      // If no text entered yet, stay idle
       if (!hasText) return "idle";
+      // If text entered but not triggered, show "ready" state with Extract button
+      if (!hasTriggered) return "ready";
+      // After triggering, show extraction states
       if (extraction.pending) return "extracting";
       if (extraction.error) return "error";
       if (preview?.fields?.length) return "preview";
@@ -384,9 +408,9 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
             </button>
           </div>
 
-          {/* Idle state - text input */}
+          {/* Idle/Ready state - text input with Extract button */}
           {ifElse(
-            computed(() => phase === "idle" || phase === "error"),
+            computed(() => phase === "idle" || phase === "ready" || phase === "error"),
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
               <ct-textarea
                 $value={inputText}
@@ -411,11 +435,32 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
                 </div>,
                 null
               )}
-              <div style={{ fontSize: "12px", color: "#6b7280" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                  {ifElse(
+                    hasText,
+                    "Ready to extract",
+                    "Enter at least 20 characters"
+                  )}
+                </div>
                 {ifElse(
-                  hasText,
-                  "Ready to extract...",
-                  "Enter at least 20 characters"
+                  computed(() => phase === "ready"),
+                  <button
+                    onClick={triggerExtraction({ inputText, extractionPrompt })}
+                    style={{
+                      padding: "8px 16px",
+                      background: "#f59e0b",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                      fontWeight: "500",
+                    }}
+                  >
+                    ✨ Extract
+                  </button>,
+                  null
                 )}
               </div>
             </div>,
@@ -509,6 +554,7 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
         </div>
       ),
       inputText,
+      extractionPrompt,
       selections,
     };
   }
