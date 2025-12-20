@@ -604,12 +604,28 @@ While `computed()` handles closures automatically through CTS transformation, th
 
 **Why this matters:** The reactive graph builder uses frame-based execution contexts. Each `lift()` creates a new frame, and cells from different frames cannot be accessed via closure.
 
+**Common mistake - passing cells directly:**
+
+```typescript
+// ❌ WRONG - Passing cell as direct argument (returns stale/empty data!)
+const calcTotal = lift((expenses: Expense[]): number => {
+  return expenses.reduce((sum, e) => sum + e.amount, 0);
+});
+const total = calcTotal(expenses);  // Returns 0 even when expenses has data
+
+// ✅ CORRECT - Always use object parameter pattern
+const calcTotal = lift((args: { expenses: Expense[] }): number => {
+  return args.expenses.reduce((sum, e) => sum + e.amount, 0);
+});
+const total = calcTotal({ expenses });  // Works correctly
+```
+
+**Closure over reactive values also fails:**
+
 ```typescript
 // ❌ WRONG - Closing over reactive value from outer scope
 const date = Cell.of("2024-01-15");
-const grouped = computed(() => {
-  // ... grouping logic
-});
+const grouped = computed(() => { /* ... */ });
 
 // This FAILS at runtime: "Accessing an opaque ref via closure is not supported"
 const result = lift((g) => g[date])(grouped);
@@ -618,10 +634,10 @@ const result = lift((g) => g[date])(grouped);
 const result = lift((args) => args.g[args.d])({ g: grouped, d: date });
 ```
 
-**When you see this error:**
-- Error: `"Accessing an opaque ref via closure is not supported"`
-- Cause: Using `lift()` and closing over a reactive value from an outer scope
-- Fix: Pass all reactive dependencies as explicit parameters to `lift()`
+**When you see these symptoms:**
+- **Stale/empty data:** `lift()` returns 0, `{}`, or old values → Pass cells via object parameter
+- **Error:** `"Accessing an opaque ref via closure is not supported"` → Pass closed-over cells as parameters
+- **Fix for both:** Use `lift((args: { ... }) => ...)({ cell1, cell2 })` pattern
 
 **Why computed() doesn't have this issue:**
 

@@ -17,8 +17,12 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | Charm hangs, never renders | ifElse with composed pattern cell | Use local computed cell ([see below](#ifelse-with-composed-pattern-cells)) |
 | Data not updating | Missing `$` prefix or wrong event | Use `$checked`, `$value` ([COMPONENTS](COMPONENTS.md)) |
 | Filtered list not updating | Need computed() | Wrap in `computed()` ([CELLS](CELLS_AND_REACTIVITY.md)) |
+| lift() returns 0/empty | Passing cell directly to lift() | Use `computed()` or pass as object param ([see below](#lift-returns-staleempty-data)) |
+| Handler binding: unknown property | Passing event data at binding time | Use inline handler for test buttons ([see below](#handler-binding-error-unknown-property)) |
+| Stream.subscribe doesn't exist | Using Stream.of()/subscribe() | Bound handler IS the stream ([see below](#streamof--subscribe-dont-exist)) |
 | Can't access variable in nested scope | Variable scoping limitation | Pre-compute grouped data or use lift() with explicit params ([see below](#variable-scoping-in-reactive-contexts)) |
 | "Accessing an opaque ref via closure is not supported" | Using lift() with closure | Pass all reactive deps as params to lift() ([CELLS](CELLS_AND_REACTIVITY.md#lift-and-closure-limitations)) |
+| CLI `get` returns stale computed values | `charm set` doesn't trigger recompute | Run `charm step` after `set` to trigger re-evaluation ([see below](#stale-computed-values-after-charm-set)) |
 
 ---
 
@@ -73,6 +77,82 @@ const showDetails = computed(() => subPattern.isExpanded);
 // ✅ Ternaries ARE fine for attributes
 <span style={done ? { textDecoration: "line-through" } : {}}>{title}</span>
 ```
+
+### lift() Returns Stale/Empty Data
+
+**Symptom:** `lift()` returns 0, empty object, or stale values even when the source cell has data.
+
+```typescript
+// ❌ WRONG: Passing cell directly to lift()
+const calcTotal = lift((expenses: Expense[]): number => {
+  return expenses.reduce((sum, e) => sum + e.amount, 0);
+});
+const total = calcTotal(expenses);  // Returns 0!
+
+// ✅ CORRECT: Use computed() instead
+const total = computed(() => {
+  const exp = expenses.get();
+  return exp.reduce((sum, e) => sum + e.amount, 0);
+});
+
+// ✅ CORRECT: If using lift(), pass as object parameter
+const calcTotal = lift((args: { expenses: Expense[] }): number => {
+  return args.expenses.reduce((sum, e) => sum + e.amount, 0);
+});
+const total = calcTotal({ expenses });
+```
+
+**Why:** `lift()` creates a new frame, and cells cannot be accessed via closure across frames. `computed()` gets automatic closure extraction by the CTS transformer; `lift()` does not. Use `computed()` by default in patterns.
+
+### Handler Binding Error: Unknown Property
+
+**Error:** `Object literal may only specify known properties, and 'X' does not exist in type 'Opaque<{ state: unknown; }>'`
+
+**Symptom:** Trying to pass event data when binding a handler.
+
+```typescript
+// ❌ WRONG: Passing event data at binding time
+const addItem = handler<
+  { title: string },           // Event type
+  { items: Cell<Item[]> }      // State type
+>(({ title }, { items }) => { items.push({ title }); });
+
+<button onClick={addItem({ title: "Test", items })}>  // Error!
+
+// ✅ CORRECT: For test buttons, use inline handler
+<button onClick={() => items.push({ title: "Test" })}>
+
+// ✅ CORRECT: For real handlers, bind with state only
+<ct-message-input onct-send={addItem({ items })} />
+// Event data ({ title }) comes from component at runtime
+```
+
+**Why:** Handlers have two-step binding: you pass **state only** when binding. Event data comes **at runtime** from the UI component. For test buttons with hardcoded data, use inline handlers instead.
+
+### Stream.of() / .subscribe() Don't Exist
+
+**Error:** `Property 'subscribe' does not exist on type 'Stream<...>'`
+
+**Symptom:** Trying to create streams with `Stream.of()` and subscribe to them.
+
+```typescript
+// ❌ WRONG: This API doesn't exist
+const addItem: Stream<{ title: string }> = Stream.of();
+addItem.subscribe(({ title }) => {
+  items.push({ title });
+});
+
+// ✅ CORRECT: A bound handler IS the stream
+const addItemHandler = handler<{ title: string }, { items: Cell<Item[]> }>(
+  ({ title }, { items }) => { items.push({ title }); }
+);
+const addItem = addItemHandler({ items });  // This IS Stream<{ title: string }>
+
+// Export it directly
+return { addItem };
+```
+
+**Why:** Streams aren't created directly - they're the result of binding a handler with state. The bound handler IS the stream that can receive events.
 
 ---
 
@@ -536,6 +616,100 @@ Use `setsrc` to update existing charm without creating new one:
 ```bash
 deno task ct charm setsrc --identity key.json --api-url URL --space SPACE --charm ID pattern.tsx
 ```
+
+---
+
+## CLI-Based Debugging
+
+When patterns misbehave, the CLI often provides faster diagnosis than browser DevTools. This approach isolates data logic from UI rendering issues.
+
+### When to Use CLI vs Browser
+
+**Use CLI when:**
+- Data transformations produce wrong results
+- Computed values don't update as expected
+- Handlers don't modify state correctly
+- You need to test specific input combinations
+- Debugging reactivity chains
+
+**Use Browser when:**
+- UI doesn't render correctly
+- Bidirectional binding issues (visual symptoms)
+- Visual/styling problems
+- Event handling doesn't trigger (click handlers, etc.)
+
+### Stale Computed Values After `charm set`
+
+**Gotcha:** `charm set` updates data but does NOT trigger computed re-evaluation. You must run `charm step` after `set` to get fresh computed values.
+
+```bash
+# WRONG: Returns stale computed values
+echo '[...]' | deno task ct charm set --charm ID expenses ...
+deno task ct charm get --charm ID totalSpent ...  # May return old value!
+
+# CORRECT: Run charm step to trigger recompute
+echo '[...]' | deno task ct charm set --charm ID expenses ...
+deno task ct charm step --charm ID ...  # Runs scheduling step, triggers recompute
+deno task ct charm get --charm ID totalSpent ...  # Now correct
+```
+
+### Quick Diagnostic Sequence
+
+```bash
+# 1. What's the full state?
+deno task ct charm inspect --charm <charm-id> -i claude.key -a URL -s space
+
+# 2. What are the inputs?
+deno task ct charm get --charm <charm-id> /input -i claude.key -a URL -s space
+
+# 3. What's a specific computed value?
+deno task ct charm get --charm <charm-id> myComputedField -i claude.key -a URL -s space
+
+# 4. Set known input, trigger recompute, verify output
+echo '{"items":[{"title":"test","done":false}]}' | \
+  deno task ct charm set --charm <charm-id> /input -i claude.key -a URL -s space
+deno task ct charm step --charm <charm-id> -i claude.key -a URL -s space
+deno task ct charm get --charm <charm-id> itemCount -i claude.key -a URL -s space
+```
+
+### Common CLI Debugging Patterns
+
+**"Computed value is stale":**
+1. Set input via CLI
+2. **Run `charm step` to trigger re-evaluation**
+3. Get computed value via CLI
+4. If CLI shows correct value but browser doesn't → issue is UI layer
+5. If CLI shows wrong value → issue is in computed logic
+
+**"Handler doesn't work":**
+1. Inspect state before calling handler
+2. Call handler via CLI with test payload
+3. Inspect state after
+4. Compare to see if state changed as expected
+
+**"Don't know what data structure to expect":**
+1. Deploy minimal pattern
+2. `charm inspect` shows actual runtime structure
+3. Use this to understand Cell wrapping, array shapes, etc.
+
+**"Filtering/sorting not working":**
+1. Set test data with known values via CLI
+2. Get the filtered/sorted computed value
+3. Verify the transformation logic in isolation
+
+### The setsrc Workflow for Debugging
+
+When iterating on fixes, always use `setsrc` instead of `new`:
+
+```bash
+# Make a fix to your pattern, then:
+deno task ct charm setsrc --charm <charm-id> pattern.tsx -i claude.key -a URL -s space
+
+# Test again
+deno task ct charm get --charm <charm-id> brokenField -i claude.key -a URL -s space
+```
+
+This keeps you working with the same charm instance, preserving any test data you've set up.
 
 ---
 
