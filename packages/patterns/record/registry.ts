@@ -49,6 +49,10 @@ import {
   AgeCategoryModule,
   MODULE_METADATA as AgeCategoryMeta,
 } from "../age-category.tsx";
+import {
+  DietaryRestrictionsModule,
+  MODULE_METADATA as DietaryMeta,
+} from "../dietary-restrictions.tsx";
 import type { ModuleMetadata } from "../container-protocol.ts";
 
 // NOTE: TypePickerMeta is NOT imported here to avoid circular dependency:
@@ -140,6 +144,10 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
   "age-category": fromMetadata(
     AgeCategoryMeta,
     (init) => AgeCategoryModule(init as any),
+  ),
+  "dietary-restrictions": fromMetadata(
+    DietaryMeta,
+    (init) => DietaryRestrictionsModule(init as any),
   ),
 
   // Controller modules - TypePicker needs special handling in record.tsx
