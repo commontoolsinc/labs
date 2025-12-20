@@ -280,8 +280,9 @@ const Record = pattern<RecordInput, RecordOutput>(
     const recordPatternJson = computed(() => JSON.stringify(Record));
 
     // ===== Auto-initialize Notes + TypePicker =====
+    // Capture return value to force lift execution (fixes wiki-link creation)
     const isInitialized = Cell.of(false);
-    initializeRecord({
+    const _initialized = initializeRecord({
       currentCharms: subCharms,
       subCharms,
       trashedSubCharms,
