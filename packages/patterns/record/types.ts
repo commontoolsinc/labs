@@ -40,7 +40,8 @@ export type SubCharmType =
   | "timing"
   | "age-category"
   // Controller modules (internal, not user-addable)
-  | "type-picker";
+  | "type-picker"
+  | "extractor";
 
 // Module type is the same as SubCharmType (notes is now included)
 export type ModuleType = SubCharmType;

@@ -137,6 +137,17 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     },
     internal: true,
   },
+  // ExtractorModule is imported directly in record.tsx
+  "extractor": {
+    type: "extractor",
+    label: "AI Extract",
+    icon: "\u2728", // ✨
+    // createInstance is a no-op - record.tsx imports ExtractorModule directly
+    createInstance: () => {
+      throw new Error("Use ExtractorModule directly, not through registry");
+    },
+    internal: false, // Show in Add dropdown - user can add this
+  },
 };
 
 // Helper functions

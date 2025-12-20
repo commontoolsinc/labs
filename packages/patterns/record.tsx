@@ -35,6 +35,7 @@ import {
 import Note from "./note.tsx";
 import { inferTypeFromModules } from "./record/template-registry.ts";
 import { TypePickerModule } from "./type-picker.tsx";
+import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
 import type { ContainerCoordinationContext } from "./container-protocol.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 
@@ -169,26 +170,34 @@ const togglePin = handler<
 
 // Add a new sub-charm
 // Note: Receives recordPatternJson to create Notes with correct wiki-link target
+// Note: Controller modules (extractor) also receive parent Cells
 const addSubCharm = handler<
   { detail: { value: string } },
   {
     subCharms: Cell<SubCharmEntry[]>;
+    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
     selectedAddType: Cell<string>;
     recordPatternJson: string;
   }
->(({ detail }, { subCharms: sc, selectedAddType: sat, recordPatternJson }) => {
+>(({ detail }, { subCharms: sc, trashedSubCharms: trash, selectedAddType: sat, recordPatternJson }) => {
   const type = detail?.value;
   if (!type) return;
 
   // Create the sub-charm and add it (multiple modules of same type allowed)
   const current = sc.get() || [];
   // Special case: create Note directly with Record pattern for wiki-links
+  // Special case: create ExtractorModule as controller with parent Cells
   // deno-lint-ignore no-explicit-any
   const charm = type === "notes"
     ? Note({
-      embedded: true,
-      linkPattern: recordPatternJson,
-    } as any)
+        embedded: true,
+        linkPattern: recordPatternJson,
+      } as any)
+    : type === "extractor"
+    ? ExtractorModule({
+        parentSubCharms: sc,
+        parentTrashedSubCharms: trash,
+      } as any)
     : createSubCharm(type);
   sc.set([...current, { type, pinned: false, charm }]);
   sat.set("");
@@ -384,11 +393,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                 $value={selectedAddType}
                 placeholder="+ Add"
                 items={addSelectItems}
-                onct-change={addSubCharm({
-                  subCharms,
-                  selectedAddType,
-                  recordPatternJson,
-                })}
+                onct-change={addSubCharm({ subCharms, trashedSubCharms, selectedAddType, recordPatternJson })}
                 style={{ width: "130px" }}
               />
             )}
