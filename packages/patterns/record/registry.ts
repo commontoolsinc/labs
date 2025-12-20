@@ -35,8 +35,11 @@ import {
   MODULE_METADATA as GiftPrefsMeta,
 } from "../giftprefs.tsx";
 import { MODULE_METADATA as TimingMeta, TimingModule } from "../timing.tsx";
-import { MODULE_METADATA as TypePickerMeta } from "../type-picker.tsx";
 import type { ModuleMetadata } from "../container-protocol.ts";
+
+// NOTE: TypePickerMeta is NOT imported here to avoid circular dependency:
+// type-picker.tsx -> template-registry.ts -> registry.ts -> type-picker.tsx
+// TypePicker metadata is inlined below since it's a special controller module anyway.
 
 // NOTE: Note is NOT imported here - it's created directly in record.tsx
 // with the correct linkPattern (avoids global state for passing Record's pattern JSON)
@@ -114,10 +117,11 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
   timing: fromMetadata(TimingMeta, () => TimingModule({} as any)),
 
   // Controller modules - TypePicker needs special handling in record.tsx
+  // Metadata is inlined here to avoid circular dependency (see note at top)
   "type-picker": {
     type: "type-picker",
-    label: TypePickerMeta.label,
-    icon: TypePickerMeta.icon,
+    label: "Type Picker",
+    icon: "\u{1F3AF}", // 🎯 target emoji
     createInstance: () => {
       throw new Error(
         "Use TypePickerModule directly with ContainerCoordinationContext",
