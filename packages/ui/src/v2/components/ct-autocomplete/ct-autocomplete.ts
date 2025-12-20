@@ -363,7 +363,7 @@ export class CTAutocomplete extends BaseElement {
 
     // Debounce timer for search
     private _debounceTimer: number | null = null;
-    private _debounceDelay = 150; // ms - increased for large item lists
+    private _debounceDelay = 0; // ms - instant feedback, filtering is already fast (pre-indexed)
 
     constructor() {
       super();
