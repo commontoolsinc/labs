@@ -49,7 +49,7 @@ export const TimelineModule = recipe<TimelineModuleInput, TimelineModuleInput>(
       targetDate,
       completedDate,
     };
-  }
+  },
 );
 
 export default TimelineModule;

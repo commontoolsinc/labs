@@ -21,7 +21,11 @@ export const LinkModule = recipe<LinkModuleInput, LinkModuleInput>(
         <ct-vstack style={{ gap: "12px" }}>
           <ct-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>URL</label>
-            <ct-input type="url" $value={url} placeholder="https://example.com" />
+            <ct-input
+              type="url"
+              $value={url}
+              placeholder="https://example.com"
+            />
           </ct-vstack>
           <ct-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Title</label>
@@ -43,7 +47,7 @@ export const LinkModule = recipe<LinkModuleInput, LinkModuleInput>(
       linkTitle,
       description,
     };
-  }
+  },
 );
 
 export default LinkModule;

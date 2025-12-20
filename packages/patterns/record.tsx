@@ -33,9 +33,7 @@ import {
 // Import Note directly - we create it inline with proper linkPattern
 // (avoids global state for passing Record's pattern JSON)
 import Note from "./note.tsx";
-import {
-  inferTypeFromModules,
-} from "./record/template-registry.ts";
+import { inferTypeFromModules } from "./record/template-registry.ts";
 import { TypePickerModule } from "./record/type-picker-module.tsx";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 
@@ -80,7 +78,7 @@ const storeInitialCharms = lift(
       isInitialized.set(true);
       return notesCharm; // Return notes charm as primary reference
     }
-  }
+  },
 );
 
 // Outer lift: checks if empty, creates charms, calls inner lift
@@ -88,14 +86,22 @@ const storeInitialCharms = lift(
 // Note: We receive recordPatternJson as input to avoid capturing Record before it's defined
 const initializeRecord = lift(
   toSchema<{
-    currentCharms: SubCharmEntry[];  // Unwrapped value, not Cell
+    currentCharms: SubCharmEntry[]; // Unwrapped value, not Cell
     subCharms: Cell<SubCharmEntry[]>;
     trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
     isInitialized: Cell<boolean>;
-    recordPatternJson: string;  // Computed that returns Record JSON string
+    recordPatternJson: string; // Computed that returns Record JSON string
   }>(),
   undefined,
-  ({ currentCharms, subCharms, trashedSubCharms, isInitialized, recordPatternJson }) => {
+  (
+    {
+      currentCharms,
+      subCharms,
+      trashedSubCharms,
+      isInitialized,
+      recordPatternJson,
+    },
+  ) => {
     if ((currentCharms || []).length === 0) {
       // Create Note directly with Record's pattern JSON for wiki-links
       // deno-lint-ignore no-explicit-any
@@ -110,9 +116,14 @@ const initializeRecord = lift(
         parentTrashedSubCharms: trashedSubCharms,
         recordPatternJson,
       } as any);
-      return storeInitialCharms({ notesCharm, typePickerCharm, subCharms, isInitialized });
+      return storeInitialCharms({
+        notesCharm,
+        typePickerCharm,
+        subCharms,
+        isInitialized,
+      });
     }
-  }
+  },
 );
 
 // Helper to get module display info (icon + label) from type
@@ -145,7 +156,11 @@ const togglePin = handler<
 // Note: Receives recordPatternJson to create Notes with correct wiki-link target
 const addSubCharm = handler<
   { detail: { value: string } },
-  { subCharms: Cell<SubCharmEntry[]>; selectedAddType: Cell<string>; recordPatternJson: string }
+  {
+    subCharms: Cell<SubCharmEntry[]>;
+    selectedAddType: Cell<string>;
+    recordPatternJson: string;
+  }
 >(({ detail }, { subCharms: sc, selectedAddType: sat, recordPatternJson }) => {
   const type = detail?.value;
   if (!type) return;
@@ -156,9 +171,9 @@ const addSubCharm = handler<
   // deno-lint-ignore no-explicit-any
   const charm = type === "notes"
     ? Note({
-        embedded: true,
-        linkPattern: recordPatternJson,
-      } as any)
+      embedded: true,
+      linkPattern: recordPatternJson,
+    } as any)
     : createSubCharm(type);
   sc.set([...current, { type, pinned: false, charm }]);
   sat.set("");
@@ -167,7 +182,11 @@ const addSubCharm = handler<
 // Move sub-charm to trash (soft delete) - uses Cell.push() and Cell.remove()
 const trashSubCharm = handler<
   unknown,
-  { subCharms: Cell<SubCharmEntry[]>; trashedSubCharms: Cell<TrashedSubCharmEntry[]>; entry: SubCharmEntry }
+  {
+    subCharms: Cell<SubCharmEntry[]>;
+    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+    entry: SubCharmEntry;
+  }
 >((_event, { subCharms: sc, trashedSubCharms: trash, entry }) => {
   // Move to trash with timestamp
   trash.push({ ...entry, trashedAt: new Date().toISOString() });
@@ -179,7 +198,11 @@ const trashSubCharm = handler<
 // Restore sub-charm from trash - uses Cell.push() and Cell.remove()
 const restoreSubCharm = handler<
   unknown,
-  { subCharms: Cell<SubCharmEntry[]>; trashedSubCharms: Cell<TrashedSubCharmEntry[]>; entry: TrashedSubCharmEntry }
+  {
+    subCharms: Cell<SubCharmEntry[]>;
+    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+    entry: TrashedSubCharmEntry;
+  }
 >((_event, { subCharms: sc, trashedSubCharms: trash, entry }) => {
   // Restore to active (without trashedAt)
   const { trashedAt: _trashedAt, ...restored } = entry;
@@ -192,7 +215,10 @@ const restoreSubCharm = handler<
 // Permanently delete from trash - uses Cell.remove() with entry reference
 const permanentlyDelete = handler<
   unknown,
-  { trashedSubCharms: Cell<TrashedSubCharmEntry[]>; entry: TrashedSubCharmEntry }
+  {
+    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+    entry: TrashedSubCharmEntry;
+  }
 >((_event, { trashedSubCharms: trash, entry }) => {
   trash.remove(entry);
 });
@@ -207,13 +233,12 @@ const emptyTrash = handler<
 
 // Toggle trash section expanded/collapsed
 const toggleTrashExpanded = handler<unknown, { expanded: Cell<boolean> }>(
-  (_event, { expanded }) => expanded.set(!expanded.get())
+  (_event, { expanded }) => expanded.set(!expanded.get()),
 );
 
 // ===== The Record Pattern =====
 const Record = pattern<RecordInput, RecordOutput>(
   ({ title, subCharms, trashedSubCharms }) => {
-
     // Local state
     const selectedAddType = Cell.of<string>("");
     const trashExpanded = Cell.of(false);
@@ -224,7 +249,13 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // ===== Auto-initialize Notes + TypePicker =====
     const isInitialized = Cell.of(false);
-    initializeRecord({ currentCharms: subCharms, subCharms, trashedSubCharms, isInitialized, recordPatternJson });
+    initializeRecord({
+      currentCharms: subCharms,
+      subCharms,
+      trashedSubCharms,
+      isInitialized,
+      recordPatternJson,
+    });
 
     // ===== Computed Values =====
 
@@ -242,9 +273,9 @@ const Record = pattern<RecordInput, RecordOutput>(
     )({ sc: subCharms });
 
     // All subcharms (for grid layout when no split needed)
-    const allEntries = lift(({ sc }: { sc: SubCharmEntry[] }) =>
-      (sc || [])
-    )({ sc: subCharms });
+    const allEntries = lift(({ sc }: { sc: SubCharmEntry[] }) => (sc || []))({
+      sc: subCharms,
+    });
 
     // Check layout mode based on pinned count
     const pinnedCount = lift(({ arr }: { arr: SubCharmEntry[] }) =>
@@ -261,11 +292,15 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // Build dropdown items from registry, separating new types from existing ones
     const addSelectItems = lift(({ sc }: { sc: SubCharmEntry[] }) => {
-      const existingTypes = new Set((sc || []).map((e) => e?.type).filter(Boolean));
+      const existingTypes = new Set(
+        (sc || []).map((e) => e?.type).filter(Boolean),
+      );
       const allTypes = getAddableTypes();
 
       const newTypes = allTypes.filter((def) => !existingTypes.has(def.type));
-      const existingTypesDefs = allTypes.filter((def) => existingTypes.has(def.type));
+      const existingTypesDefs = allTypes.filter((def) =>
+        existingTypes.has(def.type)
+      );
 
       const items: { value: string; label: string; disabled?: boolean }[] = [];
 
@@ -334,7 +369,11 @@ const Record = pattern<RecordInput, RecordOutput>(
                 $value={selectedAddType}
                 placeholder="+ Add"
                 items={addSelectItems}
-                onct-change={addSubCharm({ subCharms, selectedAddType, recordPatternJson })}
+                onct-change={addSubCharm({
+                  subCharms,
+                  selectedAddType,
+                  recordPatternJson,
+                })}
                 style={{ width: "130px" }}
               />
             )}
@@ -351,155 +390,19 @@ const Record = pattern<RecordInput, RecordOutput>(
           >
             {/* Adaptive layout based on pinned count */}
             {ifElse(
-                pinnedCount > 0,
-                // Primary + Rail layout (when items are pinned)
-                <div style={{ display: "flex", gap: "16px" }}>
-                  {/* Left: Pinned items (2/3 width) */}
-                  <div style={{ flex: 2, display: "flex", flexDirection: "column", gap: "12px" }}>
-                    {pinnedEntries.map((entry: SubCharmEntry) => {
-                      const displayInfo = getModuleDisplay({ type: entry.type });
-                      return (
-                        <div
-                          style={{
-                            background: "white",
-                            borderRadius: "8px",
-                            border: "1px solid #e5e7eb",
-                            overflow: "hidden",
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "space-between",
-                              padding: "8px 12px",
-                              borderBottom: "1px solid #f3f4f6",
-                              background: "#fafafa",
-                            }}
-                          >
-                            <span style={{ fontSize: "14px", fontWeight: "500", flex: "1" }}>
-                              {displayInfo.icon} {displayInfo.label}
-                            </span>
-                            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexShrink: 0 }}>
-                              <button
-                                onClick={togglePin({ subCharms, entry })}
-                                style={{
-                                  background: "#e0f2fe",
-                                  border: "1px solid #7dd3fc",
-                                  borderRadius: "4px",
-                                  cursor: "pointer",
-                                  padding: "4px 8px",
-                                  fontSize: "12px",
-                                  color: "#0369a1",
-                                }}
-                                title="Unpin"
-                              >
-                                📌
-                              </button>
-                              <button
-                                onClick={trashSubCharm({ subCharms, trashedSubCharms, entry })}
-                                style={{
-                                  background: "transparent",
-                                  border: "1px solid #e5e7eb",
-                                  borderRadius: "4px",
-                                  cursor: "pointer",
-                                  padding: "4px 8px",
-                                  fontSize: "12px",
-                                  color: "#6b7280",
-                                }}
-                                title="Remove"
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          </div>
-                          <div style={{ padding: "12px" }}>
-                            {(entry.charm as any)?.[UI]}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {/* Right: Unpinned items in rail (1/3 width) */}
-                  {ifElse(
-                    hasUnpinned,
-                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "12px" }}>
-                      {unpinnedEntries.map((entry: SubCharmEntry) => {
-                        const displayInfo = getModuleDisplay({ type: entry.type });
-                        return (
-                          <div
-                            style={{
-                              background: "white",
-                              borderRadius: "8px",
-                              border: "1px solid #e5e7eb",
-                              overflow: "hidden",
-                            }}
-                          >
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "space-between",
-                                padding: "8px 12px",
-                                borderBottom: "1px solid #f3f4f6",
-                                background: "#fafafa",
-                              }}
-                            >
-                              <span style={{ fontSize: "14px", fontWeight: "500", flex: "1" }}>
-                                {displayInfo.icon} {displayInfo.label}
-                              </span>
-                              <div style={{ display: "flex", gap: "8px", alignItems: "center", flexShrink: 0 }}>
-                                <button
-                                  onClick={togglePin({ subCharms, entry })}
-                                  style={{
-                                    background: "transparent",
-                                    border: "1px solid #e5e7eb",
-                                    borderRadius: "4px",
-                                    cursor: "pointer",
-                                    padding: "4px 8px",
-                                    fontSize: "12px",
-                                    color: "#6b7280",
-                                  }}
-                                  title="Pin"
-                                >
-                                  📌
-                                </button>
-                                <button
-                                  onClick={trashSubCharm({ subCharms, trashedSubCharms, entry })}
-                                  style={{
-                                    background: "transparent",
-                                    border: "1px solid #e5e7eb",
-                                    borderRadius: "4px",
-                                    cursor: "pointer",
-                                    padding: "4px 8px",
-                                    fontSize: "12px",
-                                    color: "#6b7280",
-                                  }}
-                                  title="Remove"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            </div>
-                            <div style={{ padding: "12px" }}>
-                              {(entry.charm as any)?.[UI]}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>,
-                    null
-                  )}
-                </div>,
-                // Grid layout (no pinned items)
+              pinnedCount > 0,
+              // Primary + Rail layout (when items are pinned)
+              <div style={{ display: "flex", gap: "16px" }}>
+                {/* Left: Pinned items (2/3 width) */}
                 <div
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 500px))",
+                    flex: 2,
+                    display: "flex",
+                    flexDirection: "column",
                     gap: "12px",
                   }}
                 >
-                  {allEntries.map((entry: SubCharmEntry) => {
+                  {pinnedEntries.map((entry: SubCharmEntry) => {
                     const displayInfo = getModuleDisplay({ type: entry.type });
                     return (
                       <div
@@ -520,27 +423,44 @@ const Record = pattern<RecordInput, RecordOutput>(
                             background: "#fafafa",
                           }}
                         >
-                          <span style={{ fontSize: "14px", fontWeight: "500", flex: "1" }}>
+                          <span
+                            style={{
+                              fontSize: "14px",
+                              fontWeight: "500",
+                              flex: "1",
+                            }}
+                          >
                             {displayInfo.icon} {displayInfo.label}
                           </span>
-                          <div style={{ display: "flex", gap: "8px", alignItems: "center", flexShrink: 0 }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "8px",
+                              alignItems: "center",
+                              flexShrink: 0,
+                            }}
+                          >
                             <button
                               onClick={togglePin({ subCharms, entry })}
                               style={{
-                                background: "transparent",
-                                border: "1px solid #e5e7eb",
+                                background: "#e0f2fe",
+                                border: "1px solid #7dd3fc",
                                 borderRadius: "4px",
                                 cursor: "pointer",
                                 padding: "4px 8px",
                                 fontSize: "12px",
-                                color: "#6b7280",
+                                color: "#0369a1",
                               }}
-                              title="Pin"
+                              title="Unpin"
                             >
                               📌
                             </button>
                             <button
-                              onClick={trashSubCharm({ subCharms, trashedSubCharms, entry })}
+                              onClick={trashSubCharm({
+                                subCharms,
+                                trashedSubCharms,
+                                entry,
+                              })}
                               style={{
                                 background: "transparent",
                                 border: "1px solid #e5e7eb",
@@ -563,8 +483,193 @@ const Record = pattern<RecordInput, RecordOutput>(
                     );
                   })}
                 </div>
-              )
-            }
+                {/* Right: Unpinned items in rail (1/3 width) */}
+                {ifElse(
+                  hasUnpinned,
+                  <div
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "12px",
+                    }}
+                  >
+                    {unpinnedEntries.map((entry: SubCharmEntry) => {
+                      const displayInfo = getModuleDisplay({
+                        type: entry.type,
+                      });
+                      return (
+                        <div
+                          style={{
+                            background: "white",
+                            borderRadius: "8px",
+                            border: "1px solid #e5e7eb",
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              padding: "8px 12px",
+                              borderBottom: "1px solid #f3f4f6",
+                              background: "#fafafa",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: "14px",
+                                fontWeight: "500",
+                                flex: "1",
+                              }}
+                            >
+                              {displayInfo.icon} {displayInfo.label}
+                            </span>
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "8px",
+                                alignItems: "center",
+                                flexShrink: 0,
+                              }}
+                            >
+                              <button
+                                onClick={togglePin({ subCharms, entry })}
+                                style={{
+                                  background: "transparent",
+                                  border: "1px solid #e5e7eb",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                  padding: "4px 8px",
+                                  fontSize: "12px",
+                                  color: "#6b7280",
+                                }}
+                                title="Pin"
+                              >
+                                📌
+                              </button>
+                              <button
+                                onClick={trashSubCharm({
+                                  subCharms,
+                                  trashedSubCharms,
+                                  entry,
+                                })}
+                                style={{
+                                  background: "transparent",
+                                  border: "1px solid #e5e7eb",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                  padding: "4px 8px",
+                                  fontSize: "12px",
+                                  color: "#6b7280",
+                                }}
+                                title="Remove"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </div>
+                          <div style={{ padding: "12px" }}>
+                            {(entry.charm as any)?.[UI]}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>,
+                  null,
+                )}
+              </div>,
+              // Grid layout (no pinned items)
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 500px))",
+                  gap: "12px",
+                }}
+              >
+                {allEntries.map((entry: SubCharmEntry) => {
+                  const displayInfo = getModuleDisplay({ type: entry.type });
+                  return (
+                    <div
+                      style={{
+                        background: "white",
+                        borderRadius: "8px",
+                        border: "1px solid #e5e7eb",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "8px 12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          background: "#fafafa",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: "14px",
+                            fontWeight: "500",
+                            flex: "1",
+                          }}
+                        >
+                          {displayInfo.icon} {displayInfo.label}
+                        </span>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "8px",
+                            alignItems: "center",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <button
+                            onClick={togglePin({ subCharms, entry })}
+                            style={{
+                              background: "transparent",
+                              border: "1px solid #e5e7eb",
+                              borderRadius: "4px",
+                              cursor: "pointer",
+                              padding: "4px 8px",
+                              fontSize: "12px",
+                              color: "#6b7280",
+                            }}
+                            title="Pin"
+                          >
+                            📌
+                          </button>
+                          <button
+                            onClick={trashSubCharm({
+                              subCharms,
+                              trashedSubCharms,
+                              entry,
+                            })}
+                            style={{
+                              background: "transparent",
+                              border: "1px solid #e5e7eb",
+                              borderRadius: "4px",
+                              cursor: "pointer",
+                              padding: "4px 8px",
+                              fontSize: "12px",
+                              color: "#6b7280",
+                            }}
+                            title="Remove"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                      <div style={{ padding: "12px" }}>
+                        {(entry.charm as any)?.[UI]}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>,
+            )}
 
             {/* Collapsible Trash Section */}
             {ifElse(
@@ -593,7 +698,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                 >
                   <span
                     style={{
-                      transform: trashExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                      transform: trashExpanded
+                        ? "rotate(90deg)"
+                        : "rotate(0deg)",
                       transition: "transform 0.2s",
                     }}
                   >
@@ -607,7 +714,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                   <div style={{ paddingLeft: "16px", marginTop: "8px" }}>
                     {trashedSubCharms.map(
                       (entry: TrashedSubCharmEntry) => {
-                        const displayInfo = getModuleDisplay({ type: entry.type });
+                        const displayInfo = getModuleDisplay({
+                          type: entry.type,
+                        });
                         return (
                           <div
                             style={{
@@ -630,7 +739,13 @@ const Record = pattern<RecordInput, RecordOutput>(
                             >
                               {displayInfo.icon} {displayInfo.label}
                             </span>
-                            <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "8px",
+                                flexShrink: 0,
+                              }}
+                            >
                               <button
                                 onClick={restoreSubCharm({
                                   subCharms,
@@ -671,7 +786,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                             </div>
                           </div>
                         );
-                      }
+                      },
                     )}
 
                     <button
@@ -691,10 +806,10 @@ const Record = pattern<RecordInput, RecordOutput>(
                       Empty Trash
                     </button>
                   </div>,
-                  null
+                  null,
                 )}
               </div>,
-              null
+              null,
             )}
           </div>
         </ct-vstack>
@@ -704,7 +819,7 @@ const Record = pattern<RecordInput, RecordOutput>(
       trashedSubCharms,
       "#record": true,
     };
-  }
+  },
 );
 
 export default Record;

@@ -57,7 +57,7 @@ export const SocialModule = recipe<SocialModuleInput, SocialModuleInput>(
       handle,
       url,
     };
-  }
+  },
 );
 
 export default SocialModule;

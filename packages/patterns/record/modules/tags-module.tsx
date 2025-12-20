@@ -2,7 +2,15 @@
 /**
  * Tags Module - Sub-charm for tag/label management
  */
-import { Cell, computed, type Default, handler, NAME, recipe, UI } from "commontools";
+import {
+  Cell,
+  computed,
+  type Default,
+  handler,
+  NAME,
+  recipe,
+  UI,
+} from "commontools";
 
 export interface TagsModuleInput {
   tags: Default<string[], []>;
@@ -93,7 +101,7 @@ export const TagsModule = recipe<TagsModuleInput, TagsModuleInput>(
       ),
       tags,
     };
-  }
+  },
 );
 
 export default TagsModule;

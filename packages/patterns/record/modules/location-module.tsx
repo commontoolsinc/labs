@@ -13,7 +13,9 @@ export interface LocationModuleInput {
 export const LocationModule = recipe<LocationModuleInput, LocationModuleInput>(
   "LocationModule",
   ({ locationName, locationAddress, coordinates }) => {
-    const displayText = computed(() => locationName || locationAddress || "Not set");
+    const displayText = computed(() =>
+      locationName || locationAddress || "Not set"
+    );
 
     return {
       [NAME]: computed(() => `🗺️ Location: ${displayText}`),
@@ -23,10 +25,15 @@ export const LocationModule = recipe<LocationModuleInput, LocationModuleInput>(
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Location Name
             </label>
-            <ct-input $value={locationName} placeholder="e.g., Home, Office, Cafe" />
+            <ct-input
+              $value={locationName}
+              placeholder="e.g., Home, Office, Cafe"
+            />
           </ct-vstack>
           <ct-vstack style={{ gap: "4px" }}>
-            <label style={{ fontSize: "12px", color: "#6b7280" }}>Address</label>
+            <label style={{ fontSize: "12px", color: "#6b7280" }}>
+              Address
+            </label>
             <ct-textarea
               $value={locationAddress}
               placeholder="Full address..."
@@ -48,7 +55,7 @@ export const LocationModule = recipe<LocationModuleInput, LocationModuleInput>(
       locationAddress,
       coordinates,
     };
-  }
+  },
 );
 
 export default LocationModule;

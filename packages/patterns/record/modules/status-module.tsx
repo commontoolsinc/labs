@@ -35,7 +35,7 @@ export const StatusModule = recipe<StatusModuleInput, StatusModuleInput>(
       ),
       status,
     };
-  }
+  },
 );
 
 export default StatusModule;

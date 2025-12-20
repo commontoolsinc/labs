@@ -11,8 +11,8 @@ export interface TemplateDefinition {
   name: string;
   icon: string;
   description: string;
-  modules: string[];        // Module types to create (order matters)
-  defaultPinned: string[];  // Which modules start pinned
+  modules: string[]; // Module types to create (order matters)
+  defaultPinned: string[]; // Which modules start pinned
 }
 
 // ===== Template Registry =====
@@ -111,7 +111,10 @@ export function inferTypeFromModules(moduleTypes: string[]): InferredType {
   const typeSet = new Set(moduleTypes);
 
   // Person: has birthday AND (contact OR relationship)
-  if (typeSet.has("birthday") && (typeSet.has("contact") || typeSet.has("relationship"))) {
+  if (
+    typeSet.has("birthday") &&
+    (typeSet.has("contact") || typeSet.has("relationship"))
+  ) {
     return { type: "person", icon: "\u{1F464}", confidence: 0.9 };
   }
 
@@ -126,13 +129,23 @@ export function inferTypeFromModules(moduleTypes: string[]): InferredType {
   }
 
   // Place: has location OR address (but not birthday - that's a person)
-  if ((typeSet.has("location") || typeSet.has("address")) && !typeSet.has("birthday")) {
+  if (
+    (typeSet.has("location") || typeSet.has("address")) &&
+    !typeSet.has("birthday")
+  ) {
     return { type: "place", icon: "\u{1F4CD}", confidence: 0.8 };
   }
 
   // Family: has address AND relationship (but not birthday - individual person)
-  if (typeSet.has("address") && typeSet.has("relationship") && !typeSet.has("birthday")) {
-    return { type: "family", icon: "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}", confidence: 0.75 };
+  if (
+    typeSet.has("address") && typeSet.has("relationship") &&
+    !typeSet.has("birthday")
+  ) {
+    return {
+      type: "family",
+      icon: "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}",
+      confidence: 0.75,
+    };
   }
 
   // Default: generic record
@@ -155,7 +168,7 @@ export function inferTypeFromModules(moduleTypes: string[]): InferredType {
  */
 export function createTemplateModules(
   templateId: string,
-  createNotesCharm?: () => unknown
+  createNotesCharm?: () => unknown,
 ): SubCharmEntry[] {
   const template = TEMPLATE_REGISTRY[templateId];
   if (!template) return [];
@@ -169,7 +182,9 @@ export function createTemplateModules(
       let charm: unknown;
       if (moduleType === "notes") {
         if (!createNotesCharm) {
-          console.warn(`Template "${templateId}" includes notes but no createNotesCharm factory provided`);
+          console.warn(
+            `Template "${templateId}" includes notes but no createNotesCharm factory provided`,
+          );
           continue;
         }
         charm = createNotesCharm();
@@ -182,7 +197,10 @@ export function createTemplateModules(
         charm,
       });
     } catch (error) {
-      console.warn(`Failed to create module "${moduleType}" for template "${templateId}":`, error);
+      console.warn(
+        `Failed to create module "${moduleType}" for template "${templateId}":`,
+        error,
+      );
       // Continue with other modules - don't let one failure break the template
     }
   }

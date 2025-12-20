@@ -2,7 +2,8 @@
 
 ## Status: Deferred
 
-This document captures learnings and a plan for fixing data corruption that occurs when dragging modules with multiple browser tabs open.
+This document captures learnings and a plan for fixing data corruption that
+occurs when dragging modules with multiple browser tabs open.
 
 ---
 
@@ -12,9 +13,11 @@ This document captures learnings and a plan for fixing data corruption that occu
 
 1. **Drag handle**: Each module has a ⋮⋮ drag handle on the left side
 2. **Reorder within column**: Drag modules up/down to reorder them
-3. **Pin/unpin via drag**: Drag a module from unpinned area to pinned sidebar (or vice versa)
+3. **Pin/unpin via drag**: Drag a module from unpinned area to pinned sidebar
+   (or vice versa)
 4. **Drop zones**: Invisible 8px gaps between modules act as drop targets
-5. **Last drop zone**: Bottom of the unpinned column should be a large drop target (flex: 1) for easy "drop at end"
+5. **Last drop zone**: Bottom of the unpinned column should be a large drop
+   target (flex: 1) for easy "drop at end"
 
 ### Current Implementation
 
@@ -25,8 +28,10 @@ This document captures learnings and a plan for fixing data corruption that occu
 
 ### Layout Modes
 
-- **Rail layout** (has pinned items): Two-column layout with pinned sidebar + unpinned main area
-- **Grid layout** (no pinned items): Single grid of modules with drop zones between
+- **Rail layout** (has pinned items): Two-column layout with pinned sidebar +
+  unpinned main area
+- **Grid layout** (no pinned items): Single grid of modules with drop zones
+  between
 
 ---
 
@@ -34,7 +39,8 @@ This document captures learnings and a plan for fixing data corruption that occu
 
 **This is the main issue that needs careful handling.**
 
-The framework's sync mechanism creates a **race condition** when two browser tabs are open to the same charm:
+The framework's sync mechanism creates a **race condition** when two browser
+tabs are open to the same charm:
 
 ```
 Tab A: User drags module    →  subCharms.set([...reordered])  →  Write to server
@@ -49,17 +55,20 @@ Tab B: (idle, but syncing)  →  Receives update                →  May write b
 
 ### Why Properties Get Lost
 
-The framework's `diffAndUpdate` writes object properties individually, not atomically:
+The framework's `diffAndUpdate` writes object properties individually, not
+atomically:
 
 ```typescript
 // Under the hood, this becomes multiple writes:
-subCharms.set([{ charm: link, type: "notes", name: "My Notes" }])
+subCharms.set([{ charm: link, type: "notes", name: "My Notes" }]);
 // → Write: modules[0].charm = link
 // → Write: modules[0].type = "notes"    // ← Can be lost in conflict!
 // → Write: modules[0].name = "My Notes"
 ```
 
-If a conflict occurs between writes, some properties may not persist. The `charm` link tends to survive (it's the first/primary property), but `type` gets lost.
+If a conflict occurs between writes, some properties may not persist. The
+`charm` link tends to survive (it's the first/primary property), but `type` gets
+lost.
 
 ### Symptoms of Corruption
 
@@ -72,9 +81,12 @@ If a conflict occurs between writes, some properties may not persist. The `charm
 
 ## Problem Statement
 
-When dragging modules in the Record pattern with TWO tabs open to the same charm:
+When dragging modules in the Record pattern with TWO tabs open to the same
+charm:
+
 - Modules lose their `type` property
-- Shows fallback "📋" icon instead of proper labels like "📝 Notes" or "📧 Contact"
+- Shows fallback "📋" icon instead of proper labels like "📝 Notes" or "📧
+  Contact"
 - Data corruption is intermittent but reproducible
 
 ---
@@ -85,7 +97,8 @@ When dragging modules in the Record pattern with TWO tabs open to the same charm
 
 1. **Each tab has independent WebSocket connection** to the server
 2. **Cell writes use last-write-wins + retry** conflict resolution
-3. **Array element updates are NOT atomic** - conflict mid-write can lose properties
+3. **Array element updates are NOT atomic** - conflict mid-write can lose
+   properties
 4. **When two tabs write simultaneously:**
    - Both tabs call `subCharms.set(newList)`
    - Writes race to server
@@ -95,6 +108,7 @@ When dragging modules in the Record pattern with TWO tabs open to the same charm
 ### The `diffAndUpdate` Function
 
 The framework's `diffAndUpdate` writes each property individually:
+
 ```typescript
 // Writes to: modules[0] <- link, modules[0].type <- "module", modules[0].name <- "A"
 // If conflict between writes, some properties may not persist
@@ -102,7 +116,9 @@ The framework's `diffAndUpdate` writes each property individually:
 
 ### Evidence
 
-Corrupted modules show "📋" (fallback when `type` is undefined) while `charm` reference survives. This is consistent with partial writes where only some properties made it through.
+Corrupted modules show "📋" (fallback when `type` is undefined) while `charm`
+reference survives. This is consistent with partial writes where only some
+properties made it through.
 
 ---
 
@@ -110,12 +126,16 @@ Corrupted modules show "📋" (fallback when `type` is undefined) while `charm` 
 
 ### Use Idiomatic Cell Methods
 
-The current code uses manual `===` reference comparison which is fragile. Use the framework's idiomatic patterns:
+The current code uses manual `===` reference comparison which is fragile. Use
+the framework's idiomatic patterns:
 
-1. **Use `Cell.equals()` for identity comparison** - Uses `areLinksSame()` internally for proper identity comparison (resolves aliases)
+1. **Use `Cell.equals()` for identity comparison** - Uses `areLinksSame()`
+   internally for proper identity comparison (resolves aliases)
 2. **Use `Cell.remove()` for removal** - Uses `areLinksSame()` internally
-3. **No `insertAt()` exists** - Must use `get()` + manipulation + `set()` for positional insertion
-4. **Get fresh data from current array** - Don't rely on potentially stale `sourceCell.get()` data
+3. **No `insertAt()` exists** - Must use `get()` + manipulation + `set()` for
+   positional insertion
+4. **Get fresh data from current array** - Don't rely on potentially stale
+   `sourceCell.get()` data
 
 ### Fixed Handler Implementation
 
@@ -179,23 +199,33 @@ const insertAtPosition = handler<
 
 ### Key Changes from Original
 
-| Original | Fixed |
-|----------|-------|
-| `e?.charm === draggedEntry?.charm` | `sourceCell.equals(e.charm)` |
-| `e?.charm === insertAfterEntry?.charm` | `(e.charm as Cell<unknown>).equals(insertAfterEntry.charm)` |
-| Spread `draggedEntry` (from stale sourceCell.get()) | Spread `actualEntry` (fresh from current array) |
+| Original                                            | Fixed                                                       |
+| --------------------------------------------------- | ----------------------------------------------------------- |
+| `e?.charm === draggedEntry?.charm`                  | `sourceCell.equals(e.charm)`                                |
+| `e?.charm === insertAfterEntry?.charm`              | `(e.charm as Cell<unknown>).equals(insertAfterEntry.charm)` |
+| Spread `draggedEntry` (from stale sourceCell.get()) | Spread `actualEntry` (fresh from current array)             |
 
 ### Why We Think This Fix Should Work (UNTESTED)
 
-**Note: This fix has NOT been tested yet.** The reasoning below is theoretical based on our understanding of the framework.
+**Note: This fix has NOT been tested yet.** The reasoning below is theoretical
+based on our understanding of the framework.
 
-1. **`Cell.equals()` handles link aliases**: The framework may create different Cell references that point to the same underlying data. `===` comparison fails, but `Cell.equals()` uses `areLinksSame()` which properly resolves aliases.
+1. **`Cell.equals()` handles link aliases**: The framework may create different
+   Cell references that point to the same underlying data. `===` comparison
+   fails, but `Cell.equals()` uses `areLinksSame()` which properly resolves
+   aliases.
 
-2. **Fresh data from current array**: Instead of using `sourceCell.get()` which may return stale data from before a conflict retry, we find the entry in the current `subCharms.get()` array. This array should be authoritative and have all properties intact.
+2. **Fresh data from current array**: Instead of using `sourceCell.get()` which
+   may return stale data from before a conflict retry, we find the entry in the
+   current `subCharms.get()` array. This array should be authoritative and have
+   all properties intact.
 
-3. **Spread preserves all properties**: By spreading `actualEntry` (not the potentially stale `draggedEntry`), we should ensure `type`, `name`, and any other properties are preserved even if there was a mid-operation conflict.
+3. **Spread preserves all properties**: By spreading `actualEntry` (not the
+   potentially stale `draggedEntry`), we should ensure `type`, `name`, and any
+   other properties are preserved even if there was a mid-operation conflict.
 
-4. **Bail if entry not found**: If `fromIndex === -1`, another tab may have deleted the module. We bail gracefully instead of corrupting data.
+4. **Bail if entry not found**: If `fromIndex === -1`, another tab may have
+   deleted the module. We bail gracefully instead of corrupting data.
 
 **Testing is required to validate these assumptions.**
 
@@ -203,18 +233,23 @@ const insertAtPosition = handler<
 
 ## Secondary Issue: Last Drop Zone Size
 
-The last drop zone in the unpinned rail column is too small (8px). It should fill remaining column space for easier drop target.
+The last drop zone in the unpinned rail column is too small (8px). It should
+fill remaining column space for easier drop target.
 
 ### Fix
 
 ```jsx
 <ct-drop-zone
   accept="module"
-  onct-drop={insertAtPosition({ subCharms, insertAfterEntry: null, targetPinned: false })}
+  onct-drop={insertAtPosition({
+    subCharms,
+    insertAfterEntry: null,
+    targetPinned: false,
+  })}
   style={{ flex: 1, display: "flex" }}
 >
   <div style={{ flex: 1, minHeight: "40px" }} />
-</ct-drop-zone>
+</ct-drop-zone>;
 ```
 
 Location: Around line 654-659 in record.tsx
@@ -225,7 +260,8 @@ Location: Around line 654-659 in record.tsx
 
 **`/patterns/jkomoros/record/record.tsx`**
 
-1. **insertAtPosition handler** (lines ~277-315): Replace with idiomatic Cell.equals() version above
+1. **insertAtPosition handler** (lines ~277-315): Replace with idiomatic
+   Cell.equals() version above
 2. **Empty rail drop zone** (lines ~654-659): Add flex: 1 styling
 
 ---
@@ -244,7 +280,8 @@ When implementing:
 
 ## Reference Patterns
 
-The `card-piles.tsx` pattern in labs demonstrates proper drag-and-drop with Cell identity:
+The `card-piles.tsx` pattern in labs demonstrates proper drag-and-drop with Cell
+identity:
 
 ```typescript
 // From labs/packages/patterns/card-piles.tsx
@@ -267,13 +304,15 @@ const moveToPile1 = handler<
 });
 ```
 
-Note: card-piles uses value comparison (rank + suit) rather than Cell.equals() because cards are simple value objects, not Cells containing links.
+Note: card-piles uses value comparison (rank + suit) rather than Cell.equals()
+because cards are simple value objects, not Cells containing links.
 
 ---
 
 ## Community Doc Candidate
 
 This could become a community doc about:
+
 - Multi-tab conflict resolution patterns
 - When to use Cell.equals() vs === comparison
 - Preserving data integrity during array mutations

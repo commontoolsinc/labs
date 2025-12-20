@@ -15,14 +15,7 @@
  * See: community-docs/superstitions/2025-12-19-auto-init-use-two-lift-pattern.md
  */
 
-import {
-  Cell,
-  handler,
-  NAME,
-  pattern,
-  UI,
-  type Default,
-} from "commontools";
+import { Cell, type Default, handler, NAME, pattern, UI } from "commontools";
 import {
   createTemplateModules,
   getTemplateList,
@@ -62,7 +55,10 @@ const applyTemplate = handler<
     // deno-lint-ignore no-explicit-any
     recordPatternJson?: any;
   }
->((_event, { parentSubCharms, parentTrashedSubCharms, templateId, recordPatternJson }) => {
+>((
+  _event,
+  { parentSubCharms, parentTrashedSubCharms, templateId, recordPatternJson },
+) => {
   const current = parentSubCharms.get() || [];
 
   // Find and keep the notes module (should be first)
@@ -77,10 +73,11 @@ const applyTemplate = handler<
 
   // Create factory for Notes with correct linkPattern
   // deno-lint-ignore no-explicit-any
-  const createNotesCharm = () => Note({
-    embedded: true,
-    linkPattern: recordPatternJson,
-  } as any);
+  const createNotesCharm = () =>
+    Note({
+      embedded: true,
+      linkPattern: recordPatternJson,
+    } as any);
 
   // Create template modules (skip notes since we keep existing one)
   const templateEntries = createTemplateModules(templateId, createNotesCharm);
@@ -134,10 +131,12 @@ const dismiss = handler<
 // ===== The Pattern =====
 
 export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
-  ({ parentSubCharms, parentTrashedSubCharms, recordPatternJson, dismissed }) => {
+  (
+    { parentSubCharms, parentTrashedSubCharms, recordPatternJson, dismissed },
+  ) => {
     // Get templates to display (excluding blank)
     const templates = getTemplateList().filter(
-      (t: TemplateDefinition) => t.id !== "blank"
+      (t: TemplateDefinition) => t.id !== "blank",
     );
 
     return {
@@ -219,7 +218,7 @@ export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
       ),
       dismissed,
     };
-  }
+  },
 );
 
 export default TypePickerModule;

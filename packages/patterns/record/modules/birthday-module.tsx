@@ -16,9 +16,7 @@ export const BirthdayModule = recipe<BirthdayModuleInput, BirthdayModuleInput>(
     const displayText = computed(() => {
       const date = birthDate;
       const year = birthYear;
-      return date || year
-        ? `${date}${year ? ` (${year})` : ""}`
-        : "Not set";
+      return date || year ? `${date}${year ? ` (${year})` : ""}` : "Not set";
     });
 
     return {
@@ -49,7 +47,7 @@ export const BirthdayModule = recipe<BirthdayModuleInput, BirthdayModuleInput>(
       birthDate,
       birthYear,
     };
-  }
+  },
 );
 
 export default BirthdayModule;

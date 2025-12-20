@@ -101,7 +101,7 @@ export const TimingModule = recipe<TimingModuleInput, TimingModuleInput>(
               textAlign: "center",
             }}
           >
-            <span style={{ fontSize: "14px", color: "#6b7280" }}>Total: </span>
+            <span style={{ fontSize: "14px", color: "#6b7280" }}>Total:</span>
             <span style={{ fontSize: "18px", fontWeight: "600" }}>
               {displayText}
             </span>
@@ -113,7 +113,7 @@ export const TimingModule = recipe<TimingModuleInput, TimingModuleInput>(
       restTime,
       totalTime,
     };
-  }
+  },
 );
 
 export default TimingModule;

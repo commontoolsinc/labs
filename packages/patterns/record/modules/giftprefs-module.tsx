@@ -2,7 +2,15 @@
 /**
  * Gift Preferences Module - Sub-charm for gift giving preferences
  */
-import { Cell, computed, type Default, handler, NAME, recipe, UI } from "commontools";
+import {
+  Cell,
+  computed,
+  type Default,
+  handler,
+  NAME,
+  recipe,
+  UI,
+} from "commontools";
 
 export interface GiftPrefsModuleInput {
   giftTier: Default<string, "">;
@@ -62,7 +70,10 @@ const removeAvoid = handler<
   avoid.set((avoid.get() || []).toSpliced(index, 1));
 });
 
-export const GiftPrefsModule = recipe<GiftPrefsModuleInput, GiftPrefsModuleInput>(
+export const GiftPrefsModule = recipe<
+  GiftPrefsModuleInput,
+  GiftPrefsModuleInput
+>(
   "GiftPrefsModule",
   ({ giftTier, favorites, avoid }) => {
     const favoriteInput = Cell.of<string>("");
@@ -184,7 +195,7 @@ export const GiftPrefsModule = recipe<GiftPrefsModuleInput, GiftPrefsModuleInput
       favorites,
       avoid,
     };
-  }
+  },
 );
 
 export default GiftPrefsModule;

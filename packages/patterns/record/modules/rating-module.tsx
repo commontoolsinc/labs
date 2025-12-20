@@ -2,7 +2,15 @@
 /**
  * Rating Module - Sub-charm for 1-5 star ratings
  */
-import { Cell, computed, type Default, handler, NAME, recipe, UI } from "commontools";
+import {
+  Cell,
+  computed,
+  type Default,
+  handler,
+  NAME,
+  recipe,
+  UI,
+} from "commontools";
 
 export interface RatingModuleInput {
   rating: Default<number | null, null>;
@@ -47,14 +55,16 @@ export const RatingModule = recipe<RatingModuleInput, RatingModuleInput>(
               </button>
             ))}
           </ct-hstack>
-          <div style={{ textAlign: "center", color: "#6b7280", fontSize: "14px" }}>
+          <div
+            style={{ textAlign: "center", color: "#6b7280", fontSize: "14px" }}
+          >
             {displayText}
           </div>
         </ct-vstack>
       ),
       rating,
     };
-  }
+  },
 );
 
 export default RatingModule;

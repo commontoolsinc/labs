@@ -40,7 +40,9 @@ export const AddressModule = recipe<AddressModuleInput, AddressModuleInput>(
               <ct-input $value={city} placeholder="City" />
             </ct-vstack>
             <ct-vstack style={{ gap: "4px" }}>
-              <label style={{ fontSize: "12px", color: "#6b7280" }}>State</label>
+              <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                State
+              </label>
               <ct-input $value={state} placeholder="CA" />
             </ct-vstack>
             <ct-vstack style={{ gap: "4px" }}>
@@ -55,7 +57,7 @@ export const AddressModule = recipe<AddressModuleInput, AddressModuleInput>(
       state,
       zip,
     };
-  }
+  },
 );
 
 export default AddressModule;
