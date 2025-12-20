@@ -111,10 +111,18 @@ const EXTRACTION_SCHEMA = {
     coordinates: { type: "string", description: "Coordinates (lat,lng)" },
     // Relationship
     relationTypes: { type: "array", items: { type: "string" }, description: "Relationship types" },
-    closeness: { type: "string", description: "Closeness level" },
+    closeness: {
+      type: "string",
+      enum: ["intimate", "close", "casual", "distant"],
+      description: "Closeness level",
+    },
     howWeMet: { type: "string", description: "How we met" },
     // Gift Prefs
-    giftTier: { type: "string", description: "Gift giving tier" },
+    giftTier: {
+      type: "string",
+      enum: ["always", "occasions", "reciprocal", "none"],
+      description: "Gift giving tier (always=give often, occasions=holidays/birthdays, reciprocal=if they give, none=don't give)",
+    },
     giftBudget: { type: "number", description: "Gift budget" },
     giftNotes: { type: "string", description: "Gift notes" },
     favorites: { type: "array", items: { type: "string" }, description: "Favorites list" },
@@ -341,11 +349,11 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
       model: "anthropic:claude-haiku-4-5",  // Fast & cheap model for extraction
     });
 
-    // Check if we have enough text to extract (for UI display)
+    // Check if we have any text to extract (for UI display)
     // inputText is a reactive reference - must use computed() to track changes
     const hasText = computed(() => {
       const text = inputText || "";
-      return text.trim().length > 20;
+      return text.trim().length > 0;
     });
 
     // Check if extraction has been triggered
@@ -476,7 +484,7 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
                   {ifElse(
                     hasText,
                     "Ready to extract",
-                    "Enter at least 20 characters"
+                    "Enter some text to extract from"
                   )}
                 </div>
                 {ifElse(
