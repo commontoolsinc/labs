@@ -25,7 +25,7 @@ import {
   recipe,
   UI,
 } from "commontools";
-import { getDefinition, getFieldToTypeMapping } from "../registry.ts";
+import { createSubCharm, getDefinition, getFieldToTypeMapping } from "../registry.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "../types.ts";
 import type { ExtractedField, ExtractionPreview } from "./types.ts";
 
@@ -248,6 +248,7 @@ const triggerExtraction = handler<
 
 /**
  * Apply selected extractions to modules, then auto-trash self
+ * Creates missing modules automatically if needed
  */
 const applySelected = handler<
   unknown,
@@ -258,8 +259,40 @@ const applySelected = handler<
     selections: Cell<Record<string, boolean>>;
   }
 >((_event, { parentSubCharms, parentTrashedSubCharms, preview, selections }) => {
-  const current = parentSubCharms.get() || [];
+  let current: SubCharmEntry[] = [...(parentSubCharms.get() || [])];
   const selected = selections.get() || {};
+
+  // First pass: identify which modules need to be created
+  const modulesToCreate = new Set<string>();
+  for (const field of preview.fields) {
+    const fieldKey = `${field.targetModule}.${field.fieldName}`;
+    if (selected[fieldKey] === false) continue;
+
+    const exists = current.some((e) => e?.type === field.targetModule);
+    if (!exists && field.targetModule !== "notes") {
+      // Notes module is special (needs linkPattern), skip auto-creation
+      modulesToCreate.add(field.targetModule);
+    }
+  }
+
+  // Create missing modules
+  for (const moduleType of modulesToCreate) {
+    try {
+      const newCharm = createSubCharm(moduleType);
+      const newEntry: SubCharmEntry = {
+        type: moduleType,
+        pinned: false,
+        charm: newCharm,
+      };
+      current = [...current, newEntry];
+      parentSubCharms.set(current);
+    } catch (e) {
+      console.warn(`Failed to create module ${moduleType}:`, e);
+    }
+  }
+
+  // Re-read current after potential additions
+  current = [...(parentSubCharms.get() || [])];
 
   // Apply each selected field
   // Use parentSubCharms.key(index).key("charm").key(fieldName).set(value) pattern
@@ -271,7 +304,10 @@ const applySelected = handler<
 
     // Find the index of the entry with matching type
     const entryIndex = current.findIndex((e) => e?.type === field.targetModule);
-    if (entryIndex < 0) continue;
+    if (entryIndex < 0) {
+      console.warn(`Module ${field.targetModule} not found, skipping field ${field.fieldName}`);
+      continue;
+    }
 
     try {
       // Navigate through the Cell hierarchy: subCharms[index].charm.fieldName
@@ -351,6 +387,9 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
       if (preview?.fields?.length) return "preview";
       return "idle";
     });
+
+    // Show extract button when ready (text entered but not triggered)
+    const showExtractButton = computed(() => hasText && !hasTriggered);
 
     // Format extracted fields as text for preview display
     // Build directly from extraction.result to avoid double-computed issues
@@ -444,7 +483,7 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
                   )}
                 </div>
                 {ifElse(
-                  computed(() => phase === "ready"),
+                  showExtractButton,
                   <button
                     onClick={triggerExtraction({ inputText, extractionPrompt })}
                     style={{
