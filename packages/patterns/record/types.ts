@@ -38,6 +38,7 @@ export type SubCharmType =
   | "relationship"
   | "giftprefs"
   | "timing"
+  | "age-category"
   // Controller modules (internal, not user-addable)
   | "type-picker";
 
