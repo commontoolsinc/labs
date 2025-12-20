@@ -118,12 +118,36 @@ const Note = pattern<Input, Output>(({ title, content, linkPattern, embedded }) 
     return custom || JSON.stringify(Note);
   });
 
+  // Wrap embedded in computed() to avoid ifElse hang with input Cells
+  // See DEBUGGING.md: "ifElse with Composed Pattern Cells"
+  const isEmbedded = computed(() => embedded);
+
   return {
     [NAME]: title,
     [UI]: ifElse(
-      embedded,
+      isEmbedded,
       // Embedded mode - just the editor, no wrapper
-      () => (
+      <ct-code-editor
+        $value={content}
+        $mentionable={mentionable}
+        $mentioned={mentioned}
+        $pattern={patternJson}
+        onbacklink-click={handleCharmLinkClick({})}
+        onbacklink-create={handleNewBacklink({ mentionable })}
+        language="text/markdown"
+        theme="light"
+        wordWrap
+        style="flex: 1; min-height: 120px;"
+      />,
+      // Standalone mode - full screen with header/footer
+      <ct-screen>
+        <div slot="header">
+          <ct-input
+            $value={title}
+            placeholder="Enter title..."
+          />
+        </div>
+
         <ct-code-editor
           $value={content}
           $mentionable={mentionable}
@@ -134,44 +158,20 @@ const Note = pattern<Input, Output>(({ title, content, linkPattern, embedded }) 
           language="text/markdown"
           theme="light"
           wordWrap
-          style="flex: 1; min-height: 120px;"
+          tabIndent
+          lineNumbers
         />
-      ),
-      // Standalone mode - full screen with header/footer
-      () => (
-        <ct-screen>
-          <div slot="header">
-            <ct-input
-              $value={title}
-              placeholder="Enter title..."
-            />
-          </div>
 
-          <ct-code-editor
-            $value={content}
-            $mentionable={mentionable}
-            $mentioned={mentioned}
-            $pattern={patternJson}
-            onbacklink-click={handleCharmLinkClick({})}
-            onbacklink-create={handleNewBacklink({ mentionable })}
-            language="text/markdown"
-            theme="light"
-            wordWrap
-            tabIndent
-            lineNumbers
-          />
-
-          <ct-hstack slot="footer">
-            {backlinks?.map((charm) => (
-              <ct-button
-                onClick={handleCharmLinkClicked({ charm })}
-              >
-                {charm?.[NAME]}
-              </ct-button>
-            ))}
-          </ct-hstack>
-        </ct-screen>
-      ),
+        <ct-hstack slot="footer">
+          {backlinks?.map((charm) => (
+            <ct-button
+              onClick={handleCharmLinkClicked({ charm })}
+            >
+              {charm?.[NAME]}
+            </ct-button>
+          ))}
+        </ct-hstack>
+      </ct-screen>,
     ),
     title,
     content,

@@ -2,7 +2,6 @@
 // Defines available sub-charm types and their metadata
 // Includes pattern constructors for true sub-charm architecture
 
-import type { Cell } from "commontools";
 import type { SubCharmType } from "./types.ts";
 
 // NOTE: Note is NOT imported here - it's created directly in record.tsx
