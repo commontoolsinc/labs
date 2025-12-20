@@ -35,6 +35,10 @@ import {
   MODULE_METADATA as GiftPrefsMeta,
 } from "../giftprefs.tsx";
 import { MODULE_METADATA as TimingMeta, TimingModule } from "../timing.tsx";
+import {
+  AgeCategoryModule,
+  MODULE_METADATA as AgeCategoryMeta,
+} from "../age-category.tsx";
 import type { ModuleMetadata } from "../container-protocol.ts";
 
 // NOTE: TypePickerMeta is NOT imported here to avoid circular dependency:
@@ -115,6 +119,10 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
   ),
   giftprefs: fromMetadata(GiftPrefsMeta, () => GiftPrefsModule({} as any)),
   timing: fromMetadata(TimingMeta, () => TimingModule({} as any)),
+  "age-category": fromMetadata(
+    AgeCategoryMeta,
+    () => AgeCategoryModule({} as any),
+  ),
 
   // Controller modules - TypePicker needs special handling in record.tsx
   // Metadata is inlined here to avoid circular dependency (see note at top)
