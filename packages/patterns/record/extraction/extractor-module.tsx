@@ -62,7 +62,47 @@ Rules:
 
 Return a JSON object with the extracted fields. Use null for fields without data.`;
 
-// Static extraction schema - inlined to avoid dynamic registry calls that don't survive compilation
+/**
+ * EXTRACTION SCHEMA - Currently Hardcoded, Future: Dynamic Discovery
+ *
+ * =============================================================================
+ * CURRENT STATE (Hardcoded)
+ * =============================================================================
+ * The extraction schema is manually maintained here. When adding new modules
+ * or changing field types, this schema must be updated manually.
+ *
+ * Why hardcoded?
+ * - Dynamic registry calls don't survive CommonTools AMD compilation
+ * - The public Cell API doesn't expose schema information
+ * - There's no official way to query another charm's resultSchema
+ *
+ * =============================================================================
+ * FUTURE VISION (Dynamic Schema Discovery)
+ * =============================================================================
+ * CTS already compiles TypeScript types into JSON schemas (resultSchema) that
+ * include enums from union types and descriptions from JSDoc comments. If the
+ * runtime exposed this via the public Cell API, we could discover schemas
+ * dynamically from loaded charms:
+ *
+ *   // Hypothetical future API:
+ *   const schema = charmCell.resultSchema;
+ *   // or: getResultSchema(charmCell)
+ *
+ * This would enable:
+ * 1. Zero-config extraction - patterns just use good TypeScript types
+ * 2. Dynamic discovery - works with any loaded charm, even unknown ones
+ * 3. No duplicate schema maintenance - single source of truth in types
+ *
+ * Pattern authors would get extraction support "for free" by using:
+ * - Union literal types: `platform: "twitter" | "linkedin" | "github"`
+ *   → becomes { enum: ["twitter", "linkedin", "github"] }
+ * - JSDoc comments: `/** Social platform (normalize: Insta→instagram) */`
+ *   → becomes { description: "Social platform (normalize: Insta→instagram)" }
+ *
+ * Feature request submitted to framework team. If approved, replace this
+ * hardcoded schema with dynamic discovery from parentSubCharms.
+ * =============================================================================
+ */
 const EXTRACTION_SCHEMA = {
   type: "object",
   properties: {
