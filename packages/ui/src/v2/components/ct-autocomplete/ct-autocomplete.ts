@@ -638,9 +638,11 @@ export class CTAutocomplete extends BaseElement {
       return this._cachedShowCustomOption;
     }
 
-    // Computed: total selectable items (filtered + custom if applicable)
+    // Computed: total selectable items (limited to what's actually rendered)
     private get _totalSelectableItems(): number {
-      return this._filteredItems.length +
+      const maxRender = this.maxVisible + 4;
+      const filteredCount = Math.min(this._filteredItems.length, maxRender);
+      return filteredCount +
         (this._showCustomOption ? 1 : 0) +
         this._alreadySelectedItems.length;
     }
@@ -697,7 +699,12 @@ export class CTAutocomplete extends BaseElement {
         `;
       }
 
-      const options = filtered.map((item, index) => {
+      // Limit rendered items to maxVisible + small buffer for performance
+      // This avoids rendering 600 DOM nodes when only 8 are visible
+      const maxRender = this.maxVisible + 4;
+      const filteredToRender = filtered.slice(0, maxRender);
+
+      const options = filteredToRender.map((item, index) => {
         const optionClasses = {
           option: true,
           highlighted: index === this._highlightedIndex,
@@ -941,11 +948,14 @@ export class CTAutocomplete extends BaseElement {
     private _selectHighlighted() {
       const filtered = this._filteredItems;
       const alreadySelected = this._alreadySelectedItems;
+      // Limit to rendered items
+      const maxRender = this.maxVisible + 4;
+      const renderedFilteredCount = Math.min(filtered.length, maxRender);
       // Order: filtered items → already-selected items → custom option
-      const alreadySelectedStartIndex = filtered.length;
-      const customOptionIndex = filtered.length + alreadySelected.length;
+      const alreadySelectedStartIndex = renderedFilteredCount;
+      const customOptionIndex = renderedFilteredCount + alreadySelected.length;
 
-      if (this._highlightedIndex < filtered.length) {
+      if (this._highlightedIndex < renderedFilteredCount) {
         // Regular selectable item
         this._selectItem(filtered[this._highlightedIndex]);
       } else if (
