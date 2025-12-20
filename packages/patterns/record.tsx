@@ -116,12 +116,6 @@ const initializeRecord = lift(
   }
 );
 
-// ===== Helper: Get charm name =====
-const getCharmName = lift(({ charm }: { charm: unknown }) => {
-  // deno-lint-ignore no-explicit-any
-  return (charm as any)?.[NAME] || "Unknown";
-});
-
 // Helper to get module display info (icon + label) from type
 const getModuleDisplay = lift(({ type }: { type: string }) => {
   const def = getDefinition(type);
