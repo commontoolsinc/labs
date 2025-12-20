@@ -27,6 +27,57 @@ export interface AutocompleteItem {
 }
 
 /**
+ * Pre-processed item with search words for fast matching.
+ * Words are pre-lowercased and split for O(1) startsWith checks.
+ */
+interface ProcessedItem {
+  item: AutocompleteItem;
+  /** All searchable words from label, value, group, and aliases - lowercased */
+  words: string[];
+}
+
+/**
+ * Split text into lowercase words for search indexing.
+ * Splits on spaces, hyphens, underscores, and other common separators.
+ */
+function splitIntoWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[\s\-_,./]+/)
+    .filter((w) => w.length > 0);
+}
+
+/**
+ * Build search index for an item - extract all searchable words.
+ */
+function processItem(item: AutocompleteItem): ProcessedItem {
+  const words: string[] = [];
+
+  // Add words from label
+  if (item.label) {
+    words.push(...splitIntoWords(item.label));
+  }
+
+  // Add words from value
+  words.push(...splitIntoWords(item.value));
+
+  // Add words from group
+  if (item.group) {
+    words.push(...splitIntoWords(item.group));
+  }
+
+  // Add words from all searchAliases
+  if (item.searchAliases) {
+    for (const alias of item.searchAliases) {
+      words.push(...splitIntoWords(alias));
+    }
+  }
+
+  // Deduplicate words
+  return { item, words: [...new Set(words)] };
+}
+
+/**
  * CTAutocomplete - Search input with filterable dropdown and optional value binding
  *
  * Supports both single-select and multi-select modes, with bidirectional Cell binding.
@@ -278,10 +329,10 @@ export class CTAutocomplete extends BaseElement {
     declare disabled: boolean;
 
     // Cell controller for value binding
+    // Note: Don't call requestUpdate() in onChange - cell controller already does it
     private _cellController = createCellController<string | string[]>(this, {
-      timing: { strategy: "immediate" },
+      timing: { strategy: "debounce", delay: 50 },
       onChange: (newValue, oldValue) => {
-        this.requestUpdate();
         this.emit("ct-change", { value: newValue, oldValue });
       },
     });
@@ -296,9 +347,23 @@ export class CTAutocomplete extends BaseElement {
     @state()
     private _dropdownStyle = "";
 
+    // Cached/memoized filter results - updated in willUpdate, not on every render
+    private _cachedFilteredItems: AutocompleteItem[] = [];
+    private _cachedAlreadySelectedItems: AutocompleteItem[] = [];
+    private _cachedShowCustomOption = false;
+    private _lastQuery = "";
+    private _lastSelectedValues: Set<string> = new Set();
+
     // Element references
     private _input: HTMLInputElement | null = null;
     private _dropdown: HTMLElement | null = null;
+
+    // Pre-processed search index for fast filtering
+    private _processedItems: ProcessedItem[] = [];
+
+    // Debounce timer for search
+    private _debounceTimer: number | null = null;
+    private _debounceDelay = 100; // ms
 
     constructor() {
       super();
@@ -334,6 +399,12 @@ export class CTAutocomplete extends BaseElement {
         true,
       );
       globalThis.removeEventListener("resize", this._handleScrollOrResize);
+
+      // Clean up debounce timer
+      if (this._debounceTimer !== null) {
+        clearTimeout(this._debounceTimer);
+        this._debounceTimer = null;
+      }
     }
 
     private _handleScrollOrResize = () => {
@@ -363,6 +434,120 @@ export class CTAutocomplete extends BaseElement {
           this.value as Cell<string | string[]> | string | string[],
         );
       }
+
+      // Rebuild search index when items change
+      if (changedProperties.has("items")) {
+        this._processedItems = (this.items || []).map(processItem);
+      }
+
+      // Recompute filtered items only when dependencies change
+      this._updateFilteredItemsCache();
+    }
+
+    // Memoized filter computation - only runs when inputs actually change
+    private _updateFilteredItemsCache() {
+      const currentSelectedValues = this._getSelectedValuesSet();
+      const queryChanged = this._query !== this._lastQuery;
+      const selectionChanged = !this._setsEqual(
+        currentSelectedValues,
+        this._lastSelectedValues,
+      );
+
+      if (!queryChanged && !selectionChanged && this._cachedFilteredItems.length > 0) {
+        return; // No change, use cached values
+      }
+
+      this._lastQuery = this._query;
+      this._lastSelectedValues = currentSelectedValues;
+
+      // Compute filtered items
+      const selectableProcessed = this.multiple
+        ? this._processedItems.filter(
+            (p) => !currentSelectedValues.has(p.item.value),
+          )
+        : this._processedItems;
+
+      if (!this._query.trim()) {
+        this._cachedFilteredItems = selectableProcessed.map((p) => p.item);
+      } else {
+        const queryWords = splitIntoWords(this._query);
+        if (queryWords.length === 0) {
+          this._cachedFilteredItems = selectableProcessed.map((p) => p.item);
+        } else {
+          this._cachedFilteredItems = selectableProcessed
+            .filter((p) => this._processedItemMatchesQuery(p, queryWords))
+            .map((p) => p.item);
+        }
+      }
+
+      // Compute already-selected items
+      if (!this.multiple) {
+        this._cachedAlreadySelectedItems = [];
+      } else {
+        const selectedItems = this._processedItems
+          .filter((p) => currentSelectedValues.has(p.item.value))
+          .map((p) => p.item);
+
+        if (!this._query.trim()) {
+          this._cachedAlreadySelectedItems = selectedItems;
+        } else {
+          const queryWords = splitIntoWords(this._query);
+          this._cachedAlreadySelectedItems = selectedItems.filter((item) => {
+            const processed = this._processedItems.find(
+              (p) => p.item === item,
+            );
+            return (
+              processed && this._processedItemMatchesQuery(processed, queryWords)
+            );
+          });
+        }
+      }
+
+      // Compute show custom option
+      this._cachedShowCustomOption = this._computeShowCustomOption();
+    }
+
+    private _getSelectedValuesSet(): Set<string> {
+      if (!this.multiple) return new Set();
+      const selected = (this._getCurrentValue() as string[] | undefined) || [];
+      return new Set(selected);
+    }
+
+    private _setsEqual(a: Set<string>, b: Set<string>): boolean {
+      if (a.size !== b.size) return false;
+      for (const item of a) {
+        if (!b.has(item)) return false;
+      }
+      return true;
+    }
+
+    private _computeShowCustomOption(): boolean {
+      if (!this.allowCustom || !this._query.trim()) {
+        return false;
+      }
+
+      const queryLower = this._query.toLowerCase();
+      const queryTrimmed = this._query.trim();
+
+      const matchesExistingItem = (this.items || []).some(
+        (item) =>
+          item.value.toLowerCase() === queryLower ||
+          (item.label || "").toLowerCase() === queryLower,
+      );
+
+      if (matchesExistingItem) {
+        return false;
+      }
+
+      if (this.multiple) {
+        const selected = (this._getCurrentValue() as string[] | undefined) ||
+          [];
+        if (selected.includes(queryTrimmed)) {
+          return false;
+        }
+      }
+
+      return true;
     }
 
     override updated(changedProperties: PropertyValues) {
@@ -409,29 +594,28 @@ export class CTAutocomplete extends BaseElement {
       return "";
     }
 
-    // Helper to check if an item matches the search query
+    // Helper to check if a processed item matches the search query
+    // Uses pre-indexed words with startsWith for O(words) instead of O(chars*aliases)
+    private _processedItemMatchesQuery(
+      processed: ProcessedItem,
+      queryWords: string[],
+    ): boolean {
+      // All query words must match at least one item word (startsWith)
+      return queryWords.every((queryWord) =>
+        processed.words.some((itemWord) => itemWord.startsWith(queryWord))
+      );
+    }
+
+    // Legacy helper for compatibility - wraps the optimized version
     private _itemMatchesQuery(item: AutocompleteItem, query: string): boolean {
+      const processed = this._processedItems.find((p) => p.item === item);
+      if (processed) {
+        const queryWords = splitIntoWords(query);
+        return this._processedItemMatchesQuery(processed, queryWords);
+      }
+      // Fallback for items not in processed list
       const label = (item.label || item.value).toLowerCase();
-      const value = item.value.toLowerCase();
-      const group = (item.group || "").toLowerCase();
-
-      // Check label, value, and group
-      if (
-        label.includes(query) ||
-        value.includes(query) ||
-        group.includes(query)
-      ) {
-        return true;
-      }
-
-      // Check searchAliases
-      if (item.searchAliases) {
-        return item.searchAliases.some((alias) =>
-          alias.toLowerCase().includes(query)
-        );
-      }
-
-      return false;
+      return label.includes(query.toLowerCase());
     }
 
     // Get the set of already-selected values (for multi-select)
@@ -441,80 +625,17 @@ export class CTAutocomplete extends BaseElement {
       return new Set(selected);
     }
 
-    // Computed: filtered items based on query (selectable items only)
+    // Memoized getters - return cached values computed in willUpdate
     private get _filteredItems(): AutocompleteItem[] {
-      const items = this.items || [];
-      const selectedValues = this._selectedValues;
-
-      // Filter out already-selected items (they'll be shown separately)
-      const selectableItems = this.multiple
-        ? items.filter((item) => !selectedValues.has(item.value))
-        : items;
-
-      // Apply search filter
-      if (!this._query.trim()) {
-        return selectableItems;
-      }
-
-      const query = this._query.toLowerCase();
-      return selectableItems.filter((item) =>
-        this._itemMatchesQuery(item, query)
-      );
+      return this._cachedFilteredItems;
     }
 
-    // Computed: already-selected items that match the query (for multi-select)
     private get _alreadySelectedItems(): AutocompleteItem[] {
-      if (!this.multiple) return [];
-
-      const items = this.items || [];
-      const selectedValues = this._selectedValues;
-
-      // Get selected items
-      const selectedItems = items.filter((item) =>
-        selectedValues.has(item.value)
-      );
-
-      // Apply search filter if there's a query
-      if (!this._query.trim()) {
-        return selectedItems;
-      }
-
-      const query = this._query.toLowerCase();
-      return selectedItems.filter((item) =>
-        this._itemMatchesQuery(item, query)
-      );
+      return this._cachedAlreadySelectedItems;
     }
 
-    // Computed: should show custom value option
     private get _showCustomOption(): boolean {
-      if (!this.allowCustom || !this._query.trim()) {
-        return false;
-      }
-
-      const queryLower = this._query.toLowerCase();
-      const queryTrimmed = this._query.trim();
-
-      // Don't show if query exactly matches an existing item
-      const matchesExistingItem = (this.items || []).some(
-        (item) =>
-          item.value.toLowerCase() === queryLower ||
-          (item.label || "").toLowerCase() === queryLower,
-      );
-
-      if (matchesExistingItem) {
-        return false;
-      }
-
-      // In multi mode, don't show if already selected
-      if (this.multiple) {
-        const selected = (this._getCurrentValue() as string[] | undefined) ||
-          [];
-        if (selected.includes(queryTrimmed)) {
-          return false;
-        }
-      }
-
-      return true;
+      return this._cachedShowCustomOption;
     }
 
     // Computed: total selectable items (filtered + custom if applicable)
@@ -665,12 +786,24 @@ export class CTAutocomplete extends BaseElement {
     // Event handlers
     private _handleInput(e: Event) {
       const input = e.target as HTMLInputElement;
-      this._query = input.value;
-      this._highlightedIndex = 0;
+      const newValue = input.value;
 
-      if (!this._isOpen && this._query) {
-        this._open();
+      // Debounce the query update to avoid filtering on every keystroke
+      // Batch dropdown open with query update to avoid two separate re-renders
+      if (this._debounceTimer !== null) {
+        clearTimeout(this._debounceTimer);
       }
+
+      this._debounceTimer = setTimeout(() => {
+        // Batch both state updates together
+        if (!this._isOpen && newValue) {
+          this._isOpen = true;
+          this.emit("ct-open", {});
+        }
+        this._query = newValue;
+        this._highlightedIndex = 0;
+        this._debounceTimer = null;
+      }, this._debounceDelay) as unknown as number;
     }
 
     private _handleFocus() {
