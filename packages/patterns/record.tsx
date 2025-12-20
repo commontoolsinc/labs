@@ -92,8 +92,7 @@ const initializeRecord = lift(
     subCharms: Cell<SubCharmEntry[]>;
     trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
     isInitialized: Cell<boolean>;
-    // deno-lint-ignore no-explicit-any
-    recordPatternJson: any;  // Computed that returns Record JSON string
+    recordPatternJson: string;  // Computed that returns Record JSON string
   }>(),
   undefined,
   ({ currentCharms, subCharms, trashedSubCharms, isInitialized, recordPatternJson }) => {
@@ -146,8 +145,7 @@ const togglePin = handler<
 // Note: Receives recordPatternJson to create Notes with correct wiki-link target
 const addSubCharm = handler<
   { detail: { value: string } },
-  // deno-lint-ignore no-explicit-any
-  { subCharms: Cell<SubCharmEntry[]>; selectedAddType: Cell<string>; recordPatternJson: any }
+  { subCharms: Cell<SubCharmEntry[]>; selectedAddType: Cell<string>; recordPatternJson: string }
 >(({ detail }, { subCharms: sc, selectedAddType: sat, recordPatternJson }) => {
   const type = detail?.value;
   if (!type) return;

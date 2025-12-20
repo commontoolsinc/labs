@@ -25,9 +25,8 @@ import { TimingModule } from "./modules/timing-module.tsx";
 // (registry → type-picker → template-registry → registry)
 // Instead, record.tsx imports it directly.
 
-// Type for pattern constructors - uses any to bypass Opaque type requirements
-// deno-lint-ignore no-explicit-any
-type PatternConstructor = (...args: any[]) => any;
+// Type for pattern constructors - returns unknown since we store heterogeneous charm types
+type PatternConstructor = () => unknown;
 
 export interface SubCharmDefinition {
   type: SubCharmType;
