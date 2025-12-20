@@ -1,6 +1,7 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
-import { type Cell, isCell } from "@commontools/runner";
+import { type Cell } from "@commontools/runner";
+import { createStringCellController } from "../../core/cell-controller.ts";
 
 /**
  * MIME type to file extension mapping
@@ -28,8 +29,8 @@ const MIME_EXTENSIONS: Record<string, string> = {
  *
  * @element ct-file-download
  *
- * @attr {string|Cell<string>} data - Content to download (required)
- * @attr {string|Cell<string>} filename - Download filename (auto-generated if not provided)
+ * @property {string|Cell<string>} data - Content to download (required)
+ * @property {string|Cell<string>} filename - Download filename (auto-generated if not provided)
  * @attr {string} mime-type - MIME type for the file (default: "application/octet-stream")
  * @attr {boolean} base64 - If true, decode data as base64 before downloading (default: false)
  * @attr {string} variant - Button style variant (default: "secondary")
@@ -118,12 +119,23 @@ export class CTFileDownload extends BaseElement {
 
   private _downloaded = false;
   private _downloading = false;
-  private _resetTimeout?: number;
-  private _dataUnsubscribe: (() => void) | null = null;
-  private _filenameUnsubscribe: (() => void) | null = null;
+  private _resetTimeout?: ReturnType<typeof setTimeout>;
 
   /** Maximum file size in bytes (100MB) */
   private static readonly MAX_FILE_SIZE = 100 * 1024 * 1024;
+
+  /** Delay before revoking object URL to ensure download starts (ms) */
+  private static readonly URL_REVOKE_DELAY = 100;
+
+  /** CellController for data property */
+  private _dataController = createStringCellController(this, {
+    timing: { strategy: "immediate" },
+  });
+
+  /** CellController for filename property */
+  private _filenameController = createStringCellController(this, {
+    timing: { strategy: "immediate" },
+  });
 
   constructor() {
     super();
@@ -139,21 +151,10 @@ export class CTFileDownload extends BaseElement {
   }
 
   /**
-   * Get the current value from a Cell or plain value
-   */
-  private _getValue<T>(prop: Cell<T> | T): T | undefined {
-    if (isCell(prop)) {
-      return prop.get();
-    }
-    return prop;
-  }
-
-  /**
    * Get the data value (string content to download)
    */
   private _getDataValue(): string {
-    const value = this._getValue(this.data);
-    return value ?? "";
+    return this._dataController.getValue() ?? "";
   }
 
   /**
@@ -172,7 +173,7 @@ export class CTFileDownload extends BaseElement {
    * Get the filename, auto-generating if not provided
    */
   private _getFilename(): string {
-    const fn = this._getValue(this.filename);
+    const fn = this._filenameController.getValue();
     if (fn) return this._sanitizeFilename(fn);
 
     // Auto-generate filename with timestamp
@@ -190,7 +191,8 @@ export class CTFileDownload extends BaseElement {
   private _createBlob(data: string): Blob {
     if (this.base64) {
       try {
-        const binaryString = atob(data);
+        // Trim whitespace that may be present in base64 data from various sources
+        const binaryString = atob(data.trim());
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
           bytes[i] = binaryString.charCodeAt(i);
@@ -203,56 +205,22 @@ export class CTFileDownload extends BaseElement {
     return new Blob([data], { type: this.mimeType });
   }
 
-  /**
-   * Clean up data Cell subscription
-   */
-  private _cleanupDataSubscription(): void {
-    if (this._dataUnsubscribe) {
-      this._dataUnsubscribe();
-      this._dataUnsubscribe = null;
-    }
-  }
-
-  /**
-   * Clean up filename Cell subscription
-   */
-  private _cleanupFilenameSubscription(): void {
-    if (this._filenameUnsubscribe) {
-      this._filenameUnsubscribe();
-      this._filenameUnsubscribe = null;
-    }
-  }
-
   override willUpdate(
     changedProperties: Map<string | number | symbol, unknown>,
   ) {
     super.willUpdate(changedProperties);
 
-    // Handle data Cell subscription
+    // Bind CellControllers when properties change
     if (changedProperties.has("data")) {
-      this._cleanupDataSubscription();
-      if (this.data && isCell(this.data)) {
-        this._dataUnsubscribe = this.data.sink(() => {
-          this.requestUpdate();
-        });
-      }
+      this._dataController.bind(this.data);
     }
-
-    // Handle filename Cell subscription
     if (changedProperties.has("filename")) {
-      this._cleanupFilenameSubscription();
-      if (this.filename && isCell(this.filename)) {
-        this._filenameUnsubscribe = this.filename.sink(() => {
-          this.requestUpdate();
-        });
-      }
+      this._filenameController.bind(this.filename);
     }
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    this._cleanupDataSubscription();
-    this._cleanupFilenameSubscription();
     if (this._resetTimeout) {
       clearTimeout(this._resetTimeout);
     }
@@ -298,38 +266,39 @@ export class CTFileDownload extends BaseElement {
 
       const url = URL.createObjectURL(blob);
 
-      try {
-        // Create and trigger download via anchor element
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+      // Create and trigger download via anchor element
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
 
-        // Update state for visual feedback
-        this._downloaded = true;
-        this._downloading = false;
-        this.requestUpdate();
+      // Delay URL revocation to ensure download starts in all browsers
+      setTimeout(
+        () => URL.revokeObjectURL(url),
+        CTFileDownload.URL_REVOKE_DELAY,
+      );
 
-        this.emit("ct-download-success", {
-          filename,
-          size: blob.size,
-          mimeType: this.mimeType,
-        });
+      // Update state for visual feedback
+      this._downloaded = true;
+      this._downloading = false;
+      this.requestUpdate();
 
-        // Reset downloaded state after duration
-        if (this._resetTimeout) {
-          clearTimeout(this._resetTimeout);
-        }
-        this._resetTimeout = setTimeout(() => {
-          this._downloaded = false;
-          this.requestUpdate();
-        }, this.feedbackDuration);
-      } finally {
-        // Always revoke the object URL to prevent memory leaks
-        URL.revokeObjectURL(url);
+      this.emit("ct-download-success", {
+        filename,
+        size: blob.size,
+        mimeType: this.mimeType,
+      });
+
+      // Reset downloaded state after duration
+      if (this._resetTimeout) {
+        clearTimeout(this._resetTimeout);
       }
+      this._resetTimeout = setTimeout(() => {
+        this._downloaded = false;
+        this.requestUpdate();
+      }, this.feedbackDuration);
     } catch (error) {
       this._downloading = false;
       this.requestUpdate();
