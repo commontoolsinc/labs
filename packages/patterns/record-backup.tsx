@@ -17,6 +17,7 @@ import {
   computed,
   type Default,
   handler,
+  ifElse,
   lift,
   NAME,
   navigateTo,
@@ -135,6 +136,8 @@ const buildExportData = lift(
       const subCharms = record?.subCharms || [];
       const modules: ExportedModule[] = subCharms
         .filter((entry: SubCharmEntry) => {
+          // Guard against undefined entries
+          if (!entry || !entry.type) return false;
           const def = getDefinition(entry.type);
           // Skip internal modules (like type-picker)
           return def && !def.internal;
@@ -149,6 +152,8 @@ const buildExportData = lift(
       const trashedSubCharms = record?.trashedSubCharms || [];
       const trashedModules: ExportedTrashedModule[] = trashedSubCharms
         .filter((entry: TrashedSubCharmEntry) => {
+          // Guard against undefined entries
+          if (!entry || !entry.type) return false;
           const def = getDefinition(entry.type);
           return def && !def.internal;
         })
@@ -443,6 +448,32 @@ export default pattern<Input, Output>(({ importJson }) => {
   // Import result state
   const importResult = Cell.of<ImportResult | null>(null);
 
+  // Computed values for import result display using lift
+  const hasImportResult = lift(
+    ({ r }: { r: ImportResult | null }) => r !== null,
+  )({ r: importResult });
+
+  const importResultBg = lift(({ r }: { r: ImportResult | null }) =>
+    r?.success ? "#f0fdf4" : "#fef2f2"
+  )({ r: importResult });
+
+  const importResultBorder = lift(({ r }: { r: ImportResult | null }) =>
+    `1px solid ${r?.success ? "#86efac" : "#fca5a5"}`
+  )({ r: importResult });
+
+  const importResultTitle = lift(({ r }: { r: ImportResult | null }) =>
+    r?.success ? "Import Complete" : "Import Issues"
+  )({ r: importResult });
+
+  const importResultMessage = lift(({ r }: { r: ImportResult | null }) => {
+    if (!r) return "";
+    const msg = `Imported ${r.imported || 0} record(s)`;
+    if (r.failed > 0) {
+      return `${msg}, ${r.failed} module(s) failed`;
+    }
+    return msg;
+  })({ r: importResult });
+
   return {
     [NAME]: computed(() => `Record Backup (${recordCount} records)`),
     [UI]: (
@@ -514,66 +545,19 @@ export default pattern<Input, Output>(({ importJson }) => {
                 </ct-button>
 
                 {/* Import Result Display */}
-                {importResult && (
+                {ifElse(
+                  hasImportResult,
                   <div
                     style={{
                       padding: "12px",
                       borderRadius: "8px",
-                      background: computed(() =>
-                        importResult.get()?.success ? "#f0fdf4" : "#fef2f2"
-                      ),
-                      border: computed(() =>
-                        `1px solid ${
-                          importResult.get()?.success ? "#86efac" : "#fca5a5"
-                        }`
-                      ),
+                      background: importResultBg,
+                      border: importResultBorder,
                     }}
                   >
                     <ct-vstack gap="2">
-                      <strong>
-                        {computed(() =>
-                          importResult.get()?.success
-                            ? "Import Complete"
-                            : "Import Issues"
-                        )}
-                      </strong>
-                      <p>
-                        Imported{" "}
-                        {computed(() => importResult.get()?.imported || 0)}{" "}
-                        record(s)
-                        {computed(() => {
-                          const r = importResult.get();
-                          return r && r.failed > 0
-                            ? `, ${r.failed} module(s) failed`
-                            : "";
-                        })}
-                      </p>
-                      {computed(() => {
-                        const r = importResult.get();
-                        if (r && r.errors.length > 0) {
-                          return (
-                            <details>
-                              <summary style={{ cursor: "pointer" }}>
-                                Errors ({r.errors.length})
-                              </summary>
-                              <ul
-                                style={{ fontSize: "12px", marginTop: "8px" }}
-                              >
-                                {r.errors.map((err, i) => (
-                                  <li key={i}>
-                                    {err.record && (
-                                      <strong>{err.record}:</strong>
-                                    )}
-                                    {err.module && <span>{err.module} -</span>}
-                                    {err.error}
-                                  </li>
-                                ))}
-                              </ul>
-                            </details>
-                          );
-                        }
-                        return null;
-                      })}
+                      <strong>{importResultTitle}</strong>
+                      <p>{importResultMessage}</p>
                       <ct-button
                         size="sm"
                         variant="ghost"
@@ -582,7 +566,8 @@ export default pattern<Input, Output>(({ importJson }) => {
                         Dismiss
                       </ct-button>
                     </ct-vstack>
-                  </div>
+                  </div>,
+                  null,
                 )}
               </ct-vstack>
             </ct-card>
