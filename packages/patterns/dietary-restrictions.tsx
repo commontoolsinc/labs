@@ -1171,13 +1171,14 @@ function buildAutocompleteItems(): AutocompleteItem[] {
   const items: AutocompleteItem[] = [];
   const allMembers = new Set<string>();
 
-  // Add all groups with their members as searchAliases
+  // Add all groups WITHOUT member aliases (too expensive for large groups)
+  // Groups are found by their name directly; members are separate items
   for (const [groupName, info] of Object.entries(RESTRICTION_GROUPS)) {
     items.push({
       value: groupName,
       label: `📦 ${groupName}`,
       group: info.category,
-      searchAliases: info.members, // Typing "milk" will match "dairy" group
+      // No searchAliases - typing "milk" finds "milk" item, "dairy" finds "dairy" group
     });
     info.members.forEach((m) => allMembers.add(m));
   }
