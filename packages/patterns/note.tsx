@@ -5,6 +5,7 @@ import {
   type Default,
   generateText,
   handler,
+  ifElse,
   NAME,
   navigateTo,
   pattern,
@@ -17,6 +18,10 @@ import { type MentionableCharm } from "./backlinks-index.tsx";
 type Input = {
   title?: Cell<Default<string, "Untitled Note">>;
   content?: Cell<Default<string, "">>;
+  /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
+  linkPattern?: Cell<Default<string, "">>;
+  /** When true, renders just the editor without ct-screen wrapper. */
+  embedded?: Cell<Default<boolean, false>>;
 };
 
 /** Represents a small #note a user took to remember some text. */
@@ -98,7 +103,7 @@ const handleCharmLinkClicked = handler<void, { charm: Cell<MentionableCharm> }>(
   },
 );
 
-const Note = pattern<Input, Output>(({ title, content }) => {
+const Note = pattern<Input, Output>(({ title, content, linkPattern, embedded }) => {
   const mentionable = wish<Default<MentionableCharm[], []>>(
     "#mentionable",
   );
@@ -107,12 +112,34 @@ const Note = pattern<Input, Output>(({ title, content }) => {
   // populated in backlinks-index.tsx
   const backlinks = Cell.of<MentionableCharm[]>([]);
 
-  // The only way to serialize a pattern, apparently?
-  const patternJson = computed(() => JSON.stringify(Note));
+  // Use provided linkPattern or default to creating new Notes
+  const patternJson = computed(() => {
+    const custom = (linkPattern as unknown as string)?.trim?.();
+    return custom || JSON.stringify(Note);
+  });
+
+  // Wrap embedded in computed() to avoid ifElse hang with input Cells
+  // See DEBUGGING.md: "ifElse with Composed Pattern Cells"
+  const isEmbedded = computed(() => embedded);
 
   return {
     [NAME]: title,
-    [UI]: (
+    [UI]: ifElse(
+      isEmbedded,
+      // Embedded mode - just the editor, no wrapper
+      <ct-code-editor
+        $value={content}
+        $mentionable={mentionable}
+        $mentioned={mentioned}
+        $pattern={patternJson}
+        onbacklink-click={handleCharmLinkClick({})}
+        onbacklink-create={handleNewBacklink({ mentionable })}
+        language="text/markdown"
+        theme="light"
+        wordWrap
+        style="flex: 1; min-height: 120px;"
+      />,
+      // Standalone mode - full screen with header/footer
       <ct-screen>
         <div slot="header">
           <ct-input
@@ -144,7 +171,7 @@ const Note = pattern<Input, Output>(({ title, content }) => {
             </ct-button>
           ))}
         </ct-hstack>
-      </ct-screen>
+      </ct-screen>,
     ),
     title,
     content,
