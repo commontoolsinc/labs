@@ -56,7 +56,9 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     // createInstance throws - Notes must be created directly in record.tsx
     // with the correct linkPattern for wiki-links to work
     createInstance: () => {
-      throw new Error("Notes must be created directly with linkPattern, not through registry");
+      throw new Error(
+        "Notes must be created directly with linkPattern, not through registry",
+      );
     },
     schema: {
       notes: { type: "string", description: "Free-form notes" },
@@ -80,7 +82,12 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     icon: "\u{2B50}", // ⭐
     createInstance: () => RatingModule({} as any),
     schema: {
-      rating: { type: "number", minimum: 1, maximum: 5, description: "Rating 1-5" },
+      rating: {
+        type: "number",
+        minimum: 1,
+        maximum: 5,
+        description: "Rating 1-5",
+      },
     },
     fieldMapping: ["rating"],
   },
@@ -113,7 +120,11 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     icon: "\u{1F4CA}", // 📊
     createInstance: () => StatusModule({} as any),
     schema: {
-      status: { type: "string", enum: ["planned", "active", "blocked", "done", "archived"], description: "Project status" },
+      status: {
+        type: "string",
+        enum: ["planned", "active", "blocked", "done", "archived"],
+        description: "Project status",
+      },
     },
     fieldMapping: ["status"],
   },
@@ -137,8 +148,16 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     createInstance: () => TimelineModule({} as any),
     schema: {
       startDate: { type: "string", format: "date", description: "Start date" },
-      targetDate: { type: "string", format: "date", description: "Target completion date" },
-      completedDate: { type: "string", format: "date", description: "Actual completion date" },
+      targetDate: {
+        type: "string",
+        format: "date",
+        description: "Target completion date",
+      },
+      completedDate: {
+        type: "string",
+        format: "date",
+        description: "Actual completion date",
+      },
     },
     fieldMapping: ["startDate", "targetDate", "completedDate"],
   },
@@ -148,7 +167,21 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     icon: "\u{1F517}", // 🔗
     createInstance: () => SocialModule({} as any),
     schema: {
-      platform: { type: "string", enum: ["twitter", "linkedin", "github", "instagram", "facebook", "youtube", "tiktok", "mastodon", "bluesky"], description: "Social platform" },
+      platform: {
+        type: "string",
+        enum: [
+          "twitter",
+          "linkedin",
+          "github",
+          "instagram",
+          "facebook",
+          "youtube",
+          "tiktok",
+          "mastodon",
+          "bluesky",
+        ],
+        description: "Social platform",
+      },
       handle: { type: "string", description: "Username/handle" },
       url: { type: "string", format: "uri", description: "Profile URL" },
     },
@@ -185,8 +218,16 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     icon: "\u{1F465}", // 👥
     createInstance: () => RelationshipModule({} as any),
     schema: {
-      relationTypes: { type: "array", items: { type: "string" }, description: "Relationship types" },
-      closeness: { type: "string", enum: ["intimate", "close", "casual", "distant"], description: "Closeness level" },
+      relationTypes: {
+        type: "array",
+        items: { type: "string" },
+        description: "Relationship types",
+      },
+      closeness: {
+        type: "string",
+        enum: ["intimate", "close", "casual", "distant"],
+        description: "Closeness level",
+      },
       howWeMet: { type: "string", description: "How we met" },
       innerCircle: { type: "boolean", description: "Inner circle member" },
     },
@@ -198,9 +239,21 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     icon: "\u{1F381}", // 🎁
     createInstance: () => GiftPrefsModule({} as any),
     schema: {
-      giftTier: { type: "string", enum: ["always", "occasions", "reciprocal", "none"], description: "Gift giving tier" },
-      favorites: { type: "array", items: { type: "string" }, description: "Favorite things" },
-      avoid: { type: "array", items: { type: "string" }, description: "Things to avoid" },
+      giftTier: {
+        type: "string",
+        enum: ["always", "occasions", "reciprocal", "none"],
+        description: "Gift giving tier",
+      },
+      favorites: {
+        type: "array",
+        items: { type: "string" },
+        description: "Favorite things",
+      },
+      avoid: {
+        type: "array",
+        items: { type: "string" },
+        description: "Things to avoid",
+      },
     },
     fieldMapping: ["giftTier", "favorites", "avoid"],
   },
@@ -241,7 +294,7 @@ export function getAddableTypes(): SubCharmDefinition[] {
 }
 
 export function getDefinition(
-  type: SubCharmType | string
+  type: SubCharmType | string,
 ): SubCharmDefinition | undefined {
   return SUB_CHARM_REGISTRY[type];
 }
@@ -281,4 +334,3 @@ export function getFieldToTypeMapping(): Record<string, string> {
   }
   return fieldToType;
 }
-

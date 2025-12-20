@@ -2,7 +2,15 @@
 /**
  * Relationship Module - Sub-charm for people connections
  */
-import { Cell, computed, type Default, handler, NAME, recipe, UI } from "commontools";
+import {
+  Cell,
+  computed,
+  type Default,
+  handler,
+  NAME,
+  recipe,
+  UI,
+} from "commontools";
 
 export interface RelationshipModuleInput {
   relationTypes: Default<string[], []>;
@@ -50,7 +58,10 @@ const toggleInnerCircle = handler<
   innerCircle.set(!innerCircle.get());
 });
 
-export const RelationshipModule = recipe<RelationshipModuleInput, RelationshipModuleInput>(
+export const RelationshipModule = recipe<
+  RelationshipModuleInput,
+  RelationshipModuleInput
+>(
   "RelationshipModule",
   ({ relationTypes, closeness, howWeMet, innerCircle }) => {
     const displayText = computed(() => {
@@ -72,15 +83,20 @@ export const RelationshipModule = recipe<RelationshipModuleInput, RelationshipMo
             </label>
             <ct-hstack style={{ gap: "8px", flexWrap: "wrap" }}>
               {RELATION_TYPE_OPTIONS.map((type, index) => {
-                const isSelected = computed(() => (relationTypes || []).some((t: string) => t === type));
+                const isSelected = computed(() =>
+                  (relationTypes || []).some((t: string) => t === type)
+                );
                 return (
                   <button
+                    type="button"
                     key={index}
                     onClick={toggleRelationType({ relationTypes, type })}
                     style={{
                       padding: "6px 12px",
                       borderRadius: "16px",
-                      border: isSelected ? "2px solid #3b82f6" : "1px solid #d1d5db",
+                      border: isSelected
+                        ? "2px solid #3b82f6"
+                        : "1px solid #d1d5db",
                       background: isSelected ? "#eff6ff" : "white",
                       color: isSelected ? "#1d4ed8" : "#374151",
                       cursor: "pointer",
@@ -117,6 +133,7 @@ export const RelationshipModule = recipe<RelationshipModuleInput, RelationshipMo
           {/* Inner circle toggle */}
           <ct-hstack style={{ alignItems: "center", gap: "8px" }}>
             <button
+              type="button"
               onClick={toggleInnerCircle({ innerCircle })}
               style={{
                 width: "24px",
@@ -143,7 +160,7 @@ export const RelationshipModule = recipe<RelationshipModuleInput, RelationshipMo
       howWeMet,
       innerCircle,
     };
-  }
+  },
 );
 
 export default RelationshipModule;

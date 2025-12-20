@@ -40,7 +40,9 @@ export const ContactModule = recipe<ContactModuleInput, ContactModuleInput>(
             />
           </ct-vstack>
           <ct-vstack style={{ gap: "4px" }}>
-            <label style={{ fontSize: "12px", color: "#6b7280" }}>Website</label>
+            <label style={{ fontSize: "12px", color: "#6b7280" }}>
+              Website
+            </label>
             <ct-input
               type="url"
               $value={website}
@@ -53,7 +55,7 @@ export const ContactModule = recipe<ContactModuleInput, ContactModuleInput>(
       phone,
       website,
     };
-  }
+  },
 );
 
 export default ContactModule;

@@ -7,9 +7,9 @@
  * Each entry holds a reference to an actual sub-charm pattern instance.
  */
 export interface SubCharmEntry {
-  type: string;        // Module type identifier (e.g., "birthday", "contact")
-  pinned: boolean;     // Pin state owned by Record (not the sub-charm)
-  charm: unknown;      // Reference to the actual sub-charm pattern instance
+  type: string; // Module type identifier (e.g., "birthday", "contact")
+  pinned: boolean; // Pin state owned by Record (not the sub-charm)
+  charm: unknown; // Reference to the actual sub-charm pattern instance
 }
 
 /**
@@ -18,12 +18,12 @@ export interface SubCharmEntry {
  * Users can restore from trash or permanently delete.
  */
 export interface TrashedSubCharmEntry extends SubCharmEntry {
-  trashedAt: string;   // ISO timestamp when moved to trash
+  trashedAt: string; // ISO timestamp when moved to trash
 }
 
 // Sub-charm types (all available module types)
 export type SubCharmType =
-  | "notes"      // Built-in, always present
+  | "notes" // Built-in, always present
   | "birthday"
   | "rating"
   | "tags"
