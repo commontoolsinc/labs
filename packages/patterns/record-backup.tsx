@@ -579,34 +579,8 @@ const clearImportResult = handler<
   importResult.set(null);
 });
 
-/**
- * Handler to trigger JSON download via ct-button
- * Uses globalThis to access DOM APIs at runtime (pattern runs in browser)
- */
-const triggerDownload = handler<
-  Record<string, never>,
-  { json: string }
->((_, { json }) => {
-  // Access DOM via globalThis (available at runtime in browser)
-  // deno-lint-ignore no-explicit-any
-  const win = globalThis as any;
-
-  // Unwrap Cell if needed
-  // deno-lint-ignore no-explicit-any
-  const jsonStr = typeof json === "string" ? json : (json as any)?.get?.() ?? "";
-  const filename = `records-backup-${new Date().toISOString().split("T")[0]}.json`;
-
-  // Create blob and download
-  const blob = new win.Blob([jsonStr], { type: "application/json" });
-  const url = win.URL.createObjectURL(blob);
-  const a = win.document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  win.document.body.appendChild(a);
-  a.click();
-  win.document.body.removeChild(a);
-  win.URL.revokeObjectURL(url);
-});
+// TODO(CT-1129): Add triggerDownload handler once runtime provides downloadFile capability
+// Currently removed because globalThis DOM access will break with sandboxing
 
 /**
  * Handler to process uploaded file
@@ -690,15 +664,9 @@ export default pattern<Input, Output>(({ importJson }) => {
                 <h2>Export Records</h2>
                 <p>
                   Found <strong>{recordCount}</strong>{" "}
-                  records in this space. Download or copy the JSON to save your
-                  data.
+                  records in this space. Copy the JSON below to save your data.
                 </p>
-                <ct-button
-                  onClick={triggerDownload({ json: exportedJson })}
-                  variant="primary"
-                >
-                  📥 Download Backup
-                </ct-button>
+                {/* TODO(CT-1129): Add download button once runtime provides downloadFile capability */}
                 <ct-code-editor
                   $value={exportedJson}
                   language="application/json"
