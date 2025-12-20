@@ -105,14 +105,26 @@ function extractModuleData(
   const def = getDefinition(type);
   if (!def?.fieldMapping) return {};
 
+  // Validate charm is an object
+  if (charm == null || typeof charm !== "object") {
+    console.warn(`Invalid charm for type "${type}": expected object`);
+    return {};
+  }
+
   const data: Record<string, unknown> = {};
   for (const field of def.fieldMapping) {
-    // deno-lint-ignore no-explicit-any
-    const value = (charm as any)?.[field];
-    if (value !== undefined) {
-      // Unwrap Cell values if needed
+    try {
       // deno-lint-ignore no-explicit-any
-      data[field] = (value as any)?.get ? (value as any).get() : value;
+      const value = (charm as any)?.[field];
+      if (value !== undefined) {
+        // Unwrap Cell values if needed, with error handling
+        // deno-lint-ignore no-explicit-any
+        data[field] = (value as any)?.get ? (value as any).get() : value;
+      }
+    } catch (e) {
+      // Cell.get() or other operations may throw
+      console.warn(`Failed to extract field "${field}" from ${type}:`, e);
+      data[field] = null;
     }
   }
   return data;
@@ -136,8 +148,8 @@ const buildExportData = lift(
       const subCharms = record?.subCharms || [];
       const modules: ExportedModule[] = subCharms
         .filter((entry: SubCharmEntry) => {
-          // Guard against undefined entries
-          if (!entry || !entry.type) return false;
+          // Guard against undefined entries or missing charm
+          if (!entry || !entry.type || entry.charm == null) return false;
           const def = getDefinition(entry.type);
           // Skip internal modules (like type-picker)
           return def && !def.internal;
@@ -152,8 +164,8 @@ const buildExportData = lift(
       const trashedSubCharms = record?.trashedSubCharms || [];
       const trashedModules: ExportedTrashedModule[] = trashedSubCharms
         .filter((entry: TrashedSubCharmEntry) => {
-          // Guard against undefined entries
-          if (!entry || !entry.type) return false;
+          // Guard against undefined entries or missing charm
+          if (!entry || !entry.type || entry.charm == null) return false;
           const def = getDefinition(entry.type);
           return def && !def.internal;
         })
@@ -201,7 +213,7 @@ const countRecords = lift(
 // ===== Import Logic =====
 
 /**
- * Parse and validate import JSON
+ * Parse and validate import JSON with comprehensive structure checking
  */
 function parseImportJson(jsonText: string): {
   valid: boolean;
@@ -215,7 +227,7 @@ function parseImportJson(jsonText: string): {
   try {
     const parsed = JSON.parse(jsonText);
 
-    // Validate structure
+    // Validate top-level structure
     if (!parsed || typeof parsed !== "object") {
       return { valid: false, error: "Invalid JSON: expected an object" };
     }
@@ -231,6 +243,79 @@ function parseImportJson(jsonText: string): {
       return { valid: false, error: 'Missing or invalid "records" array' };
     }
 
+    // Validate each record structure
+    for (let i = 0; i < parsed.records.length; i++) {
+      const record = parsed.records[i];
+
+      if (!record || typeof record !== "object") {
+        return { valid: false, error: `Record ${i}: not an object` };
+      }
+
+      if (typeof record.title !== "string") {
+        return { valid: false, error: `Record ${i}: missing or invalid title` };
+      }
+
+      if (!Array.isArray(record.modules)) {
+        return { valid: false, error: `Record ${i}: modules must be an array` };
+      }
+
+      if (!Array.isArray(record.trashedModules)) {
+        return {
+          valid: false,
+          error: `Record ${i}: trashedModules must be an array`,
+        };
+      }
+
+      // Validate module structure
+      for (let j = 0; j < record.modules.length; j++) {
+        const mod = record.modules[j];
+        if (!mod || typeof mod !== "object") {
+          return { valid: false, error: `Record ${i}, module ${j}: invalid` };
+        }
+        if (typeof mod.type !== "string") {
+          return {
+            valid: false,
+            error: `Record ${i}, module ${j}: missing type`,
+          };
+        }
+        if (typeof mod.pinned !== "boolean") {
+          return {
+            valid: false,
+            error: `Record ${i}, module ${j}: pinned must be boolean`,
+          };
+        }
+        if (!mod.data || typeof mod.data !== "object") {
+          return {
+            valid: false,
+            error: `Record ${i}, module ${j}: data must be an object`,
+          };
+        }
+      }
+
+      // Validate trashed module structure
+      for (let j = 0; j < record.trashedModules.length; j++) {
+        const mod = record.trashedModules[j];
+        if (!mod || typeof mod !== "object") {
+          return {
+            valid: false,
+            error: `Record ${i}, trashed ${j}: invalid`,
+          };
+        }
+        if (typeof mod.type !== "string") {
+          return {
+            valid: false,
+            error: `Record ${i}, trashed ${j}: missing type`,
+          };
+        }
+        if (typeof mod.trashedAt !== "string") {
+          return {
+            valid: false,
+            error: `Record ${i}, trashed ${j}: missing trashedAt`,
+          };
+        }
+      }
+    }
+
     return { valid: true, data: parsed as ExportData };
   } catch (e) {
     return { valid: false, error: `JSON parse error: ${e}` };
@@ -240,6 +325,7 @@ function parseImportJson(jsonText: string): {
 /**
  * Create a module from imported data
  * Returns the charm instance or null if type is unknown
+ * Throws if module creation fails
  */
 function createModuleFromData(
   type: string,
@@ -248,22 +334,41 @@ function createModuleFromData(
 ): unknown | null {
   // Special handling for notes - needs embedded flag and linkPattern
   if (type === "notes") {
-    return Note({
-      content: (data.content as string) || (data.notes as string) || "",
+    // Type-safe content extraction
+    let content = "";
+    if (typeof data.content === "string") {
+      content = data.content;
+    } else if (typeof data.notes === "string") {
+      // Fallback for legacy field name
+      content = data.notes;
+    }
+    // Silently use empty string for non-string values
+
+    const note = Note({
+      content,
       embedded: true,
       linkPattern: recordPatternJson,
       // deno-lint-ignore no-explicit-any
     } as any);
+
+    if (!note) {
+      throw new Error("Note constructor returned null/undefined");
+    }
+    return note;
   }
 
   // Check if type is known
   const def = getDefinition(type);
   if (!def) {
-    return null; // Unknown type
+    return null; // Unknown type - handled by caller
   }
 
   // Create module with imported data
-  return createSubCharm(type, data);
+  const charm = createSubCharm(type, data);
+  if (!charm) {
+    throw new Error(`createSubCharm for "${type}" returned null/undefined`);
+  }
+  return charm;
 }
 
 /**
