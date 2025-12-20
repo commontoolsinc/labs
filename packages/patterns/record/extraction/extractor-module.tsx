@@ -23,9 +23,10 @@ import {
   ifElse,
   NAME,
   recipe,
+  toSchema,
   UI,
 } from "commontools";
-import { createSubCharm, getDefinition, getFieldToTypeMapping } from "../registry.ts";
+import { createSubCharm, getFieldToTypeMapping } from "../registry.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "../types.ts";
 import type { ExtractedField, ExtractionPreview } from "./types.ts";
 
@@ -38,18 +39,19 @@ interface ExtractorModuleInput {
   // Internal state
   inputText?: Default<string, "">;
   extractionPrompt?: Default<string, "">; // Only set when user clicks Extract
-  selections?: Default<Record<string, boolean>, {}>;
+  selections?: Default<Record<string, boolean>, Record<string, never>>;
 }
 
 interface ExtractorModuleOutput {
   inputText?: Default<string, "">;
   extractionPrompt?: Default<string, "">;
-  selections?: Default<Record<string, boolean>, {}>;
+  selections?: Default<Record<string, boolean>, Record<string, never>>;
 }
 
 // ===== Constants =====
 
-const EXTRACTION_SYSTEM_PROMPT = `You are a precise data extractor. Extract structured fields from unstructured text like email signatures, bios, vCards, or notes.
+const EXTRACTION_SYSTEM_PROMPT =
+  `You are a precise data extractor. Extract structured fields from unstructured text like email signatures, bios, vCards, or notes.
 
 Rules:
 1. Only extract data that is explicitly stated or clearly implied
@@ -94,80 +96,160 @@ Return a JSON object with the extracted fields. Use null for fields without data
  * 3. No duplicate schema maintenance - single source of truth in types
  *
  * Pattern authors would get extraction support "for free" by using:
- * - Union literal types: `platform: "twitter" | "linkedin" | "github"`
+ * - Union literal types: platform: "twitter" | "linkedin" | "github"
  *   → becomes { enum: ["twitter", "linkedin", "github"] }
- * - JSDoc comments: `/** Social platform (normalize: Insta→instagram) */`
- *   → becomes { description: "Social platform (normalize: Insta→instagram)" }
+ * - JSDoc comments with descriptions
+ *   → becomes { description: "..." }
  *
  * Feature request submitted to framework team. If approved, replace this
  * hardcoded schema with dynamic discovery from parentSubCharms.
  * =============================================================================
  */
-const EXTRACTION_SCHEMA = {
-  type: "object",
-  properties: {
-    // Notes
-    notes: { type: "string", description: "Free-form notes" },
-    // Contact
-    email: { type: "string", description: "Email address" },
-    phone: { type: "string", description: "Phone number" },
-    website: { type: "string", description: "Website URL" },
-    // Birthday
-    birthDate: { type: "string", description: "Birthday YYYY-MM-DD or MM-DD" },
-    birthYear: { type: "number", description: "Birth year" },
-    // Tags
-    tags: { type: "array", items: { type: "string" }, description: "Tags or interests" },
-    // Rating
-    rating: { type: "number", minimum: 1, maximum: 5, description: "Rating 1-5" },
-    // Status
-    status: {
-      type: "string",
-      enum: ["planned", "active", "blocked", "done", "archived"],
-      description: "Project status",
-    },
-    // Address
-    street: { type: "string", description: "Street address" },
-    city: { type: "string", description: "City" },
-    state: { type: "string", description: "State/Province" },
-    postalCode: { type: "string", description: "Postal/ZIP code" },
-    country: { type: "string", description: "Country" },
-    // Timeline
-    startDate: { type: "string", format: "date", description: "Start date" },
-    targetDate: { type: "string", format: "date", description: "Target date" },
-    // Social
-    platform: {
-      type: "string",
-      enum: ["twitter", "linkedin", "github", "instagram", "facebook", "youtube", "tiktok", "mastodon", "bluesky"],
-      description: "Social platform (normalize: Insta→instagram, X→twitter, etc.)",
-    },
-    handle: { type: "string", description: "Social handle/username (without @ prefix)" },
-    profileUrl: { type: "string", description: "Profile URL" },
-    // Link
-    url: { type: "string", format: "uri", description: "URL" },
-    linkTitle: { type: "string", description: "Link title" },
-    // Location
-    locationName: { type: "string", description: "Location name" },
-    locationAddress: { type: "string", description: "Full address" },
-    coordinates: { type: "string", description: "Coordinates (lat,lng)" },
-    // Relationship
-    relationTypes: { type: "array", items: { type: "string" }, description: "Relationship types" },
-    closeness: {
-      type: "string",
-      enum: ["intimate", "close", "casual", "distant"],
-      description: "Closeness level",
-    },
-    howWeMet: { type: "string", description: "How we met" },
-    // Gift Prefs
-    giftTier: {
-      type: "string",
-      enum: ["always", "occasions", "reciprocal", "none"],
-      description: "Gift giving tier (always=give often, occasions=holidays/birthdays, reciprocal=if they give, none=don't give)",
-    },
-    giftBudget: { type: "number", description: "Gift budget" },
-    giftNotes: { type: "string", description: "Gift notes" },
-    favorites: { type: "array", items: { type: "string" }, description: "Favorites list" },
-  },
-} as const;
+// =============================================================================
+// ADDING A NEW MODULE? Add its extractable fields to ExtractedData below!
+// CTS compiles TypeScript types + JSDoc into JSON schemas automatically.
+// Also update the module's fieldMapping in its MODULE_METADATA.
+// See ../registry.ts for the full checklist.
+// =============================================================================
+
+/** Social platform identifiers */
+type SocialPlatform =
+  | "twitter"
+  | "linkedin"
+  | "github"
+  | "instagram"
+  | "facebook"
+  | "youtube"
+  | "tiktok"
+  | "mastodon"
+  | "bluesky";
+
+/** Project/task status values */
+type StatusValue = "planned" | "active" | "blocked" | "done" | "archived";
+
+/** Relationship closeness levels */
+type ClosenessLevel = "intimate" | "close" | "casual" | "distant";
+
+/** Gift giving frequency tiers */
+type GiftTier = "always" | "occasions" | "reciprocal" | "none";
+
+/** Age category values */
+type AgeCategory =
+  | "adult"
+  | "child"
+  | "senior"
+  | "adult-specific"
+  | "young-adult"
+  | "teenager"
+  | "school-age"
+  | "toddler"
+  | "baby";
+
+/**
+ * ExtractedData - All fields that can be extracted from unstructured text.
+ * CTS compiles this TypeScript type into a JSON schema with enums and descriptions.
+ */
+interface ExtractedData {
+  // Notes
+  /** Free-form notes */
+  notes?: string | null;
+
+  // Contact
+  /** Email address */
+  email?: string | null;
+  /** Phone number */
+  phone?: string | null;
+  /** Website URL */
+  website?: string | null;
+
+  // Birthday
+  /** Birthday in YYYY-MM-DD or MM-DD format */
+  birthDate?: string | null;
+  /** Birth year */
+  birthYear?: number | null;
+
+  // Tags
+  /** Tags or interests */
+  tags?: string[] | null;
+
+  // Rating
+  /** Rating from 1-5 */
+  rating?: number | null;
+
+  // Status
+  /** Project status */
+  status?: StatusValue | null;
+
+  // Address
+  /** Street address */
+  street?: string | null;
+  /** City */
+  city?: string | null;
+  /** State or Province */
+  state?: string | null;
+  /** Postal or ZIP code */
+  postalCode?: string | null;
+  /** Country */
+  country?: string | null;
+
+  // Timeline
+  /** Start date in ISO format */
+  startDate?: string | null;
+  /** Target completion date in ISO format */
+  targetDate?: string | null;
+
+  // Social
+  /** Social platform (normalize: Insta to instagram, X to twitter) */
+  platform?: SocialPlatform | null;
+  /** Social handle or username without @ prefix */
+  handle?: string | null;
+  /** Profile URL */
+  profileUrl?: string | null;
+
+  // Link
+  /** URL */
+  url?: string | null;
+  /** Link title */
+  linkTitle?: string | null;
+
+  // Location
+  /** Location name */
+  locationName?: string | null;
+  /** Full address */
+  locationAddress?: string | null;
+  /** Coordinates as lat,lng string */
+  coordinates?: string | null;
+
+  // Relationship
+  /** Relationship types like friend, family, colleague */
+  relationTypes?: string[] | null;
+  /** Closeness level */
+  closeness?: ClosenessLevel | null;
+  /** How we met */
+  howWeMet?: string | null;
+
+  // Gift Prefs
+  /** Gift giving tier */
+  giftTier?: GiftTier | null;
+  /** Gift budget in dollars */
+  giftBudget?: number | null;
+  /** Gift notes and preferences */
+  giftNotes?: string | null;
+  /** Favorite things, interests, hobbies */
+  favorites?: string[] | null;
+
+  // Age Category
+  /** Age category */
+  ageCategory?: AgeCategory | null;
+
+  // Timing (for recipes)
+  /** Prep time in minutes */
+  prepTime?: number | null;
+  /** Cook time in minutes */
+  cookTime?: number | null;
+  /** Rest time in minutes */
+  restTime?: number | null;
+}
 
 // ===== Helper Functions =====
 
@@ -212,8 +294,8 @@ function formatValue(value: unknown): string {
  * Build extraction preview from raw LLM result and existing modules
  */
 function buildPreview(
-  extracted: Record<string, unknown>,
-  subCharms: readonly SubCharmEntry[]
+  extracted: ExtractedData,
+  subCharms: readonly SubCharmEntry[],
 ): ExtractionPreview {
   const fieldToType = getFieldToTypeMapping();
   const fields: ExtractedField[] = [];
@@ -231,7 +313,9 @@ function buildPreview(
     const currentValue = entry ? getCurrentValue(entry, fieldName) : undefined;
 
     // Skip if value hasn't changed
-    if (JSON.stringify(currentValue) === JSON.stringify(extractedValue)) continue;
+    if (JSON.stringify(currentValue) === JSON.stringify(extractedValue)) {
+      continue;
+    }
 
     const field: ExtractedField = {
       fieldName,
@@ -274,8 +358,9 @@ const dismiss = handler<
 
 /**
  * Toggle a field selection on/off
+ * Note: Currently unused but kept for future per-field toggle UI
  */
-const toggleField = handler<
+const _toggleField = handler<
   unknown,
   { selections: Cell<Record<string, boolean>>; fieldKey: string }
 >((_event, { selections, fieldKey }) => {
@@ -310,8 +395,11 @@ const applySelected = handler<
     preview: ExtractionPreview;
     selections: Cell<Record<string, boolean>>;
   }
->((_event, { parentSubCharms, parentTrashedSubCharms, preview, selections }) => {
-  let current: SubCharmEntry[] = [...(parentSubCharms.get() || [])];
+>((
+  _event,
+  { parentSubCharms, parentTrashedSubCharms, preview, selections },
+) => {
+  const current: SubCharmEntry[] = [...(parentSubCharms.get() || [])];
   const selected = selections.get() || {};
 
   // Group fields by target module
@@ -326,6 +414,9 @@ const applySelected = handler<
     fieldsByModule[field.targetModule].push(field);
   }
 
+  // Collect new entries to add (batched to avoid multiple set() calls)
+  const newEntries: SubCharmEntry[] = [];
+
   // Process each module type
   for (const [moduleType, fields] of Object.entries(fieldsByModule)) {
     const existingIndex = current.findIndex((e) => e?.type === moduleType);
@@ -334,7 +425,9 @@ const applySelected = handler<
       // Module exists - use Cell navigation to update fields
       for (const field of fields) {
         try {
-          (parentSubCharms as any).key(existingIndex).key("charm").key(field.fieldName).set(field.extractedValue);
+          (parentSubCharms as any).key(existingIndex).key("charm").key(
+            field.fieldName,
+          ).set(field.extractedValue);
         } catch (e) {
           console.warn(`Failed to set ${moduleType}.${field.fieldName}:`, e);
         }
@@ -350,23 +443,25 @@ const applySelected = handler<
         }
         // Create module with initial values passed to the recipe
         const newCharm = createSubCharm(moduleType, initialValues);
-        const newEntry: SubCharmEntry = {
+        newEntries.push({
           type: moduleType,
           pinned: false,
           charm: newCharm,
-        };
-        current = [...current, newEntry];
-        parentSubCharms.set(current);
+        });
       } catch (e) {
         console.warn(`Failed to create module ${moduleType}:`, e);
       }
     }
   }
 
-  // Auto-trash self
+  // Batch: add all new modules and remove self in a single set()
   const selfEntry = current.find((e) => e?.type === "extractor");
+  const withoutSelf = current.filter((e) => e?.type !== "extractor");
+  const final = [...withoutSelf, ...newEntries];
+  parentSubCharms.set(final);
+
+  // Trash self
   if (selfEntry) {
-    parentSubCharms.set(current.filter((e) => e?.type !== "extractor"));
     parentTrashedSubCharms.push({
       ...selfEntry,
       trashedAt: new Date().toISOString(),
@@ -376,17 +471,28 @@ const applySelected = handler<
 
 // ===== The Pattern =====
 
-export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutput>(
+export const ExtractorModule = recipe<
+  ExtractorModuleInput,
+  ExtractorModuleOutput
+>(
   "ExtractorModule",
-  ({ parentSubCharms, parentTrashedSubCharms, inputText, extractionPrompt, selections }) => {
+  (
+    {
+      parentSubCharms,
+      parentTrashedSubCharms,
+      inputText,
+      extractionPrompt,
+      selections,
+    },
+  ) => {
     // Reactive extraction - only runs when extractionPrompt is set (user clicked Extract)
     // The framework caches by content hash, so same text won't re-extract
-    // Using static EXTRACTION_SCHEMA (dynamic buildExtractionSchema doesn't survive compilation)
-    const extraction = generateObject<Record<string, unknown>>({
+    // toSchema<ExtractedData>() converts TypeScript type to JSON schema at compile time
+    const extraction = generateObject<ExtractedData>({
       system: EXTRACTION_SYSTEM_PROMPT,
-      prompt: extractionPrompt,  // Only triggers when user clicks Extract button
-      schema: EXTRACTION_SCHEMA,
-      model: "anthropic:claude-haiku-4-5",  // Fast & cheap model for extraction
+      prompt: extractionPrompt, // Only triggers when user clicks Extract button
+      schema: toSchema<ExtractedData>(),
+      model: "anthropic:claude-haiku-4-5", // Fast & cheap model for extraction
     });
 
     // Check if we have any text to extract (for UI display)
@@ -473,10 +579,11 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
               {ifElse(
                 computed(() => phase === "preview"),
                 "Review Changes",
-                "Extract from Text"
+                "Extract from Text",
               )}
             </span>
             <button
+              type="button"
               onClick={dismiss({ parentSubCharms, parentTrashedSubCharms })}
               style={{
                 background: "transparent",
@@ -494,8 +601,12 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
 
           {/* Idle/Ready state - text input with Extract button */}
           {ifElse(
-            computed(() => phase === "idle" || phase === "ready" || phase === "error"),
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            computed(() =>
+              phase === "idle" || phase === "ready" || phase === "error"
+            ),
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "12px" }}
+            >
               <ct-textarea
                 $value={inputText}
                 placeholder="Paste an email signature, bio, vCard, or any text with contact/profile information..."
@@ -517,19 +628,26 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
                 >
                   Extraction failed. Try different text or check the format.
                 </div>,
-                null
+                null,
               )}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
                 <div style={{ fontSize: "12px", color: "#6b7280" }}>
                   {ifElse(
                     hasText,
                     "Ready to extract",
-                    "Enter some text to extract from"
+                    "Enter some text to extract from",
                   )}
                 </div>
                 {ifElse(
                   showExtractButton,
                   <button
+                    type="button"
                     onClick={triggerExtraction({ inputText, extractionPrompt })}
                     style={{
                       padding: "8px 16px",
@@ -544,11 +662,11 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
                   >
                     ✨ Extract
                   </button>,
-                  null
+                  null,
                 )}
               </div>
             </div>,
-            null
+            null,
           )}
 
           {/* Extracting state */}
@@ -566,13 +684,15 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
               <ct-loader size="sm" show-elapsed />
               <span style={{ color: "#92400e" }}>Extracting data...</span>
             </div>,
-            null
+            null,
           )}
 
           {/* Preview state - diff view */}
           {ifElse(
             computed(() => phase === "preview"),
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "16px" }}
+            >
               {/* Simple field list - render flat list of extracted fields */}
               <div
                 style={{
@@ -582,19 +702,36 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
                   padding: "12px",
                 }}
               >
-                <div style={{ marginBottom: "8px", fontWeight: "500", color: "#374151" }}>
+                <div
+                  style={{
+                    marginBottom: "8px",
+                    fontWeight: "500",
+                    color: "#374151",
+                  }}
+                >
                   Extracted Fields:
                 </div>
-                <div style={{ fontSize: "13px", color: "#6b7280", whiteSpace: "pre-wrap" }}>
+                <div
+                  style={{
+                    fontSize: "13px",
+                    color: "#6b7280",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
                   {previewText}
                 </div>
               </div>
 
               {/* Action buttons */}
               <div
-                style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}
+                style={{
+                  display: "flex",
+                  gap: "8px",
+                  justifyContent: "flex-end",
+                }}
               >
                 <button
+                  type="button"
                   onClick={dismiss({ parentSubCharms, parentTrashedSubCharms })}
                   style={{
                     padding: "8px 16px",
@@ -608,6 +745,7 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
                   Discard
                 </button>
                 <button
+                  type="button"
                   onClick={applySelected({
                     parentSubCharms,
                     parentTrashedSubCharms,
@@ -628,12 +766,12 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
                   Apply {selectedCount} Change{ifElse(
                     computed(() => selectedCount !== 1),
                     "s",
-                    ""
+                    "",
                   )}
                 </button>
               </div>
             </div>,
-            null
+            null,
           )}
         </div>
       ),
@@ -641,7 +779,7 @@ export const ExtractorModule = recipe<ExtractorModuleInput, ExtractorModuleOutpu
       extractionPrompt,
       selections,
     };
-  }
+  },
 );
 
 export default ExtractorModule;

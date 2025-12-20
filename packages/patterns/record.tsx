@@ -179,7 +179,15 @@ const addSubCharm = handler<
     selectedAddType: Cell<string>;
     recordPatternJson: string;
   }
->(({ detail }, { subCharms: sc, trashedSubCharms: trash, selectedAddType: sat, recordPatternJson }) => {
+>((
+  { detail },
+  {
+    subCharms: sc,
+    trashedSubCharms: trash,
+    selectedAddType: sat,
+    recordPatternJson,
+  },
+) => {
   const type = detail?.value;
   if (!type) return;
 
@@ -190,14 +198,14 @@ const addSubCharm = handler<
   // deno-lint-ignore no-explicit-any
   const charm = type === "notes"
     ? Note({
-        embedded: true,
-        linkPattern: recordPatternJson,
-      } as any)
+      embedded: true,
+      linkPattern: recordPatternJson,
+    } as any)
     : type === "extractor"
     ? ExtractorModule({
-        parentSubCharms: sc,
-        parentTrashedSubCharms: trash,
-      } as any)
+      parentSubCharms: sc,
+      parentTrashedSubCharms: trash,
+    } as any)
     : createSubCharm(type);
   sc.set([...current, { type, pinned: false, charm }]);
   sat.set("");
@@ -393,7 +401,12 @@ const Record = pattern<RecordInput, RecordOutput>(
                 $value={selectedAddType}
                 placeholder="+ Add"
                 items={addSelectItems}
-                onct-change={addSubCharm({ subCharms, trashedSubCharms, selectedAddType, recordPatternJson })}
+                onct-change={addSubCharm({
+                  subCharms,
+                  trashedSubCharms,
+                  selectedAddType,
+                  recordPatternJson,
+                })}
                 style={{ width: "130px" }}
               />
             )}
@@ -499,7 +512,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                           </div>
                         </div>
                         <div style={{ padding: "12px" }}>
-                          {(entry.charm as any)?.[UI]}
+                          {entry.charm as any}
                         </div>
                       </div>
                     );
@@ -595,7 +608,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                             </div>
                           </div>
                           <div style={{ padding: "12px" }}>
-                            {(entry.charm as any)?.[UI]}
+                            {entry.charm as any}
                           </div>
                         </div>
                       );
@@ -689,7 +702,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                         </div>
                       </div>
                       <div style={{ padding: "12px" }}>
-                        {(entry.charm as any)?.[UI]}
+                        {entry.charm as any}
                       </div>
                     </div>
                   );

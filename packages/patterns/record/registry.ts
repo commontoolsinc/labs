@@ -1,5 +1,15 @@
 // registry.ts - Sub-charm registry with type definitions and pattern constructors
 // Now imports from peer patterns in packages/patterns/
+//
+// =============================================================================
+// ADDING A NEW MODULE? You need to update THREE places:
+// =============================================================================
+// 1. Import the module and its metadata below
+// 2. Add it to SUB_CHARM_REGISTRY (around line 90)
+// 3. Add it to SubCharmType in ./types.ts
+// 4. Add its fields to EXTRACTION_SCHEMA in ./extraction/extractor-module.tsx
+//    (so AI can extract data into the new module type)
+// =============================================================================
 
 import type { SubCharmType } from "./types.ts";
 
@@ -122,7 +132,10 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     RelationshipMeta,
     (init) => RelationshipModule(init as any),
   ),
-  giftprefs: fromMetadata(GiftPrefsMeta, (init) => GiftPrefsModule(init as any)),
+  giftprefs: fromMetadata(
+    GiftPrefsMeta,
+    (init) => GiftPrefsModule(init as any),
+  ),
   timing: fromMetadata(TimingMeta, (init) => TimingModule(init as any)),
   "age-category": fromMetadata(
     AgeCategoryMeta,

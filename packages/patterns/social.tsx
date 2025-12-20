@@ -30,9 +30,9 @@ export const MODULE_METADATA: ModuleMetadata = {
       description: "Social platform",
     },
     handle: { type: "string", description: "Username/handle" },
-    url: { type: "string", format: "uri", description: "Profile URL" },
+    profileUrl: { type: "string", format: "uri", description: "Profile URL" },
   },
-  fieldMapping: ["platform", "handle", "url"],
+  fieldMapping: ["platform", "handle", "profileUrl"],
 };
 
 // ===== Types =====
@@ -55,7 +55,7 @@ export interface SocialModuleInput {
   /** Username/handle without @ prefix */
   handle: Default<string, "">;
   /** Profile URL */
-  url: Default<string, "">;
+  profileUrl: Default<string, "">;
 }
 
 // ===== Constants =====
@@ -75,7 +75,7 @@ const PLATFORM_OPTIONS = [
 // ===== The Pattern =====
 export const SocialModule = recipe<SocialModuleInput, SocialModuleInput>(
   "SocialModule",
-  ({ platform, handle, url }) => {
+  ({ platform, handle, profileUrl }) => {
     const displayText = computed(() => {
       const opt = PLATFORM_OPTIONS.find((o) => o.value === platform);
       return handle ? `${opt?.label || platform}: @${handle}` : "Not set";
@@ -99,13 +99,17 @@ export const SocialModule = recipe<SocialModuleInput, SocialModuleInput>(
             <label style={{ fontSize: "12px", color: "#6b7280" }}>
               Profile URL
             </label>
-            <ct-input type="url" $value={url} placeholder="https://..." />
+            <ct-input
+              type="url"
+              $value={profileUrl}
+              placeholder="https://..."
+            />
           </ct-vstack>
         </ct-vstack>
       ),
       platform,
       handle,
-      url,
+      profileUrl,
     };
   },
 );
