@@ -361,9 +361,11 @@ export class CTAutocomplete extends BaseElement {
     // Pre-processed search index for fast filtering
     private _processedItems: ProcessedItem[] = [];
 
-    // Debounce timer for search
+    // Throttle flag for scroll/resize position updates
+    private _positionUpdateScheduled = false;
+
+    // Debounce timer - setTimeout(0) defers to next task, letting input render first
     private _debounceTimer: number | null = null;
-    private _debounceDelay = 0; // ms - instant feedback, filtering is already fast (pre-indexed)
 
     constructor() {
       super();
@@ -386,8 +388,14 @@ export class CTAutocomplete extends BaseElement {
       // Listen for clicks outside to close dropdown
       document.addEventListener("click", this._handleOutsideClick);
       // Close dropdown on scroll/resize to avoid mispositioned dropdown
-      globalThis.addEventListener("scroll", this._handleScrollOrResize, true);
-      globalThis.addEventListener("resize", this._handleScrollOrResize);
+      // Use passive listeners for better scroll performance
+      globalThis.addEventListener("scroll", this._handleScrollOrResize, {
+        capture: true,
+        passive: true,
+      });
+      globalThis.addEventListener("resize", this._handleScrollOrResize, {
+        passive: true,
+      });
     }
 
     override disconnectedCallback() {
@@ -407,9 +415,14 @@ export class CTAutocomplete extends BaseElement {
       }
     }
 
+    // Throttle scroll/resize updates to RAF to prevent layout thrashing
     private _handleScrollOrResize = () => {
-      if (this._isOpen) {
-        this._updateDropdownPosition();
+      if (this._isOpen && !this._positionUpdateScheduled) {
+        this._positionUpdateScheduled = true;
+        requestAnimationFrame(() => {
+          this._updateDropdownPosition();
+          this._positionUpdateScheduled = false;
+        });
       }
     };
 
@@ -795,14 +808,15 @@ export class CTAutocomplete extends BaseElement {
       const input = e.target as HTMLInputElement;
       const newValue = input.value;
 
-      // Debounce the query update to avoid filtering on every keystroke
-      // Batch dropdown open with query update to avoid two separate re-renders
+      // Clear pending update to prevent stale renders (no flashing)
       if (this._debounceTimer !== null) {
         clearTimeout(this._debounceTimer);
       }
 
+      // Defer state updates to next task, allowing input to render immediately
+      // This lets the browser paint the typed character FIRST, then update dropdown
+      // User perceives instant keystroke feedback even though dropdown is 1 frame behind
       this._debounceTimer = setTimeout(() => {
-        // Batch both state updates together
         if (!this._isOpen && newValue) {
           this._isOpen = true;
           this.emit("ct-open", {});
@@ -810,7 +824,7 @@ export class CTAutocomplete extends BaseElement {
         this._query = newValue;
         this._highlightedIndex = 0;
         this._debounceTimer = null;
-      }, this._debounceDelay) as unknown as number;
+      }, 0) as unknown as number;
     }
 
     private _handleFocus() {
@@ -1009,7 +1023,7 @@ export class CTAutocomplete extends BaseElement {
           `#option-${this._highlightedIndex}`,
         );
         if (option) {
-          option.scrollIntoView({ block: "nearest", behavior: "smooth" });
+          option.scrollIntoView({ block: "nearest", behavior: "auto" });
         }
       });
     }
