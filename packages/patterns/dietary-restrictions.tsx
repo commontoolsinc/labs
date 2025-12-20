@@ -1197,180 +1197,37 @@ function buildAutocompleteItems(): AutocompleteItem[] {
   return items;
 }
 
-// Pre-build the items list (it's static)
-const AUTOCOMPLETE_ITEMS = buildAutocompleteItems();
+// Lazy-init singleton for autocomplete items (defers work until first use)
+let _cachedAutocompleteItems: AutocompleteItem[] | null = null;
+function getAutocompleteItems(): AutocompleteItem[] {
+  if (!_cachedAutocompleteItems) {
+    _cachedAutocompleteItems = buildAutocompleteItems();
+  }
+  return _cachedAutocompleteItems;
+}
 
-// ===== Lifted Helpers for Reactive Values =====
+// ===== Computed UI helpers (stable identity, no inline callbacks) =====
 
-const getEntryStyle = lift(({ level }: { level: RestrictionLevel }) => {
-  return LEVEL_CONFIG[level] || LEVEL_CONFIG.prefer;
-});
-
-const getEntryInfo = lift(({ name }: { name: string }) => {
-  const isGroupEntry = isGroup(name);
-  const memberCount = isGroupEntry ? getGroupMembers(name).length : 0;
-  const category = getCategory(name);
-  const group = getGroup(name);
-  return {
-    isGroupEntry,
-    memberCount,
-    category,
-    description: group?.description || "",
-  };
-});
-
-// ===== Lifted Render Helpers (avoids computed() inside JSX) =====
-
-// Render the "Your Restrictions" section or empty state
-const renderRestrictionsSection = lift(
-  ({
-    restrictions,
-    onCycleLevel,
-    onRemove,
-  }: {
-    restrictions: RestrictionEntry[];
-    onCycleLevel: (index: number) => void;
-    onRemove: (index: number) => void;
-  }) => {
-    const count = restrictions?.length || 0;
-    if (count === 0) {
-      return (
-        <ct-vstack
-          style="padding: 24px; text-align: center; color: #9ca3af;"
-        >
-          <span style="font-size: 32px; margin-bottom: 8px;">🍽️</span>
-          <span>No dietary restrictions added</span>
-          <span style="font-size: 13px;">
-            Search for allergies, diets (vegetarian, keto), or intolerances
-          </span>
-        </ct-vstack>
-      );
-    }
-
-    return (
-      <ct-vstack style="gap: 8px;">
-        <span
-          style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;"
-        >
-          Your Restrictions
-        </span>
-        <ct-hstack style="gap: 8px; flex-wrap: wrap;">
-          {restrictions.map((entry: RestrictionEntry, index: number) => {
-            const style = LEVEL_CONFIG[entry.level] || LEVEL_CONFIG.prefer;
-            const isGroupEntry = isGroup(entry.name);
-            const memberCount = isGroupEntry
-              ? getGroupMembers(entry.name).length
-              : 0;
-            const contextLabel = getContextualLabel(entry.name, entry.level);
-
-            return (
-              <span
-                key={index}
-                style={`display: inline-flex; align-items: center; gap: 6px; background: ${style.bg}; color: ${style.color}; border: 1px solid ${style.border}; border-radius: 20px; padding: 6px 12px; font-size: 14px;`}
-              >
-                <button
-                  type="button"
-                  onClick={() => onCycleLevel(index)}
-                  title="Click to change level: 💜→💙→🧡→❤️"
-                  style="background: none; border: none; cursor: pointer; padding: 0; font-size: 16px; line-height: 1;"
-                >
-                  {style.icon}
-                </button>
-                <ct-vstack style="gap: 0;">
-                  <span style="font-weight: 500;">
-                    {entry.name}
-                    {isGroupEntry && (
-                      <span style="opacity: 0.7; margin-left: 4px;">
-                        ({memberCount})
-                      </span>
-                    )}
-                  </span>
-                  <span style="font-size: 10px; opacity: 0.8;">
-                    {contextLabel}
-                  </span>
-                </ct-vstack>
-                <button
-                  type="button"
-                  onClick={() => onRemove(index)}
-                  style={`background: none; border: none; cursor: pointer; padding: 0; font-size: 16px; color: ${style.color}; line-height: 1; margin-left: 2px;`}
-                  title="Remove"
-                >
-                  ×
-                </button>
-              </span>
-            );
-          })}
-        </ct-hstack>
-      </ct-vstack>
-    );
-  },
+// Empty state for when no restrictions
+const emptyState = (
+  <ct-vstack style="padding: 24px; text-align: center; color: #9ca3af;">
+    <span style="font-size: 32px; margin-bottom: 8px;">🍽️</span>
+    <span>No dietary restrictions added</span>
+    <span style="font-size: 13px;">
+      Search for allergies, diets (vegetarian, keto), or intolerances
+    </span>
+  </ct-vstack>
 );
 
-// Render the "What This Means" implied items section
-const renderImpliedSection = lift(
-  ({
-    implied,
-  }: {
-    implied: Array<{
-      name: string;
-      level: RestrictionLevel;
-      sources: string[];
-    }>;
-  }) => {
-    if (!implied || implied.length === 0) return null;
-
-    return (
-      <ct-vstack
-        style="gap: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb;"
-      >
-        <span
-          style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;"
-        >
-          What This Means (Avoid These)
-        </span>
-        <ct-hstack style="gap: 4px; flex-wrap: wrap;">
-          {implied.map(
-            (
-              item: {
-                name: string;
-                level: RestrictionLevel;
-                sources: string[];
-              },
-              idx: number,
-            ) => {
-              const style = LEVEL_CONFIG[item.level];
-              return (
-                <span
-                  key={idx}
-                  style={`display: inline-flex; align-items: center; gap: 4px; background: ${style.bg}; color: ${style.color}; border-radius: 12px; padding: 3px 8px; font-size: 12px;`}
-                  title={`From: ${item.sources.join(", ")}`}
-                >
-                  {item.name}
-                </span>
-              );
-            },
-          )}
-        </ct-hstack>
-      </ct-vstack>
-    );
-  },
+// Legend (static, only shown when count > 0)
+const legendContent = (
+  <ct-hstack style="gap: 12px; font-size: 11px; color: #9ca3af; padding-top: 8px; flex-wrap: wrap;">
+    <span>💜 Flexible (if convenient)</span>
+    <span>💙 Prefer (unless inconvenient)</span>
+    <span>🧡 Strict (strong preference)</span>
+    <span>❤️ Absolute (no exceptions)</span>
+  </ct-hstack>
 );
-
-// Render the legend
-const renderLegend = lift(({ count }: { count: number }) => {
-  if (count === 0) return null;
-
-  return (
-    <ct-hstack
-      style="gap: 12px; font-size: 11px; color: #9ca3af; padding-top: 8px; flex-wrap: wrap;"
-    >
-      <span>💜 Flexible (if convenient)</span>
-      <span>💙 Prefer (unless inconvenient)</span>
-      <span>🧡 Strict (strong preference)</span>
-      <span>❤️ Absolute (no exceptions)</span>
-    </ct-hstack>
-  );
-});
 
 // ===== Handlers =====
 
@@ -1473,50 +1330,74 @@ const onSelectRestriction = handler<
 
 // ===== Module Recipe =====
 
+// Level priority lookup for fast comparison (avoids indexOf on every comparison)
+const LEVEL_PRIORITY: Record<RestrictionLevel, number> = {
+  flexible: 0,
+  prefer: 1,
+  strict: 2,
+  absolute: 3,
+};
+
 export const DietaryRestrictionsModule = recipe<
   DietaryRestrictionsInput,
   DietaryRestrictionsInput
 >("DietaryRestrictionsModule", ({ restrictions }) => {
   const selectedLevel = Cell.of<RestrictionLevel>("prefer");
 
-  // Compute implied items (expanded from groups)
+  // Cache for impliedItems to avoid recomputation when restrictions haven't changed
+  let _cachedImpliedItems: Array<{
+    name: string;
+    level: RestrictionLevel;
+    sources: string[];
+  }> = [];
+  let _lastRestrictionsHash = "";
+
+  // Compute implied items (expanded from groups) - memoized
   const impliedItems = computed(() => {
-    const current = restrictions || [];
+    const current = (restrictions || []) as RestrictionEntry[];
+
+    // Full hash to catch ALL item changes (including middle items)
+    const hash = current.map((e) => `${e.name}:${e.level}`).join("|");
+    if (hash === _lastRestrictionsHash) {
+      return _cachedImpliedItems;
+    }
+    _lastRestrictionsHash = hash;
+
     const implied = new Map<
       string,
       { level: RestrictionLevel; sources: string[] }
     >();
 
-    for (const entry of current as RestrictionEntry[]) {
-      const members = getGroupMembers(entry.name);
-      for (const member of members) {
-        const lower = member.toLowerCase();
+    // Optimized loop with hoisted lookups
+    for (let i = 0; i < current.length; i++) {
+      const entry = current[i];
+      const entryName = entry.name;
+      const entryLevel = entry.level;
+      const entryPriority = LEVEL_PRIORITY[entryLevel];
+
+      const group = getGroup(entryName);
+      if (!group) continue; // Skip non-groups early
+
+      const members = group.members;
+      for (let j = 0; j < members.length; j++) {
+        const lower = members[j].toLowerCase();
         const existing = implied.get(lower);
         if (!existing) {
-          implied.set(lower, { level: entry.level, sources: [entry.name] });
+          implied.set(lower, { level: entryLevel, sources: [entryName] });
+        } else if (entryPriority > LEVEL_PRIORITY[existing.level]) {
+          existing.level = entryLevel;
+          existing.sources.push(entryName); // Mutate instead of spread copy
         } else {
-          // Take the stricter level
-          const levels: RestrictionLevel[] = [
-            "flexible",
-            "prefer",
-            "strict",
-            "absolute",
-          ];
-          const maxLevel =
-            levels.indexOf(entry.level) > levels.indexOf(existing.level)
-              ? entry.level
-              : existing.level;
-          implied.set(lower, {
-            level: maxLevel,
-            sources: [...existing.sources, entry.name],
-          });
+          existing.sources.push(entryName); // Mutate instead of spread copy
         }
       }
     }
 
-    return [...implied.entries()]
+    _cachedImpliedItems = [...implied.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([name, info]) => ({ name, ...info }));
+
+    return _cachedImpliedItems;
   });
 
   const displayText = computed(() => {
@@ -1525,21 +1406,136 @@ export const DietaryRestrictionsModule = recipe<
     return `${count} restriction${count !== 1 ? "s" : ""}`;
   });
 
-  // Use lifted render helpers instead of computed() inside JSX
-  // This avoids creating multiple reactive subscriptions that cascade
+  // Use lift() for UI transforms that need handler bindings
+  // lift() preserves the Cell reference for handlers while allowing value access
+  const restrictionsUI = lift(
+    ({
+      list,
+      restrictionsCell,
+    }: {
+      list: RestrictionEntry[];
+      restrictionsCell: Cell<RestrictionEntry[]>;
+    }) => {
+      if (!list || list.length === 0) return emptyState;
 
-  const restrictionCount = lift(
-    (r: RestrictionEntry[] | undefined) => (r || []).length,
+      return (
+        <ct-vstack style="gap: 8px;">
+          <span style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
+            Your Restrictions
+          </span>
+          <ct-hstack style="gap: 8px; flex-wrap: wrap;">
+            {list.map((entry: RestrictionEntry, index: number) => {
+              const style = LEVEL_CONFIG[entry.level] || LEVEL_CONFIG.prefer;
+              const isGroupEntry = isGroup(entry.name);
+              const memberCount = isGroupEntry
+                ? getGroupMembers(entry.name).length
+                : 0;
+              const contextLabel = getContextualLabel(entry.name, entry.level);
+
+              return (
+                <span
+                  key={index}
+                  style={`display: inline-flex; align-items: center; gap: 6px; background: ${style.bg}; color: ${style.color}; border: 1px solid ${style.border}; border-radius: 20px; padding: 6px 12px; font-size: 14px;`}
+                >
+                  <button
+                    type="button"
+                    onClick={cycleLevel({
+                      restrictions: restrictionsCell,
+                      index,
+                    })}
+                    title="Click to change level: 💜→💙→🧡→❤️"
+                    style="background: none; border: none; cursor: pointer; padding: 0; font-size: 16px; line-height: 1;"
+                  >
+                    {style.icon}
+                  </button>
+                  <ct-vstack style="gap: 0;">
+                    <span style="font-weight: 500;">
+                      {entry.name}
+                      {isGroupEntry && (
+                        <span style="opacity: 0.7; margin-left: 4px;">
+                          ({memberCount})
+                        </span>
+                      )}
+                    </span>
+                    <span style="font-size: 10px; opacity: 0.8;">
+                      {contextLabel}
+                    </span>
+                  </ct-vstack>
+                  <button
+                    type="button"
+                    onClick={removeRestriction({
+                      restrictions: restrictionsCell,
+                      index,
+                    })}
+                    style={`background: none; border: none; cursor: pointer; padding: 0; font-size: 16px; color: ${style.color}; line-height: 1; margin-left: 2px;`}
+                    title="Remove"
+                  >
+                    ×
+                  </button>
+                </span>
+              );
+            })}
+          </ct-hstack>
+        </ct-vstack>
+      );
+    },
   );
+
+  const impliedUI = lift(
+    (
+      implied: Array<{
+        name: string;
+        level: RestrictionLevel;
+        sources: string[];
+      }>,
+    ) => {
+      if (!implied || implied.length === 0) return null;
+
+      return (
+        <ct-vstack style="gap: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb;">
+          <span style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
+            What This Means (Avoid These)
+          </span>
+          <ct-hstack style="gap: 4px; flex-wrap: wrap;">
+            {implied.map(
+              (
+                item: {
+                  name: string;
+                  level: RestrictionLevel;
+                  sources: string[];
+                },
+                idx: number,
+              ) => {
+                const style = LEVEL_CONFIG[item.level];
+                return (
+                  <span
+                    key={idx}
+                    style={`display: inline-flex; align-items: center; gap: 4px; background: ${style.bg}; color: ${style.color}; border-radius: 12px; padding: 3px 8px; font-size: 12px;`}
+                    title={`From: ${item.sources.join(", ")}`}
+                  >
+                    {item.name}
+                  </span>
+                );
+              },
+            )}
+          </ct-hstack>
+        </ct-vstack>
+      );
+    },
+  );
+
+  const showLegend = lift((list: RestrictionEntry[]) => {
+    return list && list.length > 0 ? legendContent : null;
+  });
 
   return {
     [NAME]: computed(() => `🍽️ Dietary: ${displayText}`),
     [UI]: (
       <ct-vstack style="gap: 16px;">
-        {/* Input row - static, no reactivity needed */}
+        {/* Input row */}
         <ct-hstack style="gap: 8px; align-items: center;">
           <ct-autocomplete
-            items={AUTOCOMPLETE_ITEMS}
+            items={getAutocompleteItems()}
             placeholder="Search allergies, diets, intolerances..."
             allowCustom={true}
             onct-select={onSelectRestriction({ restrictions, selectedLevel })}
@@ -1558,37 +1554,14 @@ export const DietaryRestrictionsModule = recipe<
           />
         </ct-hstack>
 
-        {/* Restrictions list - uses lifted helper */}
-        {renderRestrictionsSection({
-          restrictions: restrictions as unknown as RestrictionEntry[],
-          onCycleLevel: (index: number) => {
-            const current = (restrictions as unknown as RestrictionEntry[]) || [];
-            const entry = current[index];
-            if (!entry) return;
-            const newLevel = LEVEL_CYCLE[entry.level];
-            const updated = [...current];
-            updated[index] = { ...entry, level: newLevel };
-            (restrictions as unknown as Cell<RestrictionEntry[]>).set(updated);
-          },
-          onRemove: (index: number) => {
-            const current = (restrictions as unknown as RestrictionEntry[]) || [];
-            (restrictions as unknown as Cell<RestrictionEntry[]>).set(
-              current.toSpliced(index, 1),
-            );
-          },
-        })}
+        {/* Restrictions list - lift with both value and Cell for handlers */}
+        {restrictionsUI({ list: restrictions, restrictionsCell: restrictions })}
 
-        {/* Implied items - uses lifted helper */}
-        {renderImpliedSection({
-          implied: impliedItems as unknown as Array<{
-            name: string;
-            level: RestrictionLevel;
-            sources: string[];
-          }>,
-        })}
+        {/* Implied items - lift for display only */}
+        {impliedUI(impliedItems)}
 
-        {/* Legend - uses lifted helper */}
-        {renderLegend({ count: restrictionCount(restrictions) as unknown as number })}
+        {/* Legend - lift conditional */}
+        {showLegend(restrictions)}
       </ct-vstack>
     ),
     restrictions,
