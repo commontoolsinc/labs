@@ -8,7 +8,16 @@
  * Data model uses nested structure: columns contain cards.
  * Array position determines ordering (simple and effective).
  */
-import { Cell, computed, Default, handler, NAME, pattern, Stream, UI } from "commontools";
+import {
+  Cell,
+  computed,
+  Default,
+  handler,
+  NAME,
+  pattern,
+  Stream,
+  UI,
+} from "commontools";
 
 // ============ HELPERS ============
 
@@ -50,7 +59,9 @@ interface Output {
   // Handlers as Streams
   addCard: Stream<{ columnId: string; title: string; description?: string }>;
   removeCard: Stream<{ columnId: string; cardId: string }>;
-  moveCard: Stream<{ cardId: string; fromColumnId: string; toColumnId: string }>;
+  moveCard: Stream<
+    { cardId: string; fromColumnId: string; toColumnId: string }
+  >;
   addColumn: Stream<{ title: string }>;
   removeColumn: Stream<{ columnId: string }>;
 }
@@ -76,7 +87,7 @@ const addCardHandler = handler<
   columns.set(
     cols.map((col, i) =>
       i === colIndex ? { ...col, cards: [...col.cards, newCard] } : col
-    )
+    ),
   );
 });
 
@@ -93,7 +104,7 @@ const removeCardHandler = handler<
       i === colIndex
         ? { ...col, cards: col.cards.filter((card) => card.id !== cardId) }
         : col
-    )
+    ),
   );
 });
 
@@ -120,7 +131,7 @@ const moveCardHandler = handler<
         return { ...col, cards: [...col.cards, card] };
       }
       return col;
-    })
+    }),
   );
 });
 
@@ -189,11 +200,6 @@ export default pattern<State>(({ columns }) => {
 
   // Column count
   const columnCount = computed(() => columns.get().length);
-
-  // Get other columns (for move dropdown)
-  const getOtherColumns = (currentColumnId: string) => {
-    return columns.get().filter((c) => c.id !== currentColumnId);
-  };
 
   // ============ UI ============
 
@@ -280,8 +286,16 @@ export default pattern<State>(({ columns }) => {
                   borderBottom: "2px solid #ddd",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                  <h3 style={{ margin: 0, fontSize: "1rem" }}>{column.title}</h3>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.5rem",
+                  }}
+                >
+                  <h3 style={{ margin: 0, fontSize: "1rem" }}>
+                    {column.title}
+                  </h3>
                   <span
                     style={{
                       background: "#ddd",
@@ -298,7 +312,7 @@ export default pattern<State>(({ columns }) => {
                   style="padding: 2px 6px; font-size: 0.8rem;"
                   onClick={() => {
                     const cols = columns.get();
-                    const index = cols.findIndex((c) => Cell.equals(c, column));
+                    const index = cols.findIndex((c) => c.id === column.id);
                     if (index >= 0) {
                       columns.set(cols.toSpliced(index, 1));
                     }
@@ -335,14 +349,16 @@ export default pattern<State>(({ columns }) => {
                         alignItems: "flex-start",
                       }}
                     >
-                      <div style={{ fontWeight: "500", flex: 1 }}>{card.title}</div>
+                      <div style={{ fontWeight: "500", flex: 1 }}>
+                        {card.title}
+                      </div>
                       <ct-button
                         variant="ghost"
                         style="padding: 0 4px; font-size: 0.75rem; min-width: auto; opacity: 0.5;"
                         onClick={() => {
                           const cols = columns.get();
                           const colIndex = cols.findIndex((c) =>
-                            Cell.equals(c, column)
+                            c.id === column.id
                           );
                           if (colIndex >= 0) {
                             columns.set(
@@ -355,7 +371,7 @@ export default pattern<State>(({ columns }) => {
                                     ),
                                   }
                                   : col
-                              )
+                              ),
                             );
                           }
                         }}
@@ -392,12 +408,12 @@ export default pattern<State>(({ columns }) => {
                         onClick={() => {
                           const cols = columns.get();
                           const fromIndex = cols.findIndex((c) =>
-                            Cell.equals(c, column)
+                            c.id === column.id
                           );
                           const toIndex = fromIndex - 1;
                           if (fromIndex > 0 && toIndex >= 0) {
                             const cardData = cols[fromIndex].cards.find(
-                              (c) => c.id === card.id
+                              (c) => c.id === card.id,
                             );
                             if (cardData) {
                               columns.set(
@@ -406,7 +422,7 @@ export default pattern<State>(({ columns }) => {
                                     return {
                                       ...col,
                                       cards: col.cards.filter(
-                                        (c) => c.id !== card.id
+                                        (c) => c.id !== card.id,
                                       ),
                                     };
                                   }
@@ -417,7 +433,7 @@ export default pattern<State>(({ columns }) => {
                                     };
                                   }
                                   return col;
-                                })
+                                }),
                               );
                             }
                           }
@@ -431,12 +447,12 @@ export default pattern<State>(({ columns }) => {
                         onClick={() => {
                           const cols = columns.get();
                           const fromIndex = cols.findIndex((c) =>
-                            Cell.equals(c, column)
+                            c.id === column.id
                           );
                           const toIndex = fromIndex + 1;
                           if (fromIndex >= 0 && toIndex < cols.length) {
                             const cardData = cols[fromIndex].cards.find(
-                              (c) => c.id === card.id
+                              (c) => c.id === card.id,
                             );
                             if (cardData) {
                               columns.set(
@@ -445,7 +461,7 @@ export default pattern<State>(({ columns }) => {
                                     return {
                                       ...col,
                                       cards: col.cards.filter(
-                                        (c) => c.id !== card.id
+                                        (c) => c.id !== card.id,
                                       ),
                                     };
                                   }
@@ -456,7 +472,7 @@ export default pattern<State>(({ columns }) => {
                                     };
                                   }
                                   return col;
-                                })
+                                }),
                               );
                             }
                           }
@@ -506,7 +522,7 @@ export default pattern<State>(({ columns }) => {
                           i === colIndex
                             ? { ...col, cards: [...col.cards, newCard] }
                             : col
-                        )
+                        ),
                       );
                     }
                   }
