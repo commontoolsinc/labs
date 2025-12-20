@@ -262,59 +262,52 @@ const applySelected = handler<
   let current: SubCharmEntry[] = [...(parentSubCharms.get() || [])];
   const selected = selections.get() || {};
 
-  // First pass: identify which modules need to be created
-  const modulesToCreate = new Set<string>();
+  // Group fields by target module
+  const fieldsByModule: Record<string, ExtractedField[]> = {};
   for (const field of preview.fields) {
     const fieldKey = `${field.targetModule}.${field.fieldName}`;
     if (selected[fieldKey] === false) continue;
 
-    const exists = current.some((e) => e?.type === field.targetModule);
-    if (!exists && field.targetModule !== "notes") {
+    if (!fieldsByModule[field.targetModule]) {
+      fieldsByModule[field.targetModule] = [];
+    }
+    fieldsByModule[field.targetModule].push(field);
+  }
+
+  // Process each module type
+  for (const [moduleType, fields] of Object.entries(fieldsByModule)) {
+    const existingIndex = current.findIndex((e) => e?.type === moduleType);
+
+    if (existingIndex >= 0) {
+      // Module exists - use Cell navigation to update fields
+      for (const field of fields) {
+        try {
+          (parentSubCharms as any).key(existingIndex).key("charm").key(field.fieldName).set(field.extractedValue);
+        } catch (e) {
+          console.warn(`Failed to set ${moduleType}.${field.fieldName}:`, e);
+        }
+      }
+    } else if (moduleType !== "notes") {
+      // Module doesn't exist - create it with initial values
       // Notes module is special (needs linkPattern), skip auto-creation
-      modulesToCreate.add(field.targetModule);
-    }
-  }
-
-  // Create missing modules
-  for (const moduleType of modulesToCreate) {
-    try {
-      const newCharm = createSubCharm(moduleType);
-      const newEntry: SubCharmEntry = {
-        type: moduleType,
-        pinned: false,
-        charm: newCharm,
-      };
-      current = [...current, newEntry];
-      parentSubCharms.set(current);
-    } catch (e) {
-      console.warn(`Failed to create module ${moduleType}:`, e);
-    }
-  }
-
-  // Re-read current after potential additions
-  current = [...(parentSubCharms.get() || [])];
-
-  // Apply each selected field
-  // Use parentSubCharms.key(index).key("charm").key(fieldName).set(value) pattern
-  // This is the same pattern used in chatbot-note-composed.tsx for editing sub-charm fields
-  for (const field of preview.fields) {
-    const fieldKey = `${field.targetModule}.${field.fieldName}`;
-    // Default to selected (true) unless explicitly unchecked
-    if (selected[fieldKey] === false) continue;
-
-    // Find the index of the entry with matching type
-    const entryIndex = current.findIndex((e) => e?.type === field.targetModule);
-    if (entryIndex < 0) {
-      console.warn(`Module ${field.targetModule} not found, skipping field ${field.fieldName}`);
-      continue;
-    }
-
-    try {
-      // Navigate through the Cell hierarchy: subCharms[index].charm.fieldName
-      // This gives us write access to the underlying Cell
-      (parentSubCharms as any).key(entryIndex).key("charm").key(field.fieldName).set(field.extractedValue);
-    } catch (e) {
-      console.warn(`Failed to set ${field.targetModule}.${field.fieldName}:`, e);
+      try {
+        // Build initial values object from extracted fields
+        const initialValues: Record<string, unknown> = {};
+        for (const field of fields) {
+          initialValues[field.fieldName] = field.extractedValue;
+        }
+        // Create module with initial values passed to the recipe
+        const newCharm = createSubCharm(moduleType, initialValues);
+        const newEntry: SubCharmEntry = {
+          type: moduleType,
+          pinned: false,
+          charm: newCharm,
+        };
+        current = [...current, newEntry];
+        parentSubCharms.set(current);
+      } catch (e) {
+        console.warn(`Failed to create module ${moduleType}:`, e);
+      }
     }
   }
 

@@ -52,13 +52,14 @@ import type { ModuleMetadata } from "../container-protocol.ts";
 // and because it needs ContainerCoordinationContext
 
 // Type for pattern constructors - returns unknown since we store heterogeneous charm types
-type PatternConstructor = () => unknown;
+// Now accepts optional initial values
+type PatternConstructor = (initialValues?: Record<string, unknown>) => unknown;
 
 export interface SubCharmDefinition {
   type: SubCharmType;
   label: string;
   icon: string;
-  // Pattern constructor for creating instances
+  // Pattern constructor for creating instances (can accept initial values)
   createInstance: PatternConstructor;
   // Internal modules don't appear in "Add" dropdown (e.g., type-picker)
   internal?: boolean;
@@ -68,15 +69,18 @@ export interface SubCharmDefinition {
 }
 
 // Helper to create SubCharmDefinition from ModuleMetadata
+// The moduleFactory is the actual recipe function that accepts input
 function fromMetadata(
   meta: ModuleMetadata,
-  createInstance: PatternConstructor,
+  moduleFactory: (input: Record<string, unknown>) => unknown,
 ): SubCharmDefinition {
   return {
     type: meta.type as SubCharmType,
     label: meta.label,
     icon: meta.icon,
-    createInstance,
+    // createInstance now accepts optional initial values
+    createInstance: (initialValues?: Record<string, unknown>) =>
+      moduleFactory(initialValues || {}),
     internal: meta.internal,
     schema: meta.schema,
     fieldMapping: meta.fieldMapping,
@@ -103,25 +107,26 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
   },
 
   // Data modules - imported from peer patterns
-  birthday: fromMetadata(BirthdayMeta, () => BirthdayModule({} as any)),
-  rating: fromMetadata(RatingMeta, () => RatingModule({} as any)),
-  tags: fromMetadata(TagsMeta, () => TagsModule({} as any)),
-  contact: fromMetadata(ContactMeta, () => ContactModule({} as any)),
-  status: fromMetadata(StatusMeta, () => StatusModule({} as any)),
-  address: fromMetadata(AddressMeta, () => AddressModule({} as any)),
-  timeline: fromMetadata(TimelineMeta, () => TimelineModule({} as any)),
-  social: fromMetadata(SocialMeta, () => SocialModule({} as any)),
-  link: fromMetadata(LinkMeta, () => LinkModule({} as any)),
-  location: fromMetadata(LocationMeta, () => LocationModule({} as any)),
+  // Each module factory receives initial values when createInstance is called
+  birthday: fromMetadata(BirthdayMeta, (init) => BirthdayModule(init as any)),
+  rating: fromMetadata(RatingMeta, (init) => RatingModule(init as any)),
+  tags: fromMetadata(TagsMeta, (init) => TagsModule(init as any)),
+  contact: fromMetadata(ContactMeta, (init) => ContactModule(init as any)),
+  status: fromMetadata(StatusMeta, (init) => StatusModule(init as any)),
+  address: fromMetadata(AddressMeta, (init) => AddressModule(init as any)),
+  timeline: fromMetadata(TimelineMeta, (init) => TimelineModule(init as any)),
+  social: fromMetadata(SocialMeta, (init) => SocialModule(init as any)),
+  link: fromMetadata(LinkMeta, (init) => LinkModule(init as any)),
+  location: fromMetadata(LocationMeta, (init) => LocationModule(init as any)),
   relationship: fromMetadata(
     RelationshipMeta,
-    () => RelationshipModule({} as any),
+    (init) => RelationshipModule(init as any),
   ),
-  giftprefs: fromMetadata(GiftPrefsMeta, () => GiftPrefsModule({} as any)),
-  timing: fromMetadata(TimingMeta, () => TimingModule({} as any)),
+  giftprefs: fromMetadata(GiftPrefsMeta, (init) => GiftPrefsModule(init as any)),
+  timing: fromMetadata(TimingMeta, (init) => TimingModule(init as any)),
   "age-category": fromMetadata(
     AgeCategoryMeta,
-    () => AgeCategoryModule({} as any),
+    (init) => AgeCategoryModule(init as any),
   ),
 
   // Controller modules - TypePicker needs special handling in record.tsx
@@ -166,13 +171,16 @@ export function getDefinition(
   return SUB_CHARM_REGISTRY[type];
 }
 
-// Create a new sub-charm instance by type
-export function createSubCharm(type: string): unknown {
+// Create a new sub-charm instance by type, optionally with initial values
+export function createSubCharm(
+  type: string,
+  initialValues?: Record<string, unknown>,
+): unknown {
   const def = SUB_CHARM_REGISTRY[type];
   if (!def) {
     throw new Error(`Unknown sub-charm type: ${type}`);
   }
-  return def.createInstance();
+  return def.createInstance(initialValues);
 }
 
 // Phase 2: Build combined extraction schema
