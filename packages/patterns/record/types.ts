@@ -39,7 +39,7 @@ export type SubCharmType =
   | "giftprefs"
   | "timing"
   | "age-category"
-  | "allergies"
+  | "dietary-restrictions"
   // Controller modules (internal, not user-addable)
   | "type-picker"
   | "extractor";
