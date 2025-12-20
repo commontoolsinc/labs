@@ -6,109 +6,46 @@
  * like Record. Provides two-tier categorization: Adult/Child with optional
  * specific subcategories (Senior, Young Adult, Teenager, etc.).
  *
- * Design decisions:
- * - Main toggle: Adult vs Child (simple binary for most use cases)
- * - Optional subcategory for more granular classification
- *
- * ## Future: Birthday Integration Architecture
- *
- * This module is designed to support future integration with the Birthday
- * module for automatic age category suggestions. The architecture pattern
- * can be reused by other modules that need sibling data access.
- *
- * ### Proposed Architecture: SiblingObserverContext
- *
- * Extend ContainerCoordinationContext with sibling discovery:
- *
- * ```typescript
- * interface SiblingObserverContext extends ContainerCoordinationContext {
- *   // Find sibling by type and get read-only access to its data
- *   observeSibling<T>(type: string): T | null;
- * }
- * ```
- *
- * ### Usage in Age Category:
- *
- * ```typescript
- * interface AgeCategoryWithContext extends AgeCategoryModuleInput {
- *   context?: SiblingObserverContext;
- * }
- *
- * // In pattern body:
- * const birthdayData = context?.observeSibling<BirthdayModuleInput>('birthday');
- *
- * const suggestedCategory = computed(() => {
- *   if (!birthdayData?.birthYear) return null;
- *   const age = calculateAgeFromYear(birthdayData.birthYear);
- *   return inferCategoryFromAge(age);
- * });
- *
- * // Show suggestion UI when available
- * {suggestedCategory && (
- *   <button onClick={applySuggestion}>
- *     Suggest: {suggestedCategory.subCategory} (age {age})
- *   </button>
- * )}
- * ```
- *
- * ### Other Modules That Could Use This Pattern:
- *
- * - Gift Preferences could observe Relationship for "closeness" hints
- * - Timeline could observe Birthday for age-based milestones
- * - Status could observe Timing for deadline-based status changes
- *
- * See: container-protocol.ts for protocol definitions
+ * Design: Single enum prevents invalid states (e.g., adult + baby subcategory).
  */
 import {
   Cell,
   computed,
   type Default,
   handler,
-  ifElse,
   NAME,
   recipe,
   UI,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
-// ===== Self-Describing Metadata =====
-export const MODULE_METADATA: ModuleMetadata = {
-  type: "age-category",
-  label: "Age Category",
-  icon: "\u{1F464}", // bust silhouette emoji 👤
-  schema: {
-    isAdult: {
-      type: "boolean",
-      description: "True for adult, false for child/minor",
-    },
-    subCategory: {
-      type: "string",
-      enum: [
-        "",
-        "senior",
-        "adult",
-        "young-adult",
-        "teenager",
-        "school-age",
-        "toddler",
-        "baby",
-      ],
-      description: "Specific age subcategory",
-    },
-  },
-  fieldMapping: ["isAdult", "subCategory"],
-};
-
 // ===== Types =====
 
 /**
- * Subcategory definitions with age ranges and parent mapping.
- * This enables future birthday-based auto-suggestion.
+ * Single enum for age categories - invalid states are impossible by construction.
+ * "adult" and "child" are general categories without specific subcategory.
  */
-export const AGE_SUBCATEGORIES = {
+export type AgeCategory =
+  | "adult"
+  | "child" // General categories
+  | "senior"
+  | "adult-specific"
+  | "young-adult" // Adult subcategories
+  | "teenager"
+  | "school-age"
+  | "toddler"
+  | "baby"; // Child subcategories
+
+/**
+ * Category metadata with age ranges for inference and display.
+ */
+export const AGE_CATEGORY_INFO = {
+  // General categories
+  adult: { label: "Adult (general)", ageMin: 18, ageMax: 150, isAdult: true },
+  child: { label: "Child (general)", ageMin: 0, ageMax: 17, isAdult: false },
   // Adult subcategories
   senior: { label: "Senior", ageMin: 65, ageMax: 150, isAdult: true },
-  adult: { label: "Adult", ageMin: 26, ageMax: 64, isAdult: true },
+  "adult-specific": { label: "Adult", ageMin: 26, ageMax: 64, isAdult: true },
   "young-adult": {
     label: "Young Adult",
     ageMin: 18,
@@ -119,27 +56,56 @@ export const AGE_SUBCATEGORIES = {
   teenager: { label: "Teenager", ageMin: 13, ageMax: 17, isAdult: false },
   "school-age": { label: "School-age", ageMin: 5, ageMax: 12, isAdult: false },
   toddler: { label: "Toddler", ageMin: 1, ageMax: 4, isAdult: false },
-  baby: { label: "Baby", ageMin: 0, ageMax: 0, isAdult: false },
+  baby: { label: "Baby", ageMin: 0, ageMax: 1, isAdult: false },
 } as const;
 
-export type SubCategory = keyof typeof AGE_SUBCATEGORIES | "";
+/**
+ * Helper to determine if a category belongs to the Adult group.
+ */
+export const isAdultCategory = (cat: AgeCategory): boolean =>
+  AGE_CATEGORY_INFO[cat]?.isAdult ?? true;
 
+// ===== Self-Describing Metadata =====
+export const MODULE_METADATA: ModuleMetadata = {
+  type: "age-category",
+  label: "Age Category",
+  icon: "\u{1F464}", // bust silhouette emoji
+  schema: {
+    ageCategory: {
+      type: "string",
+      enum: [
+        "adult",
+        "child",
+        "senior",
+        "adult-specific",
+        "young-adult",
+        "teenager",
+        "school-age",
+        "toddler",
+        "baby",
+      ],
+      description: "Age category",
+    },
+  },
+  fieldMapping: ["ageCategory"],
+};
+
+// ===== Interface =====
 export interface AgeCategoryModuleInput {
-  isAdult: Default<boolean, true>; // Default to adult
-  subCategory: Default<SubCategory, "">;
+  ageCategory: Default<AgeCategory, "adult">;
 }
 
 // ===== Constants =====
 
-const ADULT_SUBCATEGORY_OPTIONS = [
-  { value: "", label: "Adult (general)" },
+const ADULT_CATEGORY_OPTIONS = [
+  { value: "adult", label: "Adult (general)" },
   { value: "senior", label: "Senior (65+)" },
-  { value: "adult", label: "Adult (26-64)" },
+  { value: "adult-specific", label: "Adult (26-64)" },
   { value: "young-adult", label: "Young Adult (18-25)" },
 ];
 
-const CHILD_SUBCATEGORY_OPTIONS = [
-  { value: "", label: "Child (general)" },
+const CHILD_CATEGORY_OPTIONS = [
+  { value: "child", label: "Child (general)" },
   { value: "teenager", label: "Teenager (13-17)" },
   { value: "school-age", label: "School-age (5-12)" },
   { value: "toddler", label: "Toddler (1-4)" },
@@ -151,10 +117,6 @@ const CHILD_SUBCATEGORY_OPTIONS = [
 /**
  * Calculate current age from birth year and optional birth date.
  * Handles MM-DD and YYYY-MM-DD formats.
- *
- * @param birthYear - The birth year (required for age calculation)
- * @param birthDate - Optional date string in MM-DD or YYYY-MM-DD format
- * @returns Current age in years, or null if birthYear is not provided
  */
 export function calculateAge(
   birthYear: number | null,
@@ -187,144 +149,126 @@ export function calculateAge(
 
 /**
  * Infer age category from a given age.
- * Useful for future birthday integration.
  */
-export function inferCategoryFromAge(age: number): {
-  isAdult: boolean;
-  subCategory: SubCategory;
-} {
-  for (
-    const [key, def] of Object.entries(AGE_SUBCATEGORIES) as [
-      SubCategory,
-      (typeof AGE_SUBCATEGORIES)[keyof typeof AGE_SUBCATEGORIES],
-    ][]
-  ) {
-    if (age >= def.ageMin && age <= def.ageMax) {
-      return { isAdult: def.isAdult, subCategory: key };
-    }
-  }
-  // Fallback for edge cases
-  return age >= 18
-    ? { isAdult: true, subCategory: "adult" }
-    : { isAdult: false, subCategory: "school-age" };
+export function inferCategoryFromAge(age: number): AgeCategory {
+  if (age >= 65) return "senior";
+  if (age >= 26) return "adult-specific";
+  if (age >= 18) return "young-adult";
+  if (age >= 13) return "teenager";
+  if (age >= 5) return "school-age";
+  if (age >= 1) return "toddler";
+  return "baby";
 }
 
 // ===== Handlers =====
 
-// Toggle between Adult and Child, clearing subcategory when switching
-const toggleIsAdult = handler<
+// Set age group (Adult or Child), only changes if switching groups
+const setAgeGroup = handler<
   unknown,
-  { isAdult: Cell<boolean>; subCategory: Cell<SubCategory> }
->((_event, { isAdult, subCategory }) => {
-  const newValue = !isAdult.get();
-  isAdult.set(newValue);
-  // Clear subcategory when main category changes (subcategory may not be valid)
-  subCategory.set("");
+  { ageCategory: Cell<AgeCategory>; toAdult: boolean }
+>((_event, { ageCategory, toAdult }) => {
+  const current = ageCategory.get();
+  const currentIsAdult = isAdultCategory(current);
+
+  // Only change if switching groups
+  if (currentIsAdult !== toAdult) {
+    ageCategory.set(toAdult ? "adult" : "child");
+  }
 });
 
 // ===== The Pattern =====
 export const AgeCategoryModule = recipe<
   AgeCategoryModuleInput,
   AgeCategoryModuleInput
->(
-  "AgeCategoryModule",
-  ({ isAdult, subCategory }) => {
-    // Compute display text for NAME
-    const displayText = computed(() => {
-      const adult = isAdult;
-      const sub = subCategory;
+>("AgeCategoryModule", ({ ageCategory }) => {
+  // Compute whether current category is in Adult group
+  const currentIsAdult = computed(() => isAdultCategory(ageCategory));
 
-      if (sub && AGE_SUBCATEGORIES[sub as keyof typeof AGE_SUBCATEGORIES]) {
-        return AGE_SUBCATEGORIES[sub as keyof typeof AGE_SUBCATEGORIES].label;
-      }
-      return adult ? "Adult" : "Child";
-    });
+  // Compute display text for NAME
+  const displayText = computed(() => {
+    const cat = ageCategory as AgeCategory;
+    const info = AGE_CATEGORY_INFO[cat];
+    return info?.label || "Adult";
+  });
 
-    // Get current subcategory options based on main category
-    const subcategoryOptions = computed(() =>
-      isAdult ? ADULT_SUBCATEGORY_OPTIONS : CHILD_SUBCATEGORY_OPTIONS
-    );
+  // Get current category options based on group
+  const categoryOptions = computed(() =>
+    currentIsAdult ? ADULT_CATEGORY_OPTIONS : CHILD_CATEGORY_OPTIONS
+  );
 
-    return {
-      [NAME]: computed(() => `${MODULE_METADATA.icon} Age: ${displayText}`),
-      [UI]: (
-        <ct-vstack style={{ gap: "16px" }}>
-          {/* Main category toggle */}
-          <ct-vstack style={{ gap: "8px" }}>
-            <label style={{ fontSize: "12px", color: "#6b7280" }}>
-              Age Group
-            </label>
-            <ct-hstack style={{ gap: "8px" }}>
-              <button
-                type="button"
-                onClick={toggleIsAdult({ isAdult, subCategory })}
-                style={{
-                  flex: "1",
-                  padding: "12px 16px",
-                  borderRadius: "8px",
-                  border: isAdult ? "2px solid #3b82f6" : "1px solid #d1d5db",
-                  background: isAdult ? "#eff6ff" : "white",
-                  color: isAdult ? "#1d4ed8" : "#374151",
-                  cursor: "pointer",
-                  fontSize: "14px",
-                  fontWeight: isAdult ? "600" : "400",
-                }}
-              >
-                Adult (18+)
-              </button>
-              <button
-                type="button"
-                onClick={toggleIsAdult({ isAdult, subCategory })}
-                style={{
-                  flex: "1",
-                  padding: "12px 16px",
-                  borderRadius: "8px",
-                  border: isAdult ? "1px solid #d1d5db" : "2px solid #3b82f6",
-                  background: isAdult ? "white" : "#eff6ff",
-                  color: isAdult ? "#374151" : "#1d4ed8",
-                  cursor: "pointer",
-                  fontSize: "14px",
-                  fontWeight: isAdult ? "400" : "600",
-                }}
-              >
-                Child (0-17)
-              </button>
-            </ct-hstack>
-          </ct-vstack>
-
-          {/* Optional subcategory refinement */}
-          <ct-vstack style={{ gap: "4px" }}>
-            <label style={{ fontSize: "12px", color: "#6b7280" }}>
-              Specific Category (optional)
-            </label>
-            <ct-select
-              $value={subCategory}
-              items={subcategoryOptions}
-            />
-          </ct-vstack>
-
-          {/* Info text showing current selection */}
-          {ifElse(
-            computed(() => !!subCategory),
-            <div
+  return {
+    [NAME]: computed(() => `${MODULE_METADATA.icon} Age: ${displayText}`),
+    [UI]: (
+      <ct-vstack style={{ gap: "16px" }}>
+        {/* Main category toggle */}
+        <ct-vstack style={{ gap: "8px" }}>
+          <label
+            id="age-group-label"
+            style={{ fontSize: "12px", color: "#6b7280" }}
+          >
+            Age Group
+          </label>
+          <ct-hstack
+            role="radiogroup"
+            aria-labelledby="age-group-label"
+            style={{ gap: "8px" }}
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={currentIsAdult}
+              onClick={setAgeGroup({ ageCategory, toAdult: true })}
               style={{
-                padding: "8px 12px",
-                background: "#f9fafb",
-                borderRadius: "6px",
-                fontSize: "13px",
-                color: "#6b7280",
+                flex: "1",
+                padding: "12px 16px",
+                borderRadius: "8px",
+                border: currentIsAdult
+                  ? "2px solid #3b82f6"
+                  : "1px solid #d1d5db",
+                background: currentIsAdult ? "#eff6ff" : "white",
+                color: currentIsAdult ? "#1d4ed8" : "#374151",
+                cursor: "pointer",
+                fontSize: "14px",
+                fontWeight: currentIsAdult ? "600" : "400",
               }}
             >
-              Selected: {displayText}
-            </div>,
-            null,
-          )}
+              Adult (18+)
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={computed(() => !currentIsAdult)}
+              onClick={setAgeGroup({ ageCategory, toAdult: false })}
+              style={{
+                flex: "1",
+                padding: "12px 16px",
+                borderRadius: "8px",
+                border: currentIsAdult
+                  ? "1px solid #d1d5db"
+                  : "2px solid #3b82f6",
+                background: currentIsAdult ? "white" : "#eff6ff",
+                color: currentIsAdult ? "#374151" : "#1d4ed8",
+                cursor: "pointer",
+                fontSize: "14px",
+                fontWeight: currentIsAdult ? "400" : "600",
+              }}
+            >
+              Child (0-17)
+            </button>
+          </ct-hstack>
         </ct-vstack>
-      ),
-      isAdult,
-      subCategory,
-    };
-  },
-);
+
+        {/* Specific category selection */}
+        <ct-vstack style={{ gap: "4px" }}>
+          <label style={{ fontSize: "12px", color: "#6b7280" }}>
+            Specific Category
+          </label>
+          <ct-select $value={ageCategory} items={categoryOptions} />
+        </ct-vstack>
+      </ct-vstack>
+    ),
+    ageCategory,
+  };
+});
 
 export default AgeCategoryModule;
