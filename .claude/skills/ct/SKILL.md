@@ -241,6 +241,17 @@ deno task ct charm setsrc --charm bafy... pattern.tsx -i claude.key -a http://lo
 - **`setsrc`**: Iterating on a single file/charm (same code evolving)
 - **`charm new`**: Deploying separate sub-patterns for independent testing
 
+**All of these happen in the SAME space.** A space holds many charms - think of it as a project workspace.
+
+#### When to Create a New Space
+
+Almost never during pattern development. Use a new space only for:
+- Completely unrelated projects
+- Clean-slate testing (no existing charms/data)
+- Separate production vs development environments
+
+**Common mistake:** Creating a new space when you want a new charm. Instead, use `charm new` in your existing space - both charms will coexist and you can test them independently or link them together.
+
 See the **pattern-dev** skill for guidance on single-file evolution vs pattern composition approaches.
 
 #### Stale Computed Values After `charm set`

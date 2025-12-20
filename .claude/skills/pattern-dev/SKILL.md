@@ -38,28 +38,47 @@ Before starting pattern development:
 
 **What do you want to do?**
 
-→ **Create a new pattern** → Go to "Building a New Pattern"
+→ **Create a new pattern** → Go to "Starting a New Pattern" (decide structure FIRST)
 → **Modify existing pattern** → Go to "Modifying Patterns"
 → **Fix pattern errors** → Go to "Debugging Patterns"
 → **Deploy/link charms** → Use **ct** skill
 → **Understand pattern concepts** → Read `docs/common/PATTERNS.md` and `CELLS_AND_REACTIVITY.md`
 
+## Starting a New Pattern
+
+Before writing any code, decide which approach to use:
+
+**Use Pattern Composition if ANY of these apply:**
+- Multiple data types (e.g., Card + Column, Note + Folder, Expense + Budget)
+- 3+ computed values
+- Distinct UI areas (sidebar + main content, list + editor panel)
+- You want to test data logic separately from UI
+- The pattern was described with a folder structure
+
+**For Composition patterns, create structure FIRST:**
+```bash
+mkdir -p packages/patterns/[name]
+touch packages/patterns/[name]/schemas.tsx
+```
+
+**Define all types in `schemas.tsx` before writing any pattern code.** This file is the anchor - all other files import from it.
+
+For simple single-file patterns (counter, basic list), skip this and go directly to "Building a New Pattern" below.
+
 ## Development Methodology
 
-For non-trivial patterns, follow a layered approach rather than building everything at once. This makes each piece independently testable and isolates bugs to specific layers.
+Follow a layered approach rather than building everything at once. This makes each piece independently testable and isolates bugs to specific layers.
 
 ### Two Development Approaches
 
-Choose based on pattern complexity:
-
-**Approach A: Single-File Evolution** (simple patterns)
+**Approach A: Single-File Evolution** (simple patterns only)
 - One file that evolves through git commits
 - Build incrementally: schemas → computeds → handlers → UI
 - Use `setsrc` to update the same deployed charm
 - Git history provides rollback points
 
-**Approach B: Pattern Composition** (multi-component patterns)
-- Shared schemas in separate file
+**Approach B: Pattern Composition** (use for most real patterns)
+- Shared schemas in `schemas.tsx` (created FIRST)
 - Sub-patterns that can be independently tested
 - Main pattern composes sub-patterns, passing shared cells
 - Use `charm new` to deploy sub-patterns for isolated testing
@@ -151,9 +170,11 @@ export default pattern<Input, Input>(({ items }) => ({
 
 ### For Complex Patterns
 
-Follow the layered methodology:
-1. Create project subfolder: `packages/patterns/[name]/`
-2. Build Layer 1: data + computeds + debug UI
+**You should have already created the folder and `schemas.tsx`** (see "Starting a New Pattern" above).
+
+Then follow the layered methodology:
+1. Define types in `schemas.tsx`
+2. Build Layer 1: data + computeds + debug UI in first pattern file
 3. Deploy, test via CLI
 4. Build Layer 2: handlers, test via CLI
 5. Build Layer 3: production UI
