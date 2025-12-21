@@ -65,6 +65,8 @@ export type SubCharmType =
   | "phone"
   // Icon customization
   | "record-icon"
+  // Collection/group management
+  | "members"
   // Controller modules (internal, not user-addable)
   | "type-picker"
   | "extractor";
