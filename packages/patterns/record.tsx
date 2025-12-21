@@ -648,9 +648,10 @@ const Record = pattern<RecordInput, RecordOutput>(
     return {
       [NAME]: str`${recordIcon} ${displayNameWithAlias}`,
       [UI]: (
-        <ct-vstack style={{ height: "100%", gap: "0" }}>
+        <ct-screen>
           {/* Header toolbar */}
           <ct-hstack
+            slot="header"
             style={{
               padding: "8px 12px",
               gap: "8px",
@@ -680,10 +681,10 @@ const Record = pattern<RecordInput, RecordOutput>(
           </ct-hstack>
 
           {/* Main content area */}
-          <div
+          <ct-vscroll
+            flex
+            snapToBottom
             style={{
-              flex: "1",
-              overflow: "auto",
               padding: "12px",
               background: "#f9fafb",
             }}
@@ -1585,6 +1586,8 @@ const Record = pattern<RecordInput, RecordOutput>(
             null,
           )}
         </ct-vstack>
+          </ct-vscroll>
+        </ct-screen>
       ),
       title,
       subCharms,

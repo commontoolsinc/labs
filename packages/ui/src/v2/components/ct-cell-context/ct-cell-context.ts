@@ -13,6 +13,9 @@ import type { Cell } from "@commontools/runner";
  *
  * @property {Cell} cell - The Cell reference to associate with this context
  * @property {string} label - Optional label for display in the toolbar
+ * @property {boolean} fill - When true, sets height: 100% to fill parent container.
+ *   Use this when ct-cell-context is inside a height-constrained flex/grid layout
+ *   (e.g., inside ct-screen) and you need scroll containment to work properly.
  *
  * @slot - Default slot for wrapped content
  *
@@ -20,6 +23,16 @@ import type { Cell } from "@commontools/runner";
  * <ct-cell-context .cell=${myCell} label="User Data">
  *   <div>Content here</div>
  * </ct-cell-context>
+ *
+ * @example
+ * <!-- For scroll containment inside ct-screen -->
+ * <ct-screen>
+ *   <ct-cell-context fill .cell=${myCell}>
+ *     <ct-vscroll flex snapToBottom>
+ *       <!-- scrollable content -->
+ *     </ct-vscroll>
+ *   </ct-cell-context>
+ * </ct-screen>
  */
 export class CTCellContext extends BaseElement {
   static override styles = [
@@ -30,8 +43,17 @@ export class CTCellContext extends BaseElement {
         position: relative;
       }
 
+      :host([fill]) {
+        height: 100%;
+      }
+
+      :host([fill]) .container {
+        height: 100%;
+      }
+
       :host([inline]) {
         display: inline-block;
+        height: auto;
       }
 
       .container {
@@ -116,6 +138,9 @@ export class CTCellContext extends BaseElement {
 
   @property({ type: Boolean, reflect: true })
   inline?: boolean;
+
+  @property({ type: Boolean, reflect: true })
+  fill?: boolean;
 
   @state()
   private _modifierHeld: boolean = false;
