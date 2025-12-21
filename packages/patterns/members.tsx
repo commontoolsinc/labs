@@ -109,11 +109,21 @@ const removeMember = handler<
 >((event, { members, index, parentRecord }) => {
   event.stopPropagation?.();
 
+  // === PHASE 1: Read current state and prepare updates ===
+
   const current = members.get() || [];
   const entry = current[index];
 
-  // If bidirectional, try to remove reverse link from target
-  if (entry?.bidirectional && isRecord(entry.charm) && parentRecord) {
+  if (!entry) return; // Invalid index
+
+  // Prepare local update
+  const newLocalMembersList = current.toSpliced(index, 1);
+
+  // Prepare reverse link removal (if bidirectional)
+  let targetMembersCell: Cell<MemberEntry[]> | null = null;
+  let newTargetMembersList: MemberEntry[] | null = null;
+
+  if (entry.bidirectional && isRecord(entry.charm) && parentRecord) {
     try {
       const targetCharm = entry.charm as Cell<any>;
       const targetSubCharms = targetCharm.key?.("subCharms")?.get?.() || [];
@@ -122,26 +132,35 @@ const removeMember = handler<
       );
 
       if (targetMembersEntry?.charm) {
-        const targetMembersList =
-          targetMembersEntry.charm.key?.("members")?.get?.() || [];
-        // Find reverse link (this record in target's members) using Cell.equals()
+        targetMembersCell = targetMembersEntry.charm.key("members") as Cell<
+          MemberEntry[]
+        >;
+        const targetMembersList = targetMembersCell.get?.() || [];
+
+        // Find reverse link (this record in target's members)
         const reverseIdx = targetMembersList.findIndex((m: MemberEntry) =>
           Cell.equals(m?.charm as Cell<unknown>, parentRecord as Cell<unknown>)
         );
 
         if (reverseIdx >= 0) {
-          targetMembersEntry.charm.key("members").set(
-            targetMembersList.toSpliced(reverseIdx, 1),
-          );
+          newTargetMembersList = targetMembersList.toSpliced(reverseIdx, 1);
         }
       }
     } catch (e) {
-      console.warn("Could not remove reverse link:", e);
+      console.warn("Could not prepare reverse link removal:", e);
+      // Continue anyway - we'll remove local even if reverse fails
     }
   }
 
-  // Remove from local members
-  members.set(current.toSpliced(index, 1));
+  // === PHASE 2: Commit both updates atomically ===
+
+  // Write local members
+  members.set(newLocalMembersList);
+
+  // Write reverse link removal (if prepared)
+  if (targetMembersCell && newTargetMembersList) {
+    targetMembersCell.set(newTargetMembersList);
+  }
 });
 
 /** Update a member's role */
@@ -256,26 +275,26 @@ const addMember = handler<
     return;
   }
 
-  // Check for duplicates using Cell.equals()
-  const current = members.get() || [];
-  const isDuplicate = current.some((m) =>
+  // === PHASE 1: Read current state and prepare updates ===
+
+  // Read local members
+  const currentMembers = members.get() || [];
+
+  // Atomic duplicate check - if found, bail early
+  const isDuplicate = currentMembers.some((m) =>
     Cell.equals(m.charm as Cell<unknown>, charm as Cell<unknown>)
   );
   if (isDuplicate) return;
 
-  // Determine if bidirectional (both are records)
+  // Determine if bidirectional (both are records with Members modules)
   const targetIsRecord = isRecord(charm);
   const sourceIsRecord = parentRecord ? isRecord(parentRecord) : false;
-  const bidirectional = targetIsRecord && sourceIsRecord;
+  let bidirectional = targetIsRecord && sourceIsRecord;
 
-  // Add to members
-  const newEntry: MemberEntry = {
-    charm,
-    bidirectional,
-  };
-  members.push(newEntry);
+  // Prepare reverse link update (if bidirectional)
+  let targetMembersCell: Cell<MemberEntry[]> | null = null;
+  let newTargetMembersList: MemberEntry[] | null = null;
 
-  // If bidirectional, add reverse link to target's members
   if (bidirectional && parentRecord) {
     try {
       const targetCharm = charm as Cell<any>;
@@ -285,26 +304,57 @@ const addMember = handler<
       );
 
       if (targetMembersEntry?.charm) {
-        const targetMembersCell = targetMembersEntry.charm as Cell<any>;
-        const targetMembersList = targetMembersCell.key?.("members")?.get?.() ||
-          [];
+        targetMembersCell = targetMembersEntry.charm.key("members") as Cell<
+          MemberEntry[]
+        >;
+        const targetMembersList = targetMembersCell.get?.() || [];
 
-        // Check if reverse link already exists using Cell.equals()
+        // Check if reverse link already exists
         const hasReverseLink = targetMembersList.some((m: MemberEntry) =>
           Cell.equals(m?.charm as Cell<unknown>, parentRecord as Cell<unknown>)
         );
 
         if (!hasReverseLink) {
-          // Add reverse link
-          targetMembersCell.key("members").push({
-            charm: parentRecord,
-            bidirectional: true,
-          });
+          // Prepare the new target members array
+          newTargetMembersList = [
+            ...targetMembersList,
+            { charm: parentRecord, bidirectional: true },
+          ];
         }
+      } else {
+        // Target has no Members module - can't be bidirectional
+        bidirectional = false;
       }
     } catch (e) {
-      console.warn("Could not add reverse link:", e);
+      // Target doesn't support members - mark as non-bidirectional
+      bidirectional = false;
+      console.warn("Target doesn't support bidirectional linking:", e);
     }
+  }
+
+  // Prepare local update
+  const newEntry: MemberEntry = {
+    charm,
+    bidirectional,
+  };
+  const newLocalMembersList = [...currentMembers, newEntry];
+
+  // === PHASE 2: Commit both updates atomically ===
+  // Both writes happen in the same transaction context.
+  // If either fails, the transaction will roll back both.
+
+  try {
+    // Write local members
+    members.set(newLocalMembersList);
+
+    // Write reverse link (if prepared)
+    if (targetMembersCell && newTargetMembersList) {
+      targetMembersCell.set(newTargetMembersList);
+    }
+  } catch (e) {
+    // Transaction failed - both writes are rolled back
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    errorMessage.set(`Failed to add member: ${msg}`);
   }
 });
 
