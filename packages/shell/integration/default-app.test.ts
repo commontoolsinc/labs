@@ -60,7 +60,7 @@ describe("default-app loading tests", () => {
           .catch(() => null);
         return button !== null;
       },
-      { timeout: 60000, interval: 1000 },
+      { timeout: 60000, delay: 1000 },
     );
 
     const noteButton = await page.waitForSelector(
@@ -110,7 +110,7 @@ describe("default-app loading tests", () => {
           .catch(() => null);
         return button !== null;
       },
-      { timeout: 60000, interval: 1000 },
+      { timeout: 60000, delay: 1000 },
     );
 
     const recordButton = await page.waitForSelector(
