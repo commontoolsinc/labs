@@ -841,6 +841,117 @@ interface TypePickerInput {
 }
 ```
 
+## `age-category.tsx`
+
+Age categorization with two-tier selection: Adult/Child groups with specific
+subcategories (Senior, Young Adult, Teenager, etc.).
+
+**Keywords:** age, category, adult, child, record-module
+
+### Schema
+
+```ts
+type AgeCategory =
+  | "adult"
+  | "child"
+  | "senior"
+  | "adult-specific"
+  | "young-adult"
+  | "teenager"
+  | "school-age"
+  | "toddler"
+  | "baby";
+
+interface AgeCategoryModuleInput {
+  ageCategory: Default<AgeCategory, "adult">;
+}
+```
+
+## `dietary-restrictions.tsx`
+
+Comprehensive dietary restriction tracking with severity levels. Handles
+allergies, intolerances, and lifestyle diets (vegetarian, vegan, halal, kosher,
+keto, etc.) with automatic expansion of diet groups to specific food items.
+
+**Keywords:** dietary, allergies, diet, vegan, vegetarian, record-module
+
+### Schema
+
+```ts
+type RestrictionLevel = "flexible" | "prefer" | "strict" | "absolute";
+
+interface RestrictionEntry {
+  name: string;
+  level: RestrictionLevel;
+}
+
+interface DietaryRestrictionsInput {
+  restrictions: Default<RestrictionEntry[], []>;
+}
+```
+
+## `email.tsx`
+
+Email address with customizable label. Supports multiple instances per Record
+with smart default labels (Personal, Work, School, Other).
+
+**Keywords:** email, contact, record-module, multi-instance
+
+### Schema
+
+```ts
+interface EmailModuleInput {
+  label: Default<string, "Personal">;
+  address: Default<string, "">;
+}
+```
+
+## `phone.tsx`
+
+Phone number with customizable label. Supports multiple instances per Record
+with smart default labels (Mobile, Home, Work, Other).
+
+**Keywords:** phone, contact, record-module, multi-instance
+
+### Schema
+
+```ts
+interface PhoneModuleInput {
+  label: Default<string, "Mobile">;
+  number: Default<string, "">;
+}
+```
+
+---
+
+# Utility Patterns
+
+## `record-backup.tsx`
+
+Import/export utility for Records. Exports all Records in a space to JSON and
+imports them back. Designed for data survival after server wipes.
+
+**Keywords:** backup, export, import, records, data-migration
+
+### Input Schema
+
+```ts
+interface Input {
+  importJson: Default<string, "">;
+}
+```
+
+### Output Schema
+
+```ts
+interface Output {
+  exportedJson: string;
+  importJson: string;
+  recordCount: number;
+  importResult: ImportResult | null;
+}
+```
+
 ---
 
 # Protocol Types
