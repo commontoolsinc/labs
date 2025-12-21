@@ -152,15 +152,15 @@ const navigateToMember = handler<
 /** Remove a member by index with reverse link cleanup */
 const removeMember = handler<
   Event,
-  { members: Cell<MemberEntry[]>; index: number }
->((event, { members, index }) => {
+  { members: Cell<MemberEntry[]>; index: number; parentRecord: unknown }
+>((event, { members, index, parentRecord }) => {
   event.stopPropagation?.();
 
   const current = members.get() || [];
   const entry = current[index];
 
   // If bidirectional, try to remove reverse link from target
-  if (entry?.bidirectional && isRecord(entry.charm)) {
+  if (entry?.bidirectional && isRecord(entry.charm) && parentRecord) {
     try {
       const targetCharm = entry.charm as Cell<any>;
       const targetSubCharms = targetCharm.key?.("subCharms")?.get?.() || [];
@@ -170,12 +170,10 @@ const removeMember = handler<
 
       if (targetMembersEntry?.charm) {
         const targetMembersList = targetMembersEntry.charm.key?.("members")?.get?.() || [];
-        // Find reverse link (this record in target's members)
-        const reverseIdx = targetMembersList.findIndex((m: MemberEntry) => {
-          // Compare by reference or entity ID
-          return m?.charm === members ||
-                 (m?.charm as any)?.["/"] === (members as any)?.["/"];
-        });
+        // Find reverse link (this record in target's members) using Cell.equals()
+        const reverseIdx = targetMembersList.findIndex((m: MemberEntry) =>
+          Cell.equals(m?.charm as Cell<unknown>, parentRecord as Cell<unknown>)
+        );
 
         if (reverseIdx >= 0) {
           targetMembersEntry.charm.key("members").set(
@@ -244,17 +242,13 @@ const addMember = handler<
       tx.commit();
 
       // Add the new charm to members list
+      // Note: bidirectional=false because new records don't have a Members module yet.
+      // When the user adds a Members module to the new record, they can add the reverse link.
       const newEntry: MemberEntry = {
         charm: result,
-        bidirectional: true, // New records always have bidirectional links
+        bidirectional: false,
       };
       members.push(newEntry);
-
-      // Add reverse link to the new record's members module
-      // (will be created automatically by the Record pattern)
-      // Note: The new record's members module won't exist until it's rendered,
-      // so we can't add reverse link immediately. Log for now.
-      console.log("Created new record:", value, "- reverse link pending");
     } catch (error) {
       console.error("Error creating new record:", error);
     }
@@ -269,10 +263,10 @@ const addMember = handler<
     return;
   }
 
-  // Check for duplicates
+  // Check for duplicates using Cell.equals()
   const current = members.get() || [];
   const isDuplicate = current.some((m) =>
-    m.charm === charm || (m.charm as any)?.["/"] === (charm as any)?.["/"]
+    Cell.equals(m.charm as Cell<unknown>, charm as Cell<unknown>)
   );
   if (isDuplicate) return;
 
@@ -301,10 +295,9 @@ const addMember = handler<
         const targetMembersCell = targetMembersEntry.charm as Cell<any>;
         const targetMembersList = targetMembersCell.key?.("members")?.get?.() || [];
 
-        // Check if reverse link already exists
+        // Check if reverse link already exists using Cell.equals()
         const hasReverseLink = targetMembersList.some((m: MemberEntry) =>
-          m?.charm === parentRecord ||
-          (m?.charm as any)?.["/"] === (parentRecord as any)?.["/"]
+          Cell.equals(m?.charm as Cell<unknown>, parentRecord as Cell<unknown>)
         );
 
         if (!hasReverseLink) {
@@ -313,10 +306,7 @@ const addMember = handler<
             charm: parentRecord,
             bidirectional: true,
           });
-          console.log("Added reverse link to target's members");
         }
-      } else {
-        console.log("Target has no Members module - skipping reverse link");
       }
     } catch (e) {
       console.warn("Could not add reverse link:", e);
@@ -518,7 +508,7 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                   )}
                   <button
                     type="button"
-                    onClick={removeMember({ members, index })}
+                    onClick={removeMember({ members, index, parentRecord })}
                     style={{
                       background: "none",
                       border: "none",
