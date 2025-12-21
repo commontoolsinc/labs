@@ -683,22 +683,6 @@ interface TagsModuleInput {
 }
 ```
 
-## `contact-info.tsx`
-
-Contact information (email, phone, website).
-
-**Keywords:** contact, email, phone, record-module
-
-### Schema
-
-```ts
-interface ContactModuleInput {
-  email: Default<string, "">;
-  phone: Default<string, "">;
-  website: Default<string, "">;
-}
-```
-
 ## `status.tsx`
 
 Status tracking with customizable options (active, inactive, pending, etc.).
