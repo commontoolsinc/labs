@@ -163,18 +163,6 @@ const removeMember = handler<
   }
 });
 
-/** Update a member's role */
-const updateRole = handler<
-  Event,
-  { members: Cell<MemberEntry[]>; index: number; newRole: string }
->((_event, { members, index, newRole }) => {
-  const current = members.get() || [];
-  if (index < 0 || index >= current.length) return;
-  const updated = [...current];
-  updated[index] = { ...updated[index], role: newRole || undefined };
-  members.set(updated);
-});
-
 /** Start editing a role (click handler that stops propagation) */
 const startEditRole = handler<
   Event,
@@ -193,6 +181,36 @@ const startEditRole = handler<
 /** Stop event propagation for role input clicks */
 const stopPropagationOnly = handler<Event, Record<string, never>>((event) => {
   event.stopPropagation?.();
+});
+
+/** Confirm role edit - saves the role and closes edit mode */
+const confirmRoleEdit = handler<
+  Event,
+  {
+    members: Cell<MemberEntry[]>;
+    index: number;
+    roleInputValue: Cell<string>;
+    editingRoleIndex: Cell<number | null>;
+  }
+>((event, { members, index, roleInputValue, editingRoleIndex }) => {
+  event.stopPropagation?.();
+  const newRole = roleInputValue.get();
+  const current = members.get() || [];
+  if (index >= 0 && index < current.length) {
+    const updated = [...current];
+    updated[index] = { ...updated[index], role: newRole || undefined };
+    members.set(updated);
+  }
+  editingRoleIndex.set(null);
+});
+
+/** Cancel role edit - just closes edit mode */
+const cancelRoleEdit = handler<
+  Event,
+  { editingRoleIndex: Cell<number | null> }
+>((event, { editingRoleIndex }) => {
+  event.stopPropagation?.();
+  editingRoleIndex.set(null);
 });
 
 /** Add a member from autocomplete selection */
@@ -372,7 +390,7 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
     const mentionable = wish<Default<MentionableCharm[], []>>("#mentionable");
 
     // Derive parent ID from parentSubCharms Cell for self-filtering
-    // This is O(1) - no search through mentionable needed
+    // Used by autocomplete to exclude self from search results
     const parentId = computed(() => {
       if (!parentSubCharms) return null;
       // Use parentSubCharms Cell's entity ID as proxy for parent record ID
@@ -576,7 +594,6 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
               return (
                 <span
                   key={index}
-                  onClick={navigateToMember({ charm: entry.charm })}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
@@ -585,14 +602,18 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                     borderRadius: "16px",
                     padding: "4px 12px",
                     fontSize: "14px",
-                    cursor: "pointer",
                     border: charmIsRecord
                       ? "1px solid #93c5fd"
                       : "1px solid #d1d5db",
                   }}
                 >
                   <span style={{ fontSize: "12px" }}>{icon}</span>
-                  <span>{memberName}</span>
+                  <span
+                    onClick={navigateToMember({ charm: entry.charm })}
+                    style={{ cursor: "pointer" }}
+                  >
+                    {memberName}
+                  </span>
                   {/* Role editing */}
                   {ifElse(
                     computed(() => editingRoleIndex.get() === index),
@@ -612,14 +633,12 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                       />
                       <button
                         type="button"
-                        onClick={() => {
-                          updateRole({
-                            members,
-                            index,
-                            newRole: roleInputValue.get(),
-                          });
-                          editingRoleIndex.set(null);
-                        }}
+                        onClick={confirmRoleEdit({
+                          members,
+                          index,
+                          roleInputValue,
+                          editingRoleIndex,
+                        })}
                         style={{
                           background: "#3b82f6",
                           border: "none",
@@ -635,7 +654,7 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                       </button>
                       <button
                         type="button"
-                        onClick={() => editingRoleIndex.set(null)}
+                        onClick={cancelRoleEdit({ editingRoleIndex })}
                         style={{
                           background: "#e5e7eb",
                           border: "none",
@@ -672,15 +691,11 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                         </span>
                       )
                       : (
-                        <button
-                          type="button"
+                        <span
                           style={{
-                            background: "none",
-                            border: "none",
-                            cursor: "pointer",
-                            fontSize: "10px",
                             color: "#9ca3af",
-                            padding: "0 2px",
+                            fontSize: "12px",
+                            cursor: "pointer",
                           }}
                           onClick={startEditRole({
                             editingRoleIndex,
@@ -688,10 +703,10 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                             index,
                             currentRole: "",
                           })}
-                          title="Add role"
+                          title="Click to edit role"
                         >
-                          +role
-                        </button>
+                          ()
+                        </span>
                       ),
                   )}
                   {entry.bidirectional && (
