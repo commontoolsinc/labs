@@ -565,7 +565,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                     gap: "12px",
                   }}
                 >
-                  {pinnedEntries.map((entry: SubCharmEntry) => {
+                  {pinnedEntries.map((entry) => {
                     const displayInfo = getModuleDisplay({
                       type: entry.type,
                       charm: entry.charm,
@@ -682,7 +682,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                       gap: "12px",
                     }}
                   >
-                    {unpinnedEntries.map((entry: SubCharmEntry) => {
+                    {unpinnedEntries.map((entry) => {
                       const displayInfo = getModuleDisplay({
                         type: entry.type,
                         charm: entry.charm,
@@ -799,7 +799,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                   gap: "12px",
                 }}
               >
-                {allEntries.map((entry: SubCharmEntry) => {
+                {allEntries.map((entry) => {
                   const displayInfo = getModuleDisplay({
                     type: entry.type,
                     charm: entry.charm,
@@ -950,7 +950,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                   trashExpanded,
                   <div style={{ paddingLeft: "16px", marginTop: "8px" }}>
                     {trashedSubCharms.map(
-                      (entry: TrashedSubCharmEntry) => {
+                      (entry) => {
                         const displayInfo = getModuleDisplay({
                           type: entry.type,
                           charm: entry.charm,

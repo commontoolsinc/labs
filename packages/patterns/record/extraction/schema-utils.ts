@@ -63,10 +63,16 @@ export function buildExtractionSchema(
     const storedSchema = entry.schema as JSONSchema | undefined;
     if (storedSchema?.properties) {
       // Check for conflicts before assigning
-      for (const [fieldName, fieldSchema] of Object.entries(storedSchema.properties)) {
+      for (
+        const [fieldName, fieldSchema] of Object.entries(
+          storedSchema.properties,
+        )
+      ) {
         if (properties[fieldName]) {
           console.warn(
-            `[Schema] Field "${fieldName}" defined by both "${fieldOwners[fieldName]}" and "${entry.type}" - using ${entry.type}`
+            `[Schema] Field "${fieldName}" defined by both "${
+              fieldOwners[fieldName]
+            }" and "${entry.type}" - using ${entry.type}`,
           );
         }
         properties[fieldName] = fieldSchema;
@@ -82,10 +88,16 @@ export function buildExtractionSchema(
         `[Extract] Using registry fallback for "${entry.type}" - consider re-creating this module`,
       );
       // Check for conflicts before assigning
-      for (const [fieldName, fieldSchema] of Object.entries(registrySchema.properties)) {
+      for (
+        const [fieldName, fieldSchema] of Object.entries(
+          registrySchema.properties,
+        )
+      ) {
         if (properties[fieldName]) {
           console.warn(
-            `[Schema] Field "${fieldName}" defined by both "${fieldOwners[fieldName]}" and "${entry.type}" - using ${entry.type}`
+            `[Schema] Field "${fieldName}" defined by both "${
+              fieldOwners[fieldName]
+            }" and "${entry.type}" - using ${entry.type}`,
           );
         }
         properties[fieldName] = fieldSchema;
@@ -130,10 +142,16 @@ export function buildExtractionSchemaFromCell(
     const storedSchema = entry.schema as JSONSchema | undefined;
     if (storedSchema?.properties) {
       // Check for conflicts before assigning
-      for (const [fieldName, fieldSchema] of Object.entries(storedSchema.properties)) {
+      for (
+        const [fieldName, fieldSchema] of Object.entries(
+          storedSchema.properties,
+        )
+      ) {
         if (properties[fieldName]) {
           console.warn(
-            `[Schema] Field "${fieldName}" defined by both "${fieldOwners[fieldName]}" and "${entry.type}" - using ${entry.type}`
+            `[Schema] Field "${fieldName}" defined by both "${
+              fieldOwners[fieldName]
+            }" and "${entry.type}" - using ${entry.type}`,
           );
         }
         properties[fieldName] = fieldSchema;
@@ -149,10 +167,16 @@ export function buildExtractionSchemaFromCell(
         `[Extract] Using registry fallback for "${entry.type}" - consider re-creating this module`,
       );
       // Check for conflicts before assigning
-      for (const [fieldName, fieldSchema] of Object.entries(registrySchema.properties)) {
+      for (
+        const [fieldName, fieldSchema] of Object.entries(
+          registrySchema.properties,
+        )
+      ) {
         if (properties[fieldName]) {
           console.warn(
-            `[Schema] Field "${fieldName}" defined by both "${fieldOwners[fieldName]}" and "${entry.type}" - using ${entry.type}`
+            `[Schema] Field "${fieldName}" defined by both "${
+              fieldOwners[fieldName]
+            }" and "${entry.type}" - using ${entry.type}`,
           );
         }
         properties[fieldName] = fieldSchema;
@@ -196,7 +220,9 @@ export function getFieldToTypeMapping(
       for (const field of Object.keys(storedSchema.properties)) {
         if (fieldToType[field]) {
           console.warn(
-            `[Schema] Field "${field}" defined by both "${fieldToType[field]}" and "${entry.type}" - using ${entry.type}`
+            `[Schema] Field "${field}" defined by both "${
+              fieldToType[field]
+            }" and "${entry.type}" - using ${entry.type}`,
           );
         }
         fieldToType[field] = entry.type;
@@ -210,7 +236,9 @@ export function getFieldToTypeMapping(
       for (const field of Object.keys(registrySchema.properties)) {
         if (fieldToType[field]) {
           console.warn(
-            `[Schema] Field "${field}" defined by both "${fieldToType[field]}" and "${entry.type}" - using ${entry.type}`
+            `[Schema] Field "${field}" defined by both "${
+              fieldToType[field]
+            }" and "${entry.type}" - using ${entry.type}`,
           );
         }
         fieldToType[field] = entry.type;

@@ -8,20 +8,21 @@
 import type { SubCharmEntry } from "../types.ts";
 
 // JSON Schema type (simplified for our use case)
+// Uses readonly arrays to be compatible with runtime-returned schemas
 export interface JSONSchema {
   type?: string;
   properties?: Record<string, JSONSchema>;
   items?: JSONSchema;
-  enum?: unknown[];
+  enum?: readonly unknown[];
   description?: string;
-  [key: string]: unknown;
+  readonly [key: string]: unknown;
 }
 
 /**
  * Set of internal module types that don't have extractable data.
  * These are controller/system modules that should be skipped during extraction.
  */
-export const INTERNAL_MODULE_TYPES = new Set(['type-picker', 'extractor']);
+export const INTERNAL_MODULE_TYPES = new Set(["type-picker", "extractor"]);
 
 /**
  * Check if a module type is an internal/controller module.
@@ -78,10 +79,16 @@ export function buildExtractionSchemaPure(
     const storedSchema = entry.schema as JSONSchema | undefined;
     if (storedSchema?.properties) {
       // Check for conflicts before assigning
-      for (const [fieldName, fieldSchema] of Object.entries(storedSchema.properties)) {
+      for (
+        const [fieldName, fieldSchema] of Object.entries(
+          storedSchema.properties,
+        )
+      ) {
         if (properties[fieldName]) {
           console.warn(
-            `[Schema] Field "${fieldName}" defined by both "${fieldOwners[fieldName]}" and "${entry.type}" - using ${entry.type}`
+            `[Schema] Field "${fieldName}" defined by both "${
+              fieldOwners[fieldName]
+            }" and "${entry.type}" - using ${entry.type}`,
           );
         }
         properties[fieldName] = fieldSchema;
@@ -120,10 +127,16 @@ export function buildExtractionSchemaFromCellPure(
     const storedSchema = entry.schema as JSONSchema | undefined;
     if (storedSchema?.properties) {
       // Check for conflicts before assigning
-      for (const [fieldName, fieldSchema] of Object.entries(storedSchema.properties)) {
+      for (
+        const [fieldName, fieldSchema] of Object.entries(
+          storedSchema.properties,
+        )
+      ) {
         if (properties[fieldName]) {
           console.warn(
-            `[Schema] Field "${fieldName}" defined by both "${fieldOwners[fieldName]}" and "${entry.type}" - using ${entry.type}`
+            `[Schema] Field "${fieldName}" defined by both "${
+              fieldOwners[fieldName]
+            }" and "${entry.type}" - using ${entry.type}`,
           );
         }
         properties[fieldName] = fieldSchema;
@@ -162,7 +175,9 @@ export function getFieldToTypeMappingPure(
       for (const field of Object.keys(storedSchema.properties)) {
         if (fieldToType[field]) {
           console.warn(
-            `[Schema] Field "${field}" defined by both "${fieldToType[field]}" and "${entry.type}" - using ${entry.type}`
+            `[Schema] Field "${field}" defined by both "${
+              fieldToType[field]
+            }" and "${entry.type}" - using ${entry.type}`,
           );
         }
         fieldToType[field] = entry.type;
