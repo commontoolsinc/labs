@@ -18,6 +18,22 @@ export interface JSONSchema {
 }
 
 /**
+ * Set of internal module types that don't have extractable data.
+ * These are controller/system modules that should be skipped during extraction.
+ */
+export const INTERNAL_MODULE_TYPES = new Set(['type-picker', 'extractor']);
+
+/**
+ * Check if a module type is an internal/controller module.
+ *
+ * @param type - The module type to check
+ * @returns true if the type is internal and should be skipped
+ */
+export function isInternalModule(type: string): boolean {
+  return INTERNAL_MODULE_TYPES.has(type);
+}
+
+/**
  * Type-safe helper to extract resultSchema from a pattern/charm.
  *
  * Pattern outputs implement the Recipe interface which includes resultSchema.
@@ -52,15 +68,25 @@ export function buildExtractionSchemaPure(
   subCharms: readonly SubCharmEntry[],
 ): JSONSchema {
   const properties: Record<string, JSONSchema> = {};
+  const fieldOwners: Record<string, string> = {}; // Track which module defines each field
 
   for (const entry of subCharms) {
     // Skip internal/controller modules that don't have extractable data
-    if (entry.type === "type-picker" || entry.type === "extractor") continue;
+    if (isInternalModule(entry.type)) continue;
 
     // Only use stored schema (captured at creation time)
     const storedSchema = entry.schema as JSONSchema | undefined;
     if (storedSchema?.properties) {
-      Object.assign(properties, storedSchema.properties);
+      // Check for conflicts before assigning
+      for (const [fieldName, fieldSchema] of Object.entries(storedSchema.properties)) {
+        if (properties[fieldName]) {
+          console.warn(
+            `[Schema] Field "${fieldName}" defined by both "${fieldOwners[fieldName]}" and "${entry.type}" - using ${entry.type}`
+          );
+        }
+        properties[fieldName] = fieldSchema;
+        fieldOwners[fieldName] = entry.type;
+      }
     }
   }
 
@@ -83,16 +109,26 @@ export function buildExtractionSchemaFromCellPure(
   parentSubCharms: { get?: () => SubCharmEntry[] | null | undefined } | any,
 ): JSONSchema {
   const properties: Record<string, JSONSchema> = {};
+  const fieldOwners: Record<string, string> = {}; // Track which module defines each field
   const subCharms = parentSubCharms.get?.() ?? [];
 
   for (const entry of subCharms) {
     // Skip internal/controller modules
-    if (entry.type === "type-picker" || entry.type === "extractor") continue;
+    if (isInternalModule(entry.type)) continue;
 
     // Only use stored schema (captured at creation time)
     const storedSchema = entry.schema as JSONSchema | undefined;
     if (storedSchema?.properties) {
-      Object.assign(properties, storedSchema.properties);
+      // Check for conflicts before assigning
+      for (const [fieldName, fieldSchema] of Object.entries(storedSchema.properties)) {
+        if (properties[fieldName]) {
+          console.warn(
+            `[Schema] Field "${fieldName}" defined by both "${fieldOwners[fieldName]}" and "${entry.type}" - using ${entry.type}`
+          );
+        }
+        properties[fieldName] = fieldSchema;
+        fieldOwners[fieldName] = entry.type;
+      }
     }
   }
 
@@ -118,12 +154,17 @@ export function getFieldToTypeMappingPure(
 
   for (const entry of subCharms) {
     // Skip internal modules
-    if (entry.type === "type-picker" || entry.type === "extractor") continue;
+    if (isInternalModule(entry.type)) continue;
 
     // Only use stored schema
     const storedSchema = entry.schema as JSONSchema | undefined;
     if (storedSchema?.properties) {
       for (const field of Object.keys(storedSchema.properties)) {
+        if (fieldToType[field]) {
+          console.warn(
+            `[Schema] Field "${field}" defined by both "${fieldToType[field]}" and "${entry.type}" - using ${entry.type}`
+          );
+        }
         fieldToType[field] = entry.type;
       }
     }

@@ -28,10 +28,12 @@ import {
 import { createSubCharm } from "../registry.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "../types.ts";
 import type { ExtractedField, ExtractionPreview } from "./types.ts";
+import type { JSONSchema } from "./schema-utils.ts";
 import {
   buildExtractionSchemaFromCell,
   getFieldToTypeMapping,
   getResultSchema,
+  getSchemaForType,
 } from "./schema-utils.ts";
 
 // ===== Types =====
@@ -105,6 +107,87 @@ function formatValue(value: unknown): string {
   if (Array.isArray(value)) return JSON.stringify(value);
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+/**
+ * Validate that an extracted value matches the expected JSON Schema type
+ */
+function validateFieldValue(
+  value: unknown,
+  schema: JSONSchema | undefined,
+): boolean {
+  // No schema = allow anything (permissive for dynamic fields)
+  if (!schema || !schema.type) return true;
+
+  const schemaType = schema.type;
+
+  // Handle array types
+  if (schemaType === "array") {
+    return Array.isArray(value);
+  }
+
+  // Handle integer (stricter than number)
+  if (schemaType === "integer") {
+    return typeof value === "number" && Number.isInteger(value);
+  }
+
+  // Handle number (includes integers and floats)
+  if (schemaType === "number") {
+    return typeof value === "number" && !isNaN(value);
+  }
+
+  // Handle boolean
+  if (schemaType === "boolean") {
+    return typeof value === "boolean";
+  }
+
+  // Handle string
+  if (schemaType === "string") {
+    return typeof value === "string";
+  }
+
+  // Handle object
+  if (schemaType === "object") {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  // Handle null
+  if (schemaType === "null") {
+    return value === null;
+  }
+
+  // Unknown schema type - be permissive
+  return true;
+}
+
+/**
+ * Get schema for a specific field from sub-charms
+ */
+function getFieldSchema(
+  subCharms: readonly SubCharmEntry[],
+  moduleType: string,
+  fieldName: string,
+): JSONSchema | undefined {
+  const entry = subCharms.find((e) => e?.type === moduleType);
+  if (!entry) return undefined;
+
+  // Try stored schema first
+  const storedSchema = entry.schema as JSONSchema | undefined;
+  if (storedSchema?.properties?.[fieldName]) {
+    return storedSchema.properties[fieldName];
+  }
+
+  // Fallback to registry schema (for legacy entries)
+  try {
+    const registrySchema = getSchemaForType(moduleType);
+    if (registrySchema?.properties?.[fieldName]) {
+      return registrySchema.properties[fieldName];
+    }
+  } catch {
+    // getSchemaForType may fail if registry isn't available
+  }
+
+  return undefined;
 }
 
 /**
@@ -218,6 +301,7 @@ const applySelected = handler<
   { parentSubCharms, parentTrashedSubCharms, preview, selections },
 ) => {
   const current: SubCharmEntry[] = [...(parentSubCharms.get() || [])];
+  const subCharms = current; // For schema lookups
   const selected = selections.get() || {};
 
   // Group fields by target module
@@ -242,7 +326,28 @@ const applySelected = handler<
     if (existingIndex >= 0) {
       // Module exists - use Cell navigation to update fields
       for (const field of fields) {
+        // Validate extracted value against schema
+        const fieldSchema = getFieldSchema(
+          subCharms,
+          moduleType,
+          field.fieldName,
+        );
+        const isValid = validateFieldValue(field.extractedValue, fieldSchema);
+
+        if (!isValid) {
+          const actualType = Array.isArray(field.extractedValue)
+            ? "array"
+            : typeof field.extractedValue;
+          console.warn(
+            `[Extract] Type mismatch for ${moduleType}.${field.fieldName}: ` +
+              `expected ${fieldSchema?.type}, got ${actualType}. ` +
+              `Value: ${JSON.stringify(field.extractedValue)}. Skipping field.`,
+          );
+          continue; // Skip this field
+        }
+
         try {
+          // Only write if validation passed
           (parentSubCharms as any).key(existingIndex).key("charm").key(
             field.fieldName,
           ).set(field.extractedValue);
@@ -257,18 +362,44 @@ const applySelected = handler<
         // Build initial values object from extracted fields
         const initialValues: Record<string, unknown> = {};
         for (const field of fields) {
+          // Validate before adding to initialValues
+          const fieldSchema = getFieldSchema(
+            subCharms,
+            moduleType,
+            field.fieldName,
+          );
+          const isValid = validateFieldValue(field.extractedValue, fieldSchema);
+
+          if (!isValid) {
+            const actualType = Array.isArray(field.extractedValue)
+              ? "array"
+              : typeof field.extractedValue;
+            console.warn(
+              `[Extract] Type mismatch for new module ${moduleType}.${field.fieldName}: ` +
+                `expected ${fieldSchema?.type}, got ${actualType}. ` +
+                `Value: ${
+                  JSON.stringify(field.extractedValue)
+                }. Skipping field.`,
+            );
+            continue; // Skip this field
+          }
+
           initialValues[field.fieldName] = field.extractedValue;
         }
         // Create module with initial values passed to the recipe
-        const newCharm = createSubCharm(moduleType, initialValues);
-        // Capture schema at creation time for dynamic discovery
-        const schema = getResultSchema(newCharm);
-        newEntries.push({
-          type: moduleType,
-          pinned: false,
-          charm: newCharm,
-          schema,
-        });
+
+        // Only create module if we have at least one valid field
+        if (Object.keys(initialValues).length > 0) {
+          const newCharm = createSubCharm(moduleType, initialValues);
+          // Capture schema at creation time for dynamic discovery
+          const schema = getResultSchema(newCharm);
+          newEntries.push({
+            type: moduleType,
+            pinned: false,
+            charm: newCharm,
+            schema,
+          });
+        }
       } catch (e) {
         console.warn(`Failed to create module ${moduleType}:`, e);
       }
