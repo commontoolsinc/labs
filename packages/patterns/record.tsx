@@ -438,10 +438,35 @@ const Record = pattern<RecordInput, RecordOutput>(
       return inferTypeFromModules(moduleTypes as string[]);
     })({ sc: subCharms });
 
-    // Extract icon from inferred type for NAME display
-    const recordIcon = lift(({ inferred }: { inferred: { icon: string } }) =>
-      inferred?.icon || "\u{1F4CB}"
-    )({ inferred: inferredType });
+    // Check for manual icon override from record-icon module
+    const manualIcon = lift(({ sc }: { sc: SubCharmEntry[] }) => {
+      const iconModule = (sc || []).find((e) => e?.type === "record-icon");
+      if (!iconModule) return null;
+
+      try {
+        // Access the icon field from the charm pattern output
+        // deno-lint-ignore no-explicit-any
+        const charm = iconModule.charm as any;
+        const iconValue = charm?.icon;
+        // Return the icon if it's a non-empty string, otherwise null
+        return typeof iconValue === "string" && iconValue.trim()
+          ? iconValue.trim()
+          : null;
+      } catch {
+        return null;
+      }
+    })({ sc: subCharms });
+
+    // Extract icon: manual icon takes precedence over inferred type
+    const recordIcon = lift(
+      ({
+        manual,
+        inferred,
+      }: {
+        manual: string | null;
+        inferred: { icon: string };
+      }) => manual || inferred?.icon || "\u{1F4CB}",
+    )({ manual: manualIcon, inferred: inferredType });
 
     // ===== Trash Section Computed Values =====
 

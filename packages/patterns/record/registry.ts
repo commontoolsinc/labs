@@ -51,6 +51,10 @@ import {
 } from "../dietary-restrictions.tsx";
 import { EmailModule, MODULE_METADATA as EmailMeta } from "../email.tsx";
 import { MODULE_METADATA as PhoneMeta, PhoneModule } from "../phone.tsx";
+import {
+  MODULE_METADATA as RecordIconMeta,
+  RecordIconModule,
+} from "../record-icon.tsx";
 import type { ModuleMetadata } from "../container-protocol.ts";
 
 // NOTE: TypePickerMeta is NOT imported here to avoid circular dependency:
@@ -151,6 +155,10 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
   ),
   email: fromMetadata(EmailMeta, (init) => EmailModule(init as any)),
   phone: fromMetadata(PhoneMeta, (init) => PhoneModule(init as any)),
+  "record-icon": fromMetadata(
+    RecordIconMeta,
+    (init) => RecordIconModule(init as any),
+  ),
 
   // Controller modules - TypePicker needs special handling in record.tsx
   // Metadata is inlined here to avoid circular dependency (see note at top)

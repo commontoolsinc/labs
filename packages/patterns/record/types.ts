@@ -42,6 +42,8 @@ export type SubCharmType =
   // Contact modules (with labels, support multiple instances)
   | "email"
   | "phone"
+  // Icon customization
+  | "record-icon"
   // Controller modules (internal, not user-addable)
   | "type-picker"
   | "extractor";
