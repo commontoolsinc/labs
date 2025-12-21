@@ -233,7 +233,7 @@ export class CharmsController<T = unknown> {
         const doubleCheck = await this.#manager.getDefaultPattern();
         if (doubleCheck) {
           // Someone else created it, release mutex and return
-          await this.#releaseMutex(mutexCell);
+          await this.#releaseMutex(mutexCell, requestId);
           return new CharmController<NameSchema>(this.#manager, doubleCheck);
         }
 
@@ -274,12 +274,12 @@ export class CharmsController<T = unknown> {
         await this.#manager.linkDefaultPattern(charm.getCell());
 
         // Release mutex on success
-        await this.#releaseMutex(mutexCell);
+        await this.#releaseMutex(mutexCell, requestId);
 
         return charm;
       } catch (error) {
         // Release mutex on error
-        await this.#releaseMutex(mutexCell);
+        await this.#releaseMutex(mutexCell, requestId);
 
         throw new Error(
           `Failed to create default pattern: ${
@@ -296,16 +296,22 @@ export class CharmsController<T = unknown> {
 
   /**
    * Releases the default pattern creation mutex.
+   * Only releases if we still own the mutex (requestId matches).
    */
   async #releaseMutex(
     // deno-lint-ignore no-explicit-any
     mutexCell: any,
+    ownRequestId: string,
   ): Promise<void> {
     await this.#manager.runtime.editWithRetry((tx) => {
-      mutexCell.withTx(tx).update({
-        requestId: "",
-        lastActivity: 0,
-      });
+      const mutex = mutexCell.withTx(tx).get();
+      // Only release if we still own the mutex
+      if (mutex.requestId === ownRequestId) {
+        mutexCell.withTx(tx).update({
+          requestId: "",
+          lastActivity: 0,
+        });
+      }
     });
   }
 }
