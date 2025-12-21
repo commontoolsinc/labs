@@ -11,7 +11,6 @@ import {
 } from "commontools";
 
 import { default as Note } from "./note.tsx";
-import { default as Record } from "./record.tsx";
 import BacklinksIndex, { type MentionableCharm } from "./backlinks-index.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
 import NotesImportExport from "./notes-import-export.tsx";
@@ -71,12 +70,6 @@ const spawnNote = handler<void, void>((_, __) => {
   }));
 });
 
-const spawnRecord = handler<void, void>((_, __) => {
-  return navigateTo(Record({
-    title: "",
-  }));
-});
-
 const spawnNotesImportExport = handler<void, void>((_, __) => {
   return navigateTo(NotesImportExport({
     importMarkdown: "",
@@ -122,18 +115,6 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
               }}
             >
               📄 New Note
-            </ct-button>
-            <ct-button
-              variant="ghost"
-              onClick={spawnRecord()}
-              style={{
-                padding: "12px 20px",
-                fontSize: "22px",
-                borderRadius: "12px",
-                minHeight: "48px",
-              }}
-            >
-              📋 New Record
             </ct-button>
           </div>
           <div slot="end">
