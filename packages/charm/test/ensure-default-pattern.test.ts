@@ -85,7 +85,7 @@ describe("CharmsController.ensureDefaultPattern", () => {
   });
 
   describe("mutex behavior", () => {
-    it("should use mutex cell for synchronization", async () => {
+    it("should use mutex cell for synchronization", () => {
       // The mutex cell should be created in the space
       const mutexCell = runtime.getCell(
         manager.getSpace(),
