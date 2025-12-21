@@ -20,10 +20,6 @@ import {
 } from "../birthday.tsx";
 import { MODULE_METADATA as RatingMeta, RatingModule } from "../rating.tsx";
 import { MODULE_METADATA as TagsMeta, TagsModule } from "../tags.tsx";
-import {
-  ContactModule,
-  MODULE_METADATA as ContactMeta,
-} from "../contact-info.tsx";
 import { MODULE_METADATA as StatusMeta, StatusModule } from "../status.tsx";
 import { AddressModule, MODULE_METADATA as AddressMeta } from "../address.tsx";
 import {
@@ -53,6 +49,8 @@ import {
   DietaryRestrictionsModule,
   MODULE_METADATA as DietaryMeta,
 } from "../dietary-restrictions.tsx";
+import { EmailModule, MODULE_METADATA as EmailMeta } from "../email.tsx";
+import { MODULE_METADATA as PhoneMeta, PhoneModule } from "../phone.tsx";
 import type { ModuleMetadata } from "../container-protocol.ts";
 
 // NOTE: TypePickerMeta is NOT imported here to avoid circular dependency:
@@ -77,6 +75,8 @@ export interface SubCharmDefinition {
   createInstance: PatternConstructor;
   // Internal modules don't appear in "Add" dropdown (e.g., type-picker)
   internal?: boolean;
+  // Multi-instance modules show "add another" button (e.g., email, phone)
+  allowMultiple?: boolean;
   // For Phase 2 extraction:
   schema?: Record<string, unknown>;
   fieldMapping?: string[];
@@ -96,6 +96,7 @@ function fromMetadata(
     createInstance: (initialValues?: Record<string, unknown>) =>
       moduleFactory(initialValues || {}),
     internal: meta.internal,
+    allowMultiple: meta.allowMultiple,
     schema: meta.schema,
     fieldMapping: meta.fieldMapping,
   };
@@ -125,7 +126,6 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
   birthday: fromMetadata(BirthdayMeta, (init) => BirthdayModule(init as any)),
   rating: fromMetadata(RatingMeta, (init) => RatingModule(init as any)),
   tags: fromMetadata(TagsMeta, (init) => TagsModule(init as any)),
-  contact: fromMetadata(ContactMeta, (init) => ContactModule(init as any)),
   status: fromMetadata(StatusMeta, (init) => StatusModule(init as any)),
   address: fromMetadata(AddressMeta, (init) => AddressModule(init as any)),
   timeline: fromMetadata(TimelineMeta, (init) => TimelineModule(init as any)),
@@ -149,6 +149,8 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     DietaryMeta,
     (init) => DietaryRestrictionsModule(init as any),
   ),
+  email: fromMetadata(EmailMeta, (init) => EmailModule(init as any)),
+  phone: fromMetadata(PhoneMeta, (init) => PhoneModule(init as any)),
 
   // Controller modules - TypePicker needs special handling in record.tsx
   // Metadata is inlined here to avoid circular dependency (see note at top)

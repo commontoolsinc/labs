@@ -39,6 +39,45 @@ import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
 import type { ContainerCoordinationContext } from "./container-protocol.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 
+// ===== Standard Labels for Smart Defaults =====
+// When adding a second module of same type, pick next unused standard label
+const STANDARD_LABELS: Record<string, string[]> = {
+  email: ["Personal", "Work", "School", "Other"],
+  phone: ["Mobile", "Home", "Work", "Other"],
+  address: ["Home", "Work", "Billing", "Shipping", "Other"],
+};
+
+// Helper to get next unused standard label for a module type
+function getNextUnusedLabel(
+  type: string,
+  existingCharms: readonly SubCharmEntry[],
+): string | undefined {
+  const standards = STANDARD_LABELS[type];
+  if (!standards || standards.length === 0) return undefined;
+
+  // Collect labels already used by modules of this type
+  const usedLabels = new Set<string>();
+  for (const entry of existingCharms) {
+    if (entry.type === type) {
+      try {
+        // Access the label field from the charm pattern output
+        // Pattern proxy auto-dereferences Cell values, so access directly
+        // deno-lint-ignore no-explicit-any
+        const charm = entry.charm as any;
+        const labelValue = charm?.label;
+        if (typeof labelValue === "string" && labelValue) {
+          usedLabels.add(labelValue);
+        }
+      } catch {
+        // Ignore errors from charms without label field
+      }
+    }
+  }
+
+  // Return first unused standard label (or undefined if all used)
+  return standards.find((label) => !usedLabels.has(label));
+}
+
 // ===== Types =====
 
 interface RecordInput {
@@ -142,14 +181,20 @@ const initializeRecord = lift(
   },
 );
 
-// Helper to get module display info (icon + label) from type
-const getModuleDisplay = lift(({ type }: { type: string }) => {
-  const def = getDefinition(type);
-  return {
-    icon: def?.icon || "📋",
-    label: def?.label || type,
-  };
-});
+// Helper to get module display info (icon + label) from type and optional charm label
+const getModuleDisplay = lift(
+  // deno-lint-ignore no-explicit-any
+  ({ type, charm }: { type: string; charm?: any }) => {
+    const def = getDefinition(type);
+    // Use charm's label if available (for email/phone/address modules)
+    // Pattern proxy auto-dereferences Cell values, so access directly
+    const charmLabel = charm?.label;
+    return {
+      icon: def?.icon || "📋",
+      label: charmLabel || def?.label || type,
+    };
+  },
+);
 
 // ===== Module-Scope Handlers (avoid closures, use references not indices) =====
 
@@ -193,6 +238,11 @@ const addSubCharm = handler<
 
   // Create the sub-charm and add it (multiple modules of same type allowed)
   const current = sc.get() || [];
+
+  // Get smart default label for modules that support it
+  const nextLabel = getNextUnusedLabel(type, current);
+  const initialValues = nextLabel ? { label: nextLabel } : undefined;
+
   // Special case: create Note directly with Record pattern for wiki-links
   // Special case: create ExtractorModule as controller with parent Cells
   // deno-lint-ignore no-explicit-any
@@ -206,7 +256,7 @@ const addSubCharm = handler<
       parentSubCharms: sc,
       parentTrashedSubCharms: trash,
     } as any)
-    : createSubCharm(type);
+    : createSubCharm(type, initialValues);
   sc.set([...current, { type, pinned: false, charm }]);
   sat.set("");
 });
@@ -267,6 +317,33 @@ const emptyTrash = handler<
 const toggleTrashExpanded = handler<unknown, { expanded: Cell<boolean> }>(
   (_event, { expanded }) => expanded.set(!expanded.get()),
 );
+
+// Create sibling module (same type, inserted after current)
+// Used by '+' button in module headers for email/phone/address
+const createSibling = handler<
+  unknown,
+  { subCharms: Cell<SubCharmEntry[]>; entry: SubCharmEntry }
+>((_event, { subCharms: sc, entry }) => {
+  const current = sc.get() || [];
+  const currentIndex = current.findIndex((e) => e?.charm === entry?.charm);
+  if (currentIndex < 0) return;
+
+  // Get smart default label
+  const nextLabel = getNextUnusedLabel(entry.type, current);
+  const initialValues = nextLabel ? { label: nextLabel } : undefined;
+
+  // Create new module of same type
+  const charm = createSubCharm(entry.type, initialValues);
+
+  // Insert after current position
+  const updated = [...current];
+  updated.splice(currentIndex + 1, 0, {
+    type: entry.type,
+    pinned: false,
+    charm,
+  });
+  sc.set(updated);
+});
 
 // ===== The Record Pattern =====
 const Record = pattern<RecordInput, RecordOutput>(
@@ -437,7 +514,10 @@ const Record = pattern<RecordInput, RecordOutput>(
                   }}
                 >
                   {pinnedEntries.map((entry: SubCharmEntry) => {
-                    const displayInfo = getModuleDisplay({ type: entry.type });
+                    const displayInfo = getModuleDisplay({
+                      type: entry.type,
+                      charm: entry.charm,
+                    });
                     return (
                       <div
                         style={{
@@ -474,6 +554,26 @@ const Record = pattern<RecordInput, RecordOutput>(
                               flexShrink: 0,
                             }}
                           >
+                            {ifElse(
+                              getDefinition(entry.type)?.allowMultiple,
+                              <button
+                                type="button"
+                                onClick={createSibling({ subCharms, entry })}
+                                style={{
+                                  background: "transparent",
+                                  border: "1px solid #e5e7eb",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                  padding: "4px 8px",
+                                  fontSize: "12px",
+                                  color: "#6b7280",
+                                }}
+                                title="Add another"
+                              >
+                                +
+                              </button>,
+                              null,
+                            )}
                             <button
                               type="button"
                               onClick={togglePin({ subCharms, entry })}
@@ -533,6 +633,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                     {unpinnedEntries.map((entry: SubCharmEntry) => {
                       const displayInfo = getModuleDisplay({
                         type: entry.type,
+                        charm: entry.charm,
                       });
                       return (
                         <div
@@ -570,6 +671,26 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 flexShrink: 0,
                               }}
                             >
+                              {ifElse(
+                                getDefinition(entry.type)?.allowMultiple,
+                                <button
+                                  type="button"
+                                  onClick={createSibling({ subCharms, entry })}
+                                  style={{
+                                    background: "transparent",
+                                    border: "1px solid #e5e7eb",
+                                    borderRadius: "4px",
+                                    cursor: "pointer",
+                                    padding: "4px 8px",
+                                    fontSize: "12px",
+                                    color: "#6b7280",
+                                  }}
+                                  title="Add another"
+                                >
+                                  +
+                                </button>,
+                                null,
+                              )}
                               <button
                                 type="button"
                                 onClick={togglePin({ subCharms, entry })}
@@ -627,7 +748,10 @@ const Record = pattern<RecordInput, RecordOutput>(
                 }}
               >
                 {allEntries.map((entry: SubCharmEntry) => {
-                  const displayInfo = getModuleDisplay({ type: entry.type });
+                  const displayInfo = getModuleDisplay({
+                    type: entry.type,
+                    charm: entry.charm,
+                  });
                   return (
                     <div
                       style={{
@@ -664,6 +788,26 @@ const Record = pattern<RecordInput, RecordOutput>(
                             flexShrink: 0,
                           }}
                         >
+                          {ifElse(
+                            getDefinition(entry.type)?.allowMultiple,
+                            <button
+                              type="button"
+                              onClick={createSibling({ subCharms, entry })}
+                              style={{
+                                background: "transparent",
+                                border: "1px solid #e5e7eb",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                                padding: "4px 8px",
+                                fontSize: "12px",
+                                color: "#6b7280",
+                              }}
+                              title="Add another"
+                            >
+                              +
+                            </button>,
+                            null,
+                          )}
                           <button
                             type="button"
                             onClick={togglePin({ subCharms, entry })}
@@ -757,6 +901,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                       (entry: TrashedSubCharmEntry) => {
                         const displayInfo = getModuleDisplay({
                           type: entry.type,
+                          charm: entry.charm,
                         });
                         return (
                           <div

@@ -154,7 +154,7 @@ interface ExtractedData {
   /** Free-form notes */
   notes?: string | null;
 
-  // Contact
+  // Email/Phone (multi-instance modules with labels)
   /** Email address */
   email?: string | null;
   /** Phone number */
