@@ -37,6 +37,7 @@ import { inferTypeFromModules } from "./record/template-registry.ts";
 import { TypePickerModule } from "./type-picker.tsx";
 import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
 import { getResultSchema } from "./record/extraction/schema-utils.ts";
+import { MembersModule } from "./members.tsx";
 import type { ContainerCoordinationContext } from "./container-protocol.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 
@@ -269,6 +270,7 @@ const addSubCharm = handler<
 
   // Special case: create Note directly with Record pattern for wiki-links
   // Special case: create ExtractorModule as controller with parent Cells
+  // Special case: create MembersModule with parent context for bidirectional links
   // deno-lint-ignore no-explicit-any
   const charm = type === "notes"
     ? Note({
@@ -279,6 +281,11 @@ const addSubCharm = handler<
     ? ExtractorModule({
       parentSubCharms: sc,
       parentTrashedSubCharms: trash,
+    } as any)
+    : type === "members"
+    ? MembersModule({
+      parentSubCharms: sc,
+      createPattern: recordPatternJson,
     } as any)
     : createSubCharm(type, initialValues);
 

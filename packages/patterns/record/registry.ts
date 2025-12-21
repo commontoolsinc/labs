@@ -57,7 +57,6 @@ import {
   RecordIconModule,
 } from "../record-icon.tsx";
 import {
-  MembersModule,
   MODULE_METADATA as MembersMeta,
 } from "../members.tsx";
 import type { ModuleMetadata } from "../container-protocol.ts";
@@ -164,7 +163,20 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     RecordIconMeta,
     (init) => RecordIconModule(init as any),
   ),
-  members: fromMetadata(MembersMeta, (init) => MembersModule(init as any)),
+  // Members needs special handling in record.tsx - receives parentSubCharms and createPattern
+  members: {
+    type: "members",
+    label: MembersMeta.label,
+    icon: MembersMeta.icon,
+    createInstance: () => {
+      throw new Error(
+        "Use MembersModule directly with parentSubCharms and createPattern in record.tsx",
+      );
+    },
+    internal: false,
+    schema: MembersMeta.schema,
+    fieldMapping: MembersMeta.fieldMapping,
+  },
 
   // Controller modules - TypePicker needs special handling in record.tsx
   // Metadata is inlined here to avoid circular dependency (see note at top)
