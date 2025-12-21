@@ -113,7 +113,8 @@ export function inferTypeFromModules(moduleTypes: string[]): InferredType {
   // Person: has birthday AND (email/phone OR relationship)
   if (
     typeSet.has("birthday") &&
-    (typeSet.has("email") || typeSet.has("phone") || typeSet.has("relationship"))
+    (typeSet.has("email") || typeSet.has("phone") ||
+      typeSet.has("relationship"))
   ) {
     return { type: "person", icon: "\u{1F464}", confidence: 0.9 };
   }
