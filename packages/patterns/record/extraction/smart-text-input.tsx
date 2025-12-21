@@ -36,6 +36,7 @@ import {
 
 // ===== Types =====
 
+// FileData matches ct-file-input's event shape (not exported from commontools)
 interface FileData {
   id: string;
   name: string;
@@ -45,6 +46,9 @@ interface FileData {
   size: number;
   type: string;
 }
+
+// Constants for file handling
+const DEFAULT_MAX_TEXT_FILE_SIZE = 1 * 1024 * 1024; // 1MB limit for text files
 
 export interface SmartTextInputInput {
   // Required: Target text cell (bidirectional binding)
@@ -56,6 +60,7 @@ export interface SmartTextInputInput {
   placeholder?: string;
   rows?: number;
   maxImageSizeBytes?: number; // Default: 3.75MB (75% of 5MB API limit)
+  maxTextFileSizeBytes?: number; // Default: 1MB
 }
 
 export interface SmartTextInputOutput {
@@ -88,6 +93,26 @@ If no text is visible, return an empty string.`;
 // ===== Handlers (defined OUTSIDE pattern function) =====
 
 /**
+ * Decode base64 data URL to UTF-8 text
+ * Uses TextDecoder for proper multi-byte character handling
+ */
+function decodeBase64ToText(dataUrl: string): string {
+  const base64Match = dataUrl.match(/base64,(.+)/);
+  if (!base64Match) {
+    throw new Error("Invalid data URL format");
+  }
+
+  // Use TextDecoder for proper UTF-8 handling (same as uri-utils.ts)
+  const binaryString = atob(base64Match[1]);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  const decoder = new TextDecoder();
+  return decoder.decode(bytes);
+}
+
+/**
  * Handle text file upload - reads file content and sets as preview
  */
 const handleFileUpload = handler<
@@ -96,40 +121,63 @@ const handleFileUpload = handler<
     previewText: Cell<string | null>;
     previewSource: Cell<"file" | "image" | null>;
     previewFileName: Cell<string | null>;
+    fileError: Cell<string | null>;
+    maxTextFileSizeBytes: number;
   }
->(({ detail }, { previewText, previewSource, previewFileName }) => {
-  const files = detail?.files;
-  if (!files || files.length === 0) return;
+>(
+  (
+    { detail },
+    {
+      previewText,
+      previewSource,
+      previewFileName,
+      fileError,
+      maxTextFileSizeBytes,
+    },
+  ) => {
+    // Clear any previous error
+    fileError.set(null);
 
-  const file = files[0];
+    const files = detail?.files;
+    if (!files || files.length === 0) return;
 
-  // Validate file type
-  const isTextFile = file.type.startsWith("text/") ||
-    file.name.endsWith(".txt") ||
-    file.name.endsWith(".md") ||
-    file.name.endsWith(".csv") ||
-    file.name.endsWith(".json");
+    const file = files[0];
 
-  if (!isTextFile) {
-    console.warn("Not a text file:", file.name, file.type);
-    return;
-  }
+    // Validate file size
+    if (file.size > maxTextFileSizeBytes) {
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
+      const limitMB = (maxTextFileSizeBytes / (1024 * 1024)).toFixed(1);
+      fileError.set(`File too large: ${sizeMB}MB (limit: ${limitMB}MB)`);
+      return;
+    }
 
-  // Decode base64 data URL to text
-  const dataUrl = file.data;
-  const base64Match = dataUrl.match(/base64,(.+)/);
+    // Validate file type (case-insensitive extension, allow empty MIME)
+    const isTextFile = file.type.startsWith("text/") ||
+      file.type === "application/json" ||
+      file.type === "" || // Allow empty MIME if extension matches
+      /\.(txt|md|csv|json)$/i.test(file.name);
 
-  if (base64Match) {
+    if (!isTextFile) {
+      fileError.set(`Unsupported file type: ${file.name}`);
+      return;
+    }
+
+    // Decode base64 data URL to text (UTF-8 safe)
     try {
-      const textContent = atob(base64Match[1]);
+      const textContent = decodeBase64ToText(file.data);
       previewText.set(textContent);
       previewSource.set("file");
       previewFileName.set(file.name);
     } catch (e) {
       console.error("Failed to decode text file:", e);
+      fileError.set(
+        `Failed to read file: ${
+          e instanceof Error ? e.message : "Unknown error"
+        }`,
+      );
     }
-  }
-});
+  },
+);
 
 /**
  * Commit preview text to the main value
@@ -159,7 +207,7 @@ const handleCommitPreview = handler<
 );
 
 /**
- * Cancel/dismiss preview
+ * Cancel/dismiss preview and clear errors
  */
 const handleCancelPreview = handler<
   unknown,
@@ -167,42 +215,46 @@ const handleCancelPreview = handler<
     previewText: Cell<string | null>;
     previewSource: Cell<"file" | "image" | null>;
     previewFileName: Cell<string | null>;
-    uploadedImage: Cell<ImageData | null>;
+    uploadedImage: Cell<ImageData[]>; // Image array to clear
+    fileError: Cell<string | null>;
   }
 >(
   (
     _event,
-    { previewText, previewSource, previewFileName, uploadedImage },
+    { previewText, previewSource, previewFileName, uploadedImage, fileError },
   ) => {
     previewText.set(null);
     previewSource.set(null);
     previewFileName.set(null);
-    uploadedImage.set(null);
+    uploadedImage.set([]); // Clear the image array
+    fileError.set(null);
   },
 );
 
 /**
- * Trigger image upload (clears any existing preview)
+ * Handle image change from ct-image-input
+ * Note: The actual image comes from the $images binding (imageArray),
+ * we just use this handler to set up the preview state
  */
 const handleImageChange = handler<
   { detail: { images: ImageData[] } },
   {
-    uploadedImage: Cell<ImageData | null>;
     previewText: Cell<string | null>;
     previewSource: Cell<"file" | "image" | null>;
+    fileError: Cell<string | null>;
   }
->(({ detail }, { uploadedImage, previewText, previewSource }) => {
+>(({ detail }, { previewText, previewSource, fileError }) => {
   const images = detail?.images;
   if (!images || images.length === 0) {
-    uploadedImage.set(null);
+    // Image was removed - clear preview if it was from image
+    previewSource.set(null);
     return;
   }
 
-  // Take only the first image (single image mode)
-  uploadedImage.set(images[0]);
-  // Clear any existing preview - OCR will populate it
+  // Clear any existing preview and errors - OCR will populate it
   previewText.set(null);
   previewSource.set("image");
+  fileError.set(null);
 });
 
 // ===== The Pattern =====
@@ -215,6 +267,7 @@ export function SmartTextInput(
     placeholder = DEFAULT_PLACEHOLDER,
     rows = 4,
     maxImageSizeBytes = DEFAULT_MAX_IMAGE_SIZE,
+    maxTextFileSizeBytes = DEFAULT_MAX_TEXT_FILE_SIZE,
   } = input;
 
   // ===== Internal State =====
@@ -224,22 +277,26 @@ export function SmartTextInput(
   const previewSource = Cell.of<"file" | "image" | null>(null);
   const previewFileName = Cell.of<string | null>(null);
 
-  // Image upload state (single image)
-  const uploadedImage = Cell.of<ImageData | null>(null);
+  // File error state (for user feedback)
+  const fileError = Cell.of<string | null>(null);
 
-  // For ct-image-input which expects an array
+  // Image array for ct-image-input binding
   const imageArray = Cell.of<ImageData[]>([]);
 
-  // Sync imageArray changes back to uploadedImage
-  // This is handled by the onct-change handler
+  // Derive single image from array - this fixes the disconnection issue
+  const uploadedImage = derive(
+    imageArray,
+    (images: ImageData[]) => (images.length > 0 ? images[0] : null),
+  );
 
   // ===== OCR Processing =====
 
   // Build OCR prompt only when we have an image
+  // Return undefined (not []) to prevent API call when no image
   const ocrPrompt = computed(() => {
     const image = uploadedImage.get();
     if (!image || !image.data) {
-      return []; // Empty prompt = no OCR call
+      return undefined; // No prompt = no OCR call
     }
 
     return [
@@ -259,12 +316,16 @@ export function SmartTextInput(
   });
 
   // When OCR completes, set the preview text
-  // Use derive to watch for OCR completion
+  // Use requestHash to prevent race conditions - only accept results for current image
   const _ocrWatcher = derive(
-    [ocr.result, ocr.pending, uploadedImage] as const,
-    ([result, pending, image]) => {
-      if (result && !pending && image) {
-        // OCR completed - update preview
+    [ocr.result, ocr.pending, ocr.requestHash, uploadedImage] as const,
+    ([result, pending, _requestHash, image]) => {
+      // Only set preview if:
+      // 1. We have a result
+      // 2. Not pending (OCR finished)
+      // 3. We still have the image that triggered this OCR
+      // 4. Preview source is "image" (not overwritten by file upload)
+      if (result && !pending && image && previewSource.get() === "image") {
         previewText.set(result);
       }
       return null;
@@ -305,6 +366,12 @@ export function SmartTextInput(
     />
   );
 
+  // File error display
+  const hasFileError = derive(
+    fileError,
+    (err: string | null) => err !== null,
+  );
+
   const buttons = (
     <div
       style={{
@@ -325,6 +392,8 @@ export function SmartTextInput(
           previewText,
           previewSource,
           previewFileName,
+          fileError,
+          maxTextFileSizeBytes,
         })}
       />
 
@@ -335,9 +404,9 @@ export function SmartTextInput(
         showPreview={false}
         maxSizeBytes={maxImageSizeBytes}
         onct-change={handleImageChange({
-          uploadedImage,
           previewText,
           previewSource,
+          fileError,
         })}
       >
         <button
@@ -382,7 +451,46 @@ export function SmartTextInput(
         null,
       )}
 
-      {/* Error state */}
+      {/* File error state */}
+      {ifElse(
+        hasFileError,
+        <div
+          style={{
+            marginTop: "12px",
+            padding: "12px",
+            background: "#fef3c7",
+            borderRadius: "6px",
+            color: "#92400e",
+            fontSize: "13px",
+          }}
+        >
+          {fileError}
+          <button
+            type="button"
+            onClick={handleCancelPreview({
+              previewText,
+              previewSource,
+              previewFileName,
+              uploadedImage: imageArray, // Clear the image array
+              fileError,
+            })}
+            style={{
+              marginLeft: "8px",
+              padding: "2px 8px",
+              background: "white",
+              border: "1px solid #fcd34d",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontSize: "12px",
+            }}
+          >
+            Dismiss
+          </button>
+        </div>,
+        null,
+      )}
+
+      {/* OCR error state */}
       {ifElse(
         hasError,
         <div
@@ -402,7 +510,8 @@ export function SmartTextInput(
               previewText,
               previewSource,
               previewFileName,
-              uploadedImage,
+              uploadedImage: imageArray, // Clear the image array
+              fileError,
             })}
             style={{
               marginLeft: "8px",
@@ -479,7 +588,8 @@ export function SmartTextInput(
                 previewText,
                 previewSource,
                 previewFileName,
-                uploadedImage,
+                uploadedImage: imageArray, // Clear the image array
+                fileError,
               })}
               style={{
                 padding: "6px 12px",
