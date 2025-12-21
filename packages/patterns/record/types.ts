@@ -81,6 +81,8 @@ export type SubCharmType =
   | "occurrence-tracker"
   // Text import module (for file-based extraction sources)
   | "text-import"
+  // Collection/group management
+  | "members"
   // Controller modules (internal, not user-addable)
   | "type-picker"
   | "extractor";

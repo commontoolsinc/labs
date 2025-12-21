@@ -82,6 +82,10 @@ import {
   MODULE_METADATA as TextImportMeta,
   TextImportModule,
 } from "../text-import.tsx";
+import {
+  MembersModule,
+  MODULE_METADATA as MembersMeta,
+} from "../members.tsx";
 import type { ModuleMetadata } from "../container-protocol.ts";
 
 // NOTE: TypePickerMeta is NOT imported here to avoid circular dependency:
@@ -228,6 +232,7 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     TextImportMeta,
     (init) => TextImportModule(init as any),
   ),
+  members: fromMetadata(MembersMeta, (init) => MembersModule(init as any)),
 
   // Controller modules - TypePicker needs special handling in record.tsx
   // Metadata is inlined here to avoid circular dependency (see note at top)
