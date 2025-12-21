@@ -15,7 +15,9 @@ export const getPattern = async (
 
   try {
     // Security: validate filename doesn't contain path traversal
-    if (filename.includes("..") || filename.includes("/")) {
+    // Allow forward slashes for subdirectory access (e.g., record/registry.ts)
+    // but block .. sequences that could escape the patterns directory
+    if (filename.includes("..")) {
       return c.json(
         { error: "Invalid file path" },
         400,

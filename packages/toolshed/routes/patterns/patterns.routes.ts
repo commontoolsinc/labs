@@ -6,10 +6,10 @@ import { createRoute, z } from "@hono/zod-openapi";
  */
 export const getPattern = createRoute({
   method: "get",
-  path: "/api/patterns/{filename}",
+  path: "/api/patterns/:filename{.+}",
   request: {
     params: z.object({
-      filename: z.string().describe("The pattern file name to retrieve"),
+      filename: z.string().describe("The pattern file path to retrieve (supports subdirectories)"),
     }),
   },
   responses: {
