@@ -23,7 +23,7 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateDefinition> = {
     name: "Person",
     icon: "\u{1F464}", // 👤
     description: "People you know",
-    modules: ["notes", "contact", "birthday", "relationship", "tags"],
+    modules: ["notes", "email", "phone", "birthday", "relationship", "tags"],
     defaultPinned: ["notes"],
   },
   recipe: {
@@ -110,10 +110,10 @@ export interface InferredType {
 export function inferTypeFromModules(moduleTypes: string[]): InferredType {
   const typeSet = new Set(moduleTypes);
 
-  // Person: has birthday AND (contact OR relationship)
+  // Person: has birthday AND (email/phone OR relationship)
   if (
     typeSet.has("birthday") &&
-    (typeSet.has("contact") || typeSet.has("relationship"))
+    (typeSet.has("email") || typeSet.has("phone") || typeSet.has("relationship"))
   ) {
     return { type: "person", icon: "\u{1F464}", confidence: 0.9 };
   }

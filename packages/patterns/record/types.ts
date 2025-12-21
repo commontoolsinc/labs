@@ -7,7 +7,7 @@
  * Each entry holds a reference to an actual sub-charm pattern instance.
  */
 export interface SubCharmEntry {
-  type: string; // Module type identifier (e.g., "birthday", "contact")
+  type: string; // Module type identifier (e.g., "birthday", "email")
   pinned: boolean; // Pin state owned by Record (not the sub-charm)
   charm: unknown; // Reference to the actual sub-charm pattern instance
 }
@@ -27,7 +27,6 @@ export type SubCharmType =
   | "birthday"
   | "rating"
   | "tags"
-  | "contact"
   | "status"
   | "address"
   | "timeline"
@@ -40,7 +39,7 @@ export type SubCharmType =
   | "timing"
   | "age-category"
   | "dietary-restrictions"
-  // Contact modules (with labels, support siblings)
+  // Contact modules (with labels, support multiple instances)
   | "email"
   | "phone"
   // Controller modules (internal, not user-addable)
