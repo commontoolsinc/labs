@@ -3,6 +3,24 @@
 // ===== Sub-Charm Architecture Types =====
 
 /**
+ * Expected schema shape for extraction.
+ *
+ * When sub-charms are created, their resultSchema is captured and stored.
+ * This enables dynamic schema discovery for LLM extraction.
+ *
+ * Schema should be JSON Schema-like:
+ * ```
+ * {
+ *   type: "object",
+ *   properties: {
+ *     email: { type: "string", description: "Email address" },
+ *     phone: { type: "string", description: "Phone number" },
+ *   }
+ * }
+ * ```
+ */
+
+/**
  * SubCharmEntry - An entry in the Record's sub-charms array.
  * Each entry holds a reference to an actual sub-charm pattern instance.
  */
@@ -10,6 +28,7 @@ export interface SubCharmEntry {
   type: string; // Module type identifier (e.g., "birthday", "email")
   pinned: boolean; // Pin state owned by Record (not the sub-charm)
   charm: unknown; // Reference to the actual sub-charm pattern instance
+  schema?: unknown; // Schema captured at creation time for dynamic discovery
 }
 
 /**
