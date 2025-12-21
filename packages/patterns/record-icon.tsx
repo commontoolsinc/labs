@@ -48,20 +48,7 @@ export const RecordIconModule = recipe<
     [NAME]: computed(
       () => `${MODULE_METADATA.icon} Icon: ${displayText}`,
     ),
-    [UI]: (
-      <ct-vstack style={{ gap: "8px" }}>
-        <span
-          style={{
-            fontSize: "12px",
-            color: "#6b7280",
-          }}
-        >
-          Set a custom icon for this record. Leave empty to use automatic icon
-          based on record type.
-        </span>
-        {picker}
-      </ct-vstack>
-    ),
+    [UI]: picker,
     icon,
   };
 });
