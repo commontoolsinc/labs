@@ -9,7 +9,9 @@ export const getPattern = createRoute({
   path: "/api/patterns/:filename{.+}",
   request: {
     params: z.object({
-      filename: z.string().describe("The pattern file path to retrieve (supports subdirectories)"),
+      filename: z.string().describe(
+        "The pattern file path to retrieve (supports subdirectories)",
+      ),
     }),
   },
   responses: {
