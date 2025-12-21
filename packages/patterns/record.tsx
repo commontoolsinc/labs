@@ -24,7 +24,6 @@ import {
   str,
   toSchema,
   UI,
-  wish,
 } from "commontools";
 import {
   createSubCharm,
@@ -40,7 +39,6 @@ import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
 import { getResultSchema } from "./record/extraction/schema-utils.ts";
 import { MembersModule } from "./members.tsx";
 import type { ContainerCoordinationContext } from "./container-protocol.ts";
-import type { MentionableCharm } from "./backlinks-index.tsx";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 
 // ===== Standard Labels for Smart Defaults =====
@@ -250,7 +248,6 @@ const addSubCharm = handler<
     trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
     selectedAddType: Cell<string>;
     recordPatternJson: string;
-    mentionable: MentionableCharm[];
   }
 >((
   { detail },
@@ -259,7 +256,6 @@ const addSubCharm = handler<
     trashedSubCharms: trash,
     selectedAddType: sat,
     recordPatternJson,
-    mentionable,
   },
 ) => {
   const type = detail?.value;
@@ -289,7 +285,6 @@ const addSubCharm = handler<
     : type === "members"
     ? MembersModule({
       parentSubCharms: sc,
-      mentionable,
     } as any)
     : createSubCharm(type, initialValues);
 
@@ -389,10 +384,6 @@ const Record = pattern<RecordInput, RecordOutput>(
     // Local state
     const selectedAddType = Cell.of<string>("");
     const trashExpanded = Cell.of(false);
-
-    // Get mentionable charms for sub-modules that need them
-    // (Sub-charms run in their own space context and can't use wish directly)
-    const mentionable = wish<Default<MentionableCharm[], []>>("#mentionable");
 
     // Create Record pattern JSON for wiki-links in Notes
     // Using computed() defers evaluation until render time, avoiding circular dependency
@@ -551,7 +542,6 @@ const Record = pattern<RecordInput, RecordOutput>(
                   trashedSubCharms,
                   selectedAddType,
                   recordPatternJson,
-                  mentionable,
                 })}
                 style={{ width: "130px" }}
               />

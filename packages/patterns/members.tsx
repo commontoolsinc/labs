@@ -17,6 +17,7 @@ import {
   navigateTo,
   recipe,
   UI,
+  wish,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 import { type MentionableCharm } from "./backlinks-index.tsx";
@@ -42,8 +43,6 @@ export interface MembersModuleInput {
   parentSubCharms?: Cell<{ type: string; charm: unknown }[]>;
   /** Pattern JSON for creating new stub records (serialized pattern definition) */
   createPattern?: Default<string, "">;
-  /** Mentionable charms passed from parent (sub-charms can't use wish directly) */
-  mentionable?: Default<MentionableCharm[], []>;
 }
 
 // ===== Self-Describing Metadata =====
@@ -76,9 +75,11 @@ const FILTER_OPTIONS = [
 
 // ===== Helper Functions =====
 
-/** Check if a charm is a Record */
+/** Check if a charm is a Record - uses subCharms as marker since #record isn't stored */
 function isRecord(charm: unknown): boolean {
-  return (charm as any)?.["#record"] === true;
+  // Can't use #record because it's not in RecordOutput interface and isn't persisted
+  // Instead, check for subCharms array which IS a stored Record property
+  return Array.isArray((charm as any)?.subCharms);
 }
 
 /** Get module types from a record's subCharms */
@@ -231,15 +232,16 @@ const cancelRoleEdit = handler<
 /** Add a member from autocomplete selection */
 const addMember = handler<
   CustomEvent<
-    { value: string; label?: string; charmRef?: unknown; isCustom?: boolean }
+    { value: string; label?: string; isCustom?: boolean }
   >,
   {
     members: Cell<MemberEntry[]>;
     parentRecord: unknown;
     errorMessage: Cell<string>;
+    mentionable: MentionableCharm[];
   }
->((event, { members, parentRecord, errorMessage }) => {
-  const { value, charmRef, isCustom } = event.detail || {};
+>((event, { members, parentRecord, errorMessage, mentionable }) => {
+  const { value, isCustom } = event.detail || {};
 
   // Clear previous errors
   errorMessage.set("");
@@ -254,8 +256,30 @@ const addMember = handler<
     return;
   }
 
-  // Use charmRef from autocomplete item (already included)
-  const charm = charmRef;
+  // Look up charm by value from mentionable list
+  // ct-autocomplete doesn't pass custom properties like charmRef through events
+  // The value could be: entity ID ("/"), name, or label (icon + name)
+  // Try multiple lookup strategies
+  let charm = (mentionable || []).find(
+    (m) => (m as any)?.["/"] === value,
+  );
+
+  // Fallback: try matching by NAME (value might be the charm name)
+  if (!charm) {
+    charm = (mentionable || []).find(
+      (m) => getCharmName(m) === value,
+    );
+  }
+
+  // Fallback: try matching by label format (icon + name)
+  // Value might come through as label due to framework serialization
+  if (!charm) {
+    charm = (mentionable || []).find((m) => {
+      const name = getCharmName(m);
+      // Check if value ends with the name (handles "📋 Alice Smith" -> "Alice Smith")
+      return value.endsWith(name) || value.includes(name);
+    });
+  }
 
   if (!charm) {
     console.warn("Could not find charm for:", value);
@@ -268,8 +292,10 @@ const addMember = handler<
   const currentMembers = members.get() || [];
 
   // Atomic duplicate check - if found, show feedback and bail
-  const isDuplicate = currentMembers.some((m) =>
-    Cell.equals(m.charm as Cell<unknown>, charm as Cell<unknown>)
+  // Compare entity IDs since charm is a MentionableCharm, not a Cell
+  const charmEntityId = (charm as any)?.["/"];
+  const isDuplicate = currentMembers.some(
+    (m) => (m.charm as any)?.["/"] === charmEntityId,
   );
   if (isDuplicate) {
     errorMessage.set("This member is already added.");
@@ -287,21 +313,25 @@ const addMember = handler<
 
   if (bidirectional && parentRecord) {
     try {
-      const targetCharm = charm as Cell<any>;
-      const targetSubCharms = targetCharm.key?.("subCharms")?.get?.() || [];
+      // charm is a MentionableCharm (charm data), access properties directly
+      const targetSubCharms = (charm as any)?.subCharms || [];
       const targetMembersEntry = targetSubCharms.find(
         (e: any) => e?.type === "members",
       );
 
       if (targetMembersEntry?.charm) {
-        targetMembersCell = targetMembersEntry.charm.key("members") as Cell<
+        // The members module's charm has a members property
+        // Access it as a Cell via .key() if available, otherwise direct access
+        const membersCharm = targetMembersEntry.charm;
+        targetMembersCell = membersCharm?.key?.("members") as Cell<
           MemberEntry[]
-        >;
-        const targetMembersList = targetMembersCell.get?.() || [];
+        > || null;
+        const targetMembersList = targetMembersCell?.get?.() || [];
 
-        // Check if reverse link already exists
-        const hasReverseLink = targetMembersList.some((m: MemberEntry) =>
-          Cell.equals(m?.charm as Cell<unknown>, parentRecord as Cell<unknown>)
+        // Check if reverse link already exists - compare entity IDs
+        const parentEntityId = (parentRecord as any)?.["/"];
+        const hasReverseLink = targetMembersList.some(
+          (m: MemberEntry) => (m?.charm as any)?.["/"] === parentEntityId,
         );
 
         if (!hasReverseLink) {
@@ -351,9 +381,13 @@ const addMember = handler<
 // ===== The Pattern =====
 export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
   "MembersModule",
-  ({ members, parentSubCharms, createPattern: _createPattern, mentionable }) => {
+  ({ members, parentSubCharms, createPattern: _createPattern }) => {
     // Local state
     const filterMode = Cell.of<FilterMode>("all-records");
+
+    // Get mentionable charms directly via wish
+    // Sub-charms share the same MemorySpace as their parent, so wish() works
+    const mentionable = wish<Default<MentionableCharm[], []>>("#mentionable");
     const editingRoleIndex = Cell.of<number | null>(null);
     const roleInputValue = Cell.of("");
     const errorMessage = Cell.of("");
@@ -503,6 +537,7 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                 members,
                 parentRecord,
                 errorMessage,
+                mentionable,
               })}
               style={{ flex: "1" }}
             />
