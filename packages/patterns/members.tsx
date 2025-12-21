@@ -105,61 +105,75 @@ const navigateToMember = handler<
 /** Remove a member by index with reverse link cleanup */
 const removeMember = handler<
   Event,
-  { members: Cell<MemberEntry[]>; index: number; parentRecord: unknown }
->((event, { members, index, parentRecord }) => {
+  {
+    members: Cell<MemberEntry[]>;
+    index: number;
+    parentRecord: unknown;
+    errorMessage: Cell<string>;
+  }
+>((event, { members, index, parentRecord, errorMessage }) => {
   event.stopPropagation?.();
+  errorMessage.set("");
 
-  // === PHASE 1: Read current state and prepare updates ===
+  try {
+    // === PHASE 1: Read current state and prepare updates ===
 
-  const current = members.get() || [];
-  const entry = current[index];
+    const current = members.get() || [];
+    const entry = current[index];
 
-  if (!entry) return; // Invalid index
+    if (!entry) return; // Invalid index
 
-  // Prepare local update
-  const newLocalMembersList = current.toSpliced(index, 1);
+    // Prepare local update
+    const newLocalMembersList = current.toSpliced(index, 1);
 
-  // Prepare reverse link removal (if bidirectional)
-  let targetMembersCell: Cell<MemberEntry[]> | null = null;
-  let newTargetMembersList: MemberEntry[] | null = null;
+    // Prepare reverse link removal (if bidirectional)
+    let targetMembersCell: Cell<MemberEntry[]> | null = null;
+    let newTargetMembersList: MemberEntry[] | null = null;
 
-  if (entry.bidirectional && isRecord(entry.charm) && parentRecord) {
-    try {
-      const targetCharm = entry.charm as Cell<any>;
-      const targetSubCharms = targetCharm.key?.("subCharms")?.get?.() || [];
-      const targetMembersEntry = targetSubCharms.find(
-        (e: any) => e?.type === "members",
-      );
-
-      if (targetMembersEntry?.charm) {
-        targetMembersCell = targetMembersEntry.charm.key("members") as Cell<
-          MemberEntry[]
-        >;
-        const targetMembersList = targetMembersCell.get?.() || [];
-
-        // Find reverse link (this record in target's members)
-        const reverseIdx = targetMembersList.findIndex((m: MemberEntry) =>
-          Cell.equals(m?.charm as Cell<unknown>, parentRecord as Cell<unknown>)
+    if (entry.bidirectional && isRecord(entry.charm) && parentRecord) {
+      try {
+        const targetCharm = entry.charm as Cell<any>;
+        const targetSubCharms = targetCharm.key?.("subCharms")?.get?.() || [];
+        const targetMembersEntry = targetSubCharms.find(
+          (e: any) => e?.type === "members",
         );
 
-        if (reverseIdx >= 0) {
-          newTargetMembersList = targetMembersList.toSpliced(reverseIdx, 1);
+        if (targetMembersEntry?.charm) {
+          targetMembersCell = targetMembersEntry.charm.key("members") as Cell<
+            MemberEntry[]
+          >;
+          const targetMembersList = targetMembersCell.get?.() || [];
+
+          // Find reverse link (this record in target's members)
+          const reverseIdx = targetMembersList.findIndex((m: MemberEntry) =>
+            Cell.equals(
+              m?.charm as Cell<unknown>,
+              parentRecord as Cell<unknown>,
+            )
+          );
+
+          if (reverseIdx >= 0) {
+            newTargetMembersList = targetMembersList.toSpliced(reverseIdx, 1);
+          }
         }
+      } catch (e) {
+        console.warn("Could not prepare reverse link removal:", e);
+        // Continue anyway - we'll remove local even if reverse fails
       }
-    } catch (e) {
-      console.warn("Could not prepare reverse link removal:", e);
-      // Continue anyway - we'll remove local even if reverse fails
     }
-  }
 
-  // === PHASE 2: Commit both updates atomically ===
+    // === PHASE 2: Commit both updates atomically ===
 
-  // Write local members
-  members.set(newLocalMembersList);
+    // Write local members
+    members.set(newLocalMembersList);
 
-  // Write reverse link removal (if prepared)
-  if (targetMembersCell && newTargetMembersList) {
-    targetMembersCell.set(newTargetMembersList);
+    // Write reverse link removal (if prepared)
+    if (targetMembersCell && newTargetMembersList) {
+      targetMembersCell.set(newTargetMembersList);
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    errorMessage.set(`Failed to remove member: ${msg}`);
   }
 });
 
@@ -252,11 +266,14 @@ const addMember = handler<
   // Read local members
   const currentMembers = members.get() || [];
 
-  // Atomic duplicate check - if found, bail early
+  // Atomic duplicate check - if found, show feedback and bail
   const isDuplicate = currentMembers.some((m) =>
     Cell.equals(m.charm as Cell<unknown>, charm as Cell<unknown>)
   );
-  if (isDuplicate) return;
+  if (isDuplicate) {
+    errorMessage.set("This member is already added.");
+    return;
+  }
 
   // Determine if bidirectional (both are records with Members modules)
   const targetIsRecord = isRecord(charm);
@@ -333,7 +350,7 @@ const addMember = handler<
 // ===== The Pattern =====
 export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
   "MembersModule",
-  ({ members, parentSubCharms, createPattern }) => {
+  ({ members, parentSubCharms, createPattern: _createPattern }) => {
     // Local state
     const filterMode = Cell.of<FilterMode>("all-records");
     const editingRoleIndex = Cell.of<number | null>(null);
@@ -484,7 +501,6 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
             <ct-autocomplete
               items={autocompleteItems}
               placeholder="Search members..."
-              allowCustom
               onct-select={addMember({
                 members,
                 parentRecord,
@@ -522,6 +538,7 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                   padding: "0 4px",
                 }}
                 title="Dismiss"
+                aria-label="Dismiss error"
               >
                 ×
               </button>
@@ -602,6 +619,7 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                           padding: "2px 4px",
                         }}
                         title="Save role"
+                        aria-label="Save role"
                       >
                         ✓
                       </button>
@@ -618,6 +636,7 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                           padding: "2px 4px",
                         }}
                         title="Cancel"
+                        aria-label="Cancel role edit"
                       >
                         ✕
                       </button>
@@ -669,7 +688,12 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                   )}
                   <button
                     type="button"
-                    onClick={removeMember({ members, index, parentRecord })}
+                    onClick={removeMember({
+                      members,
+                      index,
+                      parentRecord,
+                      errorMessage,
+                    })}
                     style={{
                       background: "none",
                       border: "none",
@@ -681,6 +705,7 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                       marginLeft: "2px",
                     }}
                     title="Remove member"
+                    aria-label="Remove member"
                   >
                     ×
                   </button>
