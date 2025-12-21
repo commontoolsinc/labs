@@ -91,6 +91,10 @@ export interface MemberEntry {
 export interface MembersModuleInput {
   /** Array of member entries */
   members: Default<MemberEntry[], []>;
+  /** Parent's subCharms for finding self and bidirectional linking */
+  parentSubCharms?: Cell<{ type: string; charm: unknown }[]>;
+  /** Pattern JSON for creating new stub records */
+  createPattern?: Default<string, "">;
 }
 
 // ===== Self-Describing Metadata =====
@@ -191,13 +195,69 @@ const removeMember = handler<
 /** Add a member from autocomplete selection */
 const addMember = handler<
   CustomEvent<{ value: string; label?: string; charmRef?: unknown; isCustom?: boolean }>,
-  { members: Cell<MemberEntry[]> }
->((event, { members }) => {
+  {
+    members: Cell<MemberEntry[]>;
+    parentRecord: unknown;
+    createPattern: string;
+  }
+>((event, { members, parentRecord, createPattern }) => {
   const { value, charmRef, isCustom } = event.detail || {};
 
   if (isCustom) {
-    // TODO: Create new blank record with the typed name
-    console.log("Create new record:", value);
+    // Create new blank record with the typed name
+    if (!createPattern) {
+      console.warn("No createPattern provided, cannot create new record");
+      return;
+    }
+
+    try {
+      // Access runtime and space from the members Cell
+      const rt = (members as any).runtime;
+      const spaceName = (members as any).space;
+
+      if (!rt || !spaceName) {
+        console.warn("Cannot create record: runtime or space unavailable");
+        return;
+      }
+
+      // Start transaction
+      const tx = rt.edit();
+
+      // Create a unique cause Cell for the new charm
+      const result = rt.getCell(spaceName, {
+        memberName: value,
+        timestamp: Date.now(),
+      });
+
+      // Parse the pattern JSON
+      const pattern = JSON.parse(createPattern);
+
+      // Define inputs for the new Record (just title)
+      const inputs: Record<string, unknown> = {
+        title: value,
+      };
+
+      // Instantiate and run the pattern
+      rt.run(tx, pattern, inputs, result);
+
+      // Commit the transaction
+      tx.commit();
+
+      // Add the new charm to members list
+      const newEntry: MemberEntry = {
+        charm: result,
+        bidirectional: true, // New records always have bidirectional links
+      };
+      members.push(newEntry);
+
+      // Add reverse link to the new record's members module
+      // (will be created automatically by the Record pattern)
+      // Note: The new record's members module won't exist until it's rendered,
+      // so we can't add reverse link immediately. Log for now.
+      console.log("Created new record:", value, "- reverse link pending");
+    } catch (error) {
+      console.error("Error creating new record:", error);
+    }
     return;
   }
 
@@ -211,12 +271,15 @@ const addMember = handler<
 
   // Check for duplicates
   const current = members.get() || [];
-  const isDuplicate = current.some((m) => m.charm === charm);
+  const isDuplicate = current.some((m) =>
+    m.charm === charm || (m.charm as any)?.["/"] === (charm as any)?.["/"]
+  );
   if (isDuplicate) return;
 
   // Determine if bidirectional (both are records)
   const targetIsRecord = isRecord(charm);
-  const bidirectional = targetIsRecord; // TODO: also check if source is record
+  const sourceIsRecord = parentRecord ? isRecord(parentRecord) : false;
+  const bidirectional = targetIsRecord && sourceIsRecord;
 
   // Add to members
   const newEntry: MemberEntry = {
@@ -226,7 +289,7 @@ const addMember = handler<
   members.push(newEntry);
 
   // If bidirectional, add reverse link to target's members
-  if (bidirectional) {
+  if (bidirectional && parentRecord) {
     try {
       const targetCharm = charm as Cell<any>;
       const targetSubCharms = targetCharm.key?.("subCharms")?.get?.() || [];
@@ -235,10 +298,25 @@ const addMember = handler<
       );
 
       if (targetMembersEntry?.charm) {
-        // Add reverse link - need reference to current record
-        // This is tricky - we need the parent record reference
-        // For now, log and skip
-        console.log("Would add reverse link to target's members");
+        const targetMembersCell = targetMembersEntry.charm as Cell<any>;
+        const targetMembersList = targetMembersCell.key?.("members")?.get?.() || [];
+
+        // Check if reverse link already exists
+        const hasReverseLink = targetMembersList.some((m: MemberEntry) =>
+          m?.charm === parentRecord ||
+          (m?.charm as any)?.["/"] === (parentRecord as any)?.["/"]
+        );
+
+        if (!hasReverseLink) {
+          // Add reverse link
+          targetMembersCell.key("members").push({
+            charm: parentRecord,
+            bidirectional: true,
+          });
+          console.log("Added reverse link to target's members");
+        }
+      } else {
+        console.log("Target has no Members module - skipping reverse link");
       }
     } catch (e) {
       console.warn("Could not add reverse link:", e);
@@ -249,52 +327,86 @@ const addMember = handler<
 // ===== The Pattern =====
 export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
   "MembersModule",
-  ({ members }) => {
+  ({ members, parentSubCharms, createPattern }) => {
     // Local state
     const filterMode = Cell.of<FilterMode>("all-records");
 
     // Get mentionable charms via wish
     const mentionable = wish<Default<MentionableCharm[], []>>("#mentionable");
 
+    // Find parent record by looking for which record contains us in its subCharms
+    // This enables self-filtering and bidirectional linking
+    const parentRecord = lift(
+      ({ mentionable: all, parentSC }: {
+        mentionable: MentionableCharm[];
+        parentSC: { type: string; charm: unknown }[] | undefined;
+      }) => {
+        if (!parentSC) return null;
+        // Find the record that contains our members module in its subCharms
+        for (const item of all || []) {
+          if (!isRecord(item)) continue;
+          const subCharms = (item as any)?.subCharms;
+          if (!Array.isArray(subCharms)) continue;
+          // Check if this record's subCharms matches our parentSubCharms reference
+          // We can't directly compare Cell references, so check by content
+          const membersEntry = subCharms.find((sc: any) => sc?.type === "members");
+          if (membersEntry && parentSC.some((psc: any) =>
+            psc?.type === "members" && psc?.charm === membersEntry?.charm
+          )) {
+            return item;
+          }
+        }
+        return null;
+      }
+    )({ mentionable, parentSC: parentSubCharms });
+
     // Build autocomplete items from mentionable using lift()
     // lift() properly unwraps OpaqueRefs from wish()
+    // Also filters out self (parentRecord) to prevent self-reference
     const autocompleteItems = lift(
-      ({ mentionable: all, filterMode: mode }: {
+      ({ mentionable: all, filterMode: mode, parent }: {
         mentionable: MentionableCharm[];
         filterMode: FilterMode;
+        parent: unknown;
       }) => {
         const items = all || [];
 
-        // Filter based on mode
+        // Get parent entity ID for self-filtering
+        const parentId = parent ? (parent as any)?.["/"] : null;
+
+        // Helper to check if item is self
+        const isSelf = (m: any) => parentId && (m as any)?.["/"] === parentId;
+
+        // Filter based on mode (and always exclude self)
         let filtered: MentionableCharm[];
         switch (mode) {
           case "all-records":
-            filtered = items.filter((m: any) => isRecord(m));
+            filtered = items.filter((m: any) => !isSelf(m) && isRecord(m));
             break;
           case "people":
             filtered = items.filter((m: any) => {
-              if (!isRecord(m)) return false;
+              if (isSelf(m) || !isRecord(m)) return false;
               const inferred = inferTypeFromModules(getModuleTypes(m));
               return inferred.type === "person";
             });
             break;
           case "families":
             filtered = items.filter((m: any) => {
-              if (!isRecord(m)) return false;
+              if (isSelf(m) || !isRecord(m)) return false;
               const inferred = inferTypeFromModules(getModuleTypes(m));
               return inferred.type === "family";
             });
             break;
           case "places":
             filtered = items.filter((m: any) => {
-              if (!isRecord(m)) return false;
+              if (isSelf(m) || !isRecord(m)) return false;
               const inferred = inferTypeFromModules(getModuleTypes(m));
               return inferred.type === "place";
             });
             break;
           case "everything":
           default:
-            filtered = items;
+            filtered = items.filter((m: any) => !isSelf(m));
         }
 
         // Build autocomplete items
@@ -319,7 +431,7 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
           };
         });
       }
-    )({ mentionable, filterMode });
+    )({ mentionable, filterMode, parent: parentRecord });
 
     // Display text for NAME
     const displayText = computed(() => {
@@ -354,7 +466,7 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
               items={autocompleteItems}
               placeholder="Search members..."
               allowCustom
-              onct-select={addMember({ members })}
+              onct-select={addMember({ members, parentRecord, createPattern })}
               style={{ flex: "1" }}
             />
           </ct-hstack>
