@@ -504,7 +504,20 @@ export function wish(
           : parsed.path;
         const resolvedCell = resolvePath(baseResolutions[0].cell, combinedPath);
         sendResult(tx, resolvedCell);
-      } catch (_e) {
+      } catch (e) {
+        // Provide helpful warning for common defaultPattern issues
+        if (
+          wishTarget.startsWith("#mentionable") ||
+          wishTarget.startsWith("#default")
+        ) {
+          console.warn(
+            `wish("${wishTarget}") failed: ${
+              e instanceof Error ? e.message : String(e)
+            }. ` +
+              `This usually means the space's defaultPattern is not initialized. ` +
+              `Visit the space in browser first, or ensure ensureDefaultPattern() is called.`,
+          );
+        }
         sendResult(tx, undefined);
       }
       return;

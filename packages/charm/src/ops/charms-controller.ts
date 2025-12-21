@@ -5,10 +5,12 @@ import {
   type Schema,
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
+import { type NameSchema } from "@commontools/runner/schemas";
 import { CharmManager } from "../index.ts";
 import { CharmController } from "./charm-controller.ts";
 import { compileProgram } from "./utils.ts";
 import { createSession, Identity } from "@commontools/identity";
+import { HttpProgramResolver } from "@commontools/js-compiler";
 import { ACLManager } from "./acl-manager.ts";
 
 export interface CreateCharmOptions {
@@ -133,5 +135,69 @@ export class CharmsController<T = unknown> {
 
   acl(): ACLManager {
     return new ACLManager(this.#manager.runtime, this.#manager.getSpace());
+  }
+
+  /**
+   * Ensures a default pattern exists for this space, creating it if necessary.
+   * For home spaces, uses home.tsx; for other spaces, uses default-app.tsx.
+   * This makes CLI-created spaces work the same as Shell-created spaces.
+   *
+   * @returns The default pattern charm, either existing or newly created
+   */
+  async ensureDefaultPattern(): Promise<CharmController<NameSchema>> {
+    this.disposeCheck();
+
+    // Check if default pattern already exists
+    const existingPattern = await this.#manager.getDefaultPattern();
+    if (existingPattern) {
+      return new CharmController<NameSchema>(this.#manager, existingPattern);
+    }
+
+    // Determine which pattern to use based on space type
+    const isHomeSpace =
+      this.#manager.getSpace() === this.#manager.runtime.userIdentityDID;
+
+    const patternConfig = isHomeSpace
+      ? {
+        name: "Home",
+        urlPath: "/api/patterns/home.tsx",
+        cause: "home-pattern",
+      }
+      : {
+        name: "DefaultCharmList",
+        urlPath: "/api/patterns/default-app.tsx",
+        cause: "space-root",
+      };
+
+    // Construct the pattern URL from the API URL
+    const patternUrl = new URL(
+      patternConfig.urlPath,
+      this.#manager.runtime.apiUrl,
+    );
+
+    try {
+      // Load the pattern program from HTTP
+      const program = await this.#manager.runtime.harness.resolve(
+        new HttpProgramResolver(patternUrl.href),
+      );
+
+      // Create the pattern charm
+      const charm = await this.create<NameSchema>(
+        program,
+        { start: true },
+        patternConfig.cause,
+      );
+
+      // Link it as the default pattern in the space cell
+      await this.#manager.linkDefaultPattern(charm.getCell());
+
+      return charm;
+    } catch (error) {
+      throw new Error(
+        `Failed to create default pattern from ${patternUrl.href}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 }

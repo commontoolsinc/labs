@@ -131,6 +131,10 @@ export async function newCharm(
 ): Promise<string> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
+
+  // Ensure space has a default pattern so wish("#mentionable") etc. work
+  await charms.ensureDefaultPattern();
+
   const program = await getProgramFromFile(manager, entry);
   const charm = await charms.create(program, options);
   return charm.id;
