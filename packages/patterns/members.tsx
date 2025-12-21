@@ -11,6 +11,7 @@ import {
   computed,
   type Default,
   handler,
+  ifElse,
   lift,
   NAME,
   navigateTo,
@@ -20,61 +21,8 @@ import {
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 import { type MentionableCharm } from "./backlinks-index.tsx";
-
-// NOTE: We inline type inference here to avoid circular dependency:
-// members.tsx -> template-registry.ts -> registry.ts -> members.tsx
-
-interface InferredType {
-  type: string;
-  icon: string;
-  confidence: number;
-}
-
-/** Infer record "type" from the modules it contains (inlined to avoid circular dep) */
-function inferTypeFromModules(moduleTypes: string[]): InferredType {
-  const typeSet = new Set(moduleTypes);
-
-  // Person: has birthday AND (contact OR relationship)
-  if (
-    typeSet.has("birthday") &&
-    (typeSet.has("contact") || typeSet.has("relationship"))
-  ) {
-    return { type: "person", icon: "\u{1F464}", confidence: 0.9 };
-  }
-
-  // Recipe: has timing (cooking-specific module)
-  if (typeSet.has("timing")) {
-    return { type: "recipe", icon: "\u{1F373}", confidence: 0.85 };
-  }
-
-  // Project: has timeline AND status
-  if (typeSet.has("timeline") && typeSet.has("status")) {
-    return { type: "project", icon: "\u{1F4BC}", confidence: 0.85 };
-  }
-
-  // Place: has location OR address (but not birthday - that's a person)
-  if (
-    (typeSet.has("location") || typeSet.has("address")) &&
-    !typeSet.has("birthday")
-  ) {
-    return { type: "place", icon: "\u{1F4CD}", confidence: 0.8 };
-  }
-
-  // Family: has address AND relationship (but not birthday - individual person)
-  if (
-    typeSet.has("address") && typeSet.has("relationship") &&
-    !typeSet.has("birthday")
-  ) {
-    return {
-      type: "family",
-      icon: "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}",
-      confidence: 0.75,
-    };
-  }
-
-  // Default: generic record
-  return { type: "record", icon: "\u{1F4CB}", confidence: 0.5 };
-}
+// Import from pure utility to avoid circular dependency
+import { inferTypeFromModules } from "./record/type-inference.ts";
 
 // ===== Types =====
 
@@ -110,7 +58,12 @@ export const MODULE_METADATA: ModuleMetadata = {
 };
 
 // ===== Filter Options =====
-type FilterMode = "all-records" | "people" | "families" | "places" | "everything";
+type FilterMode =
+  | "all-records"
+  | "people"
+  | "families"
+  | "places"
+  | "everything";
 
 const FILTER_OPTIONS = [
   { value: "all-records", label: "All Records" },
@@ -165,11 +118,12 @@ const removeMember = handler<
       const targetCharm = entry.charm as Cell<any>;
       const targetSubCharms = targetCharm.key?.("subCharms")?.get?.() || [];
       const targetMembersEntry = targetSubCharms.find(
-        (e: any) => e?.type === "members"
+        (e: any) => e?.type === "members",
       );
 
       if (targetMembersEntry?.charm) {
-        const targetMembersList = targetMembersEntry.charm.key?.("members")?.get?.() || [];
+        const targetMembersList =
+          targetMembersEntry.charm.key?.("members")?.get?.() || [];
         // Find reverse link (this record in target's members) using Cell.equals()
         const reverseIdx = targetMembersList.findIndex((m: MemberEntry) =>
           Cell.equals(m?.charm as Cell<unknown>, parentRecord as Cell<unknown>)
@@ -177,7 +131,7 @@ const removeMember = handler<
 
         if (reverseIdx >= 0) {
           targetMembersEntry.charm.key("members").set(
-            targetMembersList.toSpliced(reverseIdx, 1)
+            targetMembersList.toSpliced(reverseIdx, 1),
           );
         }
       }
@@ -190,21 +144,59 @@ const removeMember = handler<
   members.set(current.toSpliced(index, 1));
 });
 
+/** Update a member's role */
+const updateRole = handler<
+  Event,
+  { members: Cell<MemberEntry[]>; index: number; newRole: string }
+>((_event, { members, index, newRole }) => {
+  const current = members.get() || [];
+  if (index < 0 || index >= current.length) return;
+  const updated = [...current];
+  updated[index] = { ...updated[index], role: newRole || undefined };
+  members.set(updated);
+});
+
+/** Start editing a role (click handler that stops propagation) */
+const startEditRole = handler<
+  Event,
+  {
+    editingRoleIndex: Cell<number | null>;
+    roleInputValue: Cell<string>;
+    index: number;
+    currentRole: string;
+  }
+>((event, { editingRoleIndex, roleInputValue, index, currentRole }) => {
+  event.stopPropagation?.();
+  roleInputValue.set(currentRole);
+  editingRoleIndex.set(index);
+});
+
+/** Stop event propagation for role input clicks */
+const stopPropagationOnly = handler<Event, Record<string, never>>((event) => {
+  event.stopPropagation?.();
+});
+
 /** Add a member from autocomplete selection */
 const addMember = handler<
-  CustomEvent<{ value: string; label?: string; charmRef?: unknown; isCustom?: boolean }>,
+  CustomEvent<
+    { value: string; label?: string; charmRef?: unknown; isCustom?: boolean }
+  >,
   {
     members: Cell<MemberEntry[]>;
     parentRecord: unknown;
     createPattern: string;
+    errorMessage: Cell<string>;
   }
->((event, { members, parentRecord, createPattern }) => {
+>((event, { members, parentRecord, createPattern, errorMessage }) => {
   const { value, charmRef, isCustom } = event.detail || {};
+
+  // Clear previous errors
+  errorMessage.set("");
 
   if (isCustom) {
     // Create new blank record with the typed name
     if (!createPattern) {
-      console.warn("No createPattern provided, cannot create new record");
+      errorMessage.set("Cannot create record: no template available");
       return;
     }
 
@@ -214,7 +206,7 @@ const addMember = handler<
       const spaceName = (members as any).space;
 
       if (!rt || !spaceName) {
-        console.warn("Cannot create record: runtime or space unavailable");
+        errorMessage.set("Cannot create record: runtime unavailable");
         return;
       }
 
@@ -250,7 +242,8 @@ const addMember = handler<
       };
       members.push(newEntry);
     } catch (error) {
-      console.error("Error creating new record:", error);
+      const msg = error instanceof Error ? error.message : "Unknown error";
+      errorMessage.set(`Failed to create record: ${msg}`);
     }
     return;
   }
@@ -288,12 +281,13 @@ const addMember = handler<
       const targetCharm = charm as Cell<any>;
       const targetSubCharms = targetCharm.key?.("subCharms")?.get?.() || [];
       const targetMembersEntry = targetSubCharms.find(
-        (e: any) => e?.type === "members"
+        (e: any) => e?.type === "members",
       );
 
       if (targetMembersEntry?.charm) {
         const targetMembersCell = targetMembersEntry.charm as Cell<any>;
-        const targetMembersList = targetMembersCell.key?.("members")?.get?.() || [];
+        const targetMembersList = targetMembersCell.key?.("members")?.get?.() ||
+          [];
 
         // Check if reverse link already exists using Cell.equals()
         const hasReverseLink = targetMembersList.some((m: MemberEntry) =>
@@ -320,12 +314,23 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
   ({ members, parentSubCharms, createPattern }) => {
     // Local state
     const filterMode = Cell.of<FilterMode>("all-records");
+    const editingRoleIndex = Cell.of<number | null>(null);
+    const roleInputValue = Cell.of("");
+    const errorMessage = Cell.of("");
 
     // Get mentionable charms via wish
     const mentionable = wish<Default<MentionableCharm[], []>>("#mentionable");
 
-    // Find parent record by looking for which record contains us in its subCharms
-    // This enables self-filtering and bidirectional linking
+    // Derive parent ID from parentSubCharms Cell for self-filtering
+    // This is O(1) - no search through mentionable needed
+    const parentId = computed(() => {
+      if (!parentSubCharms) return null;
+      // Use parentSubCharms Cell's entity ID as proxy for parent record ID
+      return (parentSubCharms as any)?.["/"] || null;
+    });
+
+    // Find parent record lazily - only used for bidirectional linking
+    // Cached via lift, only recalculates when mentionable changes
     const parentRecord = lift(
       ({ mentionable: all, parentSC }: {
         mentionable: MentionableCharm[];
@@ -337,35 +342,35 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
           if (!isRecord(item)) continue;
           const subCharms = (item as any)?.subCharms;
           if (!Array.isArray(subCharms)) continue;
-          // Check if this record's subCharms matches our parentSubCharms reference
-          // We can't directly compare Cell references, so check by content
-          const membersEntry = subCharms.find((sc: any) => sc?.type === "members");
-          if (membersEntry && parentSC.some((psc: any) =>
-            psc?.type === "members" && psc?.charm === membersEntry?.charm
-          )) {
+          const membersEntry = subCharms.find((sc: any) =>
+            sc?.type === "members"
+          );
+          if (
+            membersEntry &&
+            parentSC.some((psc: any) =>
+              psc?.type === "members" && psc?.charm === membersEntry?.charm
+            )
+          ) {
             return item;
           }
         }
         return null;
-      }
+      },
     )({ mentionable, parentSC: parentSubCharms });
 
     // Build autocomplete items from mentionable using lift()
     // lift() properly unwraps OpaqueRefs from wish()
-    // Also filters out self (parentRecord) to prevent self-reference
+    // Also filters out self (using parentId) to prevent self-reference
     const autocompleteItems = lift(
-      ({ mentionable: all, filterMode: mode, parent }: {
+      ({ mentionable: all, filterMode: mode, pid }: {
         mentionable: MentionableCharm[];
         filterMode: FilterMode;
-        parent: unknown;
+        pid: string | null;
       }) => {
         const items = all || [];
 
-        // Get parent entity ID for self-filtering
-        const parentId = parent ? (parent as any)?.["/"] : null;
-
-        // Helper to check if item is self
-        const isSelf = (m: any) => parentId && (m as any)?.["/"] === parentId;
+        // Helper to check if item is self (using pre-computed parentId)
+        const isSelf = (m: any) => pid && (m as any)?.["/"] === pid;
 
         // Filter based on mode (and always exclude self)
         let filtered: MentionableCharm[];
@@ -420,13 +425,15 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
             charmRef: charm,
           };
         });
-      }
-    )({ mentionable, filterMode, parent: parentRecord });
+      },
+    )({ mentionable, filterMode, pid: parentId });
 
     // Display text for NAME
     const displayText = computed(() => {
       const count = (members || []).length || 0;
-      return count > 0 ? `${count} member${count !== 1 ? "s" : ""}` : "No members";
+      return count > 0
+        ? `${count} member${count !== 1 ? "s" : ""}`
+        : "No members";
     });
 
     // Filter valid members (exclude deleted/null charms)
@@ -456,10 +463,50 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
               items={autocompleteItems}
               placeholder="Search members..."
               allowCustom
-              onct-select={addMember({ members, parentRecord, createPattern })}
+              onct-select={addMember({
+                members,
+                parentRecord,
+                createPattern,
+                errorMessage,
+              })}
               style={{ flex: "1" }}
             />
           </ct-hstack>
+
+          {/* Error banner with dismiss */}
+          {ifElse(
+            computed(() => errorMessage.get().length > 0),
+            <div
+              style={{
+                padding: "8px 12px",
+                background: "#fee2e2",
+                borderRadius: "6px",
+                color: "#991b1b",
+                fontSize: "13px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <span>{errorMessage}</span>
+              <button
+                type="button"
+                onClick={() => errorMessage.set("")}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#991b1b",
+                  fontSize: "16px",
+                  padding: "0 4px",
+                }}
+                title="Dismiss"
+              >
+                ×
+              </button>
+            </div>,
+            null,
+          )}
 
           {/* Member chips */}
           <ct-hstack style={{ gap: "8px", flexWrap: "wrap" }}>
@@ -470,7 +517,9 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
               // Get icon for records
               let icon = "🔗";
               if (charmIsRecord) {
-                const inferred = inferTypeFromModules(getModuleTypes(entry.charm));
+                const inferred = inferTypeFromModules(
+                  getModuleTypes(entry.charm),
+                );
                 icon = inferred.icon;
               }
 
@@ -494,17 +543,111 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                 >
                   <span style={{ fontSize: "12px" }}>{icon}</span>
                   <span>{memberName}</span>
-                  {entry.role && (
-                    <span style={{
-                      color: "#6b7280",
-                      fontSize: "12px",
-                      fontStyle: "italic",
-                    }}>
-                      ({entry.role})
-                    </span>
+                  {/* Role editing */}
+                  {ifElse(
+                    computed(() => editingRoleIndex.get() === index),
+                    // Editing mode - inline input with save/cancel
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "2px",
+                      }}
+                      onClick={stopPropagationOnly({})}
+                    >
+                      <ct-input
+                        $value={roleInputValue}
+                        placeholder="Role..."
+                        style="width: 60px; font-size: 12px;"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          updateRole({
+                            members,
+                            index,
+                            newRole: roleInputValue.get(),
+                          });
+                          editingRoleIndex.set(null);
+                        }}
+                        style={{
+                          background: "#3b82f6",
+                          border: "none",
+                          borderRadius: "3px",
+                          color: "white",
+                          cursor: "pointer",
+                          fontSize: "10px",
+                          padding: "2px 4px",
+                        }}
+                        title="Save role"
+                      >
+                        ✓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => editingRoleIndex.set(null)}
+                        style={{
+                          background: "#e5e7eb",
+                          border: "none",
+                          borderRadius: "3px",
+                          color: "#6b7280",
+                          cursor: "pointer",
+                          fontSize: "10px",
+                          padding: "2px 4px",
+                        }}
+                        title="Cancel"
+                      >
+                        ✕
+                      </button>
+                    </span>,
+                    // Display mode - show role or +role button
+                    entry.role
+                      ? (
+                        <span
+                          style={{
+                            color: "#6b7280",
+                            fontSize: "12px",
+                            fontStyle: "italic",
+                            cursor: "text",
+                          }}
+                          onClick={startEditRole({
+                            editingRoleIndex,
+                            roleInputValue,
+                            index,
+                            currentRole: entry.role || "",
+                          })}
+                          title="Click to edit role"
+                        >
+                          ({entry.role})
+                        </span>
+                      )
+                      : (
+                        <button
+                          type="button"
+                          style={{
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            fontSize: "10px",
+                            color: "#9ca3af",
+                            padding: "0 2px",
+                          }}
+                          onClick={startEditRole({
+                            editingRoleIndex,
+                            roleInputValue,
+                            index,
+                            currentRole: "",
+                          })}
+                          title="Add role"
+                        >
+                          +role
+                        </button>
+                      ),
                   )}
                   {entry.bidirectional && (
-                    <span style={{ fontSize: "10px", color: "#3b82f6" }}>↔</span>
+                    <span style={{ fontSize: "10px", color: "#3b82f6" }}>
+                      ↔
+                    </span>
                   )}
                   <button
                     type="button"
