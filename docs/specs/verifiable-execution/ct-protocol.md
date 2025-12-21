@@ -8,27 +8,40 @@ maps.
 
 ---
 
-## 1. Overview
+## 1. Introduction: From Asserted Trust to Verifiable Trust
 
-This specification defines a verifiable, append-only system for **state updates
-to named entities** with strong provenance, privacy-preserving computation
-receipts, and policy-compliant computation.
+Modern software systems often make claims before they make arguments. We are
+told that a model was trained responsibly, that a score reflects genuine
+activity, that a message really came from its purported author, that a user gave
+meaningful consent. The evidence, when it exists at all, is usually indirect:
+dashboards, PDFs, policy pages, institutional reputation. **Trust is asserted,
+then defended socially rather than demonstrated structurally.**
 
-Core features:
+This pattern no longer scales. Systems are larger, more automated, and more
+intertwined; the consequences of error or misrepresentation are higher; and the
+parties asked to trust them are often remote in space, time, and incentives.
+
+The CT Protocol begins from a different premise: **trust should be _derivable_,
+not declarative.** A claim should be accompanied by the evidence that produced
+it, structured so that an independent verifier can replay the reasoning without
+privileged access. Trust, in this view, is not a favor granted by authority, but
+a property that emerges from how a system is built.
+
+### 1.1 Core Features
 
 - **Mandatory append-only log** maintained by a single server
 - **Multi-signer receipts** with state-based authorization (ACL + delegation)
-- **Information Flow Control (IFC)** labels on data and computations, enabling
+- **Contextual Flow Control (CFC)** labels on data and computations, enabling
   end-to-end integrity and confidentiality guarantees
 
-Optional add-ons:
+### 1.2 Optional Add-ons
 
 - **Authenticated latest pointers** (verifiable entity → latest update mapping)
 - **Verifiable Credentials (VCs)** issued on-demand for any data point
 - **Trusted Execution Environment (TEE)** attestations for computation integrity
-  and (when present) IFC compliance
-- **Verifiable time bounds**, including cryptographic _lower bounds_ ("not before
-  t")
+  and (when present) CFC compliance
+- **Verifiable time bounds**, including cryptographic _lower bounds_ ("not
+  before t")
 
 The core system remains lightweight: it does **not** require maintaining a
 mutable ordered keyspace (e.g., MST). Optional components are independently
@@ -44,12 +57,15 @@ verifiable and can be requested or omitted per use case.
   commitments and proofs are published.
 - **Strong provenance:** Every update is cryptographically linked to its
   predecessors and inputs.
-- **Policy-compliant computation:** IFC labels travel with data, and
+- **Policy-compliant computation:** CFC labels travel with data, and
   computations can be verified to respect integrity and confidentiality
   constraints.
 - **Modular add-ons:** Latest-pointer maps and VCs are optional and orthogonal.
 - **Non-equivocation ready:** Equivocation can be detected and constrained via
   checkpoint chains.
+- **No unnecessary authority:** The system resists centralization by ensuring
+  that servers order but do not authorize, policies constrain but do not
+  execute, and UIs present but do not invent.
 
 ---
 
@@ -67,11 +83,20 @@ An **Entity** identifies a named object whose state evolves over time.
 
 ### 3.2 Fact
 
-A **Fact** represents state at a point in time. Facts are either:
+Most systems treat state as something that simply _is_: a set of rows in a
+database, a collection of files on disk, a snapshot held in memory. Changes
+happen, but the change itself is rarely preserved as a first-class object. At
+best, there is an audit log; at worst, only the latest value survives.
+
+**The CT Protocol inverts this perspective.** A state change is not an
+incidental side effect; it is the primary event. A **Fact** represents state at
+a point in time:
 
 - **Assertion**: Current state with value (`{the, of, is, cause}`)
 - **Retraction**: Tombstone indicating prior state no longer holds
   (`{the, of, cause}`)
+- **Unclaimed**: The initial/genesis state before any assertion
+  (`{the, of}` with no `is` or `cause`)
 
 State MAY be represented as:
 
@@ -85,20 +110,252 @@ Implementations MUST produce a deterministic hash for every update via the
 
 A **Receipt** is the atomic, append-only record of a state update.
 
-Receipts are signed objects and form per-entity chains via explicit
-back-references (the `cause` field).
+Receipts are deliberately precise—and deliberately limited. They bind to the
+content they reference via cryptographic hashes and to the actor that produced
+them via a signature. **They do not claim semantic correctness, moral
+legitimacy, or future validity. They record _what happened_, not _what should
+have happened_.** That discipline is what makes receipts composable and
+verifiable.
 
 Each receipt also serves as a **computation envelope**:
 
 - commits to code and inputs
 - commits to output state
-- commits to IFC label inputs/outputs and a policy identifier
+- commits to CFC label inputs/outputs and a policy identifier
+
+By treating receipts as the unit of history, the CT Protocol makes the past
+inspectable. One can trace not just the current state of a system, but the
+sequence of decisions and derivations that led there.
+
+### 3.4 Pattern
+
+A **Pattern** is the universal unit of executable logic in the fabric:
+composable, reactive programs that define how state evolves and how users
+interact with it. Patterns describe both application behavior and user
+interfaces, and they react continuously to changes in fabric state and events.
+
+Patterns are rarely retired; once instantiated they are woven into the fabric
+and continue to react over time. Most reactions are pull-based—triggered when
+state is observed or consulted—with optional periodic refresh for long-running
+processes.
+
+Because trust in the CT Protocol is narrow, explicit, and mechanically enforced,
+**patterns do not need to be trusted in order to be run.** They are safe by
+construction under Contextual Flow Control: they cannot exfiltrate data,
+escalate privileges, or violate context without explicit policy. As a result,
+patterns may be instantiated _speculatively_—woven into the fabric and allowed
+to react to existing state before any user has explicitly engaged with them.
+
+### 3.5 Space
+
+A **Space** is a logical database/namespace whose state, policies, and
+permissions evolve over time:
+
+- Identified by a `did:key` (`MemorySpace` type: `did:${string}:${string}`)
+- Owns its ACL and delegation state
+- The server maintains the append-only log but does NOT determine authorization
+
+Each user operates a **personal fabric**: a collection of spaces, policies, and
+running patterns that reflect their interests and intentions. The cryptographic
+keys that anchor authorization ultimately live on the user's own devices.
+Providers act only as delegated executors, operating under user-granted
+authority that can be renewed or revoked.
 
 ---
 
-## 4. Receipt Object
+## 4. Fact Structure
 
-### 4.1 UnsignedReceipt
+### 4.1 Core Fact Types
+
+The fundamental data model uses `{the, of, is, cause}` tuples:
+
+```typescript
+// Media type - adds a dimension for different "views" of an entity
+type MIME = `${string}/${string}`; // e.g., "application/json"
+
+// Entity identifier
+type URI = `${string}:${string}`; // e.g., "of:ba4jcbvpq3k5..."
+
+// Merkle reference - content-addressed hash
+type Reference<T> = { "/": string }; // e.g., { "/": "baedrei..." }
+
+// An assertion - current state with value
+interface Assertion {
+  the: MIME; // Kind of fact (e.g., "application/json")
+  of: URI; // Entity identifier
+  is: JSONValue; // The actual state data
+  cause: Reference<Fact> | Reference<Unclaimed>; // Prior state reference
+}
+
+// A retraction - tombstone for deleted state
+interface Retraction {
+  the: MIME;
+  of: URI;
+  is?: undefined; // No value - this is a deletion
+  cause: Reference<Assertion>; // Must point to the assertion being retracted
+}
+
+// Unclaimed - represents non-existent/genesis state
+interface Unclaimed {
+  the: MIME;
+  of: URI;
+  is?: undefined;
+  cause?: undefined; // No prior state
+}
+
+type Fact = Assertion | Retraction;
+type State = Fact | Unclaimed;
+```
+
+### 4.2 Causality and Genesis
+
+Every fact has a causal reference to the prior fact. This establishes linear
+history of changes for each entity:
+
+1. **Genesis State**: The first assertion for an entity has `cause` pointing to
+   the hash of `{the, of}` (the Unclaimed state). This is computed as:
+   ```typescript
+   const genesisCause = refer({ the, of }); // Hash of unclaimed state
+   ```
+
+2. **Subsequent States**: Each subsequent assertion or retraction points to the
+   hash of the previous fact, creating a chain.
+
+3. **Compare-and-Swap (CAS)**: The `cause` field enables optimistic concurrency.
+   A transaction is rejected if the provided `cause` doesn't match the current
+   state.
+
+### 4.3 The `the` Field (Media Type)
+
+The `the` field adds a dimension for storing different "views" of an entity:
+
+- `"application/json"` - Standard JSON data
+- `"application/commit+json"` - Commit/audit records
+- `"application/meta+json"` - Metadata about an entity
+- `"application/acl+json"` - Access control lists
+
+This allows multiple facts about the same entity (`of`) with different types
+(`the`), each with its own causal chain.
+
+---
+
+## 5. Commit Structure
+
+### 5.1 What is a Commit?
+
+A **Commit** is a special fact type that records a complete transaction for
+audit purposes. Every transaction that modifies state also creates a commit
+record.
+
+```typescript
+// The commit media type
+const COMMIT_LOG_TYPE = "application/commit+json";
+
+// Commit data structure
+interface CommitData {
+  since: number; // Lamport clock / sequence number
+  transaction: Transaction; // The complete transaction that was applied
+  labels?: FactSelection; // Optional classification labels for access control
+}
+
+// A commit is stored as a Fact
+type CommitFact = Assertion<
+  "application/commit+json", // the
+  MemorySpace, // of (the space DID)
+  CommitData // is
+>;
+```
+
+### 5.2 Commit Creation
+
+When a transaction is processed:
+
+```typescript
+// Create a commit record
+const commit = {
+  the: "application/commit+json",
+  of: space, // The space DID (e.g., "did:key:z6Mk...")
+  is: {
+    since: nextSequenceNumber,
+    transaction: transaction, // Full transaction including all changes
+    labels: extractedLabels, // Optional
+  },
+  cause: previousCommitReference, // Or unclaimed for first commit
+};
+```
+
+### 5.3 Genesis Commit
+
+The **first commit** in a space has special significance:
+
+1. Its `cause` field points to the Unclaimed reference for the space:
+   ```typescript
+   const genesisCause = refer({
+     the: "application/commit+json",
+     of: spaceDID,
+   });
+   ```
+
+2. This establishes the **root of trust** for the space. The genesis commit
+   effectively bootstraps the space's history.
+
+3. For full trust anchoring, the genesis commit SHOULD be signed by the space
+   DID itself (not a delegated signer).
+
+### 5.4 Commit Chain
+
+Commits form a chain just like regular facts:
+
+```
+Genesis Commit (cause: unclaimed)
+    ↓
+Commit #1 (cause: genesis)
+    ↓
+Commit #2 (cause: commit #1)
+    ↓
+   ...
+```
+
+This chain provides:
+- **Total ordering** of all transactions in the space
+- **Audit trail** - every transaction is recorded with its full content
+- **Consistency anchor** - verifiers can trace the complete history
+
+### 5.5 Wire Format
+
+The commit structure on the wire (e.g., in responses):
+
+```typescript
+type Commit<Subject extends MemorySpace> = {
+  [space in Subject]: {
+    ["application/commit+json"]: {
+      [cause: CauseString]: {
+        is: CommitData;
+      };
+    };
+  };
+};
+
+// Example:
+{
+  "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi": {
+    "application/commit+json": {
+      "baedreigv6dnlwjzyyzk2z2ld2kapmu6hvqp46f3axmgdowebqgbts5jksi": {
+        "is": {
+          "since": 42,
+          "transaction": { /* ... */ }
+        }
+      }
+    }
+  }
+}
+```
+
+---
+
+## 6. Receipt Object (Future Enhancement)
+
+### 6.1 UnsignedReceipt
 
 The receipt structure extends the current `Fact` model with computation
 metadata:
@@ -106,9 +363,9 @@ metadata:
 ```typescript
 interface UnsignedReceipt {
   // Core fact identity (existing)
-  the: MIME; // Media type (e.g., "application/json")
-  of: URI; // Entity identifier
-  cause: Reference<Fact>; // Previous fact for this entity
+  the: MIME;
+  of: URI;
+  cause: Reference<Fact>;
 
   // Computation identity (new)
   codeCID: Reference<CodeBundle>; // Content-addressed code bundle
@@ -116,37 +373,34 @@ interface UnsignedReceipt {
   // Inputs (new)
   inputCommitments: Hash[]; // H(salt || canonical(input))
   inputRefs?: Reference<Fact>[]; // Optional provenance references
-  inputLabelCommitments: Hash[]; // H("CT/IFCLabel" || canonicalLabel)
+  inputLabelCommitments: Hash[]; // H("CT/CFCLabel" || canonicalLabel)
 
-  // IFC policy (new)
-  ifcPolicyCID: Reference<IFCPolicy>; // Policy identifier
+  // CFC policy (new)
+  cfcPolicyCID: Reference<CFCPolicy>; // Policy identifier
 
   // Result
-  is?: JSONValue; // Resulting state (patchCID for patches)
+  is?: JSONValue;
   stateHash: Hash; // Hash of resulting state
-  outputLabelCommitment: Hash; // H("CT/IFCLabel" || canonicalLabel)
+  outputLabelCommitment: Hash; // H("CT/CFCLabel" || canonicalLabel)
 
   // Optional: computation evidence commitments
-  ifcResultHash?: Hash; // H("CT/IFCResult" || canonicalResult)
+  cfcResultHash?: Hash; // H("CT/CFCResult" || canonicalResult)
   teeBindingHash?: Hash; // Commitment bound into TEE attestation
 
   // Metadata
-  since: number; // Lamport clock / sequence number
+  since: number;
   ts?: number; // Claimed wall-clock time (informational)
   meta?: Record<string, unknown>;
 }
 ```
 
-### 4.2 Address-Level Tracking
+### 6.2 Address-Level Tracking
 
 The receipt SHOULD include path-level read/write tracking:
 
 ```typescript
 interface ReceiptActivity {
-  // Reads performed during computation
   reads: IMemoryAddress[]; // [{id, type, path}]
-
-  // Writes performed during computation
   writes: IMemoryAddress[]; // [{id, type, path}]
 }
 
@@ -158,406 +412,99 @@ interface IMemoryAddress {
 ```
 
 This enables:
-
 - Fine-grained dependency tracking for reactive scheduling
 - Minimal invalidation on upstream changes
 - Audit trail of exact data accessed
 
-### 4.3 Signature
-
-```
-sig = Sign(issuerKey, Hash(DeterministicSerialize(UnsignedReceipt)))
-```
-
-The signature is produced using the issuer's `Signer` interface:
-
-```typescript
-interface Signer<ID extends DID = DID> {
-  sign<T>(payload: AsBytes<T>): AwaitResult<Signature<T>, Error>;
-  verifier: Verifier<ID>;
-}
-```
-
-### 4.4 Receipt Reference
-
-The signed receipt is serialized deterministically and content-addressed using
-`merkle-reference`:
-
-```typescript
-const receiptRef: Reference<Receipt> = refer(receipt);
-```
-
 ---
 
-## 5. Receipt Chains and Ordering
+## 7. Append-Only Log
 
-- Receipts for a given entity (`of` field) MUST form a linear chain via `cause`.
-- `since` (sequence number) MUST increment monotonically per entity.
-- Verification of order requires only the chain for that entity.
+### 7.1 Mandatory Global Log
 
-This provides **per-entity total order** without a global keyspace structure.
-
-The current implementation uses:
-
-```typescript
-interface Assertion {
-  the: MIME;
-  of: URI;
-  is: JSONValue;
-  cause: Reference<Assertion | Retraction | Unclaimed>;
-}
-```
-
----
-
-## 6. Append-Only Log
-
-### 6.1 Mandatory Global Log
-
-All receipts MUST be included in a **single append-only log** maintained by the
+All facts MUST be included in a **single append-only log** maintained by the
 server (Space).
 
 The log provides:
-
-- A total order over all receipts
+- A total order over all facts
 - Efficient inclusion proofs
 - A global consistency anchor for time, authorization, and delegation state
 
-The log MAY be implemented as a hash chain, Merkle Mountain Range (MMR), or
-equivalent append-only accumulator.
+### 7.2 Server Role
 
-Current implementation uses SQLite with the `fact` table:
+The server's role is **intentionally constrained**: it establishes order and
+publishes checkpoints. It does not decide who is authorized or whether a fact is
+correct; it merely records that a fact was observed at a particular position in
+history.
+
+This separation is fundamental: **servers order but do not authorize.**
+
+### 7.3 Storage Schema
+
+Current implementation uses SQLite:
 
 ```sql
+-- JSON data (deduplicated by content hash)
+CREATE TABLE datum (
+  this    TEXT NOT NULL PRIMARY KEY,  -- Merkle reference
+  source  JSON                        -- The actual JSON
+);
+
+-- Fact history (append-only)
 CREATE TABLE fact (
-  this    TEXT NOT NULL PRIMARY KEY,  -- Merkle reference (content-addressed ID)
-  the     TEXT NOT NULL,              -- MIME type
+  this    TEXT NOT NULL PRIMARY KEY,  -- Merkle reference for {the, of, is, cause}
+  the     TEXT NOT NULL,              -- Media type
   of      TEXT NOT NULL,              -- Entity URI
-  'is'    TEXT NOT NULL,              -- Merkle reference to datum
-  cause   TEXT,                       -- Reference to prior fact
-  since   INTEGER NOT NULL,           -- Lamport clock timestamp
+  'is'    TEXT NOT NULL,              -- Reference to datum (or "undefined")
+  cause   TEXT,                       -- Reference to prior fact (NULL for genesis)
+  since   INTEGER NOT NULL            -- Lamport clock
+);
+
+-- Current state (mutable pointer to latest fact)
+CREATE TABLE memory (
+  the     TEXT NOT NULL,
+  of      TEXT NOT NULL,
+  fact    TEXT NOT NULL,              -- Reference to current fact
+  PRIMARY KEY (the, of)
 );
 ```
 
-### 6.2 Log Inclusion
+### 7.4 Why Ordering Matters
 
-For every receipt `R`:
+Receipts gain much of their power from ordering. Authorization changes over
+time. Delegations are granted and revoked. Policies evolve. By anchoring each
+receipt to a position in an immutable sequence, the CT Protocol allows verifiers
+to answer time-sensitive questions precisely:
 
-- The server MUST append `R` to the log
-- The log root MUST advance monotonically
-- Periodic checkpoints MAY commit to the current log root
+- _Was this signer authorized at the moment this change occurred?_
+- _Which policy was in force when this computation ran?_
 
-Log inclusion is **orthogonal** to per-entity ordering, which is established by
-receipt chains.
-
-### 6.3 Commit Records
-
-The current implementation creates commit records for audit:
-
-```typescript
-interface CommitData {
-  since: number; // Starting sequence number
-  transaction: Transaction; // Complete transaction args
-  labels?: FactSelection; // Classification labels
-}
-```
+Without temporal grounding, trust collapses into a perpetual present, where past
+actions are judged by current rules. With it, history becomes a stable reference
+against which claims can be evaluated.
 
 ---
 
-## 7. Latest Entity Map (Optional)
+## 8. Authorization Emerges from State
 
-### 7.1 Purpose
+### 8.1 The Problem with External Authorization
 
-The **Latest Entity Map** enables efficient, verifiable answers to:
+In most systems, authorization floats above the system as a separate concern—
+configuration files, database tables hidden behind an API, or out-of-band
+settings. This creates several problems:
 
-> "What is the latest state for entity E _as of checkpoint C_?"
+- Authorization changes are not auditable events
+- Verifying historical actions requires institutional memory
+- Retroactive policy changes can rewrite the meaning of past actions
 
-### 7.2 Data Structure
+### 8.2 ACLs as Evolving State
 
-- Implemented as a **Sparse Merkle Tree (SMT)** keyed by `H(of)`
-- Each leaf commits to the latest known receipt for that entity
+In the CT Protocol, authorization does not float above the system. **It lives
+_inside_ the same historical record as everything else.**
 
-### 7.3 HeadsLeafValue
-
-```typescript
-interface HeadsLeafValue {
-  since: number; // Sequence number
-  head: Reference<Fact>; // Receipt reference
-  stateHash: Hash;
-  meta?: Record<string, unknown>;
-}
-```
-
-### 7.4 Optional Inclusion
-
-- The Latest Entity Map is OPTIONAL.
-- Even when supported, inclusion in any given checkpoint is OPTIONAL.
-- A checkpoint MAY omit `headsRoot` entirely.
-
-Absence of a heads map does not affect receipt validity.
-
-### 7.5 Checkpoint
-
-```typescript
-interface UnsignedCheckpoint {
-  epoch: number;
-  headsRoot?: Hash; // OPTIONAL
-  logRoot: Hash; // REQUIRED
-  prev?: Reference<Checkpoint>;
-  ts: number;
-}
-
-// sig = Sign(checkpointKey, Hash(serialize(UnsignedCheckpoint)))
-```
-
-### 7.6 Verification (if included)
-
-To verify latest pointer for entity `E` at epoch `C`:
-
-1. Verify checkpoint signature and chain.
-2. Verify SMT inclusion proof for `H(E)` against `headsRoot`.
-3. Fetch `head` receipt and verify its signature and fields.
-
-The claim is strictly:
-
-> "This was the latest known update for E as of checkpoint C."
-
----
-
-## 8. Computation Evidence
-
-### 8.1 IFC as a Core Semantic
-
-Information Flow Control (IFC) is a **core part of the framework**.
-
-- Inputs, intermediate artifacts, and outputs MAY carry IFC labels.
-- Receipts MUST commit to:
-  - input label commitments (`inputLabelCommitments`)
-  - output label commitment (`outputLabelCommitment`)
-  - the policy identifier (`ifcPolicyCID`)
-
-A verifier can always check that a receipt is _well-formed with respect to IFC_
-(i.e., it commits to the relevant labels and policy).
-
-The current implementation has a foundation for labels:
-
-```typescript
-type Labels = {
-  classification?: string[];
-};
-```
-
-### 8.2 Attested Enforcement (Optional)
-
-The framework supports making IFC guarantees **strong** by verifying that the
-computation actually enforced the policy.
-
-When attested enforcement is used, the computation MUST run in a mechanism that
-produces verifiable evidence (a TEE is RECOMMENDED).
-
-### 8.3 Trusted Execution Environment (Optional)
-
-TEEs provide evidence that a receipt was produced by a specific, measured
-workload.
-
-- Use an **Entity Attestation Token (EAT)** (JWT or CWT)
-- The token MUST bind:
-  - code measurement (e.g., enclave hash)
-  - a binding derived from the receipt and IFC result
-
-### 8.4 TEE Binding
-
-The workload MUST compute:
-
-```
-teeBinding = H(receiptHash || ifcResultHash || context)
-```
-
-and place `teeBinding` (or its hash) into the TEE user-data field covered by
-attestation.
-
-### 8.5 IFC Result
-
-If attested enforcement is used, the workload SHOULD emit a compact result:
-
-```typescript
-interface IFCResult {
-  ok: boolean;
-  reasonCode?: string;
-  policyCID: Reference<IFCPolicy>;
-  inputLabelCommitments: Hash[];
-  outputLabelCommitment: Hash;
-}
-```
-
-The receipt SHOULD include `ifcResultHash = H("CT/IFCResult" || canonicalResult)`.
-
-This enables a verifier to treat the computation as not merely _authentic_, but
-also _policy-compliant_.
-
----
-
-## 9. Verifiable Time Bounds (Optional)
-
-### 9.1 Lower Bound ("Not Before t")
-
-To prove a receipt could not have existed before time `t`:
-
-1. Select a **public beacon value** published after `t` (e.g., transparency log
-   entry, randomness beacon).
-2. Compute:
-
-```
-nb = BeaconValue
-binding = H(receiptHash || nb)
-```
-
-3. Attest `binding` inside the TEE.
-
-Verification of the beacon proves the receipt was created _after_ the beacon
-existed.
-
-### 9.2 Upper Bound (Optional)
-
-An RFC 3161 timestamp MAY be applied to:
-
-- `receiptHash`, or
-- the VC hash (if a VC is issued)
-
-This proves existence _at or before_ the TSA time.
-
----
-
-## 10. Verifiable Credentials (Optional Add-On)
-
-### 10.1 Overview
-
-Verifiable Credentials are **not generated by default**.
-
-A VC MAY be requested for **any receipt or derived data point**.
-
-### 10.2 VC Payload
-
-The VC encapsulates:
-
-- References to receipt CID(s)
-- Optional latest-pointer inclusion proof
-- Optional TEE attestation
-- Optional time-bound evidence
-
-### 10.3 VC Semantics
-
-A VC asserts:
-
-> "According to issuer X, the referenced receipt(s) and evidence are valid and
-> verified under this policy."
-
-VC issuance does **not** alter the underlying receipt graph.
-
----
-
-## 11. Verification Summary
-
-A verifier MAY choose any subset of checks:
-
-- Receipt signature and per-entity chain
-- Mandatory log inclusion and ordering
-- Provenance references
-- IFC commitments (labels + policy identifier)
-- Attested IFC enforcement (if present)
-- Latest-pointer proof (if present)
-- Lower and/or upper time bounds (if present)
-- VC signature (if a VC is presented)
-
-Security and cost scale with selected checks.
-
----
-
-## 12. Privacy Properties
-
-- Inputs are hidden behind salted commitments.
-- State may be represented only by hashes.
-- IFC labels MAY be committed by hash rather than revealed in the clear.
-- Latest-pointer maps reveal only committed metadata.
-- VCs disclose only what they explicitly include.
-
----
-
-## 12A. Trusted UI and Interaction Integrity
-
-CT protocol extends integrity guarantees beyond data and computation to **user
-interaction**, treating UI-mediated actions as first-class, verifiable inputs.
-
-### 12A.1 Trusted Input UI
-
-A _Trusted Input UI_ is a measured, policy-bound interface that captures user
-actions (typing, clicking, submission) and produces integrity-labeled
-commitments.
-
-Properties:
-
-- UI code is identified by a `codeCID`
-- User actions are captured as inputs with integrity labels (e.g. `user-input`,
-  `approved-ui`)
-- Programmatic injection or background automation is forbidden by policy
-
-This enables claims such as:
-
-> "This text was typed by the user using the approved UI."
-
-### 12A.2 Trusted Render UI
-
-A _Trusted Render UI_ verifies receipts before displaying content.
-
-Properties:
-
-- Refuses to render unverifiable or policy-violating content
-- Displays verification badges derived from receipts and trust profiles
-- Enforces IFC disclosure rules at render time
-
-This allows trusted display even inside untrusted host applications.
-
-### 12A.3 Interaction Integrity
-
-By treating UI events as first-class inputs, CT protocol establishes integrity
-over **what the user actually did**, not just what data exists or what
-computation ran.
-
-Examples:
-
-- User typed a prompt
-- User explicitly selected an option
-- User submitted consent after viewing required text
-
----
-
-## 13. Multi-Writer Authorization and Trust Model
-
-### 13.1 Roles
-
-- **Server:**
-
-  - Maintains the append-only log
-  - Publishes checkpoints
-  - Does NOT determine authorization truth
-
-- **Signers:**
-
-  - Produce receipts
-  - May change over time
-  - Are authorized by on-chain (receipt-based) ACL state
-
-- **Space:**
-  - A logical database/namespace
-  - Identified by a `did:key` (`MemorySpace` type)
-  - Owns its ACL and delegation state
-
-### 13.2 ACL State
-
-Each space maintains an **ACL state object** stored and evolved via receipts in
-this system.
-
-Current implementation:
+Access-control lists are state, expressed as facts like any other. Adding a
+writer, removing a delegate, or transferring ownership produces a new fact that
+commits to the updated ACL.
 
 ```typescript
 type Capability = "READ" | "WRITE" | "OWNER";
@@ -567,80 +514,39 @@ type ACL = {
 };
 ```
 
-Rules:
+This design has two consequences:
 
-- Only DIDs with `OWNER` capability MAY modify the ACL state
-- Writers MAY submit receipts but MAY NOT change the ACL unless also owners
+1. **Delegation and revocation become auditable events.** One can trace when
+   authority was granted, by whom, and when it was withdrawn.
 
-### 13.3 Genesis Trust
+2. **Authorization becomes inherently time-sensitive.** A fact that modifies
+   state binds itself to the ACL that existed _at the moment it was appended to
+   the log_.
+
+### 8.3 Authorization at Commit Time
+
+This notion—_authorization at commit time_—is central. When verifying a
+historical action, the CT Protocol does not ask whether the signer is authorized
+now. **It asks whether they were authorized then.**
+
+The answer is determined mechanically by replaying facts in order. There is no
+need to consult current configuration, no ambiguity about retroactive policy
+changes, and no reliance on institutional memory.
+
+### 8.4 Genesis Trust
 
 - Each space is itself a `did:key`
-- The **initial ACL receipt** for a space MUST be signed by the space DID
-- This establishes the root of trust for all future authorization
+- The **initial commit** for a space establishes the root of trust
+- For full trust anchoring, the genesis commit SHOULD be signed by the space DID
 
-### 13.4 Delegation via Receipts
+### 8.5 Verification of Authorization
 
-Delegations MAY be expressed as ACL updates written through this system.
-
-A delegation receipt:
-
-- Updates `writers` or `delegates`
-- Is signed by a DID with `OWNER` capability in the prior ACL state
-
-Because delegation state is part of the append-only log, it is:
-
-- Ordered
-- Timestamped
-- Verifiable
-
-A sufficiently recent, valid ACL receipt therefore acts as a **delegation
-artifact**.
-
-### 13.5 External Delegation (UCANs)
-
-Signers MAY also present **UCANs** proving delegated authority.
-
-Current implementation:
-
-```typescript
-type UCAN<Command extends Invocation> = {
-  invocation: Command;
-  authorization: Authorization<Command>;
-};
-```
-
-Verification MAY combine:
-
-- UCAN validity
-- ACL state at the time of commit
-
-Implementations MAY require that UCAN audience and caveats align with ACL rules.
-
-### 13.6 Binding Authorization at Commit Time
-
-Every receipt MUST bind to the **authorization context** in which it was
-created.
-
-The following MUST be included (directly or via commitments) as part of the
-receipt inputs:
-
-- The hash or reference of the latest ACL receipt known to the signer
-- The signer DID (`iss` field in current implementation)
-- Optional UCAN(s)
-
-This binds the receipt to:
-
-> "Signer S was authorized to write to space X under ACL state A at log position
-> L."
-
-### 13.7 Verification of Authorization
-
-To verify a receipt `R`:
+To verify a fact `F`:
 
 1. Verify receipt signature
 2. Verify log inclusion and ordering
-3. Resolve the referenced ACL receipt
-4. Verify the ACL receipt chain up to genesis
+3. Resolve the referenced ACL fact
+4. Verify the ACL fact chain up to genesis
 5. Check that signer DID is authorized under that ACL state
 6. If UCANs are present, verify them and ensure consistency with ACL
 
@@ -648,448 +554,330 @@ Authorization is therefore **state-based**, not server-asserted.
 
 ---
 
-## 14. Extensibility
+## 9. Contextual Flow Control (CFC)
 
-Future extensions MAY add:
+### 9.1 Beyond Access Control
 
-- Zero-knowledge execution proofs
-- Verkle-based latest maps
-- Multi-writer conflict resolution
-- Capability-based selective disclosure
+Traditional access control answers the question "who may read or write this
+resource?" but it is largely silent on what happens _after_ access is granted.
+Once computation is treated as a first-class event, the question of _policy_
+becomes unavoidable.
 
----
+### 9.2 What is CFC?
 
-## 15. Non-Goals
+**Contextual Flow Control (CFC)** is an opinionated application of Information
+Flow Control (IFC), aligned with the idea of _contextual integrity_: data should
+flow in ways that match the user's expectations for a given context.
 
-- Real-time global consensus
-- Mandatory data availability
-- Mandatory public indexing
+CFC treats external inputs—including those produced by AI models—as **untrusted
+by default**, requiring explicit policy to allow them to influence
+higher-integrity state.
 
----
+### 9.3 Labels
 
-## 16. Conclusion
+Inputs and outputs carry labels that describe confidentiality and integrity
+constraints:
 
-This specification provides a modular foundation for verifiable state updates
-with strong provenance, privacy, policy-compliant computation, and optional
-credentials—without imposing the operational cost of maintaining a global
-mutable keyspace.
+- **Confidentiality label**: Where information is allowed to flow
+- **Integrity label**: What sources of information are considered trustworthy
 
----
+The current implementation has a foundation:
 
-## 17. Domain and DID Bootstrap (DNS + did:web)
+```typescript
+type Labels = {
+  classification?: string[];
+};
+```
 
-### 17.1 Motivation
+### 9.4 Policy as Content-Addressed Artifact
 
-CT protocol supports bootstrapping human-meaningful identity and discoverability
-by binding **domains** to **spaces** and **servers**, without weakening the
-state-based authorization model.
-
-This enables:
-
-- human-friendly naming (e.g. domains)
-- decentralized verification (no registry authority)
-- alignment with existing Web PKI, DNS, and DID tooling
-
----
-
-### 17.2 Roles and Identities
-
-This section distinguishes three identities:
-
-- **Space DID** (`did:key`)
-
-  - Root authority for ACL, delegation, and authorization
-  - Signs the genesis ACL receipt
-
-- **Server DID** (`did:web`)
-
-  - Represents the server hosting the append-only log, checkpoints, and APIs
-  - Publishes signing keys for checkpoints and optional VC issuance
-
-- **Domain** (DNS name)
-  - Human-meaningful handle
-  - Asserts which Space DID it represents
-
-Domain identity is _naming and discovery only_; authorization always derives
-from space state.
+Policies are themselves content-addressed and referenced by receipts. A
+computation does not merely claim compliance with a policy; **it commits to a
+specific, immutable policy definition.**
 
 ---
 
-### 17.3 Domain → Space Binding
+## 10. Policy Commitment vs Policy Enforcement
 
-A domain MAY assert that it represents a specific Space DID using one or both of
-the following mechanisms.
+### 10.1 The Distinction
 
-#### 17.3.1 DNS TXT Record
+**Policy commitment** records that a computation declared its intent to operate
+under a particular policy. This alone is valuable:
 
-The domain MAY publish a TXT record at a well-known label:
+- Makes assumptions explicit
+- Prevents silent policy drift
+- Allows downstream systems to reason about compatibility
+
+**Policy enforcement** concerns evidence. It asks whether the rules were
+mechanically applied during execution.
+
+### 10.2 Why the Distinction Matters
+
+The CT Protocol does not force a single answer. A system can choose to accept
+commitment alone, or it can require proof of enforcement, depending on context.
+
+By separating declaration from demonstration, the CT Protocol avoids the false
+dichotomy between blind trust and maximal proof.
+
+### 10.3 Trusted Execution Environments (TEEs)
+
+When enforcement evidence is required, TEEs can attest that specific code ran in
+a measured environment. The attestation links:
+
+- The identity of the code
+- The receipt describing the computation
+- The outcome of policy checks
+
+TEEs are treated as _optional strengthening_, not as a foundation on which
+everything else rests.
+
+---
+
+## 11. Trust Profiles
+
+### 11.1 The Problem
+
+Different audiences mean different things when they say they "trust" an
+artifact. Trust profiles provide a vocabulary for precise communication.
+
+### 11.2 Profile: Existence & Ordering
+
+**Checks:** Receipt signature, log inclusion
+
+**Guarantees:** The receipt exists and was ordered
+
+**Non-guarantees:** Authorization, correctness, policy compliance
+
+### 11.3 Profile: Authorized State Update
+
+**Checks:** Signature, log inclusion, ACL verification
+
+**Guarantees:** The signer was authorized at commit time
+
+### 11.4 Profile: Provenance-Complete Output
+
+**Checks:** Authorized + verification of all `inputRefs`
+
+**Guarantees:** Output is transitively derived from referenced inputs
+
+### 11.5 Profile: Policy-Committed Computation
+
+**Checks:** Provenance + presence of CFC commitments
+
+**Guarantees:** The computation committed to a specific CFC policy
+
+### 11.6 Profile: Policy-Enforced Computation
+
+**Checks:** Policy-Committed + TEE attestation verification
+
+**Guarantees:** The computation mechanically enforced CFC rules
+
+### 11.7 Profile Selection
+
+Applications SHOULD explicitly state which trust profile they require.
+Verifiers MUST NOT assume guarantees beyond the verified profile.
+
+---
+
+## 12. Trusted UI and Interaction Integrity
+
+### 12.1 Why UI Is Part of the Trusted Computing Base
+
+Many failures of trust occur at the boundary between system and human. Messages
+are spoofed, prompts injected, consent manufactured.
+
+The CT Protocol addresses this by extending verifiability to **interaction
+itself**: if user actions materially affect system behavior, then those actions
+belong in the provenance chain.
+
+### 12.2 Trusted Input UI
+
+A **Trusted Input UI** is a measured interface whose code identity is known.
+When a user types, clicks, or submits, the event is captured as an input with
+explicit integrity labels.
+
+This reframes familiar acts as verifiable events. A receipt can support:
+
+> "This message was typed by the user using the approved UI."
+
+The goal is not surveillance, but provenance.
+
+### 12.3 Trusted Render UI
+
+A **Trusted Render UI** verifies receipts before displaying content:
+
+- Refuses to render unverifiable content
+- Displays verification badges derived from receipts
+- Enforces CFC disclosure rules at render time
+
+---
+
+## 13. Verifiable Credentials
+
+### 13.1 From Receipts to Claims
+
+Receipts are precise but low-level. **Verifiable Credentials (VCs)** summarize
+them into portable objects.
+
+A VC does not replace receipts; it packages one or more receipts with inclusion
+proofs, policy identifiers, and optional enforcement evidence.
+
+### 13.2 The Critical Constraint
+
+A CT Protocol–backed credential must not invent facts. Every assertion must be
+reducible to receipts and verification steps that can be replayed.
+
+### 13.3 Replayable Verification
+
+A verifier need not trust the issuer's word. Given the credential, the verifier
+can extract referenced receipts, check signatures, confirm log inclusion, and
+verify policies.
+
+---
+
+## 14. Latest Entity Map (Optional)
+
+### 14.1 Purpose
+
+The **Latest Entity Map** enables efficient, verifiable answers to:
+
+> "What is the latest state for entity E _as of checkpoint C_?"
+
+### 14.2 Data Structure
+
+- Implemented as a **Sparse Merkle Tree (SMT)** keyed by `H(of)`
+- Each leaf commits to the latest known fact for that entity
+
+### 14.3 Checkpoint
+
+```typescript
+interface UnsignedCheckpoint {
+  epoch: number;
+  headsRoot?: Hash; // OPTIONAL
+  logRoot: Hash; // REQUIRED
+  prev?: Reference<Checkpoint>;
+  ts: number;
+}
+```
+
+---
+
+## 15. Domain and DID Bootstrap (DNS + did:web)
+
+### 15.1 Three Identities
+
+- **Space DID** (`did:key`): Root authority for ACL and authorization
+- **Server DID** (`did:web`): Represents the server hosting the log
+- **Domain** (DNS name): Human-meaningful handle for discovery only
+
+### 15.2 Domain → Space Binding
 
 ```
 _ct.example.com TXT "did=did:key:z6M...SPACE..."
 ```
 
-This record asserts:
-
-> "The controller of example.com claims association with Space DID X."
-
-#### 17.3.2 HTTPS Well-Known Endpoint
-
-Alternatively or additionally, the domain MAY serve:
-
+Or:
 ```
 https://example.com/.well-known/ct-space-did
 ```
 
-With response body:
+### 15.3 Security Properties
 
-```
-did:key:z6M...SPACE...
-```
-
-Both mechanisms MAY be supported simultaneously. Verifiers SHOULD accept either.
-
----
-
-### 17.4 Server Identity via did:web
-
-A CT protocol server MUST expose a **did:web DID document** at:
-
-```
-https://example.com/.well-known/did.json
-```
-
-Corresponding to:
-
-```
-did:web:example.com
-```
-
-This DID document is the authoritative source for server signing keys and
-service endpoints.
-
----
-
-### 17.5 Required did:web Document Contents
-
-The server DID document MUST include:
-
-#### Verification Methods
-
-Keys used for:
-
-- signing checkpoints and log roots
-- optionally issuing Verifiable Credentials
-
-These keys MUST be listed under `verificationMethod` and referenced from
-`assertionMethod`.
-
-#### Services
-
-The DID document MUST include a service entry describing CT protocol endpoints:
-
-```typescript
-interface CTService {
-  api: string; // "https://example.com/ct"
-  checkpoints: string; // "https://example.com/ct/checkpoints"
-  log: string; // "https://example.com/ct/log"
-  receipts: string; // "https://example.com/ct/receipts/{cid}"
-}
-```
-
-The document SHOULD also include an explicit binding to the space it serves:
-
-```typescript
-interface CTSpaceBinding {
-  spaceDid: MemorySpace; // "did:key:z6M...SPACE..."
-  methods: string[]; // ["dns:_ct", "https:/.well-known/ct-space-did"]
-}
-```
-
----
-
-### 17.6 Verification Algorithm (Domain Bootstrap)
-
-Given a domain `example.com`, a verifier MAY establish trust as follows:
-
-1. Resolve domain → Space DID using DNS and/or HTTPS well-known endpoint
-2. Resolve `did:web:example.com` to obtain the server DID document
-3. Extract checkpoint verification keys and CT protocol service endpoints
-4. Verify checkpoints and log roots using server keys
-5. Verify receipt inclusion using log proofs
-6. Verify authorization using space ACL and delegation state
-
-At no point does the domain or server assert authorization directly.
-
----
-
-### 17.7 Security Properties
-
-- **Non-equivocation:** Server signatures are verifiable via did:web
 - **No naming trust escalation:** Domain bindings do not grant write authority
-- **Auditability:** Historical receipts remain valid even if domain bindings
-  change
-- **Key rotation:** Server keys MAY be rotated by updating the did:web document
+- **Auditability:** Historical facts remain valid even if bindings change
 
 ---
 
-### 17.8 Relationship to Verifiable Credentials
+## 16. Philosophy: Dissolving Unnecessary Authority
 
-When issuing VCs, the issuer MAY be:
+The CT Protocol is not neutral about power. It begins from the observation that
+many failures of trust are also failures of balance.
 
-- the Space DID (for state-rooted claims)
-- the Server DID (for publication or availability claims)
+### 16.1 The Shift
 
-VC verification MUST follow the trust semantics of the issuing DID.
+Instead of replacing one authority with another, the CT Protocol seeks to
+**dissolve unnecessary authority** by making evidence portable and verification
+repeatable.
 
-Domain bindings MAY be included as auxiliary evidence but MUST NOT be treated as
-authorization.
+When claims are grounded in receipts, policies, and logs that anyone can
+inspect:
+
+- A server can order events without deciding what they mean
+- An application can render information without inventing facts
+- An issuer can package claims without inflating their scope
+- A user can carry evidence without depending on a platform's memory
+
+### 16.2 What This Enables
+
+Authority becomes specific, bounded, and accountable to structure. No component
+is asked to be omniscient. No component is allowed to be unquestionable.
 
 ---
 
 ## Appendix A: Glossary
 
 **ACL (Access Control List)** State object defining which DIDs may act in a
-space, including owners, writers, and delegates.
+space.
 
-**Append-Only Log** A global, monotonically growing structure maintained by the
-server that establishes total ordering and supports inclusion proofs for
-receipts.
+**Append-Only Log** A global, monotonically growing structure that establishes
+total ordering.
 
-**Authorization (State-Based)** The determination of whether a signer was
-permitted to act, derived solely from space ACL and delegation state at a
-specific log position.
+**CFC (Contextual Flow Control)** An opinionated application of IFC treating
+external inputs as untrusted by default.
 
-**Beacon** A publicly observable value that did not exist before a certain time,
-used to establish verifiable lower bounds on creation time.
-
-**Checkpoint** A signed statement committing to a log root (and optionally a
-latest-entity map root) at a specific epoch.
-
-**Computation Receipt** A signed, content-addressed record committing to inputs,
-outputs, IFC labels, and policy context for a state update.
-
-**Domain Binding** An assertion by a DNS domain that it represents or is
-associated with a specific Space DID, used for naming and discovery only.
+**Commit** A special fact type (`application/commit+json`) recording a complete
+transaction for audit purposes.
 
 **Entity** A named object whose state evolves over time, identified by a URI.
 
-**Fact** An atomic state record in the append-only log, either an Assertion (has
-value) or Retraction (tombstone).
+**Fact** An atomic state record: Assertion (has value), Retraction (tombstone),
+or Unclaimed (genesis).
 
-**IFC (Information Flow Control)** A policy framework constraining how
-information may flow through computations, expressed via confidentiality and
-integrity labels.
+**Genesis** The initial state of an entity or space, before any assertions.
 
-**IFC Enforcement Evidence** Verifiable proof (typically TEE-backed) that a
-computation enforced IFC rules during execution.
+**Pattern** A composable, reactive program defining how state evolves.
 
-**Label Commitment** A domain-separated hash committing to the canonical
-representation of an IFC label.
+**Receipt** A signed, content-addressed record with computation metadata.
 
-**Space** A logical database namespace identified by a Space DID and governed by
-ACL state (`MemorySpace` type: `did:${string}:${string}`).
+**Space** A logical database namespace identified by a DID.
 
-**Space DID** A `did:key` serving as the root authority for a space's ACL and
-delegation state.
-
-**Server DID** A `did:web` identifier representing the server that publishes the
-append-only log and checkpoints.
-
-**TEE (Trusted Execution Environment)** A hardware-backed execution environment
-capable of producing attestations about code identity and execution context.
-
-**Verifiable Credential (VC)** A cryptographically signed statement asserting
-claims about receipts, provenance, policy compliance, or availability.
+**Trust Profile** A named bundle of verification steps and guarantees.
 
 ---
 
 ## Appendix B: Threat–Invariant Matrix
 
-This table summarizes major threat classes and the invariants that prevent or
-detect them.
-
-| Threat                          | Invariant                                     | Mechanism                          |
-| ------------------------------- | --------------------------------------------- | ---------------------------------- |
-| Server forges authorization     | Authorization derives from space state        | Receipt signatures + ACL binding   |
-| Server reorders commits         | Log is append-only and checkpointed           | Log inclusion proofs + checkpoints |
-| Signer writes without authority | Receipt binds to ACL-at-commit-time           | `aclStateHash` + log ordering      |
-| Replay of revoked authority     | Authorization evaluated at commit time        | ACL evolution + log ordering       |
-| Delegation forgery              | Only owners may modify delegation state       | Signed delegation receipts         |
-| Domain hijack escalates         | Domains have no authorization power           | Space DID–rooted ACL               |
-| Hidden data flow violation      | IFC labels committed in receipts              | Label commitments + policy CID     |
-| False policy compliance         | Enforcement evidence is optional and explicit | TEE attestation + `ifcResultHash`  |
-| Tampering with history          | Content-addressed receipts and log            | Hash chaining + signatures         |
-| Key compromise (server)         | Keys are scoped and rotatable                 | did:web key rotation               |
-| Key compromise (signer)         | Authority scoped by ACL                       | Revocation via ACL update          |
-| Time backdating                 | Lower-bound beacon binding                    | Attested beacon commitment         |
+| Threat                          | Invariant                              | Mechanism                          |
+| ------------------------------- | -------------------------------------- | ---------------------------------- |
+| Server forges authorization     | Authorization derives from space state | Receipt signatures + ACL binding   |
+| Server reorders commits         | Log is append-only and checkpointed    | Log inclusion proofs + checkpoints |
+| Signer writes without authority | Fact binds to ACL-at-commit-time       | `cause` chain + log ordering       |
+| Replay of revoked authority     | Authorization evaluated at commit time | ACL evolution + log ordering       |
+| Delegation forgery              | Only owners may modify delegation      | Signed delegation facts            |
+| Domain hijack escalates         | Domains have no authorization power    | Space DID–rooted ACL               |
+| Hidden data flow violation      | CFC labels committed in receipts       | Label commitments + policy CID     |
+| False policy compliance claim   | Enforcement evidence is explicit       | TEE attestation + `cfcResultHash`  |
+| Tampering with history          | Content-addressed facts and log        | Hash chaining + signatures         |
 
 ---
 
-## Appendix C: Trust Profiles and Verification Semantics
-
-This appendix defines **normative trust profiles** describing what it means to
-"trust" an output produced under CT protocol.
-
-Each profile corresponds to a specific set of verification steps and guarantees.
-
----
-
-### C.1 Profile: Existence & Ordering
-
-**Verifier checks:**
-
-- Receipt signature
-- Inclusion in append-only log
-
-**Guarantees:**
-
-- The receipt exists
-- The receipt was observed by the server at a specific position in the global
-  order
-
-**Non-guarantees:**
-
-- Authorization
-- Correctness of computation
-- Policy compliance
-
----
-
-### C.2 Profile: Authorized State Update
-
-**Verifier checks:**
-
-- Receipt signature
-- Log inclusion
-- ACL binding and verification
-
-**Guarantees:**
-
-- The signer was authorized under space ACL at commit time
-- The state update is valid within the space's governance rules
-
-**Non-guarantees:**
-
-- Correctness of computation
-- Policy compliance beyond committed labels
-
----
-
-### C.3 Profile: Provenance-Complete Output
-
-**Verifier checks:**
-
-- Authorized State Update profile
-- Verification of all `inputRefs`
-
-**Guarantees:**
-
-- The output is transitively derived from the referenced inputs
-- The full provenance chain is intact and ordered
-
-**Non-guarantees:**
-
-- Policy enforcement during computation
-
----
-
-### C.4 Profile: Policy-Committed Computation
-
-**Verifier checks:**
-
-- Provenance-Complete Output profile
-- Presence of IFC commitments (labels + policy identifier)
-
-**Guarantees:**
-
-- The computation committed to a specific IFC policy
-- Inputs and outputs are labeled under that policy
-
-**Non-guarantees:**
-
-- That the policy was actually enforced
-
----
-
-### C.5 Profile: Policy-Enforced Computation
-
-**Verifier checks:**
-
-- Policy-Committed Computation profile
-- Verification of IFC enforcement evidence (e.g., TEE attestation)
-
-**Guarantees:**
-
-- The computation enforced IFC rules during execution
-- Confidentiality and integrity constraints were mechanically checked
-
-**Non-guarantees:**
-
-- Absolute correctness of the code logic beyond the enforced policy
-
----
-
-### C.6 Profile: Strong Integrity Output
-
-**Verifier checks:**
-
-- Policy-Enforced Computation profile
-- Integrity label validation across the entire provenance chain
-
-**Guarantees:**
-
-- Every dependency in the provenance chain satisfies required integrity
-  constraints
-- Output integrity is anchored to trusted sources
-
-**Non-guarantees:**
-
-- Completeness of data sources beyond declared provenance
-
----
-
-### C.7 Profile: Portable Verifiable Claim (VC)
-
-**Verifier checks:**
-
-- Any of the above profiles
-- VC signature and issuer semantics
-
-**Guarantees:**
-
-- The verified properties are portable and third-party verifiable
-- The issuer's trust domain is explicit
-
-**Non-guarantees:**
-
-- That the issuer is globally trusted; trust is policy-defined
-
----
-
-### C.8 Profile Selection
-
-Applications SHOULD explicitly state which trust profile they require.
-
-Verifiers MUST NOT assume guarantees beyond those provided by the verified
-profile.
-
----
-
-## Appendix D: Mapping to Current Implementation
-
-This appendix maps CT protocol concepts to the current codebase structures.
-
-| CT Protocol Concept | Current Implementation                          | Package         |
-| ------------------- | ----------------------------------------------- | --------------- |
-| Entity              | `URI` (`${string}:${string}`)                   | memory          |
-| Fact                | `Assertion \| Retraction`                       | memory          |
-| Receipt             | `Fact` + `Commit`                               | memory          |
-| Space               | `MemorySpace` (`did:${string}:${string}`)       | memory          |
-| Append-only log     | SQLite `fact` table                             | memory          |
-| ACL                 | `ACL` type with `Capability`                    | memory          |
-| Signer              | `Signer` interface                              | memory          |
-| Authorization       | UCAN-based `Authorization` type                 | memory          |
-| Address tracking    | `IMemoryAddress` (`{id, type, path}`)           | runner          |
-| Read/Write tracking | `Activity` type in `ITransactionJournal`        | runner          |
-| Transaction         | `IStorageTransaction` with `Journal`/`Chronicle`| runner          |
-| Labels              | `Labels` type with `classification`             | runner          |
+## Appendix C: Mapping to Current Implementation
+
+| CT Protocol Concept   | Current Implementation                           | Package |
+| --------------------- | ------------------------------------------------ | ------- |
+| Entity                | `URI` (`${string}:${string}`)                    | memory  |
+| Fact                  | `Assertion \| Retraction`                        | memory  |
+| Unclaimed             | `{the, of}` with no `is` or `cause`              | memory  |
+| Commit                | Fact with `the: "application/commit+json"`       | memory  |
+| CommitData            | `{since, transaction, labels?}`                  | memory  |
+| Space                 | `MemorySpace` (`did:${string}:${string}`)        | memory  |
+| Append-only log       | SQLite `fact` table                              | memory  |
+| Current state         | SQLite `memory` table                            | memory  |
+| ACL                   | `ACL` type with `Capability`                     | memory  |
+| Signer                | `Signer` interface                               | memory  |
+| Authorization         | UCAN-based `Authorization` type                  | memory  |
+| Address tracking      | `IMemoryAddress` (`{id, type, path}`)            | runner  |
+| Read/Write tracking   | `Activity` type in `ITransactionJournal`         | runner  |
+| Transaction           | `IStorageTransaction` with `Journal`/`Chronicle` | runner  |
+| Labels                | `Labels` type with `classification`              | runner  |
+| Genesis cause         | `refer({the, of})` - hash of unclaimed state     | memory  |
