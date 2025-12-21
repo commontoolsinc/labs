@@ -372,13 +372,13 @@ describe("wish built-in", () => {
     expect(dataCell.get()).toEqual(["Alpha"]);
   });
 
-  it("returns undefined for unknown wishes", async () => {
+  it("returns error for unknown wishes", async () => {
     const wishRecipe = recipe("wish unknown target", () => {
       const missing = wish("commontools://unknown");
       return { missing };
     });
 
-    const resultCell = runtime.getCell<{ missing?: unknown }>(
+    const resultCell = runtime.getCell<{ missing?: { error?: string } }>(
       space,
       "wish built-in missing target",
       undefined,
@@ -390,7 +390,9 @@ describe("wish built-in", () => {
 
     await runtime.idle();
 
-    expect(result.key("missing").get()).toBeUndefined();
+    const missingResult = result.key("missing").get();
+    // Unknown wish targets now return an error object for better UX
+    expect(missingResult?.error).toMatch(/not recognized/);
   });
 
   describe("object-based wish syntax", () => {
