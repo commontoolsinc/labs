@@ -1,14 +1,14 @@
 import { env } from "@commontools/integration";
 import { describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
-import { ShellIntegration } from "../../integration/shell-utils.ts";
+import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { Identity } from "@commontools/identity";
 import { sleep } from "@commontools/utils/sleep";
 
-const { FRONTEND_URL } = env;
+const { FRONTEND_URL, SPACE_NAME } = env;
 
 /**
- * Tests that default-app.tsx loads correctly for new spaces.
+ * Tests that default-app.tsx loads correctly for spaces.
  *
  * This is a critical test that validates:
  * 1. The patterns API can serve default-app.tsx
@@ -25,41 +25,15 @@ describe("default-app loading tests", () => {
 
   it("should load default-app with New Note and New Record buttons", async () => {
     const page = shell.page();
-    // Use a unique space name to ensure we're testing fresh space creation
-    const spaceName = `test-default-app-${Date.now()}`;
     const identity = await Identity.generate({ implementation: "noble" });
 
     // Navigate to space without charmId - this triggers default-app loading
+    // shell.goto with identity handles login automatically
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      view: { spaceName },
+      view: { spaceName: SPACE_NAME },
       identity,
     });
-
-    // Wait for login flow if needed
-    await sleep(1);
-    const registerHandle = await page.waitForSelector(
-      '[test-id="register-new-key"]',
-      { strategy: "pierce", timeout: 5000 },
-    ).catch(() => null);
-
-    if (registerHandle) {
-      // Complete registration flow
-      registerHandle.click();
-      await sleep(1);
-      const generateHandle = await page.waitForSelector(
-        '[test-id="generate-passphrase"]',
-        { strategy: "pierce" },
-      );
-      generateHandle.click();
-      await sleep(1);
-      const continueHandle = await page.waitForSelector(
-        '[test-id="passphrase-continue"]',
-        { strategy: "pierce" },
-      );
-      continueHandle.click();
-      await sleep(1);
-    }
 
     // Wait for default-app to load - look for the New Note button
     // This validates that default-app.tsx was fetched and compiled successfully
@@ -84,38 +58,13 @@ describe("default-app loading tests", () => {
 
   it("should be able to create a new record from default-app", async () => {
     const page = shell.page();
-    const spaceName = `test-record-creation-${Date.now()}`;
     const identity = await Identity.generate({ implementation: "noble" });
 
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      view: { spaceName },
+      view: { spaceName: SPACE_NAME },
       identity,
     });
-
-    // Complete registration if needed
-    await sleep(1);
-    const registerHandle = await page.waitForSelector(
-      '[test-id="register-new-key"]',
-      { strategy: "pierce", timeout: 5000 },
-    ).catch(() => null);
-
-    if (registerHandle) {
-      registerHandle.click();
-      await sleep(1);
-      const generateHandle = await page.waitForSelector(
-        '[test-id="generate-passphrase"]',
-        { strategy: "pierce" },
-      );
-      generateHandle.click();
-      await sleep(1);
-      const continueHandle = await page.waitForSelector(
-        '[test-id="passphrase-continue"]',
-        { strategy: "pierce" },
-      );
-      continueHandle.click();
-      await sleep(2);
-    }
 
     // Wait for default-app to load
     const recordButton = await page.waitForSelector(
@@ -124,9 +73,12 @@ describe("default-app loading tests", () => {
     );
     assert(recordButton, "New Record button should be present");
 
+    // Get the inner text to ensure it's ready
+    await recordButton.innerText();
+
     // Click the New Record button
     await recordButton.click();
-    await sleep(2);
+    await sleep(2000);
 
     // Verify we navigated to a record - look for record-specific UI elements
     // The record pattern has a title input and module picker
