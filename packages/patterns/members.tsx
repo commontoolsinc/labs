@@ -41,7 +41,7 @@ export interface MembersModuleInput {
   members: Default<MemberEntry[], []>;
   /** Parent's subCharms for finding self and bidirectional linking */
   parentSubCharms?: Cell<{ type: string; charm: unknown }[]>;
-  /** Pattern JSON for creating new stub records */
+  /** Pattern JSON for creating new stub records (serialized pattern definition) */
   createPattern?: Default<string, "">;
 }
 
@@ -221,67 +221,21 @@ const addMember = handler<
   {
     members: Cell<MemberEntry[]>;
     parentRecord: unknown;
-    createPattern: string;
     errorMessage: Cell<string>;
   }
->((event, { members, parentRecord, createPattern, errorMessage }) => {
+>((event, { members, parentRecord, errorMessage }) => {
   const { value, charmRef, isCustom } = event.detail || {};
 
   // Clear previous errors
   errorMessage.set("");
 
   if (isCustom) {
-    // Create new blank record with the typed name
-    if (!createPattern) {
-      errorMessage.set("Cannot create record: no template available");
-      return;
-    }
-
-    try {
-      // Access runtime and space from the members Cell
-      const rt = (members as any).runtime;
-      const spaceName = (members as any).space;
-
-      if (!rt || !spaceName) {
-        errorMessage.set("Cannot create record: runtime unavailable");
-        return;
-      }
-
-      // Start transaction
-      const tx = rt.edit();
-
-      // Create a unique cause Cell for the new charm
-      const result = rt.getCell(spaceName, {
-        memberName: value,
-        timestamp: Date.now(),
-      });
-
-      // Parse the pattern JSON
-      const pattern = JSON.parse(createPattern);
-
-      // Define inputs for the new Record (just title)
-      const inputs: Record<string, unknown> = {
-        title: value,
-      };
-
-      // Instantiate and run the pattern
-      rt.run(tx, pattern, inputs, result);
-
-      // Commit the transaction
-      tx.commit();
-
-      // Add the new charm to members list
-      // Note: bidirectional=false because new records don't have a Members module yet.
-      // When the user adds a Members module to the new record, they can add the reverse link.
-      const newEntry: MemberEntry = {
-        charm: result,
-        bidirectional: false,
-      };
-      members.push(newEntry);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : "Unknown error";
-      errorMessage.set(`Failed to create record: ${msg}`);
-    }
+    // TODO(CT-1130): Creating new records from Members is not yet supported.
+    // The pattern system cannot pass factory functions through serialization.
+    // See: https://linear.app/common-tools/issue/CT-1130
+    errorMessage.set(
+      "Creating new records is not yet supported. Please create the record first, then add it here.",
+    );
     return;
   }
 
@@ -534,7 +488,6 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
               onct-select={addMember({
                 members,
                 parentRecord,
-                createPattern,
                 errorMessage,
               })}
               style={{ flex: "1" }}

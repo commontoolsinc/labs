@@ -311,7 +311,8 @@ const addSubCharm = handler<
     : type === "members"
     ? MembersModule({
       parentSubCharms: sc,
-      createPattern: recordPatternJson,
+      // TODO(CT-1130): createPattern removed - cannot pass functions through serialization
+      // See: https://linear.app/common-tools/issue/CT-1130
     } as any)
     : createSubCharm(type, initialValues);
 
