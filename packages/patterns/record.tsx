@@ -23,6 +23,7 @@ import {
   str,
   toSchema,
   UI,
+  wish,
   Writable,
 } from "commontools";
 import {
@@ -39,6 +40,7 @@ import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
 import { getResultSchema } from "./record/extraction/schema-utils.ts";
 import { MembersModule } from "./members.tsx";
 import type { ContainerCoordinationContext } from "./container-protocol.ts";
+import type { MentionableCharm } from "./backlinks-index.tsx";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 
 // ===== Standard Labels for Smart Defaults =====
@@ -274,6 +276,7 @@ const addSubCharm = handler<
     title: Writable<string>;
     selectedAddType: Writable<string>;
     recordPatternJson: string;
+    mentionable: MentionableCharm[];
   }
 >((
   { detail },
@@ -283,6 +286,7 @@ const addSubCharm = handler<
     title,
     selectedAddType: sat,
     recordPatternJson,
+    mentionable,
   },
 ) => {
   const type = detail?.value;
@@ -311,8 +315,7 @@ const addSubCharm = handler<
     : type === "members"
     ? MembersModule({
       parentSubCharms: sc,
-      // TODO(CT-1130): createPattern removed - cannot pass functions through serialization
-      // See: https://linear.app/common-tools/issue/CT-1130
+      mentionable,
     } as any)
     : createSubCharm(type, initialValues);
 
@@ -869,6 +872,10 @@ const Record = pattern<RecordInput, RecordOutput>(
     // Settings modal state - tracks which module's settings are being edited
     const settingsModuleIndex = Writable.of<number | undefined>();
 
+    // Get mentionable charms for sub-modules that need them
+    // (Sub-charms run in their own space context and can't use wish directly)
+    const mentionable = wish<Default<MentionableCharm[], []>>("#mentionable");
+
     // Create Record pattern JSON for wiki-links in Notes
     // Using computed() defers evaluation until render time, avoiding circular dependency
     const recordPatternJson = computed(() => JSON.stringify(Record));
@@ -1167,6 +1174,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                   title,
                   selectedAddType,
                   recordPatternJson,
+                  mentionable,
                 })}
                 style={{ width: "130px" }}
               />

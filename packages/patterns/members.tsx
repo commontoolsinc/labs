@@ -17,7 +17,6 @@ import {
   navigateTo,
   recipe,
   UI,
-  wish,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 import { type MentionableCharm } from "./backlinks-index.tsx";
@@ -43,6 +42,8 @@ export interface MembersModuleInput {
   parentSubCharms?: Cell<{ type: string; charm: unknown }[]>;
   /** Pattern JSON for creating new stub records (serialized pattern definition) */
   createPattern?: Default<string, "">;
+  /** Mentionable charms passed from parent (sub-charms can't use wish directly) */
+  mentionable?: Default<MentionableCharm[], []>;
 }
 
 // ===== Self-Describing Metadata =====
@@ -350,15 +351,12 @@ const addMember = handler<
 // ===== The Pattern =====
 export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
   "MembersModule",
-  ({ members, parentSubCharms, createPattern: _createPattern }) => {
+  ({ members, parentSubCharms, createPattern: _createPattern, mentionable }) => {
     // Local state
     const filterMode = Cell.of<FilterMode>("all-records");
     const editingRoleIndex = Cell.of<number | null>(null);
     const roleInputValue = Cell.of("");
     const errorMessage = Cell.of("");
-
-    // Get mentionable charms via wish
-    const mentionable = wish<Default<MentionableCharm[], []>>("#mentionable");
 
     // Derive parent ID from parentSubCharms Cell for self-filtering
     // Used by autocomplete to exclude self from search results
