@@ -40,6 +40,9 @@ export type SubCharmType =
   | "timing"
   | "age-category"
   | "dietary-restrictions"
+  // Contact modules (with labels, support siblings)
+  | "email"
+  | "phone"
   // Controller modules (internal, not user-addable)
   | "type-picker"
   | "extractor";

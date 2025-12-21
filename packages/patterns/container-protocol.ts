@@ -45,6 +45,9 @@ export interface ModuleMetadata {
   /** If true, hide from "Add module" dropdown (e.g., type-picker) */
   internal?: boolean;
 
+  /** If true, show "add another" button for multi-instance modules (e.g., email, phone) */
+  allowMultiple?: boolean;
+
   /** JSON Schema for the module's data (for LLM extraction) */
   schema?: Record<string, unknown>;
 
