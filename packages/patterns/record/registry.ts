@@ -7,8 +7,9 @@
 // 1. Import the module and its metadata below
 // 2. Add it to SUB_CHARM_REGISTRY (around line 90)
 // 3. Add it to SubCharmType in ./types.ts
-// 4. Add its fields to EXTRACTION_SCHEMA in ./extraction/extractor-module.tsx
-//    (so AI can extract data into the new module type)
+//
+// AI extraction schema is discovered dynamically from pattern.resultSchema
+// at creation time - no manual schema maintenance needed!
 // =============================================================================
 
 import type { SubCharmType } from "./types.ts";
@@ -120,9 +121,9 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
       );
     },
     schema: {
-      notes: { type: "string", description: "Free-form notes" },
+      content: { type: "string", description: "Free-form notes and content" },
     },
-    fieldMapping: ["notes", "content"],
+    fieldMapping: ["content", "notes"],
   },
 
   // Data modules - imported from peer patterns

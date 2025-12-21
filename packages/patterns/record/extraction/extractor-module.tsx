@@ -23,12 +23,18 @@ import {
   ifElse,
   NAME,
   recipe,
-  toSchema,
   UI,
 } from "commontools";
-import { createSubCharm, getFieldToTypeMapping } from "../registry.ts";
+import { createSubCharm } from "../registry.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "../types.ts";
 import type { ExtractedField, ExtractionPreview } from "./types.ts";
+import type { JSONSchema } from "./schema-utils.ts";
+import {
+  buildExtractionSchemaFromCell,
+  getFieldToTypeMapping,
+  getResultSchema,
+  getSchemaForType,
+} from "./schema-utils.ts";
 
 // ===== Types =====
 
@@ -63,193 +69,6 @@ Rules:
 7. Be conservative - only extract what you're confident about
 
 Return a JSON object with the extracted fields. Use null for fields without data.`;
-
-/**
- * EXTRACTION SCHEMA - Currently Hardcoded, Future: Dynamic Discovery
- *
- * =============================================================================
- * CURRENT STATE (Hardcoded)
- * =============================================================================
- * The extraction schema is manually maintained here. When adding new modules
- * or changing field types, this schema must be updated manually.
- *
- * Why hardcoded?
- * - Dynamic registry calls don't survive CommonTools AMD compilation
- * - The public Cell API doesn't expose schema information
- * - There's no official way to query another charm's resultSchema
- *
- * =============================================================================
- * FUTURE VISION (Dynamic Schema Discovery)
- * =============================================================================
- * CTS already compiles TypeScript types into JSON schemas (resultSchema) that
- * include enums from union types and descriptions from JSDoc comments. If the
- * runtime exposed this via the public Cell API, we could discover schemas
- * dynamically from loaded charms:
- *
- *   // Hypothetical future API:
- *   const schema = charmCell.resultSchema;
- *   // or: getResultSchema(charmCell)
- *
- * This would enable:
- * 1. Zero-config extraction - patterns just use good TypeScript types
- * 2. Dynamic discovery - works with any loaded charm, even unknown ones
- * 3. No duplicate schema maintenance - single source of truth in types
- *
- * Pattern authors would get extraction support "for free" by using:
- * - Union literal types: platform: "twitter" | "linkedin" | "github"
- *   → becomes { enum: ["twitter", "linkedin", "github"] }
- * - JSDoc comments with descriptions
- *   → becomes { description: "..." }
- *
- * Feature request submitted to framework team. If approved, replace this
- * hardcoded schema with dynamic discovery from parentSubCharms.
- * =============================================================================
- */
-// =============================================================================
-// ADDING A NEW MODULE? Add its extractable fields to ExtractedData below!
-// CTS compiles TypeScript types + JSDoc into JSON schemas automatically.
-// Also update the module's fieldMapping in its MODULE_METADATA.
-// See ../registry.ts for the full checklist.
-// =============================================================================
-
-/** Social platform identifiers */
-type SocialPlatform =
-  | "twitter"
-  | "linkedin"
-  | "github"
-  | "instagram"
-  | "facebook"
-  | "youtube"
-  | "tiktok"
-  | "mastodon"
-  | "bluesky";
-
-/** Project/task status values */
-type StatusValue = "planned" | "active" | "blocked" | "done" | "archived";
-
-/** Relationship closeness levels */
-type ClosenessLevel = "intimate" | "close" | "casual" | "distant";
-
-/** Gift giving frequency tiers */
-type GiftTier = "always" | "occasions" | "reciprocal" | "none";
-
-/** Age category values */
-type AgeCategory =
-  | "adult"
-  | "child"
-  | "senior"
-  | "adult-specific"
-  | "young-adult"
-  | "teenager"
-  | "school-age"
-  | "toddler"
-  | "baby";
-
-/**
- * ExtractedData - All fields that can be extracted from unstructured text.
- * CTS compiles this TypeScript type into a JSON schema with enums and descriptions.
- */
-interface ExtractedData {
-  // Notes
-  /** Free-form notes */
-  notes?: string | null;
-
-  // Email/Phone (multi-instance modules with labels)
-  /** Email address */
-  email?: string | null;
-  /** Phone number */
-  phone?: string | null;
-  /** Website URL */
-  website?: string | null;
-
-  // Birthday
-  /** Birthday in YYYY-MM-DD or MM-DD format */
-  birthDate?: string | null;
-  /** Birth year */
-  birthYear?: number | null;
-
-  // Tags
-  /** Tags or interests */
-  tags?: string[] | null;
-
-  // Rating
-  /** Rating from 1-5 */
-  rating?: number | null;
-
-  // Status
-  /** Project status */
-  status?: StatusValue | null;
-
-  // Address
-  /** Street address */
-  street?: string | null;
-  /** City */
-  city?: string | null;
-  /** State or Province */
-  state?: string | null;
-  /** Postal or ZIP code */
-  postalCode?: string | null;
-  /** Country */
-  country?: string | null;
-
-  // Timeline
-  /** Start date in ISO format */
-  startDate?: string | null;
-  /** Target completion date in ISO format */
-  targetDate?: string | null;
-
-  // Social
-  /** Social platform (normalize: Insta to instagram, X to twitter) */
-  platform?: SocialPlatform | null;
-  /** Social handle or username without @ prefix */
-  handle?: string | null;
-  /** Profile URL */
-  profileUrl?: string | null;
-
-  // Link
-  /** URL */
-  url?: string | null;
-  /** Link title */
-  linkTitle?: string | null;
-
-  // Location
-  /** Location name */
-  locationName?: string | null;
-  /** Full address */
-  locationAddress?: string | null;
-  /** Coordinates as lat,lng string */
-  coordinates?: string | null;
-
-  // Relationship
-  /** Relationship types like friend, family, colleague */
-  relationTypes?: string[] | null;
-  /** Closeness level */
-  closeness?: ClosenessLevel | null;
-  /** How we met */
-  howWeMet?: string | null;
-
-  // Gift Prefs
-  /** Gift giving tier */
-  giftTier?: GiftTier | null;
-  /** Gift budget in dollars */
-  giftBudget?: number | null;
-  /** Gift notes and preferences */
-  giftNotes?: string | null;
-  /** Favorite things, interests, hobbies */
-  favorites?: string[] | null;
-
-  // Age Category
-  /** Age category */
-  ageCategory?: AgeCategory | null;
-
-  // Timing (for recipes)
-  /** Prep time in minutes */
-  prepTime?: number | null;
-  /** Cook time in minutes */
-  cookTime?: number | null;
-  /** Rest time in minutes */
-  restTime?: number | null;
-}
 
 // ===== Helper Functions =====
 
@@ -291,13 +110,95 @@ function formatValue(value: unknown): string {
 }
 
 /**
+ * Validate that an extracted value matches the expected JSON Schema type
+ */
+function validateFieldValue(
+  value: unknown,
+  schema: JSONSchema | undefined,
+): boolean {
+  // No schema = allow anything (permissive for dynamic fields)
+  if (!schema || !schema.type) return true;
+
+  const schemaType = schema.type;
+
+  // Handle array types
+  if (schemaType === "array") {
+    return Array.isArray(value);
+  }
+
+  // Handle integer (stricter than number)
+  if (schemaType === "integer") {
+    return typeof value === "number" && Number.isInteger(value);
+  }
+
+  // Handle number (includes integers and floats)
+  if (schemaType === "number") {
+    return typeof value === "number" && !isNaN(value);
+  }
+
+  // Handle boolean
+  if (schemaType === "boolean") {
+    return typeof value === "boolean";
+  }
+
+  // Handle string
+  if (schemaType === "string") {
+    return typeof value === "string";
+  }
+
+  // Handle object
+  if (schemaType === "object") {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  // Handle null
+  if (schemaType === "null") {
+    return value === null;
+  }
+
+  // Unknown schema type - be permissive
+  return true;
+}
+
+/**
+ * Get schema for a specific field from sub-charms
+ */
+function getFieldSchema(
+  subCharms: readonly SubCharmEntry[],
+  moduleType: string,
+  fieldName: string,
+): JSONSchema | undefined {
+  const entry = subCharms.find((e) => e?.type === moduleType);
+  if (!entry) return undefined;
+
+  // Try stored schema first
+  const storedSchema = entry.schema as JSONSchema | undefined;
+  if (storedSchema?.properties?.[fieldName]) {
+    return storedSchema.properties[fieldName];
+  }
+
+  // Fallback to registry schema (for legacy entries)
+  try {
+    const registrySchema = getSchemaForType(moduleType);
+    if (registrySchema?.properties?.[fieldName]) {
+      return registrySchema.properties[fieldName];
+    }
+  } catch {
+    // getSchemaForType may fail if registry isn't available
+  }
+
+  return undefined;
+}
+
+/**
  * Build extraction preview from raw LLM result and existing modules
  */
 function buildPreview(
-  extracted: ExtractedData,
+  extracted: Record<string, unknown>,
   subCharms: readonly SubCharmEntry[],
 ): ExtractionPreview {
-  const fieldToType = getFieldToTypeMapping();
+  // Use dynamic field-to-type mapping from stored schemas (falls back to registry)
+  const fieldToType = getFieldToTypeMapping(subCharms);
   const fields: ExtractedField[] = [];
   const byModule: Record<string, ExtractedField[]> = {};
 
@@ -400,6 +301,7 @@ const applySelected = handler<
   { parentSubCharms, parentTrashedSubCharms, preview, selections },
 ) => {
   const current: SubCharmEntry[] = [...(parentSubCharms.get() || [])];
+  const subCharms = current; // For schema lookups
   const selected = selections.get() || {};
 
   // Group fields by target module
@@ -424,7 +326,28 @@ const applySelected = handler<
     if (existingIndex >= 0) {
       // Module exists - use Cell navigation to update fields
       for (const field of fields) {
+        // Validate extracted value against schema
+        const fieldSchema = getFieldSchema(
+          subCharms,
+          moduleType,
+          field.fieldName,
+        );
+        const isValid = validateFieldValue(field.extractedValue, fieldSchema);
+
+        if (!isValid) {
+          const actualType = Array.isArray(field.extractedValue)
+            ? "array"
+            : typeof field.extractedValue;
+          console.warn(
+            `[Extract] Type mismatch for ${moduleType}.${field.fieldName}: ` +
+              `expected ${fieldSchema?.type}, got ${actualType}. ` +
+              `Value: ${JSON.stringify(field.extractedValue)}. Skipping field.`,
+          );
+          continue; // Skip this field
+        }
+
         try {
+          // Only write if validation passed
           (parentSubCharms as any).key(existingIndex).key("charm").key(
             field.fieldName,
           ).set(field.extractedValue);
@@ -439,15 +362,44 @@ const applySelected = handler<
         // Build initial values object from extracted fields
         const initialValues: Record<string, unknown> = {};
         for (const field of fields) {
+          // Validate before adding to initialValues
+          const fieldSchema = getFieldSchema(
+            subCharms,
+            moduleType,
+            field.fieldName,
+          );
+          const isValid = validateFieldValue(field.extractedValue, fieldSchema);
+
+          if (!isValid) {
+            const actualType = Array.isArray(field.extractedValue)
+              ? "array"
+              : typeof field.extractedValue;
+            console.warn(
+              `[Extract] Type mismatch for new module ${moduleType}.${field.fieldName}: ` +
+                `expected ${fieldSchema?.type}, got ${actualType}. ` +
+                `Value: ${
+                  JSON.stringify(field.extractedValue)
+                }. Skipping field.`,
+            );
+            continue; // Skip this field
+          }
+
           initialValues[field.fieldName] = field.extractedValue;
         }
         // Create module with initial values passed to the recipe
-        const newCharm = createSubCharm(moduleType, initialValues);
-        newEntries.push({
-          type: moduleType,
-          pinned: false,
-          charm: newCharm,
-        });
+
+        // Only create module if we have at least one valid field
+        if (Object.keys(initialValues).length > 0) {
+          const newCharm = createSubCharm(moduleType, initialValues);
+          // Capture schema at creation time for dynamic discovery
+          const schema = getResultSchema(newCharm);
+          newEntries.push({
+            type: moduleType,
+            pinned: false,
+            charm: newCharm,
+            schema,
+          });
+        }
       } catch (e) {
         console.warn(`Failed to create module ${moduleType}:`, e);
       }
@@ -485,15 +437,19 @@ export const ExtractorModule = recipe<
       selections,
     },
   ) => {
+    // Dynamic schema discovery - builds schema from stored entry.schema (with registry fallback)
+    const extractSchema = computed(() => {
+      return buildExtractionSchemaFromCell(parentSubCharms);
+    });
+
     // Reactive extraction - only runs when extractionPrompt is set (user clicked Extract)
     // The framework caches by content hash, so same text won't re-extract
-    // toSchema<ExtractedData>() converts TypeScript type to JSON schema at compile time
-    const extraction = generateObject<ExtractedData>({
+    const extraction = generateObject({
       system: EXTRACTION_SYSTEM_PROMPT,
       prompt: extractionPrompt, // Only triggers when user clicks Extract button
-      schema: toSchema<ExtractedData>(),
+      schema: extractSchema as any, // Dynamic schema from stored entry.schema
       model: "anthropic:claude-haiku-4-5", // Fast & cheap model for extraction
-    });
+    } as any);
 
     // Check if we have any text to extract (for UI display)
     // inputText is a reactive reference - must use computed() to track changes

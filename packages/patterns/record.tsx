@@ -36,6 +36,7 @@ import Note from "./note.tsx";
 import { inferTypeFromModules } from "./record/template-registry.ts";
 import { TypePickerModule } from "./type-picker.tsx";
 import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
+import { getResultSchema } from "./record/extraction/schema-utils.ts";
 import type { ContainerCoordinationContext } from "./container-protocol.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 
@@ -105,16 +106,30 @@ interface RecordOutput {
 const storeInitialCharms = lift(
   toSchema<{
     notesCharm: unknown;
+    notesSchema: unknown;
     typePickerCharm: unknown;
+    typePickerSchema: unknown;
     subCharms: Cell<SubCharmEntry[]>;
     isInitialized: Cell<boolean>;
   }>(),
   undefined,
-  ({ notesCharm, typePickerCharm, subCharms, isInitialized }) => {
+  ({
+    notesCharm,
+    notesSchema,
+    typePickerCharm,
+    typePickerSchema,
+    subCharms,
+    isInitialized,
+  }) => {
     if (!isInitialized.get()) {
       subCharms.set([
-        { type: "notes", pinned: true, charm: notesCharm },
-        { type: "type-picker", pinned: false, charm: typePickerCharm },
+        { type: "notes", pinned: true, charm: notesCharm, schema: notesSchema },
+        {
+          type: "type-picker",
+          pinned: false,
+          charm: typePickerCharm,
+          schema: typePickerSchema,
+        },
       ]);
       isInitialized.set(true);
       return notesCharm; // Return notes charm as primary reference
@@ -168,12 +183,21 @@ const initializeRecord = lift(
         },
       };
 
+      // Capture schema for dynamic discovery
+      const notesSchema = getResultSchema(notesCharm);
+
       // TypePicker uses the ContainerCoordinationContext protocol
       // deno-lint-ignore no-explicit-any
       const typePickerCharm = TypePickerModule({ context } as any);
+
+      // Capture schema for dynamic discovery
+      const typePickerSchema = getResultSchema(typePickerCharm);
+
       return storeInitialCharms({
         notesCharm,
+        notesSchema,
         typePickerCharm,
+        typePickerSchema,
         subCharms,
         isInitialized,
       });
@@ -257,7 +281,10 @@ const addSubCharm = handler<
       parentTrashedSubCharms: trash,
     } as any)
     : createSubCharm(type, initialValues);
-  sc.set([...current, { type, pinned: false, charm }]);
+
+  // Capture schema at creation time for dynamic discovery
+  const schema = getResultSchema(charm);
+  sc.set([...current, { type, pinned: false, charm, schema }]);
   sat.set("");
 });
 
@@ -538,7 +565,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                     gap: "12px",
                   }}
                 >
-                  {pinnedEntries.map((entry: SubCharmEntry) => {
+                  {pinnedEntries.map((entry) => {
                     const displayInfo = getModuleDisplay({
                       type: entry.type,
                       charm: entry.charm,
@@ -655,7 +682,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                       gap: "12px",
                     }}
                   >
-                    {unpinnedEntries.map((entry: SubCharmEntry) => {
+                    {unpinnedEntries.map((entry) => {
                       const displayInfo = getModuleDisplay({
                         type: entry.type,
                         charm: entry.charm,
@@ -772,7 +799,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                   gap: "12px",
                 }}
               >
-                {allEntries.map((entry: SubCharmEntry) => {
+                {allEntries.map((entry) => {
                   const displayInfo = getModuleDisplay({
                     type: entry.type,
                     charm: entry.charm,
@@ -923,7 +950,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                   trashExpanded,
                   <div style={{ paddingLeft: "16px", marginTop: "8px" }}>
                     {trashedSubCharms.map(
-                      (entry: TrashedSubCharmEntry) => {
+                      (entry) => {
                         const displayInfo = getModuleDisplay({
                           type: entry.type,
                           charm: entry.charm,
