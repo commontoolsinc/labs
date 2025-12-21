@@ -30,8 +30,8 @@ import {
 import { isObject } from "@commontools/utils/types";
 
 const logger = getLogger("llm", {
-  enabled: false,
-  level: "info",
+  enabled: true,
+  level: "warn",
 });
 
 const client = new LLMClient();
