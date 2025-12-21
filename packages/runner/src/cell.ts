@@ -1269,7 +1269,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
         } else if (prop === Symbol.toPrimitive) {
           return () => {
             throw new Error(
-              "Tried to directly access an opaque value. Use `computed()` to perform operations on reactive values - it handles closures automatically.",
+              "Tried to access a reactive reference outside a reactive context. Use `computed()` to perform operations on reactive values - it handles closures automatically.",
             );
           };
         } else if (prop === toCell) {

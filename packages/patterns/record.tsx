@@ -62,7 +62,7 @@ function getNextUnusedLabel(
     if (entry.type === type) {
       try {
         // Access the label field from the charm pattern output
-        // Pattern proxy auto-dereferences Cell values, so access directly
+        // Property access is reactive - framework handles Cell unwrapping
         // deno-lint-ignore no-explicit-any
         const charm = entry.charm as any;
         const labelValue = charm?.label;
@@ -211,7 +211,7 @@ const getModuleDisplay = lift(
   ({ type, charm }: { type: string; charm?: any }) => {
     const def = getDefinition(type);
     // Use charm's label if available (for email/phone/address modules)
-    // Pattern proxy auto-dereferences Cell values, so access directly
+    // Property access is reactive - framework handles Cell unwrapping
     const charmLabel = charm?.label;
     return {
       icon: def?.icon || "📋",

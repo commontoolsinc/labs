@@ -223,7 +223,7 @@ import type { TodoItem } from "./schemas.ts";
 
 ## Anti-Pattern: Manual OpaqueRef Casting
 
-Don't manually cast to/from `OpaqueRef`. The framework handles this automatically.
+Don't manually cast to/from `OpaqueRef`. The framework handles reactive tracking automatically.
 
 ```typescript
 // ❌ WRONG - Don't cast
@@ -242,9 +242,9 @@ handler<Event, { items: Cell<Item[]> }>((_, { items }) => {
 ```
 
 **Why casting breaks things:**
-- Strips reactive proxy wrapper
+- Bypasses reactive tracking
 - Bypasses TypeScript guidance
-- Framework already does this automatically
+- Framework already handles this automatically
 
 ---
 
