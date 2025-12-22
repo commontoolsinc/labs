@@ -67,7 +67,7 @@ export function navigateTo(
       runtime.navigateCallback(resolvedTarget);
 
       navigated = true;
-      resultCell.set(true);
+      resultCell.withTx(tx).set(true);
     }
   };
 }
