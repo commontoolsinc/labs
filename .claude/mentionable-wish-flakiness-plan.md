@@ -47,50 +47,23 @@ The reactive dependency system in `packages/runner/src/reactive-dependencies.ts`
 
 ### 0b. HIGH: MentionController Missing Cell Subscription
 
-**Status:** NOT FIXED
+**Status:** ✅ FIXED in this branch
 **Severity:** HIGH
-**Confidence:** VERY HIGH (confirmed by code analysis)
+**Confidence:** VERY HIGH (confirmed by code analysis and Oracle investigation)
 
 **The Problem:**
 
-The UI layer doesn't subscribe to Cell value changes:
+The UI layer didn't subscribe to Cell value changes.
 
-```typescript
-// packages/ui/src/v2/core/mention-controller.ts:128-154
-getFilteredMentions(): Cell<Mentionable>[] {
-  const mentionableArray = this._mentionable.get();  // Reads current value
-  // ... but NO subscription to future changes
-}
-```
+**The Fix (implemented):**
 
-**Why this causes flakiness:**
-1. `$mentionable` binding passes the Cell object (correct)
-2. Lit uses **reference equality** for Object properties
-3. When Cell's VALUE changes, the Cell REFERENCE stays the same
-4. Lit's `updated()` is never called → MentionController never notified
-5. Autocomplete shows stale data until next keystroke
+Added Cell subscription in MentionController (`packages/ui/src/v2/core/mention-controller.ts`):
+- Added `_mentionableUnsubscribe` private field
+- Updated `setMentionable()` to subscribe via `.sink()`
+- Added cleanup in `hostDisconnected()`
+- Added re-subscribe in `hostConnected()`
 
-**Evidence:**
-- MentionController has no `sink()`, `effect`, or subscription setup
-- Compare to `model` property which DOES use CellController with subscriptions (line 359)
-
-**Key Files:**
-- `packages/ui/src/v2/core/mention-controller.ts:106-109` - setMentionable just stores ref
-- `packages/ui/src/v2/components/ct-prompt-input/ct-prompt-input.ts:439-441` - only triggers on ref change
-
-**Proposed Fix:**
-Add Cell subscription in MentionController:
-```typescript
-setMentionable(cell: Cell<Mentionable[]> | undefined) {
-  if (this._unsubscribe) this._unsubscribe();
-  this._mentionable = cell;
-  if (cell) {
-    this._unsubscribe = cell.sink(() => {
-      this._host.requestUpdate();  // Trigger re-render on value change
-    });
-  }
-}
-```
+The fix follows the established pattern from `CellController` (lines 266-280).
 
 ---
 
