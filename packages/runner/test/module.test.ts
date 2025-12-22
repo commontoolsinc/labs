@@ -257,12 +257,12 @@ describe("module", () => {
   });
 
   describe("source location tracking", () => {
-    it("attaches source location to function implementation via .src", () => {
+    it("attaches source location to function implementation via .name", () => {
       const fn = (x: number) => x * 2;
       lift(fn);
 
-      // The implementation's .src should now be the source location
-      expect((fn as { src?: string }).src).toMatch(/module\.test\.ts:\d+:\d+$/);
+      // The implementation's .name should now be the source location
+      expect(fn.name).toMatch(/module\.test\.ts:\d+:\d+$/);
     });
 
     it("attaches source location to handler implementations", () => {
@@ -271,7 +271,7 @@ describe("module", () => {
       };
       handler(fn, { proxy: true });
 
-      expect((fn as { src?: string }).src).toMatch(/module\.test\.ts:\d+:\d+$/);
+      expect(fn.name).toMatch(/module\.test\.ts:\d+:\d+$/);
     });
 
     it("attaches source location through derive", () => {
@@ -279,7 +279,7 @@ describe("module", () => {
       derive(opaqueRef(5), fn);
 
       // derive calls lift internally, should still track the original function
-      expect((fn as { src?: string }).src).toMatch(/module\.test\.ts:\d+:\d+$/);
+      expect(fn.name).toMatch(/module\.test\.ts:\d+:\d+$/);
     });
   });
 });

@@ -30,7 +30,10 @@ export function createNodeFactory<T = any, R = any>(
   if (typeof moduleSpec.implementation === "function") {
     const location = getExternalSourceLocation();
     if (location) {
-      (moduleSpec.implementation as { src?: string }).src = location;
+      Object.defineProperty(moduleSpec.implementation, "name", {
+        value: location,
+        configurable: true,
+      });
     }
   }
 
@@ -177,7 +180,10 @@ function handlerInternal<E, T>(
   if (typeof handler === "function") {
     const location = getExternalSourceLocation();
     if (location) {
-      (handler as { src?: string }).src = location;
+      Object.defineProperty(handler, "name", {
+        value: location,
+        configurable: true,
+      });
     }
   }
 
