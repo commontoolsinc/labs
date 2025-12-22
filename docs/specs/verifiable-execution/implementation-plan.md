@@ -62,6 +62,37 @@ CREATE INDEX fact_the_since ON fact (the, since);
 - `packages/memory/migrations/` - migration for existing databases
 - `packages/memory/provider.ts` - include producing commits in responses
 
+### 1.5 Scheduler Staleness Detection
+
+Works with current CAS semantics - no commit model changes required.
+
+**Required changes:**
+
+- [ ] Scheduler tracks `since` of each input it reads
+- [ ] On incoming commit, compare commit's writes against tracked inputs
+- [ ] Mark computation stale if `commit.since > tracked_input.since` for same entity
+- [ ] Re-run only stale computations
+
+```typescript
+interface TrackedInput {
+  address: Address; // {id, type} or {id, type, path}
+  since: number; // When this input was read
+}
+
+// On commit received:
+for (const write of commit.writes) {
+  if (trackedInputs.has(write.address) &&
+      commit.since > trackedInputs.get(write.address).since) {
+    markStale(computationsUsing(write.address));
+  }
+}
+```
+
+**Files to modify:**
+
+- `packages/runner/src/scheduler/` - staleness tracking and comparison
+- `packages/runner/src/storage/transaction.ts` - expose `since` with reads
+
 ---
 
 ## Phase 2: Enhanced Receipts (Priority: High)
@@ -337,47 +368,58 @@ The activity tracking from Phase 2 enables intelligent reactive scheduling.
 
 ## Implementation Priority
 
-### Immediate (Phases 1-2)
+### Immediate - Quick Wins (works with current CAS semantics)
 
 1. **Document → Commit provenance** (Phase 1.4)
    - Add compound index `(the, since)` for fast commit lookup
    - Query/subscription responses include producing commits
-   - Essential for clients to verify how data was computed
+   - Foundation for scheduler and client verification
 
-2. **Activity in receipts** (Phase 2.1)
-   - Extend `CommitData` with activity
+2. **Scheduler staleness detection**
+   - Compare `since` values to detect stale data
+   - Scheduler tracks `since` of its inputs, compares against incoming commits
+   - Re-run computations only when inputs are newer
+   - **High impact**: Immediate efficiency gains with no commit model changes
+
+### Next - Fine-grained Scheduling (Phase 2-3)
+
+3. **Activity in receipts** (Phase 2.1)
+   - Extend `CommitData` with address-level reads/writes
    - Serialize journal activity to commits
-   - This unlocks reactive scheduling benefits
+   - Enables path-level dependency tracking
 
-3. **Client state & commit validation** (Phase 2.5)
+4. **Scheduler with activity data** (Phase 3)
+   - Use activity for precise dependency graphs
+   - Minimal invalidation based on exact addresses changed
+   - Only re-run computations whose specific inputs changed
+
+### Then - Enhanced Commit Model (Phase 2.5)
+
+5. **Client state & commit validation**
    - Nursery/heap model for pending vs confirmed commits
-   - `since`-based validation rules
+   - `since`-based validation rules (relaxed from strict CAS)
    - CommitLogEntry with original + resolution
    - Hash mapping for provisional → final resolution
-   - This enables offline operation and stacked commits
+   - Enables offline operation and stacked commits
 
-4. **Code bundle references** (Phase 2.2)
+### Later - Auditing & Reproducibility (Phase 2.2-2.3)
+
+6. **Code bundle references**
    - Track which code produced each output
    - Essential for reproducibility and auditing
 
-5. **Input provenance** (Phase 2.3)
+7. **Input provenance**
    - Link outputs to input sources
    - Enables provenance chain verification
 
-### Near-term (Phase 3)
-
-6. **Scheduler integration**
-   - Use activity data for dependency tracking
-   - Minimal invalidation on changes
-
 ### Medium-term (Phases 4-5)
 
-7. **IFC labels** - Build on existing `Labels` type
-8. **Merkle proofs** - Enable verification without full log
+8. **IFC labels** - Build on existing `Labels` type
+9. **Merkle proofs** - Enable verification without full log
 
 ### Long-term (Phases 6-8)
 
-9. **VCs, Domain bootstrap, Time bounds** - Optional add-ons
+10. **VCs, Domain bootstrap, Time bounds** - Optional add-ons
 
 ---
 

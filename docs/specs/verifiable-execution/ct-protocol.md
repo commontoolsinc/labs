@@ -526,6 +526,25 @@ client also receives the commits that produced it:
 This guarantee means clients always have provenance for any data they receive
 without needing a separate commit-fetching API.
 
+**Scheduler staleness detection:**
+
+The scheduler can use commit information to determine whether data is current:
+
+1. **Compare `since` values**: If the scheduler has data with `since=N`, and
+   sees a commit with `since=M` where `M > N` that writes to the same entity,
+   the data is stale.
+
+2. **Incremental refresh**: Rather than blindly re-running computations, the
+   scheduler checks if inputs have changed by comparing their `since` against
+   the latest commits.
+
+3. **Dependency-aware scheduling**: By tracking which addresses each computation
+   reads (from commit activity), the scheduler knows exactly which computations
+   need to re-run when specific data changes.
+
+This works with the current CAS-based commit semantics and provides immediate
+value for reactive scheduling without requiring changes to commit validation.
+
 **Client verification:**
 
 For any document received, the client can:
