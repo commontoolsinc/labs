@@ -129,10 +129,8 @@ export class CharmManager {
           // Set cells directly (not .get()) to create reactive links.
           // The Cell system automatically converts cells to links via convertCellsToLinks().
           // This ensures wish("/").allCharms stays in sync when charms are added/removed.
-          allCharms: this.charms.withTx(tx) as unknown as Cell<never>[],
-          recentCharms: recentCharmsField.withTx(tx) as unknown as Cell<
-            never
-          >[],
+          allCharms: this.charms.withTx(tx) as Cell<unknown[]>,
+          recentCharms: recentCharmsField.withTx(tx) as Cell<unknown[]>,
         };
 
         spaceCellWithTx.set(nextSpaceValue as SpaceCellContents);
