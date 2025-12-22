@@ -16,7 +16,13 @@ export function createSchemaTransformerV2() {
       options?: { widenLiterals?: boolean },
       schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
     ) {
-      return generator.generateSchema(type, checker, typeArg, options, schemaHints);
+      return generator.generateSchema(
+        type,
+        checker,
+        typeArg,
+        options,
+        schemaHints,
+      );
     },
 
     generateSchemaFromSyntheticTypeNode(
