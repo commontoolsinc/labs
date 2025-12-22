@@ -122,6 +122,7 @@ const handleFileUpload = handler<
     previewSource: Cell<"file" | "image" | null>;
     previewFileName: Cell<string | null>;
     fileError: Cell<string | null>;
+    uploadedImage: Cell<ImageData[]>;
     maxTextFileSizeBytes: number;
   }
 >(
@@ -132,6 +133,7 @@ const handleFileUpload = handler<
       previewSource,
       previewFileName,
       fileError,
+      uploadedImage,
       maxTextFileSizeBytes,
     },
   ) => {
@@ -168,6 +170,8 @@ const handleFileUpload = handler<
       previewText.set(textContent);
       previewSource.set("file");
       previewFileName.set(file.name);
+      // Clear any previous image upload so the label shows correctly
+      uploadedImage.set([]);
     } catch (e) {
       console.error("Failed to decode text file:", e);
       fileError.set(
@@ -437,6 +441,7 @@ export function SmartTextInput(
           previewSource,
           previewFileName,
           fileError,
+          uploadedImage: imageArray,
           maxTextFileSizeBytes,
         })}
       />
@@ -584,7 +589,7 @@ export function SmartTextInput(
           >
             <span style={{ fontSize: "12px", color: "#047857" }}>
               {ifElse(
-                computed(() => previewSource.get() === "file" && imageArray.get().length === 0),
+                computed(() => previewSource.get() === "file"),
                 <span>📄 From file: {previewFileName}</span>,
                 <span>📷 Extracted from image</span>,
               )}
