@@ -123,9 +123,9 @@ export const homeSpaceCellSchema: JSONSchema = {
 } as JSONSchema;
 
 export interface SpaceCellContents {
-  allCharms: Cell<never>[];
-  recentCharms: Cell<never>[];
-  defaultPattern: Cell<never>;
+  allCharms: Cell<unknown[]>;
+  recentCharms: Cell<unknown[]>;
+  defaultPattern: Cell<unknown>;
 }
 
 /**
