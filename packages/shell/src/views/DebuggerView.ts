@@ -4,6 +4,7 @@ import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts
 import type { RuntimeTelemetryMarkerResult } from "@commontools/runner";
 import { isRecord } from "@commontools/utils/types";
 import type { DebuggerController } from "../lib/debugger-controller.ts";
+import "./SchedulerGraphView.ts"; // Register x-scheduler-graph component
 
 /**
  * Hierarchical topic definitions for filtering telemetry events.
@@ -611,7 +612,7 @@ export class XDebuggerView extends LitElement {
   debuggerController?: DebuggerController;
 
   @state()
-  private _activeTab: "events" | "watch" = "events";
+  private _activeTab: "events" | "watch" | "scheduler" = "events";
 
   @state()
   private activeSubtopics = new Set<string>();
@@ -1086,7 +1087,16 @@ export class XDebuggerView extends LitElement {
     }
 
     if (typeof value === "function") {
-      return `[Function: ${value.name || "anonymous"}]`;
+      // Serialize functions as objects with name + all enumerable properties
+      const fn = value as { name?: string } & Record<string, unknown>;
+      const result: Record<string, unknown> = {
+        name: fn.name || "[anonymous]",
+      };
+      // Copy enumerable properties (actions often have metadata attached)
+      for (const key of Object.keys(fn)) {
+        result[key] = this.truncateValue(fn[key], maxDepth - 1);
+      }
+      return result;
     }
 
     if (typeof value === "string") {
@@ -1156,6 +1166,17 @@ export class XDebuggerView extends LitElement {
           @click="${() => this._activeTab = "watch"}"
         >
           Watch List
+        </button>
+        <button
+          type="button"
+          class="tab-button ${this._activeTab === "scheduler" ? "active" : ""}"
+          @click="${() => {
+            this._activeTab = "scheduler";
+            // Request a fresh snapshot when tab is opened
+            this.debuggerController?.requestGraphSnapshot();
+          }}"
+        >
+          Scheduler
         </button>
       </div>
     `;
@@ -1327,7 +1348,14 @@ export class XDebuggerView extends LitElement {
               </div>
             </div>
 
-            ${this.renderTabs()} ${this._activeTab === "events"
+            ${this.renderTabs()} ${this._activeTab === "scheduler"
+              ? html`
+                <x-scheduler-graph
+                  .debuggerController="${this.debuggerController}"
+                  style="flex: 1; min-height: 0;"
+                ></x-scheduler-graph>
+              `
+              : this._activeTab === "events"
               ? html`
                 <div class="toolbar-container">
                   <div class="topics-filter">

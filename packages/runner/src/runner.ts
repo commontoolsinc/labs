@@ -944,7 +944,8 @@ export class Runner {
       fn = module.implementation as (inputs: any) => any;
     }
 
-    const src = fn.name || undefined;
+    // Prefer .src (backup) over .name since name can be finicky
+    const name = (fn as { src?: string; name?: string }).src || fn.name;
 
     if (module.wrapper && module.wrapper in moduleWrappers) {
       fn = moduleWrappers[module.wrapper](fn);
@@ -1065,6 +1066,15 @@ export class Runner {
               // (nothing else would read from it, otherwise)
               const readResultAction: Action = (tx) =>
                 resultRedirects.forEach((link) => tx.readValueOrThrow(link));
+              if (name) {
+                Object.defineProperty(readResultAction, "name", {
+                  value: `readResult:${name}`,
+                  configurable: true,
+                });
+                // Also set .src as backup (name can be finicky)
+                (readResultAction as Action & { src?: string }).src =
+                  `readResult:${name}`;
+              }
               const cancel = this.runtime.scheduler.subscribe(
                 readResultAction,
                 readResultAction,
@@ -1091,9 +1101,9 @@ export class Runner {
         }
       };
 
-      if (src) {
+      if (name) {
         Object.defineProperty(handler, "name", {
-          value: `handler:${src}`,
+          value: `handler:${name}`,
           configurable: true,
         });
       }
@@ -1244,11 +1254,13 @@ export class Runner {
         }
       };
 
-      if (src) {
+      if (name) {
         Object.defineProperty(action, "name", {
-          value: `action:${src}`,
+          value: `action:${name}`,
           configurable: true,
         });
+        // Also set .src as backup (name can be finicky)
+        (action as Action & { src?: string }).src = `action:${name}`;
       }
       const wrappedAction = Object.assign(action, {
         reads,
@@ -1358,6 +1370,15 @@ export class Runner {
       processCell,
       this.runtime,
     );
+
+    // Name the raw action for debugging - use implementation name or fallback to "raw"
+    const impl = module.implementation as (...args: unknown[]) => Action;
+    const rawName = `raw:${impl.name || "anonymous"}`;
+    Object.defineProperty(action, "name", {
+      value: rawName,
+      configurable: true,
+    });
+    (action as Action & { src?: string }).src = rawName;
 
     // Create populateDependencies callback to discover what cells the action reads
     // and writes. Both are needed for pull-based scheduling:

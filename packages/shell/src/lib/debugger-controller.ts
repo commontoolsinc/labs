@@ -5,6 +5,8 @@ import type {
   MemorySpace,
   NormalizedLink,
   RuntimeTelemetryMarkerResult,
+  SchedulerGraphEdge,
+  SchedulerGraphSnapshot,
 } from "@commontools/runner";
 
 const STORAGE_KEY = "showDebuggerView";
@@ -17,6 +19,23 @@ type NormalizedFullLink = NormalizedLink & {
   id: string;
   space: MemorySpace;
 };
+
+/**
+ * Extended graph edge with historical tracking
+ */
+export interface GraphEdgeWithHistory extends SchedulerGraphEdge {
+  isHistorical: boolean; // true = edge existed before but not in current snapshot
+}
+
+/**
+ * Graph snapshot with historical edge tracking
+ */
+export interface GraphWithHistory {
+  nodes: SchedulerGraphSnapshot["nodes"];
+  edges: GraphEdgeWithHistory[];
+  pullMode: boolean;
+  timestamp: number;
+}
 
 /**
  * Represents a watched cell with subscription management
@@ -48,6 +67,11 @@ export class DebuggerController implements ReactiveController {
   private telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
   private updateVersion = 0;
   private watchedCells = new Map<string, WatchedCell>();
+
+  // Scheduler graph tracking with historical edges
+  private currentSnapshot?: SchedulerGraphSnapshot;
+  private historicalEdges = new Set<string>(); // "from->to" format
+  private graphUpdateVersion = 0;
 
   constructor(host: ReactiveControllerHost & HTMLElement) {
     this.host = host;
@@ -166,10 +190,41 @@ export class DebuggerController implements ReactiveController {
       this.telemetryMarkers = allMarkers.slice(-MAX_TELEMETRY_EVENTS);
       this.updateVersion++;
 
+      // Check for graph snapshot events in recent markers
+      const latestMarker = allMarkers[allMarkers.length - 1];
+      if (latestMarker?.type === "scheduler.graph.snapshot") {
+        this.processGraphSnapshot(
+          (latestMarker as { graph: SchedulerGraphSnapshot }).graph,
+        );
+      }
+
       // Request update to refresh the UI
       this.host.requestUpdate();
     }
   };
+
+  /**
+   * Process a new graph snapshot and track historical edges
+   */
+  private processGraphSnapshot(newSnapshot: SchedulerGraphSnapshot): void {
+    if (this.currentSnapshot) {
+      // Build set of current edges in the new snapshot
+      const newEdgeSet = new Set(
+        newSnapshot.edges.map((e) => `${e.from}->${e.to}`),
+      );
+
+      // Any edges in the old snapshot but not in the new one become historical
+      for (const edge of this.currentSnapshot.edges) {
+        const edgeKey = `${edge.from}->${edge.to}`;
+        if (!newEdgeSet.has(edgeKey)) {
+          this.historicalEdges.add(edgeKey);
+        }
+      }
+    }
+
+    this.currentSnapshot = newSnapshot;
+    this.graphUpdateVersion++;
+  }
 
   /**
    * Handle storage change events for cross-tab synchronization
@@ -202,6 +257,83 @@ export class DebuggerController implements ReactiveController {
       newestEvent: this.telemetryMarkers[this.telemetryMarkers.length - 1]
         ?.timeStamp,
     };
+  }
+
+  /**
+   * Get the current graph snapshot with historical edge tracking
+   */
+  getGraphWithHistory(): GraphWithHistory | undefined {
+    if (!this.currentSnapshot) return undefined;
+
+    // Build set of current edge keys
+    const currentEdgeSet = new Set(
+      this.currentSnapshot.edges.map((e) => `${e.from}->${e.to}`),
+    );
+
+    // Combine current edges with historical flag
+    const edges: GraphEdgeWithHistory[] = this.currentSnapshot.edges.map(
+      (e) => ({
+        ...e,
+        isHistorical: false,
+      }),
+    );
+
+    // Add historical edges that are not in current snapshot
+    for (const edgeKey of this.historicalEdges) {
+      if (!currentEdgeSet.has(edgeKey)) {
+        const [from, to] = edgeKey.split("->");
+        edges.push({
+          from,
+          to,
+          cells: [],
+          isHistorical: true,
+        });
+      }
+    }
+
+    return {
+      nodes: this.currentSnapshot.nodes,
+      edges,
+      pullMode: this.currentSnapshot.pullMode,
+      timestamp: this.currentSnapshot.timestamp,
+    };
+  }
+
+  /**
+   * Get the graph update version for change detection
+   */
+  getGraphUpdateVersion(): number {
+    return this.graphUpdateVersion;
+  }
+
+  /**
+   * Request a fresh graph snapshot from the scheduler
+   */
+  requestGraphSnapshot(): void {
+    if (!this.runtime) return;
+
+    const rt = this.runtime.runtime();
+    if (!rt) return;
+
+    const snapshot = rt.scheduler.getGraphSnapshot();
+    this.processGraphSnapshot(snapshot);
+    this.host.requestUpdate();
+  }
+
+  /**
+   * Get the current runtime internals
+   */
+  getRuntime(): RuntimeInternals | undefined {
+    return this.runtime;
+  }
+
+  /**
+   * Clear historical edges
+   */
+  clearHistoricalEdges(): void {
+    this.historicalEdges.clear();
+    this.graphUpdateVersion++;
+    this.host.requestUpdate();
   }
 
   /**

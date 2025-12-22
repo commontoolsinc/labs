@@ -34,6 +34,8 @@ export function createNodeFactory<T = any, R = any>(
         value: location,
         configurable: true,
       });
+      // Also set .src as backup (name can be finicky)
+      (moduleSpec.implementation as { src?: string }).src = location;
     }
   }
 
@@ -184,6 +186,8 @@ function handlerInternal<E, T>(
         value: location,
         configurable: true,
       });
+      // Also set .src as backup (name can be finicky)
+      (handler as { src?: string }).src = location;
     }
   }
 

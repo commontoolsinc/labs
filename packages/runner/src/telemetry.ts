@@ -5,12 +5,35 @@
 import { IMemoryChange } from "./storage/interface.ts";
 import {
   Action,
+  ActionStats,
   AnnotatedAction,
   AnnotatedEventHandler,
   EventHandler,
 } from "./scheduler.ts";
 import { StorageTelemetry } from "./storage/telemetry.ts";
 import type * as Inspector from "./storage/inspector.ts";
+
+// Types for scheduler graph visualization
+export interface SchedulerGraphNode {
+  id: string; // action.name (includes code location)
+  type: "effect" | "computation";
+  stats?: ActionStats;
+  isDirty: boolean;
+  isPending: boolean;
+}
+
+export interface SchedulerGraphEdge {
+  from: string; // action.name of source
+  to: string; // action.name of target
+  cells: string[]; // Cell IDs creating this dependency
+}
+
+export interface SchedulerGraphSnapshot {
+  nodes: SchedulerGraphNode[];
+  edges: SchedulerGraphEdge[];
+  pullMode: boolean;
+  timestamp: number;
+}
 
 // Types of markers that can be submitted by the runtime.
 export type RuntimeTelemetryMarker = {
@@ -64,6 +87,12 @@ export type RuntimeTelemetryMarker = {
   type: "storage.subscription.remove";
   id: string;
   error?: string;
+} | {
+  type: "scheduler.graph.snapshot";
+  graph: SchedulerGraphSnapshot;
+} | {
+  type: "scheduler.mode.change";
+  pullMode: boolean;
 };
 
 export type RuntimeTelemetryMarkerResult = RuntimeTelemetryMarker & {

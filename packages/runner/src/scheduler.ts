@@ -34,6 +34,11 @@ import {
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
 import { ensureCharmRunning } from "./ensure-charm-running.ts";
+import type {
+  SchedulerGraphEdge,
+  SchedulerGraphNode,
+  SchedulerGraphSnapshot,
+} from "./telemetry.ts";
 
 const logger = getLogger("scheduler", {
   enabled: false,
@@ -889,6 +894,82 @@ export class Scheduler {
   }
 
   /**
+   * Returns a snapshot of the current dependency graph for visualization.
+   * Uses action.src or action.name as the identifier (includes code location).
+   */
+  getGraphSnapshot(): SchedulerGraphSnapshot {
+    const nodes: SchedulerGraphNode[] = [];
+    const edges: SchedulerGraphEdge[] = [];
+    const actionById = new Map<string, Action>();
+
+    // Helper to get action ID - prefer .src (backup) over .name
+    const getActionId = (action: Action): string =>
+      (action as Action & { src?: string }).src || action.name || "anonymous";
+
+    // Build nodes from all known actions (effects + computations)
+    for (const action of [...this.effects, ...this.computations]) {
+      const id = getActionId(action);
+      actionById.set(id, action);
+
+      nodes.push({
+        id,
+        type: this.effects.has(action) ? "effect" : "computation",
+        stats: this.actionStats.get(action),
+        isDirty: this.dirty.has(action),
+        isPending: this.pending.has(action),
+      });
+    }
+
+    // Build edges from dependents map
+    for (const action of [...this.effects, ...this.computations]) {
+      const actionId = getActionId(action);
+      const deps = this.dependents.get(action);
+      if (deps) {
+        for (const dependent of deps) {
+          const dependentId = getActionId(dependent);
+          // Find overlapping cells between action's writes and dependent's reads
+          const cells = this.findOverlappingCells(action, dependent);
+          edges.push({
+            from: actionId,
+            to: dependentId,
+            cells,
+          });
+        }
+      }
+    }
+
+    return {
+      nodes,
+      edges,
+      pullMode: this.pullMode,
+      timestamp: performance.now(),
+    };
+  }
+
+  /**
+   * Finds the cell IDs that create a dependency between producer and consumer.
+   */
+  private findOverlappingCells(producer: Action, consumer: Action): string[] {
+    const producerWrites = this.mightWrite.get(producer) ?? [];
+    const consumerDeps = this.dependencies.get(consumer);
+    if (!consumerDeps) return [];
+
+    const overlapping: string[] = [];
+    for (const write of producerWrites) {
+      for (const read of consumerDeps.reads) {
+        if (
+          write.space === read.space &&
+          write.id === read.id &&
+          arraysOverlap(write.path, read.path)
+        ) {
+          overlapping.push(`${write.space}/${write.id}`);
+        }
+      }
+    }
+    return [...new Set(overlapping)]; // Deduplicate
+  }
+
+  /**
    * Returns whether an action is registered as an effect.
    */
   isEffect(action: Action): boolean {
@@ -920,6 +1001,10 @@ export class Scheduler {
    */
   enablePullMode(): void {
     this.pullMode = true;
+    this.runtime.telemetry.submit({
+      type: "scheduler.mode.change",
+      pullMode: true,
+    });
   }
 
   /**
@@ -929,6 +1014,10 @@ export class Scheduler {
     this.pullMode = false;
     // Clear dirty set when switching back to push mode
     this.dirty.clear();
+    this.runtime.telemetry.submit({
+      type: "scheduler.mode.change",
+      pullMode: false,
+    });
   }
 
   /**
