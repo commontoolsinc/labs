@@ -443,6 +443,10 @@ export class Runner {
     this.setupTypeWatcher(key, processCell, resultCell, tx);
   }
 
+  // CT-1135: Track failed reload attempts per charm for circuit breaker
+  private reloadFailures = new Map<`${MemorySpace}/${URI}`, number>();
+  private static readonly MAX_RELOAD_FAILURES = 3;
+
   /**
    * CT-1135: Set up a TYPE watcher for hot-reload functionality.
    * This watcher persists across charm restarts to enable multiple hot-reloads.
@@ -460,11 +464,19 @@ export class Runner {
       this.typeWatcherCancels.delete(key);
     }
 
+    // Reset failure count when setting up new watcher
+    this.reloadFailures.delete(key);
+
     // Use a mutable ref so it updates after each reload
+    const initialRecipeId = processCell.withTx(tx).key(TYPE).getRaw({
+      meta: ignoreReadForScheduling,
+    }) as string | undefined;
     const currentRecipeIdRef = {
-      value: processCell.withTx(tx).key(TYPE).getRaw({
-        meta: ignoreReadForScheduling,
-      }) as string | undefined,
+      value: initialRecipeId,
+    };
+    // Track the "target" recipe ID separately to handle rapid changes
+    const targetRecipeIdRef = {
+      value: initialRecipeId,
     };
     const processTypeCell = processCell.key(TYPE);
 
@@ -473,12 +485,29 @@ export class Runner {
         meta: ignoreReadForScheduling,
       }) as string | undefined;
 
-      // Guard: Skip if already reloading or recipe hasn't actually changed
-      if (
-        this.reloadingCharms.has(key) ||
-        !newRecipeId ||
-        newRecipeId === currentRecipeIdRef.value
-      ) {
+      // Guard: Skip if no recipe or same as current target
+      if (!newRecipeId || newRecipeId === targetRecipeIdRef.value) {
+        return;
+      }
+
+      // Circuit breaker: skip if too many failures for this charm
+      const failures = this.reloadFailures.get(key) ?? 0;
+      if (failures >= Runner.MAX_RELOAD_FAILURES) {
+        logger.warn("recipe-hot-reload", () => [
+          `Skipping hot-reload for ${key}: too many failures (${failures})`,
+          `Recipe ${newRecipeId} will not be loaded automatically`,
+        ]);
+        return;
+      }
+
+      // Always update target to latest requested recipe (handles A→B→C)
+      targetRecipeIdRef.value = newRecipeId;
+
+      // If already reloading, the in-flight reload will pick up the new target
+      if (this.reloadingCharms.has(key)) {
+        logger.debug("recipe-hot-reload", () => [
+          `Reload already in progress for ${key}, updated target to ${newRecipeId}`,
+        ]);
         return;
       }
 
@@ -487,12 +516,8 @@ export class Runner {
         "Triggering restart...",
       ]);
 
-      // Mark as reloading to prevent race conditions
+      // Mark as reloading to prevent concurrent reloads
       this.reloadingCharms.add(key);
-
-      // Update the ref BEFORE stopping so we don't re-trigger on our own write
-      const previousRecipeId = currentRecipeIdRef.value;
-      currentRecipeIdRef.value = newRecipeId;
 
       // Stop the current charm (but don't cancel the TYPE watcher)
       this.stop(resultCell);
@@ -500,32 +525,57 @@ export class Runner {
       // Restart with the new recipe on next tick to allow sync to complete
       queueMicrotask(async () => {
         try {
+          // Use the LATEST target, not the one captured at action start
+          const latestTargetId = targetRecipeIdRef.value;
+          if (!latestTargetId) {
+            logger.warn("recipe-hot-reload", `No target recipe for ${key}`);
+            return;
+          }
+
           const newRecipe = await this.runtime.recipeManager.loadRecipe(
-            newRecipeId,
+            latestTargetId,
             resultCell.space,
           );
           if (newRecipe) {
             await this.runtime.runSynced(resultCell, newRecipe);
+            // Success - update current and reset failure count
+            currentRecipeIdRef.value = latestTargetId;
+            this.reloadFailures.delete(key);
             logger.info("recipe-hot-reload", () => [
-              `Successfully hot-reloaded ${key} with recipe ${newRecipeId}`,
+              `Successfully hot-reloaded ${key} with recipe ${latestTargetId}`,
             ]);
           } else {
-            // Recipe not found - restore previous state
+            // Recipe not found - increment failure count
+            const newFailures = (this.reloadFailures.get(key) ?? 0) + 1;
+            this.reloadFailures.set(key, newFailures);
             logger.error(
               "recipe-hot-reload",
-              `Recipe ${newRecipeId} not found, charm ${key} is now stopped`,
+              `Recipe ${latestTargetId} not found for ${key} (failure ${newFailures}/${Runner.MAX_RELOAD_FAILURES})`,
             );
-            currentRecipeIdRef.value = previousRecipeId;
           }
         } catch (error) {
+          // Increment failure count on error
+          const newFailures = (this.reloadFailures.get(key) ?? 0) + 1;
+          this.reloadFailures.set(key, newFailures);
           logger.error(
             "recipe-hot-reload",
-            `Failed to restart charm ${key} after recipe change: ${error}`,
+            `Failed to restart charm ${key}: ${error} (failure ${newFailures}/${Runner.MAX_RELOAD_FAILURES})`,
           );
-          // Restore ref so we can try again if recipe is fixed
-          currentRecipeIdRef.value = previousRecipeId;
         } finally {
           this.reloadingCharms.delete(key);
+
+          // Check if target changed while we were reloading - if so, reload again
+          if (targetRecipeIdRef.value !== currentRecipeIdRef.value) {
+            logger.debug("recipe-hot-reload", () => [
+              `Target changed during reload for ${key}, triggering another reload`,
+            ]);
+            // Re-trigger by calling the action directly (it will check guards)
+            queueMicrotask(() => {
+              const tx = this.runtime.edit();
+              recipeChangeAction(tx);
+              // Don't need to commit - action only reads
+            });
+          }
         }
       });
     };
@@ -537,6 +587,27 @@ export class Runner {
       false, // Don't run immediately - only on changes
     );
     this.typeWatcherCancels.set(key, cancel);
+  }
+
+  /**
+   * CT-1135: Cancel the TYPE watcher for a charm.
+   * Called when a charm is permanently removed (not just stopped for reload).
+   */
+  private cancelTypeWatcher(key: `${MemorySpace}/${URI}`): void {
+    const cancel = this.typeWatcherCancels.get(key);
+    if (cancel) {
+      try {
+        cancel();
+      } catch (error) {
+        logger.warn(
+          "recipe-hot-reload",
+          `Error canceling TYPE watcher: ${error}`,
+        );
+      }
+      this.typeWatcherCancels.delete(key);
+    }
+    this.reloadFailures.delete(key);
+    this.reloadingCharms.delete(key);
   }
 
   /**
@@ -796,10 +867,32 @@ export class Runner {
    *
    * @param resultCell - The result doc or cell to stop.
    */
-  stop<T>(resultCell: Cell<T>): void {
+  /**
+   * Stop a running charm.
+   *
+   * @param resultCell - The result cell of the charm to stop.
+   * @param options.permanent - If true, also cancels the TYPE watcher (for charm removal).
+   *                           If false (default), TYPE watcher persists for hot-reload.
+   */
+  stop<T>(resultCell: Cell<T>, options?: { permanent?: boolean }): void {
     const key = this.getDocKey(resultCell);
     this.cancels.get(key)?.();
     this.cancels.delete(key);
+
+    // CT-1135: Only cancel TYPE watcher if permanent removal
+    if (options?.permanent) {
+      this.cancelTypeWatcher(key);
+    }
+  }
+
+  /**
+   * Permanently remove a charm, stopping it and cleaning up all resources
+   * including the TYPE watcher.
+   *
+   * Use this when a charm is being deleted, not just temporarily stopped.
+   */
+  remove<T>(resultCell: Cell<T>): void {
+    this.stop(resultCell, { permanent: true });
   }
 
   stopAll(): void {
@@ -825,6 +918,7 @@ export class Runner {
     }
     this.typeWatcherCancels.clear();
     this.reloadingCharms.clear();
+    this.reloadFailures.clear();
   }
 
   /**

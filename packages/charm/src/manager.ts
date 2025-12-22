@@ -857,6 +857,12 @@ export class CharmManager {
       }
     });
 
+    // CT-1135: Clean up the TYPE watcher for this charm permanently
+    // This prevents memory leaks from hot-reload subscriptions
+    if (ok) {
+      this.runtime.runner.remove(charm);
+    }
+
     return !!ok;
   }
 
