@@ -115,7 +115,7 @@ export default pattern<TestCellEqualsInput, TestCellEqualsOutput>(
     });
 
     // WORKAROUND: Pre-compute selection state outside the map callback
-    // This avoids the "Cannot create cell link: space is required" bug
+    // This avoids the "Cannot create cell link - space required" error
     // that occurs when closing over cells inside .map() callbacks
     const itemsWithSelection = computed(() => {
       const selected = selectedItem.get();
