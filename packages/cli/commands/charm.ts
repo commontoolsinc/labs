@@ -102,18 +102,30 @@ export const charm = new Command()
     `ct charm new ${EX_ID} ${EX_URL} ./main.tsx`,
     `Create a new charm, using ./main.tsx as source.`,
   )
+  .example(
+    `ct charm new ${EX_ID} ${EX_COMP} --root ./patterns ./patterns/wip/main.tsx`,
+    `Create a charm that can import from parent directories within ./patterns.`,
+  )
   .arguments("<main:string>")
   .option("--start", "Start the charm after creation for one step")
   .option(
     "--main-export <export:string>",
     'Named export from entry for recipe definition. Defaults to "default".',
   )
+  .option(
+    "--root <path:string>",
+    "Root directory for resolving imports. Allows imports from parent directories within this root.",
+  )
   .action(
     async (options, main) =>
       render(
         await newCharm(
           parseSpaceOptions(options),
-          { mainPath: absPath(main), mainExport: options.mainExport },
+          {
+            mainPath: absPath(main),
+            mainExport: options.mainExport,
+            rootPath: options.root ? absPath(options.root) : undefined,
+          },
           { start: options.start },
         ),
       ),
@@ -184,11 +196,16 @@ export const charm = new Command()
     "--main-export <export:string>",
     'Named export from entry for recipe definition. Defaults to "default".',
   )
+  .option(
+    "--root <path:string>",
+    "Root directory for resolving imports. Allows imports from parent directories within this root.",
+  )
   .arguments("<main:string>")
   .action((options, mainPath) =>
     setCharmRecipe(parseCharmOptions(options), {
       mainPath: absPath(mainPath),
       mainExport: options.mainExport,
+      rootPath: options.root ? absPath(options.root) : undefined,
     })
   )
   /* charm inspect */
