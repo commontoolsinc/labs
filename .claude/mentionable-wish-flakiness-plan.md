@@ -85,36 +85,28 @@ When a handler executes, it unwraps OpaqueRefs to plain values. If you pass `men
 
 ### 0d. MEDIUM: CharmManager Parallel Promise Race
 
-**Status:** NOT FIXED
+**Status:** ✅ FIXED in this branch
 **Severity:** MEDIUM
-**Confidence:** HIGH (confirmed by code analysis)
+**Confidence:** HIGH (confirmed by Oracle investigation)
 
 **The Problem:**
 
-In CharmManager constructor, promises run in parallel:
+In CharmManager constructor, `linkSpaceCellContents` read `this.charms.get()` before
+`syncCharms(this.charms)` completed, potentially capturing an empty array.
 
+**The Fix (implemented):**
+
+Changed from parallel Promise.all to two-phase sequential execution:
 ```typescript
-// packages/charm/src/manager.ts:143-149
 this.ready = Promise.all([
-  this.syncCharms(this.charms),  // Promise A: Fetches allCharms from network
-  linkSpaceCellContents,          // Promise B: Reads this.charms.get() at line 129
-])
+  this.syncCharms(this.charms),
+  this.syncCharms(this.pinnedCharms),
+  this.syncCharms(this.recentCharms),
+  syncSpaceCellContents,
+]).then(() => linkSpaceCellContents).then(() => {});
 ```
 
-Promise B can read `this.charms.get()` BEFORE Promise A completes, capturing an empty array.
-
-**Proposed Fix:**
-```typescript
-this.ready = (async () => {
-  await Promise.all([
-    this.syncCharms(this.charms),
-    this.syncCharms(this.pinnedCharms),
-    this.syncCharms(this.recentCharms),
-    syncSpaceCellContents,
-  ]);
-  await linkSpaceCellContents;  // Run AFTER syncs complete
-})();
-```
+This ensures all syncs complete BEFORE `linkSpaceCellContents` reads the data.
 
 ---
 

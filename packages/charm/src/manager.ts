@@ -140,13 +140,16 @@ export class CharmManager {
       .key("recentCharms")
       .asSchema(charmListSchema);
 
+    // Two-phase initialization to avoid race condition:
+    // 1. Sync all cells in parallel
+    // 2. THEN link space cell contents (which reads the synced charm lists)
+    // This ensures this.charms.get() at line 129 has data from syncCharms()
     this.ready = Promise.all([
       this.syncCharms(this.charms),
       this.syncCharms(this.pinnedCharms),
       this.syncCharms(this.recentCharms),
       syncSpaceCellContents,
-      linkSpaceCellContents,
-    ]).then(() => {});
+    ]).then(() => linkSpaceCellContents).then(() => {});
   }
 
   getSpace(): MemorySpace {
