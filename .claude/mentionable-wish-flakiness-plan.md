@@ -110,6 +110,38 @@ This ensures all syncs complete BEFORE `linkSpaceCellContents` reads the data.
 
 ---
 
+### 0e. HIGH: spaceCell.allCharms Not Reactive to Charm Additions
+
+**Status:** ✅ FIXED in this branch
+**Severity:** HIGH
+**Confidence:** VERY HIGH (confirmed by multiple Oracle investigations)
+
+**The Problem:**
+
+Line 129 called `.get()` on the charms cell, creating a static snapshot:
+```typescript
+allCharms: this.charms.withTx(tx).get() as Cell<never>[],  // WRONG: snapshot
+```
+
+When users created new charms, they wouldn't appear in the mentionable list because
+`spaceCell.allCharms` was a frozen copy from initialization.
+
+**The Fix (implemented):**
+
+Remove `.get()` to create a reactive link instead:
+```typescript
+allCharms: this.charms.withTx(tx) as unknown as Cell<never>[],  // CORRECT: reactive link
+```
+
+This matches the pattern used by:
+- `linkDefaultPattern()` (line 215) - sets cells directly
+- All wish.test.ts test cases - set cells directly
+- The Cell system design - `convertCellsToLinks()` handles the conversion
+
+Now `wish("/").allCharms` stays in sync when charms are added/removed.
+
+---
+
 ### 1. defaultPattern Not Linked Before Wishes Execute (CT-1133)
 
 **Status:** PR #2325 pending - will land soon

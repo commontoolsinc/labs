@@ -126,8 +126,11 @@ export class CharmManager {
 
         const nextSpaceValue: Partial<SpaceCellContents> = {
           ...(existingSpace ?? {}),
-          allCharms: this.charms.withTx(tx).get() as Cell<never>[],
-          recentCharms: recentCharmsField.withTx(tx).get() as Cell<never>[],
+          // Set cells directly (not .get()) to create reactive links.
+          // The Cell system automatically converts cells to links via convertCellsToLinks().
+          // This ensures wish("/").allCharms stays in sync when charms are added/removed.
+          allCharms: this.charms.withTx(tx) as unknown as Cell<never>[],
+          recentCharms: recentCharmsField.withTx(tx) as unknown as Cell<never>[],
         };
 
         spaceCellWithTx.set(nextSpaceValue as SpaceCellContents);
