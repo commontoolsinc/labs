@@ -237,6 +237,21 @@ const togglePin = handler<
   sc.set(updated);
 });
 
+// Toggle collapsed state for a sub-charm - uses entry reference, not index
+const toggleCollapsed = handler<
+  unknown,
+  { subCharms: Cell<SubCharmEntry[]>; entry: SubCharmEntry }
+>((_event, { subCharms: sc, entry }) => {
+  const current = sc.get() || [];
+  // Find by reference using charm identity
+  const index = current.findIndex((e) => e?.charm === entry?.charm);
+  if (index < 0) return;
+
+  const updated = [...current];
+  updated[index] = { ...entry, collapsed: !entry.collapsed };
+  sc.set(updated);
+});
+
 // Add a new sub-charm
 // Note: Receives recordPatternJson to create Notes with correct wiki-link target
 // Note: Controller modules (extractor) also receive parent Cells
@@ -580,141 +595,51 @@ const Record = pattern<RecordInput, RecordOutput>(
                         }}
                       >
                         <div
-                          style={{
+                          style={computed(() => ({
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between",
                             padding: "8px 12px",
-                            borderBottom: "1px solid #f3f4f6",
+                            borderBottom: entry.collapsed
+                              ? "none"
+                              : "1px solid #f3f4f6",
                             background: "#fafafa",
-                          }}
+                          }))}
                         >
-                          <span
+                          <div
                             style={{
-                              fontSize: "14px",
-                              fontWeight: "500",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
                               flex: "1",
                             }}
                           >
-                            {displayInfo.icon} {displayInfo.label}
-                          </span>
-                          <div
-                            style={{
-                              display: "flex",
-                              gap: "8px",
-                              alignItems: "center",
-                              flexShrink: 0,
-                            }}
-                          >
-                            {ifElse(
-                              getDefinition(entry.type)?.allowMultiple,
-                              <button
-                                type="button"
-                                onClick={createSibling({ subCharms, entry })}
-                                style={{
-                                  background: "transparent",
-                                  border: "1px solid #e5e7eb",
-                                  borderRadius: "4px",
-                                  cursor: "pointer",
-                                  padding: "4px 8px",
-                                  fontSize: "12px",
-                                  color: "#6b7280",
-                                }}
-                                title="Add another"
-                              >
-                                +
-                              </button>,
-                              null,
-                            )}
-                            <button
-                              type="button"
-                              onClick={togglePin({ subCharms, entry })}
-                              style={{
-                                background: "#e0f2fe",
-                                border: "1px solid #7dd3fc",
-                                borderRadius: "4px",
+                            <span
+                              onClick={toggleCollapsed({ subCharms, entry })}
+                              style={computed(() => ({
+                                transform: entry.collapsed
+                                  ? "rotate(0deg)"
+                                  : "rotate(90deg)",
+                                transition: "transform 0.2s",
+                                fontSize: "10px",
+                                color: "#9ca3af",
                                 cursor: "pointer",
-                                padding: "4px 8px",
-                                fontSize: "12px",
-                                color: "#0369a1",
-                              }}
-                              title="Unpin"
+                                padding: "4px",
+                              }))}
                             >
-                              📌
-                            </button>
-                            <button
-                              type="button"
-                              onClick={trashSubCharm({
-                                subCharms,
-                                trashedSubCharms,
-                                entry,
-                              })}
-                              style={{
-                                background: "transparent",
-                                border: "1px solid #e5e7eb",
-                                borderRadius: "4px",
-                                cursor: "pointer",
-                                padding: "4px 8px",
-                                fontSize: "12px",
-                                color: "#6b7280",
-                              }}
-                              title="Remove"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        </div>
-                        <div style={{ padding: "12px" }}>
-                          {entry.charm as any}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                {/* Right: Unpinned items in rail (1/3 width) */}
-                {ifElse(
-                  hasUnpinned,
-                  <div
-                    style={{
-                      flex: 1,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "12px",
-                    }}
-                  >
-                    {unpinnedEntries.map((entry) => {
-                      const displayInfo = getModuleDisplay({
-                        type: entry.type,
-                        charm: entry.charm,
-                      });
-                      return (
-                        <div
-                          style={{
-                            background: "white",
-                            borderRadius: "8px",
-                            border: "1px solid #e5e7eb",
-                            overflow: "hidden",
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "space-between",
-                              padding: "8px 12px",
-                              borderBottom: "1px solid #f3f4f6",
-                              background: "#fafafa",
-                            }}
-                          >
+                              ▶
+                            </span>
                             <span
                               style={{
                                 fontSize: "14px",
                                 fontWeight: "500",
-                                flex: "1",
                               }}
                             >
                               {displayInfo.icon} {displayInfo.label}
                             </span>
+                          </div>
+                          {ifElse(
+                            computed(() => !entry.collapsed),
                             <div
                               style={{
                                 display: "flex",
@@ -747,15 +672,15 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 type="button"
                                 onClick={togglePin({ subCharms, entry })}
                                 style={{
-                                  background: "transparent",
-                                  border: "1px solid #e5e7eb",
+                                  background: "#e0f2fe",
+                                  border: "1px solid #7dd3fc",
                                   borderRadius: "4px",
                                   cursor: "pointer",
                                   padding: "4px 8px",
                                   fontSize: "12px",
-                                  color: "#6b7280",
+                                  color: "#0369a1",
                                 }}
-                                title="Pin"
+                                title="Unpin"
                               >
                                 📌
                               </button>
@@ -779,11 +704,170 @@ const Record = pattern<RecordInput, RecordOutput>(
                               >
                                 ✕
                               </button>
-                            </div>
-                          </div>
+                            </div>,
+                            null,
+                          )}
+                        </div>
+                        {ifElse(
+                          computed(() => !entry.collapsed),
                           <div style={{ padding: "12px" }}>
                             {entry.charm as any}
+                          </div>,
+                          null,
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* Right: Unpinned items in rail (1/3 width) */}
+                {ifElse(
+                  hasUnpinned,
+                  <div
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "12px",
+                    }}
+                  >
+                    {unpinnedEntries.map((entry) => {
+                      const displayInfo = getModuleDisplay({
+                        type: entry.type,
+                        charm: entry.charm,
+                      });
+                      return (
+                        <div
+                          style={{
+                            background: "white",
+                            borderRadius: "8px",
+                            border: "1px solid #e5e7eb",
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div
+                            style={computed(() => ({
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              padding: "8px 12px",
+                              borderBottom: entry.collapsed
+                                ? "none"
+                                : "1px solid #f3f4f6",
+                              background: "#fafafa",
+                            }))}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                                flex: "1",
+                              }}
+                            >
+                              <span
+                                onClick={toggleCollapsed({ subCharms, entry })}
+                                style={computed(() => ({
+                                  transform: entry.collapsed
+                                    ? "rotate(0deg)"
+                                    : "rotate(90deg)",
+                                  transition: "transform 0.2s",
+                                  fontSize: "10px",
+                                  color: "#9ca3af",
+                                  cursor: "pointer",
+                                  padding: "4px",
+                                }))}
+                              >
+                                ▶
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: "14px",
+                                  fontWeight: "500",
+                                }}
+                              >
+                                {displayInfo.icon} {displayInfo.label}
+                              </span>
+                            </div>
+                            {ifElse(
+                              computed(() => !entry.collapsed),
+                              <div
+                                style={{
+                                  display: "flex",
+                                  gap: "8px",
+                                  alignItems: "center",
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {ifElse(
+                                  getDefinition(entry.type)?.allowMultiple,
+                                  <button
+                                    type="button"
+                                    onClick={createSibling({
+                                      subCharms,
+                                      entry,
+                                    })}
+                                    style={{
+                                      background: "transparent",
+                                      border: "1px solid #e5e7eb",
+                                      borderRadius: "4px",
+                                      cursor: "pointer",
+                                      padding: "4px 8px",
+                                      fontSize: "12px",
+                                      color: "#6b7280",
+                                    }}
+                                    title="Add another"
+                                  >
+                                    +
+                                  </button>,
+                                  null,
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={togglePin({ subCharms, entry })}
+                                  style={{
+                                    background: "transparent",
+                                    border: "1px solid #e5e7eb",
+                                    borderRadius: "4px",
+                                    cursor: "pointer",
+                                    padding: "4px 8px",
+                                    fontSize: "12px",
+                                    color: "#6b7280",
+                                  }}
+                                  title="Pin"
+                                >
+                                  📌
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={trashSubCharm({
+                                    subCharms,
+                                    trashedSubCharms,
+                                    entry,
+                                  })}
+                                  style={{
+                                    background: "transparent",
+                                    border: "1px solid #e5e7eb",
+                                    borderRadius: "4px",
+                                    cursor: "pointer",
+                                    padding: "4px 8px",
+                                    fontSize: "12px",
+                                    color: "#6b7280",
+                                  }}
+                                  title="Remove"
+                                >
+                                  ✕
+                                </button>
+                              </div>,
+                              null,
+                            )}
                           </div>
+                          {ifElse(
+                            computed(() => !entry.collapsed),
+                            <div style={{ padding: "12px" }}>
+                              {entry.charm as any}
+                            </div>,
+                            null,
+                          )}
                         </div>
                       );
                     })}
@@ -814,37 +898,82 @@ const Record = pattern<RecordInput, RecordOutput>(
                       }}
                     >
                       <div
-                        style={{
+                        style={computed(() => ({
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "space-between",
                           padding: "8px 12px",
-                          borderBottom: "1px solid #f3f4f6",
+                          borderBottom: entry.collapsed
+                            ? "none"
+                            : "1px solid #f3f4f6",
                           background: "#fafafa",
-                        }}
+                        }))}
                       >
-                        <span
-                          style={{
-                            fontSize: "14px",
-                            fontWeight: "500",
-                            flex: "1",
-                          }}
-                        >
-                          {displayInfo.icon} {displayInfo.label}
-                        </span>
                         <div
                           style={{
                             display: "flex",
-                            gap: "8px",
                             alignItems: "center",
-                            flexShrink: 0,
+                            gap: "8px",
+                            flex: "1",
                           }}
                         >
-                          {ifElse(
-                            getDefinition(entry.type)?.allowMultiple,
+                          <span
+                            onClick={toggleCollapsed({ subCharms, entry })}
+                            style={computed(() => ({
+                              transform: entry.collapsed
+                                ? "rotate(0deg)"
+                                : "rotate(90deg)",
+                              transition: "transform 0.2s",
+                              fontSize: "10px",
+                              color: "#9ca3af",
+                              cursor: "pointer",
+                              padding: "4px",
+                            }))}
+                          >
+                            ▶
+                          </span>
+                          <span
+                            style={{
+                              fontSize: "14px",
+                              fontWeight: "500",
+                            }}
+                          >
+                            {displayInfo.icon} {displayInfo.label}
+                          </span>
+                        </div>
+                        {ifElse(
+                          computed(() => !entry.collapsed),
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "8px",
+                              alignItems: "center",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {ifElse(
+                              getDefinition(entry.type)?.allowMultiple,
+                              <button
+                                type="button"
+                                onClick={createSibling({ subCharms, entry })}
+                                style={{
+                                  background: "transparent",
+                                  border: "1px solid #e5e7eb",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                  padding: "4px 8px",
+                                  fontSize: "12px",
+                                  color: "#6b7280",
+                                }}
+                                title="Add another"
+                              >
+                                +
+                              </button>,
+                              null,
+                            )}
                             <button
                               type="button"
-                              onClick={createSibling({ subCharms, entry })}
+                              onClick={togglePin({ subCharms, entry })}
                               style={{
                                 background: "transparent",
                                 border: "1px solid #e5e7eb",
@@ -854,53 +983,41 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 fontSize: "12px",
                                 color: "#6b7280",
                               }}
-                              title="Add another"
+                              title="Pin"
                             >
-                              +
-                            </button>,
-                            null,
-                          )}
-                          <button
-                            type="button"
-                            onClick={togglePin({ subCharms, entry })}
-                            style={{
-                              background: "transparent",
-                              border: "1px solid #e5e7eb",
-                              borderRadius: "4px",
-                              cursor: "pointer",
-                              padding: "4px 8px",
-                              fontSize: "12px",
-                              color: "#6b7280",
-                            }}
-                            title="Pin"
-                          >
-                            📌
-                          </button>
-                          <button
-                            type="button"
-                            onClick={trashSubCharm({
-                              subCharms,
-                              trashedSubCharms,
-                              entry,
-                            })}
-                            style={{
-                              background: "transparent",
-                              border: "1px solid #e5e7eb",
-                              borderRadius: "4px",
-                              cursor: "pointer",
-                              padding: "4px 8px",
-                              fontSize: "12px",
-                              color: "#6b7280",
-                            }}
-                            title="Remove"
-                          >
-                            ✕
-                          </button>
-                        </div>
+                              📌
+                            </button>
+                            <button
+                              type="button"
+                              onClick={trashSubCharm({
+                                subCharms,
+                                trashedSubCharms,
+                                entry,
+                              })}
+                              style={{
+                                background: "transparent",
+                                border: "1px solid #e5e7eb",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                                padding: "4px 8px",
+                                fontSize: "12px",
+                                color: "#6b7280",
+                              }}
+                              title="Remove"
+                            >
+                              ✕
+                            </button>
+                          </div>,
+                          null,
+                        )}
                       </div>
-                      <div style={{ padding: "12px" }}>
-                        {entry.charm as any}
-                      </div>
+                      {ifElse(
+                        computed(() => !entry.collapsed),
+                        <div style={{ padding: "12px" }}>
+                          {entry.charm as any}
+                        </div>,
+                        null,
+                      )}
                     </div>
                   );
                 })}
