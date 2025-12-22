@@ -212,9 +212,20 @@ export class CommonToolsFormatter implements TypeFormatter {
     // Only pass typeNode if it's real (not synthetic) AND not a generic type parameter
     const shouldPassTypeNode = innerTypeNode && !isSyntheticNode &&
       !innerTypeIsGeneric;
+
+    // Check for schema hints on the current typeNode and propagate to child context
+    // This allows array-property-only access patterns (e.g., .length) to generate items: false
+    let childContext = context;
+    if (context.schemaHints && context.typeNode) {
+      const hint = context.schemaHints.get(context.typeNode);
+      if (hint?.items !== undefined) {
+        childContext = { ...context, arrayItemsOverride: hint.items };
+      }
+    }
+
     const innerSchema = this.schemaGenerator.formatChildType(
       innerType,
-      context,
+      childContext,
       shouldPassTypeNode ? innerTypeNode : undefined,
     );
 

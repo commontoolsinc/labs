@@ -14,19 +14,22 @@ export function createSchemaTransformerV2() {
       checker: ts.TypeChecker,
       typeArg?: ts.TypeNode,
       options?: { widenLiterals?: boolean },
+      schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
     ) {
-      return generator.generateSchema(type, checker, typeArg, options);
+      return generator.generateSchema(type, checker, typeArg, options, schemaHints);
     },
 
     generateSchemaFromSyntheticTypeNode(
       typeNode: ts.TypeNode,
       checker: ts.TypeChecker,
       typeRegistry?: WeakMap<ts.Node, ts.Type>,
+      schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
     ) {
       return generator.generateSchemaFromSyntheticTypeNode(
         typeNode,
         checker,
         typeRegistry,
+        schemaHints,
       );
     },
   };

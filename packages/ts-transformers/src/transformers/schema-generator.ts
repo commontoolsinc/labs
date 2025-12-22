@@ -21,7 +21,7 @@ export class SchemaGeneratorTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
     if (!schemaTransformer) schemaTransformer = createSchemaTransformerV2();
     const { sourceFile, tsContext: transformation, checker } = context;
-    const { logger, typeRegistry } = context.options;
+    const { logger, typeRegistry, schemaHints } = context.options;
 
     const visit: ts.Visitor = (node) => {
       if (isToSchemaNode(node)) {
@@ -80,6 +80,7 @@ export class SchemaGeneratorTransformer extends Transformer {
             typeArg,
             checker,
             typeRegistry,
+            schemaHints,
           );
         } else {
           // Normal Type path
@@ -88,6 +89,7 @@ export class SchemaGeneratorTransformer extends Transformer {
             checker,
             typeArg,
             generationOptions,
+            schemaHints,
           );
         }
 

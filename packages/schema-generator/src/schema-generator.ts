@@ -45,6 +45,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
     options?: { widenLiterals?: boolean },
+    schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
   ): SchemaDefinition {
     return this.generateSchemaInternal(
       type,
@@ -52,6 +53,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       typeNode,
       undefined,
       options,
+      schemaHints,
     );
   }
 
@@ -66,6 +68,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode: ts.TypeNode,
     checker: ts.TypeChecker,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
+    schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
   ): SchemaDefinition {
     // Pass 'any' type with the typeNode - auto-detection will choose node-based analysis
     const anyType = checker.getAnyType();
@@ -74,6 +77,8 @@ export class SchemaGenerator implements ISchemaGenerator {
       checker,
       typeNode,
       typeRegistry,
+      undefined,
+      schemaHints,
     );
   }
 
@@ -87,6 +92,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode?: ts.TypeNode,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
     options?: { widenLiterals?: boolean },
+    schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
   ): SchemaDefinition {
     // Create unified context with all state
     const cycles = this.getCycles(type, checker);
@@ -110,6 +116,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       ...(typeNode && { typeNode }),
       ...(typeRegistry && { typeRegistry }),
       ...(options?.widenLiterals && { widenLiterals: true }),
+      ...(schemaHints && { schemaHints }),
     };
 
     // Auto-detect: Should we use node-based or type-based analysis?
