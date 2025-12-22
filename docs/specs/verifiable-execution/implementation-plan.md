@@ -166,6 +166,60 @@ interface Receipt {
 - `packages/memory/receipt.ts` - full receipt implementation (currently minimal)
 - `packages/memory/interface.ts` - Receipt type definition
 
+### 2.5 Client State & Commit Validation
+
+Implement the nursery/heap model for client-side state and relaxed commit
+validation.
+
+**Required changes:**
+
+- [ ] Define `ClientCommit` structure with confirmed/pending read separation:
+
+```typescript
+interface ClientCommit {
+  reads: {
+    confirmed: Array<{ address: Address; hash: Hash; since: number }>;
+    pending: Array<{ address: Address; hash: Hash; fromCommit: Reference<Commit> }>;
+  };
+  writes: Array<{ address: Address; value: JSONValue; cause: Hash }>;
+  codeCID?: Reference<CodeBundle>;
+  activity?: ReceiptActivity;
+}
+```
+
+- [ ] Define `CommitLogEntry` structure preserving original + resolution:
+
+```typescript
+interface CommitLogEntry {
+  original: SignedClientCommit;
+  resolution: {
+    since: number;
+    commitResolutions: Map<Reference<Commit>, number>;
+    hashMappings?: Map<Hash, Hash>; // provisional → final
+  };
+}
+```
+
+- [ ] Implement `since`-based validation (not hash-chain validation):
+  - Reads must record `since` of what was read
+  - Validation: `new_commit.reads[entity].since >= prior_commit.writes[entity].since`
+
+- [ ] Track hash mappings when provisional hashes differ from final
+
+- [ ] Implement server-side commit processing:
+  - Validate confirmed reads against current `since`
+  - Resolve pending reads via `fromCommit` → assigned `since`
+  - Assign next `since` to commit
+  - Compute final hashes and record mappings
+  - Store both original and resolution
+
+**Files to modify:**
+
+- `packages/memory/interface.ts` - `ClientCommit`, `CommitLogEntry` types
+- `packages/memory/commit.ts` - commit processing with validation
+- `packages/memory/space.ts` - commit log storage with original + resolution
+- `packages/runner/src/storage/transaction.ts` - client-side commit building
+
 ---
 
 ## Phase 3: Reactive Scheduling Integration
@@ -271,11 +325,18 @@ The activity tracking from Phase 2 enables intelligent reactive scheduling.
    - Serialize journal activity to commits
    - This unlocks reactive scheduling benefits
 
-2. **Code bundle references**
+2. **Client state & commit validation**
+   - Nursery/heap model for pending vs confirmed commits
+   - `since`-based validation rules
+   - CommitLogEntry with original + resolution
+   - Hash mapping for provisional → final resolution
+   - This enables offline operation and stacked commits
+
+3. **Code bundle references**
    - Track which code produced each output
    - Essential for reproducibility and auditing
 
-3. **Input provenance**
+4. **Input provenance**
    - Link outputs to input sources
    - Enables provenance chain verification
 

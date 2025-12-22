@@ -351,6 +351,142 @@ type Commit<Subject extends MemorySpace> = {
 }
 ```
 
+### 5.6 Client State Model: Nursery and Heap
+
+Clients maintain two areas for tracking state:
+
+- **Heap**: Confirmed commits and their outputs (have real `since` values)
+- **Nursery**: Pending/unconfirmed commits and outputs (no `since` yet)
+
+A commit can reference data from both:
+
+```
+C1 sent → nursery
+C2 created (refs C1 from nursery) → sent → nursery
+C1 confirmed → moves to heap with since=10
+C3 created (refs C2 from nursery) → sent → nursery
+C4 created (refs C1@since=10 from heap, refs C3 from nursery) → sent
+```
+
+Commits are sent incrementally. If C2 fails, C3 also fails (dependency), but C1
+may already be committed.
+
+### 5.7 Client Commit Structure
+
+A client commit explicitly distinguishes confirmed vs pending references:
+
+```typescript
+interface ClientCommit {
+  reads: {
+    // From heap - confirmed, has real since
+    confirmed: Array<{
+      address: Address;
+      hash: Hash;
+      since: number; // Real, known
+    }>;
+
+    // From nursery - pending, referenced by commit hash
+    pending: Array<{
+      address: Address;
+      hash: Hash; // Provisional hash (may change on resolution)
+      fromCommit: Reference<Commit>; // Which pending commit produced this
+    }>;
+  };
+
+  writes: Array<{
+    address: Address;
+    value: JSONValue;
+    cause: Hash; // May be provisional if from nursery
+  }>;
+
+  // Computation metadata
+  codeCID?: Reference<CodeBundle>;
+  activity?: ReceiptActivity;
+}
+```
+
+### 5.8 Commit Validation Rules
+
+**Relaxed validation** (compared to strict CAS on everything):
+
+1. **For reads**: Must record hash AND `since` of what was read
+2. **For writes**:
+   - If write depends on prior value → need exact cause hash (CAS)
+   - If write is derived/computed → only need "same or newer" on inputs
+
+**Validation rule:**
+
+```
+A commit is valid if for all overlapping entities:
+  new_commit.reads[entity].since >= prior_commit.writes[entity].since
+```
+
+This means: "my inputs are at least as fresh as whatever the current state was
+based on."
+
+**Why `since` not hash chains?**
+
+Different clients may skip intermediate states, so causal hash chains might
+diverge. But `since` is monotonically increasing and comparable across all
+commits. Freshness is determined by `since`, not by hash ancestry.
+
+### 5.9 Commit Log Entry Structure
+
+The commit log preserves both the client's original submission and the server's
+resolution:
+
+```typescript
+interface CommitLogEntry {
+  // Original client submission (signed, preserved exactly)
+  original: SignedClientCommit;
+
+  // Server's resolution
+  resolution: {
+    since: number; // Assigned sequence number
+
+    // How pending refs were resolved
+    commitResolutions: Map<Reference<Commit>, number>; // commit ref → since
+
+    // Hash mappings where provisional ≠ final (sparse, only differences)
+    hashMappings?: Map<Hash, Hash>; // provisional → final
+  };
+}
+```
+
+**Why hashes can differ:**
+
+The hash of a fact includes its `cause`. If the cause was provisional (from
+nursery), the final hash changes when the cause resolves:
+
+```
+C1 writes X with provisional cause → X@H1_provisional
+C2 reads X@H1_provisional from nursery
+C1 confirms, cause chain resolves → X@H1_final (different!)
+```
+
+**Verification can check:**
+
+1. **Client's computation**: Signature valid, read invariants satisfied at
+   claimed `since`, code identity matches
+2. **Server's resolution**: `since` monotonic, hash mappings consistent with log
+3. **Cross-check**: Resolution doesn't contradict client's claims
+
+This gives a complete audit trail: client's view → server's resolution → final
+state.
+
+### 5.10 Server Processing
+
+When the server processes a commit:
+
+1. **Confirmed reads**: Validate directly against `since`
+2. **Pending reads**: Look up `fromCommit` → get its assigned `since` → validate
+3. **Assign `since`**: Next sequence number
+4. **Resolve hashes**: Compute final hashes, record mappings where different
+5. **Store**: Both original and resolution in commit log
+
+If validation fails, the commit is rejected. Dependent commits (referencing this
+one from nursery) will also fail.
+
 ---
 
 ## 6. Receipt Object (Future Enhancement)
