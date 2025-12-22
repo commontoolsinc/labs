@@ -1266,8 +1266,20 @@ export class Runner {
         // Capture read dependencies - use the pre-computed reads list
         // Note: We DON'T run fn(depTx) here because that would execute
         // user code with side effects during dependency discovery
-        for (const read of reads) {
-          this.runtime.getCellFromLink(read, undefined, depTx)?.get();
+        if (module.argumentSchema !== undefined) {
+          const inputsCell = this.runtime.getImmutableCell(
+            processCell.space,
+            inputs,
+            undefined,
+            depTx,
+          );
+          inputsCell.asSchema(module.argumentSchema!).get({
+            traverseCells: true,
+          });
+        } else {
+          for (const read of reads) {
+            this.runtime.getCellFromLink(read, undefined, depTx)?.get();
+          }
         }
         // Capture write dependencies by marking outputs as potential writes
         for (const output of writes) {
