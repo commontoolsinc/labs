@@ -240,8 +240,9 @@ const addMember = handler<
     members: Cell<MemberEntry[]>;
     parentRecord: unknown;
     errorMessage: Cell<string>;
+    mentionable: Cell<MentionableCharm[]>;
   }
->((event, { members, parentRecord, errorMessage }) => {
+>((event, { members, parentRecord, errorMessage, mentionable }) => {
   const { isCustom, data } = event.detail || {};
 
   // Clear previous errors
@@ -257,18 +258,27 @@ const addMember = handler<
     return;
   }
 
-  // Extract charm metadata from data
-  // Note: Cell references become sigil links after event sanitization,
-  // so isRecord is pre-computed in the lift context where direct property access works.
-  // The charm reference becomes a sigil link which we use for Cell.equals() matching.
-  const { charm, isRecord: targetIsRecord } =
+  // Extract charm index from data
+  // Reactive proxies become undefined during event sanitization, so we pass
+  // an index into mentionable instead of the charm reference directly.
+  const { charmIndex, isRecord: targetIsRecord } =
     (data as {
-      charm: unknown;
+      charmIndex: number;
       isRecord: boolean;
     }) || {};
 
+  if (charmIndex === undefined || charmIndex < 0) {
+    console.warn("No charm index in selection event");
+    return;
+  }
+
+  // Look up the charm Cell from mentionable using .key() for proper Cell navigation
+  // Using .key() instead of .get()[index] maintains the reactive path for Cell equality
+  const charmCell = mentionable.key(charmIndex);
+  const charm = charmCell.get();
+
   if (!charm) {
-    console.warn("No charm data in selection event");
+    console.warn("Charm not found at index", charmIndex);
     return;
   }
 
@@ -278,8 +288,9 @@ const addMember = handler<
   const currentMembers = members.get() || [];
 
   // Atomic duplicate check - if found, show feedback and bail
+  // Use charmCell for Cell.equals() to get proper Cell comparison
   const isDuplicate = currentMembers.some((m) =>
-    Cell.equals(m.charm as object, charm as object)
+    Cell.equals(m.charm as object, charmCell as unknown as object)
   );
   if (isDuplicate) {
     errorMessage.set("This member is already added.");
@@ -298,10 +309,9 @@ const addMember = handler<
 
   if (bidirectional && parentRecord) {
     try {
-      // The charm from the event IS a Cell reference (as sigil link after sanitization).
-      // No need to search for it - just navigate directly on the reference!
-      const targetCharm = charm as Cell<any>;
-      const targetSubCharms = targetCharm.key("subCharms").get() || [];
+      // Navigate to the target charm's subCharms using charmCell
+      // charmCell is mentionable.key(charmIndex), a Cell pointing to the charm
+      const targetSubCharms = charmCell.key("subCharms").get() || [];
 
       // Find the members module entry
       const membersEntryIndex = targetSubCharms.findIndex(
@@ -309,8 +319,8 @@ const addMember = handler<
       );
 
       if (membersEntryIndex >= 0) {
-        // Navigate to the members Cell: subCharms[membersEntryIndex].charm.members
-        targetMembersCell = targetCharm
+        // Navigate to the members Cell: charmCell.subCharms[membersEntryIndex].charm.members
+        targetMembersCell = charmCell
           .key("subCharms")
           .key(membersEntryIndex)
           .key("charm")
@@ -477,11 +487,18 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
             filtered = items.filter((m: any) => !isSelf(m));
         }
 
-        // Build autocomplete items with charm reference in data field
-        // ct-autocomplete passes data through to ct-select event unchanged
+        // Build autocomplete items with charm index for lookup in handler
+        // Reactive proxies become undefined during event sanitization, so we pass
+        // the index into the mentionable array. The handler receives the mentionable
+        // Cell and uses .key(index) for Cell navigation.
         return filtered.map((charm: any) => {
           const name = getCharmName(charm);
           const charmIsRecord = isRecord(charm);
+
+          // Find the original index in mentionable (not filtered array)
+          const charmIndex = items.findIndex((m: any) =>
+            Cell.equals(m as object, charm as object)
+          );
 
           let icon = "🔗";
           let group = "linked";
@@ -497,14 +514,11 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
             value: name, // Human-readable value
             label: `${icon} ${name}`,
             group,
-            // Pass charm reference with isRecord flag for handler context
-            // Cell references become sigil links after event sanitization,
-            // so we pre-compute isRecord here where direct property access works.
-            // The handler will use mentionableCell to find the target and navigate
-            // to its members Cell using .key() - this works because .key() builds
-            // a path and .get()/.set() resolve sigil links automatically.
+            // Pass charm index and isRecord flag for handler context.
+            // isRecord is pre-computed here where direct property access works.
+            // The handler will use mentionable.key(charmIndex) for Cell navigation.
             data: {
-              charm,
+              charmIndex,
               isRecord: charmIsRecord,
             },
           };
@@ -550,6 +564,7 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                 members,
                 parentRecord,
                 errorMessage,
+                mentionable,
               })}
               style={{ flex: "1" }}
             />
