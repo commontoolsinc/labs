@@ -79,6 +79,8 @@ const FILTER_OPTIONS = [
 function isRecord(charm: unknown): boolean {
   // Can't use #record because it's not in RecordOutput interface and isn't persisted
   // Instead, check for subCharms array which IS a stored Record property
+  // NOTE: This function only works in lift/view context where direct property access works.
+  // In handler context (after event sanitization), use the pre-computed isRecord flag.
   return Array.isArray((charm as any)?.subCharms);
 }
 
@@ -240,7 +242,7 @@ const addMember = handler<
     errorMessage: Cell<string>;
   }
 >((event, { members, parentRecord, errorMessage }) => {
-  const { isCustom, data: charm } = event.detail || {};
+  const { isCustom, data } = event.detail || {};
 
   // Clear previous errors
   errorMessage.set("");
@@ -255,7 +257,16 @@ const addMember = handler<
     return;
   }
 
-  // Charm reference is passed through ct-autocomplete's data field
+  // Extract charm metadata from data
+  // Note: Cell references become sigil links after event sanitization,
+  // so isRecord is pre-computed in the lift context where direct property access works.
+  // The charm reference becomes a sigil link which we use for Cell.equals() matching.
+  const { charm, isRecord: targetIsRecord } =
+    (data as {
+      charm: unknown;
+      isRecord: boolean;
+    }) || {};
+
   if (!charm) {
     console.warn("No charm data in selection event");
     return;
@@ -276,7 +287,8 @@ const addMember = handler<
   }
 
   // Determine if bidirectional (both are records with Members modules)
-  const targetIsRecord = isRecord(charm);
+  // targetIsRecord comes from the data (computed in lift context)
+  // sourceIsRecord uses isRecord() which works on parentRecord from wish()
   const sourceIsRecord = parentRecord ? isRecord(parentRecord) : false;
   let bidirectional = targetIsRecord && sourceIsRecord;
 
@@ -286,29 +298,50 @@ const addMember = handler<
 
   if (bidirectional && parentRecord) {
     try {
-      // Access subCharms from the target charm (a Cell)
-      const targetSubCharms = (charm as any).subCharms || [];
-      const targetMembersEntry = targetSubCharms.find(
+      // The charm from the event IS a Cell reference (as sigil link after sanitization).
+      // No need to search for it - just navigate directly on the reference!
+      const targetCharm = charm as Cell<any>;
+      const targetSubCharms = targetCharm.key("subCharms").get() || [];
+
+      // Find the members module entry
+      const membersEntryIndex = targetSubCharms.findIndex(
         (e: any) => e?.type === "members",
       );
 
-      if (targetMembersEntry?.charm) {
-        // Access the members Cell from the Members module charm
-        const membersCharm = targetMembersEntry.charm;
-        targetMembersCell = membersCharm.key("members") as Cell<MemberEntry[]>;
-        const targetMembersList = targetMembersCell?.get() || [];
+      if (membersEntryIndex >= 0) {
+        // Navigate to the members Cell: subCharms[membersEntryIndex].charm.members
+        targetMembersCell = targetCharm
+          .key("subCharms")
+          .key(membersEntryIndex)
+          .key("charm")
+          .key("members") as Cell<MemberEntry[]>;
+
+        const targetMembersList = targetMembersCell.get() || [];
 
         // Check if reverse link already exists
-        const hasReverseLink = targetMembersList.some((m: MemberEntry) =>
-          Cell.equals(m?.charm as object, parentRecord as object)
+        const existingEntryIndex = targetMembersList.findIndex(
+          (m: MemberEntry) =>
+            Cell.equals(parentRecord as object, m?.charm as object),
         );
 
-        if (!hasReverseLink) {
-          // Prepare the new target members array
+        if (existingEntryIndex === -1) {
+          // No existing entry - add new one with bidirectional: true
           newTargetMembersList = [
             ...targetMembersList,
             { charm: parentRecord, bidirectional: true },
           ];
+        } else {
+          // Entry exists - update it to be bidirectional
+          const existingEntry = targetMembersList[existingEntryIndex];
+          if (!existingEntry.bidirectional) {
+            // Only update if not already bidirectional
+            newTargetMembersList = [
+              ...targetMembersList.slice(0, existingEntryIndex),
+              { ...existingEntry, bidirectional: true },
+              ...targetMembersList.slice(existingEntryIndex + 1),
+            ];
+          }
+          // else: already bidirectional, nothing to do (newTargetMembersList stays null)
         }
       } else {
         // Target has no Members module - can't be bidirectional
@@ -453,6 +486,7 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
           let icon = "🔗";
           let group = "linked";
 
+          // Get inferred type for icon/grouping if this is a Record
           if (charmIsRecord) {
             const inferred = inferTypeFromModules(getModuleTypes(charm));
             icon = inferred.icon;
@@ -463,7 +497,16 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
             value: name, // Human-readable value
             label: `${icon} ${name}`,
             group,
-            data: charm, // Charm reference passed through to handler
+            // Pass charm reference with isRecord flag for handler context
+            // Cell references become sigil links after event sanitization,
+            // so we pre-compute isRecord here where direct property access works.
+            // The handler will use mentionableCell to find the target and navigate
+            // to its members Cell using .key() - this works because .key() builds
+            // a path and .get()/.set() resolve sigil links automatically.
+            data: {
+              charm,
+              isRecord: charmIsRecord,
+            },
           };
         });
       },
