@@ -53,16 +53,14 @@ This document tracks implementation status of the CT Protocol specification.
 CREATE INDEX fact_the_since ON fact (the, since);
 ```
 
-- [ ] Subscription protocol ensures commits delivered with/before facts
-- [ ] Client API to query historical commits by `since` range
-- [ ] Client-side commit cache for provenance lookups
+- [ ] Query/subscription responses include commits for all returned facts
+- [ ] Include older commits if client hasn't seen them yet
 
 **Files to modify:**
 
 - `packages/memory/space.ts` - add compound index in schema
 - `packages/memory/migrations/` - migration for existing databases
-- `packages/memory/consumer.ts` - ensure commit delivery ordering
-- `packages/runner/src/storage/` - client-side commit tracking
+- `packages/memory/provider.ts` - include producing commits in responses
 
 ---
 
@@ -343,8 +341,7 @@ The activity tracking from Phase 2 enables intelligent reactive scheduling.
 
 1. **Document → Commit provenance** (Phase 1.4)
    - Add compound index `(the, since)` for fast commit lookup
-   - Ensure subscription protocol delivers commits with/before facts
-   - Client-side commit cache for provenance lookups
+   - Query/subscription responses include producing commits
    - Essential for clients to verify how data was computed
 
 2. **Activity in receipts** (Phase 2.1)

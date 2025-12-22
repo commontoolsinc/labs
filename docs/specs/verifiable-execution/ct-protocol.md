@@ -513,20 +513,18 @@ SELECT * FROM fact
 WHERE the = 'application/commit+json' AND since = :fact_since
 ```
 
-**Subscription model:**
+**Subscription and query protocol:**
 
-Clients subscribe to both data and commits:
+The existing subscription/query API ensures that when data is returned, the
+client also receives the commits that produced it:
 
-1. **Data subscription**: Receive document updates
-2. **Commit subscription**: Receive commit records
+- **Query responses** include commits for all returned facts
+- **Subscription updates** deliver the producing commit alongside data changes
+- If a fact was produced by an older commit the client hasn't seen, that commit
+  is included in the response
 
-When a client receives a document via subscription, it may need commits it
-hasn't seen yet (e.g., if the document was produced by an older commit). The
-subscription protocol ensures:
-
-- Commits are delivered before or alongside their produced facts
-- Clients can request historical commits by `since` range
-- The commit chain provides complete provenance back to genesis
+This guarantee means clients always have provenance for any data they receive
+without needing a separate commit-fetching API.
 
 **Client verification:**
 
