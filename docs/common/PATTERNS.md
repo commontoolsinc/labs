@@ -397,6 +397,23 @@ const active = computed(() => items.filter(i => !i.done));
 {active.map(...)}  // You CAN map over computed() results!
 ```
 
+### Defensive Array Filtering
+
+Arrays may contain null/undefined entries (e.g., after deletions or from external data). Always filter before iterating:
+
+```typescript
+// ❌ May crash: TypeError: Cannot read properties of null
+const names = computed(() => {
+  return items.map(item => item.name);  // Crashes if any item is null
+});
+
+// ✅ Filter first to ensure valid items
+const names = computed(() => {
+  const safeItems = items.filter((item): item is Item => item != null);
+  return safeItems.map(item => item.name);
+});
+```
+
 ### Template String Access
 
 ```typescript

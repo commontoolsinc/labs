@@ -52,6 +52,51 @@ interface Input {
 }
 ```
 
+### Cell Values Must Be JSON-Serializable
+
+Cells are persisted via JSON serialization. **Map and Set lose their methods** after serialization:
+
+```typescript
+// ❌ BROKEN - Map/Set methods lost after serialization
+const mySet = Cell.of<Set<string>>(new Set(["a", "b"]));
+const myMap = Cell.of<Map<string, number>>(new Map([["key", 1]]));
+
+// After persistence/reload, these FAIL:
+mySet.get().add("c");     // Error: .add() is not a function
+myMap.get().set("k", 2);  // Error: .set() is not a function
+```
+
+**Use Array and Record instead:**
+
+```typescript
+// ✅ CORRECT - Use Array for Set-like behavior
+const items = Cell.of<string[]>(["a", "b"]);
+items.push("c");  // Works!
+
+// ✅ CORRECT - Use Record for Map-like behavior
+const lookup = Cell.of<Record<string, number>>({ key: 1 });
+lookup.update({ newKey: 2 });  // Works!
+```
+
+### Cell<T[]> Type Ergonomics
+
+When you have `Cell<T[]>`, you cannot access `.length` directly—it's a Cell, not an array:
+
+```typescript
+// ❌ TypeScript error: Property 'length' does not exist on type Cell<Item[]>
+const count = items.length;
+
+// ✅ CORRECT - Use computed() to access array properties
+const count = computed(() => items.length);
+
+// ✅ CORRECT - Or use .get() in handlers
+const handleClick = handler<unknown, { items: Cell<Item[]> }>(
+  (_, { items }) => {
+    console.log(items.get().length);  // Works!
+  }
+);
+```
+
 ---
 
 ## Type Contexts
@@ -115,6 +160,40 @@ const removeItem = handler<
   if (index >= 0) items.set(items.get().toSpliced(index, 1));
 });
 ```
+
+---
+
+## Boxed Selection Pattern
+
+When tracking a selected item from an array, **box the selection in an object** rather than storing a Cell reference directly:
+
+```typescript
+// ✅ CORRECT - Boxed selection
+interface BoxedSelection {
+  selected: Item | null;
+}
+const selection = Cell.of<BoxedSelection>({ selected: null });
+
+// Select an item
+const selectItem = handler<unknown, { sel: Cell<BoxedSelection>; item: Item }>(
+  (_, { sel, item }) => {
+    sel.update({ selected: item });
+  }
+);
+
+// ❌ WRONG - Don't store Cell<Cell<T>>
+const selection = Cell.of<Cell<Item> | null>(null);
+// This causes rendering bugs when items come from .map()
+```
+
+**Why avoid `Cell<Cell<T>>`?**
+- Items from `.map()` are `Cell<Item>` (OpaqueRef)
+- Storing them creates `Cell<Cell<Item>>` which is unstable
+- Runtime behavior: clicking buttons causes rendering bugs (labels swap incorrectly)
+
+**When you need to compare items by identity:**
+- Use `.equals()` for *comparison* (finding/removing items)
+- Use boxed selection or index/ID for *storage*
 
 ---
 
@@ -241,3 +320,4 @@ import type { TodoItem } from "./schemas.ts";
 | `/// <cts-enable />` | Enable CTS type processing |
 | `Writable<T[]>` | Standard array (default) |
 | `Writable<Array<Writable<T>>>` | When you need `.equals()` on elements |
+| `Writable<{selected: T}>` | Boxed selection pattern (avoid `Writable<Writable<T>>`) |

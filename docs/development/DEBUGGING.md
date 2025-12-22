@@ -15,6 +15,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | "Type 'string' is not assignable to type 'CSSProperties'" | String style on HTML element | Use object syntax `style={{ ... }}` ([COMPONENTS](COMPONENTS.md)) |
 | Type mismatch binding item to `$checked` | Binding whole item, not property | Bind `item.done`, not `item` |
 | "ReadOnlyAddressError" | onClick inside computed() | Move button outside, use disabled ([see below](#onclick-inside-computed)) |
+| "ReadOnlyAddressError" on `$checked`/`$value` | Default\<T[], []\> items are read-only | Use `Cell<Default<T[], []>>` ([see below](#bidirectional-binding-on-array-items)) |
 | Charm hangs, never renders | ifElse with composed pattern cell | Use local computed cell ([see below](#ifelse-with-composed-pattern-cells)) |
 | Data not updating | Missing `$` prefix or wrong event | Use `$checked`, `$value` ([COMPONENTS](COMPONENTS.md)) |
 | Filtered list not updating | Need computed() | Wrap in `computed()` ([REACTIVITY](REACTIVITY.md)) |
@@ -26,6 +27,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | CLI `get` returns stale computed values | `charm set` doesn't trigger recompute | Run `charm step` after `set` to trigger re-evaluation ([see below](#stale-computed-values-after-charm-set)) |
 | "Property 'onMouseEnter' does not exist" | Hover events not supported | Use click handlers instead ([see below](#hover-events-not-supported)) |
 | ct-tabs panels all hidden | Value attribute reflection issue | Use custom tabs with ifElse ([see below](#ct-tabs-panels-not-showing)) |
+| Space URL 404 or routing errors | Space name contains `/` | Use only `a-z`, `0-9`, `-`, `_` in space names |
 
 ---
 
@@ -138,6 +140,34 @@ See [REACTIVITY.md](REACTIVITY.md#using-reactive-values-to-index-objects-in-map)
 ```
 
 **Why:** `computed()` creates read-only inline data addresses. Always render buttons at the top level and control visibility with `disabled`.
+
+### Bidirectional Binding on Array Items
+
+**Error:** "ReadOnlyAddressError: Cannot write to read-only address: data:application/json..."
+
+```typescript
+// ❌ Default<> arrays have read-only item properties
+interface Input {
+  items: Default<Item[], []>;  // OpaqueRef - items are read-only!
+}
+
+{items.map((item) => (
+  <ct-checkbox $checked={item.done} />  // ReadOnlyAddressError on click
+))}
+
+// ✅ Use Cell<Default<>> for write access to item properties
+interface Input {
+  items: Cell<Default<Item[], []>>;  // Cell wrapper enables writes
+}
+
+{items.map((item) => (
+  <ct-checkbox $checked={item.done} />  // Works!
+))}
+```
+
+**Why:** `Default<T[], []>` creates an OpaqueRef array where item properties become read-only data URIs at runtime. Wrapping with `Cell<>` provides write access needed for bidirectional binding (`$checked`, `$value`).
+
+**Rule:** For the "state on objects" pattern (`$checked={item.property}`), use `Cell<Default<Item[], []>>`, not just `Default<Item[], []>`.
 
 ### ifElse with Composed Pattern Cells
 
@@ -572,6 +602,33 @@ export default pattern(({ searchQuery }) => {
 ```
 
 **Rule:** Handlers should be synchronous state changes. Use `fetchData` for async operations.
+
+---
+
+## Development Best Practices
+
+### Use Isolated Spaces for Testing
+
+A charm with an infinite loop or high CPU usage can make an entire space unusable. When you visit a space URL, all charms in that space may be loaded - if one loops, the space becomes unresponsive.
+
+**Symptoms:**
+1. Deploy a charm that causes infinite loop or 100% CPU
+2. Server becomes unresponsive, needs restart
+3. After restart, visiting the space triggers the loop again
+4. Space is effectively "poisoned" until the charm is removed
+
+**Prevention:** Use isolated spaces for testing new patterns:
+
+```bash
+# ❌ Don't test in your main space
+--space my-production-space
+
+# ✅ Use throwaway spaces for testing
+--space test-feature-1
+--space debug-session-2
+```
+
+This way, if a charm causes issues, you don't lose access to your main space with other working charms.
 
 ---
 

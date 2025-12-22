@@ -177,6 +177,38 @@ prompt: `Title: ${article.title}\nContent: ${article.content}`
 prompt: computed(() => `Title: ${article.title}\nContent: ${article.content}`)
 ```
 
+### Optional Type Annotations for Nested Access
+
+When accessing nested properties of `generateObject` results in the UI (like `item.analysis?.pending`), you need explicit type annotations to make the property optional in the generated schema. Otherwise you'll get runtime errors like "Cannot read properties of undefined".
+
+```typescript
+// Define the return type with optional analysis
+type GenerateObjectResult = ReturnType<typeof generateObject<SentimentResult>>;
+
+interface AnalysisMapItem {
+  itemId: string;
+  analysis?: GenerateObjectResult;  // Must be optional
+}
+
+// Use explicit return type annotation on the map callback
+const results = items.map((item): AnalysisMapItem => ({
+  itemId: item.id,
+  analysis: generateObject<SentimentResult>({
+    prompt: computed(() => `Analyze: ${item.content}`),
+  }),
+}));
+
+// Now optional chaining works correctly in UI
+{results.map((item) => (
+  <div>
+    <div>Pending: {String(item.analysis?.pending ?? "loading")}</div>
+    <div>Result: {item.analysis?.result ? JSON.stringify(item.analysis.result) : "null"}</div>
+  </div>
+))}
+```
+
+Without the explicit `?: GenerateObjectResult` annotation, the schema generator marks `analysis` as required, and the runtime fails when trying to access nested properties before the generateObject state is fully initialized.
+
 ---
 
 ## Constraints
