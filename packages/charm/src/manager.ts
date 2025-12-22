@@ -145,10 +145,11 @@ export class CharmManager {
       .key("recentCharms")
       .asSchema(charmListSchema);
 
-    // Two-phase initialization to avoid race condition:
+    // Two-phase initialization for defensive programming:
     // 1. Sync all cells in parallel
-    // 2. THEN link space cell contents (which reads the synced charm lists)
-    // This ensures this.charms.get() at line 129 has data from syncCharms()
+    // 2. THEN link space cell contents
+    // Note: linkSpaceCellContents now passes Cell references (not .get() snapshots),
+    // so this sequencing is conservative but ensures consistent initialization order.
     this.ready = Promise.all([
       this.syncCharms(this.charms),
       this.syncCharms(this.pinnedCharms),

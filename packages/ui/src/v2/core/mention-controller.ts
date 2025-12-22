@@ -358,6 +358,10 @@ export class MentionController implements ReactiveController {
    * @private
    */
   private _setupMentionableSubscription(): void {
+    // Clean up any existing subscription first to prevent orphaned subscriptions
+    // (e.g., if setMentionable() was called before hostConnected())
+    this._cleanupMentionableSubscription();
+
     if (isCell(this._mentionable)) {
       this._mentionableUnsubscribe = this._mentionable.sink(() => {
         this.host.requestUpdate();
