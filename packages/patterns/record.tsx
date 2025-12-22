@@ -299,7 +299,13 @@ const addSubCharm = handler<
 
   // Capture schema at creation time for dynamic discovery
   const schema = getResultSchema(charm);
-  sc.set([...current, { type, pinned: false, charm, schema }]);
+  sc.set([...current, {
+    type,
+    pinned: false,
+    collapsed: false,
+    charm,
+    schema,
+  }]);
   sat.set("");
 });
 
@@ -328,9 +334,9 @@ const restoreSubCharm = handler<
     entry: TrashedSubCharmEntry;
   }
 >((_event, { subCharms: sc, trashedSubCharms: trash, entry }) => {
-  // Restore to active (without trashedAt)
+  // Restore to active (without trashedAt, reset collapsed state)
   const { trashedAt: _trashedAt, ...restored } = entry;
-  sc.push(restored);
+  sc.push({ ...restored, collapsed: false });
 
   // Remove from trash
   trash.remove(entry);
@@ -382,6 +388,7 @@ const createSibling = handler<
   updated.splice(currentIndex + 1, 0, {
     type: entry.type,
     pinned: false,
+    collapsed: false,
     charm,
   });
   sc.set(updated);
@@ -614,21 +621,35 @@ const Record = pattern<RecordInput, RecordOutput>(
                               flex: "1",
                             }}
                           >
-                            <span
+                            <button
+                              type="button"
                               onClick={toggleCollapsed({ subCharms, entry })}
-                              style={computed(() => ({
-                                transform: entry.collapsed
-                                  ? "rotate(0deg)"
-                                  : "rotate(90deg)",
-                                transition: "transform 0.2s",
-                                fontSize: "10px",
-                                color: "#9ca3af",
+                              aria-expanded={computed(() =>
+                                entry.collapsed ? "false" : "true"
+                              )}
+                              aria-label="Toggle module"
+                              style={{
+                                background: "none",
+                                border: "none",
                                 cursor: "pointer",
                                 padding: "4px",
-                              }))}
+                                display: "flex",
+                                alignItems: "center",
+                              }}
                             >
-                              ▶
-                            </span>
+                              <span
+                                style={computed(() => ({
+                                  transform: entry.collapsed
+                                    ? "rotate(0deg)"
+                                    : "rotate(90deg)",
+                                  transition: "transform 0.2s",
+                                  fontSize: "10px",
+                                  color: "#9ca3af",
+                                }))}
+                              >
+                                ▶
+                              </span>
+                            </button>
                             <span
                               style={{
                                 fontSize: "14px",
@@ -764,21 +785,35 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 flex: "1",
                               }}
                             >
-                              <span
+                              <button
+                                type="button"
                                 onClick={toggleCollapsed({ subCharms, entry })}
-                                style={computed(() => ({
-                                  transform: entry.collapsed
-                                    ? "rotate(0deg)"
-                                    : "rotate(90deg)",
-                                  transition: "transform 0.2s",
-                                  fontSize: "10px",
-                                  color: "#9ca3af",
+                                aria-expanded={computed(() =>
+                                  entry.collapsed ? "false" : "true"
+                                )}
+                                aria-label="Toggle module"
+                                style={{
+                                  background: "none",
+                                  border: "none",
                                   cursor: "pointer",
                                   padding: "4px",
-                                }))}
+                                  display: "flex",
+                                  alignItems: "center",
+                                }}
                               >
-                                ▶
-                              </span>
+                                <span
+                                  style={computed(() => ({
+                                    transform: entry.collapsed
+                                      ? "rotate(0deg)"
+                                      : "rotate(90deg)",
+                                    transition: "transform 0.2s",
+                                    fontSize: "10px",
+                                    color: "#9ca3af",
+                                  }))}
+                                >
+                                  ▶
+                                </span>
+                              </button>
                               <span
                                 style={{
                                   fontSize: "14px",
@@ -917,21 +952,35 @@ const Record = pattern<RecordInput, RecordOutput>(
                             flex: "1",
                           }}
                         >
-                          <span
+                          <button
+                            type="button"
                             onClick={toggleCollapsed({ subCharms, entry })}
-                            style={computed(() => ({
-                              transform: entry.collapsed
-                                ? "rotate(0deg)"
-                                : "rotate(90deg)",
-                              transition: "transform 0.2s",
-                              fontSize: "10px",
-                              color: "#9ca3af",
+                            aria-expanded={computed(() =>
+                              entry.collapsed ? "false" : "true"
+                            )}
+                            aria-label="Toggle module"
+                            style={{
+                              background: "none",
+                              border: "none",
                               cursor: "pointer",
                               padding: "4px",
-                            }))}
+                              display: "flex",
+                              alignItems: "center",
+                            }}
                           >
-                            ▶
-                          </span>
+                            <span
+                              style={computed(() => ({
+                                transform: entry.collapsed
+                                  ? "rotate(0deg)"
+                                  : "rotate(90deg)",
+                                transition: "transform 0.2s",
+                                fontSize: "10px",
+                                color: "#9ca3af",
+                              }))}
+                            >
+                              ▶
+                            </span>
+                          </button>
                           <span
                             style={{
                               fontSize: "14px",
