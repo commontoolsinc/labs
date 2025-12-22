@@ -41,7 +41,10 @@ function validateModelAndJsonMode(
 
   if (!model) {
     return c.json(
-      { error: `Unknown model '${modelString}'. GET /api/ai/llm/models for available models.` },
+      {
+        error:
+          `Unknown model '${modelString}'. GET /api/ai/llm/models for available models.`,
+      },
       HttpStatusCodes.BAD_REQUEST,
     );
   }
@@ -118,7 +121,10 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   const payload = await c.req.json();
   if (!isLLMRequest(payload)) {
     return c.json(
-      { error: "Invalid request: requires 'model' (string), 'messages' (array), and 'cache' (boolean)" },
+      {
+        error:
+          "Invalid request: requires 'model' (string), 'messages' (array), and 'cache' (boolean)",
+      },
       HttpStatusCodes.BAD_REQUEST,
     );
   }
