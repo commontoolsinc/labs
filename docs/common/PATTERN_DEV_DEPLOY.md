@@ -104,6 +104,22 @@ patterns/feature/
 
 Use relative imports. ct bundles dependencies automatically.
 
+### Importing from Parent Directories
+
+By default, patterns can only import files from their own directory or subdirectories. To import from parent directories, use the `--root` option:
+
+```bash
+# Allow imports from anywhere within ./patterns
+deno task ct charm new -i key.json -a URL -s space --root ./patterns ./patterns/wip/main.tsx
+```
+
+This allows `./patterns/wip/main.tsx` to import from `./patterns/shared/utils.tsx` (via `../shared/utils.tsx`), while preventing imports from outside the specified root.
+
+**Use cases:**
+- Shared type definitions across pattern directories
+- Common utility functions
+- Reusing blessed patterns as building blocks
+
 **Pitfall:** Schema mismatches between linked charms → export shared schemas from common file.
 
 ---
