@@ -29,6 +29,7 @@ import type { JSONSchema } from "./extraction/schema-utils-pure.ts";
 export interface SubCharmEntry {
   type: string; // Module type identifier (e.g., "birthday", "email")
   pinned: boolean; // Pin state owned by Record (not the sub-charm)
+  collapsed?: boolean; // Collapse state - when true, only header is shown (default: false/expanded)
   charm: unknown; // Reference to the actual sub-charm pattern instance
   schema?: JSONSchema; // Schema captured at creation time for dynamic discovery
 }
