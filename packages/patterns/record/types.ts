@@ -64,6 +64,8 @@ export type SubCharmType =
   // Contact modules (with labels, support multiple instances)
   | "email"
   | "phone"
+  // Nickname/alias (supports multiple instances)
+  | "nickname"
   // Icon customization
   | "record-icon"
   // Controller modules (internal, not user-addable)

@@ -517,6 +517,41 @@ const Record = pattern<RecordInput, RecordOutput>(
       }) => manual || inferred?.icon || "\u{1F4CB}",
     )({ manual: manualIcon, inferred: inferredType });
 
+    // Extract nicknames from nickname modules for display in NAME
+    const nicknamesList = lift(({ sc }: { sc: SubCharmEntry[] }) => {
+      const nicknameModules = (sc || []).filter((e) => e?.type === "nickname");
+      const nicknames: string[] = [];
+      for (const mod of nicknameModules) {
+        try {
+          // Access the nickname field from the charm pattern output
+          // deno-lint-ignore no-explicit-any
+          const charm = mod.charm as any;
+          const nicknameValue = charm?.nickname;
+          if (typeof nicknameValue === "string" && nicknameValue.trim()) {
+            nicknames.push(nicknameValue.trim());
+          }
+        } catch {
+          // Ignore errors from charms without nickname field
+        }
+      }
+      return nicknames;
+    })({ sc: subCharms });
+
+    // Build display name with nickname alias if present
+    const displayNameWithAlias = lift(
+      ({
+        name,
+        nicknames,
+      }: {
+        name: string;
+        nicknames: string[];
+      }) => {
+        if (nicknames.length === 0) return name;
+        // Show all nicknames as aliases (aka Liz, Beth, Lizzie)
+        return `${name} (aka ${nicknames.join(", ")})`;
+      },
+    )({ name: displayName, nicknames: nicknamesList });
+
     // ===== Trash Section Computed Values =====
 
     // Compute trash count directly
@@ -531,7 +566,7 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // ===== Main UI =====
     return {
-      [NAME]: str`${recordIcon} ${displayName}`,
+      [NAME]: str`${recordIcon} ${displayNameWithAlias}`,
       [UI]: (
         <ct-vstack style={{ height: "100%", gap: "0" }}>
           {/* Header toolbar */}
