@@ -181,6 +181,7 @@ const handleFileUpload = handler<
 
 /**
  * Commit preview text to the main value
+ * Reads from previewText (for file uploads) or ocrResult (for image OCR)
  */
 const handleCommitPreview = handler<
   unknown,
@@ -189,13 +190,26 @@ const handleCommitPreview = handler<
     previewText: Cell<string | null>;
     previewSource: Cell<"file" | "image" | null>;
     previewFileName: Cell<string | null>;
+    uploadedImage: Cell<ImageData[]>;
+    // deno-lint-ignore no-explicit-any
+    ocrResult: any; // The ocr.result reactive value
   }
 >(
   (
     _event,
-    { $value, previewText, previewSource, previewFileName },
+    { $value, previewText, previewSource, previewFileName, uploadedImage, ocrResult },
   ) => {
-    const preview = previewText.get();
+    const hasImage = uploadedImage.get().length > 0;
+    const fileSource = previewSource.get() === "file";
+    let preview: string | null = null;
+
+    if (fileSource) {
+      preview = previewText.get();
+    } else if (hasImage && ocrResult) {
+      // ocrResult is already the string value from generateText
+      preview = ocrResult as string;
+    }
+
     if (preview) {
       $value.set(preview);
     }
@@ -203,6 +217,7 @@ const handleCommitPreview = handler<
     previewText.set(null);
     previewSource.set(null);
     previewFileName.set(null);
+    uploadedImage.set([]); // Also clear image to reset OCR state
   },
 );
 
@@ -233,27 +248,29 @@ const handleCancelPreview = handler<
 
 /**
  * Handle image change from ct-image-input
- * Note: The actual image comes from the $images binding (imageArray),
- * we just use this handler to set up the preview state
+ * NOTE: The $images binding handles actual data flow to the imageArray Cell.
+ * This handler only sets UI state flags for the preview section.
+ * The image data arrives via the binding, triggering the computed() for OCR.
  */
 const handleImageChange = handler<
   { detail: { images: ImageData[] } },
   {
     previewText: Cell<string | null>;
-    previewSource: Cell<"file" | "image" | null>;
     fileError: Cell<string | null>;
   }
->(({ detail }, { previewText, previewSource, fileError }) => {
+>(({ detail }, { previewText, fileError }) => {
+  // NOTE: The $images binding handles data flow - this handler only clears state
+  // The handler fires before file processing completes, so we can't rely on
+  // detail.images to detect uploads. derivedPreviewSource handles that reactively.
   const images = detail?.images;
   if (!images || images.length === 0) {
-    // Image was removed - clear preview if it was from image
-    previewSource.set(null);
+    // Image was removed - clear file errors
+    fileError.set(null);
     return;
   }
 
-  // Clear any existing preview and errors - OCR will populate it
+  // Image added - clear file preview state (image preview is derived from imageArray)
   previewText.set(null);
-  previewSource.set("image");
   fileError.set(null);
 });
 
@@ -283,20 +300,18 @@ export function SmartTextInput(
   // Image array for ct-image-input binding
   const imageArray = Cell.of<ImageData[]>([]);
 
-  // Derive single image from array - this fixes the disconnection issue
-  const uploadedImage = derive(
-    imageArray,
-    (images: ImageData[]) => (images.length > 0 ? images[0] : null),
-  );
-
   // ===== OCR Processing =====
 
-  // Build OCR prompt only when we have an image
-  // Return undefined (not []) to prevent API call when no image
+  // Build OCR prompt directly using computed() - this ensures reactivity
+  // when the $images binding updates the imageArray Cell.
+  // Pattern: Match image-analysis.tsx which uses computed() to build content parts
   const ocrPrompt = computed(() => {
-    const image = uploadedImage.get();
+    const images = imageArray.get();
+    const image = images.length > 0 ? images[0] : null;
+
     if (!image || !image.data) {
-      return undefined; // No prompt = no OCR call
+      // Return undefined when no image - generateText will early-exit gracefully
+      return undefined;
     }
 
     return [
@@ -315,42 +330,74 @@ export function SmartTextInput(
     model: "anthropic:claude-sonnet-4-5",
   });
 
-  // When OCR completes, set the preview text
-  // Use requestHash to prevent race conditions - only accept results for current image
-  const _ocrWatcher = derive(
-    [ocr.result, ocr.pending, ocr.requestHash, uploadedImage] as const,
-    ([result, pending, _requestHash, image]) => {
-      // Only set preview if:
-      // 1. We have a result
-      // 2. Not pending (OCR finished)
-      // 3. We still have the image that triggered this OCR
-      // 4. Preview source is "image" (not overwritten by file upload)
-      if (result && !pending && image && previewSource.get() === "image") {
-        previewText.set(result);
-      }
-      return null;
-    },
-  );
-
   // ===== Computed State =====
+  // Use computed() for reactive transformations (not derive() with side effects)
 
-  const hasPreview = derive(
-    previewText,
-    (text: string | null) => text !== null && text !== "",
-  );
+  // Compute the effective preview text - either from file upload or OCR result
+  // IMPORTANT: Don't use .set() inside computed() - that's an anti-pattern!
+  // Instead, compute the display value directly from sources
+  const effectivePreviewText = computed(() => {
+    const images = imageArray.get();
+    const hasImages = images.length > 0;
+    const manualSource = previewSource.get();
+    // Determine effective source: "image" if images present, else manual source
+    const source = hasImages ? "image" : manualSource;
 
-  const isPending = derive(
-    [ocr.pending, uploadedImage] as const,
-    ([pending, image]) => Boolean(pending && image),
-  );
+    const filePreview = previewText.get();
+    const ocrResult = ocr.result;
+    const ocrPending = ocr.pending;
+    const image = images[0] ?? null;
+
+    // If we have a file upload preview, use it
+    if (source === "file" && filePreview) {
+      return filePreview;
+    }
+    // If we have an OCR result and it's done processing, use it
+    if (source === "image" && ocrResult && !ocrPending && image) {
+      return ocrResult as string;
+    }
+    return null;
+  });
+
+  // hasPreview checks if there's content to show (from file or OCR)
+  const hasPreview = computed(() => {
+    const images = imageArray.get();
+    const hasImages = images.length > 0;
+    const manualSource = previewSource.get();
+    // Determine effective source: "image" if images present, else manual source
+    const source = hasImages ? "image" : manualSource;
+
+    const filePreview = previewText.get();
+    const ocrResult = ocr.result;
+    const ocrPending = ocr.pending;
+    const image = images[0] ?? null;
+
+    if (source === "file" && filePreview) {
+      return true;
+    }
+    if (source === "image" && ocrResult && !ocrPending && image) {
+      return true;
+    }
+    return false;
+  });
+
+  const isPending = computed(() => {
+    const pending = ocr.pending;
+    const image = imageArray.get()[0] ?? null;
+    return Boolean(pending && image);
+  });
 
   // Only show error if there's an uploaded image (to avoid showing error for empty prompt)
-  const hasError = derive(
-    [ocr.error, uploadedImage] as const,
-    ([err, image]) => Boolean(err && image),
-  );
+  const hasError = computed(() => {
+    const err = ocr.error;
+    const image = imageArray.get()[0] ?? null;
+    return Boolean(err && image);
+  });
 
-  const errorMessage = derive(ocr.error, (err) => err ? String(err) : null);
+  const errorMessage = computed(() => {
+    const err = ocr.error;
+    return err ? String(err) : null;
+  });
 
   // ===== UI Components =====
 
@@ -367,10 +414,7 @@ export function SmartTextInput(
   );
 
   // File error display
-  const hasFileError = derive(
-    fileError,
-    (err: string | null) => err !== null,
-  );
+  const hasFileError = computed(() => fileError.get() !== null);
 
   const buttons = (
     <div
@@ -398,32 +442,21 @@ export function SmartTextInput(
       />
 
       {/* Image Upload Button */}
+      {/* Using $images binding like image-analysis.tsx - this handles data flow */}
+      {/* Handler only sets preview state flags, doesn't store image */}
       <ct-image-input
         $images={imageArray}
         maxImages={1}
         showPreview={false}
         maxSizeBytes={maxImageSizeBytes}
+        buttonText="📷 Add Photo"
+        variant="ghost"
+        size="sm"
         onct-change={handleImageChange({
           previewText,
-          previewSource,
           fileError,
         })}
-      >
-        <button
-          type="button"
-          style={{
-            padding: "4px 12px",
-            background: "transparent",
-            border: "1px solid #d1d5db",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontSize: "13px",
-            color: "#374151",
-          }}
-        >
-          📷 Scan Image
-        </button>
-      </ct-image-input>
+      />
     </div>
   );
 
@@ -551,8 +584,7 @@ export function SmartTextInput(
           >
             <span style={{ fontSize: "12px", color: "#047857" }}>
               {ifElse(
-                derive(previewSource, (s: "file" | "image" | null) =>
-                  s === "file"),
+                computed(() => previewSource.get() === "file" && imageArray.get().length === 0),
                 <span>📄 From file: {previewFileName}</span>,
                 <span>📷 Extracted from image</span>,
               )}
@@ -571,7 +603,7 @@ export function SmartTextInput(
               overflow: "auto",
             }}
           >
-            {previewText}
+            {effectivePreviewText}
           </div>
 
           <div
@@ -609,6 +641,8 @@ export function SmartTextInput(
                 previewText,
                 previewSource,
                 previewFileName,
+                uploadedImage: imageArray,
+                ocrResult: ocr.result,
               })}
               style={{
                 padding: "6px 12px",
