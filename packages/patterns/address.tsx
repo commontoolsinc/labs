@@ -28,7 +28,7 @@ export const MODULE_METADATA: ModuleMetadata = {
       description: "Address label (Home, Work, etc.)",
     },
   },
-  fieldMapping: ["street", "city", "state", "zip", "address"],
+  fieldMapping: ["street", "city", "state", "zip", "label"],
 };
 
 // ===== Types =====

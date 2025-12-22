@@ -126,7 +126,9 @@ export const TimingModule = recipe<TimingModuleInput, TimingModuleInput>(
             }}
           >
             <span style={{ fontSize: "14px", color: "#6b7280" }}>Total:</span>
-            <span style={{ fontSize: "18px", fontWeight: "600" }}>
+            <span
+              style={{ fontSize: "18px", fontWeight: "600", marginLeft: "4px" }}
+            >
               {displayText}
             </span>
           </div>
