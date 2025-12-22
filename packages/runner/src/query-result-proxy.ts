@@ -252,7 +252,7 @@ export function createQueryResultProxy<T>(
             if (!Array.isArray(newValue)) {
               throw new Error(
                 `Array operation failed - value is no longer an array after .${prop}() (now ${typeof newValue})\n` +
-                `help: ensure cell schema specifies array type, check for concurrent modifications`,
+                  `help: ensure cell schema specifies array type, check for concurrent modifications`,
               );
             }
 
