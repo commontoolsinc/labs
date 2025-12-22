@@ -846,6 +846,11 @@ const createSibling = handler<
 });
 
 // ===== The Record Pattern =====
+// Type for mentionable charms (matches backlinks-index.tsx)
+type MentionableCharm = {
+  [NAME]?: string;
+};
+
 const Record = pattern<RecordInput, RecordOutput>(
   ({ title, subCharms, trashedSubCharms }) => {
     // Local state

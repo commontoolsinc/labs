@@ -78,17 +78,21 @@ const FILTER_OPTIONS = [
 /** Check if a charm is a Record - uses subCharms as marker since #record isn't stored */
 function isRecord(charm: unknown): boolean {
   // Can't use #record because it's not in RecordOutput interface and isn't persisted
-  // Instead, check for subCharms array which IS a stored Record property
-  // NOTE: This function only works in lift/view context where direct property access works.
-  // In handler context (after event sanitization), use the pre-computed isRecord flag.
-  return Array.isArray((charm as any)?.subCharms);
+  // Instead, check for subCharms property which IS a stored Record property
+  // NOTE: Array.isArray() doesn't work on reactive proxies - it returns false even for arrays
+  // So we check for property existence and length instead
+  const subCharms = (charm as any)?.subCharms;
+  return subCharms !== undefined && subCharms !== null && typeof subCharms.length === "number";
 }
 
 /** Get module types from a record's subCharms */
 function getModuleTypes(charm: unknown): string[] {
   const subCharms = (charm as any)?.subCharms;
-  if (!Array.isArray(subCharms)) return [];
-  return subCharms.map((e: any) => e?.type).filter(Boolean);
+  // Use length check instead of Array.isArray() - reactive proxies don't pass Array.isArray
+  if (subCharms == null || typeof subCharms.length !== "number") return [];
+  // Convert to array if it's array-like (reactive proxy), then map
+  const arr = Array.from(subCharms as ArrayLike<unknown>);
+  return arr.map((e: any) => e?.type).filter(Boolean);
 }
 
 /** Get display name from a charm */
@@ -277,6 +281,10 @@ const addMember = handler<
   // reference whatever is at that position going forward, not the selected charm.
   const charm = mentionable.get()[charmIndex];
 
+  // Also get a Cell reference for navigating to the target's subCharms.
+  // We need .key() navigation to get writable Cell references for bidirectional linking.
+  const charmCell = mentionable.key(charmIndex);
+
   if (!charm) {
     console.warn("Charm not found at index", charmIndex);
     return;
@@ -309,9 +317,10 @@ const addMember = handler<
 
   if (bidirectional && parentRecord) {
     try {
-      // Navigate to the target charm's subCharms
-      // charm from .get()[index] should be a reactive proxy that supports property access
-      const targetSubCharms = (charm as any).subCharms || [];
+      // Navigate to the target charm's subCharms using Cell.key() for writable references.
+      // Property access on .get() values returns plain values, not Cells.
+      // We need actual Cell references to write the reverse link.
+      const targetSubCharms = charmCell.key("subCharms").get() || [];
 
       // Find the members module entry
       const membersEntryIndex = targetSubCharms.findIndex(
@@ -319,10 +328,13 @@ const addMember = handler<
       );
 
       if (membersEntryIndex >= 0) {
-        // Navigate to the members Cell through the subCharms path
-        // Since charm is a reactive proxy, we can navigate via property access
-        const membersEntry = targetSubCharms[membersEntryIndex];
-        targetMembersCell = membersEntry?.charm?.members as Cell<MemberEntry[]>;
+        // Navigate to the members Cell using .key() chain for a writable Cell reference.
+        // This is the correct pattern - property access gives values, .key() gives Cells.
+        targetMembersCell = charmCell
+          .key("subCharms")
+          .key(membersEntryIndex)
+          .key("charm")
+          .key("members") as Cell<MemberEntry[]>;
 
         const targetMembersList = targetMembersCell.get() || [];
 
