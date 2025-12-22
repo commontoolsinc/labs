@@ -31,6 +31,7 @@ const favoriteListSchema = {
   type: "array",
   items: favoriteEntrySchema,
 } as const satisfies JSONSchema;
+
 import { getRecipeEnvironment } from "../env.ts";
 
 const WISH_TSX_PATH = getRecipeEnvironment().apiUrl + "api/patterns/wish.tsx";
@@ -226,6 +227,18 @@ function resolveBase(
         ctx.tx,
       );
       return [{ cell: nowCell }];
+    }
+    case "#journal": {
+      // Journal always comes from the HOME space (user identity DID)
+      const userDID = ctx.runtime.userIdentityDID;
+      if (!userDID) {
+        throw new WishError("User identity DID not available for #journal");
+      }
+      // Use getHomeSpaceCell to ensure homeSpaceCellSchema is applied
+      // This schema defines the journal structure with proper asCell handling
+      const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+
+      return [{ cell: homeSpaceCell, pathPrefix: ["journal"] }];
     }
     default: {
       // Check if it's a well-known target

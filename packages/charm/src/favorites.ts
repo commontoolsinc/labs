@@ -3,6 +3,8 @@ import {
   type FavoriteList,
   favoriteListSchema,
 } from "@commontools/runner/schemas";
+import { type FavoriteList, favoriteListSchema } from "./manager.ts";
+import { addJournalEntry } from "./journal.ts";
 
 /**
  * Get cell description (schema as string) for tag-based search.
@@ -64,6 +66,7 @@ export async function addFavorite(
 
   const tag = getCellDescription(charm);
 
+  let wasAdded = false;
   await runtime.editWithRetry((tx) => {
     const favoritesWithTx = favorites.withTx(tx);
     const current = favoritesWithTx.get() || [];
@@ -74,9 +77,24 @@ export async function addFavorite(
     ) return;
 
     favoritesWithTx.push({ cell: charm, tag });
+    wasAdded = true;
   });
 
   await runtime.idle();
+
+  // Add journal entry if we actually favorited
+  if (wasAdded) {
+    try {
+      await addJournalEntry(
+        runtime,
+        "charm:favorited",
+        charm,
+        runtime.userIdentityDID,
+      );
+    } catch (err) {
+      console.error("Failed to add journal entry:", err);
+    }
+  }
 }
 
 /**
@@ -100,8 +118,23 @@ export async function removeFavorite(
     }
   });
 
-  // Only return true if tx succeeded and we actually removed something
-  return result.ok !== undefined && removed;
+  const wasRemoved = result.ok !== undefined && removed;
+
+  // Add journal entry if we actually unfavorited
+  if (wasRemoved) {
+    try {
+      await addJournalEntry(
+        runtime,
+        "charm:unfavorited",
+        charm,
+        runtime.userIdentityDID,
+      );
+    } catch (err) {
+      console.error("Failed to add journal entry:", err);
+    }
+  }
+
+  return wasRemoved;
 }
 
 /**

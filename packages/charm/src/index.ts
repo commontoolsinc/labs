@@ -5,6 +5,17 @@ export {
   isFavorite,
   removeFavorite,
 } from "./favorites.ts";
+export {
+  addJournalEntry,
+  getHomeJournal,
+  getRecentEntries,
+  type Journal,
+  type JournalEntry,
+  type JournalEventType,
+  journalEntrySchema,
+  journalSchema,
+  searchJournalByTag,
+} from "./journal.ts";
 export { searchCharms } from "./search.ts";
 export {
   castNewRecipe,

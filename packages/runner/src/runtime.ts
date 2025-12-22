@@ -119,6 +119,31 @@ export const homeSpaceCellSchema: JSONSchema = {
       },
       asCell: true,
     },
+    journal: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          timestamp: { type: "number" },
+          eventType: { type: "string" },
+          subject: { not: true, asCell: true },
+          snapshot: {
+            type: "object",
+            properties: {
+              name: { type: "string", default: "" },
+              schemaTag: { type: "string", default: "" },
+              valueExcerpt: { type: "string", default: "" },
+            },
+          },
+          narrative: { type: "string", default: "" },
+          tags: { type: "array", items: { type: "string" }, default: [] },
+          space: { type: "string" },
+        },
+        required: ["timestamp", "eventType", "space"],
+      },
+      default: [],
+      asCell: true,
+    },
   },
 } as JSONSchema;
 
@@ -135,6 +160,15 @@ export interface SpaceCellContents {
  */
 export interface HomeSpaceCellContents extends SpaceCellContents {
   favorites: Cell<{ cell: Cell<unknown>; tag: string }[]>;
+  journal: Cell<{
+    timestamp: number;
+    eventType: string;
+    subject?: Cell<unknown>;
+    snapshot?: { name?: string; schemaTag?: string; valueExcerpt?: string };
+    narrative?: string;
+    tags?: string[];
+    space: string;
+  }[]>;
 }
 
 /**
