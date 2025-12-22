@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { spy } from "@std/testing/mock";
 import "@commontools/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commontools/identity";
@@ -279,6 +280,48 @@ describe("Recipe Runner", () => {
     result.key("stream").send({ amount: 2 });
     value = await result.pull();
     expect(value).toMatchObject({ counter: { value: 3 } });
+  });
+
+  it("should propagate handler source location to scheduler via .name", async () => {
+    // Spy on addEventHandler to capture the handler passed to it
+    const addEventHandlerSpy = spy(runtime.scheduler, "addEventHandler");
+
+    const incHandler = handler<
+      { amount: number },
+      { counter: { value: number } }
+    >(
+      ({ amount }, { counter }) => {
+        counter.value += amount;
+      },
+      { proxy: true },
+    );
+
+    const incRecipe = recipe<{ counter: { value: number } }>(
+      "Handler source location test",
+      ({ counter }) => {
+        return { counter, stream: incHandler({ counter }) };
+      },
+    );
+
+    const resultCell = runtime.getCell<
+      { counter: { value: number }; stream: any }
+    >(space, "handler source location test", undefined, tx);
+    const result = runtime.run(tx, incRecipe, {
+      counter: { value: 0 },
+    }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    // Verify addEventHandler was called and the handler has .name set
+    expect(addEventHandlerSpy.calls.length).toBeGreaterThan(0);
+    const registeredHandler = addEventHandlerSpy.calls[0].args[0];
+
+    // The handler's .name should be set to handler:source_location (file:line:col)
+    expect(registeredHandler.name).toMatch(/^handler:.*recipes\.test\.ts:\d+:\d+$/);
+
+    addEventHandlerSpy.restore();
   });
 
   it("should execute recipes returned by handlers", async () => {

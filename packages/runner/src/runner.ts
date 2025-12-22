@@ -944,7 +944,7 @@ export class Runner {
       fn = module.implementation as (inputs: any) => any;
     }
 
-    const src = (fn as { src?: string }).src;
+    const src = fn.name || undefined;
 
     if (module.wrapper && module.wrapper in moduleWrappers) {
       fn = moduleWrappers[module.wrapper](fn);
@@ -1091,8 +1091,13 @@ export class Runner {
         }
       };
 
+      if (src) {
+        Object.defineProperty(handler, "name", {
+          value: `handler:${src}`,
+          configurable: true,
+        });
+      }
       const wrappedHandler = Object.assign(handler, {
-        src,
         reads,
         writes,
         module,
@@ -1239,8 +1244,13 @@ export class Runner {
         }
       };
 
+      if (src) {
+        Object.defineProperty(action, "name", {
+          value: `action:${src}`,
+          configurable: true,
+        });
+      }
       const wrappedAction = Object.assign(action, {
-        src,
         reads,
         writes,
         module,
