@@ -351,29 +351,178 @@ type Commit<Subject extends MemorySpace> = {
 }
 ```
 
-### 5.6 Client State Model: Nursery and Heap
+### 5.6 Transaction Structure (Current Implementation)
+
+The current implementation uses strict CAS (compare-and-swap) semantics at the
+entity level:
+
+```typescript
+type Transaction = {
+  cmd: "/memory/transact";
+  sub: MemorySpace; // Space DID
+  args: {
+    changes: Changes;
+  };
+};
+
+type Changes = {
+  [of: URI]: {
+    [the: MIME]: {
+      [cause: CauseString]: Assert | Retract | Claim;
+    };
+  };
+};
+
+type Assert = { is: JSONValue }; // Add or update
+type Retract = { is?: undefined }; // Delete
+type Claim = true; // Verify without modifying
+```
+
+**The Claim variant** is key for consistency: it validates that a fact's current
+state matches the specified cause *without modifying it*. This enables
+STM-style (Software Transactional Memory) transactions where you list all facts
+you read to produce an update, ensuring none have changed.
+
+```typescript
+// Example: Update user age, but only if name hasn't changed
+const transaction = {
+  changes: {
+    "user:alice": {
+      "application/json": {
+        // Claim: verify name fact still has this cause (read dependency)
+        "baedrei...nameHash": true,
+        // Assert: update age fact
+        "baedrei...ageHash": { is: { age: 31 } },
+      },
+    },
+  },
+};
+```
+
+**Relationship to activity tracking:** The `Claim` variant serves transaction
+validation (CAS on reads), while activity tracking in commits (see 6.2) serves
+scheduling and provenance. Current implementation uses Claims; future path-level
+activity enables finer-grained invalidation.
+
+### 5.7 Concurrent Transaction Handling (Current CAS Model)
+
+The current implementation uses strict CAS semantics. When concurrent updates
+target the same entity, only one succeeds:
+
+```
+Timeline:
+─────────────────────────────────────────────────────────────────────
+
+Client A                    Server                    Client B
+    │                          │                          │
+    │  Read user:alice         │                          │
+    │  ───────────────────────>│                          │
+    │  {name: 'Alice'}         │                          │
+    │  cause: H1               │                          │
+    │  <───────────────────────│                          │
+    │                          │                          │
+    │                          │    Read user:alice       │
+    │                          │<─────────────────────────│
+    │                          │    {name: 'Alice'}       │
+    │                          │    cause: H1             │
+    │                          │─────────────────────────>│
+    │                          │                          │
+    │  Update: add job         │                          │
+    │  cause: H1               │                          │
+    │  ───────────────────────>│                          │
+    │  ✅ Success              │                          │
+    │  <───────────────────────│                          │
+    │                          │                          │
+    │                          │    Update: add age       │
+    │                          │    cause: H1             │
+    │                          │<─────────────────────────│
+    │                          │    ❌ Rejected           │
+    │                          │    (cause mismatch)      │
+    │                          │─────────────────────────>│
+    │                          │                          │
+    │                          │    Re-read user:alice    │
+    │                          │<─────────────────────────│
+    │                          │    {name: 'Alice',       │
+    │                          │     job: 'Engineer'}     │
+    │                          │    cause: H2             │
+    │                          │─────────────────────────>│
+    │                          │                          │
+    │                          │    Update: add age       │
+    │                          │    cause: H2             │
+    │                          │<─────────────────────────│
+    │                          │    ✅ Success            │
+    │                          │─────────────────────────>│
+```
+
+**Key points:**
+- Each change must reference the current `cause` hash
+- If cause doesn't match current state → transaction rejected
+- Client must re-read and retry with updated cause
+- Non-conflicting updates (different entities) proceed independently
+
+### 5.8 Client State: Nursery and Heap (Current CAS Model)
 
 Clients maintain two areas for tracking state:
 
-- **Heap**: Confirmed commits and their outputs (have real `since` values)
-- **Nursery**: Pending/unconfirmed commits and outputs (no `since` yet)
+- **Heap**: Confirmed state from server (has real `cause` hashes)
+- **Nursery**: Pending/unconfirmed writes (optimistic, may be rejected)
 
-A commit can reference data from both:
+With current CAS semantics, the flow is:
 
 ```
-C1 sent → nursery
-C2 created (refs C1 from nursery) → sent → nursery
-C1 confirmed → moves to heap with since=10
-C3 created (refs C2 from nursery) → sent → nursery
-C4 created (refs C1@since=10 from heap, refs C3 from nursery) → sent
+1. Client reads entity from heap (cause: H1)
+2. Client computes update locally → nursery
+3. Client sends transaction with cause: H1
+4. If accepted: nursery state moves to heap
+5. If rejected (cause mismatch): discard nursery, re-read, retry
 ```
 
-Commits are sent incrementally. If C2 fails, C3 also fails (dependency), but C1
-may already be committed.
+**Stacked pending commits** can reference nursery state:
 
-### 5.7 Client Commit Structure
+```
+C1 sent → nursery (writes X with cause H1)
+C2 created (reads X from nursery) → sent → nursery
+C1 confirmed → X moves to heap
+C2 depends on C1's success
+```
 
-A client commit explicitly distinguishes confirmed vs pending references:
+If C1 fails (cause mismatch), C2 also fails. The client must re-read and rebuild
+both transactions.
+
+### 5.9 Server Processing (Current CAS Model)
+
+When the server processes a transaction:
+
+1. **Validate all cause references**: Each must match current state
+2. **If any mismatch**: Reject entire transaction
+3. **If all match**: Apply atomically, assign next `since`, record commit
+
+```typescript
+// Server validation pseudocode
+for (const [of, types] of Object.entries(changes)) {
+  for (const [the, revisions] of Object.entries(types)) {
+    for (const [cause, change] of Object.entries(revisions)) {
+      const current = getCurrentFact(of, the);
+      if (hash(current) !== cause) {
+        return { error: "cause_mismatch", of, the, expected: cause };
+      }
+    }
+  }
+}
+// All causes match - apply transaction atomically
+```
+
+---
+
+## 5.10 Future: Enhanced Commit Model
+
+The following sections describe planned enhancements to support offline
+operation, stacked commits, and relaxed validation. These build on the current
+CAS model.
+
+### 5.10.1 Client Commit Structure (Enhanced)
+
+Future commits explicitly track confirmed vs pending references:
 
 ```typescript
 interface ClientCommit {
@@ -382,37 +531,34 @@ interface ClientCommit {
     confirmed: Array<{
       address: Address;
       hash: Hash;
-      since: number; // Real, known
+      since: number;
     }>;
 
     // From nursery - pending, referenced by commit hash
     pending: Array<{
       address: Address;
-      hash: Hash; // Provisional hash (may change on resolution)
-      fromCommit: Reference<Commit>; // Which pending commit produced this
+      hash: Hash; // Provisional (may change)
+      fromCommit: Reference<Commit>;
     }>;
   };
 
   writes: Array<{
     address: Address;
     value: JSONValue;
-    cause: Hash; // May be provisional if from nursery
+    cause: Hash;
   }>;
 
-  // Computation metadata
   codeCID?: Reference<CodeBundle>;
   activity?: ReceiptActivity;
 }
 ```
 
-### 5.8 Commit Validation Rules
+### 5.10.2 Relaxed Validation Rules (Future)
 
-**Relaxed validation** (compared to strict CAS on everything):
+**Relaxed validation** allows `since`-based comparison instead of strict CAS:
 
-1. **For reads**: Must record hash AND `since` of what was read
-2. **For writes**:
-   - If write depends on prior value → need exact cause hash (CAS)
-   - If write is derived/computed → only need "same or newer" on inputs
+1. **For reads**: Record hash AND `since` of what was read
+2. **For writes**: CAS only when causally dependent on prior value
 
 **Validation rule:**
 
@@ -422,70 +568,25 @@ A commit is valid if for all overlapping entities:
 ```
 
 This means: "my inputs are at least as fresh as whatever the current state was
-based on."
+based on." Freshness is determined by `since`, not hash ancestry.
 
-**Why `since` not hash chains?**
+### 5.10.3 Commit Log Entry Structure (Future)
 
-Different clients may skip intermediate states, so causal hash chains might
-diverge. But `since` is monotonically increasing and comparable across all
-commits. Freshness is determined by `since`, not by hash ancestry.
-
-### 5.9 Commit Log Entry Structure
-
-The commit log preserves both the client's original submission and the server's
-resolution:
+The commit log preserves both original submission and server resolution:
 
 ```typescript
 interface CommitLogEntry {
-  // Original client submission (signed, preserved exactly)
   original: SignedClientCommit;
-
-  // Server's resolution
   resolution: {
-    since: number; // Assigned sequence number
-
-    // How pending refs were resolved
-    commitResolutions: Map<Reference<Commit>, number>; // commit ref → since
-
-    // Hash mappings where provisional ≠ final (sparse, only differences)
+    since: number;
+    commitResolutions: Map<Reference<Commit>, number>;
     hashMappings?: Map<Hash, Hash>; // provisional → final
   };
 }
 ```
 
-**Why hashes can differ:**
-
-The hash of a fact includes its `cause`. If the cause was provisional (from
-nursery), the final hash changes when the cause resolves:
-
-```
-C1 writes X with provisional cause → X@H1_provisional
-C2 reads X@H1_provisional from nursery
-C1 confirms, cause chain resolves → X@H1_final (different!)
-```
-
-**Verification can check:**
-
-1. **Client's computation**: Signature valid, read invariants satisfied at
-   claimed `since`, code identity matches
-2. **Server's resolution**: `since` monotonic, hash mappings consistent with log
-3. **Cross-check**: Resolution doesn't contradict client's claims
-
-This gives a complete audit trail: client's view → server's resolution → final
-state.
-
-### 5.10 Server Processing
-
-When the server processes a commit:
-
-1. **Confirmed reads**: Validate directly against `since`
-2. **Pending reads**: Look up `fromCommit` → get its assigned `since` → validate
-3. **Assign `since`**: Next sequence number
-4. **Resolve hashes**: Compute final hashes, record mappings where different
-5. **Store**: Both original and resolution in commit log
-
-If validation fails, the commit is rejected. Dependent commits (referencing this
-one from nursery) will also fail.
+**Why hashes can differ:** The hash of a fact includes its `cause`. If the cause
+was provisional (from nursery), the final hash changes when resolved.
 
 ### 5.11 Document → Commit Provenance
 
@@ -577,9 +678,139 @@ This enables O(log n) lookup of any commit by its `since` value.
 
 ---
 
-## 6. Receipt Object (Future Enhancement)
+## 6. Capabilities API
 
-### 6.1 UnsignedReceipt
+The Memory protocol defines capabilities as UCAN invocations. Each capability
+requires a valid delegation chain rooted in the space's `did:key`.
+
+### 6.1 `/memory/transact`
+
+Atomically assert, retract, or claim facts in a space.
+
+**Request:**
+
+```typescript
+type TransactInvocation = {
+  iss: DID; // Issuer (who is invoking)
+  sub: MemorySpace; // Subject (space DID)
+  cmd: "/memory/transact";
+  args: {
+    changes: Changes;
+  };
+  prf: Reference<Delegation>[]; // Proof chain to space owner
+  exp: number; // Expiration
+  nonce: Bytes;
+};
+```
+
+**Processing:**
+
+1. Verify UCAN delegation chain to space DID
+2. Validate all cause references (CAS)
+3. Apply all changes atomically or reject entirely
+4. Record commit in transaction log
+5. Return success with new `since` value, or error
+
+**Response:**
+
+```typescript
+type TransactResult =
+  | { ok: { since: number } }
+  | { error: "cause_mismatch"; of: URI; the: MIME; expected: Hash }
+  | { error: "unauthorized" };
+```
+
+### 6.2 `/memory/query`
+
+Retrieve facts from a space, optionally at a specific logical time.
+
+**Request:**
+
+```typescript
+type QueryInvocation = {
+  iss: DID;
+  sub: MemorySpace;
+  cmd: "/memory/query";
+  args: {
+    select: Selector;
+    since?: number; // Optional: only facts after this time
+  };
+  prf: Reference<Delegation>[];
+  exp: number;
+  nonce: Bytes;
+};
+
+type Selector = {
+  [of: URI]: {
+    [the: MIME]: {
+      [cause: CauseString]: { is?: {} }; // Empty object = include value
+    };
+  };
+};
+```
+
+**Wildcards:** The RFC uses `'_'` to match any value. For example:
+- `{ "_": { "_": {} } }` - all facts
+- `{ "user:alice": { "_": {} } }` - all facts for user:alice
+- `{ "_": { "application/json": {} } }` - all JSON facts
+
+**Response:**
+
+```typescript
+type QueryResult = {
+  ok: {
+    facts: FactSelection;
+    commit: Commit; // The commit at query time
+    since: number; // Logical time of snapshot
+  };
+};
+```
+
+All results represent a consistent snapshot at a specific `since` value.
+
+### 6.3 `/memory/subscribe`
+
+Receive push-based updates when facts change.
+
+**Request:**
+
+```typescript
+type SubscribeInvocation = {
+  iss: DID;
+  sub: MemorySpace;
+  cmd: "/memory/subscribe";
+  args: {
+    select: Selector;
+    since?: number; // Start from this logical time
+  };
+  prf: Reference<Delegation>[];
+  exp: number;
+  nonce: Bytes;
+};
+```
+
+**Updates pushed to client:**
+
+```typescript
+type SubscriptionUpdate = {
+  facts: FactSelection; // Changed facts matching selector
+  commit: Commit; // The commit that made these changes
+  since: number; // New logical time
+};
+```
+
+**Key properties:**
+
+- Push-based complement to poll-based `/memory/query`
+- Reduces latency vs polling
+- Enables reactive applications and real-time replication
+- Subscription includes producing commit for provenance
+
+---
+
+## 7. Receipt Object (Future Enhancement)
+
+### 7.1 UnsignedReceipt
 
 The receipt structure extends the current `Fact` model with computation
 metadata:
@@ -618,7 +849,7 @@ interface UnsignedReceipt {
 }
 ```
 
-### 6.2 Address-Level Tracking
+### 7.2 Address-Level Tracking
 
 The receipt SHOULD include path-level read/write tracking:
 
@@ -642,9 +873,9 @@ This enables:
 
 ---
 
-## 7. Append-Only Log
+## 8. Append-Only Log
 
-### 7.1 Mandatory Global Log
+### 8.1 Mandatory Global Log
 
 All facts MUST be included in a **single append-only log** maintained by the
 server (Space).
@@ -654,7 +885,7 @@ The log provides:
 - Efficient inclusion proofs
 - A global consistency anchor for time, authorization, and delegation state
 
-### 7.2 Server Role
+### 8.2 Server Role
 
 The server's role is **intentionally constrained**: it establishes order and
 publishes checkpoints. It does not decide who is authorized or whether a fact is
@@ -663,7 +894,7 @@ history.
 
 This separation is fundamental: **servers order but do not authorize.**
 
-### 7.3 Storage Schema
+### 8.3 Storage Schema
 
 Current implementation uses SQLite:
 
@@ -693,7 +924,7 @@ CREATE TABLE memory (
 );
 ```
 
-### 7.4 Why Ordering Matters
+### 8.4 Why Ordering Matters
 
 Receipts gain much of their power from ordering. Authorization changes over
 time. Delegations are granted and revoked. Policies evolve. By anchoring each
@@ -709,9 +940,9 @@ against which claims can be evaluated.
 
 ---
 
-## 8. Authorization Emerges from State
+## 9. Authorization Emerges from State
 
-### 8.1 The Problem with External Authorization
+### 9.1 The Problem with External Authorization
 
 In most systems, authorization floats above the system as a separate concern—
 configuration files, database tables hidden behind an API, or out-of-band
@@ -721,7 +952,7 @@ settings. This creates several problems:
 - Verifying historical actions requires institutional memory
 - Retroactive policy changes can rewrite the meaning of past actions
 
-### 8.2 ACLs as Evolving State
+### 9.2 ACLs as Evolving State
 
 In the CT Protocol, authorization does not float above the system. **It lives
 _inside_ the same historical record as everything else.**
@@ -747,7 +978,7 @@ This design has two consequences:
    state binds itself to the ACL that existed _at the moment it was appended to
    the log_.
 
-### 8.3 Authorization at Commit Time
+### 9.3 Authorization at Commit Time
 
 This notion—_authorization at commit time_—is central. When verifying a
 historical action, the CT Protocol does not ask whether the signer is authorized
@@ -757,13 +988,13 @@ The answer is determined mechanically by replaying facts in order. There is no
 need to consult current configuration, no ambiguity about retroactive policy
 changes, and no reliance on institutional memory.
 
-### 8.4 Genesis Trust
+### 9.4 Genesis Trust
 
 - Each space is itself a `did:key`
 - The **initial commit** for a space establishes the root of trust
 - For full trust anchoring, the genesis commit SHOULD be signed by the space DID
 
-### 8.5 Verification of Authorization
+### 9.5 Verification of Authorization
 
 To verify a fact `F`:
 
@@ -778,16 +1009,16 @@ Authorization is therefore **state-based**, not server-asserted.
 
 ---
 
-## 9. Contextual Flow Control (CFC)
+## 10. Contextual Flow Control (CFC)
 
-### 9.1 Beyond Access Control
+### 10.1 Beyond Access Control
 
 Traditional access control answers the question "who may read or write this
 resource?" but it is largely silent on what happens _after_ access is granted.
 Once computation is treated as a first-class event, the question of _policy_
 becomes unavoidable.
 
-### 9.2 What is CFC?
+### 10.2 What is CFC?
 
 **Contextual Flow Control (CFC)** is an opinionated application of Information
 Flow Control (IFC), aligned with the idea of _contextual integrity_: data should
@@ -797,7 +1028,7 @@ CFC treats external inputs—including those produced by AI models—as **untrus
 by default**, requiring explicit policy to allow them to influence
 higher-integrity state.
 
-### 9.3 Labels
+### 10.3 Labels
 
 Inputs and outputs carry labels that describe confidentiality and integrity
 constraints:
@@ -813,7 +1044,7 @@ type Labels = {
 };
 ```
 
-### 9.4 Policy as Content-Addressed Artifact
+### 10.4 Policy as Content-Addressed Artifact
 
 Policies are themselves content-addressed and referenced by receipts. A
 computation does not merely claim compliance with a policy; **it commits to a
@@ -821,9 +1052,9 @@ specific, immutable policy definition.**
 
 ---
 
-## 10. Policy Commitment vs Policy Enforcement
+## 11. Policy Commitment vs Policy Enforcement
 
-### 10.1 The Distinction
+### 11.1 The Distinction
 
 **Policy commitment** records that a computation declared its intent to operate
 under a particular policy. This alone is valuable:
@@ -835,7 +1066,7 @@ under a particular policy. This alone is valuable:
 **Policy enforcement** concerns evidence. It asks whether the rules were
 mechanically applied during execution.
 
-### 10.2 Why the Distinction Matters
+### 11.2 Why the Distinction Matters
 
 The CT Protocol does not force a single answer. A system can choose to accept
 commitment alone, or it can require proof of enforcement, depending on context.
@@ -843,7 +1074,7 @@ commitment alone, or it can require proof of enforcement, depending on context.
 By separating declaration from demonstration, the CT Protocol avoids the false
 dichotomy between blind trust and maximal proof.
 
-### 10.3 Trusted Execution Environments (TEEs)
+### 11.3 Trusted Execution Environments (TEEs)
 
 When enforcement evidence is required, TEEs can attest that specific code ran in
 a measured environment. The attestation links:
@@ -857,14 +1088,14 @@ everything else rests.
 
 ---
 
-## 11. Trust Profiles
+## 12. Trust Profiles
 
-### 11.1 The Problem
+### 12.1 The Problem
 
 Different audiences mean different things when they say they "trust" an
 artifact. Trust profiles provide a vocabulary for precise communication.
 
-### 11.2 Profile: Existence & Ordering
+### 12.2 Profile: Existence & Ordering
 
 **Checks:** Receipt signature, log inclusion
 
@@ -872,40 +1103,40 @@ artifact. Trust profiles provide a vocabulary for precise communication.
 
 **Non-guarantees:** Authorization, correctness, policy compliance
 
-### 11.3 Profile: Authorized State Update
+### 12.3 Profile: Authorized State Update
 
 **Checks:** Signature, log inclusion, ACL verification
 
 **Guarantees:** The signer was authorized at commit time
 
-### 11.4 Profile: Provenance-Complete Output
+### 12.4 Profile: Provenance-Complete Output
 
 **Checks:** Authorized + verification of all `inputRefs`
 
 **Guarantees:** Output is transitively derived from referenced inputs
 
-### 11.5 Profile: Policy-Committed Computation
+### 12.5 Profile: Policy-Committed Computation
 
 **Checks:** Provenance + presence of CFC commitments
 
 **Guarantees:** The computation committed to a specific CFC policy
 
-### 11.6 Profile: Policy-Enforced Computation
+### 12.6 Profile: Policy-Enforced Computation
 
 **Checks:** Policy-Committed + TEE attestation verification
 
 **Guarantees:** The computation mechanically enforced CFC rules
 
-### 11.7 Profile Selection
+### 12.7 Profile Selection
 
 Applications SHOULD explicitly state which trust profile they require.
 Verifiers MUST NOT assume guarantees beyond the verified profile.
 
 ---
 
-## 12. Trusted UI and Interaction Integrity
+## 13. Trusted UI and Interaction Integrity
 
-### 12.1 Why UI Is Part of the Trusted Computing Base
+### 13.1 Why UI Is Part of the Trusted Computing Base
 
 Many failures of trust occur at the boundary between system and human. Messages
 are spoofed, prompts injected, consent manufactured.
@@ -914,7 +1145,7 @@ The CT Protocol addresses this by extending verifiability to **interaction
 itself**: if user actions materially affect system behavior, then those actions
 belong in the provenance chain.
 
-### 12.2 Trusted Input UI
+### 13.2 Trusted Input UI
 
 A **Trusted Input UI** is a measured interface whose code identity is known.
 When a user types, clicks, or submits, the event is captured as an input with
@@ -926,7 +1157,7 @@ This reframes familiar acts as verifiable events. A receipt can support:
 
 The goal is not surveillance, but provenance.
 
-### 12.3 Trusted Render UI
+### 13.3 Trusted Render UI
 
 A **Trusted Render UI** verifies receipts before displaying content:
 
@@ -936,9 +1167,9 @@ A **Trusted Render UI** verifies receipts before displaying content:
 
 ---
 
-## 13. Verifiable Credentials
+## 14. Verifiable Credentials
 
-### 13.1 From Receipts to Claims
+### 14.1 From Receipts to Claims
 
 Receipts are precise but low-level. **Verifiable Credentials (VCs)** summarize
 them into portable objects.
@@ -946,12 +1177,12 @@ them into portable objects.
 A VC does not replace receipts; it packages one or more receipts with inclusion
 proofs, policy identifiers, and optional enforcement evidence.
 
-### 13.2 The Critical Constraint
+### 14.2 The Critical Constraint
 
 A CT Protocol–backed credential must not invent facts. Every assertion must be
 reducible to receipts and verification steps that can be replayed.
 
-### 13.3 Replayable Verification
+### 14.3 Replayable Verification
 
 A verifier need not trust the issuer's word. Given the credential, the verifier
 can extract referenced receipts, check signatures, confirm log inclusion, and
@@ -959,20 +1190,20 @@ verify policies.
 
 ---
 
-## 14. Latest Entity Map (Optional)
+## 15. Latest Entity Map (Optional)
 
-### 14.1 Purpose
+### 15.1 Purpose
 
 The **Latest Entity Map** enables efficient, verifiable answers to:
 
 > "What is the latest state for entity E _as of checkpoint C_?"
 
-### 14.2 Data Structure
+### 15.2 Data Structure
 
 - Implemented as a **Sparse Merkle Tree (SMT)** keyed by `H(of)`
 - Each leaf commits to the latest known fact for that entity
 
-### 14.3 Checkpoint
+### 15.3 Checkpoint
 
 ```typescript
 interface UnsignedCheckpoint {
@@ -986,15 +1217,15 @@ interface UnsignedCheckpoint {
 
 ---
 
-## 15. Domain and DID Bootstrap (DNS + did:web)
+## 16. Domain and DID Bootstrap (DNS + did:web)
 
-### 15.1 Three Identities
+### 16.1 Three Identities
 
 - **Space DID** (`did:key`): Root authority for ACL and authorization
 - **Server DID** (`did:web`): Represents the server hosting the log
 - **Domain** (DNS name): Human-meaningful handle for discovery only
 
-### 15.2 Domain → Space Binding
+### 16.2 Domain → Space Binding
 
 ```
 _ct.example.com TXT "did=did:key:z6M...SPACE..."
@@ -1005,19 +1236,19 @@ Or:
 https://example.com/.well-known/ct-space-did
 ```
 
-### 15.3 Security Properties
+### 16.3 Security Properties
 
 - **No naming trust escalation:** Domain bindings do not grant write authority
 - **Auditability:** Historical facts remain valid even if bindings change
 
 ---
 
-## 16. Philosophy: Dissolving Unnecessary Authority
+## 17. Philosophy: Dissolving Unnecessary Authority
 
 The CT Protocol is not neutral about power. It begins from the observation that
 many failures of trust are also failures of balance.
 
-### 16.1 The Shift
+### 17.1 The Shift
 
 Instead of replacing one authority with another, the CT Protocol seeks to
 **dissolve unnecessary authority** by making evidence portable and verification
@@ -1031,7 +1262,7 @@ inspect:
 - An issuer can package claims without inflating their scope
 - A user can carry evidence without depending on a platform's memory
 
-### 16.2 What This Enables
+### 17.2 What This Enables
 
 Authority becomes specific, bounded, and accountable to structure. No component
 is asked to be omniscient. No component is allowed to be unquestionable.
