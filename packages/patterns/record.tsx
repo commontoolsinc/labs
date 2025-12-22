@@ -24,6 +24,7 @@ import {
   str,
   toSchema,
   UI,
+  wish,
 } from "commontools";
 import {
   createSubCharm,
@@ -379,11 +380,21 @@ const createSibling = handler<
 });
 
 // ===== The Record Pattern =====
+// Type for mentionable charms (matches backlinks-index.tsx)
+type MentionableCharm = {
+  [NAME]?: string;
+};
+
 const Record = pattern<RecordInput, RecordOutput>(
   ({ title, subCharms, trashedSubCharms }) => {
     // Local state
     const selectedAddType = Cell.of<string>("");
     const trashExpanded = Cell.of(false);
+
+    // Get mentionable charms at pattern level to pass to MembersModule
+    // wish("#mentionable") resolves to spaceCell.defaultPattern.backlinksIndex.mentionable
+    // This is called at pattern level (not inside recipe) to ensure proper context
+    const mentionable = wish<MentionableCharm[]>("#mentionable");
 
     // Create Record pattern JSON for wiki-links in Notes
     // Using computed() defers evaluation until render time, avoiding circular dependency
