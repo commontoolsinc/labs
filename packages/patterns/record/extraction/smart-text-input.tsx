@@ -27,7 +27,6 @@
 import {
   Cell,
   computed,
-  derive,
   generateText,
   handler,
   ifElse,
@@ -201,7 +200,14 @@ const handleCommitPreview = handler<
 >(
   (
     _event,
-    { $value, previewText, previewSource, previewFileName, uploadedImage, ocrResult },
+    {
+      $value,
+      previewText,
+      previewSource,
+      previewFileName,
+      uploadedImage,
+      ocrResult,
+    },
   ) => {
     const hasImage = uploadedImage.get().length > 0;
     const fileSource = previewSource.get() === "file";
