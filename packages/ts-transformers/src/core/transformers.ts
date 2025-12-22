@@ -3,12 +3,30 @@ import { TransformationContext } from "./mod.ts";
 
 export type TransformMode = "transform" | "error";
 
+/**
+ * Hints for schema generation that override default behavior.
+ * Used to communicate access patterns (like array-property-only access)
+ * from capture analysis to schema generation.
+ */
+export interface SchemaHint {
+  /** Override for array items schema (e.g., false for items: false) */
+  readonly items?: unknown;
+}
+
+/**
+ * Registry for passing schema hints between transformer stages.
+ * Keyed by TypeNode (unique per usage) to avoid conflicts when the same
+ * Type is used in multiple places with different access patterns.
+ */
+export type SchemaHints = WeakMap<ts.Node, SchemaHint>;
+
 export interface TransformationOptions {
   readonly mode?: TransformMode;
   readonly debug?: boolean;
   readonly logger?: (message: string) => void;
   readonly typeRegistry?: TypeRegistry;
   readonly mapCallbackRegistry?: WeakSet<ts.Node>;
+  readonly schemaHints?: SchemaHints;
 }
 
 export interface TransformationDiagnostic {

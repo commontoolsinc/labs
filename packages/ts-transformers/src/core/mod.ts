@@ -1,6 +1,8 @@
 export { TransformationContext } from "./context.ts";
 export type {
   DiagnosticInput,
+  SchemaHint,
+  SchemaHints,
   TransformationDiagnostic,
   TransformationOptions,
   TransformMode,
