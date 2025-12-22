@@ -430,6 +430,56 @@ export class Runner {
         recipe,
       );
     }
+
+    // CT-1135: Subscribe to process cell TYPE changes for hot-reload
+    // When another client (e.g., CLI via `ct charm setsrc`) updates the recipe,
+    // this subscription detects the change and restarts the charm.
+    const currentRecipeId = processCell.withTx(tx).key(TYPE).getRaw({
+      meta: ignoreReadForScheduling,
+    });
+    const processTypeCell = processCell.key(TYPE);
+
+    const recipeChangeAction: Action = (actionTx) => {
+      const newRecipeId = processTypeCell.withTx(actionTx).getRaw({
+        meta: ignoreReadForScheduling,
+      });
+
+      if (newRecipeId && newRecipeId !== currentRecipeId) {
+        logger.info("recipe-hot-reload", () => [
+          `Recipe changed for ${key}: ${currentRecipeId} -> ${newRecipeId}`,
+          "Triggering restart...",
+        ]);
+
+        // Stop the current charm
+        this.stop(resultCell);
+
+        // Restart with the new recipe on next tick to allow sync to complete
+        queueMicrotask(async () => {
+          try {
+            const newRecipe = await this.runtime.recipeManager.loadRecipe(
+              newRecipeId as string,
+              resultCell.space,
+            );
+            if (newRecipe) {
+              await this.runtime.runSynced(resultCell, newRecipe);
+            }
+          } catch (error) {
+            logger.error(
+              "recipe-hot-reload",
+              `Failed to restart charm after recipe change: ${error}`,
+            );
+          }
+        });
+      }
+    };
+
+    addCancel(
+      this.runtime.scheduler.subscribe(
+        recipeChangeAction,
+        { reads: [processTypeCell.getAsNormalizedFullLink()], writes: [] },
+        false, // Don't run immediately - only on changes
+      ),
+    );
   }
 
   /**
