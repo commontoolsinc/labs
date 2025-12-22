@@ -67,6 +67,10 @@ export class Runner {
   // Map whose key is the result cell's full key, and whose values are the
   // recipes as strings
   private resultRecipeCache = new Map<`${MemorySpace}/${URI}`, string>();
+  // CT-1135: Separate cancel map for TYPE watchers that persist across restarts
+  private typeWatcherCancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
+  // CT-1135: Track charms currently reloading to prevent race conditions
+  private reloadingCharms = new Set<`${MemorySpace}/${URI}`>();
 
   constructor(readonly runtime: Runtime) {
     this.runtime.storageManager.subscribe(this.createStorageSubscription());
@@ -434,52 +438,105 @@ export class Runner {
     // CT-1135: Subscribe to process cell TYPE changes for hot-reload
     // When another client (e.g., CLI via `ct charm setsrc`) updates the recipe,
     // this subscription detects the change and restarts the charm.
-    const currentRecipeId = processCell.withTx(tx).key(TYPE).getRaw({
-      meta: ignoreReadForScheduling,
-    });
+    // NOTE: This subscription is stored separately (not in cancel group) so it
+    // persists across stop/start cycles and can trigger subsequent reloads.
+    this.setupTypeWatcher(key, processCell, resultCell, tx);
+  }
+
+  /**
+   * CT-1135: Set up a TYPE watcher for hot-reload functionality.
+   * This watcher persists across charm restarts to enable multiple hot-reloads.
+   */
+  private setupTypeWatcher(
+    key: `${MemorySpace}/${URI}`,
+    processCell: Cell<any>,
+    resultCell: Cell<any>,
+    tx: IExtendedStorageTransaction | undefined,
+  ): void {
+    // Cancel any existing watcher for this charm (prevents stacking)
+    const existingCancel = this.typeWatcherCancels.get(key);
+    if (existingCancel) {
+      existingCancel();
+      this.typeWatcherCancels.delete(key);
+    }
+
+    // Use a mutable ref so it updates after each reload
+    const currentRecipeIdRef = {
+      value: processCell.withTx(tx).key(TYPE).getRaw({
+        meta: ignoreReadForScheduling,
+      }) as string | undefined,
+    };
     const processTypeCell = processCell.key(TYPE);
 
     const recipeChangeAction: Action = (actionTx) => {
       const newRecipeId = processTypeCell.withTx(actionTx).getRaw({
         meta: ignoreReadForScheduling,
-      });
+      }) as string | undefined;
 
-      if (newRecipeId && newRecipeId !== currentRecipeId) {
-        logger.info("recipe-hot-reload", () => [
-          `Recipe changed for ${key}: ${currentRecipeId} -> ${newRecipeId}`,
-          "Triggering restart...",
-        ]);
+      // Guard: Skip if already reloading or recipe hasn't actually changed
+      if (
+        this.reloadingCharms.has(key) ||
+        !newRecipeId ||
+        newRecipeId === currentRecipeIdRef.value
+      ) {
+        return;
+      }
 
-        // Stop the current charm
-        this.stop(resultCell);
+      logger.info("recipe-hot-reload", () => [
+        `Recipe changed for ${key}: ${currentRecipeIdRef.value} -> ${newRecipeId}`,
+        "Triggering restart...",
+      ]);
 
-        // Restart with the new recipe on next tick to allow sync to complete
-        queueMicrotask(async () => {
-          try {
-            const newRecipe = await this.runtime.recipeManager.loadRecipe(
-              newRecipeId as string,
-              resultCell.space,
-            );
-            if (newRecipe) {
-              await this.runtime.runSynced(resultCell, newRecipe);
-            }
-          } catch (error) {
+      // Mark as reloading to prevent race conditions
+      this.reloadingCharms.add(key);
+
+      // Update the ref BEFORE stopping so we don't re-trigger on our own write
+      const previousRecipeId = currentRecipeIdRef.value;
+      currentRecipeIdRef.value = newRecipeId;
+
+      // Stop the current charm (but don't cancel the TYPE watcher)
+      this.stop(resultCell);
+
+      // Restart with the new recipe on next tick to allow sync to complete
+      queueMicrotask(async () => {
+        try {
+          const newRecipe = await this.runtime.recipeManager.loadRecipe(
+            newRecipeId,
+            resultCell.space,
+          );
+          if (newRecipe) {
+            await this.runtime.runSynced(resultCell, newRecipe);
+            logger.info("recipe-hot-reload", () => [
+              `Successfully hot-reloaded ${key} with recipe ${newRecipeId}`,
+            ]);
+          } else {
+            // Recipe not found - restore previous state
             logger.error(
               "recipe-hot-reload",
-              `Failed to restart charm after recipe change: ${error}`,
+              `Recipe ${newRecipeId} not found, charm ${key} is now stopped`,
             );
+            currentRecipeIdRef.value = previousRecipeId;
           }
-        });
-      }
+        } catch (error) {
+          logger.error(
+            "recipe-hot-reload",
+            `Failed to restart charm ${key} after recipe change: ${error}`,
+          );
+          // Restore ref so we can try again if recipe is fixed
+          currentRecipeIdRef.value = previousRecipeId;
+        } finally {
+          this.reloadingCharms.delete(key);
+        }
+      });
     };
 
-    addCancel(
-      this.runtime.scheduler.subscribe(
-        recipeChangeAction,
-        { reads: [processTypeCell.getAsNormalizedFullLink()], writes: [] },
-        false, // Don't run immediately - only on changes
-      ),
+    // Store subscription separately - NOT in the cancel group
+    const cancel = this.runtime.scheduler.subscribe(
+      recipeChangeAction,
+      { reads: [processTypeCell.getAsNormalizedFullLink()], writes: [] },
+      false, // Don't run immediately - only on changes
     );
+    this.typeWatcherCancels.set(key, cancel);
   }
 
   /**
@@ -758,6 +815,16 @@ export class Runner {
     // Clear the result recipe cache as well, since the actions have been
     // canceled
     this.resultRecipeCache.clear();
+    // CT-1135: Also cancel all TYPE watchers on full stop
+    for (const cancel of this.typeWatcherCancels.values()) {
+      try {
+        cancel();
+      } catch (error) {
+        console.warn("Error canceling TYPE watcher:", error);
+      }
+    }
+    this.typeWatcherCancels.clear();
+    this.reloadingCharms.clear();
   }
 
   /**

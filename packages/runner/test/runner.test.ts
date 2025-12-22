@@ -950,6 +950,79 @@ describe("setup/start", () => {
     expect(resultCell.getAsQueryResult()).toEqual({ output: 5 });
   });
 
+  it("CT-1135: hot-reloads when process cell TYPE changes", async () => {
+    // Recipe 1: multiplies input by 2
+    const recipe1: Recipe = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      resultSchema: {},
+      result: { output: { $alias: { path: ["internal", "output"] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (v: { input: number }) => v.input * 2,
+          },
+          inputs: { $alias: { path: ["argument"] } },
+          outputs: { $alias: { path: ["internal", "output"] } },
+        },
+      ],
+    };
+
+    // Recipe 2: multiplies input by 3
+    const recipe2: Recipe = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      resultSchema: {},
+      result: { output: { $alias: { path: ["internal", "output"] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (v: { input: number }) => v.input * 3,
+          },
+          inputs: { $alias: { path: ["argument"] } },
+          outputs: { $alias: { path: ["internal", "output"] } },
+        },
+      ],
+    };
+
+    // Start charm with recipe1
+    const resultCell = runtime.getCell(space, "hot-reload-test");
+    await runtime.runSynced(resultCell, recipe1, { input: 5 });
+    await runtime.idle();
+
+    // Verify recipe1 behavior (5 * 2 = 10)
+    expect(resultCell.getAsQueryResult()).toEqual({ output: 10 });
+
+    // Register and save recipe2
+    const recipe2Id = runtime.recipeManager.registerRecipe(recipe2);
+    await runtime.recipeManager.saveAndSyncRecipe({ recipeId: recipe2Id, space });
+
+    // Get process cell and directly update the TYPE field
+    const processCell = resultCell.getSourceCell()!;
+    const tx = runtime.edit();
+    const currentRaw = processCell.getRaw() as Record<string, unknown>;
+    processCell.withTx(tx).setRaw({
+      ...currentRaw,
+      "$TYPE": recipe2Id,
+    });
+    await tx.commit();
+
+    // Wait for scheduler to detect change and hot-reload
+    await runtime.idle();
+    // Allow queueMicrotask to execute
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await runtime.idle();
+
+    // Should now use recipe2 (5 * 3 = 15)
+    expect(resultCell.getAsQueryResult()).toEqual({ output: 15 });
+  });
+
   it("setup with Module wraps to recipe and runs on start", async () => {
     const mod = {
       type: "javascript" as const,
