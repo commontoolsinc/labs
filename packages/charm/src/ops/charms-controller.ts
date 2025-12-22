@@ -1,28 +1,18 @@
 import {
+  type Cell,
   type JSONSchema,
   Runtime,
   RuntimeProgram,
   type Schema,
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
-import { type NameSchema } from "@commontools/runner/schemas";
+import { type NameSchema, nameSchema } from "@commontools/runner/schemas";
 import { CharmManager } from "../index.ts";
 import { CharmController } from "./charm-controller.ts";
 import { compileProgram } from "./utils.ts";
 import { createSession, Identity } from "@commontools/identity";
 import { HttpProgramResolver } from "@commontools/js-compiler";
 import { ACLManager } from "./acl-manager.ts";
-
-// Schema for mutex-based synchronization of default pattern creation
-const defaultPatternMutexSchema = {
-  type: "object",
-  properties: {
-    requestId: { type: "string", default: "" },
-    lastActivity: { type: "number", default: 0 },
-  },
-  default: {},
-  required: ["requestId", "lastActivity"],
-} as const satisfies JSONSchema;
 
 export interface CreateCharmOptions {
   input?: object;
@@ -153,165 +143,105 @@ export class CharmsController<T = unknown> {
    * For home spaces, uses home.tsx; for other spaces, uses default-app.tsx.
    * This makes CLI-created spaces work the same as Shell-created spaces.
    *
-   * Uses a mutex pattern to prevent race conditions when multiple processes
-   * attempt to create the default pattern simultaneously.
+   * Uses the transaction system's optimistic concurrency control to handle
+   * race conditions - if multiple processes try to create the pattern
+   * simultaneously, the first successful commit wins and others gracefully
+   * discover the existing pattern on retry.
    *
    * @returns The default pattern charm, either existing or newly created
    */
   async ensureDefaultPattern(): Promise<CharmController<NameSchema>> {
     this.disposeCheck();
 
-    const MUTEX_TIMEOUT = 10000; // 10 seconds for pattern creation
-    const MAX_RETRIES = 3;
-    const RETRY_DELAY = 500;
-    const requestId = crypto.randomUUID();
-
-    // Get mutex cell in space for synchronization
-    const mutexCell = this.#manager.runtime.getCell(
-      this.#manager.getSpace(),
-      { defaultPatternMutex: true },
-      defaultPatternMutexSchema,
-    );
-
-    // Try to get existing pattern first (outside mutex)
+    // Fast path: check if pattern already exists (outside transaction)
     const existingPattern = await this.#manager.getDefaultPattern();
     if (existingPattern) {
-      // Validate it's not a dangling reference to a deleted charm
-      const charmEntityId = existingPattern.entityId;
-      if (charmEntityId?.["/"] !== undefined) {
-        try {
-          // Try to verify the charm exists by getting it
-          // getDefaultPattern already runs the charm, so if we got here it works
-          return new CharmController<NameSchema>(
-            this.#manager,
-            existingPattern,
-          );
-        } catch {
-          console.warn(
-            `Default pattern points to deleted charm, will recreate`,
-          );
-          // Fall through to creation logic
-        }
-      }
+      return new CharmController<NameSchema>(this.#manager, existingPattern);
     }
 
-    // Attempt to claim mutex with retries
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      let claimed = false;
+    // Determine which pattern to use based on space type
+    const isHomeSpace =
+      this.#manager.getSpace() === this.#manager.runtime.userIdentityDID;
 
-      await this.#manager.runtime.editWithRetry((tx) => {
-        const mutex = mutexCell.withTx(tx).get();
-        const now = Date.now();
-
-        // Can claim if no one is processing or previous request timed out
-        const canClaim = !mutex.requestId ||
-          (mutex.lastActivity < now - MUTEX_TIMEOUT);
-
-        if (canClaim) {
-          mutexCell.withTx(tx).update({
-            requestId,
-            lastActivity: now,
-          });
-          claimed = true;
-        }
-      });
-
-      // If we didn't claim, wait and check if someone else created the pattern
-      if (!claimed) {
-        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
-        // Check if pattern was created while we waited
-        const retryPattern = await this.#manager.getDefaultPattern();
-        if (retryPattern) {
-          return new CharmController<NameSchema>(this.#manager, retryPattern);
-        }
-        continue; // Try to claim again
+    const patternConfig = isHomeSpace
+      ? {
+        name: "Home",
+        urlPath: "/api/patterns/home.tsx",
+        cause: "home-pattern",
       }
+      : {
+        name: "DefaultCharmList",
+        urlPath: "/api/patterns/default-app.tsx",
+        cause: "space-root",
+      };
 
-      // We have the mutex, now create the pattern
-      try {
-        // Double-check after claiming mutex (prevents duplicate creation)
-        const doubleCheck = await this.#manager.getDefaultPattern();
-        if (doubleCheck) {
-          // Someone else created it, release mutex and return
-          await this.#releaseMutex(mutexCell, requestId);
-          return new CharmController<NameSchema>(this.#manager, doubleCheck);
-        }
-
-        // Determine which pattern to use based on space type
-        const isHomeSpace =
-          this.#manager.getSpace() === this.#manager.runtime.userIdentityDID;
-
-        const patternConfig = isHomeSpace
-          ? {
-            name: "Home",
-            urlPath: "/api/patterns/home.tsx",
-            cause: "home-pattern",
-          }
-          : {
-            name: "DefaultCharmList",
-            urlPath: "/api/patterns/default-app.tsx",
-            cause: "space-root",
-          };
-
-        const patternUrl = new URL(
-          patternConfig.urlPath,
-          this.#manager.runtime.apiUrl,
-        );
-
-        // Load the pattern program from HTTP
-        const program = await this.#manager.runtime.harness.resolve(
-          new HttpProgramResolver(patternUrl.href),
-        );
-
-        // Create the pattern charm
-        const charm = await this.create<NameSchema>(
-          program,
-          { start: true },
-          patternConfig.cause,
-        );
-
-        // Link it as the default pattern in the space cell
-        await this.#manager.linkDefaultPattern(charm.getCell());
-
-        // Release mutex on success
-        await this.#releaseMutex(mutexCell, requestId);
-
-        return charm;
-      } catch (error) {
-        // Release mutex on error
-        await this.#releaseMutex(mutexCell, requestId);
-
-        throw new Error(
-          `Failed to create default pattern: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    }
-
-    throw new Error(
-      "Failed to claim mutex for default pattern creation after maximum retries",
+    const patternUrl = new URL(
+      patternConfig.urlPath,
+      this.#manager.runtime.apiUrl,
     );
-  }
 
-  /**
-   * Releases the default pattern creation mutex.
-   * Only releases if we still own the mutex (requestId matches).
-   */
-  async #releaseMutex(
-    // deno-lint-ignore no-explicit-any
-    mutexCell: any,
-    ownRequestId: string,
-  ): Promise<void> {
+    // Load and compile the pattern (async work outside transaction)
+    const program = await this.#manager.runtime.harness.resolve(
+      new HttpProgramResolver(patternUrl.href),
+    );
+    const recipe = await this.#manager.runtime.recipeManager.compileRecipe(
+      program,
+    );
+
+    // Atomic creation with automatic retry on conflicts.
+    // The transaction system provides optimistic concurrency control:
+    // - Reading defaultPattern inside the transaction creates an invariant
+    // - If another process creates it first, the commit fails and retries
+    // - On retry, we'll see the existing pattern and return early
+    let charmCell: Cell<NameSchema>;
+
     await this.#manager.runtime.editWithRetry((tx) => {
-      const mutex = mutexCell.withTx(tx).get();
-      // Only release if we still own the mutex
-      if (mutex.requestId === ownRequestId) {
-        mutexCell.withTx(tx).update({
-          requestId: "",
-          lastActivity: 0,
-        });
+      // Double-check pattern doesn't exist (read establishes invariant)
+      const spaceCellWithTx = this.#manager.getSpaceCellContents().withTx(tx);
+      const defaultPatternCell = spaceCellWithTx.key("defaultPattern");
+      const existingDefault = defaultPatternCell.get();
+
+      if (existingDefault?.get()) {
+        // Pattern was created by another process - we're done
+        // The editWithRetry will complete successfully, and we'll
+        // fetch the existing pattern below
+        return;
       }
+
+      // Create charm cell within this transaction
+      charmCell = this.#manager.runtime.getCell<NameSchema>(
+        this.#manager.getSpace(),
+        patternConfig.cause,
+        nameSchema,
+        tx,
+      );
+
+      // Run pattern setup within same transaction
+      this.#manager.runtime.run(tx, recipe, {}, charmCell);
+
+      // Add to charms list within same transaction
+      const charmsCell = this.#manager.getCharms().withTx(tx);
+      const currentCharms = charmsCell.get();
+      if (!currentCharms.some((c) => c.equals(charmCell))) {
+        charmsCell.push(charmCell);
+      }
+
+      // Link as default pattern within same transaction
+      defaultPatternCell.set(charmCell.withTx(tx));
     });
+
+    // After transaction commits, fetch the final result
+    // (either we created it, or another process did)
+    const finalPattern = await this.#manager.getDefaultPattern();
+    if (!finalPattern) {
+      throw new Error("Failed to create or find default pattern");
+    }
+
+    // Start the charm after successful creation/discovery
+    await this.#manager.startCharm(finalPattern);
+    await this.#manager.runtime.idle();
+    await this.#manager.synced();
+
+    return new CharmController<NameSchema>(this.#manager, finalPattern);
   }
 }
