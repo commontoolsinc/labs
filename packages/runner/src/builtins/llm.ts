@@ -236,6 +236,8 @@ async function handleLLMError<T, P>(
 ): Promise<void> {
   if (thisRun !== getCurrentRun()) return;
 
+  const message = error instanceof Error ? error.message : String(error);
+  console.warn(`[LLM Error] ${message}`);
   logger.warn("llm", "Error in LLM request", { error });
 
   await runtime.idle();
