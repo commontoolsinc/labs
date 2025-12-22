@@ -67,6 +67,10 @@ export class Runner {
   // Map whose key is the result cell's full key, and whose values are the
   // recipes as strings
   private resultRecipeCache = new Map<`${MemorySpace}/${URI}`, string>();
+  // CT-1135: Separate cancel map for TYPE watchers that persist across restarts
+  private typeWatcherCancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
+  // CT-1135: Track charms currently reloading to prevent race conditions
+  private reloadingCharms = new Set<`${MemorySpace}/${URI}`>();
 
   constructor(readonly runtime: Runtime) {
     this.runtime.storageManager.subscribe(this.createStorageSubscription());
@@ -430,6 +434,180 @@ export class Runner {
         recipe,
       );
     }
+
+    // CT-1135: Subscribe to process cell TYPE changes for hot-reload
+    // When another client (e.g., CLI via `ct charm setsrc`) updates the recipe,
+    // this subscription detects the change and restarts the charm.
+    // NOTE: This subscription is stored separately (not in cancel group) so it
+    // persists across stop/start cycles and can trigger subsequent reloads.
+    this.setupTypeWatcher(key, processCell, resultCell, tx);
+  }
+
+  // CT-1135: Track failed reload attempts per charm for circuit breaker
+  private reloadFailures = new Map<`${MemorySpace}/${URI}`, number>();
+  private static readonly MAX_RELOAD_FAILURES = 3;
+
+  /**
+   * CT-1135: Set up a TYPE watcher for hot-reload functionality.
+   * This watcher persists across charm restarts to enable multiple hot-reloads.
+   */
+  private setupTypeWatcher(
+    key: `${MemorySpace}/${URI}`,
+    processCell: Cell<any>,
+    resultCell: Cell<any>,
+    tx: IExtendedStorageTransaction | undefined,
+  ): void {
+    // Cancel any existing watcher for this charm (prevents stacking)
+    const existingCancel = this.typeWatcherCancels.get(key);
+    if (existingCancel) {
+      existingCancel();
+      this.typeWatcherCancels.delete(key);
+    }
+
+    // Reset failure count when setting up new watcher
+    this.reloadFailures.delete(key);
+
+    // Use a mutable ref so it updates after each reload
+    const initialRecipeId = processCell.withTx(tx).key(TYPE).getRaw({
+      meta: ignoreReadForScheduling,
+    }) as string | undefined;
+    const currentRecipeIdRef = {
+      value: initialRecipeId,
+    };
+    // Track the "target" recipe ID separately to handle rapid changes
+    const targetRecipeIdRef = {
+      value: initialRecipeId,
+    };
+    const processTypeCell = processCell.key(TYPE);
+
+    const recipeChangeAction: Action = (actionTx) => {
+      const newRecipeId = processTypeCell.withTx(actionTx).getRaw({
+        meta: ignoreReadForScheduling,
+      }) as string | undefined;
+
+      // Guard: Skip if no recipe or same as current target
+      if (!newRecipeId || newRecipeId === targetRecipeIdRef.value) {
+        return;
+      }
+
+      // Circuit breaker: skip if too many failures for this charm
+      const failures = this.reloadFailures.get(key) ?? 0;
+      if (failures >= Runner.MAX_RELOAD_FAILURES) {
+        logger.warn("recipe-hot-reload", () => [
+          `Skipping hot-reload for ${key}: too many failures (${failures})`,
+          `Recipe ${newRecipeId} will not be loaded automatically`,
+        ]);
+        return;
+      }
+
+      // Always update target to latest requested recipe (handles A→B→C)
+      targetRecipeIdRef.value = newRecipeId;
+
+      // If already reloading, the in-flight reload will pick up the new target
+      if (this.reloadingCharms.has(key)) {
+        logger.debug("recipe-hot-reload", () => [
+          `Reload already in progress for ${key}, updated target to ${newRecipeId}`,
+        ]);
+        return;
+      }
+
+      logger.info("recipe-hot-reload", () => [
+        `Recipe changed for ${key}: ${currentRecipeIdRef.value} -> ${newRecipeId}`,
+        "Triggering restart...",
+      ]);
+
+      // Mark as reloading to prevent concurrent reloads
+      this.reloadingCharms.add(key);
+
+      // Stop the current charm (but don't cancel the TYPE watcher)
+      this.stop(resultCell);
+
+      // Restart with the new recipe on next tick to allow sync to complete
+      queueMicrotask(async () => {
+        try {
+          // Use the LATEST target, not the one captured at action start
+          const latestTargetId = targetRecipeIdRef.value;
+          if (!latestTargetId) {
+            logger.warn("recipe-hot-reload", `No target recipe for ${key}`);
+            return;
+          }
+
+          const newRecipe = await this.runtime.recipeManager.loadRecipe(
+            latestTargetId,
+            resultCell.space,
+          );
+          if (newRecipe) {
+            await this.runtime.runSynced(resultCell, newRecipe);
+            // Success - update current and reset failure count
+            currentRecipeIdRef.value = latestTargetId;
+            this.reloadFailures.delete(key);
+            logger.info("recipe-hot-reload", () => [
+              `Successfully hot-reloaded ${key} with recipe ${latestTargetId}`,
+            ]);
+          } else {
+            // Recipe not found - increment failure count
+            const newFailures = (this.reloadFailures.get(key) ?? 0) + 1;
+            this.reloadFailures.set(key, newFailures);
+            logger.error(
+              "recipe-hot-reload",
+              `Recipe ${latestTargetId} not found for ${key} (failure ${newFailures}/${Runner.MAX_RELOAD_FAILURES})`,
+            );
+          }
+        } catch (error) {
+          // Increment failure count on error
+          const newFailures = (this.reloadFailures.get(key) ?? 0) + 1;
+          this.reloadFailures.set(key, newFailures);
+          logger.error(
+            "recipe-hot-reload",
+            `Failed to restart charm ${key}: ${error} (failure ${newFailures}/${Runner.MAX_RELOAD_FAILURES})`,
+          );
+        } finally {
+          this.reloadingCharms.delete(key);
+
+          // Check if target changed while we were reloading - if so, reload again
+          if (targetRecipeIdRef.value !== currentRecipeIdRef.value) {
+            logger.debug("recipe-hot-reload", () => [
+              `Target changed during reload for ${key}, triggering another reload`,
+            ]);
+            // Re-trigger by calling the action directly (it will check guards)
+            queueMicrotask(() => {
+              const tx = this.runtime.edit();
+              recipeChangeAction(tx);
+              // Don't need to commit - action only reads
+            });
+          }
+        }
+      });
+    };
+
+    // Store subscription separately - NOT in the cancel group
+    const cancel = this.runtime.scheduler.subscribe(
+      recipeChangeAction,
+      { reads: [processTypeCell.getAsNormalizedFullLink()], writes: [] },
+      false, // Don't run immediately - only on changes
+    );
+    this.typeWatcherCancels.set(key, cancel);
+  }
+
+  /**
+   * CT-1135: Cancel the TYPE watcher for a charm.
+   * Called when a charm is permanently removed (not just stopped for reload).
+   */
+  private cancelTypeWatcher(key: `${MemorySpace}/${URI}`): void {
+    const cancel = this.typeWatcherCancels.get(key);
+    if (cancel) {
+      try {
+        cancel();
+      } catch (error) {
+        logger.warn(
+          "recipe-hot-reload",
+          `Error canceling TYPE watcher: ${error}`,
+        );
+      }
+      this.typeWatcherCancels.delete(key);
+    }
+    this.reloadFailures.delete(key);
+    this.reloadingCharms.delete(key);
   }
 
   /**
@@ -689,10 +867,32 @@ export class Runner {
    *
    * @param resultCell - The result doc or cell to stop.
    */
-  stop<T>(resultCell: Cell<T>): void {
+  /**
+   * Stop a running charm.
+   *
+   * @param resultCell - The result cell of the charm to stop.
+   * @param options.permanent - If true, also cancels the TYPE watcher (for charm removal).
+   *                           If false (default), TYPE watcher persists for hot-reload.
+   */
+  stop<T>(resultCell: Cell<T>, options?: { permanent?: boolean }): void {
     const key = this.getDocKey(resultCell);
     this.cancels.get(key)?.();
     this.cancels.delete(key);
+
+    // CT-1135: Only cancel TYPE watcher if permanent removal
+    if (options?.permanent) {
+      this.cancelTypeWatcher(key);
+    }
+  }
+
+  /**
+   * Permanently remove a charm, stopping it and cleaning up all resources
+   * including the TYPE watcher.
+   *
+   * Use this when a charm is being deleted, not just temporarily stopped.
+   */
+  remove<T>(resultCell: Cell<T>): void {
+    this.stop(resultCell, { permanent: true });
   }
 
   stopAll(): void {
@@ -708,6 +908,17 @@ export class Runner {
     // Clear the result recipe cache as well, since the actions have been
     // canceled
     this.resultRecipeCache.clear();
+    // CT-1135: Also cancel all TYPE watchers on full stop
+    for (const cancel of this.typeWatcherCancels.values()) {
+      try {
+        cancel();
+      } catch (error) {
+        console.warn("Error canceling TYPE watcher:", error);
+      }
+    }
+    this.typeWatcherCancels.clear();
+    this.reloadingCharms.clear();
+    this.reloadFailures.clear();
   }
 
   /**
