@@ -349,7 +349,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       // If still no full link after ensureLink, throw
       if (!this.hasFullLink()) {
         throw new Error(
-          "Cell link could not be created. Use .for() to set a cause before accessing the cell.",
+          "Cell link creation failed - no cause or context\n" +
+            "help: use .for(uniqueId) to set explicit identity, or create cells within handler/pattern contexts",
         );
       }
     }
@@ -421,10 +422,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     // We must be in a frame context to derive the id.
     if (!this._frame) {
       throw new Error(
-        "Cannot create cell link: no frame context.\n" +
-          "This typically happens when:\n" +
-          "  - A cell is passed to another cell's .set() method without a link\n" +
-          "  - A cell is used outside of a handler or lift context\n",
+        "Cannot create cell link - no frame context\n" +
+          "help: create cells inside pattern/handler/lift, or use .for(cause) for explicit identity",
       );
     }
 
@@ -434,9 +433,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     // We need a space to create a link
     if (!space) {
       throw new Error(
-        "Cannot create cell link: space is required.\n" +
-          "This can happen when accessing closed-over cells e.g. with .get().\n" +
-          "Use `computed()` for reactive computations - it handles closures automatically.\n",
+        "Cannot create cell link - space required\n" +
+          "help: use computed() to handle closures automatically, or pass cells as explicit parameters",
       );
     }
 
@@ -449,11 +447,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 
     if (!cause) {
       throw new Error(
-        "Cannot create cell link: not in a handler context and no cause was provided.\n" +
-          "This typically happens when:\n" +
-          "  - A cell is passed to another cell's .set() method without a link\n" +
-          "  - A cell is used outside of a handler context\n" +
-          "Solution: Use .for(cause) to set a cause before using the cell in ambiguous cases.",
+        "Cannot create cell link - not in handler context and no cause provided\n" +
+          "help: use .for(cause) for explicit identity, or create cells within handlers where identity is automatic",
       );
     }
 
@@ -590,7 +585,12 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       this.listeners.forEach((callback) => addCancel(callback(event)));
     } else {
       // Regular cell behavior
-      if (!this.tx) throw new Error("Transaction required for set");
+      if (!this.tx) {
+        throw new Error(
+          "Transaction required for .set() - mutations only work in handlers\n" +
+            "help: use handler() to create transaction context, or computed() for read-only transformations",
+        );
+      }
 
       // No await for the sync, just kicking this off, so we have the data to
       // retry on conflict.
@@ -627,9 +627,17 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
     values: V extends object ? AnyCellWrapping<V> : never,
   ): Cell<T> {
-    if (!this.tx) throw new Error("Transaction required for update");
+    if (!this.tx) {
+      throw new Error(
+        "Cell.update() requires transaction and object value\n" +
+          "help: use in handlers for partial updates, or .set() for non-object values",
+      );
+    }
     if (!isRecord(values)) {
-      throw new Error("Can't update with non-object value");
+      throw new Error(
+        "Cell.update() requires transaction and object value\n" +
+          "help: use in handlers for partial updates, or .set() for non-object values",
+      );
     }
 
     // No await for the sync, just kicking this off, so we have the data to
@@ -678,7 +686,12 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   push(
     ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : never
   ): void {
-    if (!this.tx) throw new Error("Transaction required for push");
+    if (!this.tx) {
+      throw new Error(
+        "Cell.push() requires transaction and array value\n" +
+          "help: use in handlers only, ensure cell is typed as array",
+      );
+    }
 
     // No await for the sync, just kicking this off, so we have the data to
     // retry on conflict.
@@ -692,7 +705,10 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 
     let array = currentValue as unknown[];
     if (array !== undefined && !Array.isArray(array)) {
-      throw new Error("Can't push into non-array value");
+      throw new Error(
+        "Cell.push() requires transaction and array value\n" +
+          "help: use in handlers only, ensure cell is typed as array",
+      );
     }
 
     // If there is no array yet, create it first. We have to do this as a
@@ -1269,7 +1285,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
         } else if (prop === Symbol.toPrimitive) {
           return () => {
             throw new Error(
-              "Tried to directly access an opaque value. Use `computed()` to perform operations on reactive values - it handles closures automatically.",
+              "Tried to access a reactive reference outside a reactive context. Use `computed()` to perform operations on reactive values - it handles closures automatically.",
             );
           };
         } else if (prop === toCell) {

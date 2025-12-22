@@ -3,7 +3,7 @@
  * Multiplayer Free-for-All Scrabble - Game Room Pattern
  *
  * ARCHITECTURE:
- * - ALL shared state stored as JSON STRINGS to bypass Cell array proxy issues
+ * - ALL shared state stored as JSON STRINGS (WORKAROUND for framework bug with Cell arrays)
  * - bagJson, boardJson, playersJson, gameEventsJson, allRacksJson, allPlacedJson
  * - Parse functions handle BOTH string and object input (runtime may auto-deserialize)
  *
@@ -637,7 +637,7 @@ function buildBoardSet(tiles: readonly PlacedTile[]): Set<string> {
   return set;
 }
 
-// Helper to deep clone a letter, stripping any Cell proxy references
+// Helper to deep clone a letter (WORKAROUND for framework bug with reactive value serialization)
 function sanitizeLetter(letter: Letter): Letter {
   return {
     char: String(letter.char || ""),
@@ -653,7 +653,7 @@ function updatePlayerRack(
   newRack: Letter[],
 ) {
   const current = parseAllRacksJson(allRacksJson.get());
-  // Deep clone all letters to strip Cell proxy references
+  // Deep clone all letters (WORKAROUND for framework bug)
   current[playerName] = newRack.map(sanitizeLetter);
   allRacksJson.set(JSON.stringify(current));
 }

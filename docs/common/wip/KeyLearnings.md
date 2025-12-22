@@ -49,7 +49,7 @@ interface Input {
 TypeError: count.set is not a function
 ```
 
-**Key insight:** `Cell<>` in the Input interface indicates write intent. It tells the runtime to provide a Cell reference instead of an opaque ref. Everything is reactive by default - `Cell<>` only signals that you'll call mutation methods.
+**Key insight:** `Cell<>` in the Input interface indicates write intent. It tells the runtime to provide a Cell reference with mutation methods. Everything is reactive by default - `Cell<>` only signals that you'll call mutation methods like `.set()`, `.update()`, or `.push()`.
 
 ---
 

@@ -208,7 +208,8 @@ function factoryFromRecipe<T, R>(
         const { frame, nodes } = value.export();
         if (isOpaqueRef(value) && frame !== getTopFrame()) {
           throw new Error(
-            "Accessing an opaque ref via closure is not supported. Wrap the access in a derive that passes the variable through.",
+            "Cannot access cell via closure - reactive dependencies must be explicit parameters\n" +
+              "help: use computed() for automatic extraction, or pass cells as parameters to lift()",
           );
         }
         allCells.add(value);

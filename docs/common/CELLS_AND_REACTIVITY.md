@@ -602,6 +602,8 @@ const groupedItems = computed(() => {
 
 While `computed()` handles closures automatically through CTS transformation, the lower-level `lift()` function requires explicit parameter passing for all reactive dependencies.
 
+**Note on terminology:** You may see "opaque ref" in error messages or low-level code. This is an implementation detail (JavaScript Proxy objects used for reactive tracking). As a pattern developer, think "reactive reference" - values that automatically track dependencies and update when changed.
+
 **Why this matters:** The reactive graph builder uses frame-based execution contexts. Each `lift()` creates a new frame, and cells from different frames cannot be accessed via closure.
 
 **Common mistake - passing cells directly:**
@@ -627,7 +629,7 @@ const total = calcTotal({ expenses });  // Works correctly
 const date = Cell.of("2024-01-15");
 const grouped = computed(() => { /* ... */ });
 
-// This FAILS at runtime: "Accessing an opaque ref via closure is not supported"
+// This FAILS at runtime: "Reactive reference from outer scope cannot be accessed via closure"
 const result = lift((g) => g[date])(grouped);
 
 // ✅ CORRECT - Pass all reactive dependencies as parameters
@@ -636,7 +638,7 @@ const result = lift((args) => args.g[args.d])({ g: grouped, d: date });
 
 **When you see these symptoms:**
 - **Stale/empty data:** `lift()` returns 0, `{}`, or old values → Pass cells via object parameter
-- **Error:** `"Accessing an opaque ref via closure is not supported"` → Pass closed-over cells as parameters
+- **Error:** `"Reactive reference from outer scope cannot be accessed via closure"` → Pass closed-over cells as parameters
 - **Fix for both:** Use `lift((args: { ... }) => ...)({ cell1, cell2 })` pattern
 
 **Why computed() doesn't have this issue:**

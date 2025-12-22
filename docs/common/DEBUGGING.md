@@ -21,7 +21,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | Handler binding: unknown property | Passing event data at binding time | Use inline handler for test buttons ([see below](#handler-binding-error-unknown-property)) |
 | Stream.subscribe doesn't exist | Using Stream.of()/subscribe() | Bound handler IS the stream ([see below](#streamof--subscribe-dont-exist)) |
 | Can't access variable in nested scope | Variable scoping limitation | Pre-compute grouped data or use lift() with explicit params ([see below](#variable-scoping-in-reactive-contexts)) |
-| "Accessing an opaque ref via closure is not supported" | Using lift() with closure | Pass all reactive deps as params to lift() ([CELLS](CELLS_AND_REACTIVITY.md#lift-and-closure-limitations)) |
+| "Cannot access cell via closure" | Using lift() with closure | Pass all reactive deps as params to lift() ([CELLS](CELLS_AND_REACTIVITY.md#lift-and-closure-limitations)) |
 | CLI `get` returns stale computed values | `charm set` doesn't trigger recompute | Run `charm step` after `set` to trigger re-evaluation ([see below](#stale-computed-values-after-charm-set)) |
 
 ---

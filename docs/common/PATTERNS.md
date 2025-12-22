@@ -8,12 +8,12 @@ Patterns for building CommonTools applications, organized by complexity.
 
 ### 1. Use computed() for Data Transformations
 
-Cell references in pattern bodies are "opaque refs" - placeholders that can't be read directly. Wrap transformations in `computed()`:
+Reactive references in pattern bodies need `computed()` for transformations - direct iteration or operations will fail. Wrap transformations in `computed()`:
 
 ```typescript
 // ❌ WRONG
 const grouped = {};
-for (const entry of entries) {  // Error: "Tried to directly access an opaque value"
+for (const entry of entries) {  // Error: reactive reference needs computed()
   grouped[entry.date] = entry;
 }
 
@@ -310,7 +310,7 @@ return {
 ### Direct Data Access
 
 ```typescript
-// ❌ Error: "Tried to directly access an opaque value"
+// ❌ Error: reactive reference outside reactive context
 for (const entry of entries) { ... }
 
 // ✅ Wrap in computed()
@@ -343,7 +343,7 @@ const active = computed(() => items.filter(i => !i.done));
 ### Template String Access
 
 ```typescript
-// ❌ Error: "Accessing an opaque ref via closure"
+// ❌ Error: reactive reference from outer scope
 const prompt = `Seed: ${seed}`;
 
 // ✅ Wrap in computed()
@@ -353,7 +353,7 @@ const prompt = computed(() => `Seed: ${seed}`);
 ### lift() Closure Pattern
 
 ```typescript
-// ❌ Error: "Accessing an opaque ref via closure"
+// ❌ Error: reactive reference from outer scope cannot be accessed via closure
 const result = lift((g) => g[date])(grouped);
 
 // ✅ Pass all reactive dependencies as parameters

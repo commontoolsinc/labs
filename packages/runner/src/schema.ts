@@ -255,7 +255,8 @@ export function processDefaultValue(
       // items: false means no additional items allowed (empty arrays only)
       // For default value processing, we'll treat this as an error
       throw new Error(
-        "Cannot process default values for array with items: false - no items are allowed",
+        "Array schema error: items: false conflicts with non-empty default\n" +
+          "help: either allow items with valid schema, or use empty array default",
       );
     } else {
       // items is a JSONSchema object
