@@ -131,6 +131,22 @@ export async function newCharm(
 ): Promise<string> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
+
+  // Try to ensure default pattern, but don't fail the entire operation
+  try {
+    await charms.ensureDefaultPattern();
+  } catch (error) {
+    console.warn(
+      `Warning: Could not initialize default pattern: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    console.warn(
+      "Patterns using wish('#mentionable') or wish('#default') may not work.",
+    );
+    // Continue anyway - user's pattern might not need defaultPattern
+  }
+
   const program = await getProgramFromFile(manager, entry);
   const charm = await charms.create(program, options);
   return charm.id;
@@ -205,6 +221,20 @@ export async function linkCharms(
   targetPath: (string | number)[],
 ): Promise<void> {
   const manager = await loadManager(config);
+
+  // Ensure default pattern exists (best effort)
+  try {
+    const charms = new CharmsController(manager);
+    await charms.ensureDefaultPattern();
+  } catch (error) {
+    // Non-fatal, log and continue
+    console.warn(
+      `Warning: Could not ensure default pattern: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
   await manager.link(sourceCharmId, sourcePath, targetCharmId, targetPath);
 }
 
@@ -479,6 +509,19 @@ export async function callCharmHandler<T = any>(
 ): Promise<void> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
+
+  // Ensure default pattern exists (best effort)
+  try {
+    await charms.ensureDefaultPattern();
+  } catch (error) {
+    // Non-fatal, log and continue
+    console.warn(
+      `Warning: Could not ensure default pattern: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
   const charm = await charms.get(config.charm, true);
 
   // Get the cell and traverse to the handler using .key()

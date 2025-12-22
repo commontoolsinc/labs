@@ -504,8 +504,34 @@ export function wish(
           : parsed.path;
         const resolvedCell = resolvePath(baseResolutions[0].cell, combinedPath);
         sendResult(tx, resolvedCell);
-      } catch (_e) {
-        sendResult(tx, undefined);
+      } catch (e) {
+        // Provide helpful feedback for common defaultPattern issues
+        if (
+          wishTarget.startsWith("#mentionable") ||
+          wishTarget.startsWith("#default")
+        ) {
+          const errorMsg =
+            `${wishTarget} failed: ${
+              e instanceof Error ? e.message : String(e)
+            }. This usually means the space's defaultPattern is not initialized. ` +
+            `Visit the space in browser first, or ensure ensureDefaultPattern() is called.`;
+          console.warn(errorMsg);
+          // Return error state instead of undefined for better UX
+          sendResult(
+            tx,
+            { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<
+              any
+            >,
+          );
+          return;
+        }
+
+        // For other errors, also return error state
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        sendResult(
+          tx,
+          { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
+        );
       }
       return;
     } else if (typeof targetValue === "object") {
