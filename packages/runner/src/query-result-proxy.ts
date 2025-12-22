@@ -198,7 +198,8 @@ export function createQueryResultProxy<T>(
           : (...args: any[]) => {
             if (!tx) {
               throw new Error(
-                "Transaction required for changing query result proxy",
+                "Transaction required for mutation\n" +
+                  "help: move mutations to handlers, or use computed() for read-only operations",
               );
             }
 
@@ -250,7 +251,34 @@ export function createQueryResultProxy<T>(
 
             if (!Array.isArray(newValue)) {
               throw new Error(
-                `Array is not an array anymore after ${prop} operation, it's now ${typeof newValue}`,
+                `Array operation failed: unexpected type after mutation
+
+After calling .${prop}(), the value is no longer an array (now ${typeof newValue}).
+This indicates either:
+  1. Schema mismatch: cell schema doesn't specify array type
+  2. Concurrent modification changed type
+  3. Handler replaced array with non-array value
+
+Common fix: Ensure cell is typed as array in schema
+
+Example:
+  // ❌ Schema doesn't specify array
+  interface State {
+    items: Cell<any>;  // Could be anything!
+  }
+
+  // ✅ Schema specifies array
+  interface State {
+    items: Cell<Item[]>;  // Clearly an array
+  }
+
+  // ✅ Runtime type checking
+  const items = Cell.of<Item[]>([]);  // Initialize as array
+
+Debug: Inspect cell value before mutation:
+  console.log("Before .${prop}():", items.get(), typeof items.get());
+
+See: docs/common/TYPES_AND_SCHEMAS.md#array-types`,
               );
             }
 

@@ -49,8 +49,8 @@ import type { RuntimeProgram } from "../harness/types.ts";
 // The TypeScript transformer should replace all calls at compile time
 const toSchema: ToSchemaFunction = (_options?) => {
   throw new Error(
-    "toSchema() should be transformed at compile time. " +
-      "Make sure the TypeScript transformer is configured correctly.",
+    "toSchema() must be transformed at compile time - transformer not running\n" +
+    "help: enable CTS with /// <cts-enable /> directive, ensure using correct build process",
   );
 };
 

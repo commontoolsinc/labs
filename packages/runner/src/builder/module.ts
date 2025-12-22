@@ -112,7 +112,8 @@ function handlerInternal<E, T>(
       eventSchema = stateSchema = undefined;
     } else {
       throw new Error(
-        "invalid handler, no schema provided - did you forget to enable CTS?",
+        "Handler requires schemas or CTS transformer\n" +
+        "help: enable CTS with /// <cts-enable /> for automatic schema inference, or provide explicit schemas",
       );
     }
   }
