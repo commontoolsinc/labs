@@ -125,11 +125,10 @@ interface CtListItem {
 
 ## ct-message-input
 
-Input + button combo for adding items.
+Input + button combo for adding items. Button always shows "Send" - `buttonText` prop is not available in JSX types.
 
 ```tsx
 <ct-message-input
-  buttonText="Add item"
   placeholder="New item"
   onct-send={(e) => {
     const text = e.detail?.message?.trim();
@@ -137,6 +136,8 @@ Input + button combo for adding items.
   }}
 />
 ```
+
+**Note:** The `buttonText` property exists in the component but is intentionally omitted from JSX types. Use `ct-input` + `ct-button` separately if you need custom button text.
 
 ---
 
