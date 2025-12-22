@@ -296,7 +296,8 @@ export function createQueryResultProxy<T>(
 
       if (!tx) {
         throw new Error(
-          "Transaction required for changing query result proxy",
+          "Transaction required for mutation\n" +
+            "help: move mutations to handlers, or use computed() for read-only operations",
         );
       }
 
