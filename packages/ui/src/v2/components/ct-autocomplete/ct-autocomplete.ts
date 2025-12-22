@@ -24,6 +24,22 @@ export interface AutocompleteItem {
   group?: string;
   /** Additional search terms that match this item */
   searchAliases?: string[];
+  /**
+   * Arbitrary data to pass through with ct-select event.
+   *
+   * NOTE: Cell references passed here will be converted to link representations
+   * during event sanitization. The original Cell instance is NOT preserved.
+   * Use `Cell.equals()` for comparisons - it handles both Cells and links.
+   *
+   * @example
+   * // In pattern - pass charm reference
+   * items={charms.map(c => ({ value: c[NAME], data: c }))}
+   *
+   * // In handler - compare with Cell.equals()
+   * const { data: charm } = event.detail;
+   * const isDuplicate = members.some(m => Cell.equals(m.charm, charm));
+   */
+  data?: unknown;
 }
 
 /**
@@ -94,7 +110,8 @@ function processItem(item: AutocompleteItem): ProcessedItem {
  * @prop {Cell<string>|Cell<string[]>|string|string[]} value - Selected value(s) - supports Cell binding
  *
  * @fires ct-change - Fired when value changes: { value, oldValue }
- * @fires ct-select - Fired when an item is selected: { value, label, group?, isCustom }
+ * @fires ct-select - Fired when an item is selected: { value, label, group?, isCustom, data? }
+ *                   Note: Cell refs in `data` become link representations; use Cell.equals() to compare
  * @fires ct-open - Fired when dropdown opens
  * @fires ct-close - Fired when dropdown closes
  *
@@ -925,11 +942,13 @@ export class CTAutocomplete extends BaseElement {
     // Selection methods
     private _selectItem(item: AutocompleteItem) {
       // Always emit ct-select for side effects
+      // Include data field if present (allows passing arbitrary objects through selection)
       this.emit("ct-select", {
         value: item.value,
         label: item.label || item.value,
         group: item.group,
         isCustom: false,
+        ...(item.data !== undefined && { data: item.data }),
       });
 
       // Update value through cell controller
