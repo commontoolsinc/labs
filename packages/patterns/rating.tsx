@@ -54,7 +54,9 @@ const setRating = handler<
 export const RatingModule = recipe<RatingModuleInput, RatingModuleInput>(
   "RatingModule",
   ({ rating }) => {
-    const displayText = computed(() => rating ? `${rating}/5` : "Not rated");
+    const displayText = computed(() =>
+      rating.get() ? `${rating.get()}/5` : "Not rated"
+    );
 
     return {
       [NAME]: computed(() => `${MODULE_METADATA.icon} Rating: ${displayText}`),
@@ -72,7 +74,7 @@ export const RatingModule = recipe<RatingModuleInput, RatingModuleInput>(
                   cursor: "pointer",
                   fontSize: "24px",
                   padding: "4px",
-                  opacity: (rating ?? 0) >= value ? "1" : "0.3",
+                  opacity: (rating.get() ?? 0) >= value ? "1" : "0.3",
                   transition: "opacity 0.1s, transform 0.1s",
                 }}
                 title={`Rate ${value} star${value > 1 ? "s" : ""}`}

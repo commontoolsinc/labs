@@ -934,12 +934,12 @@ const Record = pattern<RecordInput, RecordOutput>(
                   }}
                 >
                   <span
-                    style={{
-                      transform: trashExpanded
+                    style={computed(() => ({
+                      transform: trashExpanded.get()
                         ? "rotate(90deg)"
                         : "rotate(0deg)",
                       transition: "transform 0.2s",
-                    }}
+                    }))}
                   >
                     ▶
                   </span>
@@ -947,7 +947,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                 </button>
 
                 {ifElse(
-                  trashExpanded,
+                  computed(() => trashExpanded.get()),
                   <div style={{ paddingLeft: "16px", marginTop: "8px" }}>
                     {trashedSubCharms.map(
                       (entry) => {

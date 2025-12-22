@@ -24,7 +24,7 @@ export const MODULE_METADATA: ModuleMetadata = {
   schema: {
     giftTier: {
       type: "string",
-      enum: ["always", "occasions", "reciprocal", "none"],
+      enum: ["", "always", "occasions", "reciprocal", "none"],
       description: "Gift giving tier",
     },
     favorites: {

@@ -16,7 +16,7 @@ export const MODULE_METADATA: ModuleMetadata = {
   schema: {
     status: {
       type: "string",
-      enum: ["planned", "active", "blocked", "done", "archived"],
+      enum: ["", "planned", "active", "blocked", "done", "archived"],
       description: "Project status",
     },
   },

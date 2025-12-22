@@ -129,14 +129,6 @@ export function inferTypeFromModules(moduleTypes: string[]): InferredType {
     return { type: "project", icon: "\u{1F4BC}", confidence: 0.85 };
   }
 
-  // Place: has location OR address (but not birthday - that's a person)
-  if (
-    (typeSet.has("location") || typeSet.has("address")) &&
-    !typeSet.has("birthday")
-  ) {
-    return { type: "place", icon: "\u{1F4CD}", confidence: 0.8 };
-  }
-
   // Family: has address AND relationship (but not birthday - individual person)
   if (
     typeSet.has("address") && typeSet.has("relationship") &&
@@ -147,6 +139,14 @@ export function inferTypeFromModules(moduleTypes: string[]): InferredType {
       icon: "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}",
       confidence: 0.75,
     };
+  }
+
+  // Place: has location OR address (but not birthday - that's a person)
+  if (
+    (typeSet.has("location") || typeSet.has("address")) &&
+    !typeSet.has("birthday")
+  ) {
+    return { type: "place", icon: "\u{1F4CD}", confidence: 0.8 };
   }
 
   // Default: generic record
