@@ -143,17 +143,14 @@ export class CharmManager {
       .key("recentCharms")
       .asSchema(charmListSchema);
 
-    // Two-phase initialization for defensive programming:
-    // 1. Sync all cells in parallel
-    // 2. THEN link space cell contents
-    // Note: linkSpaceCellContents now passes Cell references (not .get() snapshots),
-    // so this sequencing is conservative but ensures consistent initialization order.
+    // Initialize all cells in parallel. linkSpaceCellContents already
+    // depends on syncSpaceCellContents internally, so ordering is preserved.
     this.ready = Promise.all([
       this.syncCharms(this.charms),
       this.syncCharms(this.pinnedCharms),
       this.syncCharms(this.recentCharms),
-      syncSpaceCellContents,
-    ]).then(() => linkSpaceCellContents).then(() => {});
+      linkSpaceCellContents,
+    ]).then(() => {});
   }
 
   getSpace(): MemorySpace {
