@@ -24,6 +24,8 @@ export interface AutocompleteItem {
   group?: string;
   /** Additional search terms that match this item */
   searchAliases?: string[];
+  /** Arbitrary data to pass through with ct-select event (preserved as-is) */
+  data?: unknown;
 }
 
 /**
@@ -94,7 +96,7 @@ function processItem(item: AutocompleteItem): ProcessedItem {
  * @prop {Cell<string>|Cell<string[]>|string|string[]} value - Selected value(s) - supports Cell binding
  *
  * @fires ct-change - Fired when value changes: { value, oldValue }
- * @fires ct-select - Fired when an item is selected: { value, label, group?, isCustom }
+ * @fires ct-select - Fired when an item is selected: { value, label, group?, isCustom, data? }
  * @fires ct-open - Fired when dropdown opens
  * @fires ct-close - Fired when dropdown closes
  *
@@ -925,11 +927,13 @@ export class CTAutocomplete extends BaseElement {
     // Selection methods
     private _selectItem(item: AutocompleteItem) {
       // Always emit ct-select for side effects
+      // Include data field if present (allows passing arbitrary objects through selection)
       this.emit("ct-select", {
         value: item.value,
         label: item.label || item.value,
         group: item.group,
         isCustom: false,
+        ...(item.data !== undefined && { data: item.data }),
       });
 
       // Update value through cell controller
