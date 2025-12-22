@@ -30,8 +30,8 @@ import {
 import { isObject } from "@commontools/utils/types";
 
 const logger = getLogger("llm", {
-  enabled: false,
-  level: "info",
+  enabled: true,
+  level: "warn",
 });
 
 const client = new LLMClient();
@@ -236,6 +236,8 @@ async function handleLLMError<T, P>(
 ): Promise<void> {
   if (thisRun !== getCurrentRun()) return;
 
+  const message = error instanceof Error ? error.message : String(error);
+  console.warn(`[LLM Error] ${message}`);
   logger.warn("llm", "Error in LLM request", { error });
 
   await runtime.idle();

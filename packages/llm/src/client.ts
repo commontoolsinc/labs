@@ -240,6 +240,14 @@ export class LLMClient {
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error(
+        `%c[generateObject Error]%c HTTP ${response.status}\n` +
+          `Response: ${errorText}\n` +
+          `%cCommon cause: Check that you're passing the correct parameters (messages, schema, model, etc.)`,
+        "color: red; font-weight: bold",
+        "color: inherit",
+        "color: gray; font-style: italic",
+      );
       throw new Error(
         `HTTP error! status: ${response.status}, body: ${errorText}`,
       );
@@ -315,6 +323,14 @@ export class LLMClient {
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error(
+        `%c[generateText Error]%c HTTP ${response.status}\n` +
+          `Response: ${errorText}\n` +
+          `%cCommon cause: Check that you're passing the correct parameters (messages, prompt, model, etc.)`,
+        "color: red; font-weight: bold",
+        "color: inherit",
+        "color: gray; font-style: italic",
+      );
       throw new Error(
         `HTTP error! status: ${response.status}, body: ${errorText}`,
       );
