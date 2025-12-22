@@ -32,6 +32,7 @@ export interface SubCharmEntry {
   collapsed?: boolean; // Collapse state - when true, only header is shown (default: false/expanded)
   charm: unknown; // Reference to the actual sub-charm pattern instance
   schema?: JSONSchema; // Schema captured at creation time for dynamic discovery
+  note?: string; // User annotation about this module (visible to LLM reads, not extraction)
 }
 
 /**
