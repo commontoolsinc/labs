@@ -3938,7 +3938,9 @@ describe("Cell success callbacks", () => {
 
       // Start from outer.result
       const startCell = outerCell.key("result");
-      expect(startCell.getAsNormalizedFullLink().path.length).toBeGreaterThan(0);
+      expect(startCell.getAsNormalizedFullLink().path.length).toBeGreaterThan(
+        0,
+      );
 
       // Test resolveAsCell
       const resolved = startCell.resolveAsCell();
