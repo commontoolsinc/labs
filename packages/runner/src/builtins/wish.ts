@@ -136,6 +136,12 @@ type BaseResolution = {
   pathPrefix?: readonly string[];
 };
 
+type ResolveResult = {
+  resolutions: BaseResolution[];
+  /** True if resolution required searching (favorites lookup, etc.) */
+  searched: boolean;
+};
+
 function getSpaceCell(ctx: WishContext): Cell<unknown> {
   if (!ctx.spaceCell) {
     ctx.spaceCell = ctx.runtime.getCell(
@@ -167,19 +173,31 @@ function formatTarget(parsed: ParsedWishTarget): string {
 function resolveBase(
   parsed: ParsedWishTarget,
   ctx: WishContext,
-): BaseResolution[] {
+): ResolveResult {
   switch (parsed.key) {
     case "/":
-      return [{ cell: getSpaceCell(ctx) }];
+      return {
+        resolutions: [{ cell: getSpaceCell(ctx) }],
+        searched: false,
+      };
     case "#default":
-      return [{ cell: getSpaceCell(ctx), pathPrefix: ["defaultPattern"] }];
+      return {
+        resolutions: [{ cell: getSpaceCell(ctx), pathPrefix: ["defaultPattern"] }],
+        searched: false,
+      };
     case "#mentionable":
-      return [{
-        cell: getSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "backlinksIndex", "mentionable"],
-      }];
+      return {
+        resolutions: [{
+          cell: getSpaceCell(ctx),
+          pathPrefix: ["defaultPattern", "backlinksIndex", "mentionable"],
+        }],
+        searched: false,
+      };
     case "#recent":
-      return [{ cell: getSpaceCell(ctx), pathPrefix: ["recentCharms"] }];
+      return {
+        resolutions: [{ cell: getSpaceCell(ctx), pathPrefix: ["recentCharms"] }],
+        searched: false,
+      };
     case "#favorites": {
       // Favorites always come from the HOME space (user identity DID)
       const userDID = ctx.runtime.userIdentityDID;
@@ -193,9 +211,12 @@ function resolveBase(
         ctx.tx,
       );
 
-      // No path = return favorites list
+      // No path = return favorites list (direct, no search)
       if (parsed.path.length === 0) {
-        return [{ cell: homeSpaceCell, pathPrefix: ["favorites"] }];
+        return {
+          resolutions: [{ cell: homeSpaceCell, pathPrefix: ["favorites"] }],
+          searched: false,
+        };
       }
 
       // Path provided = search by tag
@@ -230,10 +251,13 @@ function resolveBase(
         throw new WishError(`No favorite found matching "${searchTerm}"`);
       }
 
-      return [{
-        cell: match.cell,
-        pathPrefix: parsed.path.slice(1), // remaining path after search term
-      }];
+      return {
+        resolutions: [{
+          cell: match.cell,
+          pathPrefix: parsed.path.slice(1), // remaining path after search term
+        }],
+        searched: true,
+      };
     }
     case "#now": {
       if (parsed.path.length > 0) {
@@ -247,7 +271,10 @@ function resolveBase(
         undefined,
         ctx.tx,
       );
-      return [{ cell: nowCell }];
+      return {
+        resolutions: [{ cell: nowCell }],
+        searched: false,
+      };
     }
     case "#wishIndex": {
       // Wish index comes from the HOME space (user identity DID)
@@ -256,7 +283,10 @@ function resolveBase(
         throw new WishError("User identity DID not available for #wishIndex");
       }
       const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
-      return [{ cell: homeSpaceCell, pathPrefix: ["wishIndex"] }];
+      return {
+        resolutions: [{ cell: homeSpaceCell, pathPrefix: ["wishIndex"] }],
+        searched: false,
+      };
     }
     default: {
       // Check if it's a well-known target
@@ -268,7 +298,10 @@ function resolveBase(
           ctx.parentCell.space,
           ctx.tx,
         );
-        return [{ cell: baseCell }];
+        return {
+          resolutions: [{ cell: baseCell }],
+          searched: false,
+        };
       }
 
       // Hash tag: Look for exact matches in favorites.
@@ -315,10 +348,13 @@ function resolveBase(
           throw new WishError(`No favorite found matching "${searchTerm}"`);
         }
 
-        return matches.map((match) => ({
-          cell: match.cell,
-          pathPrefix: parsed.path,
-        }));
+        return {
+          resolutions: matches.map((match) => ({
+            cell: match.cell,
+            pathPrefix: parsed.path,
+          })),
+          searched: true,
+        };
       }
 
       throw new WishError(`Wish target "${parsed.key}" is not recognized.`);
@@ -421,57 +457,60 @@ function getRecentWishIndexEntries(
  * Record a successful wish resolution to the wish index.
  * Implements FIFO eviction when MAX_ENTRIES is exceeded.
  * Deduplicates entries with the same query within the debounce window.
+ *
+ * Always uses a separate transaction via editWithRetry because the wish index
+ * lives in the HOME space, which may differ from the current transaction's space.
  */
-async function recordToWishIndex(
+function recordToWishIndex(
   runtime: Runtime,
   query: string,
   resultCell: Cell<unknown>,
   patternUrl?: string,
-): Promise<void> {
+): void {
   try {
     const homeSpaceCell = runtime.getHomeSpaceCell();
     const wishIndexCell = homeSpaceCell.key("wishIndex").asSchema(
       wishIndexListSchema,
     );
-    await wishIndexCell.sync();
 
-    await runtime.editWithRetry((tx: IExtendedStorageTransaction) => {
-      const indexWithTx = wishIndexCell.withTx(tx);
-      const currentEntries = indexWithTx.get() || [];
-      const now = Date.now();
+    // Use separate transaction - wish index is in home space, not current space
+    Promise.resolve(wishIndexCell.sync()).then(() => {
+      runtime.editWithRetry((recordTx: IExtendedStorageTransaction) => {
+        const indexWithTx = wishIndexCell.withTx(recordTx);
+        const currentEntries = indexWithTx.get() || [];
+        const now = Date.now();
 
-      // Check for duplicate: same query recorded recently
-      const queryLower = query.toLowerCase().trim();
-      const existingEntry = currentEntries.find((entry) =>
-        entry?.query?.toLowerCase().trim() === queryLower &&
-        now - (entry?.timestamp ?? 0) < WISH_INDEX_DEBOUNCE_MS
-      );
+        // Check for duplicate: same query recorded recently
+        const queryLower = query.toLowerCase().trim();
+        const existingEntry = currentEntries.find((entry) =>
+          entry?.query?.toLowerCase().trim() === queryLower &&
+          now - (entry?.timestamp ?? 0) < WISH_INDEX_DEBOUNCE_MS
+        );
 
-      if (existingEntry) {
-        // Skip duplicate
-        return;
-      }
+        if (existingEntry) {
+          // Skip duplicate
+          return;
+        }
 
-      // Create new entry
-      const newEntry = {
-        query,
-        resultCell,
-        patternUrl,
-        timestamp: now,
-      };
+        // Create new entry
+        const newEntry = {
+          query,
+          resultCell,
+          patternUrl,
+          timestamp: now,
+        };
 
-      // Add at front, filter nulls, apply FIFO eviction
-      let entries = [newEntry, ...currentEntries].filter(
-        (e) => e != null && e.query != null,
-      );
-      if (entries.length > WISH_INDEX_MAX_ENTRIES) {
-        entries = entries.slice(0, WISH_INDEX_MAX_ENTRIES);
-      }
+        // Add at front, filter nulls, apply FIFO eviction
+        let entries = [newEntry, ...currentEntries].filter(
+          (e) => e != null && e.query != null,
+        );
+        if (entries.length > WISH_INDEX_MAX_ENTRIES) {
+          entries = entries.slice(0, WISH_INDEX_MAX_ENTRIES);
+        }
 
-      indexWithTx.set(entries);
+        indexWithTx.set(entries);
+      });
     });
-
-    await runtime.idle();
   } catch (e) {
     console.warn("Failed to record to wish index:", e);
   }
@@ -550,7 +589,6 @@ export function wish(
     | { situation: string; context: Record<string, any> }
     | undefined;
   let suggestionPatternResultCell: Cell<WishState<any>> | undefined;
-  let lastRecordedSuggestionQuery: string | undefined;
 
   function launchSuggestionPattern(
     input: { situation: string; context: Record<string, any> },
@@ -597,21 +635,15 @@ export function wish(
       );
     }
 
-    if (!providedTx) tx.commit();
+    // Record the suggestion pattern charm to wish index
+    recordToWishIndex(
+      runtime,
+      input.situation,
+      suggestionPatternResultCell!, // should this be .key('result')
+      SUGGESTION_TSX_PATH,
+    );
 
-    // Record to wish index when query changes (after all setup is complete)
-    if (input.situation !== lastRecordedSuggestionQuery) {
-      const queryToRecord = input.situation;
-      lastRecordedSuggestionQuery = queryToRecord;
-      setTimeout(() => {
-        recordToWishIndex(
-          runtime,
-          queryToRecord,
-          suggestionPatternResultCell!,
-          SUGGESTION_TSX_PATH,
-        );
-      }, 100);
-    }
+    if (!providedTx) tx.commit();
 
     return suggestionPatternResultCell;
   }
@@ -632,19 +664,19 @@ export function wish(
       try {
         const parsed = parseWishTarget(wishTarget);
         const ctx: WishContext = { runtime, tx, parentCell };
-        const baseResolutions = resolveBase(parsed, ctx);
+        const { resolutions, searched } = resolveBase(parsed, ctx);
 
         // Just use the first result (if there aren't any, the above throws)
-        const combinedPath = baseResolutions[0].pathPrefix
-          ? [...baseResolutions[0].pathPrefix, ...parsed.path]
+        const combinedPath = resolutions[0].pathPrefix
+          ? [...resolutions[0].pathPrefix, ...parsed.path]
           : parsed.path;
-        const resolvedCell = resolvePath(baseResolutions[0].cell, combinedPath);
+        const resolvedCell = resolvePath(resolutions[0].cell, combinedPath);
         sendResult(tx, resolvedCell);
 
-                // Record to wish index (deferred to avoid transaction conflicts)
-                setTimeout(() => {
-                  recordToWishIndex(runtime, wishTarget, resolvedCell);
-                }, 0);
+        // Only record to wish index if resolution required a search
+        if (searched) {
+          recordToWishIndex(runtime, wishTarget, resolvedCell);
+        }
       } catch (e) {
         // Provide helpful feedback for common defaultPattern issues
         if (
@@ -699,12 +731,12 @@ export function wish(
             path: path ?? [],
           };
           const ctx: WishContext = { runtime, tx, parentCell };
-          const baseResolutions = resolveBase(parsed, ctx);
-          const resultCells = baseResolutions.map((baseResolution) => {
-            const combinedPath = baseResolution.pathPrefix
-              ? [...baseResolution.pathPrefix, ...(path ?? [])]
+          const { resolutions, searched } = resolveBase(parsed, ctx);
+          const resultCells = resolutions.map((resolution) => {
+            const combinedPath = resolution.pathPrefix
+              ? [...resolution.pathPrefix, ...(path ?? [])]
               : path ?? [];
-            const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
+            const resolvedCell = resolvePath(resolution.cell, combinedPath);
             return schema ? resolvedCell.asSchema(schema) : resolvedCell;
           });
           if (resultCells.length === 1) {
@@ -714,10 +746,10 @@ export function wish(
               [UI]: cellLinkUI(resultCells[0]),
             });
 
-            // Record to wish index (deferred to avoid transaction conflicts)
-            setTimeout(() => {
+            // Only record to wish index if resolution required a search
+            if (searched) {
               recordToWishIndex(runtime, query, resultCells[0]);
-            }, 0);
+            }
           } else {
             // If it's multiple result, launch the wish pattern, which will
             // immediately return the first candidate as result
