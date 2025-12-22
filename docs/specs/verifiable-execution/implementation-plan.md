@@ -43,6 +43,27 @@ This document tracks implementation status of the CT Protocol specification.
 - [x] Consistency checking via attestations
 - [x] Commit records with transaction data
 
+### 1.4 Document → Commit Provenance
+
+- [x] `since` field links facts to their producing commit
+- [x] Index on `since` for range queries (`fact_since`)
+- [ ] Add compound index `(the, since)` for fast commit lookup:
+
+```sql
+CREATE INDEX fact_the_since ON fact (the, since);
+```
+
+- [ ] Subscription protocol ensures commits delivered with/before facts
+- [ ] Client API to query historical commits by `since` range
+- [ ] Client-side commit cache for provenance lookups
+
+**Files to modify:**
+
+- `packages/memory/space.ts` - add compound index in schema
+- `packages/memory/migrations/` - migration for existing databases
+- `packages/memory/consumer.ts` - ensure commit delivery ordering
+- `packages/runner/src/storage/` - client-side commit tracking
+
 ---
 
 ## Phase 2: Enhanced Receipts (Priority: High)
@@ -318,42 +339,48 @@ The activity tracking from Phase 2 enables intelligent reactive scheduling.
 
 ## Implementation Priority
 
-### Immediate (Phase 2)
+### Immediate (Phases 1-2)
 
-1. **Activity in receipts** - Highest priority
+1. **Document → Commit provenance** (Phase 1.4)
+   - Add compound index `(the, since)` for fast commit lookup
+   - Ensure subscription protocol delivers commits with/before facts
+   - Client-side commit cache for provenance lookups
+   - Essential for clients to verify how data was computed
+
+2. **Activity in receipts** (Phase 2.1)
    - Extend `CommitData` with activity
    - Serialize journal activity to commits
    - This unlocks reactive scheduling benefits
 
-2. **Client state & commit validation**
+3. **Client state & commit validation** (Phase 2.5)
    - Nursery/heap model for pending vs confirmed commits
    - `since`-based validation rules
    - CommitLogEntry with original + resolution
    - Hash mapping for provisional → final resolution
    - This enables offline operation and stacked commits
 
-3. **Code bundle references**
+4. **Code bundle references** (Phase 2.2)
    - Track which code produced each output
    - Essential for reproducibility and auditing
 
-4. **Input provenance**
+5. **Input provenance** (Phase 2.3)
    - Link outputs to input sources
    - Enables provenance chain verification
 
 ### Near-term (Phase 3)
 
-4. **Scheduler integration**
+6. **Scheduler integration**
    - Use activity data for dependency tracking
    - Minimal invalidation on changes
 
 ### Medium-term (Phases 4-5)
 
-5. **IFC labels** - Build on existing `Labels` type
-6. **Merkle proofs** - Enable verification without full log
+7. **IFC labels** - Build on existing `Labels` type
+8. **Merkle proofs** - Enable verification without full log
 
 ### Long-term (Phases 6-8)
 
-7. **VCs, Domain bootstrap, Time bounds** - Optional add-ons
+9. **VCs, Domain bootstrap, Time bounds** - Optional add-ons
 
 ---
 

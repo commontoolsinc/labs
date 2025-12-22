@@ -487,6 +487,75 @@ When the server processes a commit:
 If validation fails, the commit is rejected. Dependent commits (referencing this
 one from nursery) will also fail.
 
+### 5.11 Document → Commit Provenance
+
+Clients must always know which commit produced any document they receive. This
+enables:
+
+- **Auditability**: Trace how any data was computed
+- **Verification**: Check the authorization and code that produced the data
+- **Reactivity**: Know when upstream data has changed
+
+**The `since` field as provenance link:**
+
+All facts produced by a commit share the same `since` value. This creates a
+direct relationship:
+
+```
+Document (fact) → since=N → Commit with since=N
+```
+
+Given any fact, the client can find the producing commit by querying for the
+commit fact with matching `since`:
+
+```sql
+SELECT * FROM fact
+WHERE the = 'application/commit+json' AND since = :fact_since
+```
+
+**Subscription model:**
+
+Clients subscribe to both data and commits:
+
+1. **Data subscription**: Receive document updates
+2. **Commit subscription**: Receive commit records
+
+When a client receives a document via subscription, it may need commits it
+hasn't seen yet (e.g., if the document was produced by an older commit). The
+subscription protocol ensures:
+
+- Commits are delivered before or alongside their produced facts
+- Clients can request historical commits by `since` range
+- The commit chain provides complete provenance back to genesis
+
+**Client verification:**
+
+For any document received, the client can:
+
+1. Look up the commit by `since`
+2. Verify the commit's signature and authorization
+3. Check the `codeCID` to see what code produced it
+4. Examine the commit's `reads` to trace input provenance
+
+This gives clients end-to-end visibility into how their data was computed.
+
+### 5.12 Efficient Commit Lookup
+
+To efficiently find commits by `since`, the storage layer should maintain:
+
+1. **Index on `(the, since)`**: For fast commit lookup by sequence number
+2. **Or a dedicated commit table**: Mapping `since → commit reference`
+
+Current implementation uses SQLite with an index on `since`. Adding a compound
+index optimizes the common query pattern:
+
+```sql
+-- Fast commit lookup
+CREATE INDEX fact_the_since ON fact (the, since);
+```
+
+This enables O(log n) lookup of any commit by its `since` value.
+
 ---
 
 ## 6. Receipt Object (Future Enhancement)
