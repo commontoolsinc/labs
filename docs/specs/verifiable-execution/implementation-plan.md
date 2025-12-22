@@ -65,28 +65,32 @@ CREATE INDEX fact_the_since ON fact (the, since);
 ### 1.5 Scheduler Staleness Detection
 
 Works with current CAS semantics - no commit model changes required.
+**Requires activity tracking (2.1)** for path-level granularity.
 
 **Required changes:**
 
-- [ ] Scheduler tracks `since` of each input it reads
-- [ ] On incoming commit, compare commit's writes against tracked inputs
-- [ ] Mark computation stale if `commit.since > tracked_input.since` for same entity
+- [ ] Scheduler tracks `since` of each path it reads (from commit activity)
+- [ ] On incoming commit, compare commit's write paths against tracked inputs
+- [ ] Mark computation stale if `commit.since > tracked_input.since` for same path
 - [ ] Re-run only stale computations
 
 ```typescript
 interface TrackedInput {
-  address: Address; // {id, type} or {id, type, path}
+  address: IMemoryAddress; // {id, type, path} - path-level!
   since: number; // When this input was read
 }
 
-// On commit received:
-for (const write of commit.writes) {
-  if (trackedInputs.has(write.address) &&
-      commit.since > trackedInputs.get(write.address).since) {
-    markStale(computationsUsing(write.address));
+// On commit received (using activity from 2.1):
+for (const writePath of commit.activity.writes) {
+  if (trackedInputs.has(writePath) &&
+      commit.since > trackedInputs.get(writePath).since) {
+    markStale(computationsUsing(writePath));
   }
 }
 ```
+
+Without path-level tracking, any change to entity X invalidates ALL computations
+reading ANY part of X - too coarse for efficient scheduling.
 
 **Files to modify:**
 
@@ -375,27 +379,21 @@ The activity tracking from Phase 2 enables intelligent reactive scheduling.
    - Query/subscription responses include producing commits
    - Foundation for scheduler and client verification
 
-2. **Scheduler staleness detection**
-   - Compare `since` values to detect stale data
-   - Scheduler tracks `since` of its inputs, compares against incoming commits
-   - Re-run computations only when inputs are newer
-   - **High impact**: Immediate efficiency gains with no commit model changes
-
-### Next - Fine-grained Scheduling (Phase 2-3)
-
-3. **Activity in receipts** (Phase 2.1)
+2. **Activity in receipts** (Phase 2.1)
    - Extend `CommitData` with address-level reads/writes
    - Serialize journal activity to commits
-   - Enables path-level dependency tracking
+   - **Required for efficient scheduler** - without paths, any entity change
+     invalidates all computations touching that entity
 
-4. **Scheduler with activity data** (Phase 3)
-   - Use activity for precise dependency graphs
-   - Minimal invalidation based on exact addresses changed
-   - Only re-run computations whose specific inputs changed
+3. **Scheduler staleness detection** (Phase 1.5 + 3)
+   - Compare `since` values at path level to detect stale data
+   - Scheduler tracks `since` of each path it reads
+   - Re-run computations only when their specific paths are newer
+   - **High impact**: Efficient invalidation with path granularity
 
 ### Then - Enhanced Commit Model (Phase 2.5)
 
-5. **Client state & commit validation**
+4. **Client state & commit validation**
    - Nursery/heap model for pending vs confirmed commits
    - `since`-based validation rules (relaxed from strict CAS)
    - CommitLogEntry with original + resolution
@@ -404,22 +402,22 @@ The activity tracking from Phase 2 enables intelligent reactive scheduling.
 
 ### Later - Auditing & Reproducibility (Phase 2.2-2.3)
 
-6. **Code bundle references**
+5. **Code bundle references**
    - Track which code produced each output
    - Essential for reproducibility and auditing
 
-7. **Input provenance**
+6. **Input provenance**
    - Link outputs to input sources
    - Enables provenance chain verification
 
 ### Medium-term (Phases 4-5)
 
-8. **IFC labels** - Build on existing `Labels` type
-9. **Merkle proofs** - Enable verification without full log
+7. **IFC labels** - Build on existing `Labels` type
+8. **Merkle proofs** - Enable verification without full log
 
 ### Long-term (Phases 6-8)
 
-10. **VCs, Domain bootstrap, Time bounds** - Optional add-ons
+9. **VCs, Domain bootstrap, Time bounds** - Optional add-ons
 
 ---
 

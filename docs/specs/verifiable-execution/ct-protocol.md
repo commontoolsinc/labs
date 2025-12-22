@@ -528,22 +528,24 @@ without needing a separate commit-fetching API.
 
 **Scheduler staleness detection:**
 
-The scheduler can use commit information to determine whether data is current:
+The scheduler uses commit activity (path-level reads/writes) to determine
+whether data is current:
 
-1. **Compare `since` values**: If the scheduler has data with `since=N`, and
-   sees a commit with `since=M` where `M > N` that writes to the same entity,
-   the data is stale.
+1. **Path-level `since` tracking**: The scheduler tracks `since` for each path
+   it reads. When a commit arrives with writes to a specific path, only
+   computations reading that exact path are invalidated.
 
-2. **Incremental refresh**: Rather than blindly re-running computations, the
-   scheduler checks if inputs have changed by comparing their `since` against
-   the latest commits.
+2. **Compare `since` values**: If the scheduler has data at path P with
+   `since=N`, and sees a commit with `since=M` where `M > N` that writes to
+   path P, only that path is stale.
 
-3. **Dependency-aware scheduling**: By tracking which addresses each computation
-   reads (from commit activity), the scheduler knows exactly which computations
-   need to re-run when specific data changes.
+3. **Efficient invalidation**: Without path-level granularity, any change to
+   entity X would invalidate ALL computations touching ANY part of X. Path
+   tracking enables precise, minimal re-computation.
 
-This works with the current CAS-based commit semantics and provides immediate
-value for reactive scheduling without requiring changes to commit validation.
+This works with the current CAS-based commit semantics. The key requirement is
+activity tracking in commits (address-level reads/writes) to know which paths
+changed.
 
 **Client verification:**
 
