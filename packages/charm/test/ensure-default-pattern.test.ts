@@ -84,7 +84,7 @@ describe("CharmsController.ensureDefaultPattern", () => {
   });
 
   describe("initial state", () => {
-    it("should have no defaultPattern in space cell initially", async () => {
+    it("should have no defaultPattern in space cell initially", () => {
       // The space cell should initially have no defaultPattern
       const spaceCell = runtime.getCell(
         manager.getSpace(),
