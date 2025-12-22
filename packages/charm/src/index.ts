@@ -5,6 +5,19 @@ export {
   isFavorite,
   removeFavorite,
 } from "./favorites.ts";
+export {
+  addWishIndexEntry,
+  clearWishIndex,
+  getMaxEntries,
+  getRecentWishIndexEntries,
+  getStalenessMsThreshold,
+  getWishIndex,
+  removeWishIndexEntry,
+  wishIndexEntrySchema,
+  type WishIndexEntrySchema,
+  wishIndexListSchema,
+  type WishIndexList,
+} from "./wish-index.ts";
 export { searchCharms } from "./search.ts";
 export {
   castNewRecipe,
