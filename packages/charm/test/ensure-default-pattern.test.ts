@@ -83,8 +83,8 @@ describe("CharmsController.ensureDefaultPattern", () => {
     expect(value).toBeDefined();
   });
 
-  describe("transaction-based synchronization", () => {
-    it("should use transaction system for race protection", async () => {
+  describe("initial state", () => {
+    it("should have no defaultPattern in space cell initially", async () => {
       // The space cell should initially have no defaultPattern
       const spaceCell = runtime.getCell(
         manager.getSpace(),
