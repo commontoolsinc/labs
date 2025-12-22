@@ -319,7 +319,9 @@ describe("Recipe Runner", () => {
     const registeredHandler = addEventHandlerSpy.calls[0].args[0];
 
     // The handler's .name should be set to handler:source_location (file:line:col)
-    expect(registeredHandler.name).toMatch(/^handler:.*recipes\.test\.ts:\d+:\d+$/);
+    expect(registeredHandler.name).toMatch(
+      /^handler:.*recipes\.test\.ts:\d+:\d+$/,
+    );
 
     addEventHandlerSpy.restore();
   });
@@ -1790,5 +1792,187 @@ describe("Recipe Runner", () => {
     // Still 1
     expect(lift1Runs).toBe(1);
     expect(lift2Runs).toBe(1);
+  });
+
+  it("should run dynamically instantiated recipes before reading their outputs", async () => {
+    // This test reproduces a bug where:
+    // 1. A lift dynamically instantiates recipes and pushes them to an array
+    // 2. Another lift reads computed values from those array entries
+    // 3. The dynamically instantiated recipes haven't executed yet, so their
+    //    computed outputs are undefined
+    //
+    // The bug manifests with push-based scheduling (sink + idle) but not with
+    // pull-based scheduling (pull()) because pull correctly traverses the
+    // dependency chain.
+
+    // Inner recipe that computes itemCount from a values array
+    const itemCountRecipe = recipe(
+      // Input schema
+      {
+        type: "object",
+        properties: {
+          values: {
+            type: "array",
+            items: { type: "number" },
+            default: [],
+          },
+        },
+      } as const satisfies JSONSchema,
+      // Output schema
+      {
+        type: "object",
+        properties: {
+          values: { type: "array", items: { type: "number" } },
+          itemCount: { type: "number" },
+        },
+      } as const satisfies JSONSchema,
+      ({ values }) => {
+        // Compute item count from values
+        const itemCount = lift(
+          {
+            type: "array",
+            items: { type: "number" },
+          } as const satisfies JSONSchema,
+          { type: "number" } as const satisfies JSONSchema,
+          (arr: number[]) => (Array.isArray(arr) ? arr.length : 0),
+        )(values);
+
+        return { values, itemCount };
+      },
+    );
+
+    // Lift that dynamically instantiates itemCountRecipe for each group
+    const instantiateGroups = lift(
+      {
+        type: "object",
+        properties: {
+          groups: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                values: { type: "array", items: { type: "number" } },
+              },
+            },
+            asCell: true,
+          },
+        },
+        required: ["groups"],
+      } as const satisfies JSONSchema,
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            values: { type: "array", items: { type: "number" } },
+            itemCount: { type: "number" },
+          },
+        },
+      } as const satisfies JSONSchema,
+      ({ groups }) => {
+        const raw = groups.get();
+        const list = Array.isArray(raw) ? raw : [];
+        const children = [];
+        for (let index = 0; index < list.length; index++) {
+          const groupCell = groups.key(index)!;
+          const valuesCell = groupCell.key("values");
+          const child = itemCountRecipe({
+            values: valuesCell,
+          });
+          children.push(child);
+        }
+        return children;
+      },
+    );
+
+    // Lift that sums itemCount from all groups
+    const computeTotalItems = lift(
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            itemCount: { type: "number" },
+          },
+        },
+      } as const satisfies JSONSchema,
+      { type: "number" } as const satisfies JSONSchema,
+      (entries: Array<{ itemCount?: number }>) => {
+        if (!Array.isArray(entries)) {
+          return 0;
+        }
+        return entries.reduce((sum, entry) => {
+          const count = entry?.itemCount;
+          return typeof count === "number" ? sum + count : sum;
+        }, 0);
+      },
+    );
+
+    // Outer recipe that uses instantiateGroups and computeTotalItems
+    const outerRecipe = recipe(
+      {
+        type: "object",
+        properties: {
+          groups: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                values: { type: "array", items: { type: "number" } },
+              },
+            },
+            default: [],
+          },
+        },
+      } as const satisfies JSONSchema,
+      {
+        type: "object",
+        properties: {
+          groups: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                values: { type: "array", items: { type: "number" } },
+                itemCount: { type: "number" },
+              },
+            },
+          },
+          totalItems: { type: "number" },
+        },
+      } as const satisfies JSONSchema,
+      ({ groups: groupSeeds }) => {
+        const groups = instantiateGroups({ groups: groupSeeds });
+        const totalItems = computeTotalItems(groups);
+        return { groups, totalItems };
+      },
+    );
+
+    const resultCell = runtime.getCell<{
+      groups: Array<{ values: number[]; itemCount: number }>;
+      totalItems: number;
+    }>(
+      space,
+      "should run dynamically instantiated recipes before reading their outputs",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, outerRecipe, {
+      groups: [
+        { values: [1, 2, 3] },
+        { values: [4, 5] },
+      ],
+    }, resultCell);
+    tx.commit();
+
+    const value = await result.pull();
+
+    // The bug: totalItems would be 0 because the dynamically instantiated
+    // recipes haven't run yet when computeTotalItems executes
+    expect(value.groups).toHaveLength(2);
+    expect(value.groups![0].itemCount).toBe(3);
+    expect(value.groups![1].itemCount).toBe(2);
+    expect(value.totalItems).toBe(5); // This fails if nested recipes aren't run first
   });
 });
