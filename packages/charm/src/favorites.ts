@@ -1,5 +1,8 @@
 import { type Cell, type Runtime } from "@commontools/runner";
-import { type FavoriteList, favoriteListSchema } from "./manager.ts";
+import {
+  type FavoriteList,
+  favoriteListSchema,
+} from "@commontools/runner/schemas";
 
 /**
  * Get cell description (schema as string) for tag-based search.
@@ -42,7 +45,10 @@ export function getHomeFavorites(runtime: Runtime): Cell<FavoriteList> {
 }
 
 /**
- * Add a charm to the user's favorites (in home space)
+ * Add a charm to the user's favorites (in home space).
+ *
+ * Syncs the charm before computing the tag to ensure schema is available.
+ * wish.ts has a fallback for computing tags lazily if needed.
  */
 export async function addFavorite(
   runtime: Runtime,
@@ -53,6 +59,11 @@ export async function addFavorite(
 
   const resolvedCharm = charm.resolveAsCell();
 
+  // Sync to ensure schema is available for tag computation
+  await resolvedCharm.sync();
+
+  const tag = getCellDescription(charm);
+
   await runtime.editWithRetry((tx) => {
     const favoritesWithTx = favorites.withTx(tx);
     const current = favoritesWithTx.get() || [];
@@ -61,9 +72,6 @@ export async function addFavorite(
     if (
       current.some((entry) => entry.cell.resolveAsCell().equals(resolvedCharm))
     ) return;
-
-    // Get the schema tag for this cell
-    const tag = getCellDescription(charm);
 
     favoritesWithTx.push({ cell: charm, tag });
   });

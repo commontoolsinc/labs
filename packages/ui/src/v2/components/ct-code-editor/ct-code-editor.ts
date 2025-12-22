@@ -347,19 +347,52 @@ export class CTCodeEditor extends BaseElement {
         // Extract ID from "Name (id)" format
         const idMatch = backlinkText.match(/\(([^)]+)\)$/);
         const backlinkId = idMatch ? idMatch[1] : undefined;
-        const charm = backlinkId ? this.findCharmById(backlinkId) : null;
 
-        if (charm) {
-          this.emit("backlink-click", {
-            id: backlinkId,
-            text: backlinkText,
-            charm: charm,
-          });
-          return true;
+        // If we have a valid ID, navigate directly using getCellFromEntityId.
+        // This bypasses the mentionable array and eliminates a race condition
+        // where findCharmById returns null because the array hasn't synced yet
+        // (common when clicking a backlink immediately after creating it).
+        if (backlinkId) {
+          const runtime = this.pattern?.runtime ??
+            this.mentionable?.runtime ??
+            this.mentioned?.runtime;
+          const space = this.pattern?.space ??
+            this.mentionable?.space ??
+            this.mentioned?.space;
+
+          if (runtime && space) {
+            // Get cell directly by entity ID - no array search needed
+            const charmCell = runtime.getCellFromEntityId(space, {
+              "/": backlinkId,
+            });
+
+            // Use navigateCallback (same pattern as ct-cell-link)
+            if (runtime.navigateCallback) {
+              runtime.navigateCallback(charmCell);
+            }
+
+            this.emit("backlink-click", {
+              id: backlinkId,
+              text: backlinkText,
+              charm: charmCell,
+            });
+            return true;
+          } else {
+            // Log warning instead of silent failure
+            console.warn(
+              "[ct-code-editor] Cannot navigate to backlink: runtime or space unavailable",
+            );
+            this.emit("backlink-click", {
+              id: backlinkId,
+              text: backlinkText,
+              charm: null,
+            });
+            return true;
+          }
         }
 
-        // Instantiate the pattern and pass the ID so we can insert it into the text
-        if (this.pattern) {
+        // Only create new backlink if there's NO ID (text-only like [[Name]])
+        if (!backlinkId && this.pattern) {
           this.createBacklinkFromPattern(backlinkText, true);
         }
 

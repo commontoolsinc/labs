@@ -5,6 +5,7 @@ import {
   type Default,
   generateText,
   handler,
+  ifElse,
   NAME,
   navigateTo,
   pattern,
@@ -17,6 +18,10 @@ import { type MentionableCharm } from "./backlinks-index.tsx";
 type Input = {
   title?: Cell<Default<string, "Untitled Note">>;
   content?: Cell<Default<string, "">>;
+  /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
+  linkPattern?: Cell<Default<string, "">>;
+  /** When true, renders just the editor without ct-screen wrapper. */
+  embedded?: Cell<Default<boolean, false>>;
 };
 
 /** Represents a small #note a user took to remember some text. */
@@ -98,29 +103,34 @@ const handleCharmLinkClicked = handler<void, { charm: Cell<MentionableCharm> }>(
   },
 );
 
-const Note = pattern<Input, Output>(({ title, content }) => {
-  const mentionable = wish<Default<MentionableCharm[], []>>(
-    "#mentionable",
-  );
-  const mentioned = Cell.of<MentionableCharm[]>([]);
+const Note = pattern<Input, Output>(
+  ({ title, content, linkPattern, embedded }) => {
+    const mentionable = wish<Default<MentionableCharm[], []>>(
+      "#mentionable",
+    );
+    const mentioned = Cell.of<MentionableCharm[]>([]);
 
-  // populated in backlinks-index.tsx
-  const backlinks = Cell.of<MentionableCharm[]>([]);
+    // populated in backlinks-index.tsx
+    const backlinks = Cell.of<MentionableCharm[]>([]);
 
-  // The only way to serialize a pattern, apparently?
-  const patternJson = computed(() => JSON.stringify(Note));
+    // Use provided linkPattern or default to creating new Notes
+    // linkPattern is a Cell<string> - access reactively, not as raw string
+    const patternJson = computed(() => {
+      // deno-lint-ignore no-explicit-any
+      const lpValue = (linkPattern as any)?.get?.() ?? linkPattern;
+      const custom = typeof lpValue === "string" ? lpValue.trim() : "";
+      return custom || JSON.stringify(Note);
+    });
 
-  return {
-    [NAME]: title,
-    [UI]: (
-      <ct-screen>
-        <div slot="header">
-          <ct-input
-            $value={title}
-            placeholder="Enter title..."
-          />
-        </div>
+    // Wrap embedded in computed() to avoid ifElse hang with input Cells
+    // See DEBUGGING.md: "ifElse with Composed Pattern Cells"
+    const isEmbedded = computed(() => embedded);
 
+    return {
+      [NAME]: title,
+      [UI]: ifElse(
+        isEmbedded,
+        // Embedded mode - just the editor, no wrapper
         <ct-code-editor
           $value={content}
           $mentionable={mentionable}
@@ -131,55 +141,77 @@ const Note = pattern<Input, Output>(({ title, content }) => {
           language="text/markdown"
           theme="light"
           wordWrap
-          tabIndent
-          lineNumbers
-        />
+          style="flex: 1; min-height: 120px;"
+        />,
+        // Standalone mode - full screen with header/footer
+        <ct-screen>
+          <div slot="header">
+            <ct-input
+              $value={title}
+              placeholder="Enter title..."
+            />
+          </div>
 
-        <ct-hstack slot="footer">
-          {backlinks?.map((charm) => (
-            <ct-button
-              onClick={handleCharmLinkClicked({ charm })}
-            >
-              {charm?.[NAME]}
-            </ct-button>
-          ))}
-        </ct-hstack>
-      </ct-screen>
-    ),
-    title,
-    content,
-    mentioned,
-    backlinks,
-    grep: patternTool(
-      ({ query, content }: { query: string; content: string }) => {
-        return computed(() => {
-          return content.split("\n").filter((c) => c.includes(query));
-        });
-      },
-      { content },
-    ),
-    translate: patternTool(
-      (
-        { language, content }: {
-          language: string;
-          content: string;
+          <ct-code-editor
+            $value={content}
+            $mentionable={mentionable}
+            $mentioned={mentioned}
+            $pattern={patternJson}
+            onbacklink-click={handleCharmLinkClick({})}
+            onbacklink-create={handleNewBacklink({ mentionable })}
+            language="text/markdown"
+            theme="light"
+            wordWrap
+            tabIndent
+            lineNumbers
+          />
+
+          <ct-hstack slot="footer">
+            {backlinks?.map((charm) => (
+              <ct-button
+                onClick={handleCharmLinkClicked({ charm })}
+              >
+                {charm?.[NAME]}
+              </ct-button>
+            ))}
+          </ct-hstack>
+        </ct-screen>,
+      ),
+      title,
+      content,
+      mentioned,
+      backlinks,
+      grep: patternTool(
+        ({ query, content }: { query: string; content: string }) => {
+          return computed(() => {
+            return content.split("\n").filter((c) => c.includes(query));
+          });
         },
-      ) => {
-        const genResult = generateText({
-          system: computed(() => `Translate the content to ${language}.`),
-          prompt: computed(() => `<to_translate>${content}</to_translate>`),
-        });
+        { content },
+      ),
+      translate: patternTool(
+        (
+          { language, content }: {
+            language: string;
+            content: string;
+          },
+        ) => {
+          const genResult = generateText({
+            system: computed(() => `Translate the content to ${language}.`),
+            prompt: computed(() => `<to_translate>${content}</to_translate>`),
+          });
 
-        return computed(() => {
-          if (genResult.pending) return undefined;
-          if (genResult.result == null) return "Error occured";
-          return genResult.result;
-        });
-      },
-      { content },
-    ),
-    editContent: handleEditContent({ content }),
-  };
-});
+          return computed(() => {
+            if (genResult.pending) return undefined;
+            if (genResult.result == null) return "Error occured";
+            return genResult.result;
+          });
+        },
+        { content },
+      ),
+      editContent: handleEditContent({ content }),
+    };
+  },
+);
 
 export default Note;

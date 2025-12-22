@@ -301,136 +301,156 @@ export async function generateText(
   // Create streaming response
   const stream = new ReadableStream({
     async start(controller) {
-      let result = "";
-      const toolCalls: Array<{
-        toolCallId: string;
-        toolName: string;
-        input: any;
-      }> = [];
+      const encoder = new TextEncoder();
+      try {
+        let result = "";
+        const toolCalls: Array<{
+          toolCallId: string;
+          toolName: string;
+          input: any;
+        }> = [];
 
-      // If last message was from assistant, send it first
-      if (messages[messages.length - 1].role === "assistant") {
-        const content = messages[messages.length - 1].content;
-        // This `content` could be a structured content array, which isn't supported here.
-        if (typeof content !== "string") {
-          throw new Error("Structured content not supported in responses.");
+        // If last message was from assistant, send it first
+        if (messages[messages.length - 1].role === "assistant") {
+          const content = messages[messages.length - 1].content;
+          // This `content` could be a structured content array, which isn't supported here.
+          if (typeof content !== "string") {
+            throw new Error("Structured content not supported in responses.");
+          }
+          result = content;
+          controller.enqueue(encoder.encode(JSON.stringify(result) + "\n"));
         }
-        result = content;
-        controller.enqueue(
-          new TextEncoder().encode(JSON.stringify(result) + "\n"),
-        );
-      }
 
-      // Stream each event from the full AI SDK stream
-      for await (const part of llmStream.fullStream) {
-        if (part.type === "text-delta") {
-          result += part.text;
-          // Send text delta event to client
+        // Stream each event from the full AI SDK stream
+        for await (const part of llmStream.fullStream) {
+          if (part.type === "text-delta") {
+            result += part.text;
+            // Send text delta event to client
+            controller.enqueue(
+              encoder.encode(
+                JSON.stringify({
+                  type: "text-delta",
+                  textDelta: part.text,
+                }) + "\n",
+              ),
+            );
+          } else if (part.type === "tool-call") {
+            // Track tool calls for message history
+            toolCalls.push({
+              toolCallId: part.toolCallId,
+              toolName: part.toolName,
+              input: part.input,
+            });
+            // Send tool call event to client
+            controller.enqueue(
+              encoder.encode(
+                JSON.stringify({
+                  type: "tool-call",
+                  toolCallId: part.toolCallId,
+                  toolName: part.toolName,
+                  args: part.input,
+                }) + "\n",
+              ),
+            );
+          } else if (part.type === "tool-result") {
+            // Send tool result event to client
+            controller.enqueue(
+              encoder.encode(
+                JSON.stringify({
+                  type: "tool-result",
+                  toolCallId: part.toolCallId,
+                  result: part.output,
+                }) + "\n",
+              ),
+            );
+          }
+        }
+
+        // Only add stop token if not in JSON mode to avoid breaking JSON structure
+        if (
+          (await llmStream.finishReason) === "stop" && params.stop &&
+          !params.mode
+        ) {
+          result += params.stop;
           controller.enqueue(
-            new TextEncoder().encode(
-              JSON.stringify({
-                type: "text-delta",
-                textDelta: part.text,
-              }) + "\n",
-            ),
-          );
-        } else if (part.type === "tool-call") {
-          // Track tool calls for message history
-          toolCalls.push({
-            toolCallId: part.toolCallId,
-            toolName: part.toolName,
-            input: part.input,
-          });
-          // Send tool call event to client
-          controller.enqueue(
-            new TextEncoder().encode(
-              JSON.stringify({
-                type: "tool-call",
-                toolCallId: part.toolCallId,
-                toolName: part.toolName,
-                args: part.input,
-              }) + "\n",
-            ),
-          );
-        } else if (part.type === "tool-result") {
-          // Send tool result event to client
-          controller.enqueue(
-            new TextEncoder().encode(
-              JSON.stringify({
-                type: "tool-result",
-                toolCallId: part.toolCallId,
-                result: part.output,
-              }) + "\n",
-            ),
+            encoder.encode(JSON.stringify(params.stop) + "\n"),
           );
         }
-      }
 
-      // Only add stop token if not in JSON mode to avoid breaking JSON structure
-      if (
-        (await llmStream.finishReason) === "stop" && params.stop &&
-        !params.mode
-      ) {
-        result += params.stop;
-        controller.enqueue(
-          new TextEncoder().encode(JSON.stringify(params.stop) + "\n"),
-        );
-      }
-
-      // For JSON mode, clean the result to strip any markdown code blocks
-      if (params.mode) {
-        result = cleanJsonResponse(result);
-      }
-
-      // Update message history with proper content structure
-      let assistantContent: BuiltInLLMMessage["content"];
-
-      if (toolCalls.length > 0) {
-        // Build structured content when tool calls are present
-        const contentParts: BuiltInLLMMessage["content"] = [];
-        if (result.trim()) {
-          contentParts.push({ type: "text", text: result } as any);
+        // For JSON mode, clean the result to strip any markdown code blocks
+        if (params.mode) {
+          result = cleanJsonResponse(result);
         }
-        for (const tc of toolCalls) {
-          contentParts.push({
-            type: "tool-call",
-            toolCallId: tc.toolCallId,
-            toolName: tc.toolName,
-            input: tc.input,
+
+        // Update message history with proper content structure
+        let assistantContent: BuiltInLLMMessage["content"];
+
+        if (toolCalls.length > 0) {
+          // Build structured content when tool calls are present
+          const contentParts: BuiltInLLMMessage["content"] = [];
+          if (result.trim()) {
+            contentParts.push({ type: "text", text: result } as any);
+          }
+          for (const tc of toolCalls) {
+            contentParts.push({
+              type: "tool-call",
+              toolCallId: tc.toolCallId,
+              toolName: tc.toolName,
+              input: tc.input,
+            } as any);
+          }
+          assistantContent = contentParts as any;
+        } else {
+          // Plain text response
+          assistantContent = result;
+        }
+
+        // Update message history
+        if (messages[messages.length - 1].role === "user") {
+          messages.push({
+            role: "assistant",
+            content: assistantContent,
           } as any);
+        } else {
+          messages[messages.length - 1].content = assistantContent as any;
         }
-        assistantContent = contentParts as any;
-      } else {
-        // Plain text response
-        assistantContent = result;
+
+        // Send finish event to client
+        controller.enqueue(
+          encoder.encode(
+            JSON.stringify({
+              type: "finish",
+            }) + "\n",
+          ),
+        );
+
+        // Call the onStreamComplete callback with all the data needed for caching
+        if (params.onStreamComplete) {
+          params.onStreamComplete({
+            message: messages[messages.length - 1] as BuiltInLLMMessage,
+            messages: [...messages] as BuiltInLLMMessage[],
+            originalRequest: params,
+          });
+        }
+
+        controller.close();
+      } catch (error) {
+        // Log error server-side for debugging
+        console.error("[generateText Stream Error]:", error);
+        // Send error event to client before closing stream
+        const errorMessage = error instanceof Error
+          ? error.message
+          : String(error);
+        controller.enqueue(
+          encoder.encode(
+            JSON.stringify({
+              type: "error",
+              error: errorMessage,
+            }) + "\n",
+          ),
+        );
+        controller.error(error);
       }
-
-      // Update message history
-      if (messages[messages.length - 1].role === "user") {
-        messages.push({ role: "assistant", content: assistantContent } as any);
-      } else {
-        messages[messages.length - 1].content = assistantContent as any;
-      }
-
-      // Send finish event to client
-      controller.enqueue(
-        new TextEncoder().encode(
-          JSON.stringify({
-            type: "finish",
-          }) + "\n",
-        ),
-      );
-
-      // Call the onStreamComplete callback with all the data needed for caching
-      if (params.onStreamComplete) {
-        params.onStreamComplete({
-          message: messages[messages.length - 1] as BuiltInLLMMessage,
-          messages: [...messages] as BuiltInLLMMessage[],
-          originalRequest: params,
-        });
-      }
-
-      controller.close();
     },
   });
 

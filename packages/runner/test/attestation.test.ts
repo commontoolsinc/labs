@@ -282,6 +282,216 @@ describe("Attestation Module", () => {
       expect(resultValue.items[3]).toBeUndefined();
       expect(resultValue.items[9]).toBeUndefined();
     });
+
+    it("should share sibling references (structural sharing)", () => {
+      // CT-1123 Phase 2: Verify structural sharing optimization
+      const source = {
+        address: { id: "test:structural", type: "application/json", path: [] },
+        value: {
+          unchanged: { nested: { deep: "value" } },
+          modified: { target: "old" },
+        },
+      } as const;
+
+      const result = Attestation.write(source, {
+        id: "test:structural",
+        type: "application/json",
+        path: ["modified", "target"],
+      }, "new");
+
+      expect(result.ok).toBeDefined();
+      const resultValue = result.ok!.value as Record<string, unknown>;
+
+      // Modified path should have new value
+      expect((resultValue.modified as Record<string, unknown>).target).toBe(
+        "new",
+      );
+
+      // Sibling 'unchanged' should be EXACT SAME reference (structural sharing)
+      expect(resultValue.unchanged).toBe(source.value.unchanged);
+
+      // Modified 'modified' object should be NEW reference
+      expect(resultValue.modified).not.toBe(source.value.modified);
+
+      // Original source should be unmodified
+      expect(source.value.modified.target).toBe("old");
+    });
+  });
+
+  describe("setAtPath edge cases", () => {
+    // 1. PROTOTYPE POLLUTION
+    it("should not allow __proto__ key writes to pollute Object.prototype", () => {
+      const source = {
+        address: { id: "test:proto", type: "application/json", path: [] },
+        value: { safe: 1 },
+      } as const;
+      // Attempt to pollute via __proto__
+      Attestation.write(
+        source,
+        { ...source.address, path: ["__proto__", "polluted"] },
+        true,
+      );
+      // Verify Object.prototype wasn't polluted
+      // deno-lint-ignore no-explicit-any
+      expect(({} as any).polluted).toBeUndefined();
+    });
+
+    it("should not allow constructor key writes to pollute prototypes", () => {
+      const source = {
+        address: { id: "test:constructor", type: "application/json", path: [] },
+        value: { data: {} },
+      } as const;
+      Attestation.write(
+        source,
+        {
+          ...source.address,
+          path: ["data", "constructor", "prototype", "polluted"],
+        },
+        true,
+      );
+      // deno-lint-ignore no-explicit-any
+      expect(({} as any).polluted).toBeUndefined();
+    });
+
+    // 2. NaN HANDLING
+    it("should handle NaN values (NaN === NaN is false)", () => {
+      const source = {
+        address: {
+          id: "test:nan" as const,
+          type: "application/json" as const,
+          path: [] as const,
+        },
+        value: { x: NaN },
+      };
+      // Writing NaN to a field that already has NaN
+      const result = Attestation.write(
+        source,
+        { ...source.address, path: ["x"] },
+        NaN,
+      );
+      // Document current behavior: NaN !== NaN, so this won't be noop
+      expect(result.ok).toBeDefined();
+      expect(Number.isNaN((result.ok!.value as { x: number }).x)).toBe(true);
+    });
+
+    it("should handle -0 vs 0 comparison (should be noop)", () => {
+      const source = {
+        address: {
+          id: "test:zero" as const,
+          type: "application/json" as const,
+          path: [] as const,
+        },
+        value: { x: -0 },
+      };
+      const result = Attestation.write(
+        source,
+        { ...source.address, path: ["x"] },
+        0,
+      );
+      // -0 === 0 is true, so this should be noop
+      expect(result.ok).toBe(source);
+    });
+
+    // 3. ARRAY.LENGTH EDGE CASES
+    it("should handle negative array length (slice behavior removes last element)", () => {
+      const source = {
+        address: {
+          id: "test:arrlen" as const,
+          type: "application/json" as const,
+          path: [] as const,
+        },
+        value: { items: [1, 2, 3] },
+      };
+      const result = Attestation.write(
+        source,
+        { ...source.address, path: ["items", "length"] },
+        -1,
+      );
+      // Document current behavior: slice(0, -1) returns all but last
+      expect(result.ok).toBeDefined();
+      // deno-lint-ignore no-explicit-any
+      const items = (result.ok!.value as any).items;
+      expect(items).toEqual([1, 2]); // slice(0, -1) behavior
+    });
+
+    it("should handle NaN as array length (produces empty array)", () => {
+      const source = {
+        address: {
+          id: "test:arrnan" as const,
+          type: "application/json" as const,
+          path: [] as const,
+        },
+        value: { items: [1, 2, 3] },
+      };
+      const result = Attestation.write(
+        source,
+        { ...source.address, path: ["items", "length"] },
+        NaN,
+      );
+      // slice(0, NaN) returns empty array
+      expect(result.ok).toBeDefined();
+      // deno-lint-ignore no-explicit-any
+      expect((result.ok!.value as any).items).toEqual([]);
+    });
+
+    // 4. LARGE ARRAY INDEX
+    it("should handle large array indices as sparse arrays", () => {
+      const source = {
+        address: {
+          id: "test:bigidx" as const,
+          type: "application/json" as const,
+          path: [] as const,
+        },
+        // deno-lint-ignore no-explicit-any
+        value: { items: [] as any[] },
+      };
+      const result = Attestation.write(
+        source,
+        { ...source.address, path: ["items", "1000000"] },
+        "value",
+      );
+      expect(result.ok).toBeDefined();
+      // deno-lint-ignore no-explicit-any
+      const items = (result.ok!.value as any).items;
+      // Should be sparse array, not allocating 1M elements
+      expect(Object.keys(items).length).toBe(1);
+      expect(items[1000000]).toBe("value");
+      expect(items.length).toBe(1000001); // length is set
+    });
+
+    // 5. SPARSE ARRAY BEHAVIOR
+    it("should convert sparse array holes to undefined (spread behavior)", () => {
+      // Create sparse array using explicit assignment
+      // deno-lint-ignore no-explicit-any
+      const sparseArray: any[] = [];
+      sparseArray[0] = 1;
+      sparseArray[2] = 3;
+      // Index 1 is a hole (not undefined, actually missing)
+
+      const source = {
+        address: {
+          id: "test:sparse" as const,
+          type: "application/json" as const,
+          path: [] as const,
+        },
+        value: { items: sparseArray },
+      };
+      const result = Attestation.write(
+        source,
+        { ...source.address, path: ["items", "0"] },
+        999,
+      );
+      expect(result.ok).toBeDefined();
+      // deno-lint-ignore no-explicit-any
+      const items = (result.ok!.value as any).items;
+      expect(items[0]).toBe(999);
+      // NOTE: [...array] spread converts holes to undefined (1 in items is now true)
+      // Old JSON.parse(JSON.stringify()) would convert holes to null
+      // This is a known behavioral difference, but both result in "filled" arrays
+      expect(1 in items).toBe(true); // hole is converted to undefined
+      expect(items[1]).toBe(undefined);
+      expect(items[2]).toBe(3);
+    });
   });
 
   describe("read function", () => {

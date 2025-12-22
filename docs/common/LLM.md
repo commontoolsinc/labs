@@ -144,10 +144,10 @@ const summaries = articles.map((article) => ({
 
 ### Template Strings Require computed()
 
-When referencing multiple properties from opaque refs:
+When referencing multiple properties from reactive references:
 
 ```typescript
-// ❌ Fails: "Tried to directly access an opaque value"
+// ❌ Fails: reactive references can't be used in template strings directly
 prompt: `Title: ${article.title}\nContent: ${article.content}`
 
 // ✅ Works: defer evaluation with computed()
@@ -220,5 +220,5 @@ When adding items to an array, only new items trigger LLM requests.
 **Key rules:**
 - Call from pattern body only
 - Handle pending/error/result states
-- Use `computed()` for template strings with opaque refs
+- Use `computed()` for template strings with reactive references
 - Schema root must be object (not array)

@@ -6,7 +6,8 @@ import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode, injectUserCode } from "./iframe/static.ts";
 import { WorkflowForm } from "./index.ts";
 import { compileAndRunRecipe, generateNewRecipeVersion } from "./iterate.ts";
-import { CharmManager, nameSchema } from "./manager.ts";
+import { CharmManager } from "./manager.ts";
+import { nameSchema } from "@commontools/runner/schemas";
 import { processWorkflow, ProcessWorkflowOptions } from "./workflow.ts";
 
 export const castSpellAsCharm = async (

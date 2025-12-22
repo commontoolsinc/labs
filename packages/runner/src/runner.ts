@@ -1,7 +1,7 @@
 import { refer } from "merkle-reference/json";
 import { getLogger } from "@commontools/utils/logger";
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
-import { vdomSchema } from "@commontools/html";
+import { vdomSchema } from "./schemas.ts";
 import {
   type Frame,
   isModule,

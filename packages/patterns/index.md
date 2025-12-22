@@ -601,3 +601,383 @@ type Output = {
   error: string | undefined;
 };
 ```
+
+## `record.tsx`
+
+Flexible container pattern for structured records with composable field modules.
+Supports dynamic type selection, soft-delete with restore, and LLM-powered data
+extraction. Used for contacts, businesses, places, and other structured data.
+
+**Keywords:** record, container, sub-charms, type-picker, modules, composable
+
+### Input Schema
+
+```ts
+interface Input {
+  title?: Default<string, "">;
+}
+```
+
+### Output Schema
+
+```ts
+interface SubCharmEntry {
+  type: string;
+  charm: unknown;
+}
+
+interface Output {
+  title: string;
+  subCharms: SubCharmEntry[];
+}
+```
+
+---
+
+# Record Field Modules
+
+These patterns are composable field modules designed to work with `record.tsx`
+but can also be used standalone. Each exports `MODULE_METADATA` for
+self-description.
+
+## `birthday.tsx`
+
+Birthday/date of birth tracking with optional birth year.
+
+**Keywords:** birthday, date, record-module
+
+### Schema
+
+```ts
+interface BirthdayModuleInput {
+  birthDate: Default<string, "">;
+  birthYear: Default<number | null, null>;
+}
+```
+
+## `rating.tsx`
+
+Star rating (1-5) with visual star display.
+
+**Keywords:** rating, stars, record-module
+
+### Schema
+
+```ts
+interface RatingModuleInput {
+  rating: Default<number | null, null>;
+}
+```
+
+## `tags.tsx`
+
+Comma-separated tags/labels.
+
+**Keywords:** tags, labels, record-module
+
+### Schema
+
+```ts
+interface TagsModuleInput {
+  tags: Default<string[], []>;
+}
+```
+
+## `status.tsx`
+
+Status tracking with customizable options (active, inactive, pending, etc.).
+
+**Keywords:** status, state, record-module
+
+### Schema
+
+```ts
+interface StatusModuleInput {
+  status: Default<string, "">;
+}
+```
+
+## `address.tsx`
+
+Physical address with street, city, state, postal code, and country.
+
+**Keywords:** address, location, record-module
+
+### Schema
+
+```ts
+interface AddressModuleInput {
+  street: Default<string, "">;
+  city: Default<string, "">;
+  state: Default<string, "">;
+  postalCode: Default<string, "">;
+  country: Default<string, "">;
+}
+```
+
+## `timeline.tsx`
+
+Key dates tracking (met, started, ended, etc.).
+
+**Keywords:** dates, timeline, history, record-module
+
+### Schema
+
+```ts
+interface TimelineModuleInput {
+  metDate: Default<string, "">;
+  startDate: Default<string, "">;
+  endDate: Default<string, "">;
+}
+```
+
+## `social.tsx`
+
+Social media profile (platform, handle, URL).
+
+**Keywords:** social, twitter, linkedin, github, record-module
+
+### Schema
+
+```ts
+interface SocialModuleInput {
+  platform: Default<string, "">;
+  handle: Default<string, "">;
+  url: Default<string, "">;
+}
+```
+
+## `link.tsx`
+
+URL/link with optional title.
+
+**Keywords:** link, url, web, record-module
+
+### Schema
+
+```ts
+interface LinkModuleInput {
+  url: Default<string, "">;
+  title: Default<string, "">;
+}
+```
+
+## `location.tsx`
+
+Geographic coordinates (latitude, longitude) with optional label.
+
+**Keywords:** location, coordinates, geo, record-module
+
+### Schema
+
+```ts
+interface LocationModuleInput {
+  latitude: Default<number | null, null>;
+  longitude: Default<number | null, null>;
+  label: Default<string, "">;
+}
+```
+
+## `relationship.tsx`
+
+Relationship to another entity with type and notes.
+
+**Keywords:** relationship, connection, record-module
+
+### Schema
+
+```ts
+interface RelationshipModuleInput {
+  relationshipType: Default<string, "">;
+  relatedTo: Default<string, "">;
+  notes: Default<string, "">;
+}
+```
+
+## `giftprefs.tsx`
+
+Gift preferences and ideas.
+
+**Keywords:** gifts, preferences, record-module
+
+### Schema
+
+```ts
+interface GiftPrefsModuleInput {
+  likes: Default<string, "">;
+  dislikes: Default<string, "">;
+  giftIdeas: Default<string[], []>;
+}
+```
+
+## `timing.tsx`
+
+Best times to contact (morning, afternoon, evening, etc.).
+
+**Keywords:** timing, availability, schedule, record-module
+
+### Schema
+
+```ts
+interface TimingModuleInput {
+  bestTime: Default<string, "">;
+  timezone: Default<string, "">;
+}
+```
+
+## `type-picker.tsx`
+
+Controller module for selecting record type. Internal use only - applies
+templates to parent container and then removes itself.
+
+**Keywords:** type-picker, controller, internal, record-module
+
+### Schema
+
+```ts
+interface TypePickerInput {
+  context: ContainerCoordinationContext<SubCharmEntry>;
+  dismissed?: Default<boolean, false>;
+}
+```
+
+## `age-category.tsx`
+
+Age categorization with two-tier selection: Adult/Child groups with specific
+subcategories (Senior, Young Adult, Teenager, etc.).
+
+**Keywords:** age, category, adult, child, record-module
+
+### Schema
+
+```ts
+type AgeCategory =
+  | "adult"
+  | "child"
+  | "senior"
+  | "adult-specific"
+  | "young-adult"
+  | "teenager"
+  | "school-age"
+  | "toddler"
+  | "baby";
+
+interface AgeCategoryModuleInput {
+  ageCategory: Default<AgeCategory, "adult">;
+}
+```
+
+## `dietary-restrictions.tsx`
+
+Comprehensive dietary restriction tracking with severity levels. Handles
+allergies, intolerances, and lifestyle diets (vegetarian, vegan, halal, kosher,
+keto, etc.) with automatic expansion of diet groups to specific food items.
+
+**Keywords:** dietary, allergies, diet, vegan, vegetarian, record-module
+
+### Schema
+
+```ts
+type RestrictionLevel = "flexible" | "prefer" | "strict" | "absolute";
+
+interface RestrictionEntry {
+  name: string;
+  level: RestrictionLevel;
+}
+
+interface DietaryRestrictionsInput {
+  restrictions: Default<RestrictionEntry[], []>;
+}
+```
+
+## `email.tsx`
+
+Email address with customizable label. Supports multiple instances per Record
+with smart default labels (Personal, Work, School, Other).
+
+**Keywords:** email, contact, record-module, multi-instance
+
+### Schema
+
+```ts
+interface EmailModuleInput {
+  label: Default<string, "Personal">;
+  address: Default<string, "">;
+}
+```
+
+## `phone.tsx`
+
+Phone number with customizable label. Supports multiple instances per Record
+with smart default labels (Mobile, Home, Work, Other).
+
+**Keywords:** phone, contact, record-module, multi-instance
+
+### Schema
+
+```ts
+interface PhoneModuleInput {
+  label: Default<string, "Mobile">;
+  number: Default<string, "">;
+}
+```
+
+---
+
+# Utility Patterns
+
+## `record-backup.tsx`
+
+Import/export utility for Records. Exports all Records in a space to JSON and
+imports them back. Designed for data survival after server wipes.
+
+**Keywords:** backup, export, import, records, data-migration
+
+### Input Schema
+
+```ts
+interface Input {
+  importJson: Default<string, "">;
+}
+```
+
+### Output Schema
+
+```ts
+interface Output {
+  exportedJson: string;
+  importJson: string;
+  recordCount: number;
+  importResult: ImportResult | null;
+}
+```
+
+---
+
+# Protocol Types
+
+## `container-protocol.ts`
+
+Protocol definitions for controller patterns that coordinate with parent
+containers.
+
+**Keywords:** protocol, container, coordination, types
+
+### Types
+
+```ts
+interface ContainerCoordinationContext<TEntry = unknown> {
+  entries: Cell<TEntry[]>;
+  trashedEntries: Cell<(TEntry & { trashedAt: string })[]>;
+  createModule: (type: string) => unknown;
+}
+
+interface ModuleMetadata {
+  type: string;
+  label: string;
+  icon: string;
+  internal?: boolean;
+  schema?: Record<string, unknown>;
+  fieldMapping?: string[];
+}
+```

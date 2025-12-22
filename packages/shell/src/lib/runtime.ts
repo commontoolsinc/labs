@@ -1,16 +1,12 @@
-import { createSession, DID, Identity } from "@commontools/identity";
+import { createSession, Identity, isDID } from "@commontools/identity";
 import {
   Runtime,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
   RuntimeTelemetryMarkerResult,
 } from "@commontools/runner";
-import {
-  charmId,
-  CharmManager,
-  NameSchema,
-  nameSchema,
-} from "@commontools/charm";
+import { charmId, CharmManager } from "@commontools/charm";
+import { NameSchema, nameSchema } from "@commontools/runner/schemas";
 import { CharmController, CharmsController } from "@commontools/charm/ops";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { navigate } from "./navigate.ts";
@@ -205,37 +201,75 @@ export class RuntimeInternals extends EventTarget {
         if (!id) {
           throw new Error(`Could not navigate to cell that is not a charm.`);
         }
-        const navigateCallback = createNavCallback(
-          session.space,
-          charmManager.getSpaceName(),
-        );
+
+        // Safely extract target space, catching any errors from the getter
+        let targetSpace: string | undefined;
+        try {
+          targetSpace = target.space;
+        } catch (err) {
+          console.error(
+            "[navigateCallback] Failed to get target cell space:",
+            err,
+          );
+          // Fall back to same-space navigation
+          targetSpace = undefined;
+        }
+
+        const currentSpace = session.space;
+        const currentSpaceName = charmManager.getSpaceName();
+
+        // Determine if this is cross-space navigation:
+        // - targetSpace must be defined
+        // - targetSpace must differ from currentSpace
+        // - targetSpace must be a valid DID for cross-space navigation
+        const isCrossSpace = targetSpace !== undefined &&
+          targetSpace !== currentSpace &&
+          isDID(targetSpace);
+
+        // Helper to perform the actual navigation
+        const doNavigate = () => {
+          if (isCrossSpace && isDID(targetSpace)) {
+            // Cross-space: use target's space DID (validated above)
+            navigate({ spaceDid: targetSpace, charmId: id });
+          } else if (currentSpaceName) {
+            // Same space with name: use readable URL format
+            navigate({ spaceName: currentSpaceName, charmId: id });
+          } else {
+            // Same space without name: use DID format
+            navigate({ spaceDid: currentSpace, charmId: id });
+          }
+        };
 
         // Await storage being synced, at least for now, as the page fully
         // reloads. Once we have in-page navigation with reloading, we don't
         // need this anymore
         runtime.storageManager.synced().then(async () => {
-          // Check if the charm is already in the list
-          const charms = charmManager.getCharms();
-          const existingCharm = charms.get().find((charm) =>
-            charmId(charm) === id
-          );
+          // Only add to local charm list for same-space navigation
+          // Cross-space charms belong to their own space's list
+          if (!isCrossSpace) {
+            // Check if the charm is already in the list
+            const charms = charmManager.getCharms();
+            const existingCharm = charms.get().find((charm) =>
+              charmId(charm) === id
+            );
 
-          // If the charm doesn't exist in the list, add it
-          if (!existingCharm) {
-            // FIXME(jake): This feels, perhaps, like an incorrect mix of
-            // concerns. If `navigateTo`
-            // should be managing/updating the charms list cell, that should be
-            // happening as part of the runtime built-in function, not up in
-            // the shell layer...
+            // If the charm doesn't exist in the list, add it
+            if (!existingCharm) {
+              // FIXME(jake): This feels, perhaps, like an incorrect mix of
+              // concerns. If `navigateTo`
+              // should be managing/updating the charms list cell, that should be
+              // happening as part of the runtime built-in function, not up in
+              // the shell layer...
 
-            // Add target charm to the charm list
-            await charmManager.add([target]);
+              // Add target charm to the charm list
+              await charmManager.add([target]);
+            }
           }
 
-          navigateCallback(id);
+          doNavigate();
         }).catch((err) => {
           console.error("[navigateCallback] Error during storage sync:", err);
-          navigateCallback(id);
+          doNavigate();
         });
       },
     });
@@ -287,17 +321,4 @@ class PatternCache {
       return cached;
     }
   }
-}
-
-function createNavCallback(spaceDid: DID, spaceName?: string) {
-  return (id: string) => {
-    if (spaceName) {
-      navigate({
-        spaceName,
-        charmId: id,
-      });
-    } else {
-      navigate({ spaceDid, charmId: id });
-    }
-  };
 }

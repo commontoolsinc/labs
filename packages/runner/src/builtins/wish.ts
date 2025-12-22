@@ -183,10 +183,26 @@ function resolveBase(
       );
       const favorites = favoritesCell.get() || [];
 
-      // Case-insensitive search in tag
-      const match = favorites.find((entry) =>
-        entry.tag?.toLowerCase().includes(searchTerm)
-      );
+      // Case-insensitive search in tag.
+      // If tag is empty, try to compute it lazily from the cell's schema.
+      const match = favorites.find((entry) => {
+        let tag = entry.tag;
+
+        // Fallback: compute tag lazily if not stored
+        if (!tag) {
+          try {
+            const { schema } = entry.cell.asSchemaFromLinks()
+              .getAsNormalizedFullLink();
+            if (schema !== undefined) {
+              tag = JSON.stringify(schema);
+            }
+          } catch {
+            // Schema not available yet
+          }
+        }
+
+        return tag?.toLowerCase().includes(searchTerm);
+      });
 
       if (!match) {
         throw new WishError(`No favorite found matching "${searchTerm}"`);
@@ -241,10 +257,26 @@ function resolveBase(
         const favorites = favoritesCell.get() || [];
 
         // Match hash tags in tag field (the schema), all lowercase.
+        // If tag is empty, try to compute it lazily from the cell's schema.
+        // This handles existing favorites that were saved before schema was synced.
         const searchTerm = parsed.key.toLowerCase();
         const matches = favorites.filter((entry) => {
-          const hashtags =
-            entry.tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
+          let tag = entry.tag;
+
+          // Fallback: compute tag lazily if not stored
+          if (!tag) {
+            try {
+              const { schema } = entry.cell.asSchemaFromLinks()
+                .getAsNormalizedFullLink();
+              if (schema !== undefined) {
+                tag = JSON.stringify(schema);
+              }
+            } catch {
+              // Schema not available yet
+            }
+          }
+
+          const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
           return [...hashtags].some((m) => m[0] === searchTerm);
         });
 
@@ -472,8 +504,34 @@ export function wish(
           : parsed.path;
         const resolvedCell = resolvePath(baseResolutions[0].cell, combinedPath);
         sendResult(tx, resolvedCell);
-      } catch (_e) {
-        sendResult(tx, undefined);
+      } catch (e) {
+        // Provide helpful feedback for common defaultPattern issues
+        if (
+          wishTarget.startsWith("#mentionable") ||
+          wishTarget.startsWith("#default")
+        ) {
+          const errorMsg =
+            `${wishTarget} failed: ${
+              e instanceof Error ? e.message : String(e)
+            }. This usually means the space's defaultPattern is not initialized. ` +
+            `Visit the space in browser first, or ensure ensureDefaultPattern() is called.`;
+          console.warn(errorMsg);
+          // Return error state instead of undefined for better UX
+          sendResult(
+            tx,
+            { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<
+              any
+            >,
+          );
+          return;
+        }
+
+        // For other errors, also return error state
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        sendResult(
+          tx,
+          { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
+        );
       }
       return;
     } else if (typeof targetValue === "object") {

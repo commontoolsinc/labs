@@ -9,21 +9,26 @@ import {
   JSONSchema,
   type MemorySpace,
   Module,
-  NAME,
   parseLink,
   Recipe,
   Runtime,
   type Schema,
   type SpaceCellContents,
   TYPE,
-  UI,
   URI,
 } from "@commontools/runner";
 import * as favorites from "./favorites.ts";
 import { ALL_CHARMS_ID } from "../../runner/src/builtins/well-known.ts";
-import { vdomSchema } from "@commontools/html";
 import { type Session } from "@commontools/identity";
 import { isObject, isRecord } from "@commontools/utils/types";
+import {
+  charmListSchema,
+  charmSourceCellSchema,
+  FavoriteList,
+  NameSchema,
+  nameSchema,
+  processSchema,
+} from "@commontools/runner/schemas";
 
 /**
  * Extracts the ID from a charm.
@@ -37,81 +42,7 @@ export function charmId(charm: Cell<unknown>): string | undefined {
   return typeof idValue === "string" ? idValue : undefined;
 }
 
-export const nameSchema = {
-  type: "object",
-  properties: { [NAME]: { type: "string" } },
-  required: [NAME],
-} as const satisfies JSONSchema;
 
-export type NameSchema = Schema<typeof nameSchema>;
-
-export const uiSchema = {
-  type: "object",
-  properties: { [UI]: vdomSchema },
-  required: [UI],
-} as const satisfies JSONSchema;
-
-export type UISchema = Schema<typeof uiSchema>;
-
-// We specify not true for the items, since we don't want to recursively load them
-export const charmListSchema = {
-  type: "array",
-  items: { not: true, asCell: true },
-  default: [],
-} as const satisfies JSONSchema;
-
-export const charmLineageSchema = {
-  type: "object",
-  properties: {
-    charm: { not: true, asCell: true },
-    relation: { type: "string" },
-    timestamp: { type: "number" },
-  },
-  required: ["charm", "relation", "timestamp"],
-} as const satisfies JSONSchema;
-export type CharmLineage = Schema<typeof charmLineageSchema>;
-
-export const favoriteEntrySchema = {
-  type: "object",
-  properties: {
-    cell: { not: true, asCell: true },
-    tag: { type: "string", default: "" },
-  },
-  required: ["cell"],
-} as const satisfies JSONSchema;
-
-export type FavoriteEntry = Schema<typeof favoriteEntrySchema>;
-
-export const favoriteListSchema = {
-  type: "array",
-  items: favoriteEntrySchema,
-} as const satisfies JSONSchema;
-
-export type FavoriteList = Schema<typeof favoriteListSchema>;
-
-export const charmSourceCellSchema = {
-  type: "object",
-  properties: {
-    [TYPE]: { type: "string" },
-    spell: { type: "object" },
-    lineage: {
-      type: "array",
-      items: charmLineageSchema,
-      default: [],
-    },
-    llmRequestId: { type: "string" },
-  },
-} as const satisfies JSONSchema;
-
-export const processSchema = {
-  type: "object",
-  properties: {
-    argument: { type: "object" },
-    [TYPE]: { type: "string" },
-    spell: { type: "object" },
-  },
-  required: [TYPE],
-} as const satisfies JSONSchema;
 
 /**
  * Filters an array of charms by removing any that match the target cell
@@ -197,8 +128,11 @@ export class CharmManager {
 
         const nextSpaceValue: Partial<SpaceCellContents> = {
           ...(existingSpace ?? {}),
-          allCharms: this.charms.withTx(tx).get() as Cell<never>[],
-          recentCharms: recentCharmsField.withTx(tx).get() as Cell<never>[],
+          // Set cells directly (not .get()) to create reactive links.
+          // The Cell system automatically converts cells to links via convertCellsToLinks().
+          // This ensures wish("/").allCharms stays in sync when charms are added/removed.
+          allCharms: this.charms.withTx(tx) as Cell<unknown[]>,
+          recentCharms: recentCharmsField.withTx(tx) as Cell<unknown[]>,
         };
 
         spaceCellWithTx.set(nextSpaceValue as SpaceCellContents);
@@ -211,11 +145,12 @@ export class CharmManager {
       .key("recentCharms")
       .asSchema(charmListSchema);
 
+    // Initialize all cells in parallel. linkSpaceCellContents already
+    // depends on syncSpaceCellContents internally, so ordering is preserved.
     this.ready = Promise.all([
       this.syncCharms(this.charms),
       this.syncCharms(this.pinnedCharms),
       this.syncCharms(this.recentCharms),
-      syncSpaceCellContents,
       linkSpaceCellContents,
     ]).then(() => {});
   }
