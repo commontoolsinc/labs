@@ -272,10 +272,10 @@ const addMember = handler<
     return;
   }
 
-  // Look up the charm Cell from mentionable using .key() for proper Cell navigation
-  // Using .key() instead of .get()[index] maintains the reactive path for Cell equality
-  const charmCell = mentionable.key(charmIndex);
-  const charm = charmCell.get();
+  // Sample the current value at index to capture the specific charm at selection time.
+  // Using .get()[index] (not .key(index)) avoids forward-tracking - .key(index) would
+  // reference whatever is at that position going forward, not the selected charm.
+  const charm = mentionable.get()[charmIndex];
 
   if (!charm) {
     console.warn("Charm not found at index", charmIndex);
@@ -288,9 +288,9 @@ const addMember = handler<
   const currentMembers = members.get() || [];
 
   // Atomic duplicate check - if found, show feedback and bail
-  // Use charmCell for Cell.equals() to get proper Cell comparison
+  // Cell.equals() resolves all links on both sides to compare actual data
   const isDuplicate = currentMembers.some((m) =>
-    Cell.equals(m.charm as object, charmCell as unknown as object)
+    Cell.equals(m.charm as object, charm as unknown as object)
   );
   if (isDuplicate) {
     errorMessage.set("This member is already added.");
@@ -309,9 +309,9 @@ const addMember = handler<
 
   if (bidirectional && parentRecord) {
     try {
-      // Navigate to the target charm's subCharms using charmCell
-      // charmCell is mentionable.key(charmIndex), a Cell pointing to the charm
-      const targetSubCharms = charmCell.key("subCharms").get() || [];
+      // Navigate to the target charm's subCharms
+      // charm from .get()[index] should be a reactive proxy that supports property access
+      const targetSubCharms = (charm as any).subCharms || [];
 
       // Find the members module entry
       const membersEntryIndex = targetSubCharms.findIndex(
@@ -319,12 +319,10 @@ const addMember = handler<
       );
 
       if (membersEntryIndex >= 0) {
-        // Navigate to the members Cell: charmCell.subCharms[membersEntryIndex].charm.members
-        targetMembersCell = charmCell
-          .key("subCharms")
-          .key(membersEntryIndex)
-          .key("charm")
-          .key("members") as Cell<MemberEntry[]>;
+        // Navigate to the members Cell through the subCharms path
+        // Since charm is a reactive proxy, we can navigate via property access
+        const membersEntry = targetSubCharms[membersEntryIndex];
+        targetMembersCell = membersEntry?.charm?.members as Cell<MemberEntry[]>;
 
         const targetMembersList = targetMembersCell.get() || [];
 
