@@ -25,6 +25,18 @@
 - `packages/shell/local-dev-shell.log`
 - `packages/toolshed/local-dev-toolshed.log`
 
+**First-time browser login:**
+
+When accessing a space for the first time, you'll need to register:
+1. Click "➕ Register"
+2. Click "🔑 Generate Passphrase"
+3. Click "🔒 I've Saved It - Continue"
+
+For Playwright testing, use:
+```javascript
+await page.goto("http://localhost:5173/<SPACE>/<CHARM_ID>");
+```
+
 ---
 
 ## Architecture
