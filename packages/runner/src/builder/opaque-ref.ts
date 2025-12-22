@@ -25,7 +25,7 @@ function opaqueRefWithCell<T>(
   if (!frame || !frame.runtime) {
     throw new Error(
       "Cannot create reactive reference - no runtime context available\n" +
-      "help: create cells inside pattern/handler/lift contexts, or use plain objects for module-level constants",
+        "help: create cells inside pattern/handler/lift contexts, or use plain objects for module-level constants",
     );
   }
 

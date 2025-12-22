@@ -113,7 +113,7 @@ function handlerInternal<E, T>(
     } else {
       throw new Error(
         "Handler requires schemas or CTS transformer\n" +
-        "help: enable CTS with /// <cts-enable /> for automatic schema inference, or provide explicit schemas",
+          "help: enable CTS with /// <cts-enable /> for automatic schema inference, or provide explicit schemas",
       );
     }
   }

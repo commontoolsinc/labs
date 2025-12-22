@@ -50,7 +50,7 @@ import type { RuntimeProgram } from "../harness/types.ts";
 const toSchema: ToSchemaFunction = (_options?) => {
   throw new Error(
     "toSchema() must be transformed at compile time - transformer not running\n" +
-    "help: enable CTS with /// <cts-enable /> directive, ensure using correct build process",
+      "help: enable CTS with /// <cts-enable /> directive, ensure using correct build process",
   );
 };
 
