@@ -651,6 +651,13 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
           deepTraverse(result);
         }
       };
+      // Name the action for debugging
+      Object.defineProperty(action, "name", {
+        value: `pull:${this.sourceURI}`,
+        configurable: true,
+      });
+      // Also set .src as backup (name can be finicky)
+      (action as Action & { src?: string }).src = `pull:${this.sourceURI}`;
 
       // Subscribe as an effect so it runs in the next cycle.
       const cancel = this.runtime.scheduler.subscribe(action, action, {
@@ -1489,6 +1496,13 @@ function subscribeToReferencedDocs<T>(
     // on changes already.
     extraTx.commit();
   };
+  // Name the action for debugging
+  const sinkName = `sink:${link.space}/${link.id}/${link.path.join("/")}`;
+  Object.defineProperty(action, "name", {
+    value: sinkName,
+    configurable: true,
+  });
+  (action as Action & { src?: string }).src = sinkName;
 
   // Call action once immediately, which also defines what docs need to be
   // subscribed to.
