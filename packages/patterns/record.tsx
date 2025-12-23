@@ -341,7 +341,10 @@ const trashSubCharm = handler<
     expandedIndex: Cell<number | undefined>;
     index: number;
   }
->((_event, { subCharms: sc, trashedSubCharms: trash, expandedIndex, index }) => {
+>((
+  _event,
+  { subCharms: sc, trashedSubCharms: trash, expandedIndex, index },
+) => {
   const current = sc.get() || [];
   const entry = current[index];
   if (!entry) return;
@@ -550,13 +553,22 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // Entry with index for rendering - preserves charm references (no spreading!)
     // isExpanded is pre-computed to avoid closure issues inside .map() callbacks
-    type EntryWithIndex = { entry: SubCharmEntry; index: number; isExpanded: boolean };
+    type EntryWithIndex = {
+      entry: SubCharmEntry;
+      index: number;
+      isExpanded: boolean;
+    };
 
     // Pre-compute entries with their indices AND expanded state for stable reference during render
     // IMPORTANT: We do NOT spread entry properties - that breaks charm rendering
     // IMPORTANT: isExpanded must be computed here, not inside .map() - closures over cells in .map() don't work correctly
     const entriesWithIndex = lift(
-      ({ sc, expandedIdx }: { sc: SubCharmEntry[]; expandedIdx: number | undefined }) => {
+      (
+        { sc, expandedIdx }: {
+          sc: SubCharmEntry[];
+          expandedIdx: number | undefined;
+        },
+      ) => {
         const entries = sc || [];
         return entries.map((entry, index) => ({
           entry,
@@ -780,28 +792,28 @@ const Record = pattern<RecordInput, RecordOutput>(
                       <div
                         style={isExpanded
                           ? {
-                              position: "fixed",
-                              top: "50%",
-                              left: "50%",
-                              transform: "translate(-50%, -50%)",
-                              zIndex: "1001",
-                              width: "95%",
-                              maxWidth: "1200px",
-                              height: "90%",
-                              maxHeight: "800px",
-                              background: "white",
-                              borderRadius: "12px",
-                              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
-                              overflow: "hidden",
-                              display: "flex",
-                              flexDirection: "column",
-                            }
+                            position: "fixed",
+                            top: "50%",
+                            left: "50%",
+                            transform: "translate(-50%, -50%)",
+                            zIndex: "1001",
+                            width: "95%",
+                            maxWidth: "1200px",
+                            height: "90%",
+                            maxHeight: "800px",
+                            background: "white",
+                            borderRadius: "12px",
+                            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+                            overflow: "hidden",
+                            display: "flex",
+                            flexDirection: "column",
+                          }
                           : {
-                              background: "white",
-                              borderRadius: "8px",
-                              border: "1px solid #e5e7eb",
-                              overflow: "hidden",
-                            }}
+                            background: "white",
+                            borderRadius: "8px",
+                            border: "1px solid #e5e7eb",
+                            overflow: "hidden",
+                          }}
                       >
                         <div
                           style={computed(() => ({
@@ -938,10 +950,17 @@ const Record = pattern<RecordInput, RecordOutput>(
                               )}
                               <button
                                 type="button"
-                                onClick={toggleExpanded({ expandedIndex, index })}
+                                onClick={toggleExpanded({
+                                  expandedIndex,
+                                  index,
+                                })}
                                 style={{
-                                  background: isExpanded ? "#3b82f6" : "transparent",
-                                  border: isExpanded ? "1px solid #3b82f6" : "1px solid #e5e7eb",
+                                  background: isExpanded
+                                    ? "#3b82f6"
+                                    : "transparent",
+                                  border: isExpanded
+                                    ? "1px solid #3b82f6"
+                                    : "1px solid #e5e7eb",
                                   borderRadius: "4px",
                                   cursor: "pointer",
                                   padding: "4px 8px",
@@ -1018,28 +1037,29 @@ const Record = pattern<RecordInput, RecordOutput>(
                         <div
                           style={isExpanded
                             ? {
-                                position: "fixed",
-                                top: "50%",
-                                left: "50%",
-                                transform: "translate(-50%, -50%)",
-                                zIndex: "1001",
-                                width: "95%",
-                                maxWidth: "1200px",
-                                height: "90%",
-                                maxHeight: "800px",
-                                background: "white",
-                                borderRadius: "12px",
-                                boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
-                                overflow: "hidden",
-                                display: "flex",
-                                flexDirection: "column",
-                              }
+                              position: "fixed",
+                              top: "50%",
+                              left: "50%",
+                              transform: "translate(-50%, -50%)",
+                              zIndex: "1001",
+                              width: "95%",
+                              maxWidth: "1200px",
+                              height: "90%",
+                              maxHeight: "800px",
+                              background: "white",
+                              borderRadius: "12px",
+                              boxShadow:
+                                "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+                              overflow: "hidden",
+                              display: "flex",
+                              flexDirection: "column",
+                            }
                             : {
-                                background: "white",
-                                borderRadius: "8px",
-                                border: "1px solid #e5e7eb",
-                                overflow: "hidden",
-                              }}
+                              background: "white",
+                              borderRadius: "8px",
+                              border: "1px solid #e5e7eb",
+                              overflow: "hidden",
+                            }}
                         >
                           <div
                             style={computed(() => ({
@@ -1179,10 +1199,17 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 )}
                                 <button
                                   type="button"
-                                  onClick={toggleExpanded({ expandedIndex, index })}
+                                  onClick={toggleExpanded({
+                                    expandedIndex,
+                                    index,
+                                  })}
                                   style={{
-                                    background: isExpanded ? "#3b82f6" : "transparent",
-                                    border: isExpanded ? "1px solid #3b82f6" : "1px solid #e5e7eb",
+                                    background: isExpanded
+                                      ? "#3b82f6"
+                                      : "transparent",
+                                    border: isExpanded
+                                      ? "1px solid #3b82f6"
+                                      : "1px solid #e5e7eb",
                                     borderRadius: "4px",
                                     cursor: "pointer",
                                     padding: "4px 8px",
@@ -1259,28 +1286,28 @@ const Record = pattern<RecordInput, RecordOutput>(
                     <div
                       style={isExpanded
                         ? {
-                            position: "fixed",
-                            top: "50%",
-                            left: "50%",
-                            transform: "translate(-50%, -50%)",
-                            zIndex: "1001",
-                            width: "95%",
-                            maxWidth: "1200px",
-                            height: "90%",
-                            maxHeight: "800px",
-                            background: "white",
-                            borderRadius: "12px",
-                            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
-                            overflow: "hidden",
-                            display: "flex",
-                            flexDirection: "column",
-                          }
+                          position: "fixed",
+                          top: "50%",
+                          left: "50%",
+                          transform: "translate(-50%, -50%)",
+                          zIndex: "1001",
+                          width: "95%",
+                          maxWidth: "1200px",
+                          height: "90%",
+                          maxHeight: "800px",
+                          background: "white",
+                          borderRadius: "12px",
+                          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+                          overflow: "hidden",
+                          display: "flex",
+                          flexDirection: "column",
+                        }
                         : {
-                            background: "white",
-                            borderRadius: "8px",
-                            border: "1px solid #e5e7eb",
-                            overflow: "hidden",
-                          }}
+                          background: "white",
+                          borderRadius: "8px",
+                          border: "1px solid #e5e7eb",
+                          overflow: "hidden",
+                        }}
                     >
                       <div
                         style={computed(() => ({
@@ -1419,8 +1446,12 @@ const Record = pattern<RecordInput, RecordOutput>(
                               type="button"
                               onClick={toggleExpanded({ expandedIndex, index })}
                               style={{
-                                background: isExpanded ? "#3b82f6" : "transparent",
-                                border: isExpanded ? "1px solid #3b82f6" : "1px solid #e5e7eb",
+                                background: isExpanded
+                                  ? "#3b82f6"
+                                  : "transparent",
+                                border: isExpanded
+                                  ? "1px solid #3b82f6"
+                                  : "1px solid #e5e7eb",
                                 borderRadius: "4px",
                                 cursor: "pointer",
                                 padding: "4px 8px",
@@ -1804,11 +1835,13 @@ const Record = pattern<RecordInput, RecordOutput>(
             null,
           )}
 
-          {/*
-           * Expanded (Maximize) Module Overlay
-           * Just provides backdrop + escape handler.
-           * Module card itself becomes position:fixed when expanded.
-           */}
+          {
+            /*
+             * Expanded (Maximize) Module Overlay
+             * Just provides backdrop + escape handler.
+             * Module card itself becomes position:fixed when expanded.
+             */
+          }
           {ifElse(
             hasExpandedModule,
             <div>
