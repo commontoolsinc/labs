@@ -126,6 +126,11 @@ export async function addGithubRecipe(
   const response = await fetch(
     `https://raw.githubusercontent.com/commontoolsinc/labs/refs/heads/main/recipes/${filename}?${Date.now()}`,
   );
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch recipe from GitHub: ${response.status} ${response.statusText}`,
+    );
+  }
   const src = await response.text();
   return await compileAndRunRecipe(
     charmManager,

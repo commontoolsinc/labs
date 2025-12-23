@@ -215,10 +215,6 @@ export async function classifyWorkflow(
       `\`imagine\`: Create something new, potentially combining multiple data sources
    - Example: "Create a dashboard combining my tasks and calendar"
    - Creates new code, specification, and potentially new schema`,
-
-    "cast-spell":
-      `\`cast-spell\`: Find a spell from the spellbook that fits the user's needs and can be used on their mentioned data
-   - Example: "Find a spell to optimize my code for performance"`,
     //  'fix': `\`fix\`: Repair existing functionality without changing core behavior
     // - Example: "Fix the bug in my sorting function"
     // - Preserves specification and schema exactly as-is`,
