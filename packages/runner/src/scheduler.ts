@@ -911,12 +911,20 @@ export class Scheduler {
       const id = getActionId(action);
       actionById.set(id, action);
 
+      // Get parent-child relationships
+      const parent = this.actionParent.get(action);
+      const parentId = parent ? getActionId(parent) : undefined;
+      const children = this.actionChildren.get(action);
+      const childCount = children ? children.size : undefined;
+
       nodes.push({
         id,
         type: this.effects.has(action) ? "effect" : "computation",
         stats: this.actionStats.get(action),
         isDirty: this.dirty.has(action),
         isPending: this.pending.has(action),
+        parentId,
+        childCount: childCount && childCount > 0 ? childCount : undefined,
       });
     }
 

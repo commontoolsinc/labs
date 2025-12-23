@@ -20,6 +20,8 @@ export interface SchedulerGraphNode {
   stats?: ActionStats;
   isDirty: boolean;
   isPending: boolean;
+  parentId?: string; // ID of parent action if this was created during parent's execution
+  childCount?: number; // Number of child actions created during this action's execution
 }
 
 export interface SchedulerGraphEdge {
