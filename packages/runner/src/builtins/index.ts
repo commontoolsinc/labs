@@ -8,7 +8,14 @@ import { ifElse } from "./if-else.ts";
 import { when } from "./when.ts";
 import { unless } from "./unless.ts";
 import type { Runtime } from "../runtime.ts";
-import { compileAndRun } from "./compile-and-run.ts";
+import {
+  compileAndRun,
+  getCompilationStats,
+  clearCompilationCache,
+} from "./compile-and-run.ts";
+
+// Re-export for testing/debugging
+export { getCompilationStats, clearCompilationCache };
 import { navigateTo } from "./navigate-to.ts";
 import { wish } from "./wish.ts";
 import type { Cell } from "../cell.ts";

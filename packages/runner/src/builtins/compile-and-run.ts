@@ -6,6 +6,73 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Program } from "@commontools/js-compiler";
 import { CompilerError } from "@commontools/js-compiler/typescript";
+import { Recipe } from "../builder/types.ts";
+import { getLogger } from "@commontools/utils/logger";
+
+const logger = getLogger("compile-and-run");
+
+// LRU cache configuration - high limit to prevent unbounded growth on long-running servers
+const MAX_CACHE_SIZE = 1000;
+
+// In-memory compilation cache keyed by content hash (LRU eviction)
+const compilationCache = new Map<string, Recipe>();
+// Single-flight pattern: track in-progress compilations to avoid duplicate work
+const inProgressCompilations = new Map<string, Promise<Recipe>>();
+
+// Performance instrumentation
+let cacheHits = 0;
+let cacheMisses = 0;
+let cacheEvictions = 0;
+
+/** Add to cache with LRU eviction */
+function cacheSet(hash: string, recipe: Recipe) {
+  // Delete first to update insertion order (Map maintains insertion order)
+  if (compilationCache.has(hash)) {
+    compilationCache.delete(hash);
+  }
+  compilationCache.set(hash, recipe);
+
+  // Evict oldest entries if over limit
+  while (compilationCache.size > MAX_CACHE_SIZE) {
+    const oldestKey = compilationCache.keys().next().value;
+    if (oldestKey) {
+      compilationCache.delete(oldestKey);
+      cacheEvictions++;
+    }
+  }
+}
+
+/** Get from cache and refresh LRU position */
+function cacheGet(hash: string): Recipe | undefined {
+  const recipe = compilationCache.get(hash);
+  if (recipe) {
+    // Move to end (most recently used) by re-inserting
+    compilationCache.delete(hash);
+    compilationCache.set(hash, recipe);
+  }
+  return recipe;
+}
+
+export function getCompilationStats() {
+  return {
+    cacheHits,
+    cacheMisses,
+    cacheEvictions,
+    cacheSize: compilationCache.size,
+    maxCacheSize: MAX_CACHE_SIZE,
+    hitRate: cacheHits + cacheMisses > 0
+      ? (cacheHits / (cacheHits + cacheMisses) * 100).toFixed(1) + "%"
+      : "N/A",
+  };
+}
+
+export function clearCompilationCache() {
+  compilationCache.clear();
+  inProgressCompilations.clear();
+  cacheHits = 0;
+  cacheMisses = 0;
+  cacheEvictions = 0;
+}
 
 /**
  * Compile a recipe/module and run it.
@@ -191,8 +258,45 @@ export function compileAndRun(
     // Capture requestId for this compilation run
     const thisRequestId = requestId;
 
-    const compilePromise = runtime.harness.run(program)
-      .catch(
+    // Check compilation cache first (LRU)
+    const cachedRecipe = cacheGet(hash);
+    let compilePromise: Promise<Recipe | undefined>;
+
+    if (cachedRecipe) {
+      // Cache hit - use cached recipe
+      cacheHits++;
+      logger.debug("compile-and-run", `Cache HIT for ${program.main}`);
+      compilePromise = Promise.resolve(cachedRecipe);
+    } else if (inProgressCompilations.has(hash)) {
+      // Single-flight: reuse in-progress compilation (avoid duplicate work)
+      cacheHits++;
+      logger.debug("compile-and-run", `Reusing in-flight compilation for ${program.main}`);
+      compilePromise = inProgressCompilations.get(hash)!;
+    } else {
+      // Cache miss - compile and cache
+      cacheMisses++;
+      const startTime = performance.now();
+
+      const actualCompilePromise = runtime.harness.run(program)
+        .then((recipe) => {
+          const elapsed = performance.now() - startTime;
+          logger.info(
+            "compile-and-run",
+            `Compiled ${program.main} in ${elapsed.toFixed(0)}ms`,
+          );
+          // Cache the successful result (LRU)
+          cacheSet(hash, recipe);
+          return recipe;
+        })
+        .finally(() => {
+          inProgressCompilations.delete(hash);
+        });
+
+      inProgressCompilations.set(hash, actualCompilePromise);
+      compilePromise = actualCompilePromise;
+    }
+
+    compilePromise.catch(
         (err) => {
           // Only process this error if the request hasn't been superseded
           if (requestId !== thisRequestId) return;
