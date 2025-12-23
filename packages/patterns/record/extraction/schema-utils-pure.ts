@@ -1,0 +1,189 @@
+/**
+ * Pure schema utilities - no external dependencies.
+ *
+ * These functions only use stored schema and don't fall back to registry.
+ * This module can be imported in tests without pulling in the commontools runtime.
+ */
+
+import type { SubCharmEntry } from "../types.ts";
+
+// JSON Schema type (simplified for our use case)
+// Uses readonly arrays to be compatible with runtime-returned schemas
+export interface JSONSchema {
+  type?: string;
+  properties?: Record<string, JSONSchema>;
+  items?: JSONSchema;
+  enum?: readonly unknown[];
+  description?: string;
+  readonly [key: string]: unknown;
+}
+
+/**
+ * Set of internal module types that don't have extractable data.
+ * These are controller/system modules that should be skipped during extraction.
+ */
+export const INTERNAL_MODULE_TYPES = new Set(["type-picker", "extractor"]);
+
+/**
+ * Check if a module type is an internal/controller module.
+ *
+ * @param type - The module type to check
+ * @returns true if the type is internal and should be skipped
+ */
+export function isInternalModule(type: string): boolean {
+  return INTERNAL_MODULE_TYPES.has(type);
+}
+
+/**
+ * Type-safe helper to extract resultSchema from a pattern/charm.
+ *
+ * Pattern outputs implement the Recipe interface which includes resultSchema.
+ * This helper safely extracts it with proper type checking.
+ *
+ * @param charm - The charm/pattern instance (usually stored as `unknown`)
+ * @returns The resultSchema if available, undefined otherwise
+ */
+export function getResultSchema(charm: unknown): JSONSchema | undefined {
+  if (
+    charm &&
+    typeof charm === "object" &&
+    "resultSchema" in charm &&
+    charm.resultSchema &&
+    typeof charm.resultSchema === "object"
+  ) {
+    return charm.resultSchema as JSONSchema;
+  }
+  return undefined;
+}
+
+/**
+ * Build a combined extraction schema from all sub-charms using stored schemas only.
+ *
+ * This pure version only uses entry.schema - no registry fallback.
+ * For production use with fallback, use buildExtractionSchema from schema-utils.ts.
+ *
+ * @param subCharms - Array of sub-charm entries from the Record
+ * @returns Combined JSON Schema with properties from all sub-charms
+ */
+export function buildExtractionSchemaPure(
+  subCharms: readonly SubCharmEntry[],
+): JSONSchema {
+  const properties: Record<string, JSONSchema> = {};
+  const fieldOwners: Record<string, string> = {}; // Track which module defines each field
+
+  for (const entry of subCharms) {
+    // Skip internal/controller modules that don't have extractable data
+    if (isInternalModule(entry.type)) continue;
+
+    // Only use stored schema (captured at creation time)
+    const storedSchema = entry.schema as JSONSchema | undefined;
+    if (storedSchema?.properties) {
+      // Check for conflicts before assigning
+      for (
+        const [fieldName, fieldSchema] of Object.entries(
+          storedSchema.properties,
+        )
+      ) {
+        if (properties[fieldName]) {
+          console.warn(
+            `[Schema] Field "${fieldName}" defined by both "${
+              fieldOwners[fieldName]
+            }" and "${entry.type}" - using ${entry.type}`,
+          );
+        }
+        properties[fieldName] = fieldSchema;
+        fieldOwners[fieldName] = entry.type;
+      }
+    }
+  }
+
+  return {
+    type: "object",
+    properties,
+  };
+}
+
+/**
+ * Build extraction schema from a Cell-like object using stored schemas only.
+ *
+ * This pure version only uses entry.schema - no registry fallback.
+ *
+ * @param parentSubCharms - Object with get() method returning sub-charm entries
+ * @returns Combined JSON Schema with properties from all sub-charms
+ */
+export function buildExtractionSchemaFromCellPure(
+  // deno-lint-ignore no-explicit-any
+  parentSubCharms: { get?: () => SubCharmEntry[] | null | undefined } | any,
+): JSONSchema {
+  const properties: Record<string, JSONSchema> = {};
+  const fieldOwners: Record<string, string> = {}; // Track which module defines each field
+  const subCharms = parentSubCharms.get?.() ?? [];
+
+  for (const entry of subCharms) {
+    // Skip internal/controller modules
+    if (isInternalModule(entry.type)) continue;
+
+    // Only use stored schema (captured at creation time)
+    const storedSchema = entry.schema as JSONSchema | undefined;
+    if (storedSchema?.properties) {
+      // Check for conflicts before assigning
+      for (
+        const [fieldName, fieldSchema] of Object.entries(
+          storedSchema.properties,
+        )
+      ) {
+        if (properties[fieldName]) {
+          console.warn(
+            `[Schema] Field "${fieldName}" defined by both "${
+              fieldOwners[fieldName]
+            }" and "${entry.type}" - using ${entry.type}`,
+          );
+        }
+        properties[fieldName] = fieldSchema;
+        fieldOwners[fieldName] = entry.type;
+      }
+    }
+  }
+
+  return {
+    type: "object",
+    properties,
+  };
+}
+
+/**
+ * Get the field-to-type mapping from sub-charm schemas (stored schemas only).
+ *
+ * Creates a reverse mapping from field names to their owning module types.
+ * This pure version only uses entry.schema - no registry fallback.
+ *
+ * @param subCharms - Array of sub-charm entries from the Record
+ * @returns Map of field names to module types
+ */
+export function getFieldToTypeMappingPure(
+  subCharms: readonly SubCharmEntry[],
+): Record<string, string> {
+  const fieldToType: Record<string, string> = {};
+
+  for (const entry of subCharms) {
+    // Skip internal modules
+    if (isInternalModule(entry.type)) continue;
+
+    // Only use stored schema
+    const storedSchema = entry.schema as JSONSchema | undefined;
+    if (storedSchema?.properties) {
+      for (const field of Object.keys(storedSchema.properties)) {
+        if (fieldToType[field]) {
+          console.warn(
+            `[Schema] Field "${field}" defined by both "${
+              fieldToType[field]
+            }" and "${entry.type}" - using ${entry.type}`,
+          );
+        }
+        fieldToType[field] = entry.type;
+      }
+    }
+  }
+
+  return fieldToType;
+}

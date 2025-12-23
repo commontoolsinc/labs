@@ -1401,6 +1401,15 @@ export declare const createNodeFactory: CreateNodeFactoryFunction;
 export declare const cell: CellTypeConstructor<AsCell>["of"];
 export declare const byRef: ByRefFunction;
 export declare const getRecipeEnvironment: GetRecipeEnvironmentFunction;
+
+/**
+ * Get the entity ID from a cell or value.
+ * Returns { "/": "id-string" } format if the value has an entity ID, undefined otherwise.
+ * Useful for extracting IDs from newly created charms for linking.
+ */
+export type GetEntityIdFunction = (value: any) => { "/": string } | undefined;
+export declare const getEntityId: GetEntityIdFunction;
+
 export declare const schema: SchemaFunction;
 export declare const toSchema: ToSchemaFunction;
 
