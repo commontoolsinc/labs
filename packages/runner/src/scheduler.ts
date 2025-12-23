@@ -428,6 +428,24 @@ export class Scheduler {
       this.effects.delete(action);
     }
 
+    // Track parent-child relationship if action is created during another action's execution
+    // Only set if not already set (resubscribe can be called multiple times)
+    if (
+      this.executingAction && this.executingAction !== action &&
+      !this.actionParent.has(action)
+    ) {
+      const parent = this.executingAction;
+      this.actionParent.set(action, parent);
+
+      // Add to parent's children set
+      let children = this.actionChildren.get(parent);
+      if (!children) {
+        children = new Set();
+        this.actionChildren.set(parent, children);
+      }
+      children.add(action);
+    }
+
     const pathsByEntity = addressesToPathByEntity(reads);
 
     logger.debug("schedule", () => [

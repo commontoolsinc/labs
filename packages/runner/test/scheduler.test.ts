@@ -1508,6 +1508,76 @@ describe("effect/computation tracking", () => {
     // After cancel, effect count should decrease (but may not be immediate due to GC)
   });
 
+  it("should track sink() parent-child relationship when called inside an action", async () => {
+    const sourceCell = runtime.getCell<number>(
+      space,
+      "sink-parent-source",
+      undefined,
+      tx,
+    );
+    sourceCell.set(1);
+
+    const observedCell = runtime.getCell<number>(
+      space,
+      "sink-parent-observed",
+      undefined,
+      tx,
+    );
+    observedCell.set(42);
+
+    await tx.commit();
+    tx = runtime.edit();
+
+    let sinkCalled = false;
+    let parentCalled = false;
+    let sinkCancel: (() => void) | undefined;
+
+    // Parent action that creates a sink during its execution
+    const parentAction: Action = (actionTx) => {
+      parentCalled = true;
+      sourceCell.withTx(actionTx).get();
+
+      // Create a sink inside the action - this should track parent relationship
+      if (!sinkCancel) {
+        sinkCancel = observedCell.sink((_value) => {
+          sinkCalled = true;
+        });
+      }
+    };
+
+    runtime.scheduler.subscribe(parentAction, {
+      reads: [sourceCell.getAsNormalizedFullLink()],
+      writes: [],
+    }, { isEffect: true }); // Mark as effect so it runs in pull mode
+
+    await runtime.idle();
+
+    // Verify the parent action was called
+    expect(parentCalled).toBe(true);
+
+    // Verify the sink was called (sink() always calls callback immediately on creation)
+    expect(sinkCalled).toBe(true);
+
+    // Get the graph snapshot and verify parent-child relationship
+    const graph = runtime.scheduler.getGraphSnapshot();
+
+    // Find the sink action node (named sink:space/...)
+    const sinkNodes = graph.nodes.filter((n) => n.id.startsWith("sink:"));
+    expect(sinkNodes.length).toBe(1);
+    const sinkNode = sinkNodes[0];
+
+    // Verify the sink has a parent (the parent action)
+    expect(sinkNode.parentId).toBeDefined();
+
+    // Verify the parent node exists and has childCount
+    const parentNode = graph.nodes.find((n) => n.id === sinkNode.parentId);
+    expect(parentNode).toBeDefined();
+    expect(parentNode!.childCount).toBeGreaterThanOrEqual(1);
+
+    sinkCancel!();
+    await runtime.idle();
+  });
+
   it("should track dependents for reverse dependency graph", async () => {
     const source = runtime.getCell<number>(
       space,
