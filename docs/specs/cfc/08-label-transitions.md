@@ -1,0 +1,1325 @@
+# 8. Label Transition Rules
+
+Labels propagate through computations at runtime. The transition rules depend on how data flows—handlers may transform, filter, or pass through values unchanged.
+
+## 8.1 Overview
+
+When a computation (handler, action, or transformation) executes, labels must transition from inputs to outputs. The transition depends on how data flows:
+
+| Flow Type | Confidentiality | Integrity |
+|-----------|-----------------|-----------|
+| **Pass-through** (reference) | Preserved | Preserved |
+| **Projection** (field access) | Inherited | Scoped to projection |
+| **Exact copy** (same value) | Inherited | Preserved (content-addressed) |
+| **Combination** (join inputs) | Concatenate clauses (CNF) | Intersection (weaker) |
+| **Transformation** (compute) | Inherited from inputs | New from transformer |
+
+---
+
+## 8.2 Pass-Through via References
+
+When output contains a reference to input data rather than the data itself, the label is not copied—it remains attached to the referenced data.
+
+### 8.2.1 Reference Preservation
+
+```typescript
+interface Handler<I, O> {
+  input: I;
+  output: O;
+}
+
+// If output contains a Reference to input data:
+handler.output.selectedItem = handler.input.items[selectedIndex];
+// The output contains a Reference, not a copy
+// Label follows the reference - no transition needed
+```
+
+### 8.2.2 Schema Annotation for References
+
+In JSON Schema, indicate that an output field is a reference to input:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "object",
+      "properties": {
+        "emails": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Email" }
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "properties": {
+        "selectedEmail": {
+          "$ref": "#/$defs/Email",
+          "ifc": {
+            "passThrough": {
+              "from": "/input/emails/items"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+The `passThrough.from` annotation indicates:
+- This output has the **same label** as the data at the specified input path
+- No label transformation occurs
+
+**Runtime representation**: The output may be either:
+1. **A link** to the original item (in sigil link format, e.g., `{ "/": { "link@1": { "id": "bafy...", ... } } }`), or
+2. **A copy** of the original value
+
+Either representation is valid—what matters is that the label is preserved unchanged. Links are more efficient (no duplication) and make provenance explicit; copies may be needed when the output format requires inline data.
+
+---
+
+## 8.3 Projection Semantics
+
+Extracting a field from structured data is a **projection**. Projections have special integrity semantics.
+
+### 8.3.1 Confidentiality in Projections
+
+Confidentiality is inherited: accessing a field does not reduce confidentiality.
+
+```typescript
+const email = { subject: "...", body: "...", recipients: [...] };
+// Label: { confidentiality: [User(Alice), Ctx.Email(Alice)] }
+
+const subject = email.subject;
+// Label: { confidentiality: [User(Alice), Ctx.Email(Alice)] }
+// Confidentiality unchanged
+```
+
+### 8.3.2 Integrity in Projections
+
+Integrity may be preserved as a **scoped projection**:
+
+```typescript
+const measurement = { lat: 37.77, long: -122.41 };
+// Integrity: { GPSMeasurement: { valueRef: refer(measurement), device: "..." } }
+
+const lat = measurement.lat;
+// Integrity: {
+//   GPSMeasurement: {
+//     valueRef: refer(measurement),
+//     device: "...",
+//     projection: "/lat"  // Scoped to this field
+//   }
+// }
+```
+
+The scoped integrity indicates:
+- This value came from a valid GPS measurement
+- It is specifically the `/lat` component
+- It cannot be combined with `/long` from a different measurement and claim full GPS integrity
+
+### 8.3.3 Schema Annotation for Projections
+
+```json
+{
+  "output": {
+    "properties": {
+      "latitude": {
+        "type": "number",
+        "ifc": {
+          "projection": {
+            "from": "/input/measurement",
+            "path": "/lat"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+---
+
+## 8.4 Exact Copy Verification
+
+When the schema declares that an output should be an exact copy of an input, the runtime verifies this claim via content-addressing. This is **not automatic**—the schema must declare the expectation.
+
+### 8.4.1 Schema Declaration
+
+```json
+{
+  "output": {
+    "properties": {
+      "confirmedEmail": {
+        "type": "string",
+        "format": "email",
+        "ifc": {
+          "exactCopyOf": "/input/emailAddress"
+        }
+      }
+    }
+  }
+}
+```
+
+### 8.4.2 Runtime Verification
+
+When `exactCopyOf` is declared, the runtime verifies:
+
+```typescript
+function verifyExactCopy(
+  inputPath: string,
+  outputPath: string,
+  handler: Handler
+): { valid: boolean; preservedIntegrity?: IntegrityAtom[] } {
+  const inputValue = getValueAtPath(handler.input, inputPath);
+  const outputValue = getValueAtPath(handler.output, outputPath);
+
+  if (refer(inputValue).equals(refer(outputValue))) {
+    // Claim verified - preserve integrity
+    return {
+      valid: true,
+      preservedIntegrity: getIntegrityAtPath(handler.inputLabels, inputPath)
+    };
+  }
+
+  // Claim violated - this is an error
+  return { valid: false };
+}
+```
+
+If verification fails, the handler output is rejected—the schema made a promise it didn't keep.
+
+### 8.4.3 When to Use Exact Copy
+
+Use `exactCopyOf` when:
+- Echoing user input for confirmation
+- Passing through a value unchanged
+- Selecting an item from a list without modification
+
+---
+
+## 8.5 Collection Transitions
+
+Collections (arrays, sets) have special transition semantics beyond individual values.
+
+### 8.5.1 Collection Constraint Types
+
+| Constraint | Meaning | Integrity Implication |
+|------------|---------|----------------------|
+| `subsetOf` | All output members come from input | Each member preserves its integrity |
+| `permutationOf` | Same members, possibly reordered | Full collection integrity preserved |
+| `lengthPreserved` | Output length equals input length | Structural integrity preserved |
+| `filteredFrom` | Subset via predicate | Members preserve integrity, collection loses "complete" integrity |
+
+### 8.5.2 Subset Constraint
+
+Output array contains only elements from input array (selection):
+
+```json
+{
+  "output": {
+    "properties": {
+      "selectedEmails": {
+        "type": "array",
+        "items": { "$ref": "#/$defs/Email" },
+        "ifc": {
+          "collection": {
+            "subsetOf": "/input/emails",
+            "memberIntegrity": "preserved"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Runtime verification:
+
+```typescript
+function verifySubset(
+  inputPath: string,
+  outputPath: string,
+  handler: Handler
+): boolean {
+  const inputSet = new Set(
+    getValueAtPath(handler.input, inputPath).map(v => refer(v).toString())
+  );
+  const outputArray = getValueAtPath(handler.output, outputPath);
+
+  return outputArray.every(item =>
+    inputSet.has(refer(item).toString())
+  );
+}
+```
+
+Each output member inherits the integrity of its matching input member.
+
+### 8.5.3 Permutation Constraint
+
+Output is a reordering of input (same members, different order):
+
+```json
+{
+  "output": {
+    "properties": {
+      "sortedItems": {
+        "type": "array",
+        "ifc": {
+          "collection": {
+            "permutationOf": "/input/items"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Runtime verification:
+
+```typescript
+function verifyPermutation(
+  inputPath: string,
+  outputPath: string,
+  handler: Handler
+): boolean {
+  const inputRefs = getValueAtPath(handler.input, inputPath)
+    .map(v => refer(v).toString())
+    .sort();
+  const outputRefs = getValueAtPath(handler.output, outputPath)
+    .map(v => refer(v).toString())
+    .sort();
+
+  return inputRefs.length === outputRefs.length &&
+    inputRefs.every((ref, i) => ref === outputRefs[i]);
+}
+```
+
+Permutation preserves:
+- Individual member integrity
+- Collection-level integrity (e.g., "complete list of X")
+- Length invariants
+
+### 8.5.4 Length Preservation
+
+Output has same length as input:
+
+```json
+{
+  "output": {
+    "properties": {
+      "mappedValues": {
+        "type": "array",
+        "ifc": {
+          "collection": {
+            "sourceCollection": "/input/items",
+            "lengthPreserved": true
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+This is weaker than permutation—items may be transformed, but count is preserved. Useful for map operations.
+
+### 8.5.5 Filtered Subset
+
+Output is a subset determined by a predicate:
+
+```json
+{
+  "output": {
+    "properties": {
+      "activeUsers": {
+        "type": "array",
+        "ifc": {
+          "collection": {
+            "filteredFrom": "/input/users",
+            "predicate": "isActive"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Integrity implications:
+- Each member preserves its individual integrity
+- Collection loses "completeness" integrity (it's no longer "all users")
+- Gains filter integrity: `FilteredBy({ predicate: "isActive", source: refer(input.users) })`
+
+### 8.5.6 Collection Integrity Atoms
+
+Collections may carry integrity about the collection itself (not just members):
+
+```typescript
+interface CollectionIntegrity {
+  // The collection is complete (no filtering occurred)
+  type: "CompleteCollection";
+  source: Reference;  // Original collection reference
+}
+
+interface FilteredCollectionIntegrity {
+  type: "FilteredFrom";
+  source: Reference;
+  predicate: string;
+  // Does NOT claim completeness
+}
+
+interface PermutedCollectionIntegrity {
+  type: "PermutationOf";
+  source: Reference;
+  // Claims same members, different order
+}
+```
+
+#### 8.5.6.1 Membership Confidentiality vs Member Confidentiality
+
+Collections have **two distinct confidentiality dimensions**:
+
+1. **Member confidentiality**: The confidentiality of each individual item in the collection
+2. **Membership confidentiality**: The confidentiality of *which items are in the collection*
+
+These are tracked separately because:
+- Individual items may be PUBLIC, but their **inclusion** in a particular collection may be confidential
+- A filtered collection inherits confidentiality from the filtering criteria
+
+**Example**: Secret search results
+
+```typescript
+// Individual products may be public catalog items
+const allProducts: Product[] = /* public catalog */;
+
+// But filtering by a secret query taints the MEMBERSHIP
+const secretQuery = /* user's private search */;
+const matchingProducts = allProducts.filter(p => matches(p, secretQuery));
+
+// matchingProducts has:
+// - Member confidentiality: PUBLIC (products are public)
+// - Membership confidentiality: tainted by secretQuery
+//
+// Therefore matchingProducts.length is also tainted by secretQuery
+```
+
+```typescript
+interface CollectionLabel {
+  // Confidentiality of each member (may vary per member)
+  memberConfidentiality: Clause[];
+
+  // Confidentiality of the collection's membership/selection
+  membershipConfidentiality: Clause[];
+
+  // Collection-level integrity
+  integrity: Atom[];
+}
+```
+
+**Implications**:
+- `collection.length` inherits `membershipConfidentiality`
+- Iterating over members exposes membership (iteration order is tainted)
+- `collection.includes(item)` returns a value tainted by membership confidentiality
+- Mapping over items produces a new collection with the same membership confidentiality
+
+### 8.5.7 Selection-Decision Integrity
+
+The order and selection of items in a collection has **different taint** from the individual items themselves. This is **selection-decision integrity**—it tracks whether the ranking/selection criteria align with user interests.
+
+**The problem**: A malicious recommender could rank items to manipulate user behavior (e.g., placing sponsored content first without disclosure, or ranking search results to serve the recommender's interests rather than the user's).
+
+**Solution**: Selection-decision integrity is represented as **integrity atoms** (not a separate label field). These atoms track:
+1. What criteria influenced the selection/ordering
+2. Whether those criteria align with user interests
+3. Whether appropriate disclosure was made
+
+```typescript
+interface SelectionDecisionIntegrity {
+  type: "SelectionDecision";
+
+  // What criteria influenced selection/ordering
+  criteria: SelectionCriteria[];
+
+  // Whether user was informed of selection criteria
+  disclosed: boolean;
+
+  // Evidence of user acknowledgment (if required)
+  userAcknowledgment?: {
+    timestamp: number;
+    snapshotDigest: string;  // UI showing disclosure
+  };
+}
+
+type SelectionCriteria =
+  | { kind: "user-specified"; description: string }     // User chose sort order
+  | { kind: "relevance"; algorithm: string }            // Algorithmic relevance
+  | { kind: "commercial"; sponsor?: string }            // Paid placement
+  | { kind: "platform-interest"; description: string }  // Platform's interests
+  | { kind: "unknown" };                                // Opaque/untrusted
+
+// Selection can clear some confidentiality taint IF criteria align with user
+interface SelectionDeclassificationRule {
+  // Required: selection criteria must be user-aligned or disclosed
+  requiredIntegrity: [
+    { type: "SelectionDecision", criteria: { kind: "user-specified" } }
+  ] | [
+    { type: "SelectionDecision", disclosed: true },
+    { type: "UserAcknowledged", scope: "selection-criteria" }
+  ];
+
+  // Effect: selection decision taint can be cleared
+  clears: "selection-decision-confidentiality";
+}
+```
+
+**Contextual Integrity mapping**: This implements CI's transmission principles for ranking and recommendation scenarios:
+
+- **Sender**: The system/algorithm producing the ranking
+- **Recipient**: The user viewing the ranked list
+- **Information type**: The selection criteria and their influence
+- **Transmission principle**: Selection must serve user interests OR be disclosed
+
+**Example: Search results**
+
+```typescript
+// Untrusted search results - selection decision is opaque
+const results = searchEngine.search(query);
+// results.selectionIntegrity = { type: "SelectionDecision", criteria: [{ kind: "unknown" }] }
+
+// User sorts by date - selection decision becomes user-specified
+const sorted = results.sortBy("date", "descending");
+// sorted.selectionIntegrity = {
+//   type: "SelectionDecision",
+//   criteria: [{ kind: "user-specified", description: "date descending" }],
+//   disclosed: true
+// }
+
+// User selects from sorted list - selection integrity preserved
+const selected = userSelect(sorted);
+// selected preserves member integrity AND has user-specified selection integrity
+```
+
+**Example: Sponsored content with disclosure**
+
+```json
+{
+  "ifc": {
+    "collection": {
+      "subsetOf": "/input/searchResults",
+      "selectionIntegrity": {
+        "criteria": [
+          { "kind": "relevance", "algorithm": "semantic-v2" },
+          { "kind": "commercial", "sponsor": "displayed-in-ui" }
+        ],
+        "disclosed": true,
+        "disclosureEvidence": {
+          "snapshotDigest": "...",
+          "disclosureText": "Includes sponsored results"
+        }
+      }
+    }
+  }
+}
+```
+
+### 8.5.8 Combining Collection Constraints
+
+Constraints can be combined:
+
+```json
+{
+  "ifc": {
+    "collection": {
+      "subsetOf": "/input/candidates",
+      "lengthPreserved": false,
+      "memberIntegrity": "preserved",
+      "selectionIntegrity": {
+        "criteria": [{ "kind": "user-specified" }],
+        "disclosed": true
+      },
+      "addedCollectionIntegrity": [
+        { "type": "SelectedBy", "user": "..." }
+      ]
+    }
+  }
+}
+```
+
+---
+
+## 8.6 Combination Rules
+
+When multiple inputs contribute to a single output, labels combine.
+
+### 8.6.1 Confidentiality Combination (Join)
+
+Confidentiality clauses **concatenate** (CNF join—more restrictive):
+
+```typescript
+const input1 = { value: "...", label: { confidentiality: [User(Alice)] } };
+const input2 = { value: "...", label: { confidentiality: [User(Bob)] } };
+
+const combined = combineValues(input1.value, input2.value);
+// combined.label.confidentiality = [User(Alice), User(Bob)]
+// Two clauses, both must be satisfied
+// Both Alice AND Bob must authorize access
+```
+
+### 8.6.2 Integrity Combination (Meet)
+
+Integrity atoms **intersect** (weaker claims):
+
+```typescript
+const input1 = {
+  value: coords1,
+  integrity: [GPSMeasurement({ device: "A" }), Timestamp({ source: "ntp" })]
+};
+const input2 = {
+  value: coords2,
+  integrity: [GPSMeasurement({ device: "B" })]
+};
+
+const combined = averageCoords(input1.value, input2.value);
+// combined.integrity = []
+// No common integrity - the combination is not a valid GPS measurement from any single device
+```
+
+### 8.6.3 Schema Annotation for Combinations
+
+```json
+{
+  "output": {
+    "properties": {
+      "summary": {
+        "type": "string",
+        "ifc": {
+          "combinedFrom": ["/input/field1", "/input/field2"],
+          "combinationType": "transformation"
+        }
+      }
+    }
+  }
+}
+```
+
+---
+
+## 8.7 Transformation Rules
+
+When code transforms data, the output gains new integrity from the transformer.
+
+### 8.7.1 Transformation Integrity
+
+```typescript
+interface TransformationIntegrity {
+  type: "TransformedBy";
+  codeHash: string;           // Hash of transformer code
+  inputs: Reference[];        // References to input values
+  inputIntegrity: IntegrityAtom[][]; // Integrity of each input
+}
+```
+
+### 8.7.2 Endorsed Transformations
+
+Certain transformations may **preserve or upgrade** integrity:
+
+```typescript
+// A trusted unit converter
+function metersToFeet(meters: number): number {
+  return meters * 3.28084;
+}
+
+// If endorsed as a semantic-preserving transformation:
+// Input: { value: 100, integrity: [LengthMeasurement({ unit: "m" })] }
+// Output: { value: 328.084, integrity: [LengthMeasurement({ unit: "ft" })] }
+```
+
+This requires the transformer to be in a trusted registry:
+
+```json
+{
+  "ifc": {
+    "transformation": {
+      "codeHash": "abc123...",
+      "preservesIntegrity": ["LengthMeasurement"],
+      "transformsUnit": { "from": "m", "to": "ft" }
+    }
+  }
+}
+```
+
+### 8.7.3 Handler-Level Transitions
+
+A handler's output schema declares how labels transition:
+
+```json
+{
+  "$id": "ForwardEmailHandler",
+  "type": "object",
+  "properties": {
+    "input": {
+      "properties": {
+        "email": { "$ref": "#/$defs/Email" },
+        "recipients": {
+          "type": "array",
+          "items": { "type": "string", "format": "email" }
+        }
+      }
+    },
+    "output": {
+      "properties": {
+        "forwardedEmail": {
+          "$ref": "#/$defs/Email",
+          "ifc": {
+            "passThrough": { "from": "/input/email" },
+            "addedIntegrity": [
+              { "type": "ForwardedBy", "handler": "ForwardEmailHandler" }
+            ]
+          }
+        },
+        "recipientList": {
+          "type": "array",
+          "items": { "type": "string" },
+          "ifc": {
+            "exactCopyOf": "/input/recipients"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+---
+
+## 8.8 IFC Annotations Summary
+
+The `ifc` field in JSON Schema supports these transition annotations:
+
+```typescript
+interface IFCTransitionAnnotations {
+  // Pass-through: output is a reference to input
+  passThrough?: {
+    from: string;  // JSON Pointer to input path
+  };
+
+  // Projection: output is a field extracted from input
+  projection?: {
+    from: string;  // JSON Pointer to input object
+    path: string;  // JSON Pointer within that object
+  };
+
+  // Exact copy: output must equal input (verified at runtime)
+  exactCopyOf?: string;  // JSON Pointer to input path
+
+  // Combination: output derived from multiple inputs
+  combinedFrom?: string[];  // JSON Pointers to input paths
+  combinationType?: "join" | "transformation";
+
+  // Added integrity: new integrity atoms for this output
+  addedIntegrity?: IntegrityAtom[];
+
+  // Transformation metadata
+  transformation?: {
+    codeHash: string;
+    preservesIntegrity?: string[];  // Integrity types preserved
+  };
+}
+
+// Input-side annotations (on input schema paths)
+interface IFCInputAnnotations {
+  // Opaque input: handler receives reference but cannot read content
+  opaque?: boolean | {
+    // Schema that the opaque value must conform to (for type safety)
+    schema?: JSONSchema;
+    // Whether the handler may pass this reference to output
+    allowPassThrough?: boolean;  // default: true
+  };
+
+  // Minimum integrity required for this input
+  requiredIntegrity?: AtomPattern[];
+
+  // Maximum confidentiality allowed for this input
+  maxConfidentiality?: AtomPattern[];
+}
+```
+
+---
+
+## 8.9 Runtime Label Propagation
+
+### 8.9.1 Propagation Algorithm
+
+```typescript
+function propagateLabels(
+  handler: Handler,
+  inputLabels: Map<string, Label>,
+  outputValue: unknown,
+  outputSchema: JSONSchema
+): Map<string, Label> {
+  const outputLabels = new Map<string, Label>();
+
+  for (const [path, schema] of walkSchema(outputSchema)) {
+    const ifc = schema.ifc;
+
+    if (ifc?.passThrough) {
+      // Reference to input - label follows reference
+      outputLabels.set(path, inputLabels.get(ifc.passThrough.from)!);
+
+    } else if (ifc?.projection) {
+      // Projection - inherit confidentiality, scope integrity
+      const sourceLabel = inputLabels.get(ifc.projection.from)!;
+      outputLabels.set(path, {
+        confidentiality: sourceLabel.confidentiality,
+        integrity: scopeIntegrity(sourceLabel.integrity, ifc.projection.path)
+      });
+
+    } else if (ifc?.exactCopyOf) {
+      // Exact copy - verify and preserve if identical
+      const inputPath = ifc.exactCopyOf;
+      const inputValue = getValueAtPath(handler.input, inputPath);
+      const outputVal = getValueAtPath(outputValue, path);
+
+      if (refer(inputValue).equals(refer(outputVal))) {
+        outputLabels.set(path, inputLabels.get(inputPath)!);
+      } else {
+        // Mismatch - treat as transformation
+        outputLabels.set(path, deriveTransformedLabel(inputLabels, handler));
+      }
+
+    } else if (ifc?.combinedFrom) {
+      // Combination - concatenate confidentiality clauses (CNF), meet integrity
+      const sourceLabels = ifc.combinedFrom.map(p => inputLabels.get(p)!);
+      outputLabels.set(path, {
+        confidentiality: concatClauses(sourceLabels.map(l => l.confidentiality)),
+        integrity: intersectAtoms(sourceLabels.map(l => l.integrity))
+      });
+
+    } else {
+      // Default: inherit all input confidentiality, transformation integrity
+      outputLabels.set(path, deriveTransformedLabel(inputLabels, handler));
+    }
+
+    // Add any explicit integrity
+    if (ifc?.addedIntegrity) {
+      const label = outputLabels.get(path)!;
+      label.integrity = [...label.integrity, ...ifc.addedIntegrity];
+    }
+  }
+
+  return outputLabels;
+}
+```
+
+### 8.9.2 Default Transition (No Annotation)
+
+When no IFC annotation is present:
+- **Confidentiality**: Concatenate all input confidentiality clauses (CNF join)
+- **Integrity**: `TransformedBy` with handler code hash and input references
+
+```typescript
+function deriveTransformedLabel(
+  inputLabels: Map<string, Label>,
+  handler: Handler
+): Label {
+  return {
+    confidentiality: concatClauses(
+      Array.from(inputLabels.values()).map(l => l.confidentiality)
+    ),
+    integrity: [{
+      type: "TransformedBy",
+      codeHash: refer(handler.code).toString(),
+      inputs: Array.from(inputLabels.keys()).map(p => refer(getValueAtPath(handler.input, p)))
+    }]
+  };
+}
+
+// Helper: concatenate clause arrays (CNF join)
+function concatClauses(clauseArrays: Clause[][]): Clause[] {
+  return clauseArrays.flat();
+}
+```
+
+---
+
+## 8.10 Validation at Boundaries
+
+At trusted boundaries (display, network egress, storage), the runtime validates that label transitions were correct.
+
+### 8.10.1 Transition Verification
+
+```typescript
+function verifyTransition(
+  inputLabels: Map<string, Label>,
+  outputLabels: Map<string, Label>,
+  schema: JSONSchema
+): boolean {
+  for (const [path, outputLabel] of outputLabels) {
+    const ifc = getSchemaAtPath(schema, path).ifc;
+
+    // Verify confidentiality is not reduced
+    if (!isConfidentialityMonotone(inputLabels, outputLabel.confidentiality)) {
+      return false;
+    }
+
+    // Verify integrity claims are justified
+    if (ifc?.exactCopyOf) {
+      // Must actually be exact copy for integrity preservation
+      if (!verifyExactCopy(path, ifc.exactCopyOf)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+```
+
+### 8.10.2 Integrity Binding Verification
+
+For instance-bound integrity, verify the scope binding:
+
+```typescript
+function verifyIntegrityBinding(
+  integrity: IntegrityAtom[],
+  value: unknown
+): boolean {
+  for (const atom of integrity) {
+    if (atom.scope?.valueRef) {
+      // Integrity claims to be about a specific value
+      if (!refer(value).equals(atom.scope.valueRef)) {
+        return false;  // Value doesn't match integrity claim
+      }
+    }
+  }
+  return true;
+}
+```
+
+---
+
+## 8.11 Content Labels vs Flow Labels
+
+Confidentiality clauses can arise from two conceptually distinct sources, but are stored together in the single `Label` structure (Section 3.1.7):
+
+### 8.11.1 Data Content Labels
+
+Clauses describing the sensitivity of the **value itself**:
+
+```typescript
+const location = { lat: 37.7749, long: -122.4194 };
+// Content contributes: [HighPrecision], [User(Alice)]
+```
+
+This answers: "How sensitive is this value?"
+
+### 8.11.2 Data Flow Labels
+
+Clauses describing what the **presence or routing** of this data reveals:
+
+```typescript
+// This location was routed through a decision influenced by:
+// Flow contributes: [WeatherRequest]
+```
+
+This answers: "What does the existence of this data at this point reveal?"
+
+### 8.11.3 Why Both Matter
+
+The router attack (Section 10) shows why flow labels are needed. An adversary can encode high-precision data in routing decisions:
+
+```
+High-precision location → [router] → 64 paths → [declassifier] → low-precision outputs
+```
+
+Even though each output *value* is low-precision, the *routing decision* (which path was taken) encodes the high-precision input. If we only track content labels, the attack succeeds.
+
+**Rule**: When data flows through a decision point influenced by labeled inputs, the *decision itself* inherits that label. All downstream outputs—regardless of their content—carry the decision's label.
+
+### 8.11.4 Unified Representation
+
+Both content and flow labels are stored in the same `confidentiality: Clause[]` array. They are not tracked separately at runtime—they're simply concatenated as the data flows through computations. The distinction is conceptual, helping explain where clauses come from:
+
+- **Content clauses**: From schema `ifc` annotations and input data labels
+- **Flow clauses**: Added when data passes through decision points influenced by labeled inputs
+
+---
+
+## 8.12 Store Label Monotonicity
+
+Stores (persistent cells) have labels that must be **monotonically non-decreasing** over their lifetime.
+
+### 8.12.1 The Constraint
+
+A store's label may become **stricter** (more clauses, shorter expiration) but never **looser**:
+
+```typescript
+function canUpdateStoreLabel(current: Label, proposed: Label): boolean {
+  // Confidentiality (CNF): can only add clauses or remove alternatives
+  // More clauses = more restrictive (more requirements)
+  // Fewer alternatives per clause = more restrictive (fewer ways to satisfy)
+  if (!isMoreRestrictiveCNF(current.confidentiality, proposed.confidentiality)) {
+    return false;
+  }
+
+  // Integrity: can only remove atoms (weaker claims OK)
+  if (!isSubset(proposed.integrity, current.integrity)) {
+    return false;
+  }
+
+  // Expiration: can only decrease (earlier deadline)
+  if (proposed.expiration !== undefined && current.expiration !== undefined) {
+    if (proposed.expiration > current.expiration) {
+      return false;  // Can't extend expiration without policy authorization
+    }
+  }
+
+  return true;
+}
+
+// Check if proposed is at least as restrictive as current (CNF)
+function isMoreRestrictiveCNF(current: Clause[], proposed: Clause[]): boolean {
+  // Every clause in current must have a corresponding clause in proposed
+  // that is at least as restrictive (same atoms or fewer alternatives)
+  for (const currentClause of current) {
+    const currentAlts = Array.isArray(currentClause) ? currentClause : [currentClause];
+
+    // Find a matching clause in proposed
+    const hasMatch = proposed.some(proposedClause => {
+      const proposedAlts = Array.isArray(proposedClause) ? proposedClause : [proposedClause];
+      // Proposed alternatives must be a subset of current alternatives
+      // (fewer alternatives = more restrictive)
+      return proposedAlts.every(alt =>
+        currentAlts.some(c => atomEquals(c, alt))
+      );
+    });
+
+    if (!hasMatch) return false;
+  }
+
+  // Additional clauses in proposed are fine (more restrictive)
+  return true;
+}
+```
+
+**Note**: In practice, store labels typically contain only singleton clauses (no disjunctions). Disjunctions arise from exchange rules evaluated at access time, not from storage. This simplifies monotonicity checking to clause set containment.
+
+### 8.12.2 Rationale
+
+This constraint:
+1. **Simplifies analysis**: No need to track temporal sequences of label changes
+2. **Prevents aliasing attacks**: Can't downgrade a store's label after high-confidentiality data was written
+3. **Matches schema evolution**: Just as schemas can only add fields (backward compatible), labels can only add constraints
+
+### 8.12.3 Schema Evolution Alignment
+
+This aligns with the system's schema evolution rules:
+- Schemas are strictly additive (new fields only)
+- Each schema version is backward compatible with previous
+- Labels follow the same principle: each update is "backward compatible" with prior confidentiality expectations
+
+### 8.12.4 Writers and Readers
+
+The store label constrains both:
+
+**Writers**: Data written to the store must have a label that is ≤ the store's label:
+```typescript
+// Writer's data label must be covered by store label
+function canWrite(dataLabel: Label, storeLabel: Label): boolean {
+  return isSubsetOrEqual(dataLabel.confidentiality, storeLabel.confidentiality);
+}
+```
+
+**Readers**: Anyone reading the store is tainted by the store's label:
+```typescript
+// Reader inherits store's label
+function readLabel(storeLabel: Label): Label {
+  return storeLabel;  // Reader's output is at least this restrictive
+}
+```
+
+### 8.12.5 Upgrading Store Labels
+
+When stricter data needs to be written to a store with looser labels:
+
+1. **Reject the write**: The store cannot accept data more sensitive than its label
+2. **Upgrade the store label**: Atomically tighten the store's label, then write
+3. **Create a new store**: Write to a different store with appropriate labels
+
+Option 2 is safe because upgrading is monotonic—existing readers already expect data at the original label level, and stricter data is always acceptable where looser data was expected.
+
+### 8.12.6 Expiration Cascade
+
+When a cell's data expires, the expiration **cascades** to all dependents in the reactive graph:
+
+```typescript
+interface ExpiredState {
+  type: "expired";
+  expiredAt: number;
+  originalLabel: Label;
+}
+
+function onCellExpiration(cell: Cell): void {
+  // Mark cell as expired
+  cell.state = { type: "expired", expiredAt: Date.now(), originalLabel: cell.label };
+
+  // Cascade to all dependents
+  for (const dependent of cell.dependents) {
+    propagateExpiration(dependent, cell);
+  }
+}
+
+function propagateExpiration(cell: Cell, expiredSource: Cell): void {
+  // If this cell has its own independent TTL (e.g., from declassification),
+  // it may preserve its value until that TTL expires
+  if (cell.hasDeclassifiedTTL && cell.declassifiedExpiration > Date.now()) {
+    // Value preserved via declassified output path
+    return;
+  }
+
+  // Otherwise, cascade the expiration
+  cell.state = { type: "expired", expiredAt: Date.now(), originalLabel: cell.label };
+
+  for (const dependent of cell.dependents) {
+    propagateExpiration(dependent, cell);
+  }
+}
+```
+
+**Key behaviors**:
+
+1. **Cascade by default**: Expired state propagates through the reactive graph
+2. **Declassified TTL preservation**: If an output was declassified with a longer TTL (e.g., API response cached for 1 hour), that value persists until its own TTL expires
+3. **Integrity on expiration**: Expired cells lose their integrity claims—the value is stale
+4. **UI behavior**: Expired cells should display stale indicators or refresh prompts
+
+**Example**: A user profile cell expires after 5 minutes. A derived "greeting" cell that depends on the profile also expires. However, if the greeting was sent to an external system with a 1-hour cache TTL, that external copy remains valid until its own expiration.
+
+---
+
+## 8.13 Opaque Inputs (Blind Data Passing)
+
+Handlers can declare inputs as **opaque**: they receive a reference to the data but cannot read its content. This enables high-integrity routing decisions while passing untrusted content.
+
+### 8.13.1 The Problem
+
+Consider a routing module that decides where to send an email based on trusted metadata:
+
+```typescript
+function routeEmail(email: Email): Destination {
+  // We want to:
+  // 1. Read email.priority (trusted) to make routing decision
+  // 2. Pass email.body (untrusted) to output without reading it
+  // Problem: If we read email.body, our routing decision is tainted
+}
+```
+
+Without opaque inputs, the routing decision's integrity is tainted by the untrusted body, even if the code doesn't actually use it.
+
+### 8.13.2 Solution: Opaque Input Annotation
+
+Mark inputs as opaque in the schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "input": {
+      "type": "object",
+      "properties": {
+        "priority": {
+          "type": "string",
+          "enum": ["high", "normal", "low"]
+        },
+        "body": {
+          "type": "string",
+          "ifc": {
+            "opaque": true
+          }
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "properties": {
+        "destination": { "type": "string" },
+        "body": {
+          "type": "string",
+          "ifc": {
+            "passThrough": { "from": "/input/body" }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### 8.13.3 Semantics
+
+When an input is marked `opaque`:
+
+1. **Reference only**: The handler receives a reference to the value, not the value itself
+2. **No content access**: Any attempt to read the content is a runtime error
+3. **Type safety**: The schema can still specify the expected type for validation
+4. **Pass-through allowed**: The reference can be placed in output (with `passThrough`)
+5. **Integrity isolation**: The routing decision's integrity is NOT tainted by opaque input content
+
+```typescript
+function routeEmail(input: { priority: string; body: OpaqueRef<string> }) {
+  // ✅ Can read priority (trusted)
+  const dest = input.priority === "high" ? "urgent-queue" : "normal-queue";
+
+  // ❌ Cannot read body.value - runtime error
+  // const text = input.body.value;  // ERROR
+
+  // ✅ Can pass reference to output
+  return { destination: dest, body: input.body };
+}
+```
+
+### 8.13.4 Label Propagation with Opaque Inputs
+
+| Aspect | Effect |
+|--------|--------|
+| **Handler integrity** | NOT tainted by opaque input's label |
+| **Output containing opaque ref** | Inherits opaque input's label (pass-through) |
+| **Routing decisions** | Based only on non-opaque inputs |
+
+This enables:
+- High-integrity routing based on trusted metadata
+- Untrusted content flowing through without contaminating decisions
+- Safe "blind forwarding" patterns
+
+### 8.13.5 Opaque with Schema Constraint
+
+For type safety, specify what schema the opaque value must conform to:
+
+```json
+{
+  "body": {
+    "ifc": {
+      "opaque": {
+        "schema": { "type": "string", "maxLength": 10000 },
+        "allowPassThrough": true
+      }
+    }
+  }
+}
+```
+
+The runtime validates the opaque value against the schema before passing it to the handler, but the handler still cannot read the content.
+
+### 8.13.6 Use Cases
+
+1. **Email routing**: Route based on headers without reading body
+2. **Content moderation pipeline**: Route to appropriate moderator based on metadata, pass content blindly
+3. **Multi-tenant processing**: Route based on tenant ID, process payload opaquely
+4. **Confidential aggregation**: Collect references for later batch processing without reading individual items
+
+### 8.13.7 Comparison with Authority-Only
+
+Opaque and authority-only both prevent certain data from tainting outputs, but they operate at **different levels**:
+
+| Concept | Level | Mechanism | Example |
+|---------|-------|-----------|---------|
+| **Opaque** | Handler schema annotation | Handler receives reference, cannot read content | Email body passes through router |
+| **Authority-only** | Policy field classification | Policy declares API field authorizes but doesn't taint response | OAuth token in Authorization header |
+
+**Key distinction**:
+- **Opaque** is a schema annotation on *handler inputs* — the handler declares it won't read the content
+- **Authority-only** is a policy classification for *external API fields* — the policy declares which request fields don't taint the response (Section 5.3.1)
+
+Both achieve non-tainting but through different means:
+- Opaque: Handler provably can't access content (enforced by runtime)
+- Authority-only: Policy asserts the field's confidentiality doesn't flow to response (trusted assertion)
+
+### 8.13.8 Opaque Violations Are Fatal
+
+Attempts to access opaque reference content are **fatal errors** that cannot be caught by pattern code. This prevents information leakage through exception messages.
+
+**Why fatal:**
+
+1. **Exception messages leak content**: A runtime error like "Cannot read property 'name' of {ssn: '123-45-6789'}" would expose the opaque data in the error message.
+
+2. **Catch blocks enable exfiltration**: If pattern code could catch opaque violations, it could infer information through exception handling patterns.
+
+3. **Should not compile**: Ideally, the type system prevents opaque access at compile time. Runtime checks are a fallback.
+
+**Behavior:**
+
+```typescript
+// This should not compile (type error)
+function badHandler(data: OpaqueRef<Email>) {
+  console.log(data.subject);  // Type error: cannot access opaque content
+}
+
+// If type check is bypassed, runtime enforcement:
+function riskyHandler(data: unknown) {
+  const opaque = data as OpaqueRef<Email>;
+  try {
+    console.log(opaque.subject);  // FATAL: terminates handler, no catch
+  } catch (e) {
+    // Never reached - opaque violations bypass catch
+  }
+}
+```
+
+**Fatal error handling:**
+
+```typescript
+interface OpaqueViolation {
+  type: "OpaqueViolation";
+  // NO content or stack trace - those might leak
+  handlerHash: string;
+  violationType: "read" | "stringify" | "reflect";
+  // Reported to trusted runtime, not to pattern code
+}
+```
+
+**Implications:**
+
+- Pattern code cannot recover from opaque violations
+- Violations are logged to trusted runtime for debugging
+- Error details are sanitized before any output
+- Handler execution terminates immediately
+
+---
+
+## 8.14 Open Problem: Contamination Scoping
+
+When patterns process data through multiple steps, contamination in one step can cascade. This section describes the current model and open design questions.
+
+### 8.14.1 Contamination as Absence of Integrity
+
+The CFC model treats "safety from contamination" (e.g., no prompt injection) as an **added integrity atom**, not a default state:
+
+```typescript
+// Safety is expressed as presence of integrity atoms
+interface InjectionSafeIntegrity {
+  type: "InjectionSafe";
+  validator: CodeHash;    // What validated it
+  validatedAt: number;    // When
+}
+
+// Absence of this atom means: unknown, might be contaminated
+// This is the normal IFC model—low integrity by default
+```
+
+**Key principle**: Data starts with no integrity claims. Trusted sources or validators *add* integrity atoms. Absence simply means "unknown"—the data might or might not be safe.
+
+This follows standard IFC: you don't track "contaminated" as a taint, you track "validated" as an endorsement.
+
+### 8.14.2 Blast Radius Isolation
+
+Each processing step should have isolated failure domains:
+- Contamination in step N doesn't automatically compromise step N+1
+- Intent boundaries reset or constrain propagation
+- Subtask outputs can be validated before integration
+
+**Open design question**: How to make adding integrity practical without requiring validation at every step. Current mechanisms (scoped intents, integrity guards) provide building blocks, but the ergonomics need further design work.
+
