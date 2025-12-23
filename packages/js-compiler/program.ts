@@ -102,6 +102,11 @@ export class HttpProgramResolver implements ProgramResolver {
 
   async #fetch(url: URL): Promise<Source> {
     const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(
+        `Failed to fetch ${url}: ${res.status} ${res.statusText}`,
+      );
+    }
     const contents = await res.text();
     return {
       name: url.pathname,
