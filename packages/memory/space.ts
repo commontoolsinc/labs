@@ -7,7 +7,7 @@ import {
 
 import { COMMIT_LOG_TYPE, create as createCommit } from "./commit.ts";
 import { unclaimedRef } from "./fact.ts";
-import { fromString, intern, refer } from "./reference.ts";
+import { fromString, refer } from "./reference.ts";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
   Assert,
@@ -911,20 +911,14 @@ const commit = <Space extends MemorySpace>(
     ]
     : [0, unclaimedRef({ the, of })];
 
-  // Intern the transaction first so that:
-  // 1. createCommit() will reuse this exact transaction object (via WeakSet fast path)
-  // 2. iterateTransaction() uses the same objects that are in commit.is.transaction
-  // 3. When swap() hashes payloads, those same objects are in commit.is.transaction
-  // 4. refer(commit) can cache-hit on all sub-objects
-  const internedTransaction = intern(transaction);
   const commit = createCommit({
     space: of,
     since,
-    transaction: internedTransaction,
+    transaction,
     cause,
   });
 
-  for (const fact of iterateTransaction(internedTransaction)) {
+  for (const fact of iterateTransaction(transaction)) {
     swap(session, fact, commit.is);
   }
 

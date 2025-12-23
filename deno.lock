@@ -89,7 +89,7 @@
     "npm:@opentelemetry/core@^1.19.0": "1.30.1_@opentelemetry+api@1.9.0",
     "npm:@opentelemetry/exporter-trace-otlp-proto@0.46": "0.46.0_@opentelemetry+api@1.9.0",
     "npm:@opentelemetry/resources@^1.19.0": "1.30.1_@opentelemetry+api@1.9.0",
-    "npm:@opentelemetry/sdk-trace-base@^1.19.0": "1.30.1_@opentelemetry+api@1.9.0",
+    "npm:@opentelemetry/sdk-trace-base@^1.19.0": "1.19.0_@opentelemetry+api@1.9.0",
     "npm:@opentelemetry/semantic-conventions@^1.19.0": "1.38.0",
     "npm:@scalar/hono-api-reference@~0.5.165": "0.5.184_hono@4.10.5",
     "npm:@scure/bip39@^1.5.4": "1.6.0",
@@ -102,6 +102,7 @@
     "npm:domhandler@*": "5.0.3",
     "npm:esbuild@~0.25.5": "0.25.12",
     "npm:gcp-metadata@6.1.0": "6.1.0",
+    "npm:hash-wasm@^4.11.0": "4.12.0",
     "npm:hono-pino@0.7": "0.7.2_hono@4.10.5_pino@9.14.0",
     "npm:hono@^4.7.0": "4.10.5",
     "npm:htmlparser2@*": "10.0.0",
@@ -870,7 +871,7 @@
         "@opentelemetry/otlp-proto-exporter-base",
         "@opentelemetry/otlp-transformer",
         "@opentelemetry/resources@1.19.0_@opentelemetry+api@1.9.0",
-        "@opentelemetry/sdk-trace-base@1.19.0_@opentelemetry+api@1.9.0"
+        "@opentelemetry/sdk-trace-base"
       ]
     },
     "@opentelemetry/otlp-exporter-base@0.46.0_@opentelemetry+api@1.9.0": {
@@ -899,7 +900,7 @@
         "@opentelemetry/resources@1.19.0_@opentelemetry+api@1.9.0",
         "@opentelemetry/sdk-logs",
         "@opentelemetry/sdk-metrics",
-        "@opentelemetry/sdk-trace-base@1.19.0_@opentelemetry+api@1.9.0"
+        "@opentelemetry/sdk-trace-base"
       ]
     },
     "@opentelemetry/resources@1.19.0_@opentelemetry+api@1.9.0": {
@@ -943,15 +944,6 @@
         "@opentelemetry/core@1.19.0_@opentelemetry+api@1.9.0",
         "@opentelemetry/resources@1.19.0_@opentelemetry+api@1.9.0",
         "@opentelemetry/semantic-conventions@1.19.0"
-      ]
-    },
-    "@opentelemetry/sdk-trace-base@1.30.1_@opentelemetry+api@1.9.0": {
-      "integrity": "sha512-jVPgBbH1gCy2Lb7X0AVQ8XAfgg0pJ4nvl8/IiQA6nxOsPvS+0zMJaFSs2ltXe0J6C8dqjcnpyqINDJmU30+uOg==",
-      "dependencies": [
-        "@opentelemetry/api",
-        "@opentelemetry/core@1.30.1_@opentelemetry+api@1.9.0",
-        "@opentelemetry/resources@1.30.1_@opentelemetry+api@1.9.0",
-        "@opentelemetry/semantic-conventions@1.28.0"
       ]
     },
     "@opentelemetry/semantic-conventions@1.19.0": {
@@ -1062,16 +1054,10 @@
     "@standard-schema/spec@1.0.0": {
       "integrity": "sha512-m2bOd0f2RT9k8QJx1JN85cZYyH1RqFBdlwtkSlf4tBDYLCiiZnv1fIIwacK6cqwXavOydf0NPToMQgpKq+dVlA=="
     },
-    "@types/node@24.10.1": {
-      "integrity": "sha512-GNWcUTRBgIRJD5zj+Tq0fKOJ5XZajIiBroOF0yvj2bSU1WvNdYS/dn9UxwsujGW4JX06dnHyjV2y9rRaybH0iQ==",
-      "dependencies": [
-        "undici-types@7.16.0"
-      ]
-    },
     "@types/node@24.2.0": {
       "integrity": "sha512-3xyG3pMCq3oYCNg7/ZP+E1ooTaGB4cG8JWRsqqOYQdbWNY4zbaV0Ennrd7stjiJEFZCaybcIgpTjJWHRfBSIDw==",
       "dependencies": [
-        "undici-types@7.10.0"
+        "undici-types"
       ]
     },
     "@types/trusted-types@2.0.7": {
@@ -1389,6 +1375,9 @@
         "has-symbols"
       ]
     },
+    "hash-wasm@4.12.0": {
+      "integrity": "sha512-+/2B2rYLb48I/evdOIhP+K/DD2ca2fgBjp6O+GBEnCDk2e4rpeXIK8GvIyRPjTezgmWn9gmKwkQjjx6BtqDHVQ=="
+    },
     "hasown@2.0.2": {
       "integrity": "sha512-0hJU9SCPvmMzIBdZFqNPXWa6dqh7WdH0cII9y+CyS8rG3nL48Bclra9HmKhVVUHyPWNH5Y7xDwAB7bfgSjkUMQ==",
       "dependencies": [
@@ -1629,7 +1618,7 @@
         "@protobufjs/path",
         "@protobufjs/pool",
         "@protobufjs/utf8",
-        "@types/node@24.10.1",
+        "@types/node",
         "long"
       ],
       "scripts": true
@@ -1732,9 +1721,6 @@
     "undici-types@7.10.0": {
       "integrity": "sha512-t5Fy/nfn+14LuOc2KNYg75vZqClpAiqscVvMygNnlsHBFpSXdJaYtXMcdNLpl/Qvc3P2cB3s6lOV51nqsFq4ag=="
     },
-    "undici-types@7.16.0": {
-      "integrity": "sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw=="
-    },
     "uuid@9.0.1": {
       "integrity": "sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==",
       "bin": true
@@ -1790,6 +1776,7 @@
       "jsr:@std/http@1",
       "jsr:@std/path@1",
       "jsr:@std/testing@1",
+      "npm:hash-wasm@^4.11.0",
       "npm:lit@^3.3.0",
       "npm:merkle-reference@^2.2.0",
       "npm:multiformats@^13.3.2",
