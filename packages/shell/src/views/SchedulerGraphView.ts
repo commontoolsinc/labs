@@ -1,5 +1,5 @@
 import { css, html, LitElement, svg, TemplateResult } from "lit";
-import { property, state } from "lit/decorators.js";
+import { property, state, query } from "lit/decorators.js";
 import dagre from "dagre";
 import type {
   DebuggerController, 
@@ -413,7 +413,11 @@ export class XSchedulerGraph extends LitElement {
   @state()
   private collapsedParents = new Set<string>();
 
+  @query(".graph-container")
+  private graphContainer?: HTMLElement;
+
   private lastGraphVersion = -1;
+  private hasAutoCollapsed = false;
 
   // Minimum effective node size before we boost triggered nodes
   private static readonly READABLE_THRESHOLD = 50;
@@ -450,6 +454,19 @@ export class XSchedulerGraph extends LitElement {
 
     // Build a map of all nodes and identify which are hidden due to collapsed parents
     const nodeMap = new Map(graphData.nodes.map((n) => [n.id, n]));
+
+    // Auto-collapse all parents with children on first load
+    if (!this.hasAutoCollapsed) {
+      this.hasAutoCollapsed = true;
+      const newCollapsed = new Set(this.collapsedParents);
+      for (const node of graphData.nodes) {
+        if (node.childCount && node.childCount > 0) {
+          newCollapsed.add(node.id);
+        }
+      }
+      this.collapsedParents = newCollapsed;
+    }
+
     const hiddenNodes = new Set<string>();
     const collapsedChildCounts = new Map<string, number>();
 
@@ -591,15 +608,47 @@ export class XSchedulerGraph extends LitElement {
   }
 
   private handleZoomIn(): void {
-    this.zoomLevel = Math.min(2.0, this.zoomLevel + 0.25);
+    this.zoomAroundCenter(Math.min(2.0, this.zoomLevel + 0.25));
   }
 
   private handleZoomOut(): void {
-    this.zoomLevel = Math.max(0.25, this.zoomLevel - 0.25);
+    this.zoomAroundCenter(Math.max(0.25, this.zoomLevel - 0.25));
   }
 
   private handleZoomReset(): void {
-    this.zoomLevel = 1.0;
+    this.zoomAroundCenter(1.0);
+  }
+
+  private zoomAroundCenter(newZoom: number): void {
+    const container = this.graphContainer;
+    if (!container) {
+      this.zoomLevel = newZoom;
+      return;
+    }
+
+    const oldZoom = this.zoomLevel;
+    if (oldZoom === newZoom) return;
+
+    // Get current scroll position and container dimensions
+    const scrollLeft = container.scrollLeft;
+    const scrollTop = container.scrollTop;
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+
+    // Calculate the center point in content coordinates (at old zoom)
+    const centerX = (scrollLeft + containerWidth / 2) / oldZoom;
+    const centerY = (scrollTop + containerHeight / 2) / oldZoom;
+
+    // Update zoom
+    this.zoomLevel = newZoom;
+
+    // After render, adjust scroll to keep center point centered
+    requestAnimationFrame(() => {
+      const newScrollLeft = centerX * newZoom - containerWidth / 2;
+      const newScrollTop = centerY * newZoom - containerHeight / 2;
+      container.scrollLeft = Math.max(0, newScrollLeft);
+      container.scrollTop = Math.max(0, newScrollTop);
+    });
   }
 
   private get effectiveNodeWidth(): number {
