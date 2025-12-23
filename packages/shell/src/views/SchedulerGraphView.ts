@@ -9,6 +9,7 @@ import type { SchedulerGraphNode } from "@commontools/runner";
 interface LayoutNode {
   id: string;
   label: string;
+  fullId: string; // Full ID for tooltip
   type: "effect" | "computation";
   x: number;
   y: number;
@@ -527,6 +528,7 @@ export class XSchedulerGraph extends LitElement {
         nodes.set(nodeId, {
           id: nodeId,
           label: node.label,
+          fullId: nodeId, // Store full ID for tooltip
           type: node.type as "effect" | "computation",
           x: node.x,
           y: node.y,
@@ -567,9 +569,81 @@ export class XSchedulerGraph extends LitElement {
     this.layoutEdges = edges;
   }
 
-  private truncateLabel(label: string, maxLen = 18): string {
+  /**
+   * Create a short, readable label from an action ID.
+   * Format: prefix:...last4/path
+   *
+   * Examples:
+   * - "sink:did:key:z6Mkk.../of:baedrei.../value" → "sink:...i.../value"
+   * - "parentAction" → "parentAction"
+   */
+  private truncateLabel(label: string, maxLen = 20): string {
+    // Simple case - short enough already
     if (label.length <= maxLen) return label;
-    return label.slice(0, maxLen - 2) + "...";
+
+    // Try to parse structured IDs like "sink:did:key:.../of:baedrei.../path"
+    // or "action:space/entity/path"
+
+    // Check for sink: or other prefix
+    const prefixMatch = label.match(/^(sink|action|handler|effect|computation):/i);
+    const prefix = prefixMatch ? prefixMatch[1] + ":" : "";
+    const rest = prefix ? label.slice(prefix.length) : label;
+
+    // Look for entity ID pattern (of:xxx or just the entity part after space/)
+    // Common patterns:
+    // - did:key:z6Mkk.../of:baedreide2e4l6ej534c3yimtw5g2bpfwve4xm6abycmfpk6oyml2dx4mme/path
+    // - space/entityid/path
+
+    // Try to find the last path segment(s) which are most meaningful
+    const parts = rest.split("/");
+
+    if (parts.length >= 2) {
+      // Get the entity ID (usually the second-to-last non-empty part before path)
+      // and the path (last parts)
+      let entityPart = "";
+      let pathParts: string[] = [];
+
+      // Find entity ID - look for "of:" prefix or use second part
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (part.startsWith("of:")) {
+          entityPart = part.slice(3); // Remove "of:" prefix
+          pathParts = parts.slice(i + 1).filter(p => p.length > 0);
+          break;
+        }
+      }
+
+      // If no "of:" found, try to identify entity from structure
+      if (!entityPart && parts.length >= 2) {
+        // Assume last non-empty parts are the path, entity is before that
+        const nonEmpty = parts.filter(p => p.length > 0);
+        if (nonEmpty.length >= 2) {
+          // Take last 4 chars of entity-like part
+          const potentialEntity = nonEmpty.find(p => p.length > 20) || nonEmpty[0];
+          entityPart = potentialEntity;
+          const entityIdx = nonEmpty.indexOf(potentialEntity);
+          pathParts = nonEmpty.slice(entityIdx + 1);
+        }
+      }
+
+      // Build short label: prefix + ...last4 + /path
+      if (entityPart) {
+        const shortEntity = entityPart.length > 4
+          ? "..." + entityPart.slice(-4)
+          : entityPart;
+        const path = pathParts.length > 0 ? "/" + pathParts.join("/") : "";
+        const result = prefix + shortEntity + path;
+
+        // If still too long, truncate path
+        if (result.length > maxLen) {
+          return result.slice(0, maxLen - 3) + "...";
+        }
+        return result;
+      }
+    }
+
+    // Fallback: simple truncation from end
+    return label.slice(0, maxLen - 3) + "...";
   }
 
   private handleRefresh(): void {
@@ -781,6 +855,7 @@ export class XSchedulerGraph extends LitElement {
         class="${nodeClass}"
         transform="translate(${x}, ${y})"
       >
+        <title>${node.fullId}</title>
         <rect
           class="node-rect"
           width="${node.width}"
