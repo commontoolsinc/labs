@@ -973,6 +973,54 @@ export class Scheduler {
       }
     }
 
+    // Find source entities (read but not written by any action)
+    // These represent recipe inputs / external data
+    const entityReaders = new Map<string, Set<string>>(); // entity -> action IDs that read it
+    const writtenEntities = new Set<string>();
+
+    for (const action of [...this.effects, ...this.computations]) {
+      const actionId = getActionId(action);
+      const deps = this.dependencies.get(action);
+      if (deps) {
+        for (const read of deps.reads) {
+          const entity = `${read.space}/${read.id}`;
+          if (!entityReaders.has(entity)) {
+            entityReaders.set(entity, new Set());
+          }
+          entityReaders.get(entity)!.add(actionId);
+        }
+      }
+
+      const writes = this.mightWrite.get(action);
+      if (writes) {
+        for (const write of writes) {
+          writtenEntities.add(`${write.space}/${write.id}`);
+        }
+      }
+    }
+
+    // Add input nodes for source entities
+    for (const [entity, readers] of entityReaders) {
+      if (!writtenEntities.has(entity)) {
+        const inputId = `input:${entity}`;
+        nodes.push({
+          id: inputId,
+          type: "input",
+          isDirty: false,
+          isPending: false,
+        });
+
+        // Add edges from input to all actions that read it
+        for (const readerId of readers) {
+          edges.push({
+            from: inputId,
+            to: readerId,
+            cells: [entity],
+          });
+        }
+      }
+    }
+
     return {
       nodes,
       edges,

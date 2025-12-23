@@ -10,7 +10,7 @@ interface LayoutNode {
   id: string;
   label: string;
   fullId: string; // Full ID for tooltip
-  type: "effect" | "computation";
+  type: "effect" | "computation" | "input";
   x: number;
   y: number;
   width: number;
@@ -217,6 +217,10 @@ export class XSchedulerGraph extends LitElement {
 
     .node-computation .node-rect {
       fill: #5b21b6; /* violet-800 */
+    }
+
+    .node-input .node-rect {
+      fill: #065f46; /* emerald-800 */
     }
 
     .node-dirty .node-rect {
@@ -952,13 +956,18 @@ export class XSchedulerGraph extends LitElement {
     const y = node.y - node.height / 2;
 
     // Build tooltip with reads/writes diagnostic info
-    const readsInfo = node.reads?.length
-      ? `\nReads (${node.reads.length}): ${node.reads.slice(0, 5).join(", ")}${node.reads.length > 5 ? "..." : ""}`
-      : "\nReads: none";
-    const writesInfo = node.writes?.length
-      ? `\nWrites (${node.writes.length}): ${node.writes.slice(0, 5).join(", ")}${node.writes.length > 5 ? "..." : ""}`
-      : "\nWrites: none";
-    const tooltip = `${node.fullId}${readsInfo}${writesInfo}`;
+    let tooltip: string;
+    if (node.type === "input") {
+      tooltip = `${node.fullId}\n(Source cell - no writer)`;
+    } else {
+      const readsInfo = node.reads?.length
+        ? `\nReads (${node.reads.length}): ${node.reads.slice(0, 5).join(", ")}${node.reads.length > 5 ? "..." : ""}`
+        : "\nReads: none";
+      const writesInfo = node.writes?.length
+        ? `\nWrites (${node.writes.length}): ${node.writes.slice(0, 5).join(", ")}${node.writes.length > 5 ? "..." : ""}`
+        : "\nWrites: none";
+      tooltip = `${node.fullId}${readsInfo}${writesInfo}`;
+    }
 
     return svg`
       <g
@@ -976,7 +985,7 @@ export class XSchedulerGraph extends LitElement {
           x="4"
           y="10"
         >
-          ${node.type === "effect" ? "E" : "C"}
+          ${node.type === "effect" ? "E" : node.type === "input" ? "I" : "C"}
         </text>
         <text
           class="node-label"
