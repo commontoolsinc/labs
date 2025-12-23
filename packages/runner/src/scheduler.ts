@@ -906,6 +906,16 @@ export class Scheduler {
     if (newDependencies.size > 0) {
       this.reverseDependencies.set(action, newDependencies);
     }
+
+    // Emit telemetry for dependency updates
+    const actionId = (action as Action & { src?: string }).src || action.name ||
+      "anonymous";
+    this.runtime.telemetry.submit({
+      type: "scheduler.dependencies.update",
+      actionId,
+      reads: log.reads.map((r) => `${r.space}/${r.id}/${r.path.join("/")}`),
+      writes: log.writes.map((w) => `${w.space}/${w.id}/${w.path.join("/")}`),
+    });
   }
 
   /**
