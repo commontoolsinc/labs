@@ -1313,30 +1313,64 @@ const Record = pattern<RecordInput, RecordOutput>(
                         return (
                           <div
                             style={{
-                              background: "none",
-                              border: "none",
-                              cursor: "pointer",
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "8px",
-                              color: "#6b7280",
                               fontSize: "13px",
-                              width: "100%",
-                              padding: "8px",
+                              color: "#6b7280",
+                              flex: "1",
                             }}
                           >
-                            <span
+                            {displayInfo.icon} {displayInfo.label}
+                          </span>
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "8px",
+                              flexShrink: 0,
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={restoreSubCharm({
+                                subCharms,
+                                trashedSubCharms,
+                                entry,
+                              })}
                               style={{
-                                transform: trashExpanded
-                                  ? "rotate(90deg)"
-                                  : "rotate(0deg)",
-                                transition: "transform 0.2s",
+                                background: "#e0f2fe",
+                                border: "1px solid #7dd3fc",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                                padding: "4px 8px",
+                                fontSize: "12px",
+                                color: "#0369a1",
                               }}
+                              title="Restore"
                             >
-                              ▶
-                            </span>
-                            🗑️ Trash ({trashCount})
-                          </button>
+                              ↩️
+                            </button>
+                            <button
+                              type="button"
+                              onClick={permanentlyDelete({
+                                trashedSubCharms,
+                                entry,
+                              })}
+                              style={{
+                                background: "transparent",
+                                border: "1px solid #fecaca",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                                padding: "4px 8px",
+                                fontSize: "12px",
+                                color: "#dc2626",
+                              }}
+                              title="Delete permanently"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    },
+                  )}
 
                           {ifElse(
                             trashExpanded,

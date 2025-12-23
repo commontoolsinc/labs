@@ -122,7 +122,6 @@ export class CTCellContext extends BaseElement {
   @property({ type: Boolean, reflect: true })
   inline?: boolean;
 
-
   @state()
   private _modifierHeld: boolean = false;
 
