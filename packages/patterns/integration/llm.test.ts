@@ -36,6 +36,7 @@ describe("LLM pattern test", () => {
           join(
             import.meta.dirname!,
             "..",
+            "examples",
             "llm.tsx",
           ),
         ),

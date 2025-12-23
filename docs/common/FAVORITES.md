@@ -4,7 +4,7 @@ Charms can be favorites and added to your [[HOME_SPACE]]. These charms can be ac
 
 # Accessing the Favorites list
 
-You can `wish` for the favorites list itself (see `favorites-manager.tsx` for a full example):
+You can `wish` for the favorites list itself (see `system/favorites-manager.tsx` for a full example):
 
 ```tsx
 type Favorite = { cell: Cell<{ [NAME]?: string }>; tag: string };
@@ -15,7 +15,7 @@ The `tag` field contains the serialized `resultSchema` of the charm pointed to b
 
 # Wishing for A Specific Charm
 
-See `wish.tsx` for a full example. 
+See `system/wish.tsx` for a full example. 
 
 In `note.tsx` I decorate my schema with a description containing "#note":
 ```tsx

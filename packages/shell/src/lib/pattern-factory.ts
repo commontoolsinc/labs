@@ -14,12 +14,12 @@ type BuiltinPatternConfig = {
 const Configs: Record<BuiltinPatternType, BuiltinPatternConfig> = {
   "home": {
     name: "Home",
-    url: new URL(`/api/patterns/home.tsx`, API_URL),
+    url: new URL(`/api/patterns/system/home.tsx`, API_URL),
     cause: "home-pattern",
   },
   "space-root": {
     name: "DefaultCharmList",
-    url: new URL(`/api/patterns/default-app.tsx`, API_URL),
+    url: new URL(`/api/patterns/system/default-app.tsx`, API_URL),
     cause: "space-root",
   },
 };

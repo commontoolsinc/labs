@@ -13,7 +13,7 @@ import {
   UI,
   wish,
 } from "commontools";
-import { type MentionableCharm } from "./backlinks-index.tsx";
+import { type MentionableCharm } from "../system/backlinks-index.tsx";
 
 // Simple random ID generator (crypto.randomUUID not available in pattern env)
 const generateId = () =>
