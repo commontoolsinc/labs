@@ -586,7 +586,10 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             properties: {
                 typedCellRef: {
                     type: "array",
-                    items: false,
+                    items: {
+                        not: true,
+                        asOpaque: true
+                    },
                     asOpaque: true
                 }
             },

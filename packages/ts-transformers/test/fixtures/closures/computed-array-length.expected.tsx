@@ -6,10 +6,10 @@ import * as __ctHelpers from "commontools";
  * - allCharms comes from wish<{ allCharms: MentionableCharm[] }>
  * - computed(() => allCharms.length) accesses .length on an OpaqueRef<T[]>
  *
- * The fix ensures the schema is { type: "array", items: false, asOpaque: true }
+ * The fix ensures the schema is { type: "array", items: { not: true, asOpaque: true }, asOpaque: true }
  * rather than { type: "object", properties: { length: { type: "number" } } }
  */
-import { computed, NAME, OpaqueRef, pattern, UI, wish } from "commontools";
+import { computed, NAME, pattern, UI, wish } from "commontools";
 interface Charm {
     id: string;
     name: string;
@@ -49,7 +49,10 @@ export default pattern(() => {
             properties: {
                 allCharms: {
                     type: "array",
-                    items: false,
+                    items: {
+                        not: true,
+                        asOpaque: true
+                    },
                     asOpaque: true
                 }
             },
@@ -65,7 +68,10 @@ export default pattern(() => {
             properties: {
                 allCharms: {
                     type: "array",
-                    items: false,
+                    items: {
+                        not: true,
+                        asOpaque: true
+                    },
                     asOpaque: true
                 }
             },

@@ -214,12 +214,19 @@ export class CommonToolsFormatter implements TypeFormatter {
       !innerTypeIsGeneric;
 
     // Check for schema hints on the current typeNode and propagate to child context
-    // This allows array-property-only access patterns (e.g., .length) to generate items: false
+    // This allows array-property-only access patterns (e.g., .length) to generate items: { not: true, asCell/asOpaque: true }
     let childContext = context;
     if (context.schemaHints && context.typeNode) {
       const hint = context.schemaHints.get(context.typeNode);
-      if (hint?.items !== undefined) {
-        childContext = { ...context, arrayItemsOverride: hint.items };
+      if (hint?.items === false) {
+        // Build items override with not:true and the appropriate wrapper semantic
+        const itemsOverride: Record<string, boolean> = { not: true };
+        if (wrapperKind === "Cell") {
+          itemsOverride.asCell = true;
+        } else if (wrapperKind === "OpaqueRef") {
+          itemsOverride.asOpaque = true;
+        }
+        childContext = { ...context, arrayItemsOverride: itemsOverride };
       }
     }
 

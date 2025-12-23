@@ -655,7 +655,10 @@ export default pattern(({ items, showInactive }) => {
                     properties: {
                         tags: {
                             type: "array",
-                            items: false,
+                            items: {
+                                not: true,
+                                asOpaque: true
+                            },
                             asOpaque: true
                         }
                     },
