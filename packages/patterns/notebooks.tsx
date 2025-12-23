@@ -7,6 +7,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  Stream,
   UI,
   wish,
 } from "commontools";
@@ -40,6 +41,14 @@ interface Output {
   notes: NoteCharm[];
   noteCount: number;
   isNotebook: boolean;
+  // LLM-callable streams for omnibot integration
+  createNote: Stream<{ title: string; content: string }>;
+  createNotes: Stream<{ notesData: Array<{ title: string; content: string }> }>;
+  setTitle: Stream<{ newTitle: string }>;
+  createNotebook: Stream<{
+    title: string;
+    notesData?: Array<{ title: string; content: string }>;
+  }>;
 }
 
 // Handler to create a new note within this notebook (hidden from default-app)
@@ -559,6 +568,80 @@ const toggleNoteCheckbox = handler<
   lastSelectedNoteIndex.set(index);
 });
 
+// LLM-callable handler: Create a single note in this notebook
+const handleCreateNote = handler<
+  { title: string; content: string },
+  { notes: Cell<NoteCharm[]>; allCharms: Cell<NoteCharm[]> }
+>(({ title: noteTitle, content }, { notes, allCharms }) => {
+  const newNote = Note({
+    title: noteTitle,
+    content,
+    isHidden: true,
+    noteId: generateId(),
+  });
+  allCharms.push(newNote as unknown as NoteCharm);
+  notes.push(newNote as unknown as NoteCharm);
+  return newNote;
+});
+
+// LLM-callable handler: Create multiple notes in bulk
+const handleCreateNotes = handler<
+  { notesData: Array<{ title: string; content: string }> },
+  { notes: Cell<NoteCharm[]>; allCharms: Cell<NoteCharm[]> }
+>(({ notesData }, { notes, allCharms }) => {
+  const created: NoteCharm[] = [];
+  for (const data of notesData) {
+    const newNote = Note({
+      title: data.title,
+      content: data.content,
+      isHidden: true,
+      noteId: generateId(),
+    });
+    allCharms.push(newNote as unknown as NoteCharm);
+    notes.push(newNote as unknown as NoteCharm);
+    created.push(newNote as unknown as NoteCharm);
+  }
+  return created;
+});
+
+// LLM-callable handler: Rename the notebook
+const handleSetTitle = handler<
+  { newTitle: string },
+  { title: Cell<string> }
+>(({ newTitle }, { title }) => {
+  title.set(newTitle);
+  return newTitle;
+});
+
+// LLM-callable handler: Create a new notebook (optionally with notes)
+const handleCreateNotebook = handler<
+  { title: string; notesData?: Array<{ title: string; content: string }> },
+  { allCharms: Cell<NoteCharm[]> }
+>(({ title: nbTitle, notesData }, { allCharms }) => {
+  // Create notes if provided
+  const notesToAdd: NoteCharm[] = [];
+  if (notesData && notesData.length > 0) {
+    for (const data of notesData) {
+      const newNote = Note({
+        title: data.title,
+        content: data.content,
+        isHidden: true,
+        noteId: generateId(),
+      });
+      allCharms.push(newNote as unknown as NoteCharm);
+      notesToAdd.push(newNote as unknown as NoteCharm);
+    }
+  }
+
+  // Create the notebook with the notes
+  const newNotebook = Notebook({
+    title: nbTitle,
+    notes: notesToAdd,
+  });
+  allCharms.push(newNotebook as unknown as NoteCharm);
+  return newNotebook;
+});
+
 const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
   const { allCharms } = wish<{ allCharms: NoteCharm[] }>("/");
 
@@ -1061,6 +1144,11 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
     title,
     notes,
     noteCount,
+    // LLM-callable streams for omnibot integration
+    createNote: handleCreateNote({ notes, allCharms }),
+    createNotes: handleCreateNotes({ notes, allCharms }),
+    setTitle: handleSetTitle({ title }),
+    createNotebook: handleCreateNotebook({ allCharms }),
   };
 });
 
