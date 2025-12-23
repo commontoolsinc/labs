@@ -455,11 +455,33 @@ export class XSchedulerGraph extends LitElement {
     // Build a map of all nodes and identify which are hidden due to collapsed parents
     const nodeMap = new Map(graphData.nodes.map((n) => [n.id, n]));
 
+    // Infer parent relationships for sinks without parents by matching entity IDs
+    // This handles the case where sinks are created outside of action execution
+    // but logically belong to a recipe/module action
+    const inferredParents = this.inferParentsByEntity(graphData.nodes);
+
+    // Create a combined view with both explicit and inferred parents
+    const effectiveParentId = (node: SchedulerGraphNode): string | undefined =>
+      node.parentId || inferredParents.get(node.id);
+
+    // Count children (explicit + inferred)
+    const effectiveChildCounts = new Map<string, number>();
+    for (const node of graphData.nodes) {
+      const parent = effectiveParentId(node);
+      if (parent) {
+        effectiveChildCounts.set(
+          parent,
+          (effectiveChildCounts.get(parent) ?? 0) + 1,
+        );
+      }
+    }
+
     // Auto-collapse all parents with children (always add new ones)
     const newCollapsed = new Set(this.collapsedParents);
     let hasNewCollapsed = false;
     for (const node of graphData.nodes) {
-      if (node.childCount && node.childCount > 0 && !newCollapsed.has(node.id)) {
+      const childCount = effectiveChildCounts.get(node.id) ?? 0;
+      if (childCount > 0 && !newCollapsed.has(node.id)) {
         newCollapsed.add(node.id);
         hasNewCollapsed = true;
       }
@@ -473,12 +495,13 @@ export class XSchedulerGraph extends LitElement {
 
     // Find all nodes that should be hidden (their parent is collapsed)
     for (const node of graphData.nodes) {
-      if (node.parentId && this.collapsedParents.has(node.parentId)) {
+      const parent = effectiveParentId(node);
+      if (parent && this.collapsedParents.has(parent)) {
         hiddenNodes.add(node.id);
         // Count hidden children for the collapsed parent
         collapsedChildCounts.set(
-          node.parentId,
-          (collapsedChildCounts.get(node.parentId) ?? 0) + 1,
+          parent,
+          (collapsedChildCounts.get(parent) ?? 0) + 1,
         );
       }
     }
@@ -505,8 +528,8 @@ export class XSchedulerGraph extends LitElement {
         stats: node.stats,
         isDirty: node.isDirty,
         isPending: node.isPending,
-        parentId: node.parentId,
-        childCount: node.childCount,
+        parentId: effectiveParentId(node),
+        childCount: effectiveChildCounts.get(node.id) ?? 0,
       });
     }
 
@@ -525,6 +548,8 @@ export class XSchedulerGraph extends LitElement {
       const node = g.node(nodeId);
       if (node) {
         const originalNode = nodeMap.get(nodeId);
+        const effParent = originalNode ? effectiveParentId(originalNode) : undefined;
+        const effChildCount = effectiveChildCounts.get(nodeId) ?? 0;
         nodes.set(nodeId, {
           id: nodeId,
           label: node.label,
@@ -537,8 +562,8 @@ export class XSchedulerGraph extends LitElement {
           stats: originalNode?.stats,
           isDirty: originalNode?.isDirty ?? false,
           isPending: originalNode?.isPending ?? false,
-          parentId: originalNode?.parentId,
-          childCount: originalNode?.childCount,
+          parentId: effParent,
+          childCount: effChildCount > 0 ? effChildCount : undefined,
           collapsedChildCount: collapsedChildCounts.get(nodeId),
         });
       }
@@ -644,6 +669,78 @@ export class XSchedulerGraph extends LitElement {
 
     // Fallback: simple truncation from end
     return label.slice(0, maxLen - 3) + "...";
+  }
+
+  /**
+   * Extract the entity ID from an action name.
+   * Handles formats like:
+   * - sink:did:key:.../of:entityId/path
+   * - action:recipe:did:key:.../of:entityId/path
+   */
+  private extractEntityId(actionId: string): string | undefined {
+    // Look for "of:" pattern which precedes the entity ID
+    const ofMatch = actionId.match(/\/of:([^\/]+)/);
+    if (ofMatch) {
+      return ofMatch[1];
+    }
+
+    // Fallback: look for entity ID pattern after space identifier
+    // Pattern: did:key:.../entityId/...
+    const parts = actionId.split("/");
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      // Entity IDs are typically long base32/base58 strings
+      if (part.length > 40 && !part.includes(":")) {
+        return part;
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Infer parent relationships for sinks that don't have explicit parents.
+   * Groups sinks with non-sink actions that share the same entity ID.
+   */
+  private inferParentsByEntity(
+    nodes: SchedulerGraphNode[],
+  ): Map<string, string> {
+    const inferredParents = new Map<string, string>();
+
+    // Group nodes by entity ID
+    const nodesByEntity = new Map<string, SchedulerGraphNode[]>();
+    for (const node of nodes) {
+      const entityId = this.extractEntityId(node.id);
+      if (entityId) {
+        if (!nodesByEntity.has(entityId)) {
+          nodesByEntity.set(entityId, []);
+        }
+        nodesByEntity.get(entityId)!.push(node);
+      }
+    }
+
+    // For each entity group, find sinks without parents and assign them
+    // to a non-sink action in the same group
+    for (const [_entityId, groupNodes] of nodesByEntity) {
+      // Find sink nodes without parents
+      const orphanSinks = groupNodes.filter(
+        (n) => n.id.startsWith("sink:") && !n.parentId,
+      );
+
+      // Find the first non-sink action to use as parent
+      // Prefer computations over effects as they're usually the "producer"
+      const potentialParent = groupNodes.find(
+        (n) => !n.id.startsWith("sink:") && n.type === "computation",
+      ) || groupNodes.find((n) => !n.id.startsWith("sink:"));
+
+      if (potentialParent && orphanSinks.length > 0) {
+        for (const sink of orphanSinks) {
+          inferredParents.set(sink.id, potentialParent.id);
+        }
+      }
+    }
+
+    return inferredParents;
   }
 
   private handleRefresh(): void {
