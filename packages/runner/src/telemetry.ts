@@ -15,8 +15,8 @@ import type * as Inspector from "./storage/inspector.ts";
 
 // Types for scheduler graph visualization
 export interface SchedulerGraphNode {
-  id: string; // action.name (includes code location)
-  type: "effect" | "computation";
+  id: string; // action.name (includes code location), or "input:space/entity" for inputs
+  type: "effect" | "computation" | "input"; // input = source cell with no writer
   stats?: ActionStats;
   isDirty: boolean;
   isPending: boolean;
