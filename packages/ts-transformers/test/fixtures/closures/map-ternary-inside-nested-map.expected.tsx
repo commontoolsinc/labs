@@ -654,13 +654,11 @@ export default pattern(({ items, showInactive }) => {
                     type: "object",
                     properties: {
                         tags: {
-                            type: "object",
-                            properties: {
-                                length: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["length"]
+                            type: "array",
+                            items: {
+                                not: true,
+                                asOpaque: true
+                            }
                         }
                     },
                     required: ["tags"]
@@ -1008,4 +1006,3 @@ export default pattern(({ items, showInactive }) => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-
