@@ -11,7 +11,6 @@ import {
 } from "commontools";
 
 import { default as Note } from "./note.tsx";
-import { default as Record } from "./record.tsx";
 
 // Simple random ID generator (crypto.randomUUID not available in pattern env)
 const generateId = () =>
@@ -100,11 +99,6 @@ const menuNewNotebook = handler<void, { menuOpen: Cell<boolean> }>(
   },
 );
 
-// Standalone: New Record
-const spawnRecord = handler<void, void>((_, __) => {
-  return navigateTo(Record({ title: "" }));
-});
-
 // Helper to find existing All Notes charm
 const findAllNotebooksCharm = (allCharms: Cell<MinimalCharm[]>) => {
   const charms = allCharms.get();
@@ -172,18 +166,6 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
             <h2 style={{ margin: 0, fontSize: "20px" }}>Pages</h2>
           </div>
           <div slot="end">
-            <ct-button
-              variant="ghost"
-              onClick={spawnRecord()}
-              style={{
-                padding: "12px 20px",
-                fontSize: "22px",
-                borderRadius: "12px",
-                minHeight: "48px",
-              }}
-            >
-              📋 New Record
-            </ct-button>
             <ct-button
               variant="ghost"
               onClick={toggleMenu({ menuOpen })}
