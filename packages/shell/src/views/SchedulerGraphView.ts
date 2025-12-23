@@ -1,9 +1,8 @@
-import { css, html, LitElement, svg, TemplateResult } from "lit";
-import { property, state, query } from "lit/decorators.js";
+// Workaround: deno fmt crashes on `svg` tagged templates with multiline interpolations
+import { css, html, LitElement, svg as svgTag, TemplateResult } from "lit";
+import { property, query, state } from "lit/decorators.js";
 import dagre from "dagre";
-import type {
-  DebuggerController, 
-} from "../lib/debugger-controller.ts";
+import type { DebuggerController } from "../lib/debugger-controller.ts";
 import type { SchedulerGraphNode } from "@commontools/runner";
 
 interface LayoutNode {
@@ -354,9 +353,15 @@ export class XSchedulerGraph extends LitElement {
       border-radius: 2px;
     }
 
-    .legend-swatch.input { background: #065f46; }
-    .legend-swatch.computation { background: #5b21b6; }
-    .legend-swatch.effect { background: #1e40af; }
+    .legend-swatch.input {
+      background: #065f46;
+    }
+    .legend-swatch.computation {
+      background: #5b21b6;
+    }
+    .legend-swatch.effect {
+      background: #1e40af;
+    }
 
     .legend-line {
       width: 20px;
@@ -619,7 +624,9 @@ export class XSchedulerGraph extends LitElement {
       const node = g.node(nodeId);
       if (node) {
         const originalNode = nodeMap.get(nodeId);
-        const effParent = originalNode ? effectiveParentId(originalNode) : undefined;
+        const effParent = originalNode
+          ? effectiveParentId(originalNode)
+          : undefined;
         const effChildCount = effectiveChildCounts.get(nodeId) ?? 0;
         nodes.set(nodeId, {
           id: nodeId,
@@ -684,7 +691,9 @@ export class XSchedulerGraph extends LitElement {
     // or "action:space/entity/path"
 
     // Check for sink: or other prefix
-    const prefixMatch = label.match(/^(sink|action|handler|effect|computation):/i);
+    const prefixMatch = label.match(
+      /^(sink|action|handler|effect|computation):/i,
+    );
     const prefix = prefixMatch ? prefixMatch[1] + ":" : "";
     const rest = prefix ? label.slice(prefix.length) : label;
 
@@ -707,7 +716,7 @@ export class XSchedulerGraph extends LitElement {
         const part = parts[i];
         if (part.startsWith("of:")) {
           entityPart = part.slice(3); // Remove "of:" prefix
-          pathParts = parts.slice(i + 1).filter(p => p.length > 0);
+          pathParts = parts.slice(i + 1).filter((p) => p.length > 0);
           break;
         }
       }
@@ -715,10 +724,11 @@ export class XSchedulerGraph extends LitElement {
       // If no "of:" found, try to identify entity from structure
       if (!entityPart && parts.length >= 2) {
         // Assume last non-empty parts are the path, entity is before that
-        const nonEmpty = parts.filter(p => p.length > 0);
+        const nonEmpty = parts.filter((p) => p.length > 0);
         if (nonEmpty.length >= 2) {
           // Take last 4 chars of entity-like part
-          const potentialEntity = nonEmpty.find(p => p.length > 20) || nonEmpty[0];
+          const potentialEntity = nonEmpty.find((p) => p.length > 20) ||
+            nonEmpty[0];
           entityPart = potentialEntity;
           const entityIdx = nonEmpty.indexOf(potentialEntity);
           pathParts = nonEmpty.slice(entityIdx + 1);
@@ -885,7 +895,11 @@ export class XSchedulerGraph extends LitElement {
     this.zoomAroundPoint(newZoom, mouseX, mouseY);
   }
 
-  private zoomAroundPoint(newZoom: number, pointX: number, pointY: number): void {
+  private zoomAroundPoint(
+    newZoom: number,
+    pointX: number,
+    pointY: number,
+  ): void {
     const container = this.graphContainer;
     if (!container) {
       this.zoomLevel = newZoom;
@@ -904,7 +918,8 @@ export class XSchedulerGraph extends LitElement {
 
     // After render, adjust scroll to keep point under cursor
     requestAnimationFrame(() => {
-      const newScrollLeft = contentX * newZoom - (pointX - container.scrollLeft);
+      const newScrollLeft = contentX * newZoom -
+        (pointX - container.scrollLeft);
       const newScrollTop = contentY * newZoom - (pointY - container.scrollTop);
       container.scrollLeft = Math.max(0, newScrollLeft);
       container.scrollTop = Math.max(0, newScrollTop);
@@ -1055,7 +1070,9 @@ export class XSchedulerGraph extends LitElement {
           <span>Nodes: <span class="stat-value">${nodeCount}</span></span>
           <span>Edges: <span class="stat-value">${edgeCount}</span></span>
           ${historicalCount > 0
-            ? html`<span>Historical: <span class="stat-value">${historicalCount}</span></span>`
+            ? html`
+              <span>Historical: <span class="stat-value">${historicalCount}</span></span>
+            `
             : ""}
         </div>
       </div>
@@ -1063,8 +1080,7 @@ export class XSchedulerGraph extends LitElement {
   }
 
   private renderNode(node: LayoutNode): TemplateResult {
-    const isTriggered =
-      this.triggeredNodes.has(node.id) &&
+    const isTriggered = this.triggeredNodes.has(node.id) &&
       Date.now() - (this.triggeredNodes.get(node.id) ?? 0) < 2000;
 
     // Boost triggered nodes when zoomed out below readable threshold
@@ -1090,15 +1106,19 @@ export class XSchedulerGraph extends LitElement {
       tooltip = `${node.fullId}\n(Source cell - no writer)`;
     } else {
       const readsInfo = node.reads?.length
-        ? `\nReads (${node.reads.length}): ${node.reads.slice(0, 5).join(", ")}${node.reads.length > 5 ? "..." : ""}`
+        ? `\nReads (${node.reads.length}): ${
+          node.reads.slice(0, 5).join(", ")
+        }${node.reads.length > 5 ? "..." : ""}`
         : "\nReads: none";
       const writesInfo = node.writes?.length
-        ? `\nWrites (${node.writes.length}): ${node.writes.slice(0, 5).join(", ")}${node.writes.length > 5 ? "..." : ""}`
+        ? `\nWrites (${node.writes.length}): ${
+          node.writes.slice(0, 5).join(", ")
+        }${node.writes.length > 5 ? "..." : ""}`
         : "\nWrites: none";
       tooltip = `${node.fullId}${readsInfo}${writesInfo}`;
     }
 
-    return svg`
+    return svgTag`
       <g
         class="${nodeClass}"
         transform="translate(${x}, ${y})"
@@ -1124,8 +1144,9 @@ export class XSchedulerGraph extends LitElement {
         >
           ${node.label}
         </text>
-        ${node.stats
-          ? svg`
+        ${
+      node.stats
+        ? svgTag`
           <text
             class="node-stats"
             x="${node.width - 4}"
@@ -1135,7 +1156,8 @@ export class XSchedulerGraph extends LitElement {
             ${node.stats.runCount}× ${node.stats.averageTime.toFixed(0)}ms
           </text>
         `
-          : ""}
+        : ""
+    }
         ${this.renderCollapseToggle(node)}
         ${this.renderChildCountBadge(node)}
       </g>
@@ -1149,7 +1171,7 @@ export class XSchedulerGraph extends LitElement {
     const isCollapsed = this.collapsedParents.has(node.id);
     const symbol = isCollapsed ? "+" : "-";
 
-    return svg`
+    return svgTag`
       <text
         class="node-collapse-toggle"
         x="${node.width - 8}"
@@ -1164,9 +1186,11 @@ export class XSchedulerGraph extends LitElement {
 
   private renderChildCountBadge(node: LayoutNode): TemplateResult | null {
     // Only show badge if this node has collapsed children
-    if (!node.collapsedChildCount || node.collapsedChildCount === 0) return null;
+    if (!node.collapsedChildCount || node.collapsedChildCount === 0) {
+      return null;
+    }
 
-    return svg`
+    return svgTag`
       <text
         class="node-child-count"
         x="${node.width / 2}"
@@ -1248,7 +1272,7 @@ export class XSchedulerGraph extends LitElement {
       const { bounds, parent } = group;
       const label = this.truncateLabel(parent.label, 12);
 
-      results.push(svg`
+      results.push(svgTag`
         <g class="parent-group">
           <rect
             class="parent-group-rect"
@@ -1291,7 +1315,7 @@ export class XSchedulerGraph extends LitElement {
       edge.edgeType === "parent" ? "edge-parent" : "",
     ].filter(Boolean).join(" ");
 
-    return svg`
+    return svgTag`
       <path
         class="${edgeClasses}"
         d="${path}"
@@ -1364,21 +1388,31 @@ export class XSchedulerGraph extends LitElement {
     return html`
       <div
         class="tooltip"
-        style="left: ${this.tooltipPosition.x + 10}px; top: ${this.tooltipPosition.y + 10}px;"
+        style="left: ${this.tooltipPosition.x +
+          10}px; top: ${this.tooltipPosition.y + 10}px;"
       >
         <div class="tooltip-title">
-          ${fromNode?.label ?? this.selectedEdge.from} →
-          ${toNode?.label ?? this.selectedEdge.to}
+          ${fromNode?.label ?? this.selectedEdge.from} → ${toNode?.label ??
+            this.selectedEdge.to}
         </div>
         <div class="tooltip-cells">
           ${this.selectedEdge.cells.length > 0
             ? this.selectedEdge.cells.map(
-                (cell) => html`<div class="tooltip-cell">${cell}</div>`,
-              )
-            : html`<div class="tooltip-cell">(no cells tracked)</div>`}
+              (cell) =>
+                html`
+                  <div class="tooltip-cell">${cell}</div>
+                `,
+            )
+            : html`
+              <div class="tooltip-cell">(no cells tracked)</div>
+            `}
         </div>
         ${this.selectedEdge.isHistorical
-          ? html`<div style="color: #f59e0b; margin-top: 0.25rem;">Historical (no longer active)</div>`
+          ? html`
+            <div style="color: #f59e0b; margin-top: 0.25rem;">
+              Historical (no longer active)
+            </div>
+          `
           : ""}
       </div>
     `;
@@ -1414,10 +1448,9 @@ export class XSchedulerGraph extends LitElement {
   override render(): TemplateResult {
     return html`
       ${this.renderToolbar()}
-      <div class="graph-container" @click="${this.handleContainerClick}" @wheel="${this.handleWheel}">
-        ${this.renderGraph()}
-        ${this.renderTooltip()}
-        ${this.renderLegend()}
+      <div class="graph-container" @click="${this
+        .handleContainerClick}" @wheel="${this.handleWheel}">
+        ${this.renderGraph()} ${this.renderTooltip()} ${this.renderLegend()}
       </div>
     `;
   }
