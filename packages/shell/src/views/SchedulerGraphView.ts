@@ -448,6 +448,107 @@ export class XSchedulerGraph extends LitElement {
       transform-origin: center center;
       animation: node-size-boost 2s ease-out;
     }
+
+    /* Table view styles */
+    .table-container {
+      flex: 1;
+      overflow: auto;
+      background: #0f172a;
+    }
+
+    .stats-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.75rem;
+      font-family: monospace;
+    }
+
+    .stats-table th {
+      background: #1e293b;
+      color: #94a3b8;
+      font-weight: 500;
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid #334155;
+      position: sticky;
+      top: 0;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .stats-table th:hover {
+      background: #334155;
+      color: #e2e8f0;
+    }
+
+    .stats-table th.sorted {
+      color: #3b82f6;
+    }
+
+    .stats-table th .sort-indicator {
+      margin-left: 0.25rem;
+      opacity: 0.5;
+    }
+
+    .stats-table th.sorted .sort-indicator {
+      opacity: 1;
+    }
+
+    .stats-table td {
+      padding: 0.375rem 0.75rem;
+      border-bottom: 1px solid #1e293b;
+      color: #cbd5e1;
+    }
+
+    .stats-table tr:hover td {
+      background: #1e293b;
+    }
+
+    .stats-table .col-name {
+      max-width: 400px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .stats-table .col-type {
+      width: 80px;
+    }
+
+    .stats-table .col-number {
+      width: 100px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .type-badge {
+      display: inline-block;
+      padding: 0.125rem 0.375rem;
+      border-radius: 0.25rem;
+      font-size: 0.625rem;
+      font-weight: 500;
+    }
+
+    .type-badge.effect {
+      background: #1e40af;
+      color: #93c5fd;
+    }
+
+    .type-badge.computation {
+      background: #5b21b6;
+      color: #c4b5fd;
+    }
+
+    .type-badge.input {
+      background: #065f46;
+      color: #6ee7b7;
+    }
+
+    .view-toggle {
+      display: flex;
+      gap: 0;
+      margin-left: 0.5rem;
+    }
   `;
 
   @property({ attribute: false })
@@ -482,6 +583,16 @@ export class XSchedulerGraph extends LitElement {
 
   @state()
   private collapsedParents = new Set<string>();
+
+  @state()
+  private viewMode: "graph" | "table" = "graph";
+
+  @state()
+  private tableSortColumn: "totalTime" | "runCount" | "avgTime" | "lastTime" =
+    "totalTime";
+
+  @state()
+  private tableSortAscending = false;
 
   @query(".graph-container")
   private graphContainer?: HTMLElement;
@@ -1002,6 +1113,25 @@ export class XSchedulerGraph extends LitElement {
 
     return html`
       <div class="toolbar">
+        <div class="view-toggle">
+          <button
+            type="button"
+            class="toggle-button ${this.viewMode === "graph" ? "active" : ""}"
+            @click="${() => (this.viewMode = "graph")}"
+            title="Graph view"
+          >
+            Graph
+          </button>
+          <button
+            type="button"
+            class="toggle-button ${this.viewMode === "table" ? "active" : ""}"
+            @click="${() => (this.viewMode = "table")}"
+            title="Table view sorted by performance"
+          >
+            Table
+          </button>
+        </div>
+
         <div class="toggle-group">
           <button
             type="button"
@@ -1448,9 +1578,137 @@ export class XSchedulerGraph extends LitElement {
   override render(): TemplateResult {
     return html`
       ${this.renderToolbar()}
-      <div class="graph-container" @click="${this
-        .handleContainerClick}" @wheel="${this.handleWheel}">
-        ${this.renderGraph()} ${this.renderTooltip()} ${this.renderLegend()}
+      ${this.viewMode === "graph"
+        ? html`
+            <div
+              class="graph-container"
+              @click="${this.handleContainerClick}"
+              @wheel="${this.handleWheel}"
+            >
+              ${this.renderGraph()} ${this.renderTooltip()}
+              ${this.renderLegend()}
+            </div>
+          `
+        : this.renderTable()}
+    `;
+  }
+
+  private renderTable(): TemplateResult {
+    // Get all nodes with stats and sort them
+    const nodesWithStats = Array.from(this.layoutNodes.values())
+      .filter((n) => n.type !== "input" && n.stats)
+      .map((n) => ({
+        id: n.id,
+        fullId: n.fullId,
+        label: n.label,
+        type: n.type,
+        runCount: n.stats?.runCount ?? 0,
+        totalTime: n.stats?.totalTime ?? 0,
+        avgTime: n.stats?.averageTime ?? 0,
+        lastTime: n.stats?.lastRunTime ?? 0,
+        lastTimestamp: n.stats?.lastRunTimestamp ?? 0,
+      }));
+
+    // Sort based on current column
+    nodesWithStats.sort((a, b) => {
+      let cmp = 0;
+      switch (this.tableSortColumn) {
+        case "totalTime":
+          cmp = b.totalTime - a.totalTime;
+          break;
+        case "runCount":
+          cmp = b.runCount - a.runCount;
+          break;
+        case "avgTime":
+          cmp = b.avgTime - a.avgTime;
+          break;
+        case "lastTime":
+          cmp = b.lastTime - a.lastTime;
+          break;
+      }
+      return this.tableSortAscending ? -cmp : cmp;
+    });
+
+    const sortIndicator = (col: typeof this.tableSortColumn) => {
+      const isSorted = this.tableSortColumn === col;
+      const arrow = this.tableSortAscending ? "▲" : "▼";
+      return html`<span class="sort-indicator">${isSorted ? arrow : ""}</span>`;
+    };
+
+    const handleSort = (col: typeof this.tableSortColumn) => {
+      if (this.tableSortColumn === col) {
+        this.tableSortAscending = !this.tableSortAscending;
+      } else {
+        this.tableSortColumn = col;
+        this.tableSortAscending = false;
+      }
+    };
+
+    const formatTime = (ms: number) => {
+      if (ms === 0) return "-";
+      if (ms < 1) return `${(ms * 1000).toFixed(0)}µs`;
+      if (ms < 1000) return `${ms.toFixed(1)}ms`;
+      return `${(ms / 1000).toFixed(2)}s`;
+    };
+
+    return html`
+      <div class="table-container">
+        <table class="stats-table">
+          <thead>
+            <tr>
+              <th class="col-type">Type</th>
+              <th class="col-name">Action</th>
+              <th
+                class="col-number ${this.tableSortColumn === "runCount"
+                  ? "sorted"
+                  : ""}"
+                @click="${() => handleSort("runCount")}"
+              >
+                Runs ${sortIndicator("runCount")}
+              </th>
+              <th
+                class="col-number ${this.tableSortColumn === "totalTime"
+                  ? "sorted"
+                  : ""}"
+                @click="${() => handleSort("totalTime")}"
+              >
+                Total ${sortIndicator("totalTime")}
+              </th>
+              <th
+                class="col-number ${this.tableSortColumn === "avgTime"
+                  ? "sorted"
+                  : ""}"
+                @click="${() => handleSort("avgTime")}"
+              >
+                Avg ${sortIndicator("avgTime")}
+              </th>
+              <th
+                class="col-number ${this.tableSortColumn === "lastTime"
+                  ? "sorted"
+                  : ""}"
+                @click="${() => handleSort("lastTime")}"
+              >
+                Last ${sortIndicator("lastTime")}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            ${nodesWithStats.map(
+              (n) => html`
+                <tr title="${n.fullId}">
+                  <td class="col-type">
+                    <span class="type-badge ${n.type}">${n.type}</span>
+                  </td>
+                  <td class="col-name">${n.label}</td>
+                  <td class="col-number">${n.runCount}</td>
+                  <td class="col-number">${formatTime(n.totalTime)}</td>
+                  <td class="col-number">${formatTime(n.avgTime)}</td>
+                  <td class="col-number">${formatTime(n.lastTime)}</td>
+                </tr>
+              `,
+            )}
+          </tbody>
+        </table>
       </div>
     `;
   }
