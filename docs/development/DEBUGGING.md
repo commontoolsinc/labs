@@ -309,7 +309,7 @@ Hover events (`onMouseEnter`, `onMouseLeave`) are not supported on div elements:
 
 // ✅ Use custom tabs with ifElse instead
 const activeTab = Cell.of("dashboard");
-const isDashboard = computed(() => activeTab === "dashboard");
+const isDashboard = computed(() => activeTab.get() === "dashboard");
 
 <div>
   <ct-button onClick={() => activeTab.set("dashboard")}>Dashboard</ct-button>
