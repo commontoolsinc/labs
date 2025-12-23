@@ -7,14 +7,7 @@
  *
  * Expected: ReadOnlyAddressError when using $checked on computed().map()
  */
-import {
-  Cell,
-  computed,
-  Default,
-  NAME,
-  pattern,
-  UI,
-} from "commontools";
+import { computed, Default, NAME, pattern, UI } from "commontools";
 
 interface Item {
   id: string;
@@ -25,15 +18,15 @@ interface Item {
 
 interface Input {
   items: Default<Item[], [
-    { id: "1", title: "Task A", done: false, active: true },
-    { id: "2", title: "Task B", done: true, active: true },
-    { id: "3", title: "Task C", done: false, active: false },
+    { id: "1"; title: "Task A"; done: false; active: true },
+    { id: "2"; title: "Task B"; done: true; active: true },
+    { id: "3"; title: "Task C"; done: false; active: false },
   ]>;
 }
 
 export default pattern<Input>(({ items }) => {
   // Computed: filter to only active items
-  const activeItems = computed(() => items.filter(i => i.active));
+  const activeItems = computed(() => items.filter((i) => i.active));
 
   // Count for display
   const activeCount = computed(() => activeItems.length);
@@ -48,12 +41,26 @@ export default pattern<Input>(({ items }) => {
           Testing if $checked works on computed results vs direct Cell maps
         </p>
 
-        <div style={{ background: "#f0f0f0", padding: "0.5rem", marginBottom: "1rem", borderRadius: "4px" }}>
+        <div
+          style={{
+            background: "#f0f0f0",
+            padding: "0.5rem",
+            marginBottom: "1rem",
+            borderRadius: "4px",
+          }}
+        >
           Active: {activeCount} / Total: {totalCount}
         </div>
 
         {/* TEST A: Direct Cell map - should work */}
-        <div style={{ border: "2px solid green", padding: "1rem", marginBottom: "1rem", borderRadius: "8px" }}>
+        <div
+          style={{
+            border: "2px solid green",
+            padding: "1rem",
+            marginBottom: "1rem",
+            borderRadius: "8px",
+          }}
+        >
           <h3 style={{ color: "green" }}>A: Direct Cell Map (should work)</h3>
           <p style={{ fontSize: "0.8rem", color: "#666" }}>
             $checked on items.map() - direct Cell access
@@ -68,11 +75,18 @@ export default pattern<Input>(({ items }) => {
         </div>
 
         {/* TEST B: Computed map - claimed to fail */}
-        <div style={{ border: "2px solid orange", padding: "1rem", marginBottom: "1rem", borderRadius: "8px" }}>
+        <div
+          style={{
+            border: "2px solid orange",
+            padding: "1rem",
+            marginBottom: "1rem",
+            borderRadius: "8px",
+          }}
+        >
           <h3 style={{ color: "orange" }}>B: Computed Map (claimed to fail)</h3>
           <p style={{ fontSize: "0.8rem", color: "#666" }}>
-            $checked on activeItems.map() - computed result.
-            Superstition says this should cause ReadOnlyAddressError.
+            $checked on activeItems.map() - computed result. Superstition says
+            this should cause ReadOnlyAddressError.
           </p>
           {activeItems.map((item) => (
             <div style={{ marginBottom: "0.25rem" }}>
@@ -84,7 +98,14 @@ export default pattern<Input>(({ items }) => {
         </div>
 
         {/* Expected results */}
-        <div style={{ border: "2px solid #333", padding: "1rem", borderRadius: "8px", background: "#f9f9f9" }}>
+        <div
+          style={{
+            border: "2px solid #333",
+            padding: "1rem",
+            borderRadius: "8px",
+            background: "#f9f9f9",
+          }}
+        >
           <h3>Expected Results</h3>
           <pre style={{ fontSize: "0.75rem" }}>
 {`Section A: Checkboxes should toggle (direct Cell)
