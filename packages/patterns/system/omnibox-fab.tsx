@@ -12,7 +12,7 @@ import {
   when,
   wish,
 } from "commontools";
-import Chatbot from "./chatbot.tsx";
+import Chatbot from "../chatbot.tsx";
 import {
   calculator,
   fetchAndRunPattern,
