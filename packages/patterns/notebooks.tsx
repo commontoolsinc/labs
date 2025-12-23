@@ -740,7 +740,7 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
         <ct-vscroll flex showScrollbar>
           <ct-vstack gap="4" padding="6">
             <ct-card>
-                <ct-vstack gap="4">
+              <ct-vstack gap="4">
                 {/* Header */}
                 <div
                   style={{
@@ -762,7 +762,9 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
                     }}
                     onClick={startEditingTitle({ isEditingTitle })}
                   >
-                    <span style={{ margin: 0, fontSize: "15px", fontWeight: "600" }}>
+                    <span
+                      style={{ margin: 0, fontSize: "15px", fontWeight: "600" }}
+                    >
                       📓 {title} ({noteCount})
                     </span>
                   </div>
@@ -802,137 +804,131 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
                   </ct-button>
                 </div>
 
-                {!hasNotes
-                  ? (
-                    <></>
-                  )
-                  : (
-                    <ct-vstack gap="0">
-                      {/* Table Header */}
+                {!hasNotes ? <></> : (
+                  <ct-vstack gap="0">
+                    {/* Table Header */}
+                    <ct-hstack
+                      padding="3"
+                      style={{
+                        background: "var(--ct-color-bg-secondary, #f5f5f7)",
+                        borderRadius: "8px",
+                        alignItems: "center",
+                        fontSize: "13px",
+                        fontWeight: "500",
+                        color: "var(--ct-color-text-secondary, #6e6e73)",
+                        marginBottom: "4px",
+                      }}
+                    >
+                      <div style={{ width: "32px", flexShrink: 0 }}>
+                        <ct-checkbox
+                          checked={computed(() =>
+                            notes.length > 0 &&
+                            selectedNoteIndices.get().length === notes.length
+                          )}
+                          onct-change={computed(() =>
+                            selectedNoteIndices.get().length === notes.length
+                              ? deselectAllNotes({ selectedNoteIndices })
+                              : selectAllNotes({ notes, selectedNoteIndices })
+                          )}
+                        />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>Note</div>
+                      <div
+                        style={{
+                          width: "60px",
+                          flexShrink: 0,
+                          textAlign: "center",
+                        }}
+                      >
+                        Show/Hide
+                      </div>
+                      <div style={{ width: "40px", flexShrink: 0 }} />
+                    </ct-hstack>
+
+                    {/* Notes List */}
+                    {notes.map((note, index) => (
                       <ct-hstack
                         padding="3"
                         style={{
-                          background: "var(--ct-color-bg-secondary, #f5f5f7)",
-                          borderRadius: "8px",
                           alignItems: "center",
-                          fontSize: "13px",
-                          fontWeight: "500",
-                          color: "var(--ct-color-text-secondary, #6e6e73)",
-                          marginBottom: "4px",
+                          borderBottom:
+                            "1px solid var(--ct-color-border, #e5e5e7)",
+                          background: computed(() =>
+                            selectedNoteIndices.get().includes(index)
+                              ? "var(--ct-color-bg-secondary, #f5f5f7)"
+                              : "transparent"
+                          ),
                         }}
                       >
-                        <div style={{ width: "32px", flexShrink: 0 }}>
+                        <div
+                          style={{
+                            width: "32px",
+                            flexShrink: 0,
+                            cursor: "pointer",
+                            userSelect: "none",
+                            display: "flex",
+                            alignItems: "center",
+                          }}
+                          onClick={toggleNoteCheckbox({
+                            index,
+                            selectedNoteIndices,
+                            lastSelectedNoteIndex,
+                          })}
+                        >
                           <ct-checkbox
                             checked={computed(() =>
-                              notes.length > 0 &&
-                              selectedNoteIndices.get().length === notes.length
-                            )}
-                            onct-change={computed(() =>
-                              selectedNoteIndices.get().length === notes.length
-                                ? deselectAllNotes({ selectedNoteIndices })
-                                : selectAllNotes({ notes, selectedNoteIndices })
+                              selectedNoteIndices.get().includes(index)
                             )}
                           />
                         </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>Note</div>
+                        <div
+                          style={{
+                            flex: 1,
+                            minWidth: 0,
+                            overflow: "hidden",
+                            display: "flex",
+                            alignItems: "center",
+                          }}
+                        >
+                          <ct-cell-context $cell={note}>
+                            <ct-cell-link $cell={note} />
+                          </ct-cell-context>
+                        </div>
                         <div
                           style={{
                             width: "60px",
                             flexShrink: 0,
-                            textAlign: "center",
-                          }}
-                        >
-                          Show/Hide
-                        </div>
-                        <div style={{ width: "40px", flexShrink: 0 }} />
-                      </ct-hstack>
-
-                      {/* Notes List */}
-                      {notes.map((note, index) => (
-                        <ct-hstack
-                          padding="3"
-                          style={{
+                            display: "flex",
                             alignItems: "center",
-                            borderBottom:
-                              "1px solid var(--ct-color-border, #e5e5e7)",
-                            background: computed(() =>
-                              selectedNoteIndices.get().includes(index)
-                                ? "var(--ct-color-bg-secondary, #f5f5f7)"
-                                : "transparent"
-                            ),
+                            justifyContent: "center",
                           }}
                         >
-                          <div
-                            style={{
-                              width: "32px",
-                              flexShrink: 0,
-                              cursor: "pointer",
-                              userSelect: "none",
-                              display: "flex",
-                              alignItems: "center",
-                            }}
-                            onClick={toggleNoteCheckbox({
-                              index,
-                              selectedNoteIndices,
-                              lastSelectedNoteIndex,
-                            })}
+                          <ct-switch
+                            checked={computed(() => !(note.isHidden ?? false))}
+                            onct-change={toggleNoteVisibility({ note })}
+                          />
+                        </div>
+                        <div
+                          style={{
+                            width: "40px",
+                            flexShrink: 0,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <ct-button
+                            size="sm"
+                            variant="ghost"
+                            onClick={removeFromNotebook({ note, notes })}
                           >
-                            <ct-checkbox
-                              checked={computed(() =>
-                                selectedNoteIndices.get().includes(index)
-                              )}
-                            />
-                          </div>
-                          <div
-                            style={{
-                              flex: 1,
-                              minWidth: 0,
-                              overflow: "hidden",
-                              display: "flex",
-                              alignItems: "center",
-                            }}
-                          >
-                            <ct-cell-context $cell={note}>
-                              <ct-cell-link $cell={note} />
-                            </ct-cell-context>
-                          </div>
-                          <div
-                            style={{
-                              width: "60px",
-                              flexShrink: 0,
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                            }}
-                          >
-                            <ct-switch
-                              checked={computed(() =>
-                                !(note.isHidden ?? false)
-                              )}
-                              onct-change={toggleNoteVisibility({ note })}
-                            />
-                          </div>
-                          <div
-                            style={{
-                              width: "40px",
-                              flexShrink: 0,
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                            }}
-                          >
-                            <ct-button
-                              size="sm"
-                              variant="ghost"
-                              onClick={removeFromNotebook({ note, notes })}
-                            >
-                              ✕
-                            </ct-button>
-                          </div>
-                        </ct-hstack>
-                      ))}
-                    </ct-vstack>
-                  )}
+                            ✕
+                          </ct-button>
+                        </div>
+                      </ct-hstack>
+                    ))}
+                  </ct-vstack>
+                )}
 
                 {/* Action Bar - Use CSS display to keep DOM alive (preserves handler streams) */}
                 <ct-hstack

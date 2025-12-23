@@ -427,12 +427,19 @@ const importSkipDuplicates = handler<
   // Build skip set from duplicate titles
   const skipTitles = new Set(duplicates.map((d) => d.title));
 
-  performImport(parsed, state.allCharms, state.notebooks, skipTitles, undefined, () => {
-    state.pendingImportData.set("");
-    state.detectedDuplicates.set([]);
-    state.showDuplicateModal.set(false);
-    state.importMarkdown.set("");
-  });
+  performImport(
+    parsed,
+    state.allCharms,
+    state.notebooks,
+    skipTitles,
+    undefined,
+    () => {
+      state.pendingImportData.set("");
+      state.detectedDuplicates.set([]);
+      state.showDuplicateModal.set(false);
+      state.importMarkdown.set("");
+    },
+  );
 });
 
 // Handler to import all notes (including duplicates as copies)
@@ -451,12 +458,19 @@ const importAllAsCopies = handler<
   const markdown = state.pendingImportData.get();
   const parsed = parseMarkdownToNotesPlain(markdown);
 
-  performImport(parsed, state.allCharms, state.notebooks, new Set(), undefined, () => {
-    state.pendingImportData.set("");
-    state.detectedDuplicates.set([]);
-    state.showDuplicateModal.set(false);
-    state.importMarkdown.set("");
-  });
+  performImport(
+    parsed,
+    state.allCharms,
+    state.notebooks,
+    new Set(),
+    undefined,
+    () => {
+      state.pendingImportData.set("");
+      state.detectedDuplicates.set([]);
+      state.showDuplicateModal.set(false);
+      state.importMarkdown.set("");
+    },
+  );
 });
 
 // Handler to cancel import
