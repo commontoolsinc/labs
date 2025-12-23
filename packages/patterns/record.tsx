@@ -1384,138 +1384,29 @@ const Record = pattern<RecordInput, RecordOutput>(
                     },
                   )}
 
-                          {ifElse(
-                            trashExpanded,
-                            <div style={{ paddingLeft: "16px", marginTop: "8px" }}>
-                              {trashedSubCharms.map(
-                                (entry) => {
-                                  const displayInfo = getModuleDisplay({
-                                    type: entry.type,
-                                    charm: entry.charm,
-                                  });
-                                  return (
-                                    <div
-                                      style={{
-                                        display: "flex",
-                                        alignItems: "center",
-                                        justifyContent: "space-between",
-                                        padding: "8px 12px",
-                                        background: "#f9fafb",
-                                        borderRadius: "6px",
-                                        marginBottom: "4px",
-                                        opacity: "0.7",
-                                      }}
-                                    >
-                                      <span
-                                        style={{
-                                          fontSize: "13px",
-                                          color: "#6b7280",
-                                          flex: "1",
-                                        }}
-                                      >
-                                        {displayInfo.icon} {displayInfo.label}
-                                      </span>
-                                      <div
-                                        style={{
-                                          display: "flex",
-                                          gap: "8px",
-                                          flexShrink: 0,
-                                        }}
-                                      >
-                                        <button
-                                          type="button"
-                                          onClick={restoreSubCharm({
-                                            subCharms,
-                                            trashedSubCharms,
-                                            entry,
-                                          })}
-                                          style={{
-                                            background: "#e0f2fe",
-                                            border: "1px solid #7dd3fc",
-                                            borderRadius: "4px",
-                                            cursor: "pointer",
-                                            padding: "4px 8px",
-                                            fontSize: "12px",
-                                            color: "#0369a1",
-                                          }}
-                                          title="Restore"
-                                        >
-                                          ↩️
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={permanentlyDelete({
-                                            trashedSubCharms,
-                                            entry,
-                                          })}
-                                          style={{
-                                            background: "transparent",
-                                            border: "1px solid #fecaca",
-                                            borderRadius: "4px",
-                                            cursor: "pointer",
-                                            padding: "4px 8px",
-                                            fontSize: "12px",
-                                            color: "#dc2626",
-                                          }}
-                                          title="Delete permanently"
-                                        >
-                                          🗑️
-                                        </button>
-                                      </div>
-                                    </div>
-                                  );
-                                },
-                              )}
-
-                              <button
-                                type="button"
-                                onClick={emptyTrash({ trashedSubCharms })}
-                                style={{
-                                  marginTop: "8px",
-                                  background: "transparent",
-                                  border: "1px solid #fecaca",
-                                  borderRadius: "4px",
-                                  cursor: "pointer",
-                                  padding: "6px 12px",
-                                  fontSize: "12px",
-                                  color: "#dc2626",
-                                  width: "100%",
-                                }}
-                              >
-                                Empty Trash
-                              </button>
-                            </div>,
-                            null,
-                          )}
-                        </div>,
-                        null,
-                      )}
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={emptyTrash({ trashedSubCharms })}
-                      style={{
-                        marginTop: "8px",
-                        background: "transparent",
-                        border: "1px solid #fecaca",
-                        borderRadius: "4px",
-                        cursor: "pointer",
-                        padding: "6px 12px",
-                        fontSize: "12px",
-                        color: "#dc2626",
-                        width: "100%",
-                      }}
-                    >
-                      Empty Trash
-                    </button>
-                  </div>,
-                  null,
-                )}
-              </div>,
-              null,
-            )}
-          </div>
+                  <button
+                    type="button"
+                    onClick={emptyTrash({ trashedSubCharms })}
+                    style={{
+                      marginTop: "8px",
+                      background: "transparent",
+                      border: "1px solid #fecaca",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      padding: "6px 12px",
+                      fontSize: "12px",
+                      color: "#dc2626",
+                      width: "100%",
+                    }}
+                  >
+                    Empty Trash
+                  </button>
+                </div>,
+                null,
+              )}
+            </div>,
+            null,
+          )}
 
           {
             /*
@@ -1691,31 +1582,6 @@ const Record = pattern<RecordInput, RecordOutput>(
                   </button>
                 </div>
               </div>
-            </div>,
-            null,
-          )}
-        </ct-vstack>
-          </ct-vscroll>
-                  <button
-                    type="button"
-                    onClick={emptyTrash({ trashedSubCharms })}
-                    style={{
-                      marginTop: "8px",
-                      background: "transparent",
-                      border: "1px solid #fecaca",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                      padding: "6px 12px",
-                      fontSize: "12px",
-                      color: "#dc2626",
-                      width: "100%",
-                    }}
-                  >
-                    Empty Trash
-                  </button>
-                </div>,
-                null,
-              )}
             </div>,
             null,
           )}
