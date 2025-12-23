@@ -9,13 +9,13 @@ import { when } from "./when.ts";
 import { unless } from "./unless.ts";
 import type { Runtime } from "../runtime.ts";
 import {
+  clearCompilationCache,
   compileAndRun,
   getCompilationStats,
-  clearCompilationCache,
 } from "./compile-and-run.ts";
 
 // Re-export for testing/debugging
-export { getCompilationStats, clearCompilationCache };
+export { clearCompilationCache, getCompilationStats };
 import { navigateTo } from "./navigate-to.ts";
 import { wish } from "./wish.ts";
 import type { Cell } from "../cell.ts";
