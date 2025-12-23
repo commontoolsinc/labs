@@ -482,6 +482,7 @@ export class XSchedulerGraph extends LitElement {
   private graphContainer?: HTMLElement;
 
   private lastGraphVersion = -1;
+  private hasInitialZoom = false;
 
   // Minimum effective node size before we boost triggered nodes
   private static readonly READABLE_THRESHOLD = 50;
@@ -500,6 +501,12 @@ export class XSchedulerGraph extends LitElement {
       if (currentVersion !== this.lastGraphVersion) {
         this.lastGraphVersion = currentVersion;
         this.updateLayout();
+
+        // Zoom to fit on first load
+        if (!this.hasInitialZoom && this.layoutNodes.size > 0) {
+          this.hasInitialZoom = true;
+          requestAnimationFrame(() => this.zoomToFit());
+        }
       }
     }
   }
@@ -846,15 +853,63 @@ export class XSchedulerGraph extends LitElement {
   }
 
   private handleZoomIn(): void {
-    this.zoomAroundCenter(Math.min(2.0, this.zoomLevel + 0.25));
+    this.zoomAroundCenter(this.zoomLevel * 1.25);
   }
 
   private handleZoomOut(): void {
-    this.zoomAroundCenter(Math.max(0.25, this.zoomLevel - 0.25));
+    this.zoomAroundCenter(this.zoomLevel / 1.25);
   }
 
   private handleZoomReset(): void {
-    this.zoomAroundCenter(1.0);
+    this.zoomToFit();
+  }
+
+  private handleWheel(e: WheelEvent): void {
+    // Only zoom if ctrl/cmd is held, otherwise allow normal scroll
+    if (!e.ctrlKey && !e.metaKey) return;
+
+    e.preventDefault();
+
+    const container = this.graphContainer;
+    if (!container) return;
+
+    // Calculate zoom factor based on wheel delta
+    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+    const newZoom = Math.max(0.1, Math.min(5.0, this.zoomLevel * zoomFactor));
+
+    // Zoom around mouse position
+    const rect = container.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left + container.scrollLeft;
+    const mouseY = e.clientY - rect.top + container.scrollTop;
+
+    this.zoomAroundPoint(newZoom, mouseX, mouseY);
+  }
+
+  private zoomAroundPoint(newZoom: number, pointX: number, pointY: number): void {
+    const container = this.graphContainer;
+    if (!container) {
+      this.zoomLevel = newZoom;
+      return;
+    }
+
+    const oldZoom = this.zoomLevel;
+    if (oldZoom === newZoom) return;
+
+    // Convert point to content coordinates
+    const contentX = pointX / oldZoom;
+    const contentY = pointY / oldZoom;
+
+    // Update zoom
+    this.zoomLevel = newZoom;
+
+    // After render, adjust scroll to keep point under cursor
+    requestAnimationFrame(() => {
+      const rect = container.getBoundingClientRect();
+      const newScrollLeft = contentX * newZoom - (pointX - container.scrollLeft);
+      const newScrollTop = contentY * newZoom - (pointY - container.scrollTop);
+      container.scrollLeft = Math.max(0, newScrollLeft);
+      container.scrollTop = Math.max(0, newScrollTop);
+    });
   }
 
   private zoomAroundCenter(newZoom: number): void {
@@ -887,6 +942,22 @@ export class XSchedulerGraph extends LitElement {
       container.scrollLeft = Math.max(0, newScrollLeft);
       container.scrollTop = Math.max(0, newScrollTop);
     });
+  }
+
+  private zoomToFit(): void {
+    const container = this.graphContainer;
+    if (!container) return;
+
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+
+    // Calculate zoom to fit with some padding
+    const padding = 40;
+    const zoomX = (containerWidth - padding) / this.svgWidth;
+    const zoomY = (containerHeight - padding) / this.svgHeight;
+    const fitZoom = Math.min(zoomX, zoomY, 1.0); // Don't zoom in beyond 100%
+
+    this.zoomLevel = Math.max(0.1, fitZoom);
   }
 
   private get effectiveNodeWidth(): number {
@@ -1344,7 +1415,7 @@ export class XSchedulerGraph extends LitElement {
   override render(): TemplateResult {
     return html`
       ${this.renderToolbar()}
-      <div class="graph-container" @click="${this.handleContainerClick}">
+      <div class="graph-container" @click="${this.handleContainerClick}" @wheel="${this.handleWheel}">
         ${this.renderGraph()}
         ${this.renderTooltip()}
         ${this.renderLegend()}

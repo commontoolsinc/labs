@@ -198,6 +198,20 @@ export class DebuggerController implements ReactiveController {
         );
       }
 
+      // Auto-refresh graph on scheduler events to capture new nodes/edges
+      if (
+        latestMarker?.type === "scheduler.run" ||
+        latestMarker?.type === "scheduler.invocation" ||
+        latestMarker?.type === "scheduler.mode.change" ||
+        latestMarker?.type === "scheduler.subscribe"
+      ) {
+        const rt = this.runtime.runtime();
+        if (rt) {
+          const snapshot = rt.scheduler.getGraphSnapshot();
+          this.processGraphSnapshot(snapshot);
+        }
+      }
+
       // Request update to refresh the UI
       this.host.requestUpdate();
     }
