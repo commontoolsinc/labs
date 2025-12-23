@@ -103,6 +103,11 @@ export type RuntimeTelemetryMarker = {
   type: "scheduler.subscribe";
   actionId: string;
   isEffect: boolean;
+} | {
+  type: "scheduler.dependencies.update";
+  actionId: string;
+  reads: string[]; // cell paths this action reads
+  writes: string[]; // cell paths this action writes
 };
 
 export type RuntimeTelemetryMarkerResult = RuntimeTelemetryMarker & {

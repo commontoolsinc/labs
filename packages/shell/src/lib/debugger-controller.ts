@@ -203,7 +203,8 @@ export class DebuggerController implements ReactiveController {
         latestMarker?.type === "scheduler.run" ||
         latestMarker?.type === "scheduler.invocation" ||
         latestMarker?.type === "scheduler.mode.change" ||
-        latestMarker?.type === "scheduler.subscribe"
+        latestMarker?.type === "scheduler.subscribe" ||
+        latestMarker?.type === "scheduler.dependencies.update"
       ) {
         const rt = this.runtime.runtime();
         if (rt) {
