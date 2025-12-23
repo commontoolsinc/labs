@@ -26,7 +26,7 @@ import {
   searchWeb,
 } from "../system/common-tools.tsx";
 
-import { type MentionableCharm } from "./backlinks-index.tsx";
+import { type MentionableCharm } from "../system/backlinks-index.tsx";
 
 type ChatbotNoteInput = {
   title?: Cell<Default<string, "LLM Test">>;

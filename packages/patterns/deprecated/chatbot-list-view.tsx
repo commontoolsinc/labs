@@ -19,7 +19,7 @@ import {
 import Chat from "./chatbot-note-composed.tsx";
 import { ListItem } from "../system/common-tools.tsx";
 
-import { type MentionableCharm } from "./backlinks-index.tsx";
+import { type MentionableCharm } from "../system/backlinks-index.tsx";
 type CharmEntry = {
   [ID]: string; // randomId is a string
   local_id: string; // same as ID but easier to access

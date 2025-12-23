@@ -16,7 +16,7 @@ import {
   VNode,
   wish,
 } from "commontools";
-import { type MentionableCharm } from "./backlinks-index.tsx";
+import { type MentionableCharm } from "./system/backlinks-index.tsx";
 
 const sendMessage = handler<
   {

@@ -27,7 +27,7 @@ keywords/features.
   - **Keywords**: ct-screen, ct-autolayout, slots (left/right/header/footer),
     tabNames
 
-- backlinks-index.tsx: Backlinks computation system for bi-directional
+- system/backlinks-index.tsx: Backlinks computation system for bi-directional
   references between charms
   - **Data types**: array of objects (MentionableCharm with mentioned/backlinks
     arrays)

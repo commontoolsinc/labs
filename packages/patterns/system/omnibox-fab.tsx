@@ -21,7 +21,7 @@ import {
   readWebpage,
   searchWeb,
 } from "./common-tools.tsx";
-import { MentionableCharm } from "../backlinks-index.tsx";
+import { MentionableCharm } from "./backlinks-index.tsx";
 
 interface OmniboxFABInput {
   mentionable: Cell<MentionableCharm[]>;
