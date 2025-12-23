@@ -1303,10 +1303,26 @@ export type CompileAndRunFunction = <T = any, S = any>(
 
 export type WishTag = `/${string}` | `#${string}`;
 
+/**
+ * Query for hashtags with explicit AND/OR logic.
+ * - AND: All tags must match (intersection)
+ * - OR: Any tag can match (union)
+ *
+ * @example
+ * // All must match
+ * wish({ query: { and: ["#auth", "#google"] } })
+ *
+ * // Any can match
+ * wish({ query: { or: ["#gmail", "#outlook"] } })
+ */
+export type HashtagQuery =
+  | { and: WishTag[] }
+  | { or: WishTag[] };
+
 export type DID = `did:${string}:${string}`;
 
 export type WishParams = {
-  query: WishTag | string;
+  query: WishTag | HashtagQuery | string;
   path?: string[];
   context?: Record<string, any>;
   schema?: JSONSchema;

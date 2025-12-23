@@ -64,11 +64,14 @@ export const charmLineageSchema = {
 } as const satisfies JSONSchema;
 export type CharmLineage = Schema<typeof charmLineageSchema>;
 
+// Note: wish.ts also defines a local copy of this schema to avoid circular deps.
+// Keep both schemas in sync when making changes.
 export const favoriteEntrySchema = {
   type: "object",
   properties: {
     cell: { not: true, asCell: true },
-    tag: { type: "string", default: "" },
+    tagsCell: { not: true, asCell: true }, // Reference to [TAGS] Cell<string[]> export
+    tag: { type: "string", default: "" }, // Legacy: single tag string (backward compatibility)
   },
   required: ["cell"],
 } as const satisfies JSONSchema;

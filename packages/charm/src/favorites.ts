@@ -1,25 +1,8 @@
-import { type Cell, type Runtime } from "@commontools/runner";
+import { type Cell, isCell, type Runtime, TAGS } from "@commontools/runner";
 import {
   type FavoriteList,
   favoriteListSchema,
 } from "@commontools/runner/schemas";
-
-/**
- * Get cell description (schema as string) for tag-based search.
- * Uses asSchemaFromLinks() to resolve schema through links and pattern resultSchema.
- * Returns empty string if no schema available (won't match searches).
- */
-function getCellDescription(cell: Cell<unknown>): string {
-  try {
-    const { schema } = cell.asSchemaFromLinks().getAsNormalizedFullLink();
-    if (schema !== undefined) {
-      return JSON.stringify(schema);
-    }
-  } catch (e) {
-    console.error("Failed to get cell schema for favorite tag:", e);
-  }
-  return "";
-}
 
 /**
  * Filters an array of favorite entries by removing any that match the target cell
@@ -45,10 +28,40 @@ export function getHomeFavorites(runtime: Runtime): Cell<FavoriteList> {
 }
 
 /**
+ * Validate tags and warn about invalid format.
+ * Returns the array of valid tags (strings starting with '#').
+ */
+function validateTags(tags: unknown[]): string[] {
+  const validTags: string[] = [];
+  const invalidTags: unknown[] = [];
+
+  for (const t of tags) {
+    if (typeof t === "string" && t.startsWith("#")) {
+      validTags.push(t);
+    } else {
+      invalidTags.push(t);
+    }
+  }
+
+  if (invalidTags.length > 0) {
+    console.warn(
+      `[favorites] Charm [TAGS] contains invalid tag values: ${
+        JSON.stringify(invalidTags)
+      }. Tags must be strings starting with '#' (e.g., "#auth/google").`,
+    );
+  }
+
+  return validTags;
+}
+
+/**
  * Add a charm to the user's favorites (in home space).
  *
- * Syncs the charm before computing the tag to ensure schema is available.
- * wish.ts has a fallback for computing tags lazily if needed.
+ * If the charm exports [TAGS], stores a reference for tag-based searching.
+ * Accepts both Cell<string[]> (reactive) and plain string[] (static).
+ *
+ * Tags are the ONLY way to make a favorite searchable by hashtag.
+ * Patterns without [TAGS] will not match wish({ query: ... }) queries.
  */
 export async function addFavorite(
   runtime: Runtime,
@@ -58,11 +71,45 @@ export async function addFavorite(
   await favorites.sync();
 
   const resolvedCharm = charm.resolveAsCell();
-
-  // Sync to ensure schema is available for tag computation
   await resolvedCharm.sync();
 
-  const tag = getCellDescription(charm);
+  // Detect [TAGS] export - accepts Cell<string[]> or plain string[]
+  let tagsCell: Cell<string[]> | undefined;
+  try {
+    const charmValue = resolvedCharm.get();
+    if (charmValue && typeof charmValue === "object" && TAGS in charmValue) {
+      const tagsValue = (charmValue as Record<string, unknown>)[TAGS];
+
+      if (isCell(tagsValue)) {
+        // Cell<string[]> - store reference directly (reactive)
+        const currentTags = (tagsValue as Cell<unknown>).get();
+        if (Array.isArray(currentTags)) {
+          validateTags(currentTags);
+        }
+        tagsCell = tagsValue as Cell<string[]>;
+      } else if (Array.isArray(tagsValue)) {
+        // Plain string[] - validate and wrap in immutable Cell (static)
+        const validTags = validateTags(tagsValue);
+        if (validTags.length > 0) {
+          tagsCell = runtime.getImmutableCell(
+            resolvedCharm.space,
+            validTags,
+            undefined,
+            undefined,
+          );
+        }
+      } else if (tagsValue !== undefined) {
+        // [TAGS] exists but isn't Cell or array - likely a pattern authoring mistake
+        console.warn(
+          `[favorites] Charm exports [TAGS] but value is not a Cell or array. ` +
+            `Expected Cell<string[]> or string[], got ${typeof tagsValue}. ` +
+            `Tags will not be available for this charm.`,
+        );
+      }
+    }
+  } catch {
+    // Ignore errors detecting TAGS
+  }
 
   await runtime.editWithRetry((tx) => {
     const favoritesWithTx = favorites.withTx(tx);
@@ -73,7 +120,15 @@ export async function addFavorite(
       current.some((entry) => entry.cell.resolveAsCell().equals(resolvedCharm))
     ) return;
 
-    favoritesWithTx.push({ cell: charm, tag });
+    // Build entry with optional tagsCell
+    const entry: { cell: Cell<unknown>; tagsCell?: Cell<string[]> } = {
+      cell: charm,
+    };
+    if (tagsCell) {
+      entry.tagsCell = tagsCell;
+    }
+
+    favoritesWithTx.push(entry);
   });
 
   await runtime.idle();
