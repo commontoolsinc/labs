@@ -1262,56 +1262,68 @@ const Record = pattern<RecordInput, RecordOutput>(
             )}
           </ct-vscroll>
 
-            {/* Collapsible Trash Section */}
-            {ifElse(
-              hasTrash,
-              <div
+          {/* Collapsible Trash Section */}
+          {ifElse(
+            hasTrash,
+            <div
+              style={{
+                marginTop: "16px",
+                borderTop: "1px solid #e5e7eb",
+                paddingTop: "12px",
+              }}
+            >
+              <button
+                type="button"
+                onClick={toggleTrashExpanded({ expanded: trashExpanded })}
                 style={{
-                  marginTop: "16px",
-                  borderTop: "1px solid #e5e7eb",
-                  paddingTop: "12px",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  color: "#6b7280",
+                  fontSize: "13px",
+                  width: "100%",
+                  padding: "8px",
                 }}
               >
-                <button
-                  type="button"
-                  onClick={toggleTrashExpanded({ expanded: trashExpanded })}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    color: "#6b7280",
-                    fontSize: "13px",
-                    width: "100%",
-                    padding: "8px",
-                  }}
+                <span
+                  style={computed(() => ({
+                    transform: trashExpanded.get()
+                      ? "rotate(90deg)"
+                      : "rotate(0deg)",
+                    transition: "transform 0.2s",
+                  }))}
                 >
-                  <span
-                    style={computed(() => ({
-                      transform: trashExpanded.get()
-                        ? "rotate(90deg)"
-                        : "rotate(0deg)",
-                      transition: "transform 0.2s",
-                    }))}
-                  >
-                    ▶
-                  </span>
-                  🗑️ Trash ({trashCount})
-                </button>
+                  ▶
+                </span>
+                🗑️ Trash ({trashCount})
+              </button>
 
-                {ifElse(
-                  computed(() => trashExpanded.get()),
-                  <div style={{ paddingLeft: "16px", marginTop: "8px" }}>
-                    {trashedSubCharms.map(
-                      (entry) => {
-                        const displayInfo = getModuleDisplay({
-                          type: entry.type,
-                          charm: entry.charm,
-                        });
-                        return (
-                          <div
+              {ifElse(
+                trashExpanded,
+                <div style={{ paddingLeft: "16px", marginTop: "8px" }}>
+                  {trashedSubCharms.map(
+                    (entry) => {
+                      const displayInfo = getModuleDisplay({
+                        type: entry.type,
+                        charm: entry.charm,
+                      });
+                      return (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "8px 12px",
+                            background: "#f9fafb",
+                            borderRadius: "6px",
+                            marginBottom: "4px",
+                            opacity: "0.7",
+                          }}
+                        >
+                          <span
                             style={{
                               fontSize: "13px",
                               color: "#6b7280",
@@ -1684,6 +1696,29 @@ const Record = pattern<RecordInput, RecordOutput>(
           )}
         </ct-vstack>
           </ct-vscroll>
+                  <button
+                    type="button"
+                    onClick={emptyTrash({ trashedSubCharms })}
+                    style={{
+                      marginTop: "8px",
+                      background: "transparent",
+                      border: "1px solid #fecaca",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      padding: "6px 12px",
+                      fontSize: "12px",
+                      color: "#dc2626",
+                      width: "100%",
+                    }}
+                  >
+                    Empty Trash
+                  </button>
+                </div>,
+                null,
+              )}
+            </div>,
+            null,
+          )}
         </ct-screen>
       ),
       title,
