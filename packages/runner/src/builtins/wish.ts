@@ -169,9 +169,16 @@ function resolveBase(
       );
       const favorites = favoritesCell.get() || [];
 
-      // Case-insensitive search in tag.
+      // Case-insensitive search in userTags or tag field.
       // If tag is empty, try to compute it lazily from the cell's schema.
       const match = favorites.find((entry) => {
+        // Check userTags first
+        const userTags = entry.userTags ?? [];
+        for (const t of userTags) {
+          if (t.toLowerCase().includes(searchTerm)) return true;
+        }
+
+        // Fall back to tag field
         let tag = entry.tag;
 
         // Fallback: compute tag lazily if not stored
@@ -255,11 +262,19 @@ function resolveBase(
         );
         const favorites = favoritesCell.get() || [];
 
-        // Match hash tags in tag field (the schema), all lowercase.
+        // Match hash tags in userTags or tag field (the schema), all lowercase.
         // If tag is empty, try to compute it lazily from the cell's schema.
         // This handles existing favorites that were saved before schema was synced.
-        const searchTerm = parsed.key.toLowerCase();
+        const searchTerm = parsed.key.toLowerCase(); // e.g., "#my-tag"
+        const searchTermWithoutHash = searchTerm.slice(1); // e.g., "my-tag"
         const matches = favorites.filter((entry) => {
+          // Check userTags first (stored without # prefix)
+          const userTags = entry.userTags ?? [];
+          for (const t of userTags) {
+            if (t.toLowerCase() === searchTermWithoutHash) return true;
+          }
+
+          // Fall back to tag field (schema-based hashtag search)
           let tag = entry.tag;
 
           // Fallback: compute tag lazily if not stored
@@ -276,7 +291,7 @@ function resolveBase(
           }
 
           const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
-          return [...hashtags].some((m) => m[0] === searchTerm);
+          return [...hashtags].some((m) => m[1] === searchTermWithoutHash);
         });
 
         if (matches.length === 0) {
