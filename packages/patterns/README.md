@@ -80,7 +80,7 @@ keywords/features.
   - **Keywords**: handler, str template, derive (via pure function), ct-button,
     Stream
 
-- ct-checkbox-cell.tsx: Checkbox component with bidirectional binding
+- examples/ct-checkbox-cell.tsx: Checkbox component with bidirectional binding
   - **Data types**: boolean
   - **Keywords**: ct-checkbox, $checked (bidirectional binding), handler
     (optional), ifElse, onct-change
@@ -89,11 +89,11 @@ keywords/features.
   - **Data types**: boolean
   - **Keywords**: ct-checkbox, handler, checked property, onct-change, ifElse
 
-- ct-list.tsx: List component with editable items
+- examples/ct-list.tsx: List component with editable items
   - **Data types**: array of objects (items with title)
   - **Keywords**: ct-list, $value (bidirectional binding), editable, ct-input
 
-- ct-render.tsx: Rendering sub-recipes with ct-render component
+- examples/ct-render.tsx: Rendering sub-recipes with ct-render component
   - **Data types**: number (counter value)
   - **Keywords**: ct-render, $cell, nested recipes, recipe composition, handler
 
@@ -102,7 +102,7 @@ keywords/features.
   - **Keywords**: ct-select, $value (bidirectional binding), items (label/value
     objects)
 
-- ct-tags.tsx: Tags input component
+- examples/ct-tags.tsx: Tags input component
   - **Data types**: array of strings
   - **Keywords**: ct-tags, handler, onct-change, array of strings
 

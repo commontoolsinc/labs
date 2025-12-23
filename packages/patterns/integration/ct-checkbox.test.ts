@@ -9,7 +9,7 @@ import { ANYONE_USER } from "@commontools/memory/acl";
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
 const testComponents = [
-  { name: "ct-checkbox-cell", file: "ct-checkbox-cell.tsx" },
+  { name: "ct-checkbox-cell", file: "examples/ct-checkbox-cell.tsx" },
 ];
 
 testComponents.forEach(({ name, file }) => {

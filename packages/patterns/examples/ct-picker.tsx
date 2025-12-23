@@ -1,8 +1,8 @@
 /// <cts-enable />
 
 import { Cell, computed, NAME, recipe, UI } from "commontools";
-import Counter from "./counter.tsx";
-import Note from "./note.tsx";
+import Counter from "../counter.tsx";
+import Note from "../note.tsx";
 
 // Simple random ID generator (crypto.randomUUID not available in pattern env)
 const generateId = () =>
