@@ -30,9 +30,10 @@ describe("nested counter integration test", () => {
       "examples",
       "nested-counter.tsx",
     );
+    const rootPath = join(import.meta.dirname!, "..");
     const program = await cc.manager().runtime.harness
       .resolve(
-        new FileSystemProgramResolver(sourcePath),
+        new FileSystemProgramResolver(sourcePath, rootPath),
       );
 
     charm = await cc.create(
