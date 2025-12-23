@@ -25,7 +25,7 @@
  * // Internal debugging only - not part of public API
  * import { getCompilationStats } from "./builtins/index.ts";
  * console.log(getCompilationStats());
- * // { cacheHits: 45, cacheMisses: 3, cacheEvictions: 0, cacheSize: 3, hitRate: "93.8%" }
+ * // { cacheHits: 42, singleFlightHits: 3, cacheMisses: 5, cacheEvictions: 0, cacheSize: 5, hitRate: "90.0%" }
  * ```
  *
  * ## Usage with fetchProgram
@@ -75,6 +75,7 @@ const inProgressCompilations = new Map<string, Promise<Recipe>>();
 
 // Performance counters
 let cacheHits = 0;
+let singleFlightHits = 0;
 let cacheMisses = 0;
 let cacheEvictions = 0;
 
@@ -113,14 +114,18 @@ function cacheGet(hash: string): Recipe | undefined {
  * @returns Object with cache metrics including hit rate
  */
 export function getCompilationStats() {
+  const totalRequests = cacheHits + singleFlightHits + cacheMisses;
   return {
     cacheHits,
+    singleFlightHits,
     cacheMisses,
     cacheEvictions,
     cacheSize: compilationCache.size,
     maxCacheSize: MAX_CACHE_SIZE,
-    hitRate: cacheHits + cacheMisses > 0
-      ? (cacheHits / (cacheHits + cacheMisses) * 100).toFixed(1) + "%"
+    // Hit rate = requests that didn't require a new compilation
+    hitRate: totalRequests > 0
+      ? (((cacheHits + singleFlightHits) / totalRequests) * 100).toFixed(1) +
+        "%"
       : "N/A",
   };
 }
@@ -132,6 +137,7 @@ export function clearCompilationCache() {
   compilationCache.clear();
   inProgressCompilations.clear();
   cacheHits = 0;
+  singleFlightHits = 0;
   cacheMisses = 0;
   cacheEvictions = 0;
 }
@@ -331,7 +337,7 @@ export function compileAndRun(
       compilePromise = Promise.resolve(cachedRecipe);
     } else if (inProgressCompilations.has(hash)) {
       // Single-flight: reuse in-progress compilation (avoid duplicate work)
-      cacheHits++;
+      singleFlightHits++;
       logger.debug(
         "compile-and-run",
         `Reusing in-flight compilation for ${program.main}`,
