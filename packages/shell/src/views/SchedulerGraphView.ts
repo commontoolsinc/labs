@@ -904,7 +904,6 @@ export class XSchedulerGraph extends LitElement {
 
     // After render, adjust scroll to keep point under cursor
     requestAnimationFrame(() => {
-      const rect = container.getBoundingClientRect();
       const newScrollLeft = contentX * newZoom - (pointX - container.scrollLeft);
       const newScrollTop = contentY * newZoom - (pointY - container.scrollTop);
       container.scrollLeft = Math.max(0, newScrollLeft);
