@@ -8,7 +8,7 @@ code in this repository.
 ### Build & Serve
 
 - **Development build with hot reload**: `deno task dev` (serves at
-  http://127.0.0.1:5173)
+  http://127.0.0.1:5173, access via http://localhost:8000 when running with toolshed)
 - **Production build**: `deno task build` or `deno task production`
 - **Serve built files**: `deno task serve` (serves dist/ at http://0.0.0.0:9099)
 - **Check types**: Run from workspace root: `deno task check`
@@ -95,7 +95,7 @@ The project uses `@commontools/felt` (custom build tool) configured in
 
 - Entry: `src/index.ts`
 - Output: `dist/scripts/index.js`
-- Development server: `127.0.0.1:5173`
+- Development server: `127.0.0.1:5173` (proxied via toolshed at 8000)
 - Source maps enabled in development
 
 ### Current Development Context

@@ -18,8 +18,8 @@
 | What | URL |
 |------|-----|
 | Backend API | `http://localhost:8000` |
-| Frontend/Shell | `http://localhost:5173` |
-| Access a space | `http://localhost:5173/[space-name]` |
+| Frontend/Shell | `http://localhost:8000` |
+| Access a space | `http://localhost:8000/[space-name]` |
 
 **Logs:**
 - `packages/shell/local-dev-shell.log`
@@ -34,7 +34,7 @@ When accessing a space for the first time, you'll need to register:
 
 For Playwright testing, use:
 ```javascript
-await page.goto("http://localhost:5173/<SPACE>/<CHARM_ID>");
+await page.goto("http://localhost:8000/<SPACE>/<CHARM_ID>");
 ```
 
 ---
@@ -43,10 +43,10 @@ await page.goto("http://localhost:5173/<SPACE>/<CHARM_ID>");
 
 CommonTools requires **two servers** for local development:
 
-1. **Backend (Toolshed)** - Port 8000 - API, storage, runtime
-2. **Frontend (Shell)** - Port 5173 - Web UI that renders spaces
+1. **Backend (Toolshed)** - Port 8000 - API, storage, runtime, proxies shell
+2. **Frontend (Shell)** - Port 5173 - Dev server with hot reload (accessed via 8000 proxy)
 
-You cannot access spaces without BOTH running. The scripts handle starting them in the correct order.
+You cannot access spaces without BOTH running. Access the application at **port 8000**, which proxies to shell. The scripts handle starting them in the correct order.
 
 ---
 
@@ -56,8 +56,8 @@ You cannot access spaces without BOTH running. The scripts handle starting them 
 
 **Check if ports are in use:**
 ```bash
-lsof -i :8000
-lsof -i :5173
+lsof -i :8000  # Toolshed
+lsof -i :5173  # Shell
 ```
 
 **Force restart:**
@@ -69,8 +69,8 @@ lsof -i :5173
 
 ```bash
 # Health checks (should return 200)
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/_health
-curl -s -o /dev/null -w "%{http_code}" http://localhost:5173
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/_health  # Toolshed
+curl -s -o /dev/null -w "%{http_code}" http://localhost:5173          # Shell
 ```
 
 ### Common Issues
@@ -88,8 +88,8 @@ If scripts fail completely, manual process:
 
 ```bash
 # 1. Kill by port
-lsof -ti :8000 | xargs kill -9 2>/dev/null
-lsof -ti :5173 | xargs kill -9 2>/dev/null
+lsof -ti :8000 | xargs kill -9 2>/dev/null  # Toolshed
+lsof -ti :5173 | xargs kill -9 2>/dev/null  # Shell
 
 # 2. Wait for cleanup
 sleep 2

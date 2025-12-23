@@ -37,7 +37,7 @@ SHELL_URL=http://localhost:5173 API_URL=https://toolshed.saga-castor.ts.net/ den
 
 ### Frontend (Shell)
 
-The frontend runs on port 5173 by default.
+The frontend dev server runs on port 5173 by default. Access the application at port 8000, which proxies to shell.
 
 ```bash
 cd packages/shell
