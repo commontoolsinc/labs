@@ -17,7 +17,7 @@ const generateId = () =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 import BacklinksIndex, { type MentionableCharm } from "./backlinks-index.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
-import Notebook from "./notebooks.tsx";
+import Notebook from "./notebook.tsx";
 import NotesImportExport from "./notes-import-export.tsx";
 
 type MinimalCharm = {
