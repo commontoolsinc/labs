@@ -935,6 +935,13 @@ export class Scheduler {
       const children = this.actionChildren.get(action);
       const childCount = children ? children.size : undefined;
 
+      // Get reads and writes for diagnostics
+      const deps = this.dependencies.get(action);
+      const reads = deps?.reads.map((r) => `${r.space}/${r.id}/${r.path.join("/")}`);
+      const writes = this.mightWrite.get(action)?.map((w) =>
+        `${w.space}/${w.id}/${w.path.join("/")}`
+      );
+
       nodes.push({
         id,
         type: this.effects.has(action) ? "effect" : "computation",
@@ -943,6 +950,8 @@ export class Scheduler {
         isPending: this.pending.has(action),
         parentId,
         childCount: childCount && childCount > 0 ? childCount : undefined,
+        reads,
+        writes,
       });
     }
 

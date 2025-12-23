@@ -1088,7 +1088,7 @@ export class XDebuggerView extends LitElement {
 
     if (typeof value === "function") {
       // Serialize functions as objects with name + all enumerable properties
-      const fn = value as { name?: string } & Record<string, unknown>;
+      const fn = value as unknown as { name?: string } & Record<string, unknown>;
       const result: Record<string, unknown> = {
         name: fn.name || "[anonymous]",
       };
