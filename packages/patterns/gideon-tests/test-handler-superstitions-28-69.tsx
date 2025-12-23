@@ -23,7 +23,7 @@ import {
 
 interface Input {
   counter: Default<number, 0>;
-  overrides: Default<Record<number, boolean>, {}>;
+  overrides: Default<Record<number, boolean>, Record<PropertyKey, never>>;
   items: Default<string[], ["Apple", "Banana", "Cherry"]>;
 }
 
@@ -44,7 +44,9 @@ export default pattern<Input>(({ counter, overrides, items }) => {
       console.log("[#28] SUCCESS: data-* attribute IS accessible!");
       counter.set(counter.get() + 1);
     } else {
-      console.log("[#28] CONFIRMED: data-* attribute is undefined (superstition is TRUE)");
+      console.log(
+        "[#28] CONFIRMED: data-* attribute is undefined (superstition is TRUE)",
+      );
       // Still increment to show handler fired
       counter.set(counter.get() + 100);
     }
@@ -90,9 +92,18 @@ export default pattern<Input>(({ counter, overrides, items }) => {
   // ✅ SAFE: Handler that receives primitive values at render time
   const toggleSafe = handler<
     unknown,
-    { overrides: Cell<Record<number, boolean>>; idx: number; currentlySelected: boolean }
+    {
+      overrides: Cell<Record<number, boolean>>;
+      idx: number;
+      currentlySelected: boolean;
+    }
   >((_, { overrides, idx, currentlySelected }) => {
-    console.log("[#69-SAFE] Handler called with idx:", idx, "currentlySelected:", currentlySelected);
+    console.log(
+      "[#69-SAFE] Handler called with idx:",
+      idx,
+      "currentlySelected:",
+      currentlySelected,
+    );
     const current = overrides.get();
     overrides.set({ ...current, [idx]: !currentlySelected });
     console.log("[#69-SAFE] Set overrides, new value:", !currentlySelected);
@@ -108,7 +119,14 @@ export default pattern<Input>(({ counter, overrides, items }) => {
         </p>
 
         {/* ========== TEST #28: data-* attributes ========== */}
-        <div style={{ border: "2px solid blue", padding: "1rem", marginBottom: "1rem", borderRadius: "8px" }}>
+        <div
+          style={{
+            border: "2px solid blue",
+            padding: "1rem",
+            marginBottom: "1rem",
+            borderRadius: "8px",
+          }}
+        >
           <h3 style={{ color: "blue" }}>#28: data-* Attributes in Handlers</h3>
           <p style={{ fontSize: "0.8rem", color: "#666" }}>
             Claim: event.target.dataset is undefined in handlers
@@ -116,7 +134,9 @@ export default pattern<Input>(({ counter, overrides, items }) => {
 
           <div style={{ marginBottom: "0.5rem" }}>
             <strong>Counter: {counter}</strong>
-            <span style={{ fontSize: "0.8rem", color: "#666", marginLeft: "1rem" }}>
+            <span
+              style={{ fontSize: "0.8rem", color: "#666", marginLeft: "1rem" }}
+            >
               (+1 = data attr worked, +100 = data attr undefined)
             </span>
           </div>
@@ -131,22 +151,36 @@ export default pattern<Input>(({ counter, overrides, items }) => {
           </div>
 
           <div style={{ marginBottom: "0.5rem" }}>
-            <ct-button onClick={handleContextClick({ counter, testValue: "hello123" })}>
+            <ct-button
+              onClick={handleContextClick({ counter, testValue: "hello123" })}
+            >
               Test via context (recommended)
             </ct-button>
           </div>
         </div>
 
         {/* ========== TEST #69: computed circular dependency ========== */}
-        <div style={{ border: "2px solid orange", padding: "1rem", marginBottom: "1rem", borderRadius: "8px" }}>
-          <h3 style={{ color: "orange" }}>#69: Computed → Handler Circular Dependency</h3>
+        <div
+          style={{
+            border: "2px solid orange",
+            padding: "1rem",
+            marginBottom: "1rem",
+            borderRadius: "8px",
+          }}
+        >
+          <h3 style={{ color: "orange" }}>
+            #69: Computed → Handler Circular Dependency
+          </h3>
           <p style={{ fontSize: "0.8rem", color: "#666" }}>
-            Claim: Passing computed to handler that writes to its dependencies causes CPU loop
+            Claim: Passing computed to handler that writes to its dependencies
+            causes CPU loop
           </p>
 
           <div style={{ marginBottom: "1rem" }}>
             <strong>⚠️ DANGEROUS Pattern (may cause CPU spike):</strong>
-            <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+            <div
+              style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}
+            >
               {computedItems.map((item, idx) => (
                 <ct-button
                   onClick={toggleDangerous({
@@ -154,7 +188,9 @@ export default pattern<Input>(({ counter, overrides, items }) => {
                     list: computedItems, // ❌ Passing computed
                     idx,
                   })}
-                  style={`background: ${item.selected ? "#ffc107" : "#e0e0e0"};`}
+                  style={`background: ${
+                    item.selected ? "#ffc107" : "#e0e0e0"
+                  };`}
                 >
                   {item.name} {item.selected ? "✓" : ""}
                 </ct-button>
@@ -164,7 +200,9 @@ export default pattern<Input>(({ counter, overrides, items }) => {
 
           <div style={{ marginBottom: "1rem" }}>
             <strong>✅ SAFE Pattern (pass values at render time):</strong>
-            <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+            <div
+              style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}
+            >
               {computedItems.map((item, idx) => (
                 <ct-button
                   onClick={toggleSafe({
@@ -172,7 +210,9 @@ export default pattern<Input>(({ counter, overrides, items }) => {
                     idx,
                     currentlySelected: item.selected, // ✅ Passing value
                   })}
-                  style={`background: ${item.selected ? "#4caf50" : "#e0e0e0"};`}
+                  style={`background: ${
+                    item.selected ? "#4caf50" : "#e0e0e0"
+                  };`}
                 >
                   {item.name} {item.selected ? "✓" : ""}
                 </ct-button>
@@ -186,9 +226,22 @@ export default pattern<Input>(({ counter, overrides, items }) => {
         </div>
 
         {/* ========== EXPECTED RESULTS ========== */}
-        <div style={{ border: "2px solid #333", padding: "1rem", borderRadius: "8px", background: "#f9f9f9" }}>
+        <div
+          style={{
+            border: "2px solid #333",
+            padding: "1rem",
+            borderRadius: "8px",
+            background: "#f9f9f9",
+          }}
+        >
           <h3>Expected Results</h3>
-          <pre style={{ fontSize: "0.75rem", background: "#fff", padding: "0.5rem" }}>
+          <pre
+            style={{
+              fontSize: "0.75rem",
+              background: "#fff",
+              padding: "0.5rem",
+            }}
+          >
 {`#28 (data-* attributes):
   - First button: counter +100 (dataset undefined) → SUPERSTITION TRUE
   - Second button: counter +1 → Context approach works
