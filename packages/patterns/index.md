@@ -48,7 +48,7 @@ interface Output {
 }
 ```
 
-## `note.tsx`
+## `notes/note.tsx`
 
 A note demo.
 
@@ -164,7 +164,7 @@ type ChatOutput = {
 };
 ```
 
-## `voice-note.tsx`
+## `notes/voice-note.tsx`
 
 Record voice notes with automatic transcription and note history. Hold the
 microphone button to record, release to transcribe.

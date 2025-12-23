@@ -12,7 +12,7 @@ import {
 } from "commontools";
 
 import Chat from "./chatbot.tsx";
-import Note from "./note.tsx";
+import Note from "../notes/note.tsx";
 
 // Simple random ID generator (crypto.randomUUID not available in pattern env)
 const generateId = () =>

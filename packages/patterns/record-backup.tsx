@@ -29,7 +29,7 @@ import {
 import { createSubCharm, getDefinition } from "./record/registry.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 import Record from "./record.tsx";
-import Note from "./note.tsx";
+import Note from "./notes/note.tsx";
 
 // ===== Export Format Types =====
 

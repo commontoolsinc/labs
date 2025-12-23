@@ -1,6 +1,6 @@
 /// <cts-enable />
 import { Default, NAME, pattern, UI } from "commontools";
-import Note from "./note.tsx";
+import Note from "./notes/note.tsx";
 
 // Simple random ID generator (crypto.randomUUID not available in pattern env)
 const generateId = () =>

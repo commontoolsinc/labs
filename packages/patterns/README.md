@@ -147,7 +147,7 @@ keywords/features.
   - **Keywords**: nested recipes, recipe composition, passing cells, str
     template, handler
 
-- note.tsx: Note-taking app with backlinks and mentions
+- notes/note.tsx: Note-taking app with backlinks and mentions
   - **Data types**: string (title/content), array of charms
     (mentioned/backlinks)
   - **Keywords**: wish, handler, navigateTo, ct-code-editor, $mentionable,
