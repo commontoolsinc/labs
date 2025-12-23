@@ -604,9 +604,9 @@ type Output = {
 
 ## `notebook.tsx`
 
-Notebook pattern for organizing notes with multi-select, visibility controls, and
-LLM-callable streams. Supports creating notes, bulk operations, moving/adding notes
-between notebooks, and omnibot integration.
+Notebook pattern for organizing notes with multi-select, visibility controls,
+and LLM-callable streams. Supports creating notes, bulk operations,
+moving/adding notes between notebooks, and omnibot integration.
 
 **Keywords:** notebook, notes, organization, wish, navigateTo, llm-streams
 
