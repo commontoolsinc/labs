@@ -479,6 +479,255 @@ const toggleTrashExpanded = handler<unknown, { expanded: Cell<boolean> }>(
   (_event, { expanded }) => expanded.set(!expanded.get()),
 );
 
+// ===== LLM-Callable Handlers for Omnibot Integration =====
+// These handlers are exposed in the pattern output for Omnibot's invoke() tool
+
+// Get a structured summary of all modules in this record
+// Returns module types, their data, and schemas for LLM context
+const handleGetSummary = handler<
+  Record<string, never>,
+  {
+    title: Cell<string>;
+    subCharms: Cell<SubCharmEntry[]>;
+  }
+>((_args, { title, subCharms }) => {
+  const modules = subCharms.get() || [];
+  const summary = {
+    title: title.get() || "(Untitled Record)",
+    moduleCount: modules.length,
+    modules: modules.map((entry, index) => {
+      const def = getDefinition(entry.type);
+      // Extract data from charm - access common fields reactively
+      // deno-lint-ignore no-explicit-any
+      const charm = entry.charm as any;
+      const moduleData: Record<string, unknown> = {};
+
+      // Try to extract common fields based on module type
+      try {
+        // Most modules have a primary value field
+        if (charm?.label !== undefined) moduleData.label = charm.label;
+        if (charm?.value !== undefined) moduleData.value = charm.value;
+        if (charm?.content !== undefined) moduleData.content = charm.content;
+        if (charm?.address !== undefined) moduleData.address = charm.address;
+        if (charm?.email !== undefined) moduleData.email = charm.email;
+        if (charm?.phone !== undefined) moduleData.phone = charm.phone;
+        if (charm?.rating !== undefined) moduleData.rating = charm.rating;
+        if (charm?.tags !== undefined) moduleData.tags = charm.tags;
+        if (charm?.status !== undefined) moduleData.status = charm.status;
+        if (charm?.nickname !== undefined) moduleData.nickname = charm.nickname;
+        if (charm?.icon !== undefined) moduleData.icon = charm.icon;
+        if (charm?.birthDate !== undefined) {
+          moduleData.birthDate = charm.birthDate;
+        }
+        if (charm?.birthYear !== undefined) {
+          moduleData.birthYear = charm.birthYear;
+        }
+        if (charm?.url !== undefined) moduleData.url = charm.url;
+        if (charm?.notes !== undefined) moduleData.notes = charm.notes;
+      } catch {
+        // Ignore errors from charms without expected fields
+      }
+
+      return {
+        index,
+        type: entry.type,
+        icon: def?.icon || "📋",
+        label: def?.label || entry.type,
+        pinned: entry.pinned || false,
+        collapsed: entry.collapsed || false,
+        note: entry.note,
+        data: moduleData,
+        schema: entry.schema,
+      };
+    }),
+  };
+  return summary;
+});
+
+// Add a new module to this record
+// type: module type from registry (email, phone, birthday, etc.)
+// initialData: optional initial values for the module
+const handleAddModule = handler<
+  { type: string; initialData?: Record<string, unknown> },
+  {
+    subCharms: Cell<SubCharmEntry[]>;
+    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+  }
+>(({ type, initialData }, { subCharms: sc, trashedSubCharms: trash }) => {
+  if (!type) {
+    return { success: false, error: "Module type is required" };
+  }
+
+  const def = getDefinition(type);
+  if (!def) {
+    return {
+      success: false,
+      error: `Unknown module type: ${type}. Available types: ${
+        getAddableTypes().map((d) => d.type).join(", ")
+      }`,
+    };
+  }
+
+  const current = sc.get() || [];
+
+  // Get smart default label for modules that support it
+  const nextLabel = getNextUnusedLabel(type, current);
+  const initialValues = {
+    ...(nextLabel ? { label: nextLabel } : {}),
+    ...initialData,
+  };
+
+  // Create the module - special cases handled
+  let charm: unknown;
+  if (type === "notes") {
+    return {
+      success: false,
+      error: "Notes modules must be added via UI (requires linkPattern)",
+    };
+  } else if (type === "extractor") {
+    // ExtractorModule needs parent Cells
+    charm = ExtractorModule({
+      parentSubCharms: sc,
+      parentTrashedSubCharms: trash,
+      // deno-lint-ignore no-explicit-any
+    } as any);
+  } else {
+    charm = createSubCharm(type, initialValues);
+  }
+
+  // Capture schema at creation time
+  const schema = getResultSchema(charm);
+
+  sc.push({
+    type,
+    pinned: false,
+    collapsed: false,
+    charm,
+    schema,
+  });
+
+  return {
+    success: true,
+    moduleIndex: current.length,
+    type,
+    message: `Added ${def.icon} ${def.label} module`,
+  };
+});
+
+// Update a field in a specific module
+// index: module index in subCharms array
+// field: field name to update
+// value: new value
+const handleUpdateModule = handler<
+  { index: number; field: string; value: unknown },
+  { subCharms: Cell<SubCharmEntry[]> }
+>(({ index, field, value }, { subCharms: sc }) => {
+  const current = sc.get() || [];
+
+  if (index < 0 || index >= current.length) {
+    return {
+      success: false,
+      error: `Invalid module index: ${index}. Valid range: 0-${
+        current.length - 1
+      }`,
+    };
+  }
+
+  const entry = current[index];
+  // deno-lint-ignore no-explicit-any
+  const charm = entry.charm as any;
+
+  if (!charm) {
+    return { success: false, error: "Module charm not found" };
+  }
+
+  try {
+    // Try to access the field as a Cell and set it
+    const fieldCell = charm[field];
+    if (fieldCell && typeof fieldCell.set === "function") {
+      fieldCell.set(value);
+      return {
+        success: true,
+        message: `Updated ${field} to ${JSON.stringify(value)}`,
+      };
+    } else if (fieldCell && typeof fieldCell.key === "function") {
+      // It might be a nested cell - try setting via parent
+      return {
+        success: false,
+        error:
+          `Field ${field} exists but is not directly settable. Try a more specific path.`,
+      };
+    } else {
+      return {
+        success: false,
+        error:
+          `Field ${field} not found or not a Cell on module type ${entry.type}`,
+      };
+    }
+  } catch (err) {
+    return { success: false, error: `Failed to update field: ${err}` };
+  }
+});
+
+// Remove a module (move to trash)
+const handleRemoveModule = handler<
+  { index: number },
+  {
+    subCharms: Cell<SubCharmEntry[]>;
+    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+  }
+>(({ index }, { subCharms: sc, trashedSubCharms: trash }) => {
+  const current = sc.get() || [];
+
+  if (index < 0 || index >= current.length) {
+    return {
+      success: false,
+      error: `Invalid module index: ${index}. Valid range: 0-${
+        current.length - 1
+      }`,
+    };
+  }
+
+  const entry = current[index];
+  const def = getDefinition(entry.type);
+
+  // Move to trash with timestamp
+  trash.push({ ...entry, trashedAt: new Date().toISOString() });
+
+  // Remove from active
+  const updated = [...current];
+  updated.splice(index, 1);
+  sc.set(updated);
+
+  return {
+    success: true,
+    message: `Moved ${def?.icon || "📋"} ${def?.label || entry.type} to trash`,
+  };
+});
+
+// Set the record title
+const handleSetTitle = handler<
+  { newTitle: string },
+  { title: Cell<string> }
+>(({ newTitle }, { title }) => {
+  title.set(newTitle);
+  return { success: true, title: newTitle };
+});
+
+// List available module types that can be added
+const handleListModuleTypes = handler<
+  Record<string, never>,
+  Record<string, never>
+>(() => {
+  const types = getAddableTypes().map((def) => ({
+    type: def.type,
+    label: def.label,
+    icon: def.icon,
+    allowMultiple: def.allowMultiple || false,
+  }));
+  return { types };
+});
+
 // Create sibling module (same type, inserted after current)
 // Used by '+' button in module headers for email/phone/address
 const createSibling = handler<
@@ -1752,6 +2001,14 @@ const Record = pattern<RecordInput, RecordOutput>(
       subCharms,
       trashedSubCharms,
       "#record": true,
+      // LLM-callable streams for Omnibot integration
+      // Omnibot can invoke these via: invoke({ "@link": "/of:record-id/getSummary" }, {})
+      getSummary: handleGetSummary({ title, subCharms }),
+      addModule: handleAddModule({ subCharms, trashedSubCharms }),
+      updateModule: handleUpdateModule({ subCharms }),
+      removeModule: handleRemoveModule({ subCharms, trashedSubCharms }),
+      setTitle: handleSetTitle({ title }),
+      listModuleTypes: handleListModuleTypes({}),
     };
   },
 );
