@@ -9,17 +9,10 @@ import { Cell, computed, handler, NAME, pattern, UI, wish } from "commontools";
 
 // Raw journal entry as stored - subject is a cell link, not a Cell
 type JournalEntry = {
-  timestamp?: number;
-  eventType?: string;
-  subject?: { cell: { "/": string }; path: string[] };
-  snapshot?: {
-    name?: string;
-    schemaTag?: string;
-    valueExcerpt?: string;
-  };
-  narrative?: string;
-  tags?: string[];
-  space?: string;
+  timestamp: number;
+  narrative: string;
+  tags: string[];
+  space: string;
 };
 
 function formatTimestamp(timestamp: number | undefined): string {
@@ -70,37 +63,9 @@ const clearJournal = handler<
   journal.set([]);
 });
 
-// Schema for reading journal entries - must match what's written in journal.ts
-const journalEntrySchema = {
-  type: "object",
-  properties: {
-    timestamp: { type: "number" },
-    eventType: { type: "string" },
-    subject: { not: true, asCell: true },
-    snapshot: {
-      type: "object",
-      properties: {
-        name: { type: "string", default: "" },
-        schemaTag: { type: "string", default: "" },
-        valueExcerpt: { type: "string", default: "" },
-      },
-    },
-    narrative: { type: "string", default: "" },
-    tags: { type: "array", items: { type: "string" }, default: [] },
-    space: { type: "string" },
-  },
-} as const;
-
-const journalSchema = {
-  type: "array",
-  items: journalEntrySchema,
-  default: [],
-} as const;
-
 export default pattern<Record<string, never>>((_) => {
   const journalResult = wish<Array<JournalEntry>>({
     query: "#journal",
-    schema: journalSchema,
   });
 
   // Debug: log raw result
@@ -192,17 +157,6 @@ export default pattern<Record<string, never>>((_) => {
                   marginBottom: "8px",
                 }}
               >
-                <span style={{ fontSize: "1.2em" }}>
-                  {eventTypeEmoji(entry.eventType)}
-                </span>
-                <span
-                  style={{
-                    fontWeight: "500",
-                    color: "#1976d2",
-                  }}
-                >
-                  {eventTypeLabel(entry.eventType)}
-                </span>
                 <span
                   style={{
                     marginLeft: "auto",
@@ -226,18 +180,6 @@ export default pattern<Record<string, never>>((_) => {
                 </p>
               )}
 
-              {entry.snapshot?.name && (
-                <div
-                  style={{
-                    marginTop: "8px",
-                    fontSize: "0.9em",
-                    color: "#555",
-                  }}
-                >
-                  Charm: {entry.snapshot.name}
-                </div>
-              )}
-
               {entry.tags && entry.tags.length > 0 && (
                 <div
                   style={{
@@ -247,7 +189,7 @@ export default pattern<Record<string, never>>((_) => {
                     flexWrap: "wrap",
                   }}
                 >
-                  {entry.tags.map((tag) => (
+                  {entry.tags.map((tag: any) => (
                     <span
                       style={{
                         fontSize: "0.8em",
@@ -262,7 +204,6 @@ export default pattern<Record<string, never>>((_) => {
                   ))}
                 </div>
               )}
-
             </div>
           ))}
         </div>

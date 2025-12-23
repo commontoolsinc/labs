@@ -17,6 +17,7 @@ import type { EntityId } from "../create-ref.ts";
 import { ALL_CHARMS_ID } from "./well-known.ts";
 import { type JSONSchema, type Recipe, UI } from "../builder/types.ts";
 
+
 // Define locally to avoid circular dependency with @commontools/charm
 const favoriteEntrySchema = {
   type: "object",
@@ -143,6 +144,76 @@ function formatTarget(parsed: ParsedWishTarget): string {
     (parsed.path.length > 0 ? "/" + parsed.path.join("/") : "");
 }
 
+
+/**
+ * Journal entry event types - the significant events we track
+ */
+export const journalEventTypes = [
+  "charm:favorited",
+  "charm:unfavorited",
+  "charm:created",
+  "charm:modified",
+  "space:entered",
+] as const;
+
+export type JournalEventType = typeof journalEventTypes[number];
+
+/**
+ * Snapshot of a cell's state at a point in time
+ */
+export const journalSnapshotSchema = {
+  type: "object",
+  properties: {
+    name: { type: "string", default: "" },
+    schemaTag: { type: "string", default: "" },
+    valueExcerpt: { type: "string", default: "" },
+  },
+} as const satisfies JSONSchema;
+
+export type JournalSnapshot = Schema<typeof journalSnapshotSchema>;
+
+/**
+ * A single journal entry capturing a significant event
+ */
+export const journalEntrySchema = {
+  type: "object",
+  properties: {
+    timestamp: { type: "number" },
+    eventType: {
+      type: "string",
+      enum: journalEventTypes as unknown as string[],
+    },
+    // Live cell reference (may update over time)
+    subject: { not: true, asCell: true },
+    // Frozen snapshot at entry time
+    snapshot: journalSnapshotSchema,
+    // LLM-generated narrative prose
+    narrative: { type: "string", default: "" },
+    // Tags for filtering/searching
+    tags: {
+      type: "array",
+      items: { type: "string" },
+      default: [],
+    },
+    // Space where event occurred
+    space: { type: "string" },
+  },
+  required: ["timestamp", "eventType", "space"],
+} as const satisfies JSONSchema;
+
+export type JournalEntry = Schema<typeof journalEntrySchema>;
+
+/**
+ * The journal is an array of entries
+ */
+export const journalSchema = {
+  type: "array",
+  items: journalEntrySchema,
+  default: [],
+} as const satisfies JSONSchema;
+
+export type Journal = Schema<typeof journalSchema>;
+
 function resolveBase(
   parsed: ParsedWishTarget,
   ctx: WishContext,
@@ -234,11 +305,11 @@ function resolveBase(
       if (!userDID) {
         throw new WishError("User identity DID not available for #journal");
       }
-      // Use getHomeSpaceCell to ensure homeSpaceCellSchema is applied
-      // This schema defines the journal structure with proper asCell handling
-      const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
 
-      return [{ cell: homeSpaceCell, pathPrefix: ["journal"] }];
+      const journal = ctx.runtime.getHomeSpaceCell().key("journal").asSchema(journalSchema)
+      journal.sync();
+
+      return [{ cell: journal }];
     }
     default: {
       // Check if it's a well-known target

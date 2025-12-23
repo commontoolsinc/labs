@@ -3,7 +3,6 @@ import {
   type FavoriteList,
   favoriteListSchema,
 } from "@commontools/runner/schemas";
-import { type FavoriteList, favoriteListSchema } from "./manager.ts";
 import { addJournalEntry } from "./journal.ts";
 
 /**
