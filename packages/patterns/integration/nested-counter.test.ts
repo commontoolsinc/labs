@@ -24,7 +24,12 @@ describe("nested counter integration test", () => {
       apiUrl: new URL(API_URL),
       identity: identity,
     });
-    const sourcePath = join(import.meta.dirname!, "..", "examples", "nested-counter.tsx");
+    const sourcePath = join(
+      import.meta.dirname!,
+      "..",
+      "examples",
+      "nested-counter.tsx",
+    );
     const program = await cc.manager().runtime.harness
       .resolve(
         new FileSystemProgramResolver(sourcePath),

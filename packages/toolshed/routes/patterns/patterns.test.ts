@@ -13,7 +13,9 @@ const app = createApp().route("/", router);
 describe("Patterns API", () => {
   describe("basic pattern serving", () => {
     it("serves system/default-app.tsx", async () => {
-      const response = await app.request("/api/patterns/system/default-app.tsx");
+      const response = await app.request(
+        "/api/patterns/system/default-app.tsx",
+      );
       expect(response.status).toBe(200);
       const text = await response.text();
       expect(text).toContain("export default pattern");
@@ -116,7 +118,9 @@ describe("Patterns API", () => {
 
   describe("CORS headers", () => {
     it("includes CORS headers for cross-origin access", async () => {
-      const response = await app.request("/api/patterns/system/default-app.tsx");
+      const response = await app.request(
+        "/api/patterns/system/default-app.tsx",
+      );
       expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
     });
   });
