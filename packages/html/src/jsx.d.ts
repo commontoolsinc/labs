@@ -2883,6 +2883,7 @@ interface CTScreenElement extends CTHTMLElement {}
 interface CTAutoLayoutElement extends CTHTMLElement {}
 interface CTButtonElement extends CTHTMLElement {}
 interface CTCopyButtonElement extends CTHTMLElement {}
+interface CTFileDownloadElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
 interface CTHStackElement extends CTHTMLElement {}
 interface CTFabElement extends CTHTMLElement {}
@@ -3197,6 +3198,27 @@ interface CTButtonAttributes<T> extends CTHTMLAttributes<T> {
 
 interface CTCopyButtonAttributes<T> extends CTHTMLAttributes<T> {
   "text": string;
+  "variant"?:
+    | "primary"
+    | "secondary"
+    | "destructive"
+    | "outline"
+    | "ghost"
+    | "link"
+    | "pill";
+  "size"?: "default" | "sm" | "lg" | "icon" | "md";
+  "disabled"?: boolean;
+  "feedback-duration"?: number;
+  "icon-only"?: boolean;
+}
+
+interface CTFileDownloadAttributes<T> extends CTHTMLAttributes<T> {
+  "$data"?: CellLike<string>;
+  "data"?: string;
+  "$filename"?: CellLike<string>;
+  "filename"?: string;
+  "mime-type"?: string;
+  "base64"?: boolean;
   "variant"?:
     | "primary"
     | "secondary"
@@ -4368,6 +4390,10 @@ declare global {
       "ct-fab": CTDOM.DetailedHTMLProps<
         CTFabAttributes<CTFabElement>,
         CTFabElement
+      >;
+      "ct-file-download": CTDOM.DetailedHTMLProps<
+        CTFileDownloadAttributes<CTFileDownloadElement>,
+        CTFileDownloadElement
       >;
       "ct-chevron-button": CTDOM.DetailedHTMLProps<
         CTChevronButtonAttributes<CTChevronButtonElement>,

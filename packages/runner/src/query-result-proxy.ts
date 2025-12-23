@@ -198,7 +198,8 @@ export function createQueryResultProxy<T>(
           : (...args: any[]) => {
             if (!tx) {
               throw new Error(
-                "Transaction required for changing query result proxy",
+                "Transaction required for mutation\n" +
+                  "help: move mutations to handlers, or use computed() for read-only operations",
               );
             }
 
@@ -250,7 +251,8 @@ export function createQueryResultProxy<T>(
 
             if (!Array.isArray(newValue)) {
               throw new Error(
-                `Array is not an array anymore after ${prop} operation, it's now ${typeof newValue}`,
+                `Array operation failed - value is no longer an array after .${prop}() (now ${typeof newValue})\n` +
+                  `help: ensure cell schema specifies array type, check for concurrent modifications`,
               );
             }
 
@@ -294,7 +296,8 @@ export function createQueryResultProxy<T>(
 
       if (!tx) {
         throw new Error(
-          "Transaction required for changing query result proxy",
+          "Transaction required for mutation\n" +
+            "help: move mutations to handlers, or use computed() for read-only operations",
         );
       }
 

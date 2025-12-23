@@ -1,5 +1,5 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
-import { type Cell, getEntityId, NAME } from "@commontools/runner";
+import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
 import { type Mentionable, type MentionableArray } from "./mentionable.ts";
 
 /**
@@ -82,6 +82,7 @@ export class MentionController implements ReactiveController {
 
   // Mentionable items
   private _mentionable: Cell<MentionableArray> | null = null;
+  private _mentionableUnsubscribe: (() => void) | null = null;
 
   constructor(
     host: ReactiveControllerHost,
@@ -97,14 +98,26 @@ export class MentionController implements ReactiveController {
     host.addController(this);
   }
 
-  hostConnected(): void {}
-  hostDisconnected(): void {}
+  hostConnected(): void {
+    this._setupMentionableSubscription();
+  }
+
+  hostDisconnected(): void {
+    this._cleanupMentionableSubscription();
+  }
 
   /**
    * Set the mentionable items
    */
   setMentionable(mentionable: Cell<MentionableArray> | null): void {
+    // Clean up old subscription if it exists
+    this._cleanupMentionableSubscription();
+
     this._mentionable = mentionable;
+
+    // Set up new subscription
+    this._setupMentionableSubscription();
+
     this.host.requestUpdate();
   }
 
@@ -337,5 +350,33 @@ export class MentionController implements ReactiveController {
     }
 
     return mentions;
+  }
+
+  /**
+   * Set up Cell subscription for mentionable array.
+   * When the Cell's value changes, we need to re-render to show updated mentions.
+   * @private
+   */
+  private _setupMentionableSubscription(): void {
+    // Clean up any existing subscription first to prevent orphaned subscriptions
+    // (e.g., if setMentionable() was called before hostConnected())
+    this._cleanupMentionableSubscription();
+
+    if (isCell(this._mentionable)) {
+      this._mentionableUnsubscribe = this._mentionable.sink(() => {
+        this.host.requestUpdate();
+      });
+    }
+  }
+
+  /**
+   * Clean up Cell subscription for mentionable array.
+   * @private
+   */
+  private _cleanupMentionableSubscription(): void {
+    if (this._mentionableUnsubscribe) {
+      this._mentionableUnsubscribe();
+      this._mentionableUnsubscribe = null;
+    }
   }
 }

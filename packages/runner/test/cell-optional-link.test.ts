@@ -136,7 +136,7 @@ describe("Cell with Optional Link", () => {
       // Trying to get the cell value without a link should throw
       // Note: Now that we have a default frame with runtime, the error is about missing space
       expect(() => cell.get()).toThrow(
-        "Cannot create cell link: space is required.",
+        "Cannot create cell link - space required",
       );
     });
 

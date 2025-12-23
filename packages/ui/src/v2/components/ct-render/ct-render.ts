@@ -10,14 +10,40 @@ import "../ct-loader/ct-loader.ts";
 const DEBUG_LOGGING = false;
 
 /**
+ * UI variant types for rendering different representations of a charm.
+ * Each variant maps to a property name that patterns can export.
+ */
+export type UIVariant = "default" | "preview" | "thumbnail" | "sidebar" | "fab";
+
+/**
+ * Maps variant names to the property key to look for on the charm.
+ * null means use the default [UI] rendering via render().
+ */
+const VARIANT_TO_KEY: Record<UIVariant, string | null> = {
+  default: null,
+  preview: "previewUI",
+  thumbnail: "thumbnailUI",
+  sidebar: "sidebarUI",
+  fab: "fabUI",
+};
+
+/**
  * CTRender - Renders a cell that contains a charm recipe with UI
  *
  * @element ct-render
  *
  * @property {Cell} cell - The cell containing the charm to render
+ * @property {UIVariant} variant - UI variant to render: "default" | "preview" | "thumbnail" | "sidebar" | "fab"
+ *   Each variant maps to a property on the charm (e.g., "preview" -> "previewUI").
+ *   Falls back to default [UI] if the variant property doesn't exist.
  *
  * @example
+ * // Default rendering
  * <ct-render .cell=${myCharmCell}></ct-render>
+ *
+ * @example
+ * // Render preview variant (uses previewUI if available, falls back to [UI])
+ * <ct-render .cell=${myCharmCell} variant="preview"></ct-render>
  */
 export class CTRender extends BaseElement {
   static override styles = css`
@@ -43,9 +69,11 @@ export class CTRender extends BaseElement {
 
   static override properties = {
     cell: { attribute: false },
+    variant: { type: String },
   };
 
   declare cell: Cell;
+  declare variant: UIVariant | undefined;
 
   private _renderContainer?: HTMLDivElement;
   private _cleanup?: () => void;
@@ -95,21 +123,32 @@ export class CTRender extends BaseElement {
       Array.from(changedProperties.keys()),
     );
 
-    if (changedProperties.has("cell")) {
-      const oldCell = changedProperties.get("cell") as Cell | undefined;
+    const cellChanged = changedProperties.has("cell");
+    const variantChanged = changedProperties.has("variant");
 
-      // Only re-render if the cell actually changed
-      // Check if both cells exist and are equal, or if one doesn't exist
-      const shouldRerender = !oldCell || !this.cell ||
-        !oldCell.equals(this.cell);
+    if (cellChanged || variantChanged) {
+      let shouldRerender = false;
 
-      this._log("cell property changed, should rerender:", shouldRerender);
+      if (cellChanged) {
+        const oldCell = changedProperties.get("cell") as Cell | undefined;
+        // Only re-render if the cell actually changed
+        shouldRerender = !oldCell || !this.cell || !oldCell.equals(this.cell);
+        this._log("cell property changed, should rerender:", shouldRerender);
+      }
+
+      if (variantChanged) {
+        const oldVariant = changedProperties.get("variant") as
+          | UIVariant
+          | undefined;
+        if (oldVariant !== this.variant) {
+          shouldRerender = true;
+          this._log("variant changed:", oldVariant, "->", this.variant);
+        }
+      }
 
       if (shouldRerender) {
-        this._log("cells are different, calling _renderCell");
+        this._log("re-rendering due to cell or variant change");
         this._renderCell();
-      } else {
-        this._log("cells are equal, skipping _renderCell");
       }
     }
   }
@@ -149,8 +188,25 @@ export class CTRender extends BaseElement {
 
     await cell.sync();
 
+    // Resolve UI variant with fallback to default [UI]
+    let uiCell: Cell<unknown> = cell;
+
+    if (this.variant && this.variant !== "default") {
+      const variantKey = VARIANT_TO_KEY[this.variant];
+      if (variantKey) {
+        const variantCell = cell.key(variantKey);
+        const variantValue = variantCell?.get();
+        if (variantValue !== undefined && variantValue !== null) {
+          uiCell = variantCell;
+          this._log("using variant:", this.variant, "->", variantKey);
+        } else {
+          this._log("variant not found, falling back to [UI]:", this.variant);
+        }
+      }
+    }
+
     this._log("rendering UI");
-    this._cleanup = render(this._renderContainer, cell as Cell<VNode>);
+    this._cleanup = render(this._renderContainer, uiCell as Cell<VNode>);
   }
 
   private _isSubPath(cell: Cell<unknown>): boolean {

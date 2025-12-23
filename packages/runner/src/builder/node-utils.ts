@@ -14,7 +14,7 @@ export function connectInputAndOutputs(node: NodeRef) {
     if (isCell(value)) {
       if (value.export().frame !== node.frame) {
         throw new Error(
-          "Accessing an opaque ref via closure is not supported. Wrap the access in a derive that passes the variable through.",
+          "Reactive reference from outer scope cannot be accessed via closure. Wrap the access in a derive that passes the variable through, or use computed() which handles this automatically.",
         );
       }
       value.connect(node);

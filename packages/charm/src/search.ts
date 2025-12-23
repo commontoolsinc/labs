@@ -1,9 +1,5 @@
-import {
-  charmId,
-  CharmManager,
-  DEFAULT_MODEL,
-  nameSchema,
-} from "@commontools/charm";
+import { charmId, CharmManager, DEFAULT_MODEL } from "@commontools/charm";
+import { nameSchema } from "@commontools/runner/schemas";
 import { NAME } from "@commontools/runner";
 import { extractTextFromLLMResponse, LLMClient } from "@commontools/llm";
 import { Cell } from "@commontools/runner";

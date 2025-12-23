@@ -40,6 +40,8 @@ export * from "./components/ct-copy-button/index.ts";
 export * from "./components/ct-draggable/index.ts";
 export * from "./components/ct-drop-zone/index.ts";
 export * from "./components/ct-fab/index.ts";
+export * from "./components/ct-file-download/index.ts";
+export * from "./components/ct-file-input/index.ts";
 export * from "./components/ct-form/index.ts";
 export * from "./components/ct-fragment/index.ts";
 export * from "./components/ct-google-oauth/index.ts";

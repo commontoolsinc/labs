@@ -11,7 +11,8 @@ import {
   type Runtime,
   type RuntimeProgram,
 } from "@commontools/runner";
-import { CharmManager, charmSourceCellSchema } from "./manager.ts";
+import { CharmManager } from "./manager.ts";
+import { charmSourceCellSchema } from "@commontools/runner/schemas";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import {

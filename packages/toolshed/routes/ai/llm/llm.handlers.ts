@@ -40,7 +40,13 @@ function validateModelAndJsonMode(
   const model = modelString ? findModel(modelString) : null;
 
   if (!model) {
-    return c.json({ error: "Invalid model" }, HttpStatusCodes.BAD_REQUEST);
+    return c.json(
+      {
+        error:
+          `Unknown model '${modelString}'. GET /api/ai/llm/models for available models.`,
+      },
+      HttpStatusCodes.BAD_REQUEST,
+    );
   }
 
   // Validate JSON mode support if requested
@@ -114,7 +120,13 @@ export const getModels: AppRouteHandler<GetModelsRoute> = (c) => {
 export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   const payload = await c.req.json();
   if (!isLLMRequest(payload)) {
-    return c.json({ error: "Malformed request." }, HttpStatusCodes.BAD_REQUEST);
+    return c.json(
+      {
+        error:
+          "Invalid request: requires 'model' (string), 'messages' (array), and 'cache' (boolean)",
+      },
+      HttpStatusCodes.BAD_REQUEST,
+    );
   }
 
   if (!payload.metadata) {
@@ -278,8 +290,12 @@ export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (
   const payload = await c.req.json();
 
   if (!payload.messages || !payload.schema) {
+    const missing = [
+      !payload.messages && "'messages'",
+      !payload.schema && "'schema'",
+    ].filter(Boolean).join(" and ");
     return c.json(
-      { error: "Missing required fields: messages and schema" },
+      { error: `Missing required field(s): ${missing}` },
       HttpStatusCodes.BAD_REQUEST,
     );
   }

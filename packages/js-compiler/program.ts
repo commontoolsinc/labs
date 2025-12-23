@@ -1,6 +1,6 @@
 import { isDeno } from "@commontools/utils/env";
 import { ProgramResolver, Source } from "./interface.ts";
-import { dirname, join } from "@std/path/posix";
+import { dirname, join, normalize } from "@std/path/posix";
 
 export class InMemoryProgram implements ProgramResolver {
   private modules: Record<string, string>;
@@ -30,8 +30,13 @@ export class InMemoryProgram implements ProgramResolver {
 export class FileSystemProgramResolver implements ProgramResolver {
   private fsRoot: string;
   private _main: Source;
-  constructor(mainPath: string) {
-    this.fsRoot = dirname(mainPath);
+  constructor(mainPath: string, rootPath?: string) {
+    this.fsRoot = rootPath ? normalize(rootPath) : dirname(mainPath);
+    if (rootPath && !mainPath.startsWith(this.fsRoot)) {
+      throw new Error(
+        `Main file "${mainPath}" must be within root directory "${this.fsRoot}".`,
+      );
+    }
     this._main = {
       name: mainPath.substring(this.fsRoot.length),
       contents: this.#readFile(mainPath),
@@ -46,10 +51,15 @@ export class FileSystemProgramResolver implements ProgramResolver {
     if (!specifier || specifier[0] !== "/") {
       return Promise.resolve(undefined);
     }
-    const absPath = join(
-      this.fsRoot,
-      specifier.substring(1, specifier.length),
+    const absPath = normalize(
+      join(this.fsRoot, specifier.substring(1, specifier.length)),
     );
+    // Ensure the resolved path stays within fsRoot
+    if (!absPath.startsWith(this.fsRoot + "/") && absPath !== this.fsRoot) {
+      throw new Error(
+        `Import "${specifier}" resolves outside of root directory "${this.fsRoot}".`,
+      );
+    }
     return Promise.resolve({
       name: specifier,
       contents: this.#readFile(absPath),

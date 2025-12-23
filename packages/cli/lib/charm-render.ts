@@ -1,5 +1,6 @@
-import { render, vdomSchema, VNode } from "@commontools/html";
+import { render, VNode } from "@commontools/html";
 import { Cell, UI } from "@commontools/runner";
+import { vdomSchema } from "@commontools/runner/schemas";
 import { loadManager } from "./charm.ts";
 import { CharmsController } from "@commontools/charm/ops";
 import type { CharmConfig } from "./charm.ts";

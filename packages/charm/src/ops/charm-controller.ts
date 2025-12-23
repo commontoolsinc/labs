@@ -6,12 +6,8 @@ import {
   RuntimeProgram,
   TYPE,
 } from "@commontools/runner";
-import {
-  charmId,
-  CharmManager,
-  nameSchema,
-  processSchema,
-} from "../manager.ts";
+import { charmId, CharmManager } from "../manager.ts";
+import { nameSchema, processSchema } from "@commontools/runner/schemas";
 import { CellPath, compileProgram, resolveCellPath } from "./utils.ts";
 import { injectUserCode } from "../iframe/static.ts";
 import {
