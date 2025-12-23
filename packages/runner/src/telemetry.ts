@@ -31,6 +31,7 @@ export interface SchedulerGraphEdge {
   from: string; // action.name of source
   to: string; // action.name of target
   cells: string[]; // Cell IDs creating this dependency
+  edgeType?: "data" | "parent"; // data = dependency, parent = parent-child relationship
 }
 
 export interface SchedulerGraphSnapshot {

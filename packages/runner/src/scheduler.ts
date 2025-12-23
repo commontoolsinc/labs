@@ -937,7 +937,9 @@ export class Scheduler {
 
       // Get reads and writes for diagnostics
       const deps = this.dependencies.get(action);
-      const reads = deps?.reads.map((r) => `${r.space}/${r.id}/${r.path.join("/")}`);
+      const reads = deps?.reads.map((r) =>
+        `${r.space}/${r.id}/${r.path.join("/")}`
+      );
       const writes = this.mightWrite.get(action)?.map((w) =>
         `${w.space}/${w.id}/${w.path.join("/")}`
       );
@@ -1016,6 +1018,24 @@ export class Scheduler {
             from: inputId,
             to: readerId,
             cells: [entity],
+          });
+        }
+      }
+    }
+
+    // Add parent-child edges
+    for (const action of [...this.effects, ...this.computations]) {
+      const parent = this.actionParent.get(action);
+      if (parent) {
+        const parentId = getActionId(parent);
+        const childId = getActionId(action);
+        // Only add if both nodes exist in the graph
+        if (actionById.has(parentId)) {
+          edges.push({
+            from: parentId,
+            to: childId,
+            cells: [],
+            edgeType: "parent",
           });
         }
       }
