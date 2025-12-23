@@ -259,7 +259,7 @@ type LLMTestResult = {
 };
 ```
 
-## `scrabble.tsx`
+## `scrabble/scrabble.tsx`
 
 Free-for-all multiplayer Scrabble game with lobby, tile bag, game board, and
 scoring. Two players can join and play simultaneously.
