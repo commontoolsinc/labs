@@ -602,6 +602,49 @@ type Output = {
 };
 ```
 
+## `notebook.tsx`
+
+Notebook pattern for organizing notes with multi-select, visibility controls, and
+LLM-callable streams. Supports creating notes, bulk operations, moving/adding notes
+between notebooks, and omnibot integration.
+
+**Keywords:** notebook, notes, organization, wish, navigateTo, llm-streams
+
+### Input Schema
+
+```ts
+type NoteCharm = {
+  title?: string;
+  content?: string;
+  isHidden?: boolean;
+  noteId?: string;
+};
+
+interface Input {
+  title?: Default<string, "Notebook">;
+  notes?: Default<NoteCharm[], []>;
+  isNotebook?: Default<boolean, true>;
+}
+```
+
+### Output Schema
+
+```ts
+interface Output {
+  title: string;
+  notes: NoteCharm[];
+  noteCount: number;
+  isNotebook: boolean;
+  createNote: Stream<{ title: string; content: string }>;
+  createNotes: Stream<{ notesData: Array<{ title: string; content: string }> }>;
+  setTitle: Stream<{ newTitle: string }>;
+  createNotebook: Stream<{
+    title: string;
+    notesData?: Array<{ title: string; content: string }>;
+  }>;
+}
+```
+
 ## `record.tsx`
 
 Flexible container pattern for structured records with composable field modules.
