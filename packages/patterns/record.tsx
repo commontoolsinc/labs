@@ -229,7 +229,9 @@ const togglePin = handler<
 >((_event, { subCharms: sc, entry }) => {
   const current = sc.get() || [];
   // Find by reference using charm identity
-  const index = current.findIndex((e) => e?.charm === entry?.charm);
+  const index = current.findIndex((e) =>
+    Cell.equals(e?.charm as object, entry?.charm as object)
+  );
   if (index < 0) return;
 
   const updated = [...current];
@@ -244,7 +246,9 @@ const toggleCollapsed = handler<
 >((_event, { subCharms: sc, entry }) => {
   const current = sc.get() || [];
   // Find by reference using charm identity
-  const index = current.findIndex((e) => e?.charm === entry?.charm);
+  const index = current.findIndex((e) =>
+    Cell.equals(e?.charm as object, entry?.charm as object)
+  );
   if (index < 0) return;
 
   const updated = [...current];
@@ -361,6 +365,67 @@ const emptyTrash = handler<
   trash.set([]);
 });
 
+// Open the note editor modal for a module
+const openNoteEditor = handler<
+  unknown,
+  {
+    subCharms: Cell<SubCharmEntry[]>;
+    editingNoteIndex: Cell<number | undefined>;
+    editingNoteText: Cell<string | undefined>;
+    entry: SubCharmEntry;
+  }
+>((_event, { subCharms, editingNoteIndex, editingNoteText, entry }) => {
+  if (!entry) return;
+  // Find the index of this entry in subCharms
+  const current = subCharms.get() || [];
+  const index = current.findIndex((e) =>
+    Cell.equals(e?.charm as object, entry?.charm as object)
+  );
+  if (index < 0) return;
+  editingNoteIndex.set(index);
+  editingNoteText.set(entry.note || "");
+});
+
+// Save the note and close the modal
+const saveNote = handler<
+  unknown,
+  {
+    subCharms: Cell<SubCharmEntry[]>;
+    editingNoteIndex: Cell<number | undefined>;
+    editingNoteText: Cell<string | undefined>;
+  }
+>((_event, { subCharms: sc, editingNoteIndex, editingNoteText }) => {
+  const index = editingNoteIndex.get();
+  const noteValue = (editingNoteText.get() || "").trim();
+
+  // Close modal FIRST before any other operations
+  editingNoteIndex.set(undefined);
+  editingNoteText.set(undefined);
+
+  // Validate we have an index to save
+  if (index === undefined || index < 0) return;
+
+  const current = sc.get() || [];
+  if (index >= current.length) return;
+
+  const originalEntry = current[index];
+  const updated = [...current];
+  updated[index] = { ...originalEntry, note: noteValue || undefined };
+  sc.set(updated);
+});
+
+// Close the note editor without saving
+const closeNoteEditor = handler<
+  unknown,
+  {
+    editingNoteIndex: Cell<number | undefined>;
+    editingNoteText: Cell<string | undefined>;
+  }
+>((_event, { editingNoteIndex, editingNoteText }) => {
+  editingNoteIndex.set(undefined);
+  editingNoteText.set(undefined);
+});
+
 // Toggle trash section expanded/collapsed
 const toggleTrashExpanded = handler<unknown, { expanded: Cell<boolean> }>(
   (_event, { expanded }) => expanded.set(!expanded.get()),
@@ -373,7 +438,9 @@ const createSibling = handler<
   { subCharms: Cell<SubCharmEntry[]>; entry: SubCharmEntry }
 >((_event, { subCharms: sc, entry }) => {
   const current = sc.get() || [];
-  const currentIndex = current.findIndex((e) => e?.charm === entry?.charm);
+  const currentIndex = current.findIndex((e) =>
+    Cell.equals(e?.charm as object, entry?.charm as object)
+  );
   if (currentIndex < 0) return;
 
   // Get smart default label
@@ -400,6 +467,19 @@ const Record = pattern<RecordInput, RecordOutput>(
     // Local state
     const selectedAddType = Cell.of<string>("");
     const trashExpanded = Cell.of(false);
+
+    // Note editor modal state
+    // NOTE: In the future, this should use a <ct-modal> component instead of inline implementation.
+    // A ct-modal component would follow the ct-fab pattern:
+    //   <ct-modal $open={isOpen} onct-modal-close={handleClose}>
+    //     <content />
+    //   </ct-modal>
+    // With features: backdrop blur, escape key, focus trap, centered positioning, animations
+    // IMPORTANT: Don't use Cell.of(null) - it creates a cell pointing to null, not primitive null.
+    // Use Cell.of() without argument so .get() returns undefined (falsy) initially.
+    // We store the INDEX instead of the entry to decouple modal state from array updates.
+    const editingNoteIndex = Cell.of<number | undefined>();
+    const editingNoteText = Cell.of<string>();
 
     // Create Record pattern JSON for wiki-links in Notes
     // Using computed() defers evaluation until render time, avoiding circular dependency
@@ -726,6 +806,30 @@ const Record = pattern<RecordInput, RecordOutput>(
                               )}
                               <button
                                 type="button"
+                                onClick={openNoteEditor({
+                                  subCharms,
+                                  editingNoteIndex,
+                                  editingNoteText,
+                                  entry,
+                                })}
+                                style={computed(() => ({
+                                  background: "transparent",
+                                  border: "1px solid #e5e7eb",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                  padding: "4px 8px",
+                                  fontSize: "12px",
+                                  color: "#6b7280",
+                                  fontWeight: entry?.note ? "700" : "400",
+                                }))}
+                                title={computed(() =>
+                                  entry?.note || "Add note..."
+                                )}
+                              >
+                                📝
+                              </button>
+                              <button
+                                type="button"
                                 onClick={togglePin({ subCharms, entry })}
                                 style={{
                                   background: "#e0f2fe",
@@ -893,6 +997,30 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 )}
                                 <button
                                   type="button"
+                                  onClick={openNoteEditor({
+                                    subCharms,
+                                    editingNoteIndex,
+                                    editingNoteText,
+                                    entry,
+                                  })}
+                                  style={computed(() => ({
+                                    background: "transparent",
+                                    border: "1px solid #e5e7eb",
+                                    borderRadius: "4px",
+                                    cursor: "pointer",
+                                    padding: "4px 8px",
+                                    fontSize: "12px",
+                                    color: "#6b7280",
+                                    fontWeight: entry?.note ? "700" : "400",
+                                  }))}
+                                  title={computed(() =>
+                                    entry?.note || "Add note..."
+                                  )}
+                                >
+                                  📝
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={togglePin({ subCharms, entry })}
                                   style={{
                                     background: "transparent",
@@ -1055,6 +1183,30 @@ const Record = pattern<RecordInput, RecordOutput>(
                               </button>,
                               null,
                             )}
+                            <button
+                              type="button"
+                              onClick={openNoteEditor({
+                                subCharms,
+                                editingNoteIndex,
+                                editingNoteText,
+                                entry,
+                              })}
+                              style={computed(() => ({
+                                background: "transparent",
+                                border: "1px solid #e5e7eb",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                                padding: "4px 8px",
+                                fontSize: "12px",
+                                color: "#6b7280",
+                                fontWeight: entry?.note ? "700" : "400",
+                              }))}
+                              title={computed(() =>
+                                entry?.note || "Add note..."
+                              )}
+                            >
+                              📝
+                            </button>
                             <button
                               type="button"
                               onClick={togglePin({ subCharms, entry })}
@@ -1254,6 +1406,184 @@ const Record = pattern<RecordInput, RecordOutput>(
               null,
             )}
           </div>
+
+          {
+            /*
+             * Note Editor Modal
+             * NOTE: Replace with <ct-modal> component when available.
+             * Future ct-modal API would be:
+             *   <ct-modal
+             *     $open={editingNoteIndex}
+             *     onct-modal-close={closeNoteEditor({...})}
+             *     backdrop="blur"
+             *   >
+             *     <content />
+             *   </ct-modal>
+             *
+             * Component should include:
+             * - Backdrop with blur effect (backdrop-filter: blur(8px))
+             * - Fixed centering with z-index 1001
+             * - Escape key support (document listener)
+             * - Focus trap for accessibility
+             * - Smooth fade/scale animations
+             * - Click-outside-to-close behavior
+             */
+          }
+          {ifElse(
+            computed(() => editingNoteIndex.get() !== undefined),
+            <div>
+              {/* Backdrop with blur */}
+              <div
+                onClick={closeNoteEditor({ editingNoteIndex, editingNoteText })}
+                style={{
+                  position: "fixed",
+                  inset: "0",
+                  backgroundColor: "rgba(0, 0, 0, 0.4)",
+                  backdropFilter: "blur(8px)",
+                  zIndex: "1000",
+                }}
+              />
+              {/* Modal content */}
+              <div
+                style={{
+                  position: "fixed",
+                  top: "50%",
+                  left: "50%",
+                  transform: "translate(-50%, -50%)",
+                  zIndex: "1001",
+                  width: "90%",
+                  maxWidth: "500px",
+                  background: "white",
+                  borderRadius: "12px",
+                  boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+                  overflow: "hidden",
+                }}
+              >
+                {/* Header */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "16px 20px",
+                    borderBottom: "1px solid #e5e7eb",
+                    background: "#fafafa",
+                  }}
+                >
+                  <span style={{ fontWeight: "600", fontSize: "16px" }}>
+                    📝 Module Note
+                  </span>
+                  <button
+                    type="button"
+                    onClick={closeNoteEditor({
+                      editingNoteIndex,
+                      editingNoteText,
+                    })}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: "4px 8px",
+                      fontSize: "18px",
+                      color: "#6b7280",
+                    }}
+                    title="Close"
+                  >
+                    ✕
+                  </button>
+                </div>
+                {/* Content */}
+                <div style={{ padding: "20px" }}>
+                  <ct-textarea
+                    $value={editingNoteText}
+                    placeholder="Add notes about this module... (visible to LLM reads)"
+                    rows={6}
+                    style={{ width: "100%", resize: "vertical" }}
+                  />
+                  {/* Keyboard shortcuts for modal */}
+                  <ct-keybind
+                    code="Escape"
+                    ignore-editable={false}
+                    onct-keybind={closeNoteEditor({
+                      editingNoteIndex,
+                      editingNoteText,
+                    })}
+                  />
+                  <ct-keybind
+                    code="Enter"
+                    meta
+                    ignore-editable={false}
+                    onct-keybind={saveNote({
+                      subCharms,
+                      editingNoteIndex,
+                      editingNoteText,
+                    })}
+                  />
+                  <ct-keybind
+                    code="Enter"
+                    ctrl
+                    ignore-editable={false}
+                    onct-keybind={saveNote({
+                      subCharms,
+                      editingNoteIndex,
+                      editingNoteText,
+                    })}
+                  />
+                </div>
+                {/* Footer */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: "12px",
+                    padding: "16px 20px",
+                    borderTop: "1px solid #e5e7eb",
+                    background: "#fafafa",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={closeNoteEditor({
+                      editingNoteIndex,
+                      editingNoteText,
+                    })}
+                    style={{
+                      background: "transparent",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      padding: "8px 16px",
+                      fontSize: "14px",
+                      color: "#6b7280",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveNote({
+                      subCharms,
+                      editingNoteIndex,
+                      editingNoteText,
+                    })}
+                    style={{
+                      background: "#3b82f6",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      padding: "8px 16px",
+                      fontSize: "14px",
+                      color: "white",
+                      fontWeight: "500",
+                    }}
+                  >
+                    Save Note
+                  </button>
+                </div>
+              </div>
+            </div>,
+            null,
+          )}
         </ct-vstack>
       ),
       title,
