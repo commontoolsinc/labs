@@ -365,11 +365,12 @@ const emptyTrash = handler<
 const openNoteEditor = handler<
   unknown,
   {
-    editingNoteEntry: Cell<SubCharmEntry | null>;
-    editingNoteText: Cell<string>;
+    editingNoteEntry: Cell<SubCharmEntry | undefined>;
+    editingNoteText: Cell<string | undefined>;
     entry: SubCharmEntry;
   }
 >((_event, { editingNoteEntry, editingNoteText, entry }) => {
+  if (!entry) return;
   editingNoteEntry.set(entry);
   editingNoteText.set(entry.note || "");
 });
@@ -379,36 +380,44 @@ const saveNote = handler<
   unknown,
   {
     subCharms: Cell<SubCharmEntry[]>;
-    editingNoteEntry: Cell<SubCharmEntry | null>;
-    editingNoteText: Cell<string>;
+    editingNoteEntry: Cell<SubCharmEntry | undefined>;
+    editingNoteText: Cell<string | undefined>;
   }
 >((_event, { subCharms: sc, editingNoteEntry, editingNoteText }) => {
   const entry = editingNoteEntry.get();
-  if (!entry) return;
+  const noteValue = (editingNoteText.get() || "").trim();
+
+  // Always close the modal first
+  editingNoteEntry.set(undefined);
+  editingNoteText.set(undefined);
+
+  // Then save if we have a valid entry
+  if (!entry?.charm) return;
 
   const current = sc.get() || [];
-  const index = current.findIndex((e) => e?.charm === entry?.charm);
+  // Use Cell.equals for proper identity comparison across link aliases
+  const index = current.findIndex(
+    (e) =>
+      e?.charm &&
+      Cell.equals(entry.charm as Cell<unknown>, e.charm as Cell<unknown>),
+  );
   if (index >= 0) {
     const updated = [...current];
-    const noteValue = editingNoteText.get().trim();
-    updated[index] = { ...entry, note: noteValue || undefined };
+    updated[index] = { ...current[index], note: noteValue || undefined };
     sc.set(updated);
   }
-
-  editingNoteEntry.set(null);
-  editingNoteText.set("");
 });
 
 // Close the note editor without saving
 const closeNoteEditor = handler<
   unknown,
   {
-    editingNoteEntry: Cell<SubCharmEntry | null>;
-    editingNoteText: Cell<string>;
+    editingNoteEntry: Cell<SubCharmEntry | undefined>;
+    editingNoteText: Cell<string | undefined>;
   }
 >((_event, { editingNoteEntry, editingNoteText }) => {
-  editingNoteEntry.set(null);
-  editingNoteText.set("");
+  editingNoteEntry.set(undefined);
+  editingNoteText.set(undefined);
 });
 
 // Toggle trash section expanded/collapsed
@@ -458,8 +467,10 @@ const Record = pattern<RecordInput, RecordOutput>(
     //     <content />
     //   </ct-modal>
     // With features: backdrop blur, escape key, focus trap, centered positioning, animations
-    const editingNoteEntry = Cell.of<SubCharmEntry | null>(null);
-    const editingNoteText = Cell.of<string>("");
+    // IMPORTANT: Don't use Cell.of(null) - it creates a cell pointing to null, not primitive null.
+    // Use Cell.of() without argument so .get() returns undefined (falsy) initially.
+    const editingNoteEntry = Cell.of<SubCharmEntry | undefined>();
+    const editingNoteText = Cell.of<string>();
 
     // Create Record pattern JSON for wiki-links in Notes
     // Using computed() defers evaluation until render time, avoiding circular dependency
@@ -799,10 +810,10 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   padding: "4px 8px",
                                   fontSize: "12px",
                                   color: "#6b7280",
-                                  fontWeight: entry.note ? "700" : "400",
+                                  fontWeight: entry?.note ? "700" : "400",
                                 }))}
                                 title={computed(() =>
-                                  entry.note || "Add note..."
+                                  entry?.note || "Add note..."
                                 )}
                               >
                                 📝
@@ -989,10 +1000,10 @@ const Record = pattern<RecordInput, RecordOutput>(
                                     padding: "4px 8px",
                                     fontSize: "12px",
                                     color: "#6b7280",
-                                    fontWeight: entry.note ? "700" : "400",
+                                    fontWeight: entry?.note ? "700" : "400",
                                   }))}
                                   title={computed(() =>
-                                    entry.note || "Add note..."
+                                    entry?.note || "Add note..."
                                   )}
                                 >
                                   📝
@@ -1176,10 +1187,10 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 padding: "4px 8px",
                                 fontSize: "12px",
                                 color: "#6b7280",
-                                fontWeight: entry.note ? "700" : "400",
+                                fontWeight: entry?.note ? "700" : "400",
                               }))}
                               title={computed(() =>
-                                entry.note || "Add note..."
+                                entry?.note || "Add note..."
                               )}
                             >
                               📝
@@ -1407,7 +1418,7 @@ const Record = pattern<RecordInput, RecordOutput>(
              */
           }
           {ifElse(
-            computed(() => editingNoteEntry.get() !== null),
+            computed(() => !!editingNoteEntry.get()),
             <div>
               {/* Backdrop with blur */}
               <div
