@@ -32,7 +32,7 @@ import {
 } from "./record/registry.ts";
 // Import Note directly - we create it inline with proper linkPattern
 // (avoids global state for passing Record's pattern JSON)
-import Note from "./note.tsx";
+import Note from "./notes/note.tsx";
 import { inferTypeFromModules } from "./record/template-registry.ts";
 import { TypePickerModule } from "./type-picker.tsx";
 import { ExtractorModule } from "./record/extraction/extractor-module.tsx";

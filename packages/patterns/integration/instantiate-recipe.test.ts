@@ -32,6 +32,7 @@ describe("instantiate-recipe integration test", () => {
         join(
           import.meta.dirname!,
           "..",
+          "examples",
           "instantiate-recipe.tsx",
         ),
       ),

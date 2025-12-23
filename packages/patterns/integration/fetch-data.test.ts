@@ -36,6 +36,7 @@ describe("fetch data integration test", () => {
           join(
             import.meta.dirname!,
             "..",
+            "examples",
             "fetch-data.tsx",
           ),
         ),

@@ -792,7 +792,7 @@ export function validateAndTransform(
       // cell.set(array);
       // ```
       // work as expected. Handle boolean items values for element schema
-      const maybeLink = parseLink(value[i], link);
+      const maybeLink = parseLink(value[i], ref);
       if (maybeLink) {
         elementLink = {
           ...maybeLink,
@@ -815,11 +815,11 @@ export function validateAndTransform(
               ))))
       ) {
         elementLink = {
-          id: createDataCellURI(value[i], link),
+          id: createDataCellURI(value[i], ref),
           path: [],
           schema: elementSchema,
           rootSchema: elementLink.rootSchema,
-          space: link.space,
+          space: ref.space,
           type: "application/json",
         } satisfies NormalizedFullLink;
       }

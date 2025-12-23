@@ -78,12 +78,10 @@ export class FileSystemProgramResolver implements ProgramResolver {
 
 // Resolve a program from HTTP.
 export class HttpProgramResolver implements ProgramResolver {
-  #httpRoot: string;
   #mainUrl: URL;
   #main?: Promise<Source>;
   constructor(main: string | URL) {
     this.#mainUrl = !(main instanceof URL) ? new URL(main) : main;
-    this.#httpRoot = dirname(this.#mainUrl.pathname);
   }
 
   main(): Promise<Source> {
@@ -98,18 +96,20 @@ export class HttpProgramResolver implements ProgramResolver {
       return Promise.resolve(undefined);
     }
     const url = new URL(this.#mainUrl);
-    url.pathname = join(
-      this.#httpRoot,
-      specifier.substring(1, specifier.length),
-    );
+    url.pathname = normalize(specifier);
     return this.#fetch(url);
   }
 
   async #fetch(url: URL): Promise<Source> {
     const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(
+        `Failed to fetch ${url}: ${res.status} ${res.statusText}`,
+      );
+    }
     const contents = await res.text();
     return {
-      name: url.pathname.substring(this.#httpRoot.length),
+      name: url.pathname,
       contents,
     };
   }

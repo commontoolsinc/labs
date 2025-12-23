@@ -10,7 +10,7 @@ import {
   toSchema,
   UI,
 } from "commontools";
-import { readWebpage, searchWeb } from "./common-tools.tsx";
+import { readWebpage, searchWeb } from "./system/common-tools.tsx";
 
 type ResearchResult = {
   /** Concise answer to the research question */

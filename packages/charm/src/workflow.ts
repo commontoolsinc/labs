@@ -2,56 +2,32 @@
  * Workflow module - Contains the core workflow processing pipeline for charm operations
  *
  * This module defines:
- * 1. Workflow types (Fix, Edit, Imagine, Cast-spell)
+ * 1. Workflow types (Fix, Edit, Imagine)
  * 2. Classification process
  * 3. Plan generation pipeline
  * 4. Schema and specification generation
  * 5. Workflow steps and execution
- * 6. Spell search and casting
  */
 
 import { Cell, type JSONSchema, NAME, Runtime } from "@commontools/runner";
-import { charmId, CharmManager } from "./manager.ts";
+import { CharmManager } from "./manager.ts";
 import { classifyWorkflow, generateWorkflowPlan } from "@commontools/llm";
 import { iterate } from "./iterate.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode } from "./iframe/static.ts";
 import { formatPromptWithMentions } from "./format.ts";
 import { castNewRecipe } from "./iterate.ts";
-import { VNode } from "@commontools/html";
 import { applyDefaults, GenerationOptions } from "@commontools/llm";
 import { CharmSearchResult, searchCharms } from "./search.ts";
 import { console } from "./conditional-console.ts";
-import { isObject, isRecord } from "@commontools/utils/types";
-
-export interface RecipeRecord {
-  argumentSchema: JSONSchema; // Schema type from jsonschema
-  resultSchema: JSONSchema; // Schema type from jsonschema
-  result: {
-    $NAME?: string;
-    $UI?: VNode;
-  };
-  initial?: unknown;
-}
-
-export interface SpellRecord {
-  recipe: RecipeRecord;
-  spec: string;
-  src: string;
-  recipeName?: string;
-  spellbookTitle?: string;
-  spellbookTags?: string[];
-  blobAuthor?: string;
-  blobCreatedAt?: string;
-}
+import { isRecord } from "@commontools/utils/types";
 
 // Types for workflow classification
 export type WorkflowType =
   | "fix"
   | "edit"
   | "imagine"
-  | "imagine-single-phase"
-  | "cast-spell";
+  | "imagine-single-phase";
 
 // Configuration for each workflow type
 export interface WorkflowConfig {
@@ -94,14 +70,6 @@ export const WORKFLOWS: Record<WorkflowType, WorkflowConfig> = {
     name: "imagine-single-phase",
     label: "IMAGINE (SINGLE PHASE)",
     description: "IN DEVELOPMENT",
-    updateSpec: true,
-    updateSchema: true,
-    allowsDataReferences: true,
-  },
-  "cast-spell": {
-    name: "cast-spell",
-    label: "CAST",
-    description: "Cast a spell from the spellbook",
     updateSpec: true,
     updateSchema: true,
     allowsDataReferences: true,
@@ -176,30 +144,14 @@ export async function classifyIntent(
     _existingCode = code;
   }
 
-  // Keyword detection for casting a spell
-  if (
-    form.meta.permittedWorkflows &&
-    form.meta.permittedWorkflows.includes("cast-spell")
-  ) {
-    if (!existingSpec || !existingSchema) {
-      if (
-        form.input.processedInput.toLowerCase().indexOf("spell") !== -1 &&
-        form.input.processedInput.toLowerCase().indexOf("cast") !== -1
-      ) {
-        return {
-          workflowType: "cast-spell",
-          confidence: 1.0,
-          reasoning: "You mentioned casting spells!",
-        };
-      }
-
-      return {
-        workflowType: "imagine",
-        confidence: 1.0,
-        reasoning:
-          "Automatically classified as 'imagine' because there is nothing to refer to (either no current charm or no iframe recipe).",
-      };
-    }
+  // If no existing spec/schema, default to imagine workflow
+  if (!existingSpec || !existingSchema) {
+    return {
+      workflowType: "imagine",
+      confidence: 1.0,
+      reasoning:
+        "Automatically classified as 'imagine' because there is nothing to refer to (either no current charm or no iframe recipe).",
+    };
   }
 
   const result = await classifyWorkflow(form);
@@ -324,18 +276,6 @@ export interface WorkflowForm {
     charm: Cell<unknown>;
   } | null;
 
-  searchResults: {
-    castable: Record<
-      string,
-      { id: string; spell: SpellRecord; similarity: number }[]
-    >;
-  } | null;
-
-  spellToCast: {
-    charmId: string;
-    spellId: string;
-  } | null;
-
   // Metadata and workflow state
   meta: {
     charmManager: CharmManager;
@@ -389,8 +329,6 @@ export function createWorkflowForm(
     classification: null,
     plan: null,
     generation: null,
-    searchResults: null,
-    spellToCast: null,
     meta: {
       isComplete: false,
       model,
@@ -680,145 +618,6 @@ export async function processWorkflow(
     }
 
     checkCancellation();
-
-    // Spell search flow, TODO(bf): extract
-    if (form.classification?.workflowType === "cast-spell") {
-      if (form.searchResults && form.spellToCast) {
-        globalThis.dispatchEvent(
-          new CustomEvent("job-update", {
-            detail: {
-              type: "job-update",
-              jobId: form.meta.generationId,
-              title: form.input.processedInput,
-              status: `Fetching ingredients...`,
-            },
-          }),
-        );
-        const charm = await charmManager.get(form.spellToCast.charmId);
-
-        if (!charm) {
-          throw new Error("No charm found for id: " + form.spellToCast.charmId);
-        }
-
-        const recipe = await charmManager.syncRecipeById(
-          form.spellToCast.spellId,
-        );
-
-        if (!recipe) {
-          throw new Error(
-            "No recipe found for the spell: " + form.spellToCast.spellId,
-          );
-        }
-
-        globalThis.dispatchEvent(
-          new CustomEvent("job-update", {
-            detail: {
-              type: "job-update",
-              jobId: form.meta.generationId,
-              title: form.input.processedInput,
-              status: `Casting spell...`,
-            },
-          }),
-        );
-        const newCharm = await charmManager.runPersistent(
-          recipe,
-          charm,
-        );
-
-        globalThis.dispatchEvent(
-          new CustomEvent("job-complete", {
-            detail: {
-              type: "job-complete",
-              jobId: form.meta.generationId,
-              title: form.input.processedInput,
-              result: newCharm,
-              status: `Charm created!`,
-            },
-          }),
-        );
-
-        form.generation = {
-          charm: newCharm,
-        };
-
-        return form;
-      } else {
-        const schemas: JSONSchema[] = [];
-        const refs = Object.values(form.input.references);
-
-        if (refs.length === 0) {
-          throw new Error("No references found");
-        }
-
-        refs.forEach((cell) => {
-          const schema = cell.schema;
-          if (schema) {
-            schemas.push(schema);
-          }
-        });
-
-        const castable: Record<
-          string,
-          { id: string; spell: SpellRecord; similarity: number }[]
-        > = {};
-
-        globalThis.dispatchEvent(
-          new CustomEvent("job-update", {
-            detail: {
-              type: "job-update",
-              jobId: form.meta.generationId,
-              title: form.input.processedInput,
-              status: `Searching for spells...`,
-            },
-          }),
-        );
-
-        for (const [_key, charm] of Object.entries(form.input.references)) {
-          // if we have a boolean schema, we can't really search with it, so
-          // just treat that the same as undefined
-          // I'm just passing the properties, since that's how it was built,
-          // but it's a slightly odd api.
-          const schemaProperties = isObject(charm.schema)
-            ? charm.schema.properties
-            : undefined;
-          const id = charmId(charm as Cell<unknown>);
-          if (!id) continue;
-
-          castable[id] = [];
-          const response = await fetch("/api/ai/spell/find-by-schema", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              schemaProperties,
-            }),
-          });
-
-          const result = await response.json();
-          for (const spell of result.argument) {
-            castable[id].push(spell);
-          }
-        }
-
-        form.searchResults = {
-          castable,
-        };
-
-        globalThis.dispatchEvent(
-          new CustomEvent("job-complete", {
-            detail: {
-              type: "job-complete",
-              jobId: form.meta.generationId,
-              title: form.input.processedInput,
-              status: `Found ${Object.keys(castable).length} results!`,
-            },
-          }),
-        );
-
-        return form;
-      }
-    }
 
     // Step 3: Planning if not already planned
     if (!form.plan) {

@@ -48,7 +48,7 @@ interface Output {
 }
 ```
 
-## `note.tsx`
+## `notes/note.tsx`
 
 A note demo.
 
@@ -164,7 +164,7 @@ type ChatOutput = {
 };
 ```
 
-## `voice-note.tsx`
+## `notes/voice-note.tsx`
 
 Record voice notes with automatic transcription and note history. Hold the
 microphone button to record, release to transcribe.
@@ -259,7 +259,7 @@ type LLMTestResult = {
 };
 ```
 
-## `scrabble.tsx`
+## `scrabble/scrabble.tsx`
 
 Free-for-all multiplayer Scrabble game with lobby, tile bag, game board, and
 scoring. Two players can join and play simultaneously.
@@ -296,7 +296,7 @@ interface LobbyOutput {
 }
 ```
 
-## `favorites-manager.tsx`
+## `system/favorites-manager.tsx`
 
 View and manage favorited charms with tags. Uses the wish system to query
 `#favorites` and allows removing items.
@@ -316,7 +316,7 @@ type Input = Record<string, never>;
 // Displays favorited charms with remove functionality
 ```
 
-## `contact-book.tsx`
+## `contacts/contact-book.tsx`
 
 Manage contacts with search, notes, and relationships between contacts. Contacts
 can be linked together with labels (friend, spouse, colleague, etc.).
@@ -464,7 +464,7 @@ interface Output {
 }
 ```
 
-## `contact-detail.tsx`
+## `contacts/contact-detail.tsx`
 
 Detail/edit view for a single contact. Use with `navigateTo()` from contact-book
 or as a standalone contact editor.
@@ -600,6 +600,49 @@ type Output = {
   pending: boolean;
   error: string | undefined;
 };
+```
+
+## `notebook.tsx`
+
+Notebook pattern for organizing notes with multi-select, visibility controls,
+and LLM-callable streams. Supports creating notes, bulk operations,
+moving/adding notes between notebooks, and omnibot integration.
+
+**Keywords:** notebook, notes, organization, wish, navigateTo, llm-streams
+
+### Input Schema
+
+```ts
+type NoteCharm = {
+  title?: string;
+  content?: string;
+  isHidden?: boolean;
+  noteId?: string;
+};
+
+interface Input {
+  title?: Default<string, "Notebook">;
+  notes?: Default<NoteCharm[], []>;
+  isNotebook?: Default<boolean, true>;
+}
+```
+
+### Output Schema
+
+```ts
+interface Output {
+  title: string;
+  notes: NoteCharm[];
+  noteCount: number;
+  isNotebook: boolean;
+  createNote: Stream<{ title: string; content: string }>;
+  createNotes: Stream<{ notesData: Array<{ title: string; content: string }> }>;
+  setTitle: Stream<{ newTitle: string }>;
+  createNotebook: Stream<{
+    title: string;
+    notesData?: Array<{ title: string; content: string }>;
+  }>;
+}
 ```
 
 ## `record.tsx`

@@ -15,8 +15,8 @@ import {
   wish,
 } from "commontools";
 
-import Chat from "./chatbot.tsx";
-import { MentionableCharm } from "./backlinks-index.tsx";
+import Chat from "../chatbot.tsx";
+import { MentionableCharm } from "../system/backlinks-index.tsx";
 
 type Charm = any;
 
