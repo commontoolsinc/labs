@@ -80,7 +80,7 @@ describe("RecipeManager program persistence", () => {
     const result = runtime.run(tx, loaded, { value: 3 }, resultCell);
     await tx.commit();
     tx = runtime.edit();
-    await runtime.idle();
+    await result.pull();
     expect(result.getAsQueryResult()).toEqual({ result: 6 });
   });
 

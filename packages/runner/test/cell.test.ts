@@ -39,7 +39,6 @@ describe("Cell", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-
     tx = runtime.edit();
   });
 
@@ -258,10 +257,10 @@ describe("Cell", () => {
     const resultCell = runtime.getCell(space, "doubling recipe instance");
     runtime.setup(undefined, doubleRecipe, { input: 5 }, resultCell);
     runtime.start(resultCell);
-    await runtime.idle();
 
-    // Verify initial output
-    expect(resultCell.getAsQueryResult().output).toEqual(10);
+    // Verify initial output (use pull to trigger computation)
+    const initial = (await resultCell.pull()) as { output: number };
+    expect(initial?.output).toEqual(10);
 
     // Get the argument cell and update it
     const argumentCell = resultCell.getArgumentCell<{ input: number }>();
@@ -272,18 +271,19 @@ describe("Cell", () => {
     const updateTx = runtime.edit();
     argumentCell!.withTx(updateTx).set({ input: 7 });
     updateTx.commit();
-    await runtime.idle();
 
-    // Verify the output has changed
-    expect(resultCell.getAsQueryResult()).toEqual({ output: 14 });
+    // Verify the output has changed (use pull to trigger re-computation)
+    const updated = await resultCell.pull();
+    expect(updated).toEqual({ output: 14 });
 
     // Update again to verify reactivity
     const updateTx2 = runtime.edit();
     argumentCell!.withTx(updateTx2).set({ input: 100 });
     updateTx2.commit();
-    await runtime.idle();
 
-    expect(resultCell.getAsQueryResult()).toEqual({ output: 200 });
+    // Verify final output
+    const final = await resultCell.pull();
+    expect(final).toEqual({ output: 200 });
   });
 
   it("should translate circular references into links", () => {
@@ -4317,6 +4317,194 @@ describe("Cell success callbacks", () => {
       const c = runtime.getCell(space, "no-schema", undefined, tx);
       const schemaCell = c.asSchemaFromLinks();
       expect(schemaCell.schema).toBeUndefined();
+    });
+  });
+
+  describe("pull()", () => {
+    it("should return the cell value in push mode", async () => {
+      const c = runtime.getCell<number>(space, "pull-test-1", undefined, tx);
+      c.set(42);
+      await tx.commit();
+      tx = runtime.edit();
+
+      const value = await c.pull();
+      expect(value).toBe(42);
+    });
+
+    it("should wait for dependent computations in push mode", async () => {
+      // Create a source cell
+      const source = runtime.getCell<number>(
+        space,
+        "pull-source",
+        undefined,
+        tx,
+      );
+      source.set(5);
+      await tx.commit();
+      tx = runtime.edit();
+
+      // Create a computation that depends on source
+      const computed = runtime.getCell<number>(
+        space,
+        "pull-computed",
+        undefined,
+        tx,
+      );
+
+      const action = (actionTx: IExtendedStorageTransaction) => {
+        const val = source.withTx(actionTx).get();
+        computed.withTx(actionTx).set(val * 2);
+      };
+
+      // Run once to set up initial value and log reads
+      const setupTx = runtime.edit();
+      action(setupTx);
+      const log = txToReactivityLog(setupTx);
+      await setupTx.commit();
+
+      // Subscribe the computation
+      runtime.scheduler.subscribe(action, log, {});
+
+      // Pull should wait for the computation to run
+      const value = await computed.pull();
+      expect(value).toBe(10);
+    });
+
+    it("should work in pull mode", async () => {
+      runtime.scheduler.enablePullMode();
+
+      // In pull mode, pull() works the same way - it registers as an effect
+      // and waits for the scheduler. The key difference is that pull() ensures
+      // the effect mechanism is used, which triggers pull-based execution.
+      const c = runtime.getCell<number>(space, "pull-mode-cell", undefined, tx);
+      c.set(42);
+      await tx.commit();
+      tx = runtime.edit();
+
+      const value = await c.pull();
+      expect(value).toBe(42);
+
+      // Verify we can pull after updates
+      const tx2 = runtime.edit();
+      c.withTx(tx2).set(100);
+      await tx2.commit();
+
+      const value2 = await c.pull();
+      expect(value2).toBe(100);
+
+      runtime.scheduler.disablePullMode();
+    });
+
+    it("should handle multiple sequential pulls", async () => {
+      const c = runtime.getCell<number>(space, "pull-multi", undefined, tx);
+      c.set(1);
+      await tx.commit();
+
+      expect(await c.pull()).toBe(1);
+
+      const tx2 = runtime.edit();
+      c.withTx(tx2).set(2);
+      await tx2.commit();
+
+      expect(await c.pull()).toBe(2);
+
+      const tx3 = runtime.edit();
+      c.withTx(tx3).set(3);
+      await tx3.commit();
+
+      expect(await c.pull()).toBe(3);
+    });
+
+    it("should pull nested cell values", async () => {
+      const c = runtime.getCell<{ a: { b: number } }>(
+        space,
+        "pull-nested",
+        undefined,
+        tx,
+      );
+      c.set({ a: { b: 99 } });
+      await tx.commit();
+      tx = runtime.edit();
+
+      const nested = c.key("a").key("b");
+      const value = await nested.pull();
+      expect(value).toBe(99);
+    });
+
+    it("should not create a persistent effect after pull completes", async () => {
+      runtime.scheduler.enablePullMode();
+
+      // Create source and computed cells
+      const source = runtime.getCell<number>(
+        space,
+        "pull-no-persist-source",
+        undefined,
+        tx,
+      );
+      source.set(5);
+      const computed = runtime.getCell<number>(
+        space,
+        "pull-no-persist-computed",
+        undefined,
+        tx,
+      );
+      computed.set(0);
+      await tx.commit();
+
+      // Track how many times the computation runs
+      let runCount = 0;
+
+      // Create a computation that multiplies source by 2
+      const action = (actionTx: IExtendedStorageTransaction) => {
+        runCount++;
+        const val = source.withTx(actionTx).get();
+        computed.withTx(actionTx).set(val * 2);
+      };
+
+      // Run once to set up initial value and capture dependencies
+      const setupTx = runtime.edit();
+      action(setupTx);
+      const log = txToReactivityLog(setupTx);
+      await setupTx.commit();
+
+      // Subscribe the computation (as a computation, NOT an effect)
+      // In pull mode, computations only run when pulled by effects
+      runtime.scheduler.subscribe(action, log, { isEffect: false });
+
+      // Change source to mark the computation as dirty
+      const tx1 = runtime.edit();
+      source.withTx(tx1).set(6); // Change from 5 to 6 to trigger dirtiness
+      await tx1.commit();
+
+      // Reset run count after marking dirty
+      runCount = 0;
+
+      // First pull - should trigger the computation because pull() creates
+      // a temporary effect that pulls dirty dependencies
+      const value1 = await computed.pull();
+      expect(value1).toBe(12); // 6 * 2 = 12
+      const runsAfterFirstPull = runCount;
+      expect(runsAfterFirstPull).toBeGreaterThan(0);
+
+      // Now change the source AFTER pull completed
+      const tx2 = runtime.edit();
+      source.withTx(tx2).set(7);
+      await tx2.commit();
+
+      // Wait for any scheduled work to complete
+      await runtime.scheduler.idle();
+
+      // The computation should NOT have run again because:
+      // 1. pull() cancelled its temporary effect after completing
+      // 2. There are no other effects subscribed
+      // 3. In pull mode, computations only run when pulled by effects
+      const runsAfterSourceChange = runCount;
+
+      // If pull() created a persistent effect, the computation would run
+      // again when source changes. With correct cleanup, it should NOT run.
+      expect(runsAfterSourceChange).toBe(runsAfterFirstPull);
+
+      runtime.scheduler.disablePullMode();
     });
   });
 });
