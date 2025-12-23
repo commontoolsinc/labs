@@ -22,6 +22,9 @@ export interface SchedulerGraphNode {
   isPending: boolean;
   parentId?: string; // ID of parent action if this was created during parent's execution
   childCount?: number; // Number of child actions created during this action's execution
+  // Diagnostic info: what cells this action reads and writes
+  reads?: string[]; // space/entity paths this action reads
+  writes?: string[]; // space/entity paths this action writes (mightWrite)
 }
 
 export interface SchedulerGraphEdge {

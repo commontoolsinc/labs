@@ -21,6 +21,8 @@ interface LayoutNode {
   parentId?: string;
   childCount?: number;
   collapsedChildCount?: number; // Number of hidden children when collapsed
+  reads?: string[]; // Diagnostic: cell paths this action reads
+  writes?: string[]; // Diagnostic: cell paths this action writes
 }
 
 interface LayoutEdge {
@@ -565,6 +567,8 @@ export class XSchedulerGraph extends LitElement {
           parentId: effParent,
           childCount: effChildCount > 0 ? effChildCount : undefined,
           collapsedChildCount: collapsedChildCounts.get(nodeId),
+          reads: originalNode?.reads,
+          writes: originalNode?.writes,
         });
       }
     }
@@ -947,12 +951,21 @@ export class XSchedulerGraph extends LitElement {
     const x = node.x - node.width / 2;
     const y = node.y - node.height / 2;
 
+    // Build tooltip with reads/writes diagnostic info
+    const readsInfo = node.reads?.length
+      ? `\nReads (${node.reads.length}): ${node.reads.slice(0, 5).join(", ")}${node.reads.length > 5 ? "..." : ""}`
+      : "\nReads: none";
+    const writesInfo = node.writes?.length
+      ? `\nWrites (${node.writes.length}): ${node.writes.slice(0, 5).join(", ")}${node.writes.length > 5 ? "..." : ""}`
+      : "\nWrites: none";
+    const tooltip = `${node.fullId}${readsInfo}${writesInfo}`;
+
     return svg`
       <g
         class="${nodeClass}"
         transform="translate(${x}, ${y})"
       >
-        <title>${node.fullId}</title>
+        <title>${tooltip}</title>
         <rect
           class="node-rect"
           width="${node.width}"
