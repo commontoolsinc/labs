@@ -332,14 +332,16 @@ const addSubCharm = handler<
 });
 
 // Move sub-charm to trash (soft delete) - uses Cell.push() and Cell.remove()
+// Also adjusts expandedIndex to prevent stale index pointing to wrong module
 const trashSubCharm = handler<
   unknown,
   {
     subCharms: Cell<SubCharmEntry[]>;
     trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+    expandedIndex: Cell<number | undefined>;
     index: number;
   }
->((_event, { subCharms: sc, trashedSubCharms: trash, index }) => {
+>((_event, { subCharms: sc, trashedSubCharms: trash, expandedIndex, index }) => {
   const current = sc.get() || [];
   const entry = current[index];
   if (!entry) return;
@@ -351,6 +353,18 @@ const trashSubCharm = handler<
   const updated = [...current];
   updated.splice(index, 1);
   sc.set(updated);
+
+  // Adjust expandedIndex to prevent stale reference
+  const currentExpanded = expandedIndex.get();
+  if (currentExpanded !== undefined) {
+    if (currentExpanded === index) {
+      // Deleted the expanded item - close the modal
+      expandedIndex.set(undefined);
+    } else if (currentExpanded > index) {
+      // Item before expanded item was deleted - shift index down
+      expandedIndex.set(currentExpanded - 1);
+    }
+  }
 });
 
 // Restore sub-charm from trash - uses index for reliable lookup
@@ -944,6 +958,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   onClick={trashSubCharm({
                                     subCharms,
                                     trashedSubCharms,
+                                    expandedIndex,
                                     index,
                                   })}
                                   style={{
@@ -1184,6 +1199,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                     onClick={trashSubCharm({
                                       subCharms,
                                       trashedSubCharms,
+                                      expandedIndex,
                                       index,
                                     })}
                                     style={{
@@ -1421,6 +1437,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 onClick={trashSubCharm({
                                   subCharms,
                                   trashedSubCharms,
+                                  expandedIndex,
                                   index,
                                 })}
                                 style={{
