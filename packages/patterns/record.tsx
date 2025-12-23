@@ -262,7 +262,8 @@ const toggleExpanded = handler<
   { expandedCharm: Cell<unknown>; entry: SubCharmEntry }
 >((_event, { expandedCharm, entry }) => {
   const current = expandedCharm.get();
-  if (current === entry?.charm) {
+  // Use Cell.equals in handler context for comparing charms
+  if (current !== undefined && Cell.equals(current as object, entry?.charm as object)) {
     // Already expanded, close it
     expandedCharm.set(undefined);
   } else {
@@ -528,19 +529,35 @@ const Record = pattern<RecordInput, RecordOutput>(
     // Display name with fallback
     const displayName = computed(() => title?.trim() || "(Untitled Record)");
 
-    // Split sub-charms by pin status
-    // No longer need indices - we use entry references directly
-    const pinnedEntries = lift(({ sc }: { sc: SubCharmEntry[] }) =>
-      (sc || []).filter((entry) => entry?.pinned)
-    )({ sc: subCharms });
+    // Entry type with pre-computed isExpanded flag
+    type EntryWithExpanded = SubCharmEntry & { isExpanded: boolean };
 
-    const unpinnedEntries = lift(({ sc }: { sc: SubCharmEntry[] }) =>
-      (sc || []).filter((entry) => !entry?.pinned)
-    )({ sc: subCharms });
+    // Pre-compute expanded state using Cell.equals (idiomatic pattern from test-cell-equals.tsx)
+    // This avoids "Cannot create cell link" errors by calling .get() on both cells
+    // BEFORE mapping, so Cell.equals receives plain values, not reactive proxies.
+    const entriesWithExpanded = lift(
+      ({ sc, expanded }: { sc: SubCharmEntry[]; expanded: unknown }) => {
+        const entries = sc || [];
+        return entries.map((entry) => ({
+          ...entry,
+          isExpanded: expanded !== undefined &&
+            Cell.equals(expanded as object, entry?.charm as object),
+        }));
+      },
+    )({ sc: subCharms, expanded: expandedCharm });
+
+    // Split sub-charms by pin status, including pre-computed isExpanded
+    const pinnedEntries = lift(({ arr }: { arr: EntryWithExpanded[] }) =>
+      (arr || []).filter((entry) => entry?.pinned)
+    )({ arr: entriesWithExpanded });
+
+    const unpinnedEntries = lift(({ arr }: { arr: EntryWithExpanded[] }) =>
+      (arr || []).filter((entry) => !entry?.pinned)
+    )({ arr: entriesWithExpanded });
 
     // All subcharms (for grid layout when no split needed)
-    const allEntries = lift(({ sc }: { sc: SubCharmEntry[] }) => (sc || []))({
-      sc: subCharms,
+    const allEntries = lift(({ arr }: { arr: EntryWithExpanded[] }) => arr || [])({
+      arr: entriesWithExpanded,
     });
 
     // Check layout mode based on pinned count
@@ -676,12 +693,6 @@ const Record = pattern<RecordInput, RecordOutput>(
       ec: expandedCharm,
     });
 
-    // Find the currently expanded entry (if any) - for header info display
-    const expandedEntry = lift(
-      ({ sc, ec }: { sc: SubCharmEntry[]; ec: unknown }) =>
-        (sc || []).find((e) => e?.charm === ec) || null,
-    )({ sc: subCharms, ec: expandedCharm });
-
     // ===== Main UI =====
     return {
       [NAME]: str`${recordIcon} ${displayNameWithAlias}`,
@@ -747,12 +758,34 @@ const Record = pattern<RecordInput, RecordOutput>(
                     });
                     return (
                       <div
-                        style={{
-                          background: "white",
-                          borderRadius: "8px",
-                          border: "1px solid #e5e7eb",
-                          overflow: "hidden",
-                        }}
+                        style={computed(() => {
+                          // Use pre-computed isExpanded from entriesWithExpanded (idiomatic Cell.equals)
+                          if (entry.isExpanded) {
+                            return {
+                              position: "fixed",
+                              top: "50%",
+                              left: "50%",
+                              transform: "translate(-50%, -50%)",
+                              zIndex: "1001",
+                              width: "95%",
+                              maxWidth: "1200px",
+                              height: "90%",
+                              maxHeight: "800px",
+                              background: "white",
+                              borderRadius: "12px",
+                              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+                              overflow: "hidden",
+                              display: "flex",
+                              flexDirection: "column",
+                            };
+                          }
+                          return {
+                            background: "white",
+                            borderRadius: "8px",
+                            border: "1px solid #e5e7eb",
+                            overflow: "hidden",
+                          };
+                        })}
                       >
                         <div
                           style={computed(() => ({
@@ -885,18 +918,22 @@ const Record = pattern<RecordInput, RecordOutput>(
                               <button
                                 type="button"
                                 onClick={toggleExpanded({ expandedCharm, entry })}
-                                style={{
-                                  background: "transparent",
-                                  border: "1px solid #e5e7eb",
+                                style={computed(() => ({
+                                  background: entry.isExpanded
+                                    ? "#3b82f6"
+                                    : "transparent",
+                                  border: entry.isExpanded
+                                    ? "1px solid #3b82f6"
+                                    : "1px solid #e5e7eb",
                                   borderRadius: "4px",
                                   cursor: "pointer",
                                   padding: "4px 8px",
                                   fontSize: "12px",
-                                  color: "#6b7280",
-                                }}
-                                title="Maximize"
+                                  color: entry.isExpanded ? "white" : "#6b7280",
+                                }))}
+                                title={entry.isExpanded ? "Close" : "Maximize"}
                               >
-                                ⛶
+                                {entry.isExpanded ? "✕" : "⛶"}
                               </button>
                               <button
                                 type="button"
@@ -924,7 +961,15 @@ const Record = pattern<RecordInput, RecordOutput>(
                         </div>
                         {ifElse(
                           computed(() => !entry.collapsed),
-                          <div style={{ padding: "12px" }}>
+                          <div
+                            style={computed(() => ({
+                              padding: entry.isExpanded ? "16px" : "12px",
+                              // When expanded, fill the fixed container
+                              flex: entry.isExpanded ? "1" : "none",
+                              overflow: entry.isExpanded ? "auto" : "hidden",
+                              minHeight: entry.isExpanded ? "0" : "auto",
+                            }))}
+                          >
                             {entry.charm as any}
                           </div>,
                           null,
@@ -951,12 +996,34 @@ const Record = pattern<RecordInput, RecordOutput>(
                       });
                       return (
                         <div
-                          style={{
-                            background: "white",
-                            borderRadius: "8px",
-                            border: "1px solid #e5e7eb",
-                            overflow: "hidden",
-                          }}
+                          style={computed(() => {
+                            // Use pre-computed isExpanded from entriesWithExpanded (idiomatic Cell.equals)
+                            if (entry.isExpanded) {
+                              return {
+                                position: "fixed",
+                                top: "50%",
+                                left: "50%",
+                                transform: "translate(-50%, -50%)",
+                                zIndex: "1001",
+                                width: "95%",
+                                maxWidth: "1200px",
+                                height: "90%",
+                                maxHeight: "800px",
+                                background: "white",
+                                borderRadius: "12px",
+                                boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+                                overflow: "hidden",
+                                display: "flex",
+                                flexDirection: "column",
+                              };
+                            }
+                            return {
+                              background: "white",
+                              borderRadius: "8px",
+                              border: "1px solid #e5e7eb",
+                              overflow: "hidden",
+                            };
+                          })}
                         >
                           <div
                             style={computed(() => ({
@@ -1092,18 +1159,22 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 <button
                                   type="button"
                                   onClick={toggleExpanded({ expandedCharm, entry })}
-                                  style={{
-                                    background: "transparent",
-                                    border: "1px solid #e5e7eb",
+                                  style={computed(() => ({
+                                    background: entry.isExpanded
+                                      ? "#3b82f6"
+                                      : "transparent",
+                                    border: entry.isExpanded
+                                      ? "1px solid #3b82f6"
+                                      : "1px solid #e5e7eb",
                                     borderRadius: "4px",
                                     cursor: "pointer",
                                     padding: "4px 8px",
                                     fontSize: "12px",
-                                    color: "#6b7280",
-                                  }}
-                                  title="Maximize"
+                                    color: entry.isExpanded ? "white" : "#6b7280",
+                                  }))}
+                                  title={entry.isExpanded ? "Close" : "Maximize"}
                                 >
-                                  ⛶
+                                  {entry.isExpanded ? "✕" : "⛶"}
                                 </button>
                                 <button
                                   type="button"
@@ -1131,7 +1202,15 @@ const Record = pattern<RecordInput, RecordOutput>(
                           </div>
                           {ifElse(
                             computed(() => !entry.collapsed),
-                            <div style={{ padding: "12px" }}>
+                            <div
+                              style={computed(() => ({
+                                padding: entry.isExpanded ? "16px" : "12px",
+                                // When expanded, fill the fixed container
+                                flex: entry.isExpanded ? "1" : "none",
+                                overflow: entry.isExpanded ? "auto" : "hidden",
+                                minHeight: entry.isExpanded ? "0" : "auto",
+                              }))}
+                            >
                               {entry.charm as any}
                             </div>,
                             null,
@@ -1158,12 +1237,34 @@ const Record = pattern<RecordInput, RecordOutput>(
                   });
                   return (
                     <div
-                      style={{
-                        background: "white",
-                        borderRadius: "8px",
-                        border: "1px solid #e5e7eb",
-                        overflow: "hidden",
-                      }}
+                      style={computed(() => {
+                        // Use pre-computed isExpanded from entriesWithExpanded (idiomatic Cell.equals)
+                        if (entry.isExpanded) {
+                          return {
+                            position: "fixed",
+                            top: "50%",
+                            left: "50%",
+                            transform: "translate(-50%, -50%)",
+                            zIndex: "1001",
+                            width: "95%",
+                            maxWidth: "1200px",
+                            height: "90%",
+                            maxHeight: "800px",
+                            background: "white",
+                            borderRadius: "12px",
+                            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+                            overflow: "hidden",
+                            display: "flex",
+                            flexDirection: "column",
+                          };
+                        }
+                        return {
+                          background: "white",
+                          borderRadius: "8px",
+                          border: "1px solid #e5e7eb",
+                          overflow: "hidden",
+                        };
+                      })}
                     >
                       <div
                         style={computed(() => ({
@@ -1296,18 +1397,22 @@ const Record = pattern<RecordInput, RecordOutput>(
                             <button
                               type="button"
                               onClick={toggleExpanded({ expandedCharm, entry })}
-                              style={{
-                                background: "transparent",
-                                border: "1px solid #e5e7eb",
+                              style={computed(() => ({
+                                background: entry.isExpanded
+                                  ? "#3b82f6"
+                                  : "transparent",
+                                border: entry.isExpanded
+                                  ? "1px solid #3b82f6"
+                                  : "1px solid #e5e7eb",
                                 borderRadius: "4px",
                                 cursor: "pointer",
                                 padding: "4px 8px",
                                 fontSize: "12px",
-                                color: "#6b7280",
-                              }}
-                              title="Maximize"
+                                color: entry.isExpanded ? "white" : "#6b7280",
+                              }))}
+                              title={entry.isExpanded ? "Close" : "Maximize"}
                             >
-                              ⛶
+                              {entry.isExpanded ? "✕" : "⛶"}
                             </button>
                             <button
                               type="button"
@@ -1335,7 +1440,15 @@ const Record = pattern<RecordInput, RecordOutput>(
                       </div>
                       {ifElse(
                         computed(() => !entry.collapsed),
-                        <div style={{ padding: "12px" }}>
+                        <div
+                          style={computed(() => ({
+                            padding: entry.isExpanded ? "16px" : "12px",
+                            // When expanded, fill the fixed container
+                            flex: entry.isExpanded ? "1" : "none",
+                            overflow: entry.isExpanded ? "auto" : "hidden",
+                            minHeight: entry.isExpanded ? "0" : "auto",
+                          }))}
+                        >
                           {entry.charm as any}
                         </div>,
                         null,
@@ -1673,12 +1786,13 @@ const Record = pattern<RecordInput, RecordOutput>(
 
           {/*
            * Expanded (Maximize) Module Overlay
-           * Similar style to note editor modal, but larger to show full module
+           * Just provides backdrop + escape handler.
+           * Module card itself becomes position:fixed when expanded.
            */}
           {ifElse(
             hasExpanded,
             <div>
-              {/* Backdrop with blur */}
+              {/* Backdrop with blur - clicking closes */}
               <div
                 onClick={closeExpanded({ expandedCharm })}
                 style={{
@@ -1689,91 +1803,12 @@ const Record = pattern<RecordInput, RecordOutput>(
                   zIndex: "1000",
                 }}
               />
-              {/* Modal content - larger than note editor to show full module */}
-              <div
-                style={{
-                  position: "fixed",
-                  top: "50%",
-                  left: "50%",
-                  transform: "translate(-50%, -50%)",
-                  zIndex: "1001",
-                  width: "95%",
-                  maxWidth: "1200px",
-                  height: "90%",
-                  maxHeight: "800px",
-                  background: "white",
-                  borderRadius: "12px",
-                  boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
-                  overflow: "hidden",
-                  display: "flex",
-                  flexDirection: "column",
-                }}
-              >
-                {/* Header */}
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "12px 16px",
-                    borderBottom: "1px solid #e5e7eb",
-                    background: "#fafafa",
-                    flexShrink: "0",
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={closeExpanded({ expandedCharm })}
-                    style={{
-                      background: "transparent",
-                      border: "none",
-                      cursor: "pointer",
-                      padding: "4px 8px",
-                      fontSize: "14px",
-                      color: "#374151",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                    }}
-                  >
-                    ← Back to {displayName}
-                  </button>
-                  <span style={{ fontSize: "14px", color: "#6b7280" }}>
-                    {lift(
-                      ({
-                        entry,
-                      }: {
-                        entry: SubCharmEntry | null;
-                      }) => {
-                        if (!entry) return "";
-                        const def = getDefinition(entry.type);
-                        return `${def?.icon || "📋"} ${
-                          def?.label || entry.type
-                        }`;
-                      },
-                    )({ entry: expandedEntry })}
-                  </span>
-                </div>
-
-                {/* Module content */}
-                <div
-                  style={{
-                    flex: "1",
-                    overflow: "auto",
-                    padding: "16px",
-                    minHeight: "0",
-                  }}
-                >
-                  {expandedCharm as any}
-                </div>
-
-                {/* Escape key handler */}
-                <ct-keybind
-                  code="Escape"
-                  ignore-editable={false}
-                  onct-keybind={closeExpanded({ expandedCharm })}
-                />
-              </div>
+              {/* Escape key handler */}
+              <ct-keybind
+                code="Escape"
+                ignore-editable={false}
+                onct-keybind={closeExpanded({ expandedCharm })}
+              />
             </div>,
             null,
           )}
