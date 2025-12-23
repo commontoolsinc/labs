@@ -27,7 +27,7 @@ keywords/features.
   - **Keywords**: ct-screen, ct-autolayout, slots (left/right/header/footer),
     tabNames
 
-- backlinks-index.tsx: Backlinks computation system for bi-directional
+- system/backlinks-index.tsx: Backlinks computation system for bi-directional
   references between charms
   - **Data types**: array of objects (MentionableCharm with mentioned/backlinks
     arrays)
@@ -71,7 +71,8 @@ keywords/features.
   - **Data types**: array of tuples (date/pizza strings), web response object
   - **Keywords**: fetchData, lift, string parsing, map
 
-- common-tools.tsx: Reusable tool recipes and handlers for LLM integration
+- system/common-tools.tsx: Reusable tool recipes and handlers for LLM
+  integration
   - **Data types**: array of list items (objects), API response objects
   - **Keywords**: handler, recipe as tool, fetchData, derive, ifElse
 
@@ -80,7 +81,7 @@ keywords/features.
   - **Keywords**: handler, str template, derive (via pure function), ct-button,
     Stream
 
-- ct-checkbox-cell.tsx: Checkbox component with bidirectional binding
+- examples/ct-checkbox-cell.tsx: Checkbox component with bidirectional binding
   - **Data types**: boolean
   - **Keywords**: ct-checkbox, $checked (bidirectional binding), handler
     (optional), ifElse, onct-change
@@ -89,11 +90,11 @@ keywords/features.
   - **Data types**: boolean
   - **Keywords**: ct-checkbox, handler, checked property, onct-change, ifElse
 
-- ct-list.tsx: List component with editable items
+- examples/ct-list.tsx: List component with editable items
   - **Data types**: array of objects (items with title)
   - **Keywords**: ct-list, $value (bidirectional binding), editable, ct-input
 
-- ct-render.tsx: Rendering sub-recipes with ct-render component
+- examples/ct-render.tsx: Rendering sub-recipes with ct-render component
   - **Data types**: number (counter value)
   - **Keywords**: ct-render, $cell, nested recipes, recipe composition, handler
 
@@ -102,11 +103,12 @@ keywords/features.
   - **Keywords**: ct-select, $value (bidirectional binding), items (label/value
     objects)
 
-- ct-tags.tsx: Tags input component
+- examples/ct-tags.tsx: Tags input component
   - **Data types**: array of strings
   - **Keywords**: ct-tags, handler, onct-change, array of strings
 
-- default-app.tsx: Default application with charm management and navigation
+- system/default-app.tsx: Default application with charm management and
+  navigation
   - **Data types**: array of charms (MentionableCharm objects)
   - **Keywords**: wish, derive, navigateTo, handler, ct-table, ct-button,
     multiple recipe instantiation
@@ -128,7 +130,7 @@ keywords/features.
   - **Keywords**: cell, derive, handler, custom data structure, recursive
     structure
 
-- link-tool.tsx: Tool for creating data links between charm cells
+- system/link-tool.tsx: Tool for creating data links between charm cells
   - **Data types**: string (source path), string (target path)
   - **Keywords**: link built-in, handler, charm navigation, cell linking, path
     parsing
@@ -138,7 +140,7 @@ keywords/features.
   - **Keywords**: [ID], derive, lift, filter, map, concat, reduce, handler,
     array operations, get/set
 
-- llm.tsx: Simple LLM question/answer interface
+- examples/llm.tsx: Simple LLM question/answer interface
   - **Data types**: string (question), LLM response content, array of messages
   - **Keywords**: llm, cell, derive, handler, ct-message-input, onct-send
 
@@ -147,7 +149,7 @@ keywords/features.
   - **Keywords**: nested recipes, recipe composition, passing cells, str
     template, handler
 
-- note.tsx: Note-taking app with backlinks and mentions
+- notes/note.tsx: Note-taking app with backlinks and mentions
   - **Data types**: string (title/content), array of charms
     (mentioned/backlinks)
   - **Keywords**: wish, handler, navigateTo, ct-code-editor, $mentionable,

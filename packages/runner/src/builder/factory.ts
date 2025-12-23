@@ -42,6 +42,7 @@ import {
   wish,
 } from "./built-in.ts";
 import { cellConstructorFactory } from "../cell.ts";
+import { getEntityId } from "../create-ref.ts";
 import { getRecipeEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
 
@@ -121,6 +122,9 @@ export const createBuilder = (): {
 
       // Environment
       getRecipeEnvironment,
+
+      // Entity utilities
+      getEntityId,
 
       // Constants
       ID,

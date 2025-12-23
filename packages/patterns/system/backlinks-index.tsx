@@ -3,6 +3,7 @@ import { Cell, lift, NAME, OpaqueRef, pattern, UI } from "commontools";
 
 export type MentionableCharm = {
   [NAME]?: string;
+  isHidden?: boolean;
   mentioned?: MentionableCharm[];
   backlinks?: MentionableCharm[];
 };

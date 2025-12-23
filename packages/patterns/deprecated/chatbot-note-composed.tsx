@@ -11,8 +11,12 @@ import {
   wish,
 } from "commontools";
 
-import Chat from "./chatbot.tsx";
-import Note from "./note.tsx";
+import Chat from "../chatbot.tsx";
+import Note from "../notes/note.tsx";
+
+// Simple random ID generator (crypto.randomUUID not available in pattern env)
+const generateId = () =>
+  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 import {
   addListItem,
   calculator,
@@ -20,9 +24,9 @@ import {
   readListItems,
   readWebpage,
   searchWeb,
-} from "./common-tools.tsx";
+} from "../system/common-tools.tsx";
 
-import { type MentionableCharm } from "./backlinks-index.tsx";
+import { type MentionableCharm } from "../system/backlinks-index.tsx";
 
 type ChatbotNoteInput = {
   title?: Cell<Default<string, "LLM Test">>;
@@ -52,6 +56,7 @@ const newNote = handler<
       const n = Note({
         title: args.title,
         content: args.content ?? "",
+        noteId: generateId(),
       });
 
       args.result.set(

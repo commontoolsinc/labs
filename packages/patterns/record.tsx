@@ -32,7 +32,7 @@ import {
 } from "./record/registry.ts";
 // Import Note directly - we create it inline with proper linkPattern
 // (avoids global state for passing Record's pattern JSON)
-import Note from "./note.tsx";
+import Note from "./notes/note.tsx";
 import { inferTypeFromModules } from "./record/template-registry.ts";
 import { TypePickerModule } from "./type-picker.tsx";
 import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
@@ -229,11 +229,30 @@ const togglePin = handler<
 >((_event, { subCharms: sc, entry }) => {
   const current = sc.get() || [];
   // Find by reference using charm identity
-  const index = current.findIndex((e) => e?.charm === entry?.charm);
+  const index = current.findIndex((e) =>
+    Cell.equals(e?.charm as object, entry?.charm as object)
+  );
   if (index < 0) return;
 
   const updated = [...current];
   updated[index] = { ...entry, pinned: !entry.pinned };
+  sc.set(updated);
+});
+
+// Toggle collapsed state for a sub-charm - uses entry reference, not index
+const toggleCollapsed = handler<
+  unknown,
+  { subCharms: Cell<SubCharmEntry[]>; entry: SubCharmEntry }
+>((_event, { subCharms: sc, entry }) => {
+  const current = sc.get() || [];
+  // Find by reference using charm identity
+  const index = current.findIndex((e) =>
+    Cell.equals(e?.charm as object, entry?.charm as object)
+  );
+  if (index < 0) return;
+
+  const updated = [...current];
+  updated[index] = { ...entry, collapsed: !entry.collapsed };
   sc.set(updated);
 });
 
@@ -284,7 +303,13 @@ const addSubCharm = handler<
 
   // Capture schema at creation time for dynamic discovery
   const schema = getResultSchema(charm);
-  sc.set([...current, { type, pinned: false, charm, schema }]);
+  sc.set([...current, {
+    type,
+    pinned: false,
+    collapsed: false,
+    charm,
+    schema,
+  }]);
   sat.set("");
 });
 
@@ -313,9 +338,9 @@ const restoreSubCharm = handler<
     entry: TrashedSubCharmEntry;
   }
 >((_event, { subCharms: sc, trashedSubCharms: trash, entry }) => {
-  // Restore to active (without trashedAt)
+  // Restore to active (without trashedAt, reset collapsed state)
   const { trashedAt: _trashedAt, ...restored } = entry;
-  sc.push(restored);
+  sc.push({ ...restored, collapsed: false });
 
   // Remove from trash
   trash.remove(entry);
@@ -340,6 +365,67 @@ const emptyTrash = handler<
   trash.set([]);
 });
 
+// Open the note editor modal for a module
+const openNoteEditor = handler<
+  unknown,
+  {
+    subCharms: Cell<SubCharmEntry[]>;
+    editingNoteIndex: Cell<number | undefined>;
+    editingNoteText: Cell<string | undefined>;
+    entry: SubCharmEntry;
+  }
+>((_event, { subCharms, editingNoteIndex, editingNoteText, entry }) => {
+  if (!entry) return;
+  // Find the index of this entry in subCharms
+  const current = subCharms.get() || [];
+  const index = current.findIndex((e) =>
+    Cell.equals(e?.charm as object, entry?.charm as object)
+  );
+  if (index < 0) return;
+  editingNoteIndex.set(index);
+  editingNoteText.set(entry.note || "");
+});
+
+// Save the note and close the modal
+const saveNote = handler<
+  unknown,
+  {
+    subCharms: Cell<SubCharmEntry[]>;
+    editingNoteIndex: Cell<number | undefined>;
+    editingNoteText: Cell<string | undefined>;
+  }
+>((_event, { subCharms: sc, editingNoteIndex, editingNoteText }) => {
+  const index = editingNoteIndex.get();
+  const noteValue = (editingNoteText.get() || "").trim();
+
+  // Close modal FIRST before any other operations
+  editingNoteIndex.set(undefined);
+  editingNoteText.set(undefined);
+
+  // Validate we have an index to save
+  if (index === undefined || index < 0) return;
+
+  const current = sc.get() || [];
+  if (index >= current.length) return;
+
+  const originalEntry = current[index];
+  const updated = [...current];
+  updated[index] = { ...originalEntry, note: noteValue || undefined };
+  sc.set(updated);
+});
+
+// Close the note editor without saving
+const closeNoteEditor = handler<
+  unknown,
+  {
+    editingNoteIndex: Cell<number | undefined>;
+    editingNoteText: Cell<string | undefined>;
+  }
+>((_event, { editingNoteIndex, editingNoteText }) => {
+  editingNoteIndex.set(undefined);
+  editingNoteText.set(undefined);
+});
+
 // Toggle trash section expanded/collapsed
 const toggleTrashExpanded = handler<unknown, { expanded: Cell<boolean> }>(
   (_event, { expanded }) => expanded.set(!expanded.get()),
@@ -352,7 +438,9 @@ const createSibling = handler<
   { subCharms: Cell<SubCharmEntry[]>; entry: SubCharmEntry }
 >((_event, { subCharms: sc, entry }) => {
   const current = sc.get() || [];
-  const currentIndex = current.findIndex((e) => e?.charm === entry?.charm);
+  const currentIndex = current.findIndex((e) =>
+    Cell.equals(e?.charm as object, entry?.charm as object)
+  );
   if (currentIndex < 0) return;
 
   // Get smart default label
@@ -367,6 +455,7 @@ const createSibling = handler<
   updated.splice(currentIndex + 1, 0, {
     type: entry.type,
     pinned: false,
+    collapsed: false,
     charm,
   });
   sc.set(updated);
@@ -378,6 +467,19 @@ const Record = pattern<RecordInput, RecordOutput>(
     // Local state
     const selectedAddType = Cell.of<string>("");
     const trashExpanded = Cell.of(false);
+
+    // Note editor modal state
+    // NOTE: In the future, this should use a <ct-modal> component instead of inline implementation.
+    // A ct-modal component would follow the ct-fab pattern:
+    //   <ct-modal $open={isOpen} onct-modal-close={handleClose}>
+    //     <content />
+    //   </ct-modal>
+    // With features: backdrop blur, escape key, focus trap, centered positioning, animations
+    // IMPORTANT: Don't use Cell.of(null) - it creates a cell pointing to null, not primitive null.
+    // Use Cell.of() without argument so .get() returns undefined (falsy) initially.
+    // We store the INDEX instead of the entry to decouple modal state from array updates.
+    const editingNoteIndex = Cell.of<number | undefined>();
+    const editingNoteText = Cell.of<string>();
 
     // Create Record pattern JSON for wiki-links in Notes
     // Using computed() defers evaluation until render time, avoiding circular dependency
@@ -495,6 +597,41 @@ const Record = pattern<RecordInput, RecordOutput>(
       }) => manual || inferred?.icon || "\u{1F4CB}",
     )({ manual: manualIcon, inferred: inferredType });
 
+    // Extract nicknames from nickname modules for display in NAME
+    const nicknamesList = lift(({ sc }: { sc: SubCharmEntry[] }) => {
+      const nicknameModules = (sc || []).filter((e) => e?.type === "nickname");
+      const nicknames: string[] = [];
+      for (const mod of nicknameModules) {
+        try {
+          // Access the nickname field from the charm pattern output
+          // deno-lint-ignore no-explicit-any
+          const charm = mod.charm as any;
+          const nicknameValue = charm?.nickname;
+          if (typeof nicknameValue === "string" && nicknameValue.trim()) {
+            nicknames.push(nicknameValue.trim());
+          }
+        } catch {
+          // Ignore errors from charms without nickname field
+        }
+      }
+      return nicknames;
+    })({ sc: subCharms });
+
+    // Build display name with nickname alias if present
+    const displayNameWithAlias = lift(
+      ({
+        name,
+        nicknames,
+      }: {
+        name: string;
+        nicknames: string[];
+      }) => {
+        if (nicknames.length === 0) return name;
+        // Show all nicknames as aliases (aka Liz, Beth, Lizzie)
+        return `${name} (aka ${nicknames.join(", ")})`;
+      },
+    )({ name: displayName, nicknames: nicknamesList });
+
     // ===== Trash Section Computed Values =====
 
     // Compute trash count directly
@@ -509,11 +646,12 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // ===== Main UI =====
     return {
-      [NAME]: str`${recordIcon} ${displayName}`,
+      [NAME]: str`${recordIcon} ${displayNameWithAlias}`,
       [UI]: (
-        <ct-vstack style={{ height: "100%", gap: "0" }}>
+        <ct-screen>
           {/* Header toolbar */}
           <ct-hstack
+            slot="header"
             style={{
               padding: "8px 12px",
               gap: "8px",
@@ -543,10 +681,10 @@ const Record = pattern<RecordInput, RecordOutput>(
           </ct-hstack>
 
           {/* Main content area */}
-          <div
+          <ct-vscroll
+            flex
+            snapToBottom
             style={{
-              flex: "1",
-              overflow: "auto",
               padding: "12px",
               background: "#f9fafb",
             }}
@@ -555,7 +693,7 @@ const Record = pattern<RecordInput, RecordOutput>(
             {ifElse(
               pinnedCount > 0,
               // Primary + Rail layout (when items are pinned)
-              <div style={{ display: "flex", gap: "16px" }}>
+              <div style={{ display: "flex", gap: "16px", flex: "1" }}>
                 {/* Left: Pinned items (2/3 width) */}
                 <div
                   style={{
@@ -580,141 +718,65 @@ const Record = pattern<RecordInput, RecordOutput>(
                         }}
                       >
                         <div
-                          style={{
+                          style={computed(() => ({
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between",
                             padding: "8px 12px",
-                            borderBottom: "1px solid #f3f4f6",
+                            borderBottom: entry.collapsed
+                              ? "none"
+                              : "1px solid #f3f4f6",
                             background: "#fafafa",
-                          }}
+                          }))}
                         >
-                          <span
+                          <div
                             style={{
-                              fontSize: "14px",
-                              fontWeight: "500",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
                               flex: "1",
                             }}
                           >
-                            {displayInfo.icon} {displayInfo.label}
-                          </span>
-                          <div
-                            style={{
-                              display: "flex",
-                              gap: "8px",
-                              alignItems: "center",
-                              flexShrink: 0,
-                            }}
-                          >
-                            {ifElse(
-                              getDefinition(entry.type)?.allowMultiple,
-                              <button
-                                type="button"
-                                onClick={createSibling({ subCharms, entry })}
-                                style={{
-                                  background: "transparent",
-                                  border: "1px solid #e5e7eb",
-                                  borderRadius: "4px",
-                                  cursor: "pointer",
-                                  padding: "4px 8px",
-                                  fontSize: "12px",
-                                  color: "#6b7280",
-                                }}
-                                title="Add another"
+                            <button
+                              type="button"
+                              onClick={toggleCollapsed({ subCharms, entry })}
+                              aria-expanded={computed(() =>
+                                entry.collapsed ? "false" : "true"
+                              )}
+                              aria-label="Toggle module"
+                              style={{
+                                background: "none",
+                                border: "none",
+                                cursor: "pointer",
+                                padding: "4px",
+                                display: "flex",
+                                alignItems: "center",
+                              }}
+                            >
+                              <span
+                                style={computed(() => ({
+                                  transform: entry.collapsed
+                                    ? "rotate(0deg)"
+                                    : "rotate(90deg)",
+                                  transition: "transform 0.2s",
+                                  fontSize: "10px",
+                                  color: "#9ca3af",
+                                }))}
                               >
-                                +
-                              </button>,
-                              null,
-                            )}
-                            <button
-                              type="button"
-                              onClick={togglePin({ subCharms, entry })}
-                              style={{
-                                background: "#e0f2fe",
-                                border: "1px solid #7dd3fc",
-                                borderRadius: "4px",
-                                cursor: "pointer",
-                                padding: "4px 8px",
-                                fontSize: "12px",
-                                color: "#0369a1",
-                              }}
-                              title="Unpin"
-                            >
-                              📌
+                                ▶
+                              </span>
                             </button>
-                            <button
-                              type="button"
-                              onClick={trashSubCharm({
-                                subCharms,
-                                trashedSubCharms,
-                                entry,
-                              })}
-                              style={{
-                                background: "transparent",
-                                border: "1px solid #e5e7eb",
-                                borderRadius: "4px",
-                                cursor: "pointer",
-                                padding: "4px 8px",
-                                fontSize: "12px",
-                                color: "#6b7280",
-                              }}
-                              title="Remove"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        </div>
-                        <div style={{ padding: "12px" }}>
-                          {entry.charm as any}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                {/* Right: Unpinned items in rail (1/3 width) */}
-                {ifElse(
-                  hasUnpinned,
-                  <div
-                    style={{
-                      flex: 1,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "12px",
-                    }}
-                  >
-                    {unpinnedEntries.map((entry) => {
-                      const displayInfo = getModuleDisplay({
-                        type: entry.type,
-                        charm: entry.charm,
-                      });
-                      return (
-                        <div
-                          style={{
-                            background: "white",
-                            borderRadius: "8px",
-                            border: "1px solid #e5e7eb",
-                            overflow: "hidden",
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "space-between",
-                              padding: "8px 12px",
-                              borderBottom: "1px solid #f3f4f6",
-                              background: "#fafafa",
-                            }}
-                          >
                             <span
                               style={{
                                 fontSize: "14px",
                                 fontWeight: "500",
-                                flex: "1",
                               }}
                             >
                               {displayInfo.icon} {displayInfo.label}
                             </span>
+                          </div>
+                          {ifElse(
+                            computed(() => !entry.collapsed),
                             <div
                               style={{
                                 display: "flex",
@@ -745,8 +807,13 @@ const Record = pattern<RecordInput, RecordOutput>(
                               )}
                               <button
                                 type="button"
-                                onClick={togglePin({ subCharms, entry })}
-                                style={{
+                                onClick={openNoteEditor({
+                                  subCharms,
+                                  editingNoteIndex,
+                                  editingNoteText,
+                                  entry,
+                                })}
+                                style={computed(() => ({
                                   background: "transparent",
                                   border: "1px solid #e5e7eb",
                                   borderRadius: "4px",
@@ -754,8 +821,27 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   padding: "4px 8px",
                                   fontSize: "12px",
                                   color: "#6b7280",
+                                  fontWeight: entry?.note ? "700" : "400",
+                                }))}
+                                title={computed(() =>
+                                  entry?.note || "Add note..."
+                                )}
+                              >
+                                📝
+                              </button>
+                              <button
+                                type="button"
+                                onClick={togglePin({ subCharms, entry })}
+                                style={{
+                                  background: "#e0f2fe",
+                                  border: "1px solid #7dd3fc",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                  padding: "4px 8px",
+                                  fontSize: "12px",
+                                  color: "#0369a1",
                                 }}
-                                title="Pin"
+                                title="Unpin"
                               >
                                 📌
                               </button>
@@ -779,11 +865,208 @@ const Record = pattern<RecordInput, RecordOutput>(
                               >
                                 ✕
                               </button>
-                            </div>
-                          </div>
+                            </div>,
+                            null,
+                          )}
+                        </div>
+                        {ifElse(
+                          computed(() => !entry.collapsed),
                           <div style={{ padding: "12px" }}>
                             {entry.charm as any}
+                          </div>,
+                          null,
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* Right: Unpinned items in rail (1/3 width) */}
+                {ifElse(
+                  hasUnpinned,
+                  <div
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "12px",
+                    }}
+                  >
+                    {unpinnedEntries.map((entry) => {
+                      const displayInfo = getModuleDisplay({
+                        type: entry.type,
+                        charm: entry.charm,
+                      });
+                      return (
+                        <div
+                          style={{
+                            background: "white",
+                            borderRadius: "8px",
+                            border: "1px solid #e5e7eb",
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div
+                            style={computed(() => ({
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              padding: "8px 12px",
+                              borderBottom: entry.collapsed
+                                ? "none"
+                                : "1px solid #f3f4f6",
+                              background: "#fafafa",
+                            }))}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                                flex: "1",
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={toggleCollapsed({ subCharms, entry })}
+                                aria-expanded={computed(() =>
+                                  entry.collapsed ? "false" : "true"
+                                )}
+                                aria-label="Toggle module"
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  cursor: "pointer",
+                                  padding: "4px",
+                                  display: "flex",
+                                  alignItems: "center",
+                                }}
+                              >
+                                <span
+                                  style={computed(() => ({
+                                    transform: entry.collapsed
+                                      ? "rotate(0deg)"
+                                      : "rotate(90deg)",
+                                    transition: "transform 0.2s",
+                                    fontSize: "10px",
+                                    color: "#9ca3af",
+                                  }))}
+                                >
+                                  ▶
+                                </span>
+                              </button>
+                              <span
+                                style={{
+                                  fontSize: "14px",
+                                  fontWeight: "500",
+                                }}
+                              >
+                                {displayInfo.icon} {displayInfo.label}
+                              </span>
+                            </div>
+                            {ifElse(
+                              computed(() => !entry.collapsed),
+                              <div
+                                style={{
+                                  display: "flex",
+                                  gap: "8px",
+                                  alignItems: "center",
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {ifElse(
+                                  getDefinition(entry.type)?.allowMultiple,
+                                  <button
+                                    type="button"
+                                    onClick={createSibling({
+                                      subCharms,
+                                      entry,
+                                    })}
+                                    style={{
+                                      background: "transparent",
+                                      border: "1px solid #e5e7eb",
+                                      borderRadius: "4px",
+                                      cursor: "pointer",
+                                      padding: "4px 8px",
+                                      fontSize: "12px",
+                                      color: "#6b7280",
+                                    }}
+                                    title="Add another"
+                                  >
+                                    +
+                                  </button>,
+                                  null,
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={openNoteEditor({
+                                    subCharms,
+                                    editingNoteIndex,
+                                    editingNoteText,
+                                    entry,
+                                  })}
+                                  style={computed(() => ({
+                                    background: "transparent",
+                                    border: "1px solid #e5e7eb",
+                                    borderRadius: "4px",
+                                    cursor: "pointer",
+                                    padding: "4px 8px",
+                                    fontSize: "12px",
+                                    color: "#6b7280",
+                                    fontWeight: entry?.note ? "700" : "400",
+                                  }))}
+                                  title={computed(() =>
+                                    entry?.note || "Add note..."
+                                  )}
+                                >
+                                  📝
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={togglePin({ subCharms, entry })}
+                                  style={{
+                                    background: "transparent",
+                                    border: "1px solid #e5e7eb",
+                                    borderRadius: "4px",
+                                    cursor: "pointer",
+                                    padding: "4px 8px",
+                                    fontSize: "12px",
+                                    color: "#6b7280",
+                                  }}
+                                  title="Pin"
+                                >
+                                  📌
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={trashSubCharm({
+                                    subCharms,
+                                    trashedSubCharms,
+                                    entry,
+                                  })}
+                                  style={{
+                                    background: "transparent",
+                                    border: "1px solid #e5e7eb",
+                                    borderRadius: "4px",
+                                    cursor: "pointer",
+                                    padding: "4px 8px",
+                                    fontSize: "12px",
+                                    color: "#6b7280",
+                                  }}
+                                  title="Remove"
+                                >
+                                  ✕
+                                </button>
+                              </div>,
+                              null,
+                            )}
                           </div>
+                          {ifElse(
+                            computed(() => !entry.collapsed),
+                            <div style={{ padding: "12px" }}>
+                              {entry.charm as any}
+                            </div>,
+                            null,
+                          )}
                         </div>
                       );
                     })}
@@ -814,37 +1097,120 @@ const Record = pattern<RecordInput, RecordOutput>(
                       }}
                     >
                       <div
-                        style={{
+                        style={computed(() => ({
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "space-between",
                           padding: "8px 12px",
-                          borderBottom: "1px solid #f3f4f6",
+                          borderBottom: entry.collapsed
+                            ? "none"
+                            : "1px solid #f3f4f6",
                           background: "#fafafa",
-                        }}
+                        }))}
                       >
-                        <span
-                          style={{
-                            fontSize: "14px",
-                            fontWeight: "500",
-                            flex: "1",
-                          }}
-                        >
-                          {displayInfo.icon} {displayInfo.label}
-                        </span>
                         <div
                           style={{
                             display: "flex",
-                            gap: "8px",
                             alignItems: "center",
-                            flexShrink: 0,
+                            gap: "8px",
+                            flex: "1",
                           }}
                         >
-                          {ifElse(
-                            getDefinition(entry.type)?.allowMultiple,
+                          <button
+                            type="button"
+                            onClick={toggleCollapsed({ subCharms, entry })}
+                            aria-expanded={computed(() =>
+                              entry.collapsed ? "false" : "true"
+                            )}
+                            aria-label="Toggle module"
+                            style={{
+                              background: "none",
+                              border: "none",
+                              cursor: "pointer",
+                              padding: "4px",
+                              display: "flex",
+                              alignItems: "center",
+                            }}
+                          >
+                            <span
+                              style={computed(() => ({
+                                transform: entry.collapsed
+                                  ? "rotate(0deg)"
+                                  : "rotate(90deg)",
+                                transition: "transform 0.2s",
+                                fontSize: "10px",
+                                color: "#9ca3af",
+                              }))}
+                            >
+                              ▶
+                            </span>
+                          </button>
+                          <span
+                            style={{
+                              fontSize: "14px",
+                              fontWeight: "500",
+                            }}
+                          >
+                            {displayInfo.icon} {displayInfo.label}
+                          </span>
+                        </div>
+                        {ifElse(
+                          computed(() => !entry.collapsed),
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "8px",
+                              alignItems: "center",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {ifElse(
+                              getDefinition(entry.type)?.allowMultiple,
+                              <button
+                                type="button"
+                                onClick={createSibling({ subCharms, entry })}
+                                style={{
+                                  background: "transparent",
+                                  border: "1px solid #e5e7eb",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                  padding: "4px 8px",
+                                  fontSize: "12px",
+                                  color: "#6b7280",
+                                }}
+                                title="Add another"
+                              >
+                                +
+                              </button>,
+                              null,
+                            )}
                             <button
                               type="button"
-                              onClick={createSibling({ subCharms, entry })}
+                              onClick={openNoteEditor({
+                                subCharms,
+                                editingNoteIndex,
+                                editingNoteText,
+                                entry,
+                              })}
+                              style={computed(() => ({
+                                background: "transparent",
+                                border: "1px solid #e5e7eb",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                                padding: "4px 8px",
+                                fontSize: "12px",
+                                color: "#6b7280",
+                                fontWeight: entry?.note ? "700" : "400",
+                              }))}
+                              title={computed(() =>
+                                entry?.note || "Add note..."
+                              )}
+                            >
+                              📝
+                            </button>
+                            <button
+                              type="button"
+                              onClick={togglePin({ subCharms, entry })}
                               style={{
                                 background: "transparent",
                                 border: "1px solid #e5e7eb",
@@ -854,206 +1220,372 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 fontSize: "12px",
                                 color: "#6b7280",
                               }}
-                              title="Add another"
+                              title="Pin"
                             >
-                              +
-                            </button>,
-                            null,
-                          )}
-                          <button
-                            type="button"
-                            onClick={togglePin({ subCharms, entry })}
-                            style={{
-                              background: "transparent",
-                              border: "1px solid #e5e7eb",
-                              borderRadius: "4px",
-                              cursor: "pointer",
-                              padding: "4px 8px",
-                              fontSize: "12px",
-                              color: "#6b7280",
-                            }}
-                            title="Pin"
-                          >
-                            📌
-                          </button>
-                          <button
-                            type="button"
-                            onClick={trashSubCharm({
-                              subCharms,
-                              trashedSubCharms,
-                              entry,
-                            })}
-                            style={{
-                              background: "transparent",
-                              border: "1px solid #e5e7eb",
-                              borderRadius: "4px",
-                              cursor: "pointer",
-                              padding: "4px 8px",
-                              fontSize: "12px",
-                              color: "#6b7280",
-                            }}
-                            title="Remove"
-                          >
-                            ✕
-                          </button>
-                        </div>
+                              📌
+                            </button>
+                            <button
+                              type="button"
+                              onClick={trashSubCharm({
+                                subCharms,
+                                trashedSubCharms,
+                                entry,
+                              })}
+                              style={{
+                                background: "transparent",
+                                border: "1px solid #e5e7eb",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                                padding: "4px 8px",
+                                fontSize: "12px",
+                                color: "#6b7280",
+                              }}
+                              title="Remove"
+                            >
+                              ✕
+                            </button>
+                          </div>,
+                          null,
+                        )}
                       </div>
-                      <div style={{ padding: "12px" }}>
-                        {entry.charm as any}
-                      </div>
+                      {ifElse(
+                        computed(() => !entry.collapsed),
+                        <div style={{ padding: "12px" }}>
+                          {entry.charm as any}
+                        </div>,
+                        null,
+                      )}
                     </div>
                   );
                 })}
               </div>,
             )}
+          </ct-vscroll>
 
-            {/* Collapsible Trash Section */}
-            {ifElse(
-              hasTrash,
-              <div
+          {/* Collapsible Trash Section */}
+          {ifElse(
+            hasTrash,
+            <div
+              style={{
+                marginTop: "16px",
+                borderTop: "1px solid #e5e7eb",
+                paddingTop: "12px",
+              }}
+            >
+              <button
+                type="button"
+                onClick={toggleTrashExpanded({ expanded: trashExpanded })}
                 style={{
-                  marginTop: "16px",
-                  borderTop: "1px solid #e5e7eb",
-                  paddingTop: "12px",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  color: "#6b7280",
+                  fontSize: "13px",
+                  width: "100%",
+                  padding: "8px",
                 }}
               >
-                <button
-                  type="button"
-                  onClick={toggleTrashExpanded({ expanded: trashExpanded })}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    color: "#6b7280",
-                    fontSize: "13px",
-                    width: "100%",
-                    padding: "8px",
-                  }}
+                <span
+                  style={computed(() => ({
+                    transform: trashExpanded.get()
+                      ? "rotate(90deg)"
+                      : "rotate(0deg)",
+                    transition: "transform 0.2s",
+                  }))}
                 >
-                  <span
-                    style={computed(() => ({
-                      transform: trashExpanded.get()
-                        ? "rotate(90deg)"
-                        : "rotate(0deg)",
-                      transition: "transform 0.2s",
-                    }))}
-                  >
-                    ▶
-                  </span>
-                  🗑️ Trash ({trashCount})
-                </button>
+                  ▶
+                </span>
+                🗑️ Trash ({trashCount})
+              </button>
 
-                {ifElse(
-                  computed(() => trashExpanded.get()),
-                  <div style={{ paddingLeft: "16px", marginTop: "8px" }}>
-                    {trashedSubCharms.map(
-                      (entry) => {
-                        const displayInfo = getModuleDisplay({
-                          type: entry.type,
-                          charm: entry.charm,
-                        });
-                        return (
+              {ifElse(
+                trashExpanded,
+                <div style={{ paddingLeft: "16px", marginTop: "8px" }}>
+                  {trashedSubCharms.map(
+                    (entry) => {
+                      const displayInfo = getModuleDisplay({
+                        type: entry.type,
+                        charm: entry.charm,
+                      });
+                      return (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "8px 12px",
+                            background: "#f9fafb",
+                            borderRadius: "6px",
+                            marginBottom: "4px",
+                            opacity: "0.7",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: "13px",
+                              color: "#6b7280",
+                              flex: "1",
+                            }}
+                          >
+                            {displayInfo.icon} {displayInfo.label}
+                          </span>
                           <div
                             style={{
                               display: "flex",
-                              alignItems: "center",
-                              justifyContent: "space-between",
-                              padding: "8px 12px",
-                              background: "#f9fafb",
-                              borderRadius: "6px",
-                              marginBottom: "4px",
-                              opacity: "0.7",
+                              gap: "8px",
+                              flexShrink: 0,
                             }}
                           >
-                            <span
+                            <button
+                              type="button"
+                              onClick={restoreSubCharm({
+                                subCharms,
+                                trashedSubCharms,
+                                entry,
+                              })}
                               style={{
-                                fontSize: "13px",
-                                color: "#6b7280",
-                                flex: "1",
+                                background: "#e0f2fe",
+                                border: "1px solid #7dd3fc",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                                padding: "4px 8px",
+                                fontSize: "12px",
+                                color: "#0369a1",
                               }}
+                              title="Restore"
                             >
-                              {displayInfo.icon} {displayInfo.label}
-                            </span>
-                            <div
+                              ↩️
+                            </button>
+                            <button
+                              type="button"
+                              onClick={permanentlyDelete({
+                                trashedSubCharms,
+                                entry,
+                              })}
                               style={{
-                                display: "flex",
-                                gap: "8px",
-                                flexShrink: 0,
+                                background: "transparent",
+                                border: "1px solid #fecaca",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                                padding: "4px 8px",
+                                fontSize: "12px",
+                                color: "#dc2626",
                               }}
+                              title="Delete permanently"
                             >
-                              <button
-                                type="button"
-                                onClick={restoreSubCharm({
-                                  subCharms,
-                                  trashedSubCharms,
-                                  entry,
-                                })}
-                                style={{
-                                  background: "#e0f2fe",
-                                  border: "1px solid #7dd3fc",
-                                  borderRadius: "4px",
-                                  cursor: "pointer",
-                                  padding: "4px 8px",
-                                  fontSize: "12px",
-                                  color: "#0369a1",
-                                }}
-                                title="Restore"
-                              >
-                                ↩️
-                              </button>
-                              <button
-                                type="button"
-                                onClick={permanentlyDelete({
-                                  trashedSubCharms,
-                                  entry,
-                                })}
-                                style={{
-                                  background: "transparent",
-                                  border: "1px solid #fecaca",
-                                  borderRadius: "4px",
-                                  cursor: "pointer",
-                                  padding: "4px 8px",
-                                  fontSize: "12px",
-                                  color: "#dc2626",
-                                }}
-                                title="Delete permanently"
-                              >
-                                🗑️
-                              </button>
-                            </div>
+                              🗑️
+                            </button>
                           </div>
-                        );
-                      },
-                    )}
+                        </div>
+                      );
+                    },
+                  )}
 
-                    <button
-                      type="button"
-                      onClick={emptyTrash({ trashedSubCharms })}
-                      style={{
-                        marginTop: "8px",
-                        background: "transparent",
-                        border: "1px solid #fecaca",
-                        borderRadius: "4px",
-                        cursor: "pointer",
-                        padding: "6px 12px",
-                        fontSize: "12px",
-                        color: "#dc2626",
-                        width: "100%",
-                      }}
-                    >
-                      Empty Trash
-                    </button>
-                  </div>,
-                  null,
-                )}
-              </div>,
-              null,
-            )}
-          </div>
-        </ct-vstack>
+                  <button
+                    type="button"
+                    onClick={emptyTrash({ trashedSubCharms })}
+                    style={{
+                      marginTop: "8px",
+                      background: "transparent",
+                      border: "1px solid #fecaca",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      padding: "6px 12px",
+                      fontSize: "12px",
+                      color: "#dc2626",
+                      width: "100%",
+                    }}
+                  >
+                    Empty Trash
+                  </button>
+                </div>,
+                null,
+              )}
+            </div>,
+            null,
+          )}
+
+          {
+            /*
+             * Note Editor Modal
+             * NOTE: Replace with <ct-modal> component when available.
+             * Future ct-modal API would be:
+             *   <ct-modal
+             *     $open={editingNoteIndex}
+             *     onct-modal-close={closeNoteEditor({...})}
+             *     backdrop="blur"
+             *   >
+             *     <content />
+             *   </ct-modal>
+             *
+             * Component should include:
+             * - Backdrop with blur effect (backdrop-filter: blur(8px))
+             * - Fixed centering with z-index 1001
+             * - Escape key support (document listener)
+             * - Focus trap for accessibility
+             * - Smooth fade/scale animations
+             * - Click-outside-to-close behavior
+             */
+          }
+          {ifElse(
+            computed(() => editingNoteIndex.get() !== undefined),
+            <div>
+              {/* Backdrop with blur */}
+              <div
+                onClick={closeNoteEditor({ editingNoteIndex, editingNoteText })}
+                style={{
+                  position: "fixed",
+                  inset: "0",
+                  backgroundColor: "rgba(0, 0, 0, 0.4)",
+                  backdropFilter: "blur(8px)",
+                  zIndex: "1000",
+                }}
+              />
+              {/* Modal content */}
+              <div
+                style={{
+                  position: "fixed",
+                  top: "50%",
+                  left: "50%",
+                  transform: "translate(-50%, -50%)",
+                  zIndex: "1001",
+                  width: "90%",
+                  maxWidth: "500px",
+                  background: "white",
+                  borderRadius: "12px",
+                  boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+                  overflow: "hidden",
+                }}
+              >
+                {/* Header */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "16px 20px",
+                    borderBottom: "1px solid #e5e7eb",
+                    background: "#fafafa",
+                  }}
+                >
+                  <span style={{ fontWeight: "600", fontSize: "16px" }}>
+                    📝 Module Note
+                  </span>
+                  <button
+                    type="button"
+                    onClick={closeNoteEditor({
+                      editingNoteIndex,
+                      editingNoteText,
+                    })}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: "4px 8px",
+                      fontSize: "18px",
+                      color: "#6b7280",
+                    }}
+                    title="Close"
+                  >
+                    ✕
+                  </button>
+                </div>
+                {/* Content */}
+                <div style={{ padding: "20px" }}>
+                  <ct-textarea
+                    $value={editingNoteText}
+                    placeholder="Add notes about this module... (visible to LLM reads)"
+                    rows={6}
+                    style={{ width: "100%", resize: "vertical" }}
+                  />
+                  {/* Keyboard shortcuts for modal */}
+                  <ct-keybind
+                    code="Escape"
+                    ignore-editable={false}
+                    onct-keybind={closeNoteEditor({
+                      editingNoteIndex,
+                      editingNoteText,
+                    })}
+                  />
+                  <ct-keybind
+                    code="Enter"
+                    meta
+                    ignore-editable={false}
+                    onct-keybind={saveNote({
+                      subCharms,
+                      editingNoteIndex,
+                      editingNoteText,
+                    })}
+                  />
+                  <ct-keybind
+                    code="Enter"
+                    ctrl
+                    ignore-editable={false}
+                    onct-keybind={saveNote({
+                      subCharms,
+                      editingNoteIndex,
+                      editingNoteText,
+                    })}
+                  />
+                </div>
+                {/* Footer */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: "12px",
+                    padding: "16px 20px",
+                    borderTop: "1px solid #e5e7eb",
+                    background: "#fafafa",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={closeNoteEditor({
+                      editingNoteIndex,
+                      editingNoteText,
+                    })}
+                    style={{
+                      background: "transparent",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      padding: "8px 16px",
+                      fontSize: "14px",
+                      color: "#6b7280",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveNote({
+                      subCharms,
+                      editingNoteIndex,
+                      editingNoteText,
+                    })}
+                    style={{
+                      background: "#3b82f6",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      padding: "8px 16px",
+                      fontSize: "14px",
+                      color: "white",
+                      fontWeight: "500",
+                    }}
+                  >
+                    Save Note
+                  </button>
+                </div>
+              </div>
+            </div>,
+            null,
+          )}
+        </ct-screen>
       ),
       title,
       subCharms,

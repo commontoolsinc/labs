@@ -269,9 +269,12 @@ async function startFetch(
   internal: Cell<Schema<typeof internalSchema>>,
   abortSignal: AbortSignal,
 ) {
-  const processResponse = (mode || "json") === "json"
-    ? (r: Response) => r.json()
-    : (r: Response) => r.text();
+  const processResponse = async (r: Response) => {
+    if (!r.ok) {
+      throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+    }
+    return (mode || "json") === "json" ? await r.json() : await r.text();
+  };
 
   const fetchOptions = { ...options };
   if (

@@ -19,6 +19,7 @@ import { setLLMUrl } from "@commontools/llm";
 export interface EntryConfig {
   mainPath: string;
   mainExport?: string;
+  rootPath?: string;
 }
 
 export interface SpaceConfig {
@@ -96,9 +97,8 @@ async function getProgramFromFile(
   manager: CharmManager,
   entry: EntryConfig,
 ): Promise<RuntimeProgram> {
-  // Walk entry file and collect all sources from fs.
   const program: RuntimeProgram = await manager.runtime.harness.resolve(
-    new FileSystemProgramResolver(entry.mainPath),
+    new FileSystemProgramResolver(entry.mainPath, entry.rootPath),
   );
   if (entry.mainExport) {
     program.mainExport = entry.mainExport;

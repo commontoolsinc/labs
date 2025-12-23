@@ -9,7 +9,7 @@ import {
   pattern,
   UI,
 } from "commontools";
-import Counter from "./counter.tsx";
+import Counter from "../counter.tsx";
 
 interface Item {
   title: string;

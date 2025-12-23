@@ -17,6 +17,9 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
+const signer2 = await Identity.fromPassphrase("test operator 2");
+const space2 = signer2.did();
+
 describe("Schema Support", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -2979,6 +2982,155 @@ describe("Schema Support", () => {
 
       expect(keys).toEqual(["name", "value"]);
       expect(keys).not.toContain(toCell as any);
+    });
+  });
+
+  describe("Cross-space array link resolution", () => {
+    it("should correctly follow cross-space links for arrays with linked elements", () => {
+      // This test verifies the fix for a bug where cross-space links weren't
+      // correctly followed for arrays when:
+      // 1. The initial cell is in space A (an alias to an array in space B)
+      // 2. The actual array is in space B
+      // 3. Each entry in the array is a link to another cell in space B
+      // 4. A schema is applied
+
+      // Create the actual item cells in space B
+      const tx2 = runtime.edit();
+      const item1 = runtime.getCell<{ name: string; value: number }>(
+        space2,
+        "cross-space-item-1",
+        undefined,
+        tx2,
+      );
+      item1.set({ name: "Item 1", value: 10 });
+
+      const item2 = runtime.getCell<{ name: string; value: number }>(
+        space2,
+        "cross-space-item-2",
+        undefined,
+        tx2,
+      );
+      item2.set({ name: "Item 2", value: 20 });
+
+      // Create the array in space B with links to the items
+      const arrayInSpaceB = runtime.getCell<any[]>(
+        space2,
+        "cross-space-array",
+        undefined,
+        tx2,
+      );
+      arrayInSpaceB.setRaw([
+        item1.getAsLink(),
+        item2.getAsLink(),
+      ]);
+
+      tx2.commit();
+
+      // Create an alias in space A that points to the array in space B
+      const aliasInSpaceA = runtime.getCell<any>(
+        space,
+        "cross-space-alias",
+        undefined,
+        tx,
+      );
+      aliasInSpaceA.setRaw(arrayInSpaceB.getAsLink());
+
+      // Define the schema
+      const schema = {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            value: { type: "number" },
+          },
+          required: ["name", "value"],
+        },
+      } as const satisfies JSONSchema;
+
+      // Access through space A with schema - this is where the bug manifested
+      const result = aliasInSpaceA.asSchema(schema).get();
+
+      // Verify the data is correctly resolved
+      expect(result).toHaveLength(2);
+      expect(result[0].name).toBe("Item 1");
+      expect(result[0].value).toBe(10);
+      expect(result[1].name).toBe("Item 2");
+      expect(result[1].value).toBe(20);
+
+      // Verify the links point to space B (the correct space)
+      const cell0 = (result[0] as any)[toCell]();
+      const cell1 = (result[1] as any)[toCell]();
+
+      const link0 = cell0.getAsNormalizedFullLink();
+      const link1 = cell1.getAsNormalizedFullLink();
+
+      // Both links should point to space B, not space A
+      expect(link0.space).toBe(space2);
+      expect(link1.space).toBe(space2);
+
+      // They should have empty paths (pointing to actual documents, not array indices)
+      expect(link0.path).toEqual([]);
+      expect(link1.path).toEqual([]);
+    });
+
+    it("should correctly resolve cross-space links for arrays with inline objects", () => {
+      // Similar test but with inline objects that get data URIs
+
+      // Create an array in space B with inline objects (no explicit IDs)
+      const tx2 = runtime.edit();
+      const arrayInSpaceB = runtime.getCell<any[]>(
+        space2,
+        "cross-space-inline-array",
+        undefined,
+        tx2,
+      );
+      arrayInSpaceB.set([
+        { name: "Inline 1", value: 100 },
+        { name: "Inline 2", value: 200 },
+      ]);
+
+      tx2.commit();
+
+      // Create an alias in space A
+      const aliasInSpaceA = runtime.getCell<any>(
+        space,
+        "cross-space-inline-alias",
+        undefined,
+        tx,
+      );
+      aliasInSpaceA.setRaw(arrayInSpaceB.getAsLink());
+
+      const schema = {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            value: { type: "number" },
+          },
+          required: ["name", "value"],
+        },
+      } as const satisfies JSONSchema;
+
+      // Access through space A with schema
+      const result = aliasInSpaceA.asSchema(schema).get();
+
+      // Verify data
+      expect(result).toHaveLength(2);
+      expect(result[0].name).toBe("Inline 1");
+      expect(result[1].name).toBe("Inline 2");
+
+      // Verify the links point to space B
+      const cell0 = (result[0] as any)[toCell]();
+      const cell1 = (result[1] as any)[toCell]();
+
+      const link0 = cell0.getAsNormalizedFullLink();
+      const link1 = cell1.getAsNormalizedFullLink();
+
+      // Both links should point to space B (the space where the array lives)
+      expect(link0.space).toBe(space2);
+      expect(link1.space).toBe(space2);
     });
   });
 });

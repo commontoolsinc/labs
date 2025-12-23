@@ -28,6 +28,7 @@ describe("ct-render integration test", () => {
         join(
           import.meta.dirname!,
           "..",
+          "examples",
           "ct-render.tsx",
         ),
       ),

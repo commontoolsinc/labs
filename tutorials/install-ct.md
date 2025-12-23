@@ -102,13 +102,13 @@ $ cd ./packages/toolshed
 $ deno task dev
 ```
 
-Next, is the front-end server, Shell. The following command will run Shell on its default port 5173.
+Next, is the front-end server, Shell. The following command will run Shell on port 5173 (toolshed proxies it at 8000).
 ```
 $ cd ./packages/shell
 $ deno task dev-local
 ```
 
-Now the servers should be running and you can navigate to [http://localhost:5173/](http://localhost:5173/) to see a not-too-exciting-yet charm.
+Now the servers should be running and you can navigate to [http://localhost:8000/](http://localhost:8000/) to see a not-too-exciting-yet charm.
 
 (deploy_charms)=
 ## How to deploy charms
@@ -128,9 +128,9 @@ baedreihr5yyujte22cd7oogtqldt4miifj356zj7ivgk4eom264ldsu5pm
 
 Notice the last line from the deploy output. This is the charm ID that you just deployed. We will use it to navigate to this charm.
 Here is the URL; replace <CHARM_ID> with
-  the value from your command output: `http://localhost:5173/test_space/<CHARM_ID>`
+  the value from your command output: `http://localhost:8000/test_space/<CHARM_ID>`
 
-Notice the format. Port 5173 is the port number that the Shell process is listening on.
+Notice the format. Port 8000 is where you access the application (toolshed proxies to shell).
 `test_space` is the SPACE that you are deploying to. You can think of it as a namespace for permissions.
 Any SPACE that doesn't exist already is dynamically created when you visit it.
 Lastly, we see the charm ID that was created when you deployed the charm.

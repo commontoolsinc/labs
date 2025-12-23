@@ -35,6 +35,7 @@ import {
   getResultSchema,
   getSchemaForType,
 } from "./schema-utils.ts";
+import { SmartTextInput } from "./smart-text-input.tsx";
 
 // ===== Types =====
 
@@ -442,6 +443,14 @@ export const ExtractorModule = recipe<
       return buildExtractionSchemaFromCell(parentSubCharms);
     });
 
+    // SmartTextInput - provides text, file upload, and image OCR input
+    const smartTextInput = SmartTextInput({
+      $value: inputText,
+      placeholder:
+        "Paste text, upload a file, or snap a photo of a business card...",
+      rows: 4,
+    });
+
     // Reactive extraction - only runs when extractionPrompt is set (user clicked Extract)
     // The framework caches by content hash, so same text won't re-extract
     const extraction = generateObject({
@@ -563,14 +572,8 @@ export const ExtractorModule = recipe<
             <div
               style={{ display: "flex", flexDirection: "column", gap: "12px" }}
             >
-              <ct-textarea
-                $value={inputText}
-                placeholder="Paste an email signature, bio, vCard, or any text with contact/profile information..."
-                style={{
-                  width: "100%",
-                  minHeight: "100px",
-                }}
-              />
+              {/* SmartTextInput: supports text, file upload, and image OCR */}
+              {smartTextInput.ui.complete}
               {ifElse(
                 computed(() => phase === "error"),
                 <div

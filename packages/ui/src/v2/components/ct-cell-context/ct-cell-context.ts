@@ -28,13 +28,18 @@ export class CTCellContext extends BaseElement {
       :host {
         display: block;
         position: relative;
+        flex: 1;
+        min-height: 0;
       }
 
       :host([inline]) {
         display: inline-block;
+        flex: none;
       }
 
       .container {
+        height: 100%;
+        box-sizing: border-box;
         border: 1px dashed transparent;
         transition: border-color 0.2s ease;
       }
