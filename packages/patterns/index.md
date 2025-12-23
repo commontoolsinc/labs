@@ -316,7 +316,7 @@ type Input = Record<string, never>;
 // Displays favorited charms with remove functionality
 ```
 
-## `contact-book.tsx`
+## `contacts/contact-book.tsx`
 
 Manage contacts with search, notes, and relationships between contacts. Contacts
 can be linked together with labels (friend, spouse, colleague, etc.).
@@ -464,7 +464,7 @@ interface Output {
 }
 ```
 
-## `contact-detail.tsx`
+## `contacts/contact-detail.tsx`
 
 Detail/edit view for a single contact. Use with `navigateTo()` from contact-book
 or as a standalone contact editor.
