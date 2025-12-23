@@ -12,12 +12,18 @@ import {
 
 import { default as Note } from "./note.tsx";
 import { default as Record } from "./record.tsx";
+
+// Simple random ID generator (crypto.randomUUID not available in pattern env)
+const generateId = () =>
+  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 import BacklinksIndex, { type MentionableCharm } from "./backlinks-index.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
+import Notebook from "./notebooks.tsx";
 import NotesImportExport from "./notes-import-export.tsx";
 
 type MinimalCharm = {
   [NAME]?: string;
+  isHidden?: boolean;
 };
 
 type CharmsListInput = void;
@@ -64,27 +70,79 @@ const toggleFab = handler<any, { fabExpanded: Cell<boolean> }>(
   },
 );
 
-const spawnNote = handler<void, void>((_, __) => {
-  return navigateTo(Note({
-    title: "New Note",
-    content: "",
-  }));
-});
+// Toggle dropdown menu
+const toggleMenu = handler<void, { menuOpen: Cell<boolean> }>(
+  (_, { menuOpen }) => menuOpen.set(!menuOpen.get()),
+);
 
+// Close dropdown menu (for backdrop click)
+const closeMenu = handler<void, { menuOpen: Cell<boolean> }>(
+  (_, { menuOpen }) => menuOpen.set(false),
+);
+
+// Menu: New Note
+const menuNewNote = handler<void, { menuOpen: Cell<boolean> }>(
+  (_, { menuOpen }) => {
+    menuOpen.set(false);
+    return navigateTo(Note({
+      title: "New Note",
+      content: "",
+      noteId: generateId(),
+    }));
+  },
+);
+
+// Menu: New Notebook
+const menuNewNotebook = handler<void, { menuOpen: Cell<boolean> }>(
+  (_, { menuOpen }) => {
+    menuOpen.set(false);
+    return navigateTo(Notebook({ title: "New Notebook" }));
+  },
+);
+
+// Standalone: New Record
 const spawnRecord = handler<void, void>((_, __) => {
-  return navigateTo(Record({
-    title: "",
-  }));
+  return navigateTo(Record({ title: "" }));
 });
 
-const spawnNotesImportExport = handler<void, void>((_, __) => {
-  return navigateTo(NotesImportExport({
-    importMarkdown: "",
-  }));
+// Helper to find existing All Notes charm
+const findAllNotebooksCharm = (allCharms: Cell<MinimalCharm[]>) => {
+  const charms = allCharms.get();
+  return charms.find((charm: any) => {
+    const name = charm?.[NAME];
+    return typeof name === "string" && name.startsWith("All Notes");
+  });
+};
+
+// Menu: All Notes
+const menuAllNotebooks = handler<
+  void,
+  { menuOpen: Cell<boolean>; allCharms: Cell<MinimalCharm[]> }
+>((_, { menuOpen, allCharms }) => {
+  menuOpen.set(false);
+  const existing = findAllNotebooksCharm(allCharms);
+  if (existing) {
+    return navigateTo(existing);
+  }
+  return navigateTo(NotesImportExport({ importMarkdown: "" }));
 });
 
 export default pattern<CharmsListInput, CharmsListOutput>((_) => {
   const { allCharms } = wish<{ allCharms: MentionableCharm[] }>("/");
+
+  // Dropdown menu state
+  const menuOpen = Cell.of(false);
+
+  // Filter out hidden charms and charms without resolved NAME
+  // (prevents transient hash-only pills during reactive updates)
+  const visibleCharms = computed(() =>
+    allCharms.filter((charm) => {
+      if (charm.isHidden === true) return false;
+      const name = (charm as any)?.[NAME];
+      return typeof name === "string" && name.length > 0;
+    })
+  );
+
   const index = BacklinksIndex({ allCharms });
 
   const fab = OmniboxFAB({
@@ -93,7 +151,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
 
   return {
     backlinksIndex: index,
-    [NAME]: computed(() => `DefaultCharmList (${allCharms.length})`),
+    [NAME]: computed(() => `DefaultCharmList (${visibleCharms.length})`),
     [UI]: (
       <ct-screen>
         <ct-keybind
@@ -111,18 +169,9 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
 
         <ct-toolbar slot="header" sticky>
           <div slot="start">
-            <ct-button
-              variant="ghost"
-              onClick={spawnNote()}
-              style={{
-                padding: "12px 20px",
-                fontSize: "22px",
-                borderRadius: "12px",
-                minHeight: "48px",
-              }}
-            >
-              📄 New Note
-            </ct-button>
+            <h2 style={{ margin: 0, fontSize: "20px" }}>Pages</h2>
+          </div>
+          <div slot="end">
             <ct-button
               variant="ghost"
               onClick={spawnRecord()}
@@ -135,20 +184,75 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
             >
               📋 New Record
             </ct-button>
-          </div>
-          <div slot="end">
             <ct-button
               variant="ghost"
-              onClick={spawnNotesImportExport()}
+              onClick={toggleMenu({ menuOpen })}
               style={{
-                padding: "12px 20px",
-                fontSize: "22px",
-                borderRadius: "12px",
-                minHeight: "48px",
+                padding: "8px 16px",
+                fontSize: "16px",
+                borderRadius: "8px",
               }}
             >
-              ⚙️ Import/Export
+              Notes ▾
             </ct-button>
+
+            {/* Backdrop to close menu when clicking outside */}
+            <div
+              onClick={closeMenu({ menuOpen })}
+              style={{
+                display: computed(() => (menuOpen.get() ? "block" : "none")),
+                position: "fixed",
+                inset: "0",
+                zIndex: "999",
+              }}
+            />
+
+            {/* Dropdown Menu */}
+            <ct-vstack
+              gap="0"
+              style={{
+                display: computed(() => (menuOpen.get() ? "flex" : "none")),
+                position: "fixed",
+                top: "112px",
+                right: "16px",
+                background: "var(--ct-color-bg, white)",
+                border: "1px solid var(--ct-color-border, #e5e5e7)",
+                borderRadius: "12px",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                minWidth: "160px",
+                zIndex: "1000",
+                padding: "4px",
+              }}
+            >
+              <ct-button
+                variant="ghost"
+                onClick={menuNewNote({ menuOpen })}
+                style={{ justifyContent: "flex-start" }}
+              >
+                {"\u00A0\u00A0"}📝 New Note
+              </ct-button>
+              <ct-button
+                variant="ghost"
+                onClick={menuNewNotebook({ menuOpen })}
+                style={{ justifyContent: "flex-start" }}
+              >
+                {"\u00A0\u00A0"}📓 New Notebook
+              </ct-button>
+              <div
+                style={{
+                  height: "1px",
+                  background: "var(--ct-color-border, #e5e5e7)",
+                  margin: "4px 8px",
+                }}
+              />
+              <ct-button
+                variant="ghost"
+                onClick={menuAllNotebooks({ menuOpen, allCharms })}
+                style={{ justifyContent: "flex-start" }}
+              >
+                {"\u00A0\u00A0"}📁 All Notes
+              </ct-button>
+            </ct-vstack>
           </div>
         </ct-toolbar>
 
@@ -166,11 +270,10 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
                 }
               `}
             </style>
-            <h2>Pages</h2>
 
             <ct-table full-width hover>
               <tbody>
-                {allCharms.map((charm) => (
+                {visibleCharms.map((charm) => (
                   <tr>
                     <td>
                       <ct-cell-context $cell={charm}>

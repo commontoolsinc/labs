@@ -19,6 +19,7 @@ import type {
   FetchProgramFunction,
   GenerateObjectFunction,
   GenerateTextFunction,
+  GetEntityIdFunction,
   GetRecipeEnvironmentFunction,
   HandlerFunction,
   HFunction,
@@ -271,6 +272,9 @@ export interface BuilderFunctionsAndConstants {
 
   // Environment
   getRecipeEnvironment: GetRecipeEnvironmentFunction;
+
+  // Entity utilities
+  getEntityId: GetEntityIdFunction;
 
   // Constants
   ID: typeof ID;
