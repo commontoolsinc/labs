@@ -658,8 +658,7 @@ export default pattern(({ items, showInactive }) => {
                             items: {
                                 not: true,
                                 asOpaque: true
-                            },
-                            asOpaque: true
+                            }
                         }
                     },
                     required: ["tags"]
