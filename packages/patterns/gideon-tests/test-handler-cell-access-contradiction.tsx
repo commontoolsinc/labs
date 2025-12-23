@@ -49,7 +49,7 @@ import {
 } from "commontools";
 
 interface Input {
-  inputCounter: Default<number, 0>;  // Default<> provides initial value + .get()/.set() methods
+  inputCounter: Default<number, 0>; // Default<> provides initial value + .get()/.set() methods
   items: Default<string[], ["Item A", "Item B", "Item C"]>;
   showButtons: Default<boolean, true>;
 }
@@ -63,7 +63,9 @@ const handlerWithCellParam = handler<
   try {
     const current = targetCell.get();
     targetCell.set(current + 1);
-    console.log(`[${label}] SUCCESS: handler with cell param, value now: ${current + 1}`);
+    console.log(
+      `[${label}] SUCCESS: handler with cell param, value now: ${current + 1}`,
+    );
   } catch (e) {
     console.error(`[${label}] FAILED: handler with cell param`, e);
   }
@@ -79,7 +81,9 @@ const handlerWithIndexParam = handler<
   try {
     const current = targetCell.get();
     targetCell.set(current + 1);
-    console.log(`[${label}] SUCCESS: handler with index param, value now: ${current + 1}`);
+    console.log(
+      `[${label}] SUCCESS: handler with index param, value now: ${current + 1}`,
+    );
   } catch (e) {
     console.error(`[${label}] FAILED: handler with index param`, e);
   }
@@ -94,14 +98,22 @@ export default pattern<Input>(({ inputCounter, items, showButtons }) => {
     try {
       const inputVal = inputCounter.get();
       inputCounter.set(inputVal + 1);
-      console.log(`[${label}] SUCCESS: plain function closure (input), value now: ${inputVal + 1}`);
+      console.log(
+        `[${label}] SUCCESS: plain function closure (input), value now: ${
+          inputVal + 1
+        }`,
+      );
     } catch (e) {
       console.error(`[${label}] FAILED: plain function closure (input)`, e);
     }
     try {
       const localVal = localCounter.get();
       localCounter.set(localVal + 1);
-      console.log(`[${label}] SUCCESS: plain function closure (local), value now: ${localVal + 1}`);
+      console.log(
+        `[${label}] SUCCESS: plain function closure (local), value now: ${
+          localVal + 1
+        }`,
+      );
     } catch (e) {
       console.error(`[${label}] FAILED: plain function closure (local)`, e);
     }
@@ -110,7 +122,14 @@ export default pattern<Input>(({ inputCounter, items, showButtons }) => {
   // Results display - inside computed(), values are already unwrapped (no .get() needed)
   const resultsUI = computed(() => {
     return (
-      <div style={{ background: "#f0f0f0", padding: "1rem", marginBottom: "1rem", borderRadius: "8px" }}>
+      <div
+        style={{
+          background: "#f0f0f0",
+          padding: "1rem",
+          marginBottom: "1rem",
+          borderRadius: "8px",
+        }}
+      >
         <strong>Current Values:</strong>
         <div>Input Counter: {inputCounter}</div>
         <div>Local Counter: {localCounter}</div>
@@ -127,16 +146,25 @@ export default pattern<Input>(({ inputCounter, items, showButtons }) => {
       <div style={{ padding: "1rem", maxWidth: "800px" }}>
         <h2>Handler Cell Access Test</h2>
         <p style={{ color: "#666" }}>
-          Testing which combinations of handler styles and reactive contexts work.
-          Check browser console for detailed logs.
+          Testing which combinations of handler styles and reactive contexts
+          work. Check browser console for detailed logs.
         </p>
 
         {resultsUI}
 
         {/* ========== SECTION A: TOP-LEVEL (CONTROL) ========== */}
         {/* VERIFIED: All tests PASS - both inline closures and handler params work */}
-        <div style={{ border: "2px solid blue", padding: "1rem", marginBottom: "1rem", borderRadius: "8px" }}>
-          <h3 style={{ color: "blue" }}>A. Top-Level (Control - No Reactive Context) ✅</h3>
+        <div
+          style={{
+            border: "2px solid blue",
+            padding: "1rem",
+            marginBottom: "1rem",
+            borderRadius: "8px",
+          }}
+        >
+          <h3 style={{ color: "blue" }}>
+            A. Top-Level (Control - No Reactive Context) ✅
+          </h3>
 
           <div style={{ marginBottom: "0.5rem" }}>
             <strong>A1. Inline arrow with closure (input cell):</strong>
@@ -145,7 +173,10 @@ export default pattern<Input>(({ inputCounter, items, showButtons }) => {
                 try {
                   const val = inputCounter.get();
                   inputCounter.set(val + 1);
-                  console.log("[A1] SUCCESS: inline closure (input), value now:", val + 1);
+                  console.log(
+                    "[A1] SUCCESS: inline closure (input), value now:",
+                    val + 1,
+                  );
                 } catch (e) {
                   console.error("[A1] FAILED: inline closure (input)", e);
                 }
@@ -162,7 +193,10 @@ export default pattern<Input>(({ inputCounter, items, showButtons }) => {
                 try {
                   const val = localCounter.get();
                   localCounter.set(val + 1);
-                  console.log("[A2] SUCCESS: inline closure (local), value now:", val + 1);
+                  console.log(
+                    "[A2] SUCCESS: inline closure (local), value now:",
+                    val + 1,
+                  );
                 } catch (e) {
                   console.error("[A2] FAILED: inline closure (local)", e);
                 }
@@ -174,14 +208,24 @@ export default pattern<Input>(({ inputCounter, items, showButtons }) => {
 
           <div style={{ marginBottom: "0.5rem" }}>
             <strong>A3. Handler with cell param (input):</strong>
-            <ct-button onClick={handlerWithCellParam({ targetCell: inputCounter, label: "A3-input" })}>
+            <ct-button
+              onClick={handlerWithCellParam({
+                targetCell: inputCounter,
+                label: "A3-input",
+              })}
+            >
               Test A3
             </ct-button>
           </div>
 
           <div style={{ marginBottom: "0.5rem" }}>
             <strong>A4. Handler with cell param (local):</strong>
-            <ct-button onClick={handlerWithCellParam({ targetCell: localCounter, label: "A4-local" })}>
+            <ct-button
+              onClick={handlerWithCellParam({
+                targetCell: localCounter,
+                label: "A4-local",
+              })}
+            >
               Test A4
             </ct-button>
           </div>
@@ -189,17 +233,33 @@ export default pattern<Input>(({ inputCounter, items, showButtons }) => {
 
         {/* ========== SECTION B: INSIDE .map() ========== */}
         {/* VERIFIED: All tests PASS - MapStrategy extracts closures automatically */}
-        <div style={{ border: "2px solid green", padding: "1rem", marginBottom: "1rem", borderRadius: "8px" }}>
+        <div
+          style={{
+            border: "2px solid green",
+            padding: "1rem",
+            marginBottom: "1rem",
+            borderRadius: "8px",
+          }}
+        >
           <h3 style={{ color: "green" }}>B. Inside .map() Context ✅</h3>
           <p style={{ fontSize: "0.8rem", color: "#666" }}>
-            Key insight: `index` is an opaque proxy. You can pass it directly but NOT operate on it
-            (no string concat, no arithmetic). Use computed() or pass index to handler and format inside.
-            MapStrategy handles closure extraction automatically.
+            Key insight: `index` is an opaque proxy. You can pass it directly
+            but NOT operate on it (no string concat, no arithmetic). Use
+            computed() or pass index to handler and format inside. MapStrategy
+            handles closure extraction automatically.
           </p>
 
           {items.map((item, index) => (
-            <div style={{ marginBottom: "0.5rem", paddingLeft: "1rem", borderLeft: "2px solid #ccc" }}>
-              <div><strong>{item} (index: {index})</strong></div>
+            <div
+              style={{
+                marginBottom: "0.5rem",
+                paddingLeft: "1rem",
+                borderLeft: "2px solid #ccc",
+              }}
+            >
+              <div>
+                <strong>{item} (index: {index})</strong>
+              </div>
 
               <span style={{ marginRight: "0.5rem" }}>
                 B1. Inline closure (input):
@@ -221,14 +281,26 @@ export default pattern<Input>(({ inputCounter, items, showButtons }) => {
 
               <span style={{ marginRight: "0.5rem" }}>
                 B3. Handler with index param (input):
-                <ct-button onClick={handlerWithIndexParam({ targetCell: inputCounter, prefix: "B3-input", index })}>
+                <ct-button
+                  onClick={handlerWithIndexParam({
+                    targetCell: inputCounter,
+                    prefix: "B3-input",
+                    index,
+                  })}
+                >
                   B3
                 </ct-button>
               </span>
 
               <span>
                 B4. Handler with index param (local):
-                <ct-button onClick={handlerWithIndexParam({ targetCell: localCounter, prefix: "B4-local", index })}>
+                <ct-button
+                  onClick={handlerWithIndexParam({
+                    targetCell: localCounter,
+                    prefix: "B4-local",
+                    index,
+                  })}
+                >
                   B4
                 </ct-button>
               </span>
@@ -239,21 +311,38 @@ export default pattern<Input>(({ inputCounter, items, showButtons }) => {
         {/* ========== SECTION C: INSIDE ifElse() ========== */}
         {/* VERIFIED: Inline closures FAIL, handler params WORK */}
         {/* ROOT CAUSE: No IfElseStrategy in ts-transformers - closure extraction unimplemented */}
-        <div style={{ border: "2px solid orange", padding: "1rem", marginBottom: "1rem", borderRadius: "8px" }}>
+        <div
+          style={{
+            border: "2px solid orange",
+            padding: "1rem",
+            marginBottom: "1rem",
+            borderRadius: "8px",
+          }}
+        >
           <h3 style={{ color: "orange" }}>C. Inside ifElse() Context ⚠️</h3>
           <p style={{ fontSize: "0.8rem", color: "#666" }}>
-            <strong>VERIFIED:</strong> Inline closures (C1, C2, C5) FAIL with "opaque value" error.
-            Handler params (C3, C4) WORK. This is because no IfElseStrategy exists in ts-transformers.
-            Use handler() with explicit cell params inside ifElse branches.
+            <strong>VERIFIED:</strong>{" "}
+            Inline closures (C1, C2, C5) FAIL with "opaque value" error. Handler
+            params (C3, C4) WORK. This is because no IfElseStrategy exists in
+            ts-transformers. Use handler() with explicit cell params inside
+            ifElse branches.
           </p>
 
           <div style={{ marginBottom: "0.5rem" }}>
-            <ct-checkbox $checked={showButtons}>Toggle ifElse visibility</ct-checkbox>
+            <ct-checkbox $checked={showButtons}>
+              Toggle ifElse visibility
+            </ct-checkbox>
           </div>
 
           {ifElse(
             showButtons,
-            <div style={{ background: "#fff3cd", padding: "0.5rem", borderRadius: "4px" }}>
+            <div
+              style={{
+                background: "#fff3cd",
+                padding: "0.5rem",
+                borderRadius: "4px",
+              }}
+            >
               <div style={{ marginBottom: "0.5rem" }}>
                 <strong>C1. Inline closure (input):</strong>
                 <ct-button
@@ -261,7 +350,10 @@ export default pattern<Input>(({ inputCounter, items, showButtons }) => {
                     try {
                       const val = inputCounter.get();
                       inputCounter.set(val + 1);
-                      console.log("[C1] SUCCESS: inline in ifElse (input), value now:", val + 1);
+                      console.log(
+                        "[C1] SUCCESS: inline in ifElse (input), value now:",
+                        val + 1,
+                      );
                     } catch (e) {
                       console.error("[C1] FAILED: inline in ifElse (input)", e);
                     }
@@ -278,7 +370,10 @@ export default pattern<Input>(({ inputCounter, items, showButtons }) => {
                     try {
                       const val = localCounter.get();
                       localCounter.set(val + 1);
-                      console.log("[C2] SUCCESS: inline in ifElse (local), value now:", val + 1);
+                      console.log(
+                        "[C2] SUCCESS: inline in ifElse (local), value now:",
+                        val + 1,
+                      );
                     } catch (e) {
                       console.error("[C2] FAILED: inline in ifElse (local)", e);
                     }
@@ -290,70 +385,112 @@ export default pattern<Input>(({ inputCounter, items, showButtons }) => {
 
               <div style={{ marginBottom: "0.5rem" }}>
                 <strong>C3. Handler with cell param (input):</strong>
-                <ct-button onClick={handlerWithCellParam({ targetCell: inputCounter, label: "C3-input" })}>
+                <ct-button
+                  onClick={handlerWithCellParam({
+                    targetCell: inputCounter,
+                    label: "C3-input",
+                  })}
+                >
                   Test C3
                 </ct-button>
               </div>
 
               <div style={{ marginBottom: "0.5rem" }}>
                 <strong>C4. Handler with cell param (local):</strong>
-                <ct-button onClick={handlerWithCellParam({ targetCell: localCounter, label: "C4-local" })}>
+                <ct-button
+                  onClick={handlerWithCellParam({
+                    targetCell: localCounter,
+                    label: "C4-local",
+                  })}
+                >
                   Test C4
                 </ct-button>
               </div>
 
               <div style={{ marginBottom: "0.5rem" }}>
-                <strong>C5. Plain function closure (superstition #68 workaround):</strong>
+                <strong>
+                  C5. Plain function closure (superstition #68 workaround):
+                </strong>
                 <ct-button onClick={() => plainFunctionWithClosure("C5")}>
                   Test C5
                 </ct-button>
               </div>
             </div>,
-            <div style={{ background: "#f8d7da", padding: "0.5rem", borderRadius: "4px" }}>
+            <div
+              style={{
+                background: "#f8d7da",
+                padding: "0.5rem",
+                borderRadius: "4px",
+              }}
+            >
               Buttons hidden by ifElse. Toggle checkbox to show.
-            </div>
+            </div>,
           )}
 
           {/* C6: Test ternary operator instead of ifElse - ALSO FAILS */}
-          <div style={{ marginTop: "1rem", borderTop: "1px dashed orange", paddingTop: "0.5rem" }}>
+          <div
+            style={{
+              marginTop: "1rem",
+              borderTop: "1px dashed orange",
+              paddingTop: "0.5rem",
+            }}
+          >
             <strong>C6. Ternary operator (instead of ifElse):</strong>
             <p style={{ fontSize: "0.8rem", color: "#666" }}>
-              <strong>VERIFIED:</strong> Ternary also fails - same "opaque value" error.
-              The limitation is in the transformer, not the ifElse helper.
+              <strong>VERIFIED:</strong>{" "}
+              Ternary also fails - same "opaque value" error. The limitation is
+              in the transformer, not the ifElse helper.
             </p>
-            {showButtons ? (
-              <ct-button
-                onClick={() => {
-                  try {
-                    const val = inputCounter.get();
-                    inputCounter.set(val + 1);
-                    console.log("[C6] SUCCESS: ternary closure (input), value now:", val + 1);
-                  } catch (e) {
-                    console.error("[C6] FAILED: ternary closure (input)", e);
-                  }
-                }}
-              >
-                Test C6 (ternary)
-              </ct-button>
-            ) : (
-              <span>Hidden by ternary</span>
-            )}
+            {showButtons
+              ? (
+                <ct-button
+                  onClick={() => {
+                    try {
+                      const val = inputCounter.get();
+                      inputCounter.set(val + 1);
+                      console.log(
+                        "[C6] SUCCESS: ternary closure (input), value now:",
+                        val + 1,
+                      );
+                    } catch (e) {
+                      console.error("[C6] FAILED: ternary closure (input)", e);
+                    }
+                  }}
+                >
+                  Test C6 (ternary)
+                </ct-button>
+              )
+              : <span>Hidden by ternary</span>}
           </div>
         </div>
 
         {/* ========== SECTION D: INSIDE computed() ========== */}
         {/* VERIFIED: All tests PASS - CTS transformer handles closures automatically */}
-        <div style={{ border: "2px solid purple", padding: "1rem", marginBottom: "1rem", borderRadius: "8px" }}>
+        <div
+          style={{
+            border: "2px solid purple",
+            padding: "1rem",
+            marginBottom: "1rem",
+            borderRadius: "8px",
+          }}
+        >
           <h3 style={{ color: "purple" }}>D. Inside computed() Context ✅</h3>
           <p style={{ fontSize: "0.8rem", color: "#666" }}>
-            <strong>VERIFIED:</strong> Both inline closures and handler params work.
-            The CTS transformer automatically extracts closures from computed() functions.
+            <strong>VERIFIED:</strong>{" "}
+            Both inline closures and handler params work. The CTS transformer
+            automatically extracts closures from computed() functions.
           </p>
 
           {computed(() => {
             const itemCount = items.length;
             return (
-              <div style={{ background: "#e2d5f0", padding: "0.5rem", borderRadius: "4px" }}>
+              <div
+                style={{
+                  background: "#e2d5f0",
+                  padding: "0.5rem",
+                  borderRadius: "4px",
+                }}
+              >
                 <div>Items in array: {itemCount}</div>
 
                 <div style={{ marginBottom: "0.5rem" }}>
@@ -363,9 +500,15 @@ export default pattern<Input>(({ inputCounter, items, showButtons }) => {
                       try {
                         const val = inputCounter.get();
                         inputCounter.set(val + 1);
-                        console.log("[D1] SUCCESS: inline in computed (input), value now:", val + 1);
+                        console.log(
+                          "[D1] SUCCESS: inline in computed (input), value now:",
+                          val + 1,
+                        );
                       } catch (e) {
-                        console.error("[D1] FAILED: inline in computed (input)", e);
+                        console.error(
+                          "[D1] FAILED: inline in computed (input)",
+                          e,
+                        );
                       }
                     }}
                   >
@@ -380,9 +523,15 @@ export default pattern<Input>(({ inputCounter, items, showButtons }) => {
                       try {
                         const val = localCounter.get();
                         localCounter.set(val + 1);
-                        console.log("[D2] SUCCESS: inline in computed (local), value now:", val + 1);
+                        console.log(
+                          "[D2] SUCCESS: inline in computed (local), value now:",
+                          val + 1,
+                        );
                       } catch (e) {
-                        console.error("[D2] FAILED: inline in computed (local)", e);
+                        console.error(
+                          "[D2] FAILED: inline in computed (local)",
+                          e,
+                        );
                       }
                     }}
                   >
@@ -392,14 +541,24 @@ export default pattern<Input>(({ inputCounter, items, showButtons }) => {
 
                 <div style={{ marginBottom: "0.5rem" }}>
                   <strong>D3. Handler with cell param (input):</strong>
-                  <ct-button onClick={handlerWithCellParam({ targetCell: inputCounter, label: "D3-input" })}>
+                  <ct-button
+                    onClick={handlerWithCellParam({
+                      targetCell: inputCounter,
+                      label: "D3-input",
+                    })}
+                  >
                     Test D3
                   </ct-button>
                 </div>
 
                 <div style={{ marginBottom: "0.5rem" }}>
                   <strong>D4. Handler with cell param (local):</strong>
-                  <ct-button onClick={handlerWithCellParam({ targetCell: localCounter, label: "D4-local" })}>
+                  <ct-button
+                    onClick={handlerWithCellParam({
+                      targetCell: localCounter,
+                      label: "D4-local",
+                    })}
+                  >
                     Test D4
                   </ct-button>
                 </div>
@@ -409,9 +568,23 @@ export default pattern<Input>(({ inputCounter, items, showButtons }) => {
         </div>
 
         {/* ========== VERIFIED RESULTS ========== */}
-        <div style={{ border: "2px solid #333", padding: "1rem", borderRadius: "8px", background: "#f9f9f9" }}>
+        <div
+          style={{
+            border: "2px solid #333",
+            padding: "1rem",
+            borderRadius: "8px",
+            background: "#f9f9f9",
+          }}
+        >
           <h3>Verified Results (2025-12-16)</h3>
-          <pre style={{ fontSize: "0.7rem", background: "#fff", padding: "0.5rem", overflow: "auto" }}>
+          <pre
+            style={{
+              fontSize: "0.7rem",
+              background: "#fff",
+              padding: "0.5rem",
+              overflow: "auto",
+            }}
+          >
 {`| Test | Context    | Style            | Cell Source | Result |
 |------|------------|------------------|-------------|--------|
 | A1   | top-level  | inline closure   | input       | ✅ PASS |

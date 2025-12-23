@@ -9,14 +9,7 @@
  *
  * Error observed: "Value at path value/argument/corrections/0-Technical_Expertise is not an object"
  */
-import {
-  Cell,
-  Default,
-  handler,
-  NAME,
-  pattern,
-  UI,
-} from "commontools";
+import { Cell, Default, handler, NAME, pattern, UI } from "commontools";
 
 interface Item {
   value: string;
@@ -25,9 +18,12 @@ interface Item {
 
 interface Input {
   // Empty record to test creating new keys
-  emptyRecord: Default<Record<string, Item>, {}>;
+  emptyRecord: Default<Record<string, Item>, Record<PropertyKey, never>>;
   // Pre-populated record to test updating existing keys
-  populatedRecord: Default<Record<string, Item>, { existing: { value: "preset", count: 0 } }>;
+  populatedRecord: Default<
+    Record<string, Item>,
+    { existing: { value: "preset"; count: 0 } }
+  >;
   logs: Default<string[], []>;
 }
 
@@ -35,7 +31,10 @@ export default pattern<Input>(({ emptyRecord, populatedRecord, logs }) => {
   // ============================================================
   // TEST A: .key().set() on EMPTY record with SIMPLE key
   // ============================================================
-  const testEmptySimpleKey = handler<unknown, { record: Cell<Record<string, Item>>; logs: Cell<string[]> }>(
+  const testEmptySimpleKey = handler<
+    unknown,
+    { record: Cell<Record<string, Item>>; logs: Cell<string[]> }
+  >(
     (_, { record, logs }) => {
       try {
         const key = "simplekey";
@@ -48,16 +47,19 @@ export default pattern<Input>(({ emptyRecord, populatedRecord, logs }) => {
         console.error(`[#56] ${msg}`);
         logs.set([...logs.get(), msg]);
       }
-    }
+    },
   );
 
   // ============================================================
   // TEST B: .key().set() on EMPTY record with HYPHENATED key
   // ============================================================
-  const testEmptyHyphenKey = handler<unknown, { record: Cell<Record<string, Item>>; logs: Cell<string[]> }>(
+  const testEmptyHyphenKey = handler<
+    unknown,
+    { record: Cell<Record<string, Item>>; logs: Cell<string[]> }
+  >(
     (_, { record, logs }) => {
       try {
-        const key = "0-Technical_Expertise";  // The exact key from the superstition
+        const key = "0-Technical_Expertise"; // The exact key from the superstition
         record.key(key).set({ value: "test-b", count: 2 });
         const msg = `B: SUCCESS - .key("${key}").set() on empty record`;
         console.log(`[#56] ${msg}`);
@@ -67,16 +69,19 @@ export default pattern<Input>(({ emptyRecord, populatedRecord, logs }) => {
         console.error(`[#56] ${msg}`);
         logs.set([...logs.get(), msg]);
       }
-    }
+    },
   );
 
   // ============================================================
   // TEST C: .key().set() on POPULATED record (update existing)
   // ============================================================
-  const testPopulatedUpdate = handler<unknown, { record: Cell<Record<string, Item>>; logs: Cell<string[]> }>(
+  const testPopulatedUpdate = handler<
+    unknown,
+    { record: Cell<Record<string, Item>>; logs: Cell<string[]> }
+  >(
     (_, { record, logs }) => {
       try {
-        const key = "existing";  // This key already exists
+        const key = "existing"; // This key already exists
         record.key(key).set({ value: "updated", count: 99 });
         const msg = `C: SUCCESS - .key("${key}").set() update existing key`;
         console.log(`[#56] ${msg}`);
@@ -86,18 +91,22 @@ export default pattern<Input>(({ emptyRecord, populatedRecord, logs }) => {
         console.error(`[#56] ${msg}`);
         logs.set([...logs.get(), msg]);
       }
-    }
+    },
   );
 
   // ============================================================
   // TEST D: .key().set() on POPULATED record (create new)
   // ============================================================
-  const testPopulatedNew = handler<unknown, { record: Cell<Record<string, Item>>; logs: Cell<string[]> }>(
+  const testPopulatedNew = handler<
+    unknown,
+    { record: Cell<Record<string, Item>>; logs: Cell<string[]> }
+  >(
     (_, { record, logs }) => {
       try {
-        const key = "new-hyphen-key";  // New key with hyphen
+        const key = "new-hyphen-key"; // New key with hyphen
         record.key(key).set({ value: "test-d", count: 4 });
-        const msg = `D: SUCCESS - .key("${key}").set() new key on populated record`;
+        const msg =
+          `D: SUCCESS - .key("${key}").set() new key on populated record`;
         console.log(`[#56] ${msg}`);
         logs.set([...logs.get(), msg]);
       } catch (e) {
@@ -105,13 +114,16 @@ export default pattern<Input>(({ emptyRecord, populatedRecord, logs }) => {
         console.error(`[#56] ${msg}`);
         logs.set([...logs.get(), msg]);
       }
-    }
+    },
   );
 
   // ============================================================
   // TEST E: Spread workaround (should always work)
   // ============================================================
-  const testSpreadWorkaround = handler<unknown, { record: Cell<Record<string, Item>>; logs: Cell<string[]> }>(
+  const testSpreadWorkaround = handler<
+    unknown,
+    { record: Cell<Record<string, Item>>; logs: Cell<string[]> }
+  >(
     (_, { record, logs }) => {
       try {
         const key = "spread-key";
@@ -125,14 +137,14 @@ export default pattern<Input>(({ emptyRecord, populatedRecord, logs }) => {
         console.error(`[#56] ${msg}`);
         logs.set([...logs.get(), msg]);
       }
-    }
+    },
   );
 
   // Clear logs handler
   const clearLogs = handler<unknown, { logs: Cell<string[]> }>(
     (_, { logs }) => {
       logs.set([]);
-    }
+    },
   );
 
   return {
@@ -141,11 +153,19 @@ export default pattern<Input>(({ emptyRecord, populatedRecord, logs }) => {
       <div style={{ padding: "1rem", maxWidth: "700px" }}>
         <h2>Record .key().set() Test (#56)</h2>
         <p style={{ color: "#666", fontSize: "0.9rem" }}>
-          Testing if .key(k).set(v) fails on empty Records or with hyphenated keys
+          Testing if .key(k).set(v) fails on empty Records or with hyphenated
+          keys
         </p>
 
         {/* Current state display */}
-        <div style={{ background: "#f0f0f0", padding: "1rem", marginBottom: "1rem", borderRadius: "8px" }}>
+        <div
+          style={{
+            background: "#f0f0f0",
+            padding: "1rem",
+            marginBottom: "1rem",
+            borderRadius: "8px",
+          }}
+        >
           <strong>Current State:</strong>
           <div style={{ fontSize: "0.8rem", fontFamily: "monospace" }}>
             <div>emptyRecord: {JSON.stringify(emptyRecord)}</div>
@@ -154,60 +174,116 @@ export default pattern<Input>(({ emptyRecord, populatedRecord, logs }) => {
         </div>
 
         {/* Test buttons */}
-        <div style={{ border: "2px solid blue", padding: "1rem", marginBottom: "1rem", borderRadius: "8px" }}>
+        <div
+          style={{
+            border: "2px solid blue",
+            padding: "1rem",
+            marginBottom: "1rem",
+            borderRadius: "8px",
+          }}
+        >
           <h3 style={{ color: "blue" }}>Tests on Empty Record</h3>
 
           <div style={{ marginBottom: "0.5rem" }}>
-            <ct-button onClick={testEmptySimpleKey({ record: emptyRecord, logs })}>
+            <ct-button
+              onClick={testEmptySimpleKey({ record: emptyRecord, logs })}
+            >
               A: Simple key on empty
             </ct-button>
           </div>
 
           <div style={{ marginBottom: "0.5rem" }}>
-            <ct-button onClick={testEmptyHyphenKey({ record: emptyRecord, logs })}>
+            <ct-button
+              onClick={testEmptyHyphenKey({ record: emptyRecord, logs })}
+            >
               B: Hyphen key on empty (the problematic case)
             </ct-button>
           </div>
         </div>
 
-        <div style={{ border: "2px solid green", padding: "1rem", marginBottom: "1rem", borderRadius: "8px" }}>
+        <div
+          style={{
+            border: "2px solid green",
+            padding: "1rem",
+            marginBottom: "1rem",
+            borderRadius: "8px",
+          }}
+        >
           <h3 style={{ color: "green" }}>Tests on Populated Record</h3>
 
           <div style={{ marginBottom: "0.5rem" }}>
-            <ct-button onClick={testPopulatedUpdate({ record: populatedRecord, logs })}>
+            <ct-button
+              onClick={testPopulatedUpdate({ record: populatedRecord, logs })}
+            >
               C: Update existing key
             </ct-button>
           </div>
 
           <div style={{ marginBottom: "0.5rem" }}>
-            <ct-button onClick={testPopulatedNew({ record: populatedRecord, logs })}>
+            <ct-button
+              onClick={testPopulatedNew({ record: populatedRecord, logs })}
+            >
               D: New hyphen key on populated
             </ct-button>
           </div>
         </div>
 
-        <div style={{ border: "2px solid purple", padding: "1rem", marginBottom: "1rem", borderRadius: "8px" }}>
+        <div
+          style={{
+            border: "2px solid purple",
+            padding: "1rem",
+            marginBottom: "1rem",
+            borderRadius: "8px",
+          }}
+        >
           <h3 style={{ color: "purple" }}>Workaround</h3>
 
           <div style={{ marginBottom: "0.5rem" }}>
-            <ct-button onClick={testSpreadWorkaround({ record: emptyRecord, logs })}>
+            <ct-button
+              onClick={testSpreadWorkaround({ record: emptyRecord, logs })}
+            >
               E: Spread workaround on empty
             </ct-button>
           </div>
         </div>
 
         {/* Logs */}
-        <div style={{ border: "2px solid #333", padding: "1rem", borderRadius: "8px", background: "#f9f9f9" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div
+          style={{
+            border: "2px solid #333",
+            padding: "1rem",
+            borderRadius: "8px",
+            background: "#f9f9f9",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
             <h3>Test Results</h3>
             <ct-button onClick={clearLogs({ logs })}>Clear</ct-button>
           </div>
-          <div style={{ fontFamily: "monospace", fontSize: "0.8rem", whiteSpace: "pre-wrap" }}>
+          <div
+            style={{
+              fontFamily: "monospace",
+              fontSize: "0.8rem",
+              whiteSpace: "pre-wrap",
+            }}
+          >
             {logs.map((log) => (
-              <div style={{
-                color: log.includes("SUCCESS") ? "green" : log.includes("FAILED") ? "red" : "#333",
-                marginBottom: "0.25rem"
-              }}>
+              <div
+                style={{
+                  color: log.includes("SUCCESS")
+                    ? "green"
+                    : log.includes("FAILED")
+                    ? "red"
+                    : "#333",
+                  marginBottom: "0.25rem",
+                }}
+              >
                 {log}
               </div>
             ))}
