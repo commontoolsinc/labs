@@ -3,7 +3,6 @@ import {
   Cell,
   computed,
   type Default,
-  getEntityId,
   handler,
   lift,
   NAME,
@@ -363,7 +362,7 @@ const analyzeImport = handler<
     detectedDuplicates,
     pendingImportData,
     showImportModal,
-    importStatus,
+    importStatus: _importStatus,
   } = state;
   const markdown = importMarkdown.get();
   const parsed = parseMarkdownToNotesPlain(markdown);
@@ -488,7 +487,7 @@ const cancelImport = handler<
 });
 
 // Legacy handler for direct import (no duplicate check)
-const importNotes = handler<
+const _importNotes = handler<
   Record<string, never>,
   {
     importMarkdown: Cell<string>;
@@ -518,7 +517,7 @@ const toggleNoteVisibility = handler<
 });
 
 // Handler to toggle individual selection (with shift-click range support)
-const toggleSelection = handler<
+const _toggleSelection = handler<
   { shiftKey?: boolean },
   {
     index: number;
@@ -576,7 +575,7 @@ const deselectAll = handler<
 });
 
 // Handler to toggle visibility of all selected notes via switch
-const toggleSelectedVisibility = handler<
+const _toggleSelectedVisibility = handler<
   { detail: { checked: boolean } },
   { notes: Cell<NoteCharm[]>; selectedIndices: Cell<number[]> }
 >((event, { notes, selectedIndices }) => {
@@ -1464,7 +1463,7 @@ const copyExportMarkdown = handler<
 
 // Plain function to get notebooks containing a note (with name and reference for navigation)
 // Using plain function instead of lift for more consistent proxy resolution
-function getNoteNotebooksPlain(
+function _getNoteNotebooksPlain(
   note: NoteCharm,
   notebooks: NotebookCharm[],
 ): { name: string; notebook: NotebookCharm }[] {

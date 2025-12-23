@@ -487,7 +487,7 @@ const cancelNewNotebookPrompt = handler<
 });
 
 // Handler to toggle visibility of all selected notes
-const toggleSelectedVisibility = handler<
+const _toggleSelectedVisibility = handler<
   { detail: { checked: boolean } },
   { notes: Cell<NoteCharm[]>; selectedNoteIndices: Cell<number[]> }
 >((event, { notes, selectedNoteIndices }) => {
