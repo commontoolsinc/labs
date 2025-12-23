@@ -216,9 +216,11 @@ export class CommonToolsFormatter implements TypeFormatter {
     // Check for schema hints on the current typeNode and propagate to child context
     // This allows array-property-only access patterns (e.g., .length) to generate items: { not: true, asCell/asOpaque: true }
     let childContext = context;
+    let isArrayPropertyOnlyAccess = false;
     if (context.schemaHints && context.typeNode) {
       const hint = context.schemaHints.get(context.typeNode);
       if (hint?.items === false) {
+        isArrayPropertyOnlyAccess = true;
         // Build items override with not:true and the appropriate wrapper semantic
         const itemsOverride: Record<string, boolean> = { not: true };
         if (wrapperKind === "Cell") {
@@ -235,6 +237,12 @@ export class CommonToolsFormatter implements TypeFormatter {
       childContext,
       shouldPassTypeNode ? innerTypeNode : undefined,
     );
+
+    // For array-property-only access (e.g., .length), don't wrap the result -
+    // we need the array unwrapped so .length is accessible
+    if (isArrayPropertyOnlyAccess) {
+      return innerSchema;
+    }
 
     // Stream<T>: do not reflect inner Cell-ness; only mark asStream
     if (wrapperKind === "Stream") {
