@@ -99,6 +99,10 @@ export type RuntimeTelemetryMarker = {
 } | {
   type: "scheduler.mode.change";
   pullMode: boolean;
+} | {
+  type: "scheduler.subscribe";
+  actionId: string;
+  isEffect: boolean;
 };
 
 export type RuntimeTelemetryMarkerResult = RuntimeTelemetryMarker & {

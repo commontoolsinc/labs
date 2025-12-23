@@ -385,6 +385,15 @@ export class Scheduler {
     this.pending.add(action);
     this.scheduledFirstTime.add(action);
 
+    // Emit telemetry for new subscription
+    const actionId = (action as Action & { src?: string }).src || action.name ||
+      "anonymous";
+    this.runtime.telemetry.submit({
+      type: "scheduler.subscribe",
+      actionId,
+      isEffect: this.isEffectAction.get(action) ?? false,
+    });
+
     return () => this.unsubscribe(action);
   }
 
