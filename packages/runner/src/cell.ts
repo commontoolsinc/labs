@@ -165,11 +165,7 @@ declare module "@commontools/api" {
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
     sink(callback: (value: Readonly<T>) => Cancel | undefined | void): Cancel;
     sync(): Promise<Cell<T>> | Cell<T>;
-<<<<<<< HEAD
-=======
-    resolveToRoot(): Cell<unknown>;
     pull(): Promise<Readonly<T>>;
->>>>>>> d07e61c1c (feat(cell): add pull() method for demand-driven value retrieval)
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
