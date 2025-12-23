@@ -229,7 +229,9 @@ const togglePin = handler<
 >((_event, { subCharms: sc, entry }) => {
   const current = sc.get() || [];
   // Find by reference using charm identity
-  const index = current.findIndex((e) => e?.charm === entry?.charm);
+  const index = current.findIndex((e) =>
+    Cell.equals(e?.charm as object, entry?.charm as object)
+  );
   if (index < 0) return;
 
   const updated = [...current];
@@ -244,7 +246,9 @@ const toggleCollapsed = handler<
 >((_event, { subCharms: sc, entry }) => {
   const current = sc.get() || [];
   // Find by reference using charm identity
-  const index = current.findIndex((e) => e?.charm === entry?.charm);
+  const index = current.findIndex((e) =>
+    Cell.equals(e?.charm as object, entry?.charm as object)
+  );
   if (index < 0) return;
 
   const updated = [...current];
@@ -365,13 +369,20 @@ const emptyTrash = handler<
 const openNoteEditor = handler<
   unknown,
   {
-    editingNoteEntry: Cell<SubCharmEntry | undefined>;
+    subCharms: Cell<SubCharmEntry[]>;
+    editingNoteIndex: Cell<number | undefined>;
     editingNoteText: Cell<string | undefined>;
     entry: SubCharmEntry;
   }
->((_event, { editingNoteEntry, editingNoteText, entry }) => {
+>((_event, { subCharms, editingNoteIndex, editingNoteText, entry }) => {
   if (!entry) return;
-  editingNoteEntry.set(entry);
+  // Find the index of this entry in subCharms
+  const current = subCharms.get() || [];
+  const index = current.findIndex((e) =>
+    Cell.equals(e?.charm as object, entry?.charm as object)
+  );
+  if (index < 0) return;
+  editingNoteIndex.set(index);
   editingNoteText.set(entry.note || "");
 });
 
@@ -380,43 +391,38 @@ const saveNote = handler<
   unknown,
   {
     subCharms: Cell<SubCharmEntry[]>;
-    editingNoteEntry: Cell<SubCharmEntry | undefined>;
+    editingNoteIndex: Cell<number | undefined>;
     editingNoteText: Cell<string | undefined>;
   }
->((_event, { subCharms: sc, editingNoteEntry, editingNoteText }) => {
-  const entry = editingNoteEntry.get();
+>((_event, { subCharms: sc, editingNoteIndex, editingNoteText }) => {
+  const index = editingNoteIndex.get();
   const noteValue = (editingNoteText.get() || "").trim();
 
-  // Always close the modal first
-  editingNoteEntry.set(undefined);
+  // Close modal FIRST before any other operations
+  editingNoteIndex.set(undefined);
   editingNoteText.set(undefined);
 
-  // Then save if we have a valid entry
-  if (!entry?.charm) return;
+  // Validate we have an index to save
+  if (index === undefined || index < 0) return;
 
   const current = sc.get() || [];
-  // Use Cell.equals for proper identity comparison across link aliases
-  const index = current.findIndex(
-    (e) =>
-      e?.charm &&
-      Cell.equals(entry.charm as Cell<unknown>, e.charm as Cell<unknown>),
-  );
-  if (index >= 0) {
-    const updated = [...current];
-    updated[index] = { ...current[index], note: noteValue || undefined };
-    sc.set(updated);
-  }
+  if (index >= current.length) return;
+
+  const originalEntry = current[index];
+  const updated = [...current];
+  updated[index] = { ...originalEntry, note: noteValue || undefined };
+  sc.set(updated);
 });
 
 // Close the note editor without saving
 const closeNoteEditor = handler<
   unknown,
   {
-    editingNoteEntry: Cell<SubCharmEntry | undefined>;
+    editingNoteIndex: Cell<number | undefined>;
     editingNoteText: Cell<string | undefined>;
   }
->((_event, { editingNoteEntry, editingNoteText }) => {
-  editingNoteEntry.set(undefined);
+>((_event, { editingNoteIndex, editingNoteText }) => {
+  editingNoteIndex.set(undefined);
   editingNoteText.set(undefined);
 });
 
@@ -432,7 +438,9 @@ const createSibling = handler<
   { subCharms: Cell<SubCharmEntry[]>; entry: SubCharmEntry }
 >((_event, { subCharms: sc, entry }) => {
   const current = sc.get() || [];
-  const currentIndex = current.findIndex((e) => e?.charm === entry?.charm);
+  const currentIndex = current.findIndex((e) =>
+    Cell.equals(e?.charm as object, entry?.charm as object)
+  );
   if (currentIndex < 0) return;
 
   // Get smart default label
@@ -469,7 +477,8 @@ const Record = pattern<RecordInput, RecordOutput>(
     // With features: backdrop blur, escape key, focus trap, centered positioning, animations
     // IMPORTANT: Don't use Cell.of(null) - it creates a cell pointing to null, not primitive null.
     // Use Cell.of() without argument so .get() returns undefined (falsy) initially.
-    const editingNoteEntry = Cell.of<SubCharmEntry | undefined>();
+    // We store the INDEX instead of the entry to decouple modal state from array updates.
+    const editingNoteIndex = Cell.of<number | undefined>();
     const editingNoteText = Cell.of<string>();
 
     // Create Record pattern JSON for wiki-links in Notes
@@ -798,7 +807,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                               <button
                                 type="button"
                                 onClick={openNoteEditor({
-                                  editingNoteEntry,
+                                  subCharms,
+                                  editingNoteIndex,
                                   editingNoteText,
                                   entry,
                                 })}
@@ -988,7 +998,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 <button
                                   type="button"
                                   onClick={openNoteEditor({
-                                    editingNoteEntry,
+                                    subCharms,
+                                    editingNoteIndex,
                                     editingNoteText,
                                     entry,
                                   })}
@@ -1175,7 +1186,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                             <button
                               type="button"
                               onClick={openNoteEditor({
-                                editingNoteEntry,
+                                subCharms,
+                                editingNoteIndex,
                                 editingNoteText,
                                 entry,
                               })}
@@ -1401,7 +1413,7 @@ const Record = pattern<RecordInput, RecordOutput>(
              * NOTE: Replace with <ct-modal> component when available.
              * Future ct-modal API would be:
              *   <ct-modal
-             *     $open={editingNoteEntry}
+             *     $open={editingNoteIndex}
              *     onct-modal-close={closeNoteEditor({...})}
              *     backdrop="blur"
              *   >
@@ -1418,11 +1430,11 @@ const Record = pattern<RecordInput, RecordOutput>(
              */
           }
           {ifElse(
-            computed(() => !!editingNoteEntry.get()),
+            computed(() => editingNoteIndex.get() !== undefined),
             <div>
               {/* Backdrop with blur */}
               <div
-                onClick={closeNoteEditor({ editingNoteEntry, editingNoteText })}
+                onClick={closeNoteEditor({ editingNoteIndex, editingNoteText })}
                 style={{
                   position: "fixed",
                   inset: "0",
@@ -1464,7 +1476,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                   <button
                     type="button"
                     onClick={closeNoteEditor({
-                      editingNoteEntry,
+                      editingNoteIndex,
                       editingNoteText,
                     })}
                     style={{
@@ -1488,6 +1500,35 @@ const Record = pattern<RecordInput, RecordOutput>(
                     rows={6}
                     style={{ width: "100%", resize: "vertical" }}
                   />
+                  {/* Keyboard shortcuts for modal */}
+                  <ct-keybind
+                    code="Escape"
+                    ignore-editable={false}
+                    onct-keybind={closeNoteEditor({
+                      editingNoteIndex,
+                      editingNoteText,
+                    })}
+                  />
+                  <ct-keybind
+                    code="Enter"
+                    meta
+                    ignore-editable={false}
+                    onct-keybind={saveNote({
+                      subCharms,
+                      editingNoteIndex,
+                      editingNoteText,
+                    })}
+                  />
+                  <ct-keybind
+                    code="Enter"
+                    ctrl
+                    ignore-editable={false}
+                    onct-keybind={saveNote({
+                      subCharms,
+                      editingNoteIndex,
+                      editingNoteText,
+                    })}
+                  />
                 </div>
                 {/* Footer */}
                 <div
@@ -1503,7 +1544,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                   <button
                     type="button"
                     onClick={closeNoteEditor({
-                      editingNoteEntry,
+                      editingNoteIndex,
                       editingNoteText,
                     })}
                     style={{
@@ -1522,7 +1563,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                     type="button"
                     onClick={saveNote({
                       subCharms,
-                      editingNoteEntry,
+                      editingNoteIndex,
                       editingNoteText,
                     })}
                     style={{
