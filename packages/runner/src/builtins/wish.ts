@@ -306,7 +306,7 @@ function resolveBase(
         throw new WishError("User identity DID not available for #journal");
       }
 
-      const journal = ctx.runtime.getHomeSpaceCell().key("journal").asSchema(journalSchema)
+      const journal = ctx.runtime.getHomeSpaceCell(ctx.tx).key("journal").asSchema(journalSchema)
       journal.sync();
 
       return [{ cell: journal }];
