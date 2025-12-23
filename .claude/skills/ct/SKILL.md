@@ -74,7 +74,7 @@ alias ct="deno task ct"
 
 **Local URLs:**
 - **Backend API**: `http://localhost:8000` (use with `-a` flag)
-- **Frontend/Shell**: `http://localhost:5173` (access spaces in browser)
+- **Frontend/Shell**: `http://localhost:8000` (access spaces in browser)
 - **Logs**: `packages/shell/local-dev-shell.log`, `packages/toolshed/local-dev-toolshed.log`
 
 **Example local deployment:**
@@ -84,7 +84,7 @@ alias ct="deno task ct"
 deno task ct charm new path/to/pattern.tsx \
   -i claude.key -a http://localhost:8000 -s my-space
 
-# Then open: http://localhost:5173/my-space
+# Then open: http://localhost:8000/my-space
 ```
 
 If scripts fail, see `docs/common/LOCAL_DEV_SERVERS.md` for troubleshooting.

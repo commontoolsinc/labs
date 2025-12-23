@@ -13,9 +13,9 @@ Goal: implement the task below
 
 2. Format with `deno fmt` for the changed files.
 
-3. Once tests pass, deploy it locally using
-   `/app/labs/docs/common/PATTERN_DEV_DEPLOY.md` for info on how to deploy. It
-   should deploy to http://localhost:8000. Servers are already running.
+3. Once tests pass, deploy it locally using Claude Skill "ct" for deployment
+   commands. It should deploy to http://localhost:8000. Servers are already
+   running.
 
    Remember to use space name "ralph${RALPH_ID}" when deploying.
 

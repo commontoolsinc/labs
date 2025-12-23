@@ -17,7 +17,6 @@ This directory contains documentation for pattern developers and framework contr
 
 | Doc | Description |
 |-----|-------------|
-| [PATTERN_DEV_DEPLOY.md](PATTERN_DEV_DEPLOY.md) | Building, testing, and deploying patterns |
 | [DEBUGGING.md](DEBUGGING.md) | Troubleshooting errors and common gotchas |
 | [LOCAL_DEV_SERVERS.md](LOCAL_DEV_SERVERS.md) | Setting up local development servers |
 
