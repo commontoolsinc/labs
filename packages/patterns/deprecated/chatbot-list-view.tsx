@@ -17,7 +17,7 @@ import {
 } from "commontools";
 
 import Chat from "./chatbot-note-composed.tsx";
-import { ListItem } from "./common-tools.tsx";
+import { ListItem } from "../system/common-tools.tsx";
 
 import { type MentionableCharm } from "./backlinks-index.tsx";
 type CharmEntry = {

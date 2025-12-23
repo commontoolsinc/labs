@@ -71,7 +71,7 @@ keywords/features.
   - **Data types**: array of tuples (date/pizza strings), web response object
   - **Keywords**: fetchData, lift, string parsing, map
 
-- common-tools.tsx: Reusable tool recipes and handlers for LLM integration
+- system/common-tools.tsx: Reusable tool recipes and handlers for LLM integration
   - **Data types**: array of list items (objects), API response objects
   - **Keywords**: handler, recipe as tool, fetchData, derive, ifElse
 
@@ -106,7 +106,7 @@ keywords/features.
   - **Data types**: array of strings
   - **Keywords**: ct-tags, handler, onct-change, array of strings
 
-- default-app.tsx: Default application with charm management and navigation
+- system/default-app.tsx: Default application with charm management and navigation
   - **Data types**: array of charms (MentionableCharm objects)
   - **Keywords**: wish, derive, navigateTo, handler, ct-table, ct-button,
     multiple recipe instantiation

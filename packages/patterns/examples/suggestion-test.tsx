@@ -1,6 +1,6 @@
 /// <cts-enable />
 import { Cell, Default, NAME, pattern, UI } from "commontools";
-import Suggestion from "./suggestion.tsx";
+import Suggestion from "../system/suggestion.tsx";
 
 export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
   ({ title }) => {

@@ -166,12 +166,12 @@ export class CharmsController<T = unknown> {
     const patternConfig = isHomeSpace
       ? {
         name: "Home",
-        urlPath: "/api/patterns/home.tsx",
+        urlPath: "/api/patterns/system/home.tsx",
         cause: "home-pattern",
       }
       : {
         name: "DefaultCharmList",
-        urlPath: "/api/patterns/default-app.tsx",
+        urlPath: "/api/patterns/system/default-app.tsx",
         cause: "space-root",
       };
 

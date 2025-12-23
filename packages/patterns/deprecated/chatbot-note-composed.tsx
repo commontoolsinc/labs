@@ -24,7 +24,7 @@ import {
   readListItems,
   readWebpage,
   searchWeb,
-} from "./common-tools.tsx";
+} from "../system/common-tools.tsx";
 
 import { type MentionableCharm } from "./backlinks-index.tsx";
 

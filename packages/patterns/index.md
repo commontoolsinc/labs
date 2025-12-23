@@ -296,7 +296,7 @@ interface LobbyOutput {
 }
 ```
 
-## `favorites-manager.tsx`
+## `system/favorites-manager.tsx`
 
 View and manage favorited charms with tags. Uses the wish system to query
 `#favorites` and allows removing items.
