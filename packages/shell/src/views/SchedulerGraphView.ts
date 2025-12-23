@@ -31,6 +31,7 @@ interface LayoutEdge {
   to: string;
   cells: string[];
   isHistorical: boolean;
+  edgeType?: "data" | "parent";
 }
 
 const NODE_WIDTH = 140;
@@ -316,6 +317,63 @@ export class XSchedulerGraph extends LitElement {
       fill: #64748b;
     }
 
+    .edge-parent {
+      stroke-dasharray: 4 3;
+      stroke: #94a3b8;
+    }
+
+    .edge-parent:hover {
+      stroke: #cbd5e1;
+    }
+
+    /* Legend */
+    .legend {
+      position: absolute;
+      bottom: 0.5rem;
+      left: 0.5rem;
+      background: rgba(30, 41, 59, 0.9);
+      border: 1px solid #475569;
+      border-radius: 0.375rem;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.6875rem;
+      color: #cbd5e1;
+      font-family: monospace;
+      display: flex;
+      gap: 1rem;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.375rem;
+    }
+
+    .legend-swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+    }
+
+    .legend-swatch.input { background: #065f46; }
+    .legend-swatch.computation { background: #5b21b6; }
+    .legend-swatch.effect { background: #1e40af; }
+
+    .legend-line {
+      width: 20px;
+      height: 2px;
+      background: #64748b;
+    }
+
+    .legend-line.parent {
+      background: repeating-linear-gradient(
+        90deg,
+        #94a3b8 0px,
+        #94a3b8 4px,
+        transparent 4px,
+        transparent 7px
+      );
+    }
+
     /* Tooltip */
     .tooltip {
       position: absolute;
@@ -590,6 +648,7 @@ export class XSchedulerGraph extends LitElement {
         to: e.w,
         cells: edgeData?.cells ?? [],
         isHistorical: originalEdge?.isHistorical ?? false,
+        edgeType: originalEdge?.edgeType,
       });
     }
 
@@ -1156,9 +1215,15 @@ export class XSchedulerGraph extends LitElement {
     // Simple straight line (could add bezier curves later)
     const path = `M ${x1} ${y1} L ${x2} ${y2}`;
 
+    const edgeClasses = [
+      "edge-path",
+      edge.isHistorical ? "edge-historical" : "edge-current",
+      edge.edgeType === "parent" ? "edge-parent" : "",
+    ].filter(Boolean).join(" ");
+
     return svg`
       <path
-        class="edge-path ${edge.isHistorical ? "edge-historical" : "edge-current"}"
+        class="${edgeClasses}"
         d="${path}"
         marker-end="url(#arrowhead)"
         @click="${(e: MouseEvent) => this.handleEdgeClick(e, edge)}"
@@ -1249,12 +1314,40 @@ export class XSchedulerGraph extends LitElement {
     `;
   }
 
+  private renderLegend(): TemplateResult {
+    return html`
+      <div class="legend">
+        <div class="legend-item">
+          <div class="legend-swatch input"></div>
+          <span>Input</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-swatch computation"></div>
+          <span>Computation</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-swatch effect"></div>
+          <span>Effect</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-line"></div>
+          <span>Data</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-line parent"></div>
+          <span>Parent</span>
+        </div>
+      </div>
+    `;
+  }
+
   override render(): TemplateResult {
     return html`
       ${this.renderToolbar()}
       <div class="graph-container" @click="${this.handleContainerClick}">
         ${this.renderGraph()}
         ${this.renderTooltip()}
+        ${this.renderLegend()}
       </div>
     `;
   }
