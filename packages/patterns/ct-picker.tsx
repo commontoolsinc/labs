@@ -21,7 +21,10 @@ export default recipe<Input, Result>(
   (_) => {
     // Create counter instances - these are OpaqueRefs to recipe results
     const counterA = Counter({ value: 10 });
-    const counterB = Note({ content: "This is item B (a Note)", noteId: generateId() });
+    const counterB = Note({
+      content: "This is item B (a Note)",
+      noteId: generateId(),
+    });
     const counterC = Counter({ value: 30 });
 
     const selectedIndex = Cell.of(0);

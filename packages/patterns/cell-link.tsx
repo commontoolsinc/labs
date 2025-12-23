@@ -8,7 +8,11 @@ const generateId = () =>
 
 export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
   ({ title }) => {
-    const note = Note({ title: "Demo", content: "hello", noteId: generateId() });
+    const note = Note({
+      title: "Demo",
+      content: "hello",
+      noteId: generateId(),
+    });
 
     return {
       [NAME]: title,

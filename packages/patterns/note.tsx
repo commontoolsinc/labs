@@ -278,9 +278,7 @@ const Note = pattern<Input, Output>(({ title, content, isHidden, noteId }) => {
             {/* Editable Title - click to edit */}
             <div
               style={{
-                display: computed(() =>
-                  isEditingTitle.get() ? "none" : "flex"
-                ),
+                display: computed(() => isEditingTitle.get() ? "none" : "flex"),
                 alignItems: "center",
                 gap: "8px",
                 cursor: "pointer",
@@ -294,9 +292,7 @@ const Note = pattern<Input, Output>(({ title, content, isHidden, noteId }) => {
             </div>
             <div
               style={{
-                display: computed(() =>
-                  isEditingTitle.get() ? "flex" : "none"
-                ),
+                display: computed(() => isEditingTitle.get() ? "flex" : "none"),
                 flex: 1,
                 marginRight: "12px",
               }}
@@ -310,97 +306,99 @@ const Note = pattern<Input, Output>(({ title, content, isHidden, noteId }) => {
               />
             </div>
             <ct-button
-            variant="ghost"
-            onClick={toggleMenu({ menuOpen })}
-            style={{
-              padding: "8px 16px",
-              fontSize: "16px",
-              borderRadius: "8px",
-            }}
-          >
-            Notes {"\u25BE"}
-          </ct-button>
-
-          {/* Backdrop to close menu when clicking outside */}
-          <div
-            onClick={closeMenu({ menuOpen })}
-            style={{
-              display: computed(() => (menuOpen.get() ? "block" : "none")),
-              position: "fixed",
-              inset: "0",
-              zIndex: "999",
-            }}
-          />
-
-          {/* Dropdown Menu */}
-          <ct-vstack
-            gap="0"
-            style={{
-              display: computed(() => (menuOpen.get() ? "flex" : "none")),
-              position: "fixed",
-              top: "112px",
-              right: "16px",
-              background: "var(--ct-color-bg, white)",
-              border: "1px solid var(--ct-color-border, #e5e5e7)",
-              borderRadius: "12px",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-              minWidth: "180px",
-              zIndex: "1000",
-              padding: "4px",
-            }}
-          >
-            <ct-button
               variant="ghost"
-              onClick={menuNewNote({ menuOpen, allCharms })}
-              style={{ justifyContent: "flex-start" }}
+              onClick={toggleMenu({ menuOpen })}
+              style={{
+                padding: "8px 16px",
+                fontSize: "16px",
+                borderRadius: "8px",
+              }}
             >
-              {"\u00A0\u00A0"}📝 New Note
+              Notes {"\u25BE"}
             </ct-button>
 
-            {/* Divider */}
+            {/* Backdrop to close menu when clicking outside */}
             <div
+              onClick={closeMenu({ menuOpen })}
               style={{
-                height: "1px",
-                background: "var(--ct-color-border, #e5e5e7)",
-                margin: "4px 8px",
+                display: computed(() => (menuOpen.get() ? "block" : "none")),
+                position: "fixed",
+                inset: "0",
+                zIndex: "999",
               }}
             />
 
-            {/* List of notebooks with ✓ for membership */}
-            {notebooks.map((notebook) => (
+            {/* Dropdown Menu */}
+            <ct-vstack
+              gap="0"
+              style={{
+                display: computed(() => (menuOpen.get() ? "flex" : "none")),
+                position: "fixed",
+                top: "112px",
+                right: "16px",
+                background: "var(--ct-color-bg, white)",
+                border: "1px solid var(--ct-color-border, #e5e5e7)",
+                borderRadius: "12px",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                minWidth: "180px",
+                zIndex: "1000",
+                padding: "4px",
+              }}
+            >
               <ct-button
                 variant="ghost"
-                onClick={menuGoToNotebook({ menuOpen, notebook })}
+                onClick={menuNewNote({ menuOpen, allCharms })}
                 style={{ justifyContent: "flex-start" }}
               >
-                {"\u00A0\u00A0"}{notebook[NAME]}{computed(() => {
-                  const nbName = (notebook as any)?.[NAME] ?? "";
-                  return containingNotebookNames.includes(nbName) ? " ✓" : "";
-                })}
+                {"\u00A0\u00A0"}📝 New Note
               </ct-button>
-            ))}
 
-            {/* Divider + All Notes - only show if All Notes charm exists */}
-            <div
-              style={{
-                display: computed(() => allNotesCharm ? "block" : "none"),
-                height: "1px",
-                background: "var(--ct-color-border, #e5e5e7)",
-                margin: "4px 8px",
-              }}
-            />
+              {/* Divider */}
+              <div
+                style={{
+                  height: "1px",
+                  background: "var(--ct-color-border, #e5e5e7)",
+                  margin: "4px 8px",
+                }}
+              />
 
-            <ct-button
-              variant="ghost"
-              onClick={menuAllNotebooks({ menuOpen, allCharms })}
-              style={{
-                display: computed(() => allNotesCharm ? "flex" : "none"),
-                justifyContent: "flex-start",
-              }}
-            >
-              {"\u00A0\u00A0"}📁 All Notes
-            </ct-button>
-          </ct-vstack>
+              {/* List of notebooks with ✓ for membership */}
+              {notebooks.map((notebook) => (
+                <ct-button
+                  variant="ghost"
+                  onClick={menuGoToNotebook({ menuOpen, notebook })}
+                  style={{ justifyContent: "flex-start" }}
+                >
+                  {"\u00A0\u00A0"}
+                  {notebook[NAME]}
+                  {computed(() => {
+                    const nbName = (notebook as any)?.[NAME] ?? "";
+                    return containingNotebookNames.includes(nbName) ? " ✓" : "";
+                  })}
+                </ct-button>
+              ))}
+
+              {/* Divider + All Notes - only show if All Notes charm exists */}
+              <div
+                style={{
+                  display: computed(() => allNotesCharm ? "block" : "none"),
+                  height: "1px",
+                  background: "var(--ct-color-border, #e5e5e7)",
+                  margin: "4px 8px",
+                }}
+              />
+
+              <ct-button
+                variant="ghost"
+                onClick={menuAllNotebooks({ menuOpen, allCharms })}
+                style={{
+                  display: computed(() => allNotesCharm ? "flex" : "none"),
+                  justifyContent: "flex-start",
+                }}
+              >
+                {"\u00A0\u00A0"}📁 All Notes
+              </ct-button>
+            </ct-vstack>
           </ct-hstack>
         </ct-vstack>
 
