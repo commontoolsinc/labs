@@ -418,7 +418,6 @@ export class XSchedulerGraph extends LitElement {
   private graphContainer?: HTMLElement;
 
   private lastGraphVersion = -1;
-  private hasAutoCollapsed = false;
 
   // Minimum effective node size before we boost triggered nodes
   private static readonly READABLE_THRESHOLD = 50;
@@ -456,15 +455,16 @@ export class XSchedulerGraph extends LitElement {
     // Build a map of all nodes and identify which are hidden due to collapsed parents
     const nodeMap = new Map(graphData.nodes.map((n) => [n.id, n]));
 
-    // Auto-collapse all parents with children on first load
-    if (!this.hasAutoCollapsed) {
-      this.hasAutoCollapsed = true;
-      const newCollapsed = new Set(this.collapsedParents);
-      for (const node of graphData.nodes) {
-        if (node.childCount && node.childCount > 0) {
-          newCollapsed.add(node.id);
-        }
+    // Auto-collapse all parents with children (always add new ones)
+    const newCollapsed = new Set(this.collapsedParents);
+    let hasNewCollapsed = false;
+    for (const node of graphData.nodes) {
+      if (node.childCount && node.childCount > 0 && !newCollapsed.has(node.id)) {
+        newCollapsed.add(node.id);
+        hasNewCollapsed = true;
       }
+    }
+    if (hasNewCollapsed) {
       this.collapsedParents = newCollapsed;
     }
 
