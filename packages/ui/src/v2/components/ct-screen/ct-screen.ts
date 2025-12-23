@@ -4,11 +4,6 @@ import { BaseElement } from "../../core/base-element.ts";
 /**
  * CTScreen - Full height screen layout component with header/main/footer slots
  *
- * This component requires its parent to provide a height constraint (height: 100%).
- * When used inside ct-cell-context (which is auto-injected by the pattern renderer),
- * ct-screen automatically sets the `fill` attribute on its parent ct-cell-context
- * to enable scroll containment and proper flex layout.
- *
  * @element ct-screen
  *
  * @slot header - Fixed header content at the top
@@ -47,17 +42,6 @@ export class CTScreen extends BaseElement {
       flex: none;
     }
   `;
-
-  override connectedCallback() {
-    super.connectedCallback();
-    // ct-screen requires height: 100% from its parent to work correctly.
-    // When the parent is ct-cell-context (auto-injected by the pattern renderer),
-    // set the `fill` attribute to enable height propagation.
-    const parent = this.parentElement;
-    if (parent?.tagName.toLowerCase() === "ct-cell-context") {
-      parent.setAttribute("fill", "");
-    }
-  }
 
   override render() {
     return html`

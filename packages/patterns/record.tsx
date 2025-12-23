@@ -693,7 +693,7 @@ const Record = pattern<RecordInput, RecordOutput>(
             {ifElse(
               pinnedCount > 0,
               // Primary + Rail layout (when items are pinned)
-              <div style={{ display: "flex", gap: "16px" }}>
+              <div style={{ display: "flex", gap: "16px", flex: "1" }}>
                 {/* Left: Pinned items (2/3 width) */}
                 <div
                   style={{
@@ -1260,6 +1260,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                 })}
               </div>,
             )}
+          </ct-vscroll>
 
             {/* Collapsible Trash Section */}
             {ifElse(
@@ -1312,75 +1313,137 @@ const Record = pattern<RecordInput, RecordOutput>(
                         return (
                           <div
                             style={{
+                              background: "none",
+                              border: "none",
+                              cursor: "pointer",
                               display: "flex",
                               alignItems: "center",
-                              justifyContent: "space-between",
-                              padding: "8px 12px",
-                              background: "#f9fafb",
-                              borderRadius: "6px",
-                              marginBottom: "4px",
-                              opacity: "0.7",
+                              gap: "8px",
+                              color: "#6b7280",
+                              fontSize: "13px",
+                              width: "100%",
+                              padding: "8px",
                             }}
                           >
                             <span
                               style={{
-                                fontSize: "13px",
-                                color: "#6b7280",
-                                flex: "1",
+                                transform: trashExpanded
+                                  ? "rotate(90deg)"
+                                  : "rotate(0deg)",
+                                transition: "transform 0.2s",
                               }}
                             >
-                              {displayInfo.icon} {displayInfo.label}
+                              ▶
                             </span>
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: "8px",
-                                flexShrink: 0,
-                              }}
-                            >
+                            🗑️ Trash ({trashCount})
+                          </button>
+
+                          {ifElse(
+                            trashExpanded,
+                            <div style={{ paddingLeft: "16px", marginTop: "8px" }}>
+                              {trashedSubCharms.map(
+                                (entry) => {
+                                  const displayInfo = getModuleDisplay({
+                                    type: entry.type,
+                                    charm: entry.charm,
+                                  });
+                                  return (
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "space-between",
+                                        padding: "8px 12px",
+                                        background: "#f9fafb",
+                                        borderRadius: "6px",
+                                        marginBottom: "4px",
+                                        opacity: "0.7",
+                                      }}
+                                    >
+                                      <span
+                                        style={{
+                                          fontSize: "13px",
+                                          color: "#6b7280",
+                                          flex: "1",
+                                        }}
+                                      >
+                                        {displayInfo.icon} {displayInfo.label}
+                                      </span>
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          gap: "8px",
+                                          flexShrink: 0,
+                                        }}
+                                      >
+                                        <button
+                                          type="button"
+                                          onClick={restoreSubCharm({
+                                            subCharms,
+                                            trashedSubCharms,
+                                            entry,
+                                          })}
+                                          style={{
+                                            background: "#e0f2fe",
+                                            border: "1px solid #7dd3fc",
+                                            borderRadius: "4px",
+                                            cursor: "pointer",
+                                            padding: "4px 8px",
+                                            fontSize: "12px",
+                                            color: "#0369a1",
+                                          }}
+                                          title="Restore"
+                                        >
+                                          ↩️
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={permanentlyDelete({
+                                            trashedSubCharms,
+                                            entry,
+                                          })}
+                                          style={{
+                                            background: "transparent",
+                                            border: "1px solid #fecaca",
+                                            borderRadius: "4px",
+                                            cursor: "pointer",
+                                            padding: "4px 8px",
+                                            fontSize: "12px",
+                                            color: "#dc2626",
+                                          }}
+                                          title="Delete permanently"
+                                        >
+                                          🗑️
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                },
+                              )}
+
                               <button
                                 type="button"
-                                onClick={restoreSubCharm({
-                                  subCharms,
-                                  trashedSubCharms,
-                                  entry,
-                                })}
+                                onClick={emptyTrash({ trashedSubCharms })}
                                 style={{
-                                  background: "#e0f2fe",
-                                  border: "1px solid #7dd3fc",
-                                  borderRadius: "4px",
-                                  cursor: "pointer",
-                                  padding: "4px 8px",
-                                  fontSize: "12px",
-                                  color: "#0369a1",
-                                }}
-                                title="Restore"
-                              >
-                                ↩️
-                              </button>
-                              <button
-                                type="button"
-                                onClick={permanentlyDelete({
-                                  trashedSubCharms,
-                                  entry,
-                                })}
-                                style={{
+                                  marginTop: "8px",
                                   background: "transparent",
                                   border: "1px solid #fecaca",
                                   borderRadius: "4px",
                                   cursor: "pointer",
-                                  padding: "4px 8px",
+                                  padding: "6px 12px",
                                   fontSize: "12px",
                                   color: "#dc2626",
+                                  width: "100%",
                                 }}
-                                title="Delete permanently"
                               >
-                                🗑️
+                                Empty Trash
                               </button>
-                            </div>
-                          </div>
-                        );
-                      },
+                            </div>,
+                            null,
+                          )}
+                        </div>,
+                        null,
+                      )}
                     )}
 
                     <button
