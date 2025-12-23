@@ -128,7 +128,7 @@ keywords/features.
   - **Keywords**: cell, derive, handler, custom data structure, recursive
     structure
 
-- link-tool.tsx: Tool for creating data links between charm cells
+- system/link-tool.tsx: Tool for creating data links between charm cells
   - **Data types**: string (source path), string (target path)
   - **Keywords**: link built-in, handler, charm navigation, cell linking, path
     parsing
@@ -138,7 +138,7 @@ keywords/features.
   - **Keywords**: [ID], derive, lift, filter, map, concat, reduce, handler,
     array operations, get/set
 
-- llm.tsx: Simple LLM question/answer interface
+- examples/llm.tsx: Simple LLM question/answer interface
   - **Data types**: string (question), LLM response content, array of messages
   - **Keywords**: llm, cell, derive, handler, ct-message-input, onct-send
 
