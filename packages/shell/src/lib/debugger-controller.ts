@@ -72,6 +72,7 @@ export class DebuggerController implements ReactiveController {
   private currentSnapshot?: SchedulerGraphSnapshot;
   private historicalEdges = new Set<string>(); // "from->to" format
   private graphUpdateVersion = 0;
+  private isProcessingTelemetry = false; // Guard against re-entrant updates
 
   constructor(host: ReactiveControllerHost & HTMLElement) {
     this.host = host;
@@ -182,39 +183,49 @@ export class DebuggerController implements ReactiveController {
    * Handle telemetry updates from the runtime
    */
   private handleTelemetryUpdate = () => {
+    // Guard against re-entrant updates (telemetry -> UI update -> sink -> telemetry)
+    if (this.isProcessingTelemetry) return;
+
     if (this.runtime) {
-      // Get all telemetry markers from runtime
-      const allMarkers = this.runtime.telemetry();
+      this.isProcessingTelemetry = true;
+      try {
+        // Get all telemetry markers from runtime
+        const allMarkers = this.runtime.telemetry();
 
-      // Limit to maximum number of events to prevent memory issues
-      this.telemetryMarkers = allMarkers.slice(-MAX_TELEMETRY_EVENTS);
-      this.updateVersion++;
+        // Limit to maximum number of events to prevent memory issues
+        this.telemetryMarkers = allMarkers.slice(-MAX_TELEMETRY_EVENTS);
+        this.updateVersion++;
 
-      // Check for graph snapshot events in recent markers
-      const latestMarker = allMarkers[allMarkers.length - 1];
-      if (latestMarker?.type === "scheduler.graph.snapshot") {
-        this.processGraphSnapshot(
-          (latestMarker as { graph: SchedulerGraphSnapshot }).graph,
-        );
-      }
-
-      // Auto-refresh graph on scheduler events to capture new nodes/edges
-      if (
-        latestMarker?.type === "scheduler.run" ||
-        latestMarker?.type === "scheduler.invocation" ||
-        latestMarker?.type === "scheduler.mode.change" ||
-        latestMarker?.type === "scheduler.subscribe" ||
-        latestMarker?.type === "scheduler.dependencies.update"
-      ) {
-        const rt = this.runtime.runtime();
-        if (rt) {
-          const snapshot = rt.scheduler.getGraphSnapshot();
-          this.processGraphSnapshot(snapshot);
+        // Check for graph snapshot events in recent markers
+        const latestMarker = allMarkers[allMarkers.length - 1];
+        if (latestMarker?.type === "scheduler.graph.snapshot") {
+          this.processGraphSnapshot(
+            (latestMarker as { graph: SchedulerGraphSnapshot }).graph,
+          );
         }
-      }
 
-      // Request update to refresh the UI
-      this.host.requestUpdate();
+        // NOTE: Auto-refresh disabled - was causing infinite loop
+        // (telemetry -> UI update -> sink -> telemetry)
+        // Use manual refresh button instead
+        // if (
+        //   latestMarker?.type === "scheduler.run" ||
+        //   latestMarker?.type === "scheduler.invocation" ||
+        //   latestMarker?.type === "scheduler.mode.change" ||
+        //   latestMarker?.type === "scheduler.subscribe" ||
+        //   latestMarker?.type === "scheduler.dependencies.update"
+        // ) {
+        //   const rt = this.runtime.runtime();
+        //   if (rt) {
+        //     const snapshot = rt.scheduler.getGraphSnapshot();
+        //     this.processGraphSnapshot(snapshot);
+        //   }
+        // }
+
+        // Request update to refresh the UI
+        //this.host.requestUpdate();
+      } finally {
+        this.isProcessingTelemetry = false;
+      }
     }
   };
 

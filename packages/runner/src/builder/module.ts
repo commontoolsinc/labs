@@ -64,12 +64,23 @@ export function createNodeFactory<T = any, R = any>(
  * Handles formats like:
  *   "    at functionName (file:///path/to/file.ts:42:15)"
  *   "    at file:///path/to/file.ts:42:15"
+ *   "    at functionName (http://localhost:8000/scripts/index.js:250239:17)"
+ *   "    at Object.eval [as factory] (somehash.js:52:52)"
+ * @internal Exported for testing
  */
-function parseStackFrame(
+export function parseStackFrame(
   line: string,
 ): { file: string; line: number; col: number } | null {
-  // Match file path (with optional file:// prefix) followed by :line:col
-  const match = line.match(/((?:file:\/\/)?(?:\/|[A-Z]:)[^:]+):(\d+):(\d+)/);
+  // Try to match file path inside parentheses first (most common format)
+  // Handles: "at functionName (file:///path:42:15)" or "(http://url:42:15)"
+  let match = line.match(/\((.+):(\d+):(\d+)\)\s*$/);
+
+  // If no match, try to match after "at " without parentheses
+  // Handles: "at file:///path:42:15" or "at http://url:42:15"
+  if (!match) {
+    match = line.match(/at\s+(.+):(\d+):(\d+)\s*$/);
+  }
+
   if (!match) return null;
   const [, filePath, lineNum, col] = match;
   return {
