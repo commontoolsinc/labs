@@ -365,8 +365,10 @@ function performImport(
           // Skip if already has an ID: [[Name (id)]]
           if (name.includes("(") && name.endsWith(")")) return match;
 
-          // Look up by title (case-insensitive)
-          const id = titleToId.get(name.trim().toLowerCase());
+          // Look up by title (case-insensitive), stripping emoji prefixes like 📝 📓
+          const cleanName = name.trim().replace(/^(📝|📓)\s*/, "")
+            .toLowerCase();
+          const id = titleToId.get(cleanName);
           if (id) {
             return `[[${name.trim()} (${id})]]`;
           }
@@ -2769,6 +2771,8 @@ Note content here with any markdown...
     exportedMarkdown,
     importMarkdown,
     noteCount,
+    // Make notes discoverable via [[ autocomplete system-wide
+    mentionable: notes,
   };
 });
 
