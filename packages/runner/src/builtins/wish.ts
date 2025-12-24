@@ -5,6 +5,7 @@ import {
   type WishTag,
 } from "@commontools/api";
 import { h } from "@commontools/html";
+import { favoriteListSchema, journalSchema } from "@commontools/home-schemas";
 import { HttpProgramResolver } from "@commontools/js-compiler";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
@@ -16,21 +17,6 @@ import type {
 import type { EntityId } from "../create-ref.ts";
 import { ALL_CHARMS_ID } from "./well-known.ts";
 import { type JSONSchema, type Recipe, UI } from "../builder/types.ts";
-
-// Define locally to avoid circular dependency with @commontools/charm
-const favoriteEntrySchema = {
-  type: "object",
-  properties: {
-    cell: { not: true, asCell: true },
-    tag: { type: "string", default: "" },
-  },
-  required: ["cell"],
-} as const satisfies JSONSchema;
-
-const favoriteListSchema = {
-  type: "array",
-  items: favoriteEntrySchema,
-} as const satisfies JSONSchema;
 import { getRecipeEnvironment } from "../env.ts";
 
 const WISH_TSX_PATH = getRecipeEnvironment().apiUrl + "api/patterns/wish.tsx";
@@ -226,6 +212,19 @@ function resolveBase(
         ctx.tx,
       );
       return [{ cell: nowCell }];
+    }
+    case "#journal": {
+      // Journal always comes from the HOME space (user identity DID)
+      const userDID = ctx.runtime.userIdentityDID;
+      if (!userDID) {
+        throw new WishError("User identity DID not available for #journal");
+      }
+
+      const journal = ctx.runtime.getHomeSpaceCell(ctx.tx).key("journal")
+        .asSchema(journalSchema);
+      journal.sync();
+
+      return [{ cell: journal }];
     }
     default: {
       // Check if it's a well-known target

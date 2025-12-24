@@ -4,6 +4,7 @@ import {
   StaticCacheHTTP,
 } from "@commontools/static";
 import { RuntimeTelemetry } from "@commontools/runner";
+import { favoriteListSchema, journalSchema } from "@commontools/home-schemas";
 import type {
   AnyCell,
   JSONSchema,
@@ -107,18 +108,8 @@ export const homeSpaceCellSchema: JSONSchema = {
     },
     defaultPattern: { not: true, asCell: true },
     // Plus home-space-specific properties
-    favorites: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          cell: { not: true, asCell: true },
-          tag: { type: "string", default: "" },
-        },
-        required: ["cell"],
-      },
-      asCell: true,
-    },
+    favorites: { ...favoriteListSchema, asCell: true },
+    journal: { ...journalSchema, asCell: true },
   },
 } as JSONSchema;
 
@@ -135,6 +126,15 @@ export interface SpaceCellContents {
  */
 export interface HomeSpaceCellContents extends SpaceCellContents {
   favorites: Cell<{ cell: Cell<unknown>; tag: string }[]>;
+  journal: Cell<{
+    timestamp: number;
+    eventType: string;
+    subject?: Cell<unknown>;
+    snapshot?: { name?: string; schemaTag?: string; valueExcerpt?: string };
+    narrative?: string;
+    tags?: string[];
+    space: string;
+  }[]>;
 }
 
 /**

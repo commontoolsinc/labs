@@ -1,6 +1,7 @@
 import { css, html, LitElement } from "lit";
 import { property } from "lit/decorators.js";
 import { navigate } from "../lib/navigate.ts";
+import { type DID } from "@commontools/identity";
 
 export class CharmLinkElement extends LitElement {
   static override styles = css`
@@ -15,29 +16,37 @@ export class CharmLinkElement extends LitElement {
   @property()
   spaceName?: string;
 
+  @property({ attribute: false })
+  spaceDid?: DID;
+
   #onClick = (e: Event) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!this.spaceName) {
-      throw new Error("Cannot navigate without space name.");
-    }
-    if (this.charmId) {
-      navigate({
-        spaceName: this.spaceName,
-        charmId: this.charmId,
-      });
+    if (this.spaceName) {
+      navigate(
+        this.charmId
+          ? { spaceName: this.spaceName, charmId: this.charmId }
+          : { spaceName: this.spaceName },
+      );
+    } else if (this.spaceDid) {
+      navigate(
+        this.charmId
+          ? { spaceDid: this.spaceDid, charmId: this.charmId }
+          : { spaceDid: this.spaceDid },
+      );
     } else {
-      navigate({
-        spaceName: this.spaceName,
-      });
+      throw new Error("Cannot navigate without space name or DID.");
     }
   };
 
   asHref(): string {
-    if (!this.spaceName) {
-      return "/";
+    if (this.spaceName) {
+      return `/${this.spaceName}${this.charmId ? `/${this.charmId}` : ""}`;
     }
-    return `/${this.spaceName}${this.charmId ? `/${this.charmId}` : ""}`;
+    if (this.spaceDid) {
+      return `/${this.spaceDid}${this.charmId ? `/${this.charmId}` : ""}`;
+    }
+    return "/";
   }
 
   override render() {

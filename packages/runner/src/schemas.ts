@@ -64,24 +64,6 @@ export const charmLineageSchema = {
 } as const satisfies JSONSchema;
 export type CharmLineage = Schema<typeof charmLineageSchema>;
 
-export const favoriteEntrySchema = {
-  type: "object",
-  properties: {
-    cell: { not: true, asCell: true },
-    tag: { type: "string", default: "" },
-  },
-  required: ["cell"],
-} as const satisfies JSONSchema;
-
-export type FavoriteEntry = Schema<typeof favoriteEntrySchema>;
-
-export const favoriteListSchema = {
-  type: "array",
-  items: favoriteEntrySchema,
-} as const satisfies JSONSchema;
-
-export type FavoriteList = Schema<typeof favoriteListSchema>;
-
 export const charmSourceCellSchema = {
   type: "object",
   properties: {

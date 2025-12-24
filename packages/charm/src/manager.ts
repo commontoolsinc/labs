@@ -24,11 +24,11 @@ import { isObject, isRecord } from "@commontools/utils/types";
 import {
   charmListSchema,
   charmSourceCellSchema,
-  FavoriteList,
   NameSchema,
   nameSchema,
   processSchema,
 } from "@commontools/runner/schemas";
+import { type FavoriteList } from "@commontools/home-schemas";
 
 /**
  * Extracts the ID from a charm.
