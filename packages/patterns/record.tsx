@@ -481,16 +481,18 @@ const toggleTrashExpanded = handler<unknown, { expanded: Cell<boolean> }>(
 
 // ===== LLM-Callable Handlers for Omnibot Integration =====
 // These handlers are exposed in the pattern output for Omnibot's invoke() tool
+// IMPORTANT: Handlers must use result.set() to return data to the LLM.
+// The 'result' Cell is injected by llm-dialog.ts invoke() - return statements are ignored!
 
 // Get a structured summary of all modules in this record
 // Returns module types, their data, and schemas for LLM context
 const handleGetSummary = handler<
-  Record<string, never>,
+  { result?: Cell<unknown> },
   {
     title: Cell<string>;
     subCharms: Cell<SubCharmEntry[]>;
   }
->((_args, { title, subCharms }) => {
+>(({ result }, { title, subCharms }) => {
   const modules = subCharms.get() || [];
   const summary = {
     title: title.get() || "(Untitled Record)",
@@ -541,31 +543,45 @@ const handleGetSummary = handler<
       };
     }),
   };
-  return summary;
+  // Must use result.set() to return data to LLM - return statements are ignored!
+  if (result) result.set(summary);
 });
 
 // Add a new module to this record
 // type: module type from registry (email, phone, birthday, etc.)
 // initialData: optional initial values for the module
 const handleAddModule = handler<
-  { type: string; initialData?: Record<string, unknown> },
+  {
+    type: string;
+    initialData?: Record<string, unknown>;
+    result?: Cell<unknown>;
+  },
   {
     subCharms: Cell<SubCharmEntry[]>;
     trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
   }
->(({ type, initialData }, { subCharms: sc, trashedSubCharms: trash }) => {
+>((
+  { type, initialData, result },
+  { subCharms: sc, trashedSubCharms: trash },
+) => {
   if (!type) {
-    return { success: false, error: "Module type is required" };
+    if (result) {
+      result.set({ success: false, error: "Module type is required" });
+    }
+    return;
   }
 
   const def = getDefinition(type);
   if (!def) {
-    return {
-      success: false,
-      error: `Unknown module type: ${type}. Available types: ${
-        getAddableTypes().map((d) => d.type).join(", ")
-      }`,
-    };
+    if (result) {
+      result.set({
+        success: false,
+        error: `Unknown module type: ${type}. Available types: ${
+          getAddableTypes().map((d) => d.type).join(", ")
+        }`,
+      });
+    }
+    return;
   }
 
   const current = sc.get() || [];
@@ -580,10 +596,13 @@ const handleAddModule = handler<
   // Create the module - special cases handled
   let charm: unknown;
   if (type === "notes") {
-    return {
-      success: false,
-      error: "Notes modules must be added via UI (requires linkPattern)",
-    };
+    if (result) {
+      result.set({
+        success: false,
+        error: "Notes modules must be added via UI (requires linkPattern)",
+      });
+    }
+    return;
   } else if (type === "extractor") {
     // ExtractorModule needs parent Cells
     charm = ExtractorModule({
@@ -606,12 +625,14 @@ const handleAddModule = handler<
     schema,
   });
 
-  return {
-    success: true,
-    moduleIndex: current.length,
-    type,
-    message: `Added ${def.icon} ${def.label} module`,
-  };
+  if (result) {
+    result.set({
+      success: true,
+      moduleIndex: current.length,
+      type,
+      message: `Added ${def.icon} ${def.label} module`,
+    });
+  }
 });
 
 // Update a field in a specific module
@@ -619,18 +640,21 @@ const handleAddModule = handler<
 // field: field name to update
 // value: new value
 const handleUpdateModule = handler<
-  { index: number; field: string; value: unknown },
+  { index: number; field: string; value: unknown; result?: Cell<unknown> },
   { subCharms: Cell<SubCharmEntry[]> }
->(({ index, field, value }, { subCharms: sc }) => {
+>(({ index, field, value, result }, { subCharms: sc }) => {
   const current = sc.get() || [];
 
   if (index < 0 || index >= current.length) {
-    return {
-      success: false,
-      error: `Invalid module index: ${index}. Valid range: 0-${
-        current.length - 1
-      }`,
-    };
+    if (result) {
+      result.set({
+        success: false,
+        error: `Invalid module index: ${index}. Valid range: 0-${
+          current.length - 1
+        }`,
+      });
+    }
+    return;
   }
 
   const entry = current[index];
@@ -638,7 +662,8 @@ const handleUpdateModule = handler<
   const charm = entry.charm as any;
 
   if (!charm) {
-    return { success: false, error: "Module charm not found" };
+    if (result) result.set({ success: false, error: "Module charm not found" });
+    return;
   }
 
   try {
@@ -646,46 +671,57 @@ const handleUpdateModule = handler<
     const fieldCell = charm[field];
     if (fieldCell && typeof fieldCell.set === "function") {
       fieldCell.set(value);
-      return {
-        success: true,
-        message: `Updated ${field} to ${JSON.stringify(value)}`,
-      };
+      if (result) {
+        result.set({
+          success: true,
+          message: `Updated ${field} to ${JSON.stringify(value)}`,
+        });
+      }
     } else if (fieldCell && typeof fieldCell.key === "function") {
       // It might be a nested cell - try setting via parent
-      return {
-        success: false,
-        error:
-          `Field ${field} exists but is not directly settable. Try a more specific path.`,
-      };
+      if (result) {
+        result.set({
+          success: false,
+          error:
+            `Field ${field} exists but is not directly settable. Try a more specific path.`,
+        });
+      }
     } else {
-      return {
-        success: false,
-        error:
-          `Field ${field} not found or not a Cell on module type ${entry.type}`,
-      };
+      if (result) {
+        result.set({
+          success: false,
+          error:
+            `Field ${field} not found or not a Cell on module type ${entry.type}`,
+        });
+      }
     }
   } catch (err) {
-    return { success: false, error: `Failed to update field: ${err}` };
+    if (result) {
+      result.set({ success: false, error: `Failed to update field: ${err}` });
+    }
   }
 });
 
 // Remove a module (move to trash)
 const handleRemoveModule = handler<
-  { index: number },
+  { index: number; result?: Cell<unknown> },
   {
     subCharms: Cell<SubCharmEntry[]>;
     trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
   }
->(({ index }, { subCharms: sc, trashedSubCharms: trash }) => {
+>(({ index, result }, { subCharms: sc, trashedSubCharms: trash }) => {
   const current = sc.get() || [];
 
   if (index < 0 || index >= current.length) {
-    return {
-      success: false,
-      error: `Invalid module index: ${index}. Valid range: 0-${
-        current.length - 1
-      }`,
-    };
+    if (result) {
+      result.set({
+        success: false,
+        error: `Invalid module index: ${index}. Valid range: 0-${
+          current.length - 1
+        }`,
+      });
+    }
+    return;
   }
 
   const entry = current[index];
@@ -699,33 +735,37 @@ const handleRemoveModule = handler<
   updated.splice(index, 1);
   sc.set(updated);
 
-  return {
-    success: true,
-    message: `Moved ${def?.icon || "📋"} ${def?.label || entry.type} to trash`,
-  };
+  if (result) {
+    result.set({
+      success: true,
+      message: `Moved ${def?.icon || "📋"} ${
+        def?.label || entry.type
+      } to trash`,
+    });
+  }
 });
 
 // Set the record title
 const handleSetTitle = handler<
-  { newTitle: string },
+  { newTitle: string; result?: Cell<unknown> },
   { title: Cell<string> }
->(({ newTitle }, { title }) => {
+>(({ newTitle, result }, { title }) => {
   title.set(newTitle);
-  return { success: true, title: newTitle };
+  if (result) result.set({ success: true, title: newTitle });
 });
 
 // List available module types that can be added
 const handleListModuleTypes = handler<
-  Record<string, never>,
+  { result?: Cell<unknown> },
   Record<string, never>
->(() => {
+>(({ result }) => {
   const types = getAddableTypes().map((def) => ({
     type: def.type,
     label: def.label,
     icon: def.icon,
     allowMultiple: def.allowMultiple || false,
   }));
-  return { types };
+  if (result) result.set({ types });
 });
 
 // Create sibling module (same type, inserted after current)
