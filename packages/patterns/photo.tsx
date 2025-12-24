@@ -8,13 +8,14 @@
  */
 import {
   Cell,
-  computed,
   type Default,
   handler,
   ifElse,
   ImageData,
+  lift,
   NAME,
   recipe,
+  str,
   UI,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
@@ -61,29 +62,35 @@ export const PhotoModule = recipe<PhotoModuleInput, PhotoModuleInput>(
     const images = Cell.of<ImageData[]>([]);
 
     // Sync image Cell with images array (first element)
-    // When images array changes, update the single image Cell
-    const syncedImage = computed(() => {
-      const arr = images.get() || [];
-      return arr.length > 0 ? arr[0] : null;
-    });
+    const syncedImage = lift(({ arr }: { arr: ImageData[] }) => {
+      return arr && arr.length > 0 ? arr[0] : null;
+    })({ arr: images });
 
-    // Check if we have a photo
-    const hasPhoto = computed(() => {
-      const arr = images.get() || [];
-      return arr.length > 0;
-    });
+    // Check if we have a photo - use lift for reactive boolean
+    const hasPhoto = lift(({ arr }: { arr: ImageData[] }) => {
+      return arr && arr.length > 0;
+    })({ arr: images });
 
     // Display text for NAME
-    const displayText = computed(() => {
-      const photoLabel = label || "";
-      const hasImage = hasPhoto.get();
-      if (photoLabel && hasImage) return photoLabel;
-      if (hasImage) return "Photo uploaded";
-      return "No photo";
-    });
+    const displayText = lift(
+      ({ arr, photoLabel }: { arr: ImageData[]; photoLabel: string }) => {
+        const hasImage = arr && arr.length > 0;
+        if (photoLabel && hasImage) return photoLabel;
+        if (hasImage) return "Photo uploaded";
+        return "No photo";
+      },
+    )({ arr: images, photoLabel: label });
+
+    // Get the image URL reactively
+    const imageUrl = lift(({ img }: { img: ImageData | null }) => {
+      return img?.url || "";
+    })({ img: syncedImage });
+
+    // Check if label is set
+    const hasLabel = lift(({ l }: { l: string }) => !!l)({ l: label });
 
     return {
-      [NAME]: computed(() => `${MODULE_METADATA.icon} ${displayText}`),
+      [NAME]: str`${MODULE_METADATA.icon} ${displayText}`,
       [UI]: (
         <ct-vstack style={{ gap: "12px" }}>
           {ifElse(
@@ -99,8 +106,8 @@ export const PhotoModule = recipe<PhotoModuleInput, PhotoModuleInput>(
                 }}
               >
                 <img
-                  src={computed(() => syncedImage.get()?.url || "")}
-                  alt={computed(() => label || "Uploaded photo")}
+                  src={imageUrl}
+                  alt={label || "Uploaded photo"}
                   style={{
                     maxWidth: "100%",
                     maxHeight: "300px",
@@ -135,7 +142,7 @@ export const PhotoModule = recipe<PhotoModuleInput, PhotoModuleInput>(
               </div>
               {/* Label display (if set) */}
               {ifElse(
-                computed(() => !!label),
+                hasLabel,
                 <span
                   style={{
                     fontSize: "14px",
