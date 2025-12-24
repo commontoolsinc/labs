@@ -235,8 +235,13 @@ const bindChildren = (
         ) {
           childValue = "";
         } else if (typeof childValue === "object") {
-          console.warn("unexpected object when value was expected", childValue);
-          childValue = JSON.stringify(childValue);
+          // Handle unresolved alias objects gracefully - render empty until resolved
+          if (childValue && "$alias" in childValue) {
+            childValue = "";
+          } else {
+            console.warn("unexpected object when value was expected", childValue);
+            childValue = JSON.stringify(childValue);
+          }
         }
         newRendered = {
           node: document.createTextNode(childValue.toString()),
