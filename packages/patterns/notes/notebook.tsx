@@ -1145,103 +1145,92 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
           </ct-vstack>
         </div>
 
-        {/* New Notebook Prompt Modal - Use CSS display to keep DOM alive for reactivity */}
-        <div
-          style={{
-            display: computed(() =>
-              showNewNotebookPrompt.get() ? "flex" : "none"
-            ),
-            position: "fixed",
-            inset: "0",
-            background: "rgba(0,0,0,0.5)",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: "9999",
-          }}
+        {/* New Notebook Prompt Modal */}
+        <ct-modal
+          $open={showNewNotebookPrompt}
+          dismissable
+          size="sm"
+          onct-modal-close={cancelNewNotebookPrompt({
+            showNewNotebookPrompt,
+            newNotebookName,
+            pendingNotebookAction,
+            selectedAddNotebook,
+            selectedMoveNotebook,
+          })}
         >
-          <ct-card style={{ minWidth: "320px", padding: "24px" }}>
-            <ct-vstack gap="4">
-              <h3 style={{ margin: 0 }}>New Notebook</h3>
-              <ct-input
-                $value={newNotebookName}
-                placeholder="Enter notebook name..."
-              />
-              <ct-hstack gap="2" style={{ justifyContent: "flex-end" }}>
-                <ct-button
-                  variant="ghost"
-                  onClick={cancelNewNotebookPrompt({
-                    showNewNotebookPrompt,
-                    newNotebookName,
-                    pendingNotebookAction,
-                    selectedAddNotebook,
-                    selectedMoveNotebook,
-                  })}
-                >
-                  Cancel
-                </ct-button>
-                <ct-button
-                  variant="primary"
-                  onClick={createNotebookFromPrompt({
-                    newNotebookName,
-                    showNewNotebookPrompt,
-                    pendingNotebookAction,
-                    selectedNoteIndices,
-                    notes,
-                    allCharms,
-                    notebooks,
-                  })}
-                >
-                  Create
-                </ct-button>
-              </ct-hstack>
-            </ct-vstack>
-          </ct-card>
-        </div>
+          <span slot="header">New Notebook</span>
+          <ct-input
+            $value={newNotebookName}
+            placeholder="Enter notebook name..."
+          />
+          <ct-hstack slot="footer" gap="2" style={{ justifyContent: "flex-end" }}>
+            <ct-button
+              variant="ghost"
+              onClick={cancelNewNotebookPrompt({
+                showNewNotebookPrompt,
+                newNotebookName,
+                pendingNotebookAction,
+                selectedAddNotebook,
+                selectedMoveNotebook,
+              })}
+            >
+              Cancel
+            </ct-button>
+            <ct-button
+              variant="primary"
+              onClick={createNotebookFromPrompt({
+                newNotebookName,
+                showNewNotebookPrompt,
+                pendingNotebookAction,
+                selectedNoteIndices,
+                notes,
+                allCharms,
+                notebooks,
+              })}
+            >
+              Create
+            </ct-button>
+          </ct-hstack>
+        </ct-modal>
 
         {/* New Note Prompt Modal */}
-        <div
-          style={{
-            display: computed(() => showNewNotePrompt.get() ? "flex" : "none"),
-            position: "fixed",
-            inset: "0",
-            background: "rgba(0,0,0,0.5)",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: "9999",
-          }}
+        <ct-modal
+          $open={showNewNotePrompt}
+          dismissable
+          size="sm"
+          onct-modal-close={cancelNewNotePrompt({
+            showNewNotePrompt,
+            newNoteTitle,
+          })}
         >
-          <ct-card style={{ minWidth: "320px", padding: "24px" }}>
-            <ct-vstack gap="4">
-              <h3 style={{ margin: 0 }}>New Note</h3>
-              <ct-input
-                $value={newNoteTitle}
-                placeholder="Enter note title..."
-              />
-              <ct-hstack gap="2" style={{ justifyContent: "flex-end" }}>
-                <ct-button
-                  variant="ghost"
-                  onClick={cancelNewNotePrompt({
-                    showNewNotePrompt,
-                    newNoteTitle,
-                  })}
-                >
-                  Cancel
-                </ct-button>
-                <ct-button
-                  variant="primary"
-                  onClick={createNoteAndOpen({
-                    newNoteTitle,
-                    showNewNotePrompt,
-                    notes,
-                    allCharms,
-                  })}
-                >
-                  Create
-                </ct-button>
-              </ct-hstack>
-            </ct-vstack>
-          </ct-card>
-        </div>
+          <span slot="header">New Note</span>
+          <ct-input
+            $value={newNoteTitle}
+            placeholder="Enter note title..."
+          />
+          <ct-hstack slot="footer" gap="2" style={{ justifyContent: "flex-end" }}>
+            <ct-button
+              variant="ghost"
+              onClick={cancelNewNotePrompt({
+                showNewNotePrompt,
+                newNoteTitle,
+              })}
+            >
+              Cancel
+            </ct-button>
+            <ct-button
+              variant="primary"
+              onClick={createNoteAndOpen({
+                newNoteTitle,
+                showNewNotePrompt,
+                notes,
+                allCharms,
+              })}
+            >
+              Create
+            </ct-button>
+          </ct-hstack>
+        </ct-modal>
       </ct-screen>
     ),
     title,

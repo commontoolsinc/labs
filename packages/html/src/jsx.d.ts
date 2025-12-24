@@ -2887,6 +2887,8 @@ interface CTFileDownloadElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
 interface CTHStackElement extends CTHTMLElement {}
 interface CTFabElement extends CTHTMLElement {}
+interface CTModalElement extends CTHTMLElement {}
+interface CTModalProviderElement extends CTHTMLElement {}
 interface CTChevronButtonElement extends CTHTMLElement {}
 interface CTCardElement extends CTHTMLElement {}
 interface CTAlertElement extends CTHTMLElement {}
@@ -3296,6 +3298,20 @@ interface CTFabAttributes<T> extends CTHTMLAttributes<T> {
   "pending"?: boolean;
   "$previewMessage"?: CellLike<string>;
 }
+
+interface CTModalAttributes<T> extends CTHTMLAttributes<T> {
+  "$open"?: CellLike<boolean> | boolean;
+  "dismissable"?: boolean;
+  "size"?: "sm" | "md" | "lg" | "full";
+  "prevent-scroll"?: boolean;
+  "label"?: string;
+  "onct-modal-open"?: (event: CustomEvent) => void;
+  "onct-modal-close"?: (event: CustomEvent<{ reason: string }>) => void;
+  "onct-modal-opened"?: (event: CustomEvent) => void;
+  "onct-modal-closed"?: (event: CustomEvent) => void;
+}
+
+interface CTModalProviderAttributes<T> extends CTHTMLAttributes<T> {}
 
 interface CTChevronButtonAttributes<T> extends CTHTMLAttributes<T> {
   "expanded"?: boolean;
@@ -4390,6 +4406,14 @@ declare global {
       "ct-fab": CTDOM.DetailedHTMLProps<
         CTFabAttributes<CTFabElement>,
         CTFabElement
+      >;
+      "ct-modal": CTDOM.DetailedHTMLProps<
+        CTModalAttributes<CTModalElement>,
+        CTModalElement
+      >;
+      "ct-modal-provider": CTDOM.DetailedHTMLProps<
+        CTModalProviderAttributes<CTModalProviderElement>,
+        CTModalProviderElement
       >;
       "ct-file-download": CTDOM.DetailedHTMLProps<
         CTFileDownloadAttributes<CTFileDownloadElement>,
