@@ -270,7 +270,6 @@ export class XAppView extends BaseView {
             .visible="${this.debuggerController.isVisible()}"
             .telemetryMarkers="${this.debuggerController.getTelemetryMarkers()}"
             .debuggerController="${this.debuggerController}"
-            .rt="${this.rt}"
           ></x-debugger-view>
           <x-quick-jump-view
             .visible="${config.showQuickJumpView ?? false}"

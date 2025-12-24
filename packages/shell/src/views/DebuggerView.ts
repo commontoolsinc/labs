@@ -4,8 +4,6 @@ import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts
 import type { RuntimeTelemetryMarkerResult } from "@commontools/runner";
 import { isRecord } from "@commontools/utils/types";
 import type { DebuggerController } from "../lib/debugger-controller.ts";
-import type { RuntimeInternals } from "../lib/runtime.ts";
-import { getHomeJournal, type JournalEntry } from "@commontools/charm";
 
 /**
  * Hierarchical topic definitions for filtering telemetry events.
@@ -612,20 +610,8 @@ export class XDebuggerView extends LitElement {
   @property({ attribute: false })
   debuggerController?: DebuggerController;
 
-  @property({ attribute: false })
-  rt?: RuntimeInternals;
-
   @state()
-  private _activeTab: "events" | "watch" | "journal" = "events";
-
-  @state()
-  private _journalData: JournalEntry[] | null = null;
-
-  @state()
-  private _journalError: string | null = null;
-
-  @state()
-  private _journalLoading = false;
+  private _activeTab: "events" | "watch" = "events";
 
   @state()
   private activeSubtopics = new Set<string>();
@@ -1171,136 +1157,6 @@ export class XDebuggerView extends LitElement {
         >
           Watch List
         </button>
-        <button
-          type="button"
-          class="tab-button ${this._activeTab === "journal" ? "active" : ""}"
-          @click="${() => {
-            this._activeTab = "journal";
-            this.loadJournal();
-          }}"
-        >
-          Journal Debug
-        </button>
-      </div>
-    `;
-  }
-
-  private async loadJournal() {
-    if (!this.rt) {
-      this._journalError = "No runtime available";
-      return;
-    }
-
-    this._journalLoading = true;
-    this._journalError = null;
-
-    try {
-      const runtime = this.rt.runtime();
-      const journalCell = getHomeJournal(runtime);
-      await journalCell.sync();
-      const data = journalCell.get();
-      this._journalData = data ? [...data] : [];
-      console.log("[DebuggerView] Journal data loaded directly:", this._journalData);
-    } catch (error) {
-      this._journalError = error instanceof Error ? error.message : String(error);
-      console.error("[DebuggerView] Failed to load journal:", error);
-    } finally {
-      this._journalLoading = false;
-    }
-  }
-
-  private renderJournal() {
-    if (this._journalLoading) {
-      return html`<div class="empty-state">Loading journal...</div>`;
-    }
-
-    if (this._journalError) {
-      return html`<div class="empty-state" style="color: #ef4444;">Error: ${this._journalError}</div>`;
-    }
-
-    if (!this._journalData || this._journalData.length === 0) {
-      return html`
-        <div class="empty-state">
-          No journal entries found.<br />
-          <button
-            type="button"
-            class="action-button"
-            style="margin-top: 1rem;"
-            @click="${() => this.loadJournal()}"
-          >
-            Refresh
-          </button>
-        </div>
-      `;
-    }
-
-    return html`
-      <div style="padding: 0.5rem;">
-        <div style="margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
-          <span style="color: #94a3b8;">
-            ${this._journalData.length} entries loaded directly via getHomeJournal()
-          </span>
-          <button
-            type="button"
-            class="action-button"
-            @click="${() => this.loadJournal()}"
-          >
-            Refresh
-          </button>
-        </div>
-        <div class="events-list">
-          ${this._journalData.slice().reverse().map((entry, index) => {
-            const isNull = entry === null || entry === undefined;
-            return html`
-              <div class="event-item" style="${isNull ? "border-color: #ef4444;" : ""}">
-                <div class="event-header">
-                  <div class="event-main">
-                    <span class="event-icon" style="color: ${isNull ? "#ef4444" : "#10b981"}">
-                      ${isNull ? "❌" : "📔"}
-                    </span>
-                    <div class="event-content">
-                      ${isNull
-                        ? html`
-                          <div class="event-type" style="color: #ef4444;">
-                            NULL/UNDEFINED ENTRY at index ${this._journalData!.length - 1 - index}
-                          </div>
-                          <div class="event-details">
-                            <span style="color: #ef4444;">Entry is ${entry === null ? "null" : "undefined"}</span>
-                          </div>
-                        `
-                        : html`
-                          <div class="event-type">${entry.eventType ?? "unknown event"}</div>
-                          <div class="event-details">
-                            <div class="event-detail">
-                              <span class="event-detail-label">narrative:</span>
-                              <span class="event-detail-value">${entry.narrative || "(none)"}</span>
-                            </div>
-                            ${entry.snapshot?.name ? html`
-                              <div class="event-detail">
-                                <span class="event-detail-label">name:</span>
-                                <span class="event-detail-value">${entry.snapshot.name}</span>
-                              </div>
-                            ` : ""}
-                            <div class="event-detail">
-                              <span class="event-detail-label">subject:</span>
-                              <span class="event-detail-value">${entry.subject ? "Cell ref present" : "NO SUBJECT"}</span>
-                            </div>
-                          </div>
-                        `
-                      }
-                    </div>
-                  </div>
-                  <div class="event-time">
-                    ${isNull ? "N/A" : this.formatTime(entry.timestamp)}
-                  </div>
-                </div>
-                <div class="event-expanded" style="margin-top: 0.5rem;">
-                  <pre>${this.safeJsonStringify(entry, 5000, 2)}</pre>
-                </div>
-              </div>
-            `;
-          })}
-        </div>
       </div>
     `;
   }
@@ -1619,19 +1475,11 @@ export class XDebuggerView extends LitElement {
                   ${this.renderEvents()}
                 </div>
               `
-              : this._activeTab === "watch"
-              ? html`
-                <div class="content-area ${this.resizeController.isResizing
-                  ? "resizing"
-                  : ""}">
-                  ${this.renderWatchList()}
-                </div>
-              `
               : html`
                 <div class="content-area ${this.resizeController.isResizing
                   ? "resizing"
                   : ""}">
-                  ${this.renderJournal()}
+                  ${this.renderWatchList()}
                 </div>
               `}
           </div>
