@@ -52,7 +52,7 @@
 import { html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { consume } from "@lit/context";
-import { type Cell, isCell } from "@commontools/runner";
+import { type Cell } from "@commontools/runner";
 import { BaseElement } from "../../core/base-element.ts";
 import { createBooleanCellController } from "../../core/cell-controller.ts";
 import {
@@ -65,14 +65,6 @@ import { modalStyles } from "./styles.ts";
 
 export class CTModal extends BaseElement {
   static override styles = [BaseElement.baseStyles, modalStyles];
-
-  static override properties = {
-    open: { type: Boolean, reflect: true },
-    dismissable: { type: Boolean, reflect: true },
-    size: { type: String, reflect: true },
-    preventScroll: { type: Boolean, attribute: "prevent-scroll" },
-    label: { type: String },
-  };
 
   /** Visibility state - supports both Cell<boolean> and plain boolean */
   @property({ attribute: false })
@@ -169,6 +161,13 @@ export class CTModal extends BaseElement {
 
   override updated(_changedProperties: PropertyValues) {
     const isOpen = this._getOpenValue();
+
+    // Update open attribute for CSS styling
+    if (isOpen) {
+      this.setAttribute("open", "");
+    } else {
+      this.removeAttribute("open");
+    }
 
     // Handle open state transitions
     if (isOpen !== this._wasOpen) {
@@ -279,10 +278,11 @@ export class CTModal extends BaseElement {
   }
 
   /**
-   * Handle backdrop click - dismiss if dismissable
+   * Handle container click - dismiss if click is on container itself (not dialog)
    */
-  private _handleBackdropClick = () => {
-    if (this.dismissable) {
+  private _handleContainerClick = (e: MouseEvent) => {
+    // Only dismiss if clicking directly on container (the backdrop area), not the dialog
+    if (e.target === e.currentTarget && this.dismissable) {
       this._requestClose("backdrop");
     }
   };
@@ -298,10 +298,8 @@ export class CTModal extends BaseElement {
    * Request modal close with reason
    */
   private _requestClose(reason: "backdrop" | "escape" | "button" | "api") {
-    // Write false to Cell if bound
-    if (isCell(this.open)) {
-      this._setOpenValue(false);
-    }
+    // Write false to Cell if bound (controller handles the check internally)
+    this._setOpenValue(false);
 
     // Always emit event so parent can run cleanup logic
     this.emit("ct-modal-close", { reason });
@@ -411,25 +409,16 @@ export class CTModal extends BaseElement {
   }
 
   override render() {
-    const isOpen = this._getOpenValue();
-
-    // Update open attribute for CSS
-    if (isOpen) {
-      this.setAttribute("open", "");
-    } else {
-      this.removeAttribute("open");
-    }
-
     return html`
       <div
         class="backdrop"
         part="backdrop"
-        @click=${this._handleBackdropClick}
       ></div>
 
       <div
         class="container"
         part="container"
+        @click=${this._handleContainerClick}
         @keydown=${this._handleKeydown}
       >
         <div
