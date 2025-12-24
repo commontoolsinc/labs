@@ -19,9 +19,9 @@
 import { css, html, LitElement } from "lit";
 import { provide } from "@lit/context";
 import {
-  modalContext,
   MODAL_BASE_Z_INDEX,
   MODAL_Z_INDEX_INCREMENT,
+  modalContext,
   type ModalManager,
   type ModalRegistration,
 } from "../modal-context.ts";
@@ -95,8 +95,8 @@ export class CTModalProvider extends LitElement {
     dismissable: boolean,
   ): ModalRegistration {
     const id = `modal-${this._nextId++}`;
-    const zIndex =
-      MODAL_BASE_Z_INDEX + this._stack.length * MODAL_Z_INDEX_INCREMENT;
+    const zIndex = MODAL_BASE_Z_INDEX +
+      this._stack.length * MODAL_Z_INDEX_INCREMENT;
     const registration: ModalRegistration = {
       id,
       element: modal,
@@ -149,7 +149,9 @@ export class CTModalProvider extends LitElement {
   }
 
   override render() {
-    return html`<slot></slot>`;
+    return html`
+      <slot></slot>
+    `;
   }
 }
 

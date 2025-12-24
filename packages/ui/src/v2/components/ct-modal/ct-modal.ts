@@ -56,8 +56,8 @@ import { type Cell } from "@commontools/runner";
 import { BaseElement } from "../../core/base-element.ts";
 import { createBooleanCellController } from "../../core/cell-controller.ts";
 import {
-  modalContext,
   MODAL_BASE_Z_INDEX,
+  modalContext,
   type ModalManager,
   type ModalRegistration,
 } from "../modal-context.ts";
@@ -413,20 +413,21 @@ export class CTModal extends BaseElement {
       <div
         class="backdrop"
         part="backdrop"
-      ></div>
+      >
+      </div>
 
       <div
         class="container"
         part="container"
-        @click=${this._handleContainerClick}
-        @keydown=${this._handleKeydown}
+        @click="${this._handleContainerClick}"
+        @keydown="${this._handleKeydown}"
       >
         <div
           class="dialog"
           part="dialog"
           role="dialog"
           aria-modal="true"
-          aria-label=${this.label || nothing}
+          aria-label="${this.label || nothing}"
         >
           <div
             class="header ${this._headerHasContent ? "" : "empty"}"
@@ -435,14 +436,14 @@ export class CTModal extends BaseElement {
             <div class="header-content">
               <slot
                 name="header"
-                @slotchange=${this._handleHeaderSlotChange}
+                @slotchange="${this._handleHeaderSlotChange}"
               ></slot>
             </div>
             <slot name="close-button">
               <button
                 class="close-button"
                 part="close-button"
-                @click=${this._handleCloseClick}
+                @click="${this._handleCloseClick}"
                 aria-label="Close"
                 type="button"
               >
@@ -461,7 +462,7 @@ export class CTModal extends BaseElement {
           >
             <slot
               name="footer"
-              @slotchange=${this._handleFooterSlotChange}
+              @slotchange="${this._handleFooterSlotChange}"
             ></slot>
           </div>
         </div>

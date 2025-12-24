@@ -1695,7 +1695,11 @@ const Record = pattern<RecordInput, RecordOutput>(
                 editingNoteText,
               })}
             />
-            <ct-hstack slot="footer" gap="3" style={{ justifyContent: "flex-end" }}>
+            <ct-hstack
+              slot="footer"
+              gap="3"
+              style={{ justifyContent: "flex-end" }}
+            >
               <ct-button
                 variant="ghost"
                 onClick={closeNoteEditor({

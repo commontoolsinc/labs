@@ -1162,7 +1162,11 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
             $value={newNotebookName}
             placeholder="Enter notebook name..."
           />
-          <ct-hstack slot="footer" gap="2" style={{ justifyContent: "flex-end" }}>
+          <ct-hstack
+            slot="footer"
+            gap="2"
+            style={{ justifyContent: "flex-end" }}
+          >
             <ct-button
               variant="ghost"
               onClick={cancelNewNotebookPrompt({
@@ -1206,7 +1210,11 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
             $value={newNoteTitle}
             placeholder="Enter note title..."
           />
-          <ct-hstack slot="footer" gap="2" style={{ justifyContent: "flex-end" }}>
+          <ct-hstack
+            slot="footer"
+            gap="2"
+            style={{ justifyContent: "flex-end" }}
+          >
             <ct-button
               variant="ghost"
               onClick={cancelNewNotePrompt({
