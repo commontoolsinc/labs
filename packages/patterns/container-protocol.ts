@@ -53,7 +53,4 @@ export interface ModuleMetadata {
 
   /** Field names this module manages (for data mapping) */
   fieldMapping?: string[];
-
-  /** If true, this module exports a settingsUI for configuration */
-  hasSettings?: boolean;
 }
