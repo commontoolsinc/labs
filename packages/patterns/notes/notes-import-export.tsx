@@ -910,17 +910,19 @@ const duplicateSelectedNotes = handler<
   const selected = selectedIndices.get();
   const notesList = notes.get();
 
+  // Collect copies first, then batch push (reduces N reactive cycles to 1)
+  const copies: NoteCharm[] = [];
   for (const idx of selected) {
     const original = notesList[idx];
     if (original) {
-      const copy = Note({
+      copies.push(Note({
         title: (original.title ?? "Note") + " (Copy)",
         content: original.content ?? "",
         noteId: generateId(),
-      });
-      allCharms.push(copy as unknown as NoteCharm);
+      }) as unknown as NoteCharm);
     }
   }
+  allCharms.push(...copies);
   selectedIndices.set([]);
 });
 
@@ -1205,6 +1207,8 @@ const duplicateSelectedNotebooks = handler<
   const selected = selectedNotebookIndices.get();
   const notebooksList = notebooks.get();
 
+  // Collect copies first, then batch push (reduces N reactive cycles to 1)
+  const copies: NoteCharm[] = [];
   for (const idx of selected) {
     const original = notebooksList[idx];
     if (original) {
@@ -1216,13 +1220,13 @@ const duplicateSelectedNotebooks = handler<
         "",
       );
 
-      const copy = Notebook({
+      copies.push(Notebook({
         title: baseTitle + " (Copy)",
         notes: [...(original?.notes ?? [])], // Shallow copy - reference same notes
-      });
-      allCharms.push(copy as unknown as NoteCharm);
+      }) as unknown as NoteCharm);
     }
   }
+  allCharms.push(...copies);
   selectedNotebookIndices.set([]);
 });
 

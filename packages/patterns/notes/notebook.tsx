@@ -203,19 +203,21 @@ const duplicateSelectedNotes = handler<
   const selected = selectedNoteIndices.get();
   const notesList = notes.get();
 
+  // Collect copies first, then batch push (reduces N reactive cycles to 1)
+  const copies: NoteCharm[] = [];
   for (const idx of selected) {
     const original = notesList[idx];
     if (original) {
-      const copy = Note({
+      copies.push(Note({
         title: (original.title ?? "Note") + " (Copy)",
         content: original.content ?? "",
         isHidden: true,
         noteId: generateId(),
-      });
-      allCharms.push(copy as unknown as NoteCharm);
-      notes.push(copy as unknown as NoteCharm);
+      }) as unknown as NoteCharm);
     }
   }
+  allCharms.push(...copies);
+  notes.push(...copies);
   selectedNoteIndices.set([]);
 });
 
@@ -320,12 +322,13 @@ const addSelectedToNotebook = handler<
   const targetNotebookCell = notebooks.key(nbIndex);
   const targetNotebookNotes = targetNotebookCell.key("notes");
 
+  // Collect notes first, then batch push (reduces N reactive cycles to 1)
+  const notesToAdd: NoteCharm[] = [];
   for (const idx of selected) {
     const note = notesList[idx];
-    if (note) {
-      (targetNotebookNotes as Cell<NoteCharm[] | undefined>).push(note);
-    }
+    if (note) notesToAdd.push(note);
   }
+  (targetNotebookNotes as Cell<NoteCharm[] | undefined>).push(...notesToAdd);
 
   selectedNoteIndices.set([]);
   selectedAddNotebook.set("");
@@ -375,15 +378,17 @@ const moveSelectedToNotebook = handler<
   const targetNotebookCell = notebooks.key(nbIndex);
   const targetNotebookNotes = targetNotebookCell.key("notes");
 
-  // Get noteIds of selected notes
+  // Collect notes and IDs first, then batch push (reduces N reactive cycles to 1)
   const selectedNoteIds: string[] = [];
+  const notesToMove: NoteCharm[] = [];
   for (const idx of selected) {
     const note = notesList[idx];
     const noteId = (note as any)?.noteId;
     if (noteId) selectedNoteIds.push(noteId);
-    // Add to target notebook
-    if (note) (targetNotebookNotes as Cell<NoteCharm[] | undefined>).push(note);
+    if (note) notesToMove.push(note);
   }
+  // Add to target notebook in one operation
+  (targetNotebookNotes as Cell<NoteCharm[] | undefined>).push(...notesToMove);
 
   // Remove from all notebooks
   for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
@@ -614,18 +619,18 @@ const handleCreateNotes = handler<
   { notesData: Array<{ title: string; content: string }> },
   { notes: Cell<NoteCharm[]>; allCharms: Cell<NoteCharm[]> }
 >(({ notesData }, { notes, allCharms }) => {
+  // Collect notes first, then batch push (reduces N reactive cycles to 1)
   const created: NoteCharm[] = [];
   for (const data of notesData) {
-    const newNote = Note({
+    created.push(Note({
       title: data.title,
       content: data.content,
       isHidden: true,
       noteId: generateId(),
-    });
-    allCharms.push(newNote as unknown as NoteCharm);
-    notes.push(newNote as unknown as NoteCharm);
-    created.push(newNote as unknown as NoteCharm);
+    }) as unknown as NoteCharm);
   }
+  allCharms.push(...created);
+  notes.push(...created);
   return created;
 });
 
@@ -643,18 +648,16 @@ const handleCreateNotebook = handler<
   { title: string; notesData?: Array<{ title: string; content: string }> },
   { allCharms: Cell<NoteCharm[]> }
 >(({ title: nbTitle, notesData }, { allCharms }) => {
-  // Create notes if provided
+  // Collect notes first, then batch push (reduces N reactive cycles to 1)
   const notesToAdd: NoteCharm[] = [];
   if (notesData && notesData.length > 0) {
     for (const data of notesData) {
-      const newNote = Note({
+      notesToAdd.push(Note({
         title: data.title,
         content: data.content,
         isHidden: true,
         noteId: generateId(),
-      });
-      allCharms.push(newNote as unknown as NoteCharm);
-      notesToAdd.push(newNote as unknown as NoteCharm);
+      }) as unknown as NoteCharm);
     }
   }
 
@@ -663,7 +666,9 @@ const handleCreateNotebook = handler<
     title: nbTitle,
     notes: notesToAdd,
   });
-  allCharms.push(newNotebook as unknown as NoteCharm);
+
+  // Batch push all items at once
+  allCharms.push(...notesToAdd, newNotebook as unknown as NoteCharm);
   return newNotebook;
 });
 
@@ -1145,98 +1150,103 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
           </ct-vstack>
         </div>
 
-        {/* New Notebook Prompt Modal */}
-        <ct-modal
-          $open={showNewNotebookPrompt}
-          dismissable
-          onct-modal-close={cancelNewNotebookPrompt({
-            showNewNotebookPrompt,
-            newNotebookName,
-            pendingNotebookAction,
-            selectedAddNotebook,
-            selectedMoveNotebook,
-          })}
+        {/* New Notebook Prompt Modal - Use CSS display to keep DOM alive for reactivity */}
+        <div
+          style={{
+            display: computed(() =>
+              showNewNotebookPrompt.get() ? "flex" : "none"
+            ),
+            position: "fixed",
+            inset: "0",
+            background: "rgba(0,0,0,0.5)",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: "9999",
+          }}
         >
-          <span slot="header">New Notebook</span>
-          <ct-input
-            $value={newNotebookName}
-            placeholder="Enter notebook name..."
-          />
-          <ct-hstack
-            slot="footer"
-            gap="2"
-            style={{ justifyContent: "flex-end" }}
-          >
-            <ct-button
-              variant="ghost"
-              onClick={cancelNewNotebookPrompt({
-                showNewNotebookPrompt,
-                newNotebookName,
-                pendingNotebookAction,
-                selectedAddNotebook,
-                selectedMoveNotebook,
-              })}
-            >
-              Cancel
-            </ct-button>
-            <ct-button
-              variant="primary"
-              onClick={createNotebookFromPrompt({
-                newNotebookName,
-                showNewNotebookPrompt,
-                pendingNotebookAction,
-                selectedNoteIndices,
-                notes,
-                allCharms,
-                notebooks,
-              })}
-            >
-              Create
-            </ct-button>
-          </ct-hstack>
-        </ct-modal>
+          <ct-card style={{ minWidth: "320px", padding: "24px" }}>
+            <ct-vstack gap="4">
+              <h3 style={{ margin: 0 }}>New Notebook</h3>
+              <ct-input
+                $value={newNotebookName}
+                placeholder="Enter notebook name..."
+              />
+              <ct-hstack gap="2" style={{ justifyContent: "flex-end" }}>
+                <ct-button
+                  variant="ghost"
+                  onClick={cancelNewNotebookPrompt({
+                    showNewNotebookPrompt,
+                    newNotebookName,
+                    pendingNotebookAction,
+                    selectedAddNotebook,
+                    selectedMoveNotebook,
+                  })}
+                >
+                  Cancel
+                </ct-button>
+                <ct-button
+                  variant="primary"
+                  onClick={createNotebookFromPrompt({
+                    newNotebookName,
+                    showNewNotebookPrompt,
+                    pendingNotebookAction,
+                    selectedNoteIndices,
+                    notes,
+                    allCharms,
+                    notebooks,
+                  })}
+                >
+                  Create
+                </ct-button>
+              </ct-hstack>
+            </ct-vstack>
+          </ct-card>
+        </div>
 
         {/* New Note Prompt Modal */}
-        <ct-modal
-          $open={showNewNotePrompt}
-          dismissable
-          onct-modal-close={cancelNewNotePrompt({
-            showNewNotePrompt,
-            newNoteTitle,
-          })}
+        <div
+          style={{
+            display: computed(() => showNewNotePrompt.get() ? "flex" : "none"),
+            position: "fixed",
+            inset: "0",
+            background: "rgba(0,0,0,0.5)",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: "9999",
+          }}
         >
-          <span slot="header">New Note</span>
-          <ct-input
-            $value={newNoteTitle}
-            placeholder="Enter note title..."
-          />
-          <ct-hstack
-            slot="footer"
-            gap="2"
-            style={{ justifyContent: "flex-end" }}
-          >
-            <ct-button
-              variant="ghost"
-              onClick={cancelNewNotePrompt({
-                showNewNotePrompt,
-                newNoteTitle,
-              })}
-            >
-              Cancel
-            </ct-button>
-            <ct-button
-              variant="primary"
-              onClick={createNoteAndOpen({
-                newNoteTitle,
-                showNewNotePrompt,
-                notes,
-                allCharms,
-              })}
-            >
-              Create
-            </ct-button>
-          </ct-hstack>
-        </ct-modal>
+          <ct-card style={{ minWidth: "320px", padding: "24px" }}>
+            <ct-vstack gap="4">
+              <h3 style={{ margin: 0 }}>New Note</h3>
+              <ct-input
+                $value={newNoteTitle}
+                placeholder="Enter note title..."
+              />
+              <ct-hstack gap="2" style={{ justifyContent: "flex-end" }}>
+                <ct-button
+                  variant="ghost"
+                  onClick={cancelNewNotePrompt({
+                    showNewNotePrompt,
+                    newNoteTitle,
+                  })}
+                >
+                  Cancel
+                </ct-button>
+                <ct-button
+                  variant="primary"
+                  onClick={createNoteAndOpen({
+                    newNoteTitle,
+                    showNewNotePrompt,
+                    notes,
+                    allCharms,
+                  })}
+                >
+                  Create
+                </ct-button>
+              </ct-hstack>
+            </ct-vstack>
+          </ct-card>
+        </div>
       </ct-screen>
     ),
     title,
