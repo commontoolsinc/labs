@@ -1657,191 +1657,72 @@ const Record = pattern<RecordInput, RecordOutput>(
             )}
           </div>
 
-          {
-            /*
-             * Note Editor Modal
-             * NOTE: Replace with <ct-modal> component when available.
-             * Future ct-modal API would be:
-             *   <ct-modal
-             *     $open={editingNoteIndex}
-             *     onct-modal-close={closeNoteEditor({...})}
-             *     backdrop="blur"
-             *   >
-             *     <content />
-             *   </ct-modal>
-             *
-             * Component should include:
-             * - Backdrop with blur effect (backdrop-filter: blur(8px))
-             * - Fixed centering with z-index 1001
-             * - Escape key support (document listener)
-             * - Focus trap for accessibility
-             * - Smooth fade/scale animations
-             * - Click-outside-to-close behavior
-             */
-          }
-          {ifElse(
-            computed(() => editingNoteIndex.get() !== undefined),
-            <div>
-              {/* Backdrop with blur */}
-              <div
-                onClick={closeNoteEditor({ editingNoteIndex, editingNoteText })}
-                style={{
-                  position: "fixed",
-                  inset: "0",
-                  backgroundColor: "rgba(0, 0, 0, 0.4)",
-                  backdropFilter: "blur(8px)",
-                  zIndex: "1000",
-                }}
-              />
-              {/* Modal content */}
-              <div
-                style={{
-                  position: "fixed",
-                  top: "50%",
-                  left: "50%",
-                  transform: "translate(-50%, -50%)",
-                  zIndex: "1001",
-                  width: "90%",
-                  maxWidth: "500px",
-                  background: "white",
-                  borderRadius: "12px",
-                  boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
-                  overflow: "hidden",
-                }}
+          {/* Note Editor Modal */}
+          <ct-modal
+            $open={computed(() => editingNoteIndex.get() !== undefined)}
+            dismissable
+            size="md"
+            onct-modal-close={closeNoteEditor({
+              editingNoteIndex,
+              editingNoteText,
+            })}
+          >
+            <span slot="header">Module Note</span>
+            <ct-textarea
+              $value={editingNoteText}
+              placeholder="Add notes about this module... (visible to LLM reads)"
+              rows={6}
+              style={{ width: "100%", resize: "vertical" }}
+            />
+            {/* Keyboard shortcut for save (Cmd/Ctrl+Enter) */}
+            <ct-keybind
+              code="Enter"
+              meta
+              ignore-editable={false}
+              onct-keybind={saveNote({
+                subCharms,
+                editingNoteIndex,
+                editingNoteText,
+              })}
+            />
+            <ct-keybind
+              code="Enter"
+              ctrl
+              ignore-editable={false}
+              onct-keybind={saveNote({
+                subCharms,
+                editingNoteIndex,
+                editingNoteText,
+              })}
+            />
+            <ct-hstack
+              slot="footer"
+              gap="3"
+              style={{ justifyContent: "flex-end" }}
+            >
+              <ct-button
+                variant="ghost"
+                onClick={closeNoteEditor({
+                  editingNoteIndex,
+                  editingNoteText,
+                })}
               >
-                {/* Header */}
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "16px 20px",
-                    borderBottom: "1px solid #e5e7eb",
-                    background: "#fafafa",
-                  }}
-                >
-                  <span style={{ fontWeight: "600", fontSize: "16px" }}>
-                    📝 Module Note
-                  </span>
-                  <button
-                    type="button"
-                    onClick={closeNoteEditor({
-                      editingNoteIndex,
-                      editingNoteText,
-                    })}
-                    style={{
-                      background: "transparent",
-                      border: "none",
-                      cursor: "pointer",
-                      padding: "4px 8px",
-                      fontSize: "18px",
-                      color: "#6b7280",
-                    }}
-                    title="Close"
-                  >
-                    ✕
-                  </button>
-                </div>
-                {/* Content */}
-                <div style={{ padding: "20px" }}>
-                  <ct-textarea
-                    $value={editingNoteText}
-                    placeholder="Add notes about this module... (visible to LLM reads)"
-                    rows={6}
-                    style={{ width: "100%", resize: "vertical" }}
-                  />
-                  {/* Keyboard shortcuts for modal */}
-                  <ct-keybind
-                    code="Escape"
-                    ignore-editable={false}
-                    onct-keybind={closeNoteEditor({
-                      editingNoteIndex,
-                      editingNoteText,
-                    })}
-                  />
-                  <ct-keybind
-                    code="Enter"
-                    meta
-                    ignore-editable={false}
-                    onct-keybind={saveNote({
-                      subCharms,
-                      editingNoteIndex,
-                      editingNoteText,
-                    })}
-                  />
-                  <ct-keybind
-                    code="Enter"
-                    ctrl
-                    ignore-editable={false}
-                    onct-keybind={saveNote({
-                      subCharms,
-                      editingNoteIndex,
-                      editingNoteText,
-                    })}
-                  />
-                </div>
-                {/* Footer */}
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "flex-end",
-                    gap: "12px",
-                    padding: "16px 20px",
-                    borderTop: "1px solid #e5e7eb",
-                    background: "#fafafa",
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={closeNoteEditor({
-                      editingNoteIndex,
-                      editingNoteText,
-                    })}
-                    style={{
-                      background: "transparent",
-                      border: "1px solid #e5e7eb",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      padding: "8px 16px",
-                      fontSize: "14px",
-                      color: "#6b7280",
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={saveNote({
-                      subCharms,
-                      editingNoteIndex,
-                      editingNoteText,
-                    })}
-                    style={{
-                      background: "#3b82f6",
-                      border: "none",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      padding: "8px 16px",
-                      fontSize: "14px",
-                      color: "white",
-                      fontWeight: "500",
-                    }}
-                  >
-                    Save Note
-                  </button>
-                </div>
-              </div>
-            </div>,
-            null,
-          )}
+                Cancel
+              </ct-button>
+              <ct-button
+                variant="primary"
+                onClick={saveNote({
+                  subCharms,
+                  editingNoteIndex,
+                  editingNoteText,
+                })}
+              >
+                Save Note
+              </ct-button>
+            </ct-hstack>
+          </ct-modal>
 
-          {
-            /*
-             * Expanded (Maximize) Module Overlay
-             * Just provides backdrop + escape handler.
-             * Module card itself becomes position:fixed when expanded.
-             */
-          }
+          {/* Expanded (Maximize) Module Overlay - backdrop + escape handler */}
           {ifElse(
             hasExpandedModule,
             <div>
