@@ -732,6 +732,151 @@ describe("link-utils", () => {
       expect((result as any).asCell).toBeUndefined();
       expect((result as any).properties.name.asStream).toBeUndefined();
     });
+
+    it("should handle circular schema references without stack overflow", () => {
+      // Create a circular schema like Record pattern has
+      const schema: any = {
+        type: "object",
+        asCell: true,
+        properties: {
+          name: { type: "string" },
+          subCharms: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                schema: {} as any, // Will be set to parent schema
+              },
+            },
+          },
+        },
+      };
+      // Create the circular reference
+      schema.properties.subCharms.items.properties.schema = schema;
+
+      // This should not throw a stack overflow
+      const result = sanitizeSchemaForLinks(schema);
+
+      // Should have removed asCell from top level
+      expect((result as any).asCell).toBeUndefined();
+      // Should have processed nested properties
+      expect((result as any).properties.name.type).toBe("string");
+    });
+
+    it("should handle direct self-reference cycle", () => {
+      const schema: any = {
+        type: "object",
+        asCell: true,
+        asStream: true,
+      };
+      schema.self = schema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      // Top level flags should be removed
+      expect((result as any).asCell).toBeUndefined();
+      expect((result as any).asStream).toBeUndefined();
+      // Cycle reference should point to the processed result (not original)
+      expect((result as any).self).toBe(result);
+      expect((result as any).self.asCell).toBeUndefined();
+    });
+
+    it("should handle three-way cycle (A → B → C → A)", () => {
+      const a: any = { type: "a", asCell: true, next: null };
+      const b: any = { type: "b", asStream: true, next: null };
+      const c: any = { type: "c", asCell: true, next: null };
+      a.next = b;
+      b.next = c;
+      c.next = a;
+
+      const result = sanitizeSchemaForLinks(a);
+
+      // All flags should be removed in the processed chain
+      expect((result as any).asCell).toBeUndefined();
+      expect((result as any).next.asStream).toBeUndefined();
+      expect((result as any).next.next.asCell).toBeUndefined();
+      // The cycle back should reference the processed result (not original)
+      expect((result as any).next.next.next).toBe(result);
+      expect((result as any).next.next.next.asCell).toBeUndefined();
+    });
+
+    it("should handle cycle through array items", () => {
+      const schema: any = {
+        type: "array",
+        asCell: true,
+        items: null,
+      };
+      schema.items = schema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect((result as any).asCell).toBeUndefined();
+      // Cycle reference returns processed result
+      expect((result as any).items).toBe(result);
+      expect((result as any).items.asCell).toBeUndefined();
+    });
+
+    it("should handle cycle through anyOf", () => {
+      const schema: any = {
+        type: "object",
+        asCell: true,
+        anyOf: [{ type: "string" }, null],
+      };
+      schema.anyOf[1] = schema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect((result as any).asCell).toBeUndefined();
+      expect((result as any).anyOf[0].type).toBe("string");
+      // Cycle reference returns processed result
+      expect((result as any).anyOf[1]).toBe(result);
+      expect((result as any).anyOf[1].asCell).toBeUndefined();
+    });
+
+    it("should handle multiple independent cycles", () => {
+      const cycle1: any = { type: "cycle1", asCell: true };
+      cycle1.self = cycle1;
+      const cycle2: any = { type: "cycle2", asStream: true };
+      cycle2.self = cycle2;
+      const schema: any = { a: cycle1, b: cycle2 };
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect((result as any).a.asCell).toBeUndefined();
+      expect((result as any).b.asStream).toBeUndefined();
+    });
+
+    it("should handle keepStreams option with circular schemas", () => {
+      const schema: any = {
+        type: "object",
+        asCell: true,
+        asStream: true,
+      };
+      schema.self = schema;
+
+      const result = sanitizeSchemaForLinks(schema, { keepStreams: true });
+
+      expect((result as any).asCell).toBeUndefined();
+      // asStream should be kept
+      expect((result as any).asStream).toBe(true);
+    });
+
+    it("should handle shared references (diamond pattern) correctly", () => {
+      // Test that same object referenced from multiple places is handled
+      const shared: any = { type: "shared", asCell: true };
+      const schema: any = {
+        left: { path: shared },
+        right: { path: shared },
+      };
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      // First encounter should strip asCell
+      expect((result as any).left.path.asCell).toBeUndefined();
+      // Second encounter returns the same processed result (consistent!)
+      expect((result as any).right.path).toBe((result as any).left.path);
+      expect((result as any).right.path.asCell).toBeUndefined();
+    });
   });
 
   describe("createDataCellURI", () => {
