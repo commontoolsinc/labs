@@ -61,6 +61,10 @@ import {
   NicknameModule,
 } from "../nickname.tsx";
 import { MODULE_METADATA as PhotoMeta, PhotoModule } from "../photo.tsx";
+import {
+  MODULE_METADATA as SimpleListMeta,
+  SimpleListModule,
+} from "../simple-list.tsx";
 import type { ModuleMetadata } from "../container-protocol.ts";
 
 // NOTE: TypePickerMeta is NOT imported here to avoid circular dependency:
@@ -170,6 +174,10 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
   ),
   nickname: fromMetadata(NicknameMeta, (init) => NicknameModule(init as any)),
   photo: fromMetadata(PhotoMeta, (init) => PhotoModule(init as any)),
+  "simple-list": fromMetadata(
+    SimpleListMeta,
+    (init) => SimpleListModule(init as any),
+  ),
 
   // Controller modules - TypePicker needs special handling in record.tsx
   // Metadata is inlined here to avoid circular dependency (see note at top)
