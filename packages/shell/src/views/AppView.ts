@@ -91,7 +91,12 @@ export class XAppView extends BaseView {
       | undefined
     > => {
       if (!rt) return;
-      return await rt.getSpaceRootPattern();
+      try {
+        return await rt.getSpaceRootPattern();
+      } catch (err) {
+        console.error("[AppView] Failed to load space root pattern:", err);
+        throw err;
+      }
     },
     args: () => [this.rt],
   });

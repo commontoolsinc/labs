@@ -3,6 +3,7 @@ import { property } from "lit/decorators.js";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { CharmController } from "@commontools/charm/ops";
+import { type DID } from "@commontools/identity";
 
 export class XCharmListView extends BaseView {
   static override styles = css`
@@ -54,6 +55,9 @@ export class XCharmListView extends BaseView {
   spaceName?: string;
 
   @property({ attribute: false })
+  spaceDid?: DID;
+
+  @property({ attribute: false })
   rt?: RuntimeInternals;
 
   async handleRemove(charmId: string) {
@@ -79,13 +83,14 @@ export class XCharmListView extends BaseView {
   }
 
   override render() {
-    const { charms, spaceName } = this;
-    if (!spaceName || !charms) {
+    const { charms, spaceName, spaceDid } = this;
+    if (!charms) {
       return html`
         <x-spinner></x-spinner>
       `;
     }
 
+    const displayName = spaceName ?? "Home";
     const list = charms.map((charm) => {
       const name = charm.name() ?? "Untitled Charm";
       const id = charm.id;
@@ -94,6 +99,7 @@ export class XCharmListView extends BaseView {
           <x-charm-link
             .charmId="${id}"
             .spaceName="${spaceName}"
+            .spaceDid="${spaceDid}"
           >${name}</x-charm-link>
           <x-button
             class="remove-button"
@@ -107,8 +113,12 @@ export class XCharmListView extends BaseView {
       `;
     });
     return html`
-      <h3>${spaceName}</h3>
-      <x-acl-view .rt="${this.rt}"></x-acl-view>
+      <h3>${displayName}</h3>
+      ${spaceName
+        ? html`
+          <x-acl-view .rt="${this.rt}"></x-acl-view>
+        `
+        : null}
       <ul>${list}</ul>
     `;
   }

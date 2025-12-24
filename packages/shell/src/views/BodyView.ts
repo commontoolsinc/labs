@@ -72,9 +72,6 @@ export class XBodyView extends BaseView {
 
   override render() {
     const charms = this._charms.value;
-    const spaceName = this.rt
-      ? this.rt.cc().manager().getSpaceName()
-      : undefined;
     if (!charms) {
       return html`
         <div class="content">
@@ -84,11 +81,14 @@ export class XBodyView extends BaseView {
     }
 
     if (this.showShellCharmListView) {
+      const spaceName = this.rt?.cc().manager().getSpaceName();
+      const spaceDid = this.rt?.cc().manager().getSpace();
       return html`
         <div class="content">
           <x-charm-list-view
             .charms="${charms}"
             .spaceName="${spaceName}"
+            .spaceDid="${spaceDid}"
             .rt="${this.rt}"
             @charm-removed="${() => this._charms.run()}"
           ></x-charm-list-view>
