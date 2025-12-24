@@ -60,7 +60,6 @@ import {
   MODULE_METADATA as NicknameMeta,
   NicknameModule,
 } from "../nickname.tsx";
-import { MODULE_METADATA as PhotoMeta, PhotoModule } from "../photo.tsx";
 import {
   MODULE_METADATA as SimpleListMeta,
   SimpleListModule,
@@ -94,8 +93,6 @@ export interface SubCharmDefinition {
   // For Phase 2 extraction:
   schema?: Record<string, unknown>;
   fieldMapping?: string[];
-  // If true, this module exports a settingsUI for configuration
-  hasSettings?: boolean;
 }
 
 // Helper to create SubCharmDefinition from ModuleMetadata
@@ -115,7 +112,6 @@ function fromMetadata(
     allowMultiple: meta.allowMultiple,
     schema: meta.schema,
     fieldMapping: meta.fieldMapping,
-    hasSettings: meta.hasSettings,
   };
 }
 
@@ -173,7 +169,6 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     (init) => RecordIconModule(init as any),
   ),
   nickname: fromMetadata(NicknameMeta, (init) => NicknameModule(init as any)),
-  photo: fromMetadata(PhotoMeta, (init) => PhotoModule(init as any)),
   "simple-list": fromMetadata(
     SimpleListMeta,
     (init) => SimpleListModule(init as any),
