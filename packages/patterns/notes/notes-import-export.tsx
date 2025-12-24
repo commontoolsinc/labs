@@ -1303,29 +1303,6 @@ const closeExportNotebooksModal = handler<
   selectedNotebookIndices.set([]);
 });
 
-// Handler to copy export notebooks markdown to clipboard and close modal
-const copyExportNotebooksMarkdown = handler<
-  void,
-  {
-    exportNotebooksMarkdown: Cell<string>;
-    showExportNotebooksModal: Cell<boolean>;
-    selectedNotebookIndices: Cell<number[]>;
-  }
->((
-  _,
-  {
-    exportNotebooksMarkdown,
-    showExportNotebooksModal,
-    selectedNotebookIndices,
-  },
-) => {
-  const markdown = exportNotebooksMarkdown.get();
-  copyToClipboard(markdown);
-  showExportNotebooksModal.set(false);
-  exportNotebooksMarkdown.set("");
-  selectedNotebookIndices.set([]);
-});
-
 // Handler to toggle notebook checkbox selection with shift-click support
 const toggleNotebookCheckbox = handler<
   { shiftKey?: boolean },
@@ -1521,27 +1498,6 @@ const closeImportModal = handler<
 >((_, { showImportModal, importMarkdown }) => {
   showImportModal.set(false);
   importMarkdown.set("");
-});
-
-// Lifted function to copy text to clipboard (runs in browser context)
-const copyToClipboard = lift((text: string) => {
-  if (
-    text && typeof globalThis !== "undefined" &&
-    (globalThis as any).navigator?.clipboard
-  ) {
-    (globalThis as any).navigator.clipboard.writeText(text);
-  }
-  return true;
-});
-
-// Handler to copy export markdown to clipboard
-const copyExportMarkdown = handler<
-  void,
-  { exportedMarkdown: Cell<string>; showExportAllModal: Cell<boolean> }
->((_, { exportedMarkdown, showExportAllModal }) => {
-  const markdown = exportedMarkdown.get();
-  copyToClipboard(markdown);
-  showExportAllModal.set(false);
 });
 
 // Plain function to get notebooks containing a note (with name and reference for navigation)
@@ -1758,7 +1714,7 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                 gap: "4px",
               }}
             >
-              <span>↑</span>
+              <span>💾</span>
               <span>Export All</span>
             </ct-button>
           </div>
@@ -2615,22 +2571,30 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                 >
                   Cancel
                 </ct-button>
-                <ct-button
-                  variant="primary"
-                  onClick={copyExportNotebooksMarkdown({
-                    exportNotebooksMarkdown,
+                <ct-file-download
+                  $data={exportNotebooksMarkdown}
+                  filename="notebooks-export.md"
+                  mime-type="text/markdown"
+                  variant="secondary"
+                  onct-download-success={closeExportNotebooksModal({
                     showExportNotebooksModal,
+                    exportNotebooksMarkdown,
                     selectedNotebookIndices,
                   })}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
                 >
-                  <span style={{ fontSize: "14px" }}>📋</span>
-                  <span>Copy</span>
-                </ct-button>
+                  💾 Save
+                </ct-file-download>
+                <ct-copy-button
+                  text={exportNotebooksMarkdown}
+                  variant="primary"
+                  onct-copy-success={closeExportNotebooksModal({
+                    showExportNotebooksModal,
+                    exportNotebooksMarkdown,
+                    selectedNotebookIndices,
+                  })}
+                >
+                  Copy
+                </ct-copy-button>
               </ct-hstack>
             </ct-vstack>
           </ct-card>
@@ -2688,21 +2652,26 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                 >
                   Cancel
                 </ct-button>
-                <ct-button
-                  variant="primary"
-                  onClick={copyExportMarkdown({
-                    exportedMarkdown,
+                <ct-file-download
+                  $data={exportedMarkdown}
+                  filename="notes-export.md"
+                  mime-type="text/markdown"
+                  variant="secondary"
+                  onct-download-success={closeExportAllModal({
                     showExportAllModal,
                   })}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
                 >
-                  <span style={{ fontSize: "14px" }}>📋</span>
-                  <span>Copy</span>
-                </ct-button>
+                  💾 Save
+                </ct-file-download>
+                <ct-copy-button
+                  text={exportedMarkdown}
+                  variant="primary"
+                  onct-copy-success={closeExportAllModal({
+                    showExportAllModal,
+                  })}
+                >
+                  Copy
+                </ct-copy-button>
               </ct-hstack>
             </ct-vstack>
           </ct-card>
