@@ -396,6 +396,8 @@ export function sanitizeSchemaForLinks(
 function recursiveStripAsCellAndStreamFromSchema(
   schema: any,
   options: { keepStreams?: boolean },
+  seen: Map<any, any> = new Map(),
+  depth: number = 0,
 ): any {
   // Handle null/undefined/boolean schemas
   if (
@@ -404,8 +406,19 @@ function recursiveStripAsCellAndStreamFromSchema(
     return schema;
   }
 
+  // Prevent infinite recursion from proxy objects or very deep schemas
+  // JSON Schema shouldn't need more than ~50 levels of nesting in practice
+  if (depth > 100) return schema;
+
+  // Already seen, return previously processed result (handles cycles and shared refs)
+  if (seen.has(schema)) return seen.get(schema);
+
   // Create a copy to avoid mutating the original
   const result = { ...schema };
+
+  // Register result BEFORE recursing to handle cycles correctly
+  // (same pattern as cell.ts:recursivelyAddIDIfNeeded)
+  seen.set(schema, result);
 
   // Remove asCell and asStream flags from this level
   delete (result as any).asCell;
@@ -418,7 +431,12 @@ function recursiveStripAsCellAndStreamFromSchema(
         // Handle arrays
         (result as any)[key] = value.map((item) =>
           typeof item === "object" && item !== null
-            ? recursiveStripAsCellAndStreamFromSchema(item, options)
+            ? recursiveStripAsCellAndStreamFromSchema(
+              item,
+              options,
+              seen,
+              depth + 1,
+            )
             : item
         );
       } else {
@@ -426,6 +444,8 @@ function recursiveStripAsCellAndStreamFromSchema(
         (result as any)[key] = recursiveStripAsCellAndStreamFromSchema(
           value,
           options,
+          seen,
+          depth + 1,
         );
       }
     }
