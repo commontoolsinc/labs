@@ -220,6 +220,15 @@ const getModuleDisplay = lift(
   },
 );
 
+// Helper to check if a module has settings UI
+const moduleHasSettings = lift(
+  // deno-lint-ignore no-explicit-any
+  ({ charm }: { charm?: any }) => {
+    // Check if the charm exports a settingsUI
+    return !!charm?.settingsUI;
+  },
+);
+
 // ===== Module-Scope Handlers (avoid closures, use references not indices) =====
 
 // Toggle pin state for a sub-charm - uses entry reference, not index
@@ -472,6 +481,25 @@ const closeNoteEditor = handler<
 >((_event, { editingNoteIndex, editingNoteText }) => {
   editingNoteIndex.set(undefined);
   editingNoteText.set(undefined);
+});
+
+// Open the settings modal for a module
+const openSettings = handler<
+  unknown,
+  {
+    settingsModuleIndex: Cell<number | undefined>;
+    index: number;
+  }
+>((_event, { settingsModuleIndex, index }) => {
+  settingsModuleIndex.set(index);
+});
+
+// Close the settings modal
+const closeSettings = handler<
+  unknown,
+  { settingsModuleIndex: Cell<number | undefined> }
+>((_event, { settingsModuleIndex }) => {
+  settingsModuleIndex.set(undefined);
 });
 
 // Toggle trash section expanded/collapsed
@@ -826,6 +854,9 @@ const Record = pattern<RecordInput, RecordOutput>(
     // Simple index-based tracking - just stores which index is expanded
     const expandedIndex = Cell.of<number | undefined>();
 
+    // Settings modal state - tracks which module's settings are being edited
+    const settingsModuleIndex = Cell.of<number | undefined>();
+
     // Create Record pattern JSON for wiki-links in Notes
     // Using computed() defers evaluation until render time, avoiding circular dependency
     const recordPatternJson = computed(() => JSON.stringify(Record));
@@ -1020,6 +1051,48 @@ const Record = pattern<RecordInput, RecordOutput>(
       (t || []).length > 0
     )({ t: trashedSubCharms });
 
+    // ===== Settings Modal Computed Values =====
+
+    // Get the settings UI for the currently selected module (if any)
+    const currentSettingsUI = lift(
+      ({
+        idx,
+        sc,
+      }: {
+        idx: number | undefined;
+        sc: SubCharmEntry[];
+      }) => {
+        if (idx === undefined) return null;
+        const entry = sc?.[idx];
+        if (!entry) return null;
+        // Access settingsUI from the charm output
+        // deno-lint-ignore no-explicit-any
+        return (entry.charm as any)?.settingsUI || null;
+      },
+    )({ idx: settingsModuleIndex, sc: subCharms });
+
+    // Get display info for the module whose settings are open
+    const settingsModuleDisplay = lift(
+      ({
+        idx,
+        sc,
+      }: {
+        idx: number | undefined;
+        sc: SubCharmEntry[];
+      }) => {
+        if (idx === undefined) return { icon: "", label: "Settings" };
+        const entry = sc?.[idx];
+        if (!entry) return { icon: "", label: "Settings" };
+        const def = getDefinition(entry.type);
+        // deno-lint-ignore no-explicit-any
+        const charmLabel = (entry.charm as any)?.label;
+        return {
+          icon: def?.icon || "📋",
+          label: charmLabel || def?.label || entry.type,
+        };
+      },
+    )({ idx: settingsModuleIndex, sc: subCharms });
+
     // ===== Main UI =====
     return {
       [NAME]: str`${recordIcon} ${displayNameWithAlias}`,
@@ -1198,7 +1271,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 </button>,
                                 null,
                               )}
-                              {/* Hide note/pin/remove buttons when maximized - only show close button */}
+                              {/* Hide note/settings/pin/remove buttons when maximized - only show close button */}
                               {!isExpanded && (
                                 <button
                                   type="button"
@@ -1225,6 +1298,31 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   📝
                                 </button>
                               )}
+                              {/* Settings gear - only show if module has settingsUI */}
+                              {!isExpanded &&
+                                ifElse(
+                                  moduleHasSettings({ charm: entry.charm }),
+                                  <button
+                                    type="button"
+                                    onClick={openSettings({
+                                      settingsModuleIndex,
+                                      index,
+                                    })}
+                                    style={{
+                                      background: "transparent",
+                                      border: "1px solid #e5e7eb",
+                                      borderRadius: "4px",
+                                      cursor: "pointer",
+                                      padding: "4px 8px",
+                                      fontSize: "12px",
+                                      color: "#6b7280",
+                                    }}
+                                    title="Settings"
+                                  >
+                                    ⚙️
+                                  </button>,
+                                  null,
+                                )}
                               {!isExpanded && (
                                 <button
                                   type="button"
@@ -1447,7 +1545,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   </button>,
                                   null,
                                 )}
-                                {/* Hide note/pin/remove buttons when maximized - only show close button */}
+                                {/* Hide note/settings/pin/remove buttons when maximized - only show close button */}
                                 {!isExpanded && (
                                   <button
                                     type="button"
@@ -1474,6 +1572,31 @@ const Record = pattern<RecordInput, RecordOutput>(
                                     📝
                                   </button>
                                 )}
+                                {/* Settings gear - only show if module has settingsUI */}
+                                {!isExpanded &&
+                                  ifElse(
+                                    moduleHasSettings({ charm: entry.charm }),
+                                    <button
+                                      type="button"
+                                      onClick={openSettings({
+                                        settingsModuleIndex,
+                                        index,
+                                      })}
+                                      style={{
+                                        background: "transparent",
+                                        border: "1px solid #e5e7eb",
+                                        borderRadius: "4px",
+                                        cursor: "pointer",
+                                        padding: "4px 8px",
+                                        fontSize: "12px",
+                                        color: "#6b7280",
+                                      }}
+                                      title="Settings"
+                                    >
+                                      ⚙️
+                                    </button>,
+                                    null,
+                                  )}
                                 {!isExpanded && (
                                   <button
                                     type="button"
@@ -1692,7 +1815,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                               </button>,
                               null,
                             )}
-                            {/* Hide note/pin/remove buttons when maximized - only show close button */}
+                            {/* Hide note/settings/pin/remove buttons when maximized - only show close button */}
                             {!isExpanded && (
                               <button
                                 type="button"
@@ -1719,6 +1842,31 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 📝
                               </button>
                             )}
+                            {/* Settings gear - only show if module has settingsUI */}
+                            {!isExpanded &&
+                              ifElse(
+                                moduleHasSettings({ charm: entry.charm }),
+                                <button
+                                  type="button"
+                                  onClick={openSettings({
+                                    settingsModuleIndex,
+                                    index,
+                                  })}
+                                  style={{
+                                    background: "transparent",
+                                    border: "1px solid #e5e7eb",
+                                    borderRadius: "4px",
+                                    cursor: "pointer",
+                                    padding: "4px 8px",
+                                    fontSize: "12px",
+                                    color: "#6b7280",
+                                  }}
+                                  title="Settings"
+                                >
+                                  ⚙️
+                                </button>,
+                                null,
+                              )}
                             {!isExpanded && (
                               <button
                                 type="button"
@@ -2013,6 +2161,32 @@ const Record = pattern<RecordInput, RecordOutput>(
                 })}
               >
                 Save Note
+              </ct-button>
+            </ct-hstack>
+          </ct-modal>
+
+          {/* Settings Modal */}
+          <ct-modal
+            $open={computed(() => settingsModuleIndex.get() !== undefined)}
+            dismissable
+            size="md"
+            onct-modal-close={closeSettings({ settingsModuleIndex })}
+          >
+            <span slot="header">
+              {settingsModuleDisplay.icon} {settingsModuleDisplay.label}{" "}
+              Settings
+            </span>
+            {currentSettingsUI}
+            <ct-hstack
+              slot="footer"
+              gap="3"
+              style={{ justifyContent: "flex-end" }}
+            >
+              <ct-button
+                variant="primary"
+                onClick={closeSettings({ settingsModuleIndex })}
+              >
+                Done
               </ct-button>
             </ct-hstack>
           </ct-modal>

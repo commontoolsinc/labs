@@ -13,7 +13,13 @@ const DEBUG_LOGGING = false;
  * UI variant types for rendering different representations of a charm.
  * Each variant maps to a property name that patterns can export.
  */
-export type UIVariant = "default" | "preview" | "thumbnail" | "sidebar" | "fab";
+export type UIVariant =
+  | "default"
+  | "preview"
+  | "thumbnail"
+  | "sidebar"
+  | "fab"
+  | "settings";
 
 /**
  * Maps variant names to the property key to look for on the charm.
@@ -25,6 +31,7 @@ const VARIANT_TO_KEY: Record<UIVariant, string | null> = {
   thumbnail: "thumbnailUI",
   sidebar: "sidebarUI",
   fab: "fabUI",
+  settings: "settingsUI",
 };
 
 /**
