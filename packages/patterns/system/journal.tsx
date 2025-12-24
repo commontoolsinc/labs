@@ -120,7 +120,14 @@ export default pattern<Record<string, never>>((_) => {
         {/* Debug section */}
         <details style={{ marginBottom: "16px", fontSize: "12px" }}>
           <summary>Debug: Raw Data</summary>
-          <pre style={{ overflow: "auto", maxHeight: "200px", background: "#f5f5f5", padding: "8px" }}>
+          <pre
+            style={{
+              overflow: "auto",
+              maxHeight: "200px",
+              background: "#f5f5f5",
+              padding: "8px",
+            }}
+          >
             {debugRaw}
           </pre>
         </details>
@@ -206,7 +213,8 @@ export default pattern<Record<string, never>>((_) => {
                     color: "#555",
                   }}
                 >
-                  {entry.snapshot.name}: {entry.subject && <ct-cell-link $cell={entry.subject} />}
+                  {entry.snapshot.name}:{" "}
+                  {entry.subject && <ct-cell-link $cell={entry.subject} />}
                 </div>
               )}
 
@@ -234,7 +242,6 @@ export default pattern<Record<string, never>>((_) => {
                   ))}
                 </div>
               )}
-
             </div>
           ))}
         </div>
