@@ -155,16 +155,13 @@ const initializeRecord = lift(
       subCharms,
       trashedSubCharms,
       isInitialized,
-      recordPatternJson,
+      recordPatternJson: _recordPatternJson,
     },
   ) => {
+    void _recordPatternJson; // Kept for future wiki-link integration
     if ((currentCharms || []).length === 0) {
-      // Create Note directly with Record's pattern JSON for wiki-links
-      // deno-lint-ignore no-explicit-any
-      const notesCharm = Note({
-        embedded: true,
-        linkPattern: recordPatternJson,
-      } as any);
+      // Create Note as default module (rendered via ct-render variant="embedded")
+      const notesCharm = Note({});
 
       // Build ContainerCoordinationContext for TypePicker
       const context: ContainerCoordinationContext<SubCharmEntry> = {
@@ -174,10 +171,7 @@ const initializeRecord = lift(
         >,
         createModule: (type: string) => {
           if (type === "notes") {
-            // deno-lint-ignore no-explicit-any
-            return Note(
-              { embedded: true, linkPattern: recordPatternJson } as any,
-            );
+            return Note({});
           }
           return createSubCharm(type);
         },
@@ -300,9 +294,10 @@ const addSubCharm = handler<
     subCharms: sc,
     trashedSubCharms: trash,
     selectedAddType: sat,
-    recordPatternJson,
+    recordPatternJson: _recordPatternJson,
   },
 ) => {
+  void _recordPatternJson; // Kept for future wiki-link integration
   const type = detail?.value;
   if (!type) return;
 
@@ -313,14 +308,10 @@ const addSubCharm = handler<
   const nextLabel = getNextUnusedLabel(type, current);
   const initialValues = nextLabel ? { label: nextLabel } : undefined;
 
-  // Special case: create Note directly with Record pattern for wiki-links
+  // Special case: create Note (rendered via ct-render variant="embedded")
   // Special case: create ExtractorModule as controller with parent Cells
-  // deno-lint-ignore no-explicit-any
   const charm = type === "notes"
-    ? Note({
-      embedded: true,
-      linkPattern: recordPatternJson,
-    } as any)
+    ? Note({})
     : type === "extractor"
     ? ExtractorModule({
       parentSubCharms: sc,
@@ -1422,7 +1413,10 @@ const Record = pattern<RecordInput, RecordOutput>(
                               minHeight: isExpanded ? "0" : "auto",
                             }}
                           >
-                            {entry.charm as any}
+                            <ct-render
+                              $cell={entry.charm}
+                              variant="embedded"
+                            />
                           </div>,
                           null,
                         )}
@@ -1697,7 +1691,10 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 minHeight: isExpanded ? "0" : "auto",
                               }}
                             >
-                              {entry.charm as any}
+                              <ct-render
+                                $cell={entry.charm}
+                                variant="embedded"
+                              />
                             </div>,
                             null,
                           )}
@@ -1965,7 +1962,10 @@ const Record = pattern<RecordInput, RecordOutput>(
                             minHeight: isExpanded ? "0" : "auto",
                           }}
                         >
-                          {entry.charm as any}
+                          <ct-render
+                            $cell={entry.charm}
+                            variant="embedded"
+                          />
                         </div>,
                         null,
                       )}

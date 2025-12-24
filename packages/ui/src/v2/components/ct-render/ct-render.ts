@@ -12,6 +12,15 @@ const DEBUG_LOGGING = false;
 /**
  * UI variant types for rendering different representations of a charm.
  * Each variant maps to a property name that patterns can export.
+ *
+ * - `default`: The main [UI] export. Full standalone rendering.
+ * - `preview`: Compact preview for pickers/lists (e.g., ct-picker). Maps to `previewUI`.
+ * - `thumbnail`: Icon/thumbnail view for grid displays. Maps to `thumbnailUI`.
+ * - `sidebar`: Optimized layout for sidebar/navigation contexts. Maps to `sidebarUI`.
+ * - `fab`: Floating action button UI. Maps to `fabUI`.
+ * - `settings`: Configuration/settings panel (shown in modals). Maps to `settingsUI`.
+ * - `embedded`: Minimal UI without chrome for embedding in containers. Maps to `embeddedUI`.
+ *              Used when a pattern is rendered as a module inside another pattern (e.g., Note in Record).
  */
 export type UIVariant =
   | "default"
@@ -19,7 +28,8 @@ export type UIVariant =
   | "thumbnail"
   | "sidebar"
   | "fab"
-  | "settings";
+  | "settings"
+  | "embedded";
 
 /**
  * Maps variant names to the property key to look for on the charm.
@@ -32,6 +42,7 @@ const VARIANT_TO_KEY: Record<UIVariant, string | null> = {
   sidebar: "sidebarUI",
   fab: "fabUI",
   settings: "settingsUI",
+  embedded: "embeddedUI",
 };
 
 /**
@@ -40,8 +51,8 @@ const VARIANT_TO_KEY: Record<UIVariant, string | null> = {
  * @element ct-render
  *
  * @property {Cell} cell - The cell containing the charm to render
- * @property {UIVariant} variant - UI variant to render: "default" | "preview" | "thumbnail" | "sidebar" | "fab"
- *   Each variant maps to a property on the charm (e.g., "preview" -> "previewUI").
+ * @property {UIVariant} variant - UI variant to render: "default" | "preview" | "thumbnail" | "sidebar" | "fab" | "settings" | "embedded"
+ *   Each variant maps to a property on the charm (e.g., "preview" -> "previewUI", "embedded" -> "embeddedUI").
  *   Falls back to default [UI] if the variant property doesn't exist.
  *
  * @example
@@ -51,6 +62,10 @@ const VARIANT_TO_KEY: Record<UIVariant, string | null> = {
  * @example
  * // Render preview variant (uses previewUI if available, falls back to [UI])
  * <ct-render .cell=${myCharmCell} variant="preview"></ct-render>
+ *
+ * @example
+ * // Render embedded variant (uses embeddedUI - minimal UI without chrome)
+ * <ct-render .cell=${noteCharm} variant="embedded"></ct-render>
  */
 export class CTRender extends BaseElement {
   static override styles = css`

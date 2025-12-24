@@ -3242,6 +3242,14 @@ interface CTIframeAttributes<T> extends CTHTMLAttributes<T> {
 
 interface CTRenderAttributes<T> extends CTHTMLAttributes<T> {
   "$cell": CellLike<any>;
+  "variant"?:
+    | "default"
+    | "preview"
+    | "thumbnail"
+    | "sidebar"
+    | "fab"
+    | "settings"
+    | "embedded";
 }
 
 interface CTCellContextAttributes<T> extends CTHTMLAttributes<T> {
