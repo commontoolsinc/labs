@@ -1149,7 +1149,6 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
         <ct-modal
           $open={showNewNotebookPrompt}
           dismissable
-          size="sm"
           onct-modal-close={cancelNewNotebookPrompt({
             showNewNotebookPrompt,
             newNotebookName,
@@ -1197,7 +1196,6 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
         <ct-modal
           $open={showNewNotePrompt}
           dismissable
-          size="sm"
           onct-modal-close={cancelNewNotePrompt({
             showNewNotePrompt,
             newNoteTitle,

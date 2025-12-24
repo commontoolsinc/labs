@@ -54,6 +54,7 @@ import { property, state } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { type Cell, isCell } from "@commontools/runner";
 import { BaseElement } from "../../core/base-element.ts";
+import { createBooleanCellController } from "../../core/cell-controller.ts";
 import {
   modalContext,
   MODAL_BASE_Z_INDEX,
@@ -115,8 +116,10 @@ export class CTModal extends BaseElement {
   /** Previously focused element for restoration */
   private _previousActiveElement: HTMLElement | null = null;
 
-  /** Cell subscription cleanup function */
-  private _cellUnsubscribe: (() => void) | null = null;
+  /** Boolean cell controller for open state */
+  private _openCellController = createBooleanCellController(this, {
+    timing: { strategy: "immediate" },
+  });
 
   /** Track if modal was open in previous render */
   private _wasOpen = false;
@@ -133,40 +136,34 @@ export class CTModal extends BaseElement {
    * Get the current open state (unwrap Cell if needed)
    */
   private _getOpenValue(): boolean {
-    if (isCell(this.open)) {
-      return this.open.get() ?? false;
-    }
-    return this.open ?? false;
+    return this._openCellController.getValue();
   }
 
   /**
    * Set the open state (write to Cell if bound)
    */
   private _setOpenValue(value: boolean): void {
-    if (isCell(this.open)) {
-      const tx = this.open.runtime.edit();
-      this.open.withTx(tx).set(value);
-      tx.commit();
+    if (this._openCellController.isCell()) {
+      this._openCellController.setValue(value);
     }
     // For plain boolean, we just emit the event - parent handles state
   }
 
   override connectedCallback() {
     super.connectedCallback();
-    this._setupCellSubscription();
+    // Bind initial open value to the controller
+    this._openCellController.bind(this.open);
   }
 
   override disconnectedCallback() {
     this._cleanup();
-    this._cleanupCellSubscription();
     super.disconnectedCallback();
   }
 
   override willUpdate(changedProperties: PropertyValues) {
     // Handle open property changes (including Cell rebinding)
     if (changedProperties.has("open")) {
-      this._cleanupCellSubscription();
-      this._setupCellSubscription();
+      this._openCellController.bind(this.open);
     }
   }
 
@@ -181,27 +178,6 @@ export class CTModal extends BaseElement {
         this._onClose();
       }
       this._wasOpen = isOpen;
-    }
-  }
-
-  /**
-   * Set up Cell subscription if open is a Cell
-   */
-  private _setupCellSubscription(): void {
-    if (isCell(this.open)) {
-      this._cellUnsubscribe = this.open.sink(() => {
-        this.requestUpdate();
-      });
-    }
-  }
-
-  /**
-   * Clean up Cell subscription
-   */
-  private _cleanupCellSubscription(): void {
-    if (this._cellUnsubscribe) {
-      this._cellUnsubscribe();
-      this._cellUnsubscribe = null;
     }
   }
 

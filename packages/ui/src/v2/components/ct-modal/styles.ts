@@ -171,6 +171,11 @@ export const modalStyles = css`
     display: none;
   }
 
+  /* Ensure slotted elements in footer take full width */
+  .footer ::slotted(*) {
+    width: 100%;
+  }
+
   /* ===== Mobile Bottom Sheet Transformation ===== */
   @media (max-width: 480px) {
     .container {
