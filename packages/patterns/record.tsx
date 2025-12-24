@@ -348,11 +348,18 @@ const trashSubCharm = handler<
     subCharms: Cell<SubCharmEntry[]>;
     trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
     expandedIndex: Cell<number | undefined>;
+    settingsModuleIndex: Cell<number | undefined>;
     index: number;
   }
 >((
   _event,
-  { subCharms: sc, trashedSubCharms: trash, expandedIndex, index },
+  {
+    subCharms: sc,
+    trashedSubCharms: trash,
+    expandedIndex,
+    settingsModuleIndex,
+    index,
+  },
 ) => {
   const current = sc.get() || [];
   const entry = current[index];
@@ -375,6 +382,18 @@ const trashSubCharm = handler<
     } else if (currentExpanded > index) {
       // Item before expanded item was deleted - shift index down
       expandedIndex.set(currentExpanded - 1);
+    }
+  }
+
+  // Adjust settingsModuleIndex to prevent stale reference
+  const currentSettings = settingsModuleIndex.get();
+  if (currentSettings !== undefined) {
+    if (currentSettings === index) {
+      // Deleted the item with settings open - close the modal
+      settingsModuleIndex.set(undefined);
+    } else if (currentSettings > index) {
+      // Item before settings item was deleted - shift index down
+      settingsModuleIndex.set(currentSettings - 1);
     }
   }
 });
@@ -1371,6 +1390,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                     subCharms,
                                     trashedSubCharms,
                                     expandedIndex,
+                                    settingsModuleIndex,
                                     index,
                                   })}
                                   style={{
@@ -1645,6 +1665,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                       subCharms,
                                       trashedSubCharms,
                                       expandedIndex,
+                                      settingsModuleIndex,
                                       index,
                                     })}
                                     style={{
@@ -1912,6 +1933,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   subCharms,
                                   trashedSubCharms,
                                   expandedIndex,
+                                  settingsModuleIndex,
                                   index,
                                 })}
                                 style={{

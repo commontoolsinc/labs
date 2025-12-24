@@ -55,11 +55,11 @@ const clearPhoto = handler<
 // ===== The Pattern =====
 export const PhotoModule = recipe<PhotoModuleInput, PhotoModuleInput>(
   "PhotoModule",
-  ({ image: _image, label }) => {
+  ({ image: inputImage, label }) => {
     // We use an array internally for ct-image-input compatibility
     // but the module only supports a single image
-    // Note: _image is the input but we manage state via images array
-    const images = Cell.of<ImageData[]>([]);
+    // Initialize from input image if provided (for import/restore)
+    const images = Cell.of<ImageData[]>(inputImage ? [inputImage] : []);
 
     // Sync image Cell with images array (first element)
     const syncedImage = lift(({ arr }: { arr: ImageData[] }) => {
