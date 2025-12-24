@@ -12,8 +12,7 @@ export {
   type Journal,
   type JournalEntry,
   type JournalEventType,
-  journalEntrySchema,
-  journalSchema,
+  type JournalSnapshot,
   searchJournalByTag,
 } from "./journal.ts";
 export { searchCharms } from "./search.ts";

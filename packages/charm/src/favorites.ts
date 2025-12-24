@@ -2,7 +2,7 @@ import { type Cell, type Runtime } from "@commontools/runner";
 import {
   type FavoriteList,
   favoriteListSchema,
-} from "@commontools/runner/schemas";
+} from "@commontools/home-schemas";
 import { addJournalEntry } from "./journal.ts";
 
 /**

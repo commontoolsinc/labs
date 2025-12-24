@@ -1,0 +1,4 @@
+{
+  "name": "@commontools/home-schemas",
+  "exports": "./mod.ts"
+}

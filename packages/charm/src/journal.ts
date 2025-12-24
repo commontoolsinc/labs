@@ -1,80 +1,15 @@
-import {
-  type Cell,
-  type JSONSchema,
-  NAME,
-  type Runtime,
-  type Schema,
-} from "@commontools/runner";
+import { type Cell, NAME, type Runtime } from "@commontools/runner";
 import { LLMClient } from "@commontools/llm";
+import {
+  type Journal,
+  type JournalEntry,
+  type JournalEventType,
+  journalSchema,
+  type JournalSnapshot,
+} from "@commontools/home-schemas";
 
-/**
- * Journal entry event types - the significant events we track
- */
-export const journalEventTypes = [
-  "charm:favorited",
-  "charm:unfavorited",
-  "charm:created",
-  "charm:modified",
-  "space:entered",
-] as const;
-
-export type JournalEventType = typeof journalEventTypes[number];
-
-/**
- * Snapshot of a cell's state at a point in time
- */
-export const journalSnapshotSchema = {
-  type: "object",
-  properties: {
-    name: { type: "string", default: "" },
-    schemaTag: { type: "string", default: "" },
-    valueExcerpt: { type: "string", default: "" },
-  },
-} as const satisfies JSONSchema;
-
-export type JournalSnapshot = Schema<typeof journalSnapshotSchema>;
-
-/**
- * A single journal entry capturing a significant event
- */
-export const journalEntrySchema = {
-  type: "object",
-  properties: {
-    timestamp: { type: "number" },
-    eventType: {
-      type: "string",
-      enum: journalEventTypes as unknown as string[],
-    },
-    // Live cell reference (may update over time)
-    subject: { not: true, asCell: true },
-    // Frozen snapshot at entry time
-    snapshot: journalSnapshotSchema,
-    // LLM-generated narrative prose
-    narrative: { type: "string", default: "" },
-    // Tags for filtering/searching
-    tags: {
-      type: "array",
-      items: { type: "string" },
-      default: [],
-    },
-    // Space where event occurred
-    space: { type: "string" },
-  },
-  required: ["timestamp", "eventType", "space"],
-} as const satisfies JSONSchema;
-
-export type JournalEntry = Schema<typeof journalEntrySchema>;
-
-/**
- * The journal is an array of entries
- */
-export const journalSchema = {
-  type: "array",
-  items: journalEntrySchema,
-  default: [],
-} as const satisfies JSONSchema;
-
-export type Journal = Schema<typeof journalSchema>;
+// Re-export types for consumers
+export type { Journal, JournalEntry, JournalEventType, JournalSnapshot };
 
 /**
  * Get the journal cell from the home space (singleton across all spaces).
