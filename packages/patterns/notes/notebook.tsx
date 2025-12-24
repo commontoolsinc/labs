@@ -51,31 +51,42 @@ interface Output {
   }>;
 }
 
-// Handler to create a new note within this notebook (hidden from default-app)
-const addNote = handler<
-  Record<string, never>,
-  { notes: Cell<NoteCharm[]>; allCharms: Cell<NoteCharm[]> }
->((_, { notes, allCharms }) => {
+// Handler to show the new note modal
+const showNewNoteModal = handler<void, { showNewNotePrompt: Cell<boolean> }>(
+  (_, { showNewNotePrompt }) => showNewNotePrompt.set(true),
+);
+
+// Handler to create note and navigate to it
+const createNoteAndOpen = handler<
+  void,
+  {
+    newNoteTitle: Cell<string>;
+    showNewNotePrompt: Cell<boolean>;
+    notes: Cell<NoteCharm[]>;
+    allCharms: Cell<NoteCharm[]>;
+  }
+>((_, { newNoteTitle, showNewNotePrompt, notes, allCharms }) => {
+  const title = newNoteTitle.get() || "New Note";
   const newNote = Note({
-    title: "New Note",
+    title,
     content: "",
     isHidden: true,
     noteId: generateId(),
   });
-  // Push to allCharms first to persist in space
   allCharms.push(newNote as unknown as NoteCharm);
-  // Then add to this notebook's notes
   notes.push(newNote as unknown as NoteCharm);
+  showNewNotePrompt.set(false);
+  newNoteTitle.set("");
+  return navigateTo(newNote);
 });
 
-// Handler to toggle note visibility in default-app listing
-const toggleNoteVisibility = handler<
-  Record<string, never>,
-  { note: Cell<NoteCharm> }
->((_, { note }) => {
-  const isHiddenCell = note.key("isHidden");
-  const current = isHiddenCell.get() ?? false;
-  isHiddenCell.set(!current);
+// Handler to cancel new note prompt
+const cancelNewNotePrompt = handler<
+  void,
+  { showNewNotePrompt: Cell<boolean>; newNoteTitle: Cell<string> }
+>((_, { showNewNotePrompt, newNoteTitle }) => {
+  showNewNotePrompt.set(false);
+  newNoteTitle.set("");
 });
 
 // Handler to remove a note from this notebook (but keep it in the space)
@@ -130,7 +141,8 @@ const menuNewNotebook = handler<
   { menuOpen: Cell<boolean>; allCharms: Cell<NoteCharm[]> }
 >((_, { menuOpen, allCharms }) => {
   menuOpen.set(false);
-  const nb = Notebook({ title: "New Notebook" });
+  // Pass notes: [] explicitly - relying on default can cause issues with push()
+  const nb = Notebook({ title: "New Notebook", notes: [] });
   allCharms.push(nb as unknown as NoteCharm);
   return navigateTo(nb);
 });
@@ -537,6 +549,19 @@ const handleTitleKeydown = handler<
   }
 });
 
+// Handler to toggle preview expansion for a note
+const togglePreviewExpansion = handler<
+  Record<string, never>,
+  { index: number; expandedPreviews: Cell<number[]> }
+>((_, { index, expandedPreviews }) => {
+  const current = expandedPreviews.get();
+  if (current.includes(index)) {
+    expandedPreviews.set(current.filter((i) => i !== index));
+  } else {
+    expandedPreviews.set([...current, index]);
+  }
+});
+
 // Handler to toggle checkbox selection with shift-click support
 const toggleNoteCheckbox = handler<
   { shiftKey?: boolean },
@@ -666,8 +691,15 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
   const newNotebookName = Cell.of<string>("");
   const pendingNotebookAction = Cell.of<"add" | "move" | "">(""); // Track which action triggered the modal
 
+  // State for "New Note" prompt modal
+  const showNewNotePrompt = Cell.of<boolean>(false);
+  const newNoteTitle = Cell.of<string>("");
+
   // State for inline title editing
   const isEditingTitle = Cell.of<boolean>(false);
+
+  // State for expanded note previews (tracks which note indices have full content shown)
+  const expandedPreviews = Cell.of<number[]>([]);
 
   // Filter to find all notebooks (using 📓 prefix in NAME)
   const notebooks = computed(() =>
@@ -711,117 +743,122 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
     isNotebook,
     [UI]: (
       <ct-screen>
-        <ct-hstack
-          slot="header"
-          gap="3"
-          padding="4"
+        {/* Backdrop to close menu when clicking outside */}
+        <div
+          onClick={closeMenu({ menuOpen })}
           style={{
-            alignItems: "center",
-            borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
+            display: computed(() => (menuOpen.get() ? "block" : "none")),
+            position: "fixed",
+            inset: "0",
+            zIndex: "999",
+          }}
+        />
+
+        {/* Dropdown Menu - fixed position so it floats over content */}
+        <ct-vstack
+          gap="0"
+          style={{
+            display: computed(() => (menuOpen.get() ? "flex" : "none")),
+            position: "fixed",
+            top: "112px",
+            right: "16px",
+            background: "var(--ct-color-bg, white)",
+            border: "1px solid var(--ct-color-border, #e5e5e7)",
+            borderRadius: "12px",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+            minWidth: "180px",
+            zIndex: "1000",
+            padding: "4px",
           }}
         >
-          <span style={{ flex: 1 }} />
           <ct-button
             variant="ghost"
-            onClick={toggleMenu({ menuOpen })}
-            style={{
-              padding: "8px 16px",
-              fontSize: "16px",
-              borderRadius: "8px",
-            }}
+            onClick={menuNewNote({ menuOpen, notes, allCharms })}
+            style={{ justifyContent: "flex-start" }}
           >
-            Notes {"\u25BE"}
+            {"\u00A0\u00A0"}📝 New Note
+          </ct-button>
+          <ct-button
+            variant="ghost"
+            onClick={menuNewNotebook({ menuOpen, allCharms })}
+            style={{ justifyContent: "flex-start" }}
+          >
+            {"\u00A0\u00A0"}📓 New Notebook
           </ct-button>
 
-          {/* Backdrop to close menu when clicking outside */}
+          {/* Divider */}
           <div
-            onClick={closeMenu({ menuOpen })}
             style={{
-              display: computed(() => (menuOpen.get() ? "block" : "none")),
-              position: "fixed",
-              inset: "0",
-              zIndex: "999",
+              height: "1px",
+              background: "var(--ct-color-border, #e5e5e7)",
+              margin: "4px 8px",
             }}
           />
 
-          {/* Dropdown Menu */}
-          <ct-vstack
-            gap="0"
+          {/* List of notebooks */}
+          {notebooks.map((notebook) => (
+            <ct-button
+              variant="ghost"
+              onClick={menuGoToNotebook({ menuOpen, notebook })}
+              style={{ justifyContent: "flex-start" }}
+            >
+              {"\u00A0\u00A0"}
+              {notebook?.[NAME] ?? "Untitled"}
+            </ct-button>
+          ))}
+
+          {/* Divider + All Notes - only show if All Notes charm exists */}
+          <div
             style={{
-              display: computed(() => (menuOpen.get() ? "flex" : "none")),
-              position: "fixed",
-              top: "112px",
-              right: "16px",
-              background: "var(--ct-color-bg, white)",
-              border: "1px solid var(--ct-color-border, #e5e5e7)",
-              borderRadius: "12px",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-              minWidth: "180px",
-              zIndex: "1000",
-              padding: "4px",
+              display: computed(() => allNotesCharm ? "block" : "none"),
+              height: "1px",
+              background: "var(--ct-color-border, #e5e5e7)",
+              margin: "4px 8px",
+            }}
+          />
+
+          <ct-button
+            variant="ghost"
+            onClick={menuAllNotebooks({ menuOpen, allCharms })}
+            style={{
+              display: computed(() => allNotesCharm ? "flex" : "none"),
+              justifyContent: "flex-start",
             }}
           >
-            <ct-button
-              variant="ghost"
-              onClick={menuNewNote({ menuOpen, notes, allCharms })}
-              style={{ justifyContent: "flex-start" }}
-            >
-              {"\u00A0\u00A0"}📝 New Note
-            </ct-button>
-            <ct-button
-              variant="ghost"
-              onClick={menuNewNotebook({ menuOpen, allCharms })}
-              style={{ justifyContent: "flex-start" }}
-            >
-              {"\u00A0\u00A0"}📓 New Notebook
-            </ct-button>
+            {"\u00A0\u00A0"}📁 All Notes
+          </ct-button>
+        </ct-vstack>
 
-            {/* Divider */}
+        <div
+          style={{
+            flex: 1,
+            overflow: "auto",
+            minHeight: 0,
+          }}
+        >
+          <ct-vstack gap="4" padding="6">
+            {/* Notes dropdown button - scrolls with content */}
             <div
               style={{
-                height: "1px",
-                background: "var(--ct-color-border, #e5e5e7)",
-                margin: "4px 8px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "flex-end",
+                width: "100%",
               }}
-            />
-
-            {/* List of notebooks */}
-            {notebooks.map((notebook) => (
+            >
               <ct-button
                 variant="ghost"
-                onClick={menuGoToNotebook({ menuOpen, notebook })}
-                style={{ justifyContent: "flex-start" }}
+                onClick={toggleMenu({ menuOpen })}
+                style={{
+                  padding: "8px 16px",
+                  fontSize: "16px",
+                  borderRadius: "8px",
+                }}
               >
-                {"\u00A0\u00A0"}
-                {notebook?.[NAME] ?? "Untitled"}
+                Notebooks {"\u25BE"}
               </ct-button>
-            ))}
+            </div>
 
-            {/* Divider + All Notes - only show if All Notes charm exists */}
-            <div
-              style={{
-                display: computed(() => allNotesCharm ? "block" : "none"),
-                height: "1px",
-                background: "var(--ct-color-border, #e5e5e7)",
-                margin: "4px 8px",
-              }}
-            />
-
-            <ct-button
-              variant="ghost"
-              onClick={menuAllNotebooks({ menuOpen, allCharms })}
-              style={{
-                display: computed(() => allNotesCharm ? "flex" : "none"),
-                justifyContent: "flex-start",
-              }}
-            >
-              {"\u00A0\u00A0"}📁 All Notes
-            </ct-button>
-          </ct-vstack>
-        </ct-hstack>
-
-        <ct-vscroll flex showScrollbar>
-          <ct-vstack gap="4" padding="6">
             <ct-card>
               <ct-vstack gap="4">
                 {/* Header */}
@@ -872,7 +909,7 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
                     size="sm"
                     variant="ghost"
                     title="New Note"
-                    onClick={addNote({ notes, allCharms })}
+                    onClick={showNewNoteModal({ showNewNotePrompt })}
                     style={{
                       padding: "6px 12px",
                       display: "flex",
@@ -887,7 +924,7 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
                   </ct-button>
                 </div>
 
-                {!hasNotes ? <></> : (
+                {hasNotes && (
                   <ct-vstack gap="0">
                     {/* Table Header */}
                     <ct-hstack
@@ -916,15 +953,6 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
                         />
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>Note</div>
-                      <div
-                        style={{
-                          width: "60px",
-                          flexShrink: 0,
-                          textAlign: "center",
-                        }}
-                      >
-                        Show/Hide
-                      </div>
                       <div style={{ width: "40px", flexShrink: 0 }} />
                     </ct-hstack>
 
@@ -933,7 +961,14 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
                       <ct-hstack
                         padding="3"
                         style={{
-                          alignItems: "center",
+                          // Hide row until note.title resolves to a string (prevents raw JSON flash)
+                          display: computed(() => {
+                            const titleValue = (note as any)?.title;
+                            return typeof titleValue === "string"
+                              ? "flex"
+                              : "none";
+                          }),
+                          alignItems: "flex-start",
                           borderBottom:
                             "1px solid var(--ct-color-border, #e5e5e7)",
                           background: computed(() =>
@@ -951,6 +986,7 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
                             userSelect: "none",
                             display: "flex",
                             alignItems: "center",
+                            paddingTop: "2px",
                           }}
                           onClick={toggleNoteCheckbox({
                             index,
@@ -969,27 +1005,46 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
                             flex: 1,
                             minWidth: 0,
                             overflow: "hidden",
-                            display: "flex",
-                            alignItems: "center",
                           }}
                         >
-                          <ct-cell-context $cell={note}>
-                            <ct-cell-link $cell={note} />
-                          </ct-cell-context>
-                        </div>
-                        <div
-                          style={{
-                            width: "60px",
-                            flexShrink: 0,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                          }}
-                        >
-                          <ct-switch
-                            checked={computed(() => !(note.isHidden ?? false))}
-                            onct-change={toggleNoteVisibility({ note })}
-                          />
+                          <div style={{ display: "flex", alignItems: "center" }}>
+                            <ct-cell-context $cell={note}>
+                              <ct-cell-link $cell={note} />
+                            </ct-cell-context>
+                          </div>
+                          <div
+                            onClick={togglePreviewExpansion({
+                              index,
+                              expandedPreviews,
+                            })}
+                            style={{
+                              fontSize: "12px",
+                              color: "var(--ct-color-text-secondary, #6e6e73)",
+                              marginTop: "4px",
+                              lineHeight: "1.4",
+                              cursor: "pointer",
+                              ...computed(() =>
+                                expandedPreviews.get().includes(index)
+                                  ? {}
+                                  : {
+                                    display: "-webkit-box",
+                                    overflow: "hidden",
+                                    WebkitLineClamp: 2,
+                                    WebkitBoxOrient: "vertical",
+                                  }
+                              ),
+                            } as any}
+                          >
+                            {computed(() => {
+                              const contentValue = note.content;
+                              // Type guard: ensure content is a resolved string (not a Cell proxy)
+                              const safeContent =
+                                typeof contentValue === "string" ? contentValue : "";
+                              return expandedPreviews.get().includes(index)
+                                ? safeContent
+                                : safeContent.slice(0, 175);
+                            })}
+                          </div>
                         </div>
                         <div
                           style={{
@@ -998,6 +1053,7 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
+                            paddingTop: "2px",
                           }}
                         >
                           <ct-button
@@ -1085,7 +1141,7 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
               </ct-vstack>
             </ct-card>
           </ct-vstack>
-        </ct-vscroll>
+        </div>
 
         {/* New Notebook Prompt Modal - Use CSS display to keep DOM alive for reactivity */}
         <div
@@ -1131,6 +1187,53 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
                     notes,
                     allCharms,
                     notebooks,
+                  })}
+                >
+                  Create
+                </ct-button>
+              </ct-hstack>
+            </ct-vstack>
+          </ct-card>
+        </div>
+
+        {/* New Note Prompt Modal */}
+        <div
+          style={{
+            display: computed(() =>
+              showNewNotePrompt.get() ? "flex" : "none"
+            ),
+            position: "fixed",
+            inset: "0",
+            background: "rgba(0,0,0,0.5)",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: "9999",
+          }}
+        >
+          <ct-card style={{ minWidth: "320px", padding: "24px" }}>
+            <ct-vstack gap="4">
+              <h3 style={{ margin: 0 }}>New Note</h3>
+              <ct-input
+                $value={newNoteTitle}
+                placeholder="Enter note title..."
+              />
+              <ct-hstack gap="2" style={{ justifyContent: "flex-end" }}>
+                <ct-button
+                  variant="ghost"
+                  onClick={cancelNewNotePrompt({
+                    showNewNotePrompt,
+                    newNoteTitle,
+                  })}
+                >
+                  Cancel
+                </ct-button>
+                <ct-button
+                  variant="primary"
+                  onClick={createNoteAndOpen({
+                    newNoteTitle,
+                    showNewNotePrompt,
+                    notes,
+                    allCharms,
                   })}
                 >
                   Create

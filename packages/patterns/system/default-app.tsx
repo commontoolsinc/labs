@@ -129,9 +129,10 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
 
   // Filter out hidden charms and charms without resolved NAME
   // (prevents transient hash-only pills during reactive updates)
+  // NOTE: Use truthy check, not === true, because charm.isHidden is a proxy object
   const visibleCharms = computed(() =>
     allCharms.filter((charm) => {
-      if (charm.isHidden === true) return false;
+      if (charm.isHidden) return false;
       const name = (charm as any)?.[NAME];
       return typeof name === "string" && name.length > 0;
     })
