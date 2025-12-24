@@ -11,19 +11,19 @@
  */
 
 export {
-  favoriteEntrySchema,
   type FavoriteEntry,
-  favoriteListSchema,
+  favoriteEntrySchema,
   type FavoriteList,
+  favoriteListSchema,
 } from "./favorites.ts";
 
 export {
-  journalEventTypes,
-  type JournalEventType,
-  journalSnapshotSchema,
-  type JournalSnapshot,
-  journalEntrySchema,
-  type JournalEntry,
-  journalSchema,
   type Journal,
+  type JournalEntry,
+  journalEntrySchema,
+  type JournalEventType,
+  journalEventTypes,
+  journalSchema,
+  type JournalSnapshot,
+  journalSnapshotSchema,
 } from "./journal.ts";

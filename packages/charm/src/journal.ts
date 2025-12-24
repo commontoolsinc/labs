@@ -95,11 +95,16 @@ async function generateNarrative(
     "space:entered": "entered a space",
   };
 
-  const prompt = `Generate a brief journal entry (1-2 sentences) describing this user action.
+  const prompt =
+    `Generate a brief journal entry (1-2 sentences) describing this user action.
 
 Event: User ${eventDescriptions[eventType]} a charm
 Charm name: ${snapshot.name || "unnamed"}
-${snapshot.valueExcerpt ? `Content preview: ${snapshot.valueExcerpt.slice(0, 100)}` : ""}
+${
+      snapshot.valueExcerpt
+        ? `Content preview: ${snapshot.valueExcerpt.slice(0, 100)}`
+        : ""
+    }
 ${previousNarrative ? `\nPrevious context: ${previousNarrative}` : ""}
 
 Write in past tense, personal style, like a thoughtful journal entry. Focus on the meaning and what it might indicate about the user's goals. Be concise.`;
@@ -135,7 +140,9 @@ Write in past tense, personal style, like a thoughtful journal entry. Focus on t
 /**
  * Get the most recent entry's narrative for context
  */
-function getPreviousNarrative(journal: readonly JournalEntry[]): string | undefined {
+function getPreviousNarrative(
+  journal: readonly JournalEntry[],
+): string | undefined {
   if (journal.length === 0) return undefined;
   const lastEntry = journal[journal.length - 1];
   return lastEntry?.narrative;
@@ -218,7 +225,9 @@ export function searchJournalByTag(
   runtime: Runtime,
   tag: string,
 ): JournalEntry[] {
-  const normalizedTag = tag.startsWith("#") ? tag.toLowerCase() : `#${tag}`.toLowerCase();
+  const normalizedTag = tag.startsWith("#")
+    ? tag.toLowerCase()
+    : `#${tag}`.toLowerCase();
   const journal = getHomeJournal(runtime);
   const entries = journal.get() || [];
   return entries.filter((entry: JournalEntry) =>

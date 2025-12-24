@@ -5,10 +5,7 @@ import {
   type WishTag,
 } from "@commontools/api";
 import { h } from "@commontools/html";
-import {
-  favoriteListSchema,
-  journalSchema,
-} from "@commontools/home-schemas";
+import { favoriteListSchema, journalSchema } from "@commontools/home-schemas";
 import { HttpProgramResolver } from "@commontools/js-compiler";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
@@ -223,7 +220,8 @@ function resolveBase(
         throw new WishError("User identity DID not available for #journal");
       }
 
-      const journal = ctx.runtime.getHomeSpaceCell(ctx.tx).key("journal").asSchema(journalSchema)
+      const journal = ctx.runtime.getHomeSpaceCell(ctx.tx).key("journal")
+        .asSchema(journalSchema);
       journal.sync();
 
       return [{ cell: journal }];

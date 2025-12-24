@@ -4,10 +4,7 @@ import {
   StaticCacheHTTP,
 } from "@commontools/static";
 import { RuntimeTelemetry } from "@commontools/runner";
-import {
-  favoriteListSchema,
-  journalSchema,
-} from "@commontools/home-schemas";
+import { favoriteListSchema, journalSchema } from "@commontools/home-schemas";
 import type {
   AnyCell,
   JSONSchema,
