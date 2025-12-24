@@ -1007,7 +1007,9 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
                             overflow: "hidden",
                           }}
                         >
-                          <div style={{ display: "flex", alignItems: "center" }}>
+                          <div
+                            style={{ display: "flex", alignItems: "center" }}
+                          >
                             <ct-cell-context $cell={note}>
                               <ct-cell-link $cell={note} />
                             </ct-cell-context>
@@ -1024,14 +1026,12 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
                               lineHeight: "1.4",
                               cursor: "pointer",
                               ...computed(() =>
-                                expandedPreviews.get().includes(index)
-                                  ? {}
-                                  : {
-                                    display: "-webkit-box",
-                                    overflow: "hidden",
-                                    WebkitLineClamp: 2,
-                                    WebkitBoxOrient: "vertical",
-                                  }
+                                expandedPreviews.get().includes(index) ? {} : {
+                                  display: "-webkit-box",
+                                  overflow: "hidden",
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: "vertical",
+                                }
                               ),
                             } as any}
                           >
@@ -1039,7 +1039,9 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
                               const contentValue = note.content;
                               // Type guard: ensure content is a resolved string (not a Cell proxy)
                               const safeContent =
-                                typeof contentValue === "string" ? contentValue : "";
+                                typeof contentValue === "string"
+                                  ? contentValue
+                                  : "";
                               return expandedPreviews.get().includes(index)
                                 ? safeContent
                                 : safeContent.slice(0, 175);
@@ -1199,9 +1201,7 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
         {/* New Note Prompt Modal */}
         <div
           style={{
-            display: computed(() =>
-              showNewNotePrompt.get() ? "flex" : "none"
-            ),
+            display: computed(() => showNewNotePrompt.get() ? "flex" : "none"),
             position: "fixed",
             inset: "0",
             background: "rgba(0,0,0,0.5)",
