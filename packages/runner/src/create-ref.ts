@@ -1,4 +1,4 @@
-import { refer } from "@commontools/memory/reference";
+import { refer } from "merkle-reference";
 import { isRecord } from "@commontools/utils/types";
 import { isOpaqueRef } from "./builder/types.ts";
 import {

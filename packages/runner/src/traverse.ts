@@ -1,4 +1,4 @@
-import { refer } from "@commontools/memory/reference";
+import { refer } from "merkle-reference";
 import { SchemaAll } from "@commontools/memory/schema";
 // TODO(@ubik2): Ideally this would use the following, but rollup has issues
 //import { isNumber, isObject, isString } from "@commontools/utils/types";

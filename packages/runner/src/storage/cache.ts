@@ -1,4 +1,4 @@
-import { fromString, refer } from "@commontools/memory/reference";
+import { fromString, refer } from "merkle-reference";
 import type {
   CauseString,
   Changes as MemoryChanges,
