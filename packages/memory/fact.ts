@@ -12,12 +12,7 @@ import {
   Unclaimed,
 } from "./interface.ts";
 import * as Ref from "./reference.ts";
-import {
-  fromJSON,
-  fromString,
-  is as isReference,
-  refer,
-} from "./reference.ts";
+import { fromJSON, fromString, is as isReference, refer } from "./reference.ts";
 
 /**
  * Creates an unclaimed fact.
