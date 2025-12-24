@@ -1034,6 +1034,180 @@ Deno.bench({
   },
 });
 
+// --------------------------------------------------------------------------
+// Benchmark: Object interning
+// --------------------------------------------------------------------------
+
+import { intern } from "../reference.ts";
+
+Deno.bench({
+  name: "intern() 16KB payload (first time)",
+  group: "interning",
+  baseline: true,
+  fn(b) {
+    const payload = createTypicalPayload();
+
+    b.start();
+    intern(payload);
+    b.end();
+  },
+});
+
+// Helper: create shared content payload (the part that's identical across objects)
+function createSharedContent(targetBytes: number): object {
+  const base = {
+    type: "shared-content",
+    metadata: { version: 1, tags: ["data", "shared"] },
+  };
+  const baseSize = JSON.stringify(base).length;
+  const contentSize = Math.max(0, targetBytes - baseSize - 50);
+  return { ...base, data: "X".repeat(contentSize) };
+}
+
+Deno.bench({
+  name: "refer() with intern() - unique IDs, shared 16KB content",
+  group: "interning",
+  fn(b) {
+    // Two objects with unique IDs but identical nested content
+    const content1 = createSharedContent(16 * 1024);
+    const content2 = createSharedContent(16 * 1024); // Same content, different instance
+
+    const obj1 = { id: crypto.randomUUID(), content: content1 };
+    const obj2 = { id: crypto.randomUUID(), content: content2 };
+
+    // Intern and refer first object
+    const interned1 = intern(obj1);
+    memoizedRefer(interned1);
+
+    b.start();
+    // Intern second object - content should be deduplicated
+    const interned2 = intern(obj2);
+    // interned2.content should === interned1.content now
+    memoizedRefer(interned2); // Should cache-hit on content
+    b.end();
+  },
+});
+
+Deno.bench({
+  name: "refer() without intern() - unique IDs, shared 16KB content",
+  group: "interning",
+  baseline: true,
+  fn(b) {
+    // Two objects with unique IDs but identical nested content
+    const content1 = createSharedContent(16 * 1024);
+    const content2 = createSharedContent(16 * 1024);
+
+    const obj1 = { id: crypto.randomUUID(), content: content1 };
+    const obj2 = { id: crypto.randomUUID(), content: content2 };
+
+    // Refer first object (no interning)
+    memoizedRefer(obj1);
+
+    b.start();
+    // Refer second object - full re-hash (no shared identity)
+    memoizedRefer(obj2);
+    b.end();
+  },
+});
+
+Deno.bench({
+  name: "intern() cost - unique IDs, shared 16KB content",
+  group: "interning",
+  fn(b) {
+    const content = createSharedContent(16 * 1024);
+    const obj = { id: crypto.randomUUID(), content };
+
+    b.start();
+    intern(obj);
+    b.end();
+  },
+});
+
+Deno.bench({
+  name: "intern() small object {the, of}",
+  group: "intern-size",
+  baseline: true,
+  fn(b) {
+    const doc = createDoc();
+    const obj = { the: "application/json", of: doc };
+
+    b.start();
+    intern(obj);
+    b.end();
+  },
+});
+
+Deno.bench({
+  name: "intern() 1KB payload",
+  group: "intern-size",
+  fn(b) {
+    const payload = createPayload(1024);
+
+    b.start();
+    intern(payload);
+    b.end();
+  },
+});
+
+Deno.bench({
+  name: "intern() 16KB payload",
+  group: "intern-size",
+  fn(b) {
+    const payload = createPayload(16 * 1024);
+
+    b.start();
+    intern(payload);
+    b.end();
+  },
+});
+
+// Compare: is interning worth it for small objects?
+Deno.bench({
+  name: "refer() small {the, of} - no intern",
+  group: "intern-small-benefit",
+  baseline: true,
+  fn(b) {
+    const doc = createDoc();
+
+    b.start();
+    memoizedRefer({ the: "application/json", of: doc });
+    b.end();
+  },
+});
+
+Deno.bench({
+  name: "refer() small {the, of} - with intern (first time)",
+  group: "intern-small-benefit",
+  fn(b) {
+    const doc = createDoc();
+    const obj = { the: "application/json", of: doc };
+
+    b.start();
+    const interned = intern(obj);
+    memoizedRefer(interned);
+    b.end();
+  },
+});
+
+Deno.bench({
+  name: "refer() small {the, of} - with intern (cache hit)",
+  group: "intern-small-benefit",
+  fn(b) {
+    const doc = "of:fixed-doc-id"; // Fixed so we get cache hits
+    const obj1 = { the: "application/json", of: doc };
+    const obj2 = { the: "application/json", of: doc };
+
+    // Warm caches
+    const interned1 = intern(obj1);
+    memoizedRefer(interned1);
+
+    b.start();
+    const interned2 = intern(obj2); // Should return interned1
+    memoizedRefer(interned2); // Should hit WeakMap
+    b.end();
+  },
+});
+
 // ==========================================================================
 // FILE-BASED BENCHMARKS: Test real WAL/pragma impact
 // ==========================================================================

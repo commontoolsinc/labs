@@ -19,7 +19,7 @@ import { UnsafeEvalIsolate, UnsafeEvalRuntime } from "./eval-runtime.ts";
 import { CommonToolsTransformerPipeline } from "@commontools/ts-transformers";
 import * as RuntimeModules from "./runtime-modules.ts";
 import { Runtime } from "../runtime.ts";
-import { refer } from "@commontools/memory/reference";
+import * as merkleReference from "merkle-reference";
 import { StaticCache } from "@commontools/static";
 import { pretransformProgram } from "./pretransform.ts";
 
@@ -247,5 +247,5 @@ function computeId(program: Program): string {
     program.main,
     ...program.files.filter(({ name }) => !name.endsWith(".d.ts")),
   ];
-  return refer(source).toString();
+  return merkleReference.refer(source).toString();
 }

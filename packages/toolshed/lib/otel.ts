@@ -26,17 +26,15 @@ export const provider = new BasicTracerProvider({
     "deployment.environment": env.ENV || "development",
     "openinference.project.name": env.CTTS_AI_LLM_PHOENIX_PROJECT,
   }),
+  spanProcessors: [
+    new OpenInferenceBatchSpanProcessor({
+      exporter: otlpExporter,
+      spanFilter: (span) => {
+        return isOpenInferenceSpan(span);
+      },
+    }),
+  ],
 });
-
-// Add span processor after construction (API changed in newer SDK versions)
-provider.addSpanProcessor(
-  new OpenInferenceBatchSpanProcessor({
-    exporter: otlpExporter,
-    spanFilter: (span) => {
-      return isOpenInferenceSpan(span);
-    },
-  }),
-);
 
 export function getTracerProvider() {
   return _provider;
