@@ -69,6 +69,8 @@ export type SubCharmType =
   | "nickname"
   // Icon customization
   | "record-icon"
+  // Photo module (with settings)
+  | "photo"
   // Controller modules (internal, not user-addable)
   | "type-picker"
   | "extractor";
