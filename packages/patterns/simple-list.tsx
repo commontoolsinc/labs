@@ -55,7 +55,7 @@ export interface SimpleListModuleInput {
 
 // ===== Handlers =====
 
-// Toggle indent state on an item
+// Toggle indent on an item
 const toggleIndent = handler<
   unknown,
   { items: Cell<SimpleListItem[]>; index: number }
@@ -64,7 +64,10 @@ const toggleIndent = handler<
   if (index < 0 || index >= current.length) return;
 
   const updated = [...current];
-  updated[index] = { ...updated[index], indented: !updated[index].indented };
+  updated[index] = {
+    ...updated[index],
+    indented: !updated[index].indented,
+  };
   items.set(updated);
 });
 
@@ -98,44 +101,66 @@ export const SimpleListModule = recipe<
     return {
       [NAME]: computed(() => `${MODULE_METADATA.icon} List: ${displayText}`),
       [UI]: (
-        <ct-vstack gap="3">
-          {/* Add item input */}
-          <ct-message-input
-            placeholder="Add item..."
-            button-text="Add"
-            onct-send={(e: { detail?: { message?: string } }) => {
-              const text = e.detail?.message?.trim();
-              if (text) {
-                items.push({ text, indented: false, done: false });
-              }
-            }}
-          />
-
+        <ct-vstack gap="2">
           {/* List items */}
-          <ct-vstack gap="1">
+          <ct-vstack gap="0">
             {items.map((item, index: number) => (
               <ct-hstack
                 gap="2"
                 style={{
                   alignItems: "center",
-                  padding: "8px 12px",
-                  paddingLeft: item.indented ? "32px" : "12px",
-                  background: "var(--bg-secondary, #f9fafb)",
-                  borderRadius: "6px",
+                  padding: "6px 8px",
+                  paddingLeft: item.indented ? "28px" : "8px",
+                  borderBottom: "1px solid var(--border-subtle, #f0f0f0)",
                 }}
               >
                 {/* Checkbox */}
-                <ct-checkbox $checked={item.done} />
+                <ct-checkbox
+                  $checked={item.done}
+                  style={{ flexShrink: "0" }}
+                />
 
-                {/* Editable text */}
+                {/* Editable text with Cmd+[ / Cmd+] for indent */}
                 <ct-input
                   $value={item.text}
+                  placeholder="..."
                   style={{
                     flex: "1",
                     background: "transparent",
                     border: "none",
+                    padding: "2px 4px",
+                    fontSize: "14px",
                     textDecoration: item.done ? "line-through" : "none",
-                    opacity: item.done ? "0.6" : "1",
+                    opacity: item.done ? "0.5" : "1",
+                    color: "inherit",
+                  }}
+                  onct-keydown={(e: {
+                    detail?: {
+                      key: string;
+                      metaKey?: boolean;
+                      ctrlKey?: boolean;
+                    };
+                  }) => {
+                    const d = e.detail;
+                    if (!d) return;
+                    // Cmd+] or Ctrl+] = indent
+                    if (d.key === "]" && (d.metaKey || d.ctrlKey)) {
+                      const current = items.get() || [];
+                      if (index >= 0 && index < current.length) {
+                        const updated = [...current];
+                        updated[index] = { ...updated[index], indented: true };
+                        items.set(updated);
+                      }
+                    }
+                    // Cmd+[ or Ctrl+[ = outdent
+                    if (d.key === "[" && (d.metaKey || d.ctrlKey)) {
+                      const current = items.get() || [];
+                      if (index >= 0 && index < current.length) {
+                        const updated = [...current];
+                        updated[index] = { ...updated[index], indented: false };
+                        items.set(updated);
+                      }
+                    }
                   }}
                 />
 
@@ -147,16 +172,18 @@ export const SimpleListModule = recipe<
                     background: "none",
                     border: "none",
                     cursor: "pointer",
-                    padding: "4px",
-                    fontSize: "14px",
-                    color: item.indented ? "#3b82f6" : "#9ca3af",
+                    padding: "2px 6px",
+                    fontSize: "12px",
+                    color: item.indented ? "#666" : "#ccc",
+                    opacity: "0.6",
+                    transition: "opacity 0.15s",
                   }}
                   title={item.indented ? "Outdent" : "Indent"}
                 >
-                  ↳
+                  {item.indented ? "←" : "→"}
                 </button>
 
-                {/* Delete */}
+                {/* Delete - subtle until hover */}
                 <button
                   type="button"
                   onClick={deleteItem({ items, index })}
@@ -164,9 +191,11 @@ export const SimpleListModule = recipe<
                     background: "none",
                     border: "none",
                     cursor: "pointer",
-                    padding: "4px",
+                    padding: "2px 6px",
                     fontSize: "14px",
-                    color: "#6b7280",
+                    color: "#ccc",
+                    opacity: "0.5",
+                    transition: "opacity 0.15s",
                   }}
                   title="Delete"
                 >
@@ -175,6 +204,21 @@ export const SimpleListModule = recipe<
               </ct-hstack>
             ))}
           </ct-vstack>
+
+          {/* Add item input - at bottom for natural list growth */}
+          <ct-message-input
+            placeholder="Add item..."
+            button-text="+"
+            style={{
+              fontSize: "14px",
+            }}
+            onct-send={(e: { detail?: { message?: string } }) => {
+              const text = e.detail?.message?.trim();
+              if (text) {
+                items.push({ text, indented: false, done: false });
+              }
+            }}
+          />
         </ct-vstack>
       ),
       items,
