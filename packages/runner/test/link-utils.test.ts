@@ -761,9 +761,16 @@ describe("link-utils", () => {
       expect((result as any).asCell).toBeUndefined();
       // Should have processed nested properties
       expect((result as any).properties.name.type).toBe("string");
+      // CT-1142: Result should be JSON-serializable without exponential growth
+      expect(() => JSON.stringify(result)).not.toThrow();
+      // The circular reference should use $ref
+      const schemaRef = (result as any).properties.subCharms.items.properties
+        .schema;
+      expect(schemaRef.$ref).toBeDefined();
+      expect(schemaRef.$ref).toMatch(/^#\/\$defs\//);
     });
 
-    it("should handle direct self-reference cycle", () => {
+    it("should handle direct self-reference cycle with $ref", () => {
       const schema: any = {
         type: "object",
         asCell: true,
@@ -776,12 +783,16 @@ describe("link-utils", () => {
       // Top level flags should be removed
       expect((result as any).asCell).toBeUndefined();
       expect((result as any).asStream).toBeUndefined();
-      // Cycle reference should point to the processed result (not original)
-      expect((result as any).self).toBe(result);
-      expect((result as any).self.asCell).toBeUndefined();
+      // Cycle reference should be replaced with $ref
+      expect((result as any).self.$ref).toBeDefined();
+      expect((result as any).self.$ref).toMatch(/^#\/\$defs\//);
+      // Result should have $defs section with the circular schema
+      expect((result as any).$defs).toBeDefined();
+      // Result should be JSON-serializable (no circular object references)
+      expect(() => JSON.stringify(result)).not.toThrow();
     });
 
-    it("should handle three-way cycle (A → B → C → A)", () => {
+    it("should handle three-way cycle (A → B → C → A) with $ref", () => {
       const a: any = { type: "a", asCell: true, next: null };
       const b: any = { type: "b", asStream: true, next: null };
       const c: any = { type: "c", asCell: true, next: null };
@@ -795,12 +806,14 @@ describe("link-utils", () => {
       expect((result as any).asCell).toBeUndefined();
       expect((result as any).next.asStream).toBeUndefined();
       expect((result as any).next.next.asCell).toBeUndefined();
-      // The cycle back should reference the processed result (not original)
-      expect((result as any).next.next.next).toBe(result);
-      expect((result as any).next.next.next.asCell).toBeUndefined();
+      // The cycle back should be a $ref
+      expect((result as any).next.next.next.$ref).toBeDefined();
+      expect((result as any).next.next.next.$ref).toMatch(/^#\/\$defs\//);
+      // Result should be JSON-serializable
+      expect(() => JSON.stringify(result)).not.toThrow();
     });
 
-    it("should handle cycle through array items", () => {
+    it("should handle cycle through array items with $ref", () => {
       const schema: any = {
         type: "array",
         asCell: true,
@@ -811,12 +824,14 @@ describe("link-utils", () => {
       const result = sanitizeSchemaForLinks(schema);
 
       expect((result as any).asCell).toBeUndefined();
-      // Cycle reference returns processed result
-      expect((result as any).items).toBe(result);
-      expect((result as any).items.asCell).toBeUndefined();
+      // Cycle reference should be a $ref
+      expect((result as any).items.$ref).toBeDefined();
+      expect((result as any).items.$ref).toMatch(/^#\/\$defs\//);
+      // Result should be JSON-serializable
+      expect(() => JSON.stringify(result)).not.toThrow();
     });
 
-    it("should handle cycle through anyOf", () => {
+    it("should handle cycle through anyOf with $ref", () => {
       const schema: any = {
         type: "object",
         asCell: true,
@@ -828,9 +843,11 @@ describe("link-utils", () => {
 
       expect((result as any).asCell).toBeUndefined();
       expect((result as any).anyOf[0].type).toBe("string");
-      // Cycle reference returns processed result
-      expect((result as any).anyOf[1]).toBe(result);
-      expect((result as any).anyOf[1].asCell).toBeUndefined();
+      // Cycle reference should be a $ref
+      expect((result as any).anyOf[1].$ref).toBeDefined();
+      expect((result as any).anyOf[1].$ref).toMatch(/^#\/\$defs\//);
+      // Result should be JSON-serializable
+      expect(() => JSON.stringify(result)).not.toThrow();
     });
 
     it("should handle multiple independent cycles", () => {
