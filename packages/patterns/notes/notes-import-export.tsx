@@ -93,9 +93,46 @@ function stripMentionIds(content: string): string {
   return content.replace(/\[\[([^\]]*?)\s*\([^)]+\)\]\]/g, "[[$1]]");
 }
 
+// Plain function version for imperative use in handlers (lift() doesn't work in handlers)
+function filterAndFormatNotesPlain(
+  charms: NoteCharm[],
+  notebooks: NotebookCharm[],
+): { markdown: string; count: number } {
+  // Filter to only note charms (have title and content properties)
+  const notes = charms.filter(
+    (charm) => charm?.title !== undefined && charm?.content !== undefined,
+  );
+
+  if (notes.length === 0) {
+    return { markdown: "No notes found in this space.", count: 0 };
+  }
+
+  // Format each note with HTML comment block markers (including noteId and notebooks)
+  const formatted = notes.map((note) => {
+    const title = resolveValue(note?.title) || "Untitled Note";
+    const rawContent = resolveValue(note?.content) || "";
+    // Strip mention IDs for portable export
+    const content = stripMentionIds(rawContent);
+    const noteId = resolveValue(note?.noteId) || "";
+    const notebookNames = getNotebookNamesForNote(note, notebooks);
+
+    // Escape quotes in title for the attribute
+    const escapedTitle = title.replace(/"/g, "&quot;");
+    const notebooksStr = notebookNames.join(", ");
+
+    return `${NOTE_START_MARKER} title="${escapedTitle}" noteId="${noteId}" notebooks="${notebooksStr}" -->\n\n${content}\n\n${NOTE_END_MARKER}`;
+  });
+
+  return {
+    markdown: formatted.join("\n\n"),
+    count: notes.length,
+  };
+}
+
 // Filter charms to only include notes and format as markdown with HTML comment blocks
 // Takes a combined input object since lift() only accepts one argument
-const filterAndFormatNotes = lift(
+// Currently unused - kept for potential future use
+const _filterAndFormatNotes = lift(
   (input: {
     charms: NoteCharm[];
     notebooks: NotebookCharm[];
@@ -218,7 +255,7 @@ function performImport(
     }
   }
 
-  // === PHASE 1: Create all notes ===
+  // === PHASE 1: Create all notes (batch - don't push yet) ===
   // Create content as mutable Cells so we can update them after getting entity IDs
   const createdNotes: Array<{
     title: string;
@@ -229,7 +266,11 @@ function performImport(
   const notesByNotebook = new Map<string, any[]>();
 
   // Track starting index for calculating positions
-  let currentIndex = allCharms.get().length;
+  const startingIndex = allCharms.get().length;
+  let currentIndex = startingIndex;
+
+  // Collect all new items to batch-push at the end
+  const newItems: NoteCharm[] = [];
 
   parsed.forEach((noteData) => {
     // Skip if user chose to skip this duplicate
@@ -251,7 +292,8 @@ function performImport(
       noteId: noteIdToUse,
       isHidden: belongsToNotebook ? true : false,
     });
-    allCharms.push(note as unknown as NoteCharm);
+    // Collect for batch push (don't push individually)
+    newItems.push(note as unknown as NoteCharm);
     createdNotes.push({
       title: noteData.title,
       index: currentIndex,
@@ -270,7 +312,7 @@ function performImport(
     }
   });
 
-  // === PHASE 2: Create notebooks ===
+  // === PHASE 2: Create notebooks (batch - don't push yet) ===
   for (const nbName of notebooksNeeded) {
     let actualName = nbName;
     if (existingNames.has(nbName)) {
@@ -282,7 +324,14 @@ function performImport(
       title: actualName,
       notes: notesForNotebook as unknown as NoteCharm[],
     });
-    allCharms.push(newNb as unknown as NoteCharm);
+    // Collect for batch push (don't push individually)
+    newItems.push(newNb as unknown as NoteCharm);
+  }
+
+  // === BATCH PUSH: Single set() instead of N push() calls ===
+  // This reduces O(N) filter recomputations from N times to 1 time
+  if (newItems.length > 0) {
+    allCharms.set([...allCharms.get(), ...newItems]);
   }
 
   // === PHASE 3: Build title→ID map and link mentions ===
@@ -514,6 +563,28 @@ const toggleNoteVisibility = handler<
   const isHiddenCell = note.key("isHidden");
   const current = isHiddenCell.get() ?? false;
   isHiddenCell.set(!current);
+});
+
+// Handler to toggle all notes' visibility at once
+// If any are visible, hide all; if all hidden, show all
+const toggleAllNotesVisibility = handler<
+  Record<string, never>,
+  { notes: Cell<NoteCharm[]> }
+>((_, { notes }) => {
+  const notesList = notes.get();
+  if (notesList.length === 0) return;
+
+  // Check if any notes are currently visible (not hidden)
+  const anyVisible = notesList.some((n: any) => !n?.isHidden);
+  // If any visible, hide all; otherwise show all
+  const newHiddenState = anyVisible;
+
+  // Update each note's isHidden state
+  notesList.forEach((_n: any, idx: number) => {
+    const noteCell = notes.key(idx);
+    const isHiddenCell = (noteCell as any).key("isHidden");
+    isHiddenCell.set(newHiddenState);
+  });
 });
 
 // Handler to toggle individual selection (with shift-click range support)
@@ -1407,11 +1478,23 @@ const cancelNewNotebookPrompt = handler<
   state.selectedMoveNotebook.set("");
 });
 
-// Handler to open Export All modal
+// Handler to open Export All modal - computes export on-demand for performance
 const openExportAllModal = handler<
   void,
-  { showExportAllModal: Cell<boolean> }
->((_, { showExportAllModal }) => {
+  {
+    showExportAllModal: Cell<boolean>;
+    allCharms: Cell<NoteCharm[]>;
+    notebooks: Cell<NotebookCharm[]>;
+    exportedMarkdown: Cell<string>;
+  }
+>((_, { showExportAllModal, allCharms, notebooks, exportedMarkdown }) => {
+  // Compute export ONLY when modal opens (lazy evaluation)
+  // Use plain function version (lift() doesn't work in handlers)
+  const result = filterAndFormatNotesPlain(
+    [...allCharms.get()],
+    [...notebooks.get()],
+  );
+  exportedMarkdown.set(result.markdown);
   showExportAllModal.set(true);
 });
 
@@ -1626,13 +1709,12 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
     });
   });
 
-  // Process all charms through a single lifted function (pass notebooks for membership export)
-  const processed = filterAndFormatNotes({ charms: allCharms, notebooks });
-
-  // Extract values from processed result
-  const exportedMarkdown = processed.markdown;
-  const noteCount = processed.count;
+  // noteCount derived from notes array for reactive UI display
+  const noteCount = computed(() => notes.length);
   const notebookCount = computed(() => notebooks.length);
+
+  // exportedMarkdown is computed on-demand when Export All modal opens (lazy for performance)
+  const exportedMarkdown = Cell.of<string>("");
 
   return {
     [NAME]: computed(() => `All Notes (${noteCount} notes)`),
@@ -1660,7 +1742,12 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
             <ct-button
               size="sm"
               variant="ghost"
-              onClick={openExportAllModal({ showExportAllModal })}
+              onClick={openExportAllModal({
+                showExportAllModal,
+                allCharms,
+                notebooks,
+                exportedMarkdown,
+              })}
               style={{
                 padding: "6px 12px",
                 fontSize: "13px",
@@ -1746,11 +1833,15 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                   <div style={{ flex: "0 1 auto" }}>Notes</div>
                   <div style={{ flex: "1 1 auto", minWidth: 0 }} />
                   <div
+                    onClick={toggleAllNotesVisibility({ notes })}
                     style={{
                       width: "70px",
                       flexShrink: 0,
                       textAlign: "center",
+                      cursor: "pointer",
+                      userSelect: "none",
                     }}
+                    title="Click to toggle all"
                   >
                     Show/Hide
                   </div>
@@ -1828,14 +1919,19 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                               onClick={goToNotebook({
                                 notebook: item.notebook,
                               })}
+                              title={item.name}
                               style={{
                                 fontSize: "11px",
                                 padding: "2px 8px",
                                 background:
                                   "var(--ct-color-bg-tertiary, #e5e5e7)",
                                 borderRadius: "10px",
-                                whiteSpace: "nowrap",
                                 cursor: "pointer",
+                                maxWidth: "80px",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                display: "inline-block",
                               }}
                             >
                               {item.name}
@@ -1973,7 +2069,7 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                   </ct-button>
                 </div>
 
-                {!notebooks.length ? <></> : (
+                {!!notebooks.length && (
                   <ct-vstack gap="0">
                     {/* Table Header */}
                     <ct-hstack
@@ -2066,7 +2162,7 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                 )}
 
                 {/* Action Bar - OUTSIDE conditional for reactivity */}
-                {!hasNotebookSelection ? <></> : (
+                {hasNotebookSelection && (
                   <ct-hstack
                     padding="3"
                     gap="3"

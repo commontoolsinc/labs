@@ -157,6 +157,34 @@ const closeMenu = handler<void, { menuOpen: Cell<boolean> }>(
   (_, { menuOpen }) => menuOpen.set(false),
 );
 
+// Toggle sidebar menu (hamburger)
+const toggleSidebar = handler<void, { sidebarOpen: Cell<boolean> }>(
+  (_, { sidebarOpen }) => sidebarOpen.set(!sidebarOpen.get()),
+);
+
+// Close sidebar menu
+const closeSidebar = handler<void, { sidebarOpen: Cell<boolean> }>(
+  (_, { sidebarOpen }) => sidebarOpen.set(false),
+);
+
+// Navigate to a note from sidebar (closing sidebar via flattened sidebarItems)
+const sidebarGoToNote = handler<
+  void,
+  { note: Cell<NoteCharm>; sidebarOpen: Cell<boolean> }
+>((_, { note, sidebarOpen }) => {
+  sidebarOpen.set(false);
+  return navigateTo(note);
+});
+
+// Navigate to a notebook from sidebar (currently unused - kept for future use)
+const _sidebarGoToNotebook = handler<
+  void,
+  { notebook: Cell<NotebookCharm>; sidebarOpen: Cell<boolean> }
+>((_, { notebook, sidebarOpen }) => {
+  sidebarOpen.set(false);
+  return navigateTo(notebook);
+});
+
 // Menu: New Note
 const menuNewNote = handler<
   void,
@@ -209,6 +237,9 @@ const Note = pattern<Input, Output>(({ title, content, isHidden, noteId }) => {
   // Dropdown menu state
   const menuOpen = Cell.of(false);
 
+  // Sidebar menu state (hamburger)
+  const sidebarOpen = Cell.of(false);
+
   // State for inline title editing
   const isEditingTitle = Cell.of<boolean>(false);
 
@@ -253,6 +284,46 @@ const Note = pattern<Input, Output>(({ title, content, isHidden, noteId }) => {
     return result;
   });
 
+  // Compute the actual notebooks (with notes) that contain this note
+  // Use .filter() to preserve proxy chain (manual push loses it)
+  const containingNotebooks = computed(() => {
+    let myId: string;
+    try {
+      myId = JSON.parse(JSON.stringify(noteId)) as string;
+    } catch {
+      myId = "";
+    }
+    if (!myId) return [] as NotebookCharm[];
+
+    return notebooks.filter((nb) => {
+      const nbNotes = (nb as any)?.notes ?? [];
+      return nbNotes.some((n: any) => n?.noteId === myId);
+    });
+  });
+
+  // Flattened sidebar items: notebooks and their notes in single array
+  // Enables single-level map to pass sidebarOpen to handlers
+  const sidebarItems = computed(() => {
+    let myId = "";
+    try {
+      myId = JSON.parse(JSON.stringify(noteId)) as string;
+    } catch { /* ignore parse errors */ }
+
+    const items: Array<{
+      note: NoteCharm;
+      current: number; // 1 = yes, 0 = no
+    }> = [];
+    for (const notebook of containingNotebooks) {
+      for (const note of (notebook.notes ?? []) as NoteCharm[]) {
+        items.push({
+          note,
+          current: note?.noteId === myId ? 1 : 0,
+        });
+      }
+    }
+    return items;
+  });
+
   // populated in backlinks-index.tsx
   const backlinks = Cell.of<MentionableCharm[]>([]);
 
@@ -275,6 +346,106 @@ const Note = pattern<Input, Output>(({ title, content, isHidden, noteId }) => {
             gap="3"
             style={{ alignItems: "center" }}
           >
+            {/* Hamburger menu button - only show if note is in at least one notebook */}
+            <div
+              style={{
+                display: computed(() =>
+                  containingNotebooks.length > 0 ? "flex" : "none"
+                ),
+              }}
+            >
+              <ct-button
+                variant="ghost"
+                onClick={toggleSidebar({ sidebarOpen })}
+                style={{
+                  padding: "6px 8px",
+                  minWidth: "32px",
+                  borderRadius: "6px",
+                }}
+                title="Show notebook notes"
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "3px",
+                    width: "18px",
+                  }}
+                >
+                  <div
+                    style={{
+                      height: "2px",
+                      background: "currentColor",
+                      borderRadius: "1px",
+                    }}
+                  />
+                  <div
+                    style={{
+                      height: "2px",
+                      background: "currentColor",
+                      borderRadius: "1px",
+                    }}
+                  />
+                  <div
+                    style={{
+                      height: "2px",
+                      background: "currentColor",
+                      borderRadius: "1px",
+                    }}
+                  />
+                </div>
+              </ct-button>
+            </div>
+
+            {/* Sidebar backdrop */}
+            <div
+              onClick={closeSidebar({ sidebarOpen })}
+              style={{
+                display: computed(() => (sidebarOpen.get() ? "block" : "none")),
+                position: "fixed",
+                inset: "0",
+                background: "rgba(0,0,0,0.3)",
+                zIndex: "998",
+              }}
+            />
+
+            {/* Sidebar dropdown with notes grouped by notebook */}
+            <ct-vstack
+              gap="0"
+              style={{
+                display: computed(() => (sidebarOpen.get() ? "flex" : "none")),
+                position: "fixed",
+                top: "60px",
+                left: "16px",
+                background: "var(--ct-color-bg, white)",
+                border: "1px solid var(--ct-color-border, #e5e5e7)",
+                borderRadius: "12px",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                minWidth: "220px",
+                maxWidth: "300px",
+                maxHeight: "70vh",
+                overflow: "auto",
+                zIndex: "1000",
+                padding: "8px 0",
+              }}
+            >
+              {sidebarItems.map((item) => (
+                <ct-button
+                  variant="ghost"
+                  onClick={sidebarGoToNote({ note: item.note, sidebarOpen })}
+                  style={{
+                    justifyContent: "flex-start",
+                    padding: "2px 16px",
+                    fontSize: "13px",
+                    opacity: item.current === 1 ? 0.5 : 1,
+                  }}
+                >
+                  {item.current === 1 ? "✓ " : "   "}
+                  {item.note?.[NAME] ?? "Untitled"}
+                </ct-button>
+              ))}
+            </ct-vstack>
+
             {/* Editable Title - click to edit */}
             <div
               style={{
@@ -314,7 +485,7 @@ const Note = pattern<Input, Output>(({ title, content, isHidden, noteId }) => {
                 borderRadius: "8px",
               }}
             >
-              Notes {"\u25BE"}
+              Notebooks {"\u25BE"}
             </ct-button>
 
             {/* Backdrop to close menu when clicking outside */}
