@@ -13,7 +13,14 @@ import {
   UI,
   wish,
 } from "commontools";
-import { type MentionableCharm } from "../system/backlinks-index.tsx";
+
+// Type for backlinks (inline to work around CLI path resolution bug)
+type MentionableCharm = {
+  [NAME]?: string;
+  isHidden?: boolean;
+  mentioned: MentionableCharm[];
+  backlinks: MentionableCharm[];
+};
 
 // Simple random ID generator (crypto.randomUUID not available in pattern env)
 const generateId = () =>
@@ -227,11 +234,21 @@ const menuAllNotebooks = handler<
   // User should create it from default-app first
 });
 
+// Menu: Navigate to a recent note
+const menuGoToRecentNote = handler<
+  void,
+  { menuOpen: Cell<boolean>; note: Cell<NoteCharm> }
+>((_, { menuOpen, note }) => {
+  menuOpen.set(false);
+  return navigateTo(note);
+});
+
 const Note = pattern<Input, Output>(({ title, content, isHidden, noteId }) => {
   const { allCharms } = wish<{ allCharms: MinimalCharm[] }>("/");
   const mentionable = wish<Default<MentionableCharm[], []>>(
     "#mentionable",
   );
+  const recentCharms = wish<MinimalCharm[]>("#recent");
   const mentioned = Cell.of<MentionableCharm[]>([]);
 
   // Dropdown menu state
@@ -258,6 +275,21 @@ const Note = pattern<Input, Output>(({ title, content, isHidden, noteId }) => {
       return typeof name === "string" && name.startsWith("All Notes");
     })
   );
+
+  // Filter recent charms for notes only (📝 prefix), excluding current note
+  const recentNotes = computed(() => {
+    let myId = "";
+    try {
+      myId = JSON.parse(JSON.stringify(noteId)) as string;
+    } catch { /* ignore */ }
+
+    return (recentCharms ?? []).filter((charm: any) => {
+      const name = charm?.[NAME];
+      if (typeof name !== "string" || !name.startsWith("📝")) return false;
+      // Exclude current note
+      return charm?.noteId !== myId;
+    }).slice(0, 5) as NoteCharm[]; // Limit to 5 recent
+  });
 
   // Compute which notebooks contain this note by noteId
   const containingNotebookNames = computed(() => {
@@ -523,6 +555,42 @@ const Note = pattern<Input, Output>(({ title, content, isHidden, noteId }) => {
               >
                 {"\u00A0\u00A0"}📝 New Note
               </ct-button>
+
+              {/* Recent Notes section - only show if there are recent notes */}
+              <div
+                style={{
+                  display: computed(() =>
+                    recentNotes.length > 0 ? "block" : "none"
+                  ),
+                  height: "1px",
+                  background: "var(--ct-color-border, #e5e5e7)",
+                  margin: "4px 8px",
+                }}
+              />
+              <div
+                style={{
+                  display: computed(() =>
+                    recentNotes.length > 0 ? "block" : "none"
+                  ),
+                  padding: "4px 12px 2px",
+                  fontSize: "11px",
+                  color: "var(--ct-color-text-secondary, #666)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.5px",
+                }}
+              >
+                Recent
+              </div>
+              {recentNotes.map((note) => (
+                <ct-button
+                  variant="ghost"
+                  onClick={menuGoToRecentNote({ menuOpen, note })}
+                  style={{ justifyContent: "flex-start", fontSize: "13px" }}
+                >
+                  {"\u00A0\u00A0"}
+                  {note[NAME]}
+                </ct-button>
+              ))}
 
               {/* Divider */}
               <div

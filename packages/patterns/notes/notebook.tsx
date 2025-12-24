@@ -14,6 +14,14 @@ import {
 
 import Note from "./note.tsx";
 
+// Type for backlinks (inline to work around CLI path resolution bug)
+type MentionableCharm = {
+  [NAME]?: string;
+  isHidden?: boolean;
+  mentioned: MentionableCharm[];
+  backlinks: MentionableCharm[];
+};
+
 // Simple random ID generator (crypto.randomUUID not available in pattern env)
 const generateId = () =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
@@ -41,6 +49,7 @@ interface Output {
   notes: NoteCharm[];
   noteCount: number;
   isNotebook: boolean;
+  backlinks: MentionableCharm[];
   // LLM-callable streams for omnibot integration
   createNote: Stream<{ title: string; content: string }>;
   createNotes: Stream<{ notesData: Array<{ title: string; content: string }> }>;
@@ -173,6 +182,11 @@ const menuAllNotebooks = handler<
   // Can't create NotesImportExport here due to circular imports
   // User should create it from default-app first
 });
+
+// Handler for clicking on a backlink
+const handleBacklinkClick = handler<void, { charm: Cell<MentionableCharm> }>(
+  (_, { charm }) => navigateTo(charm),
+);
 
 // Handler to select all notes in this notebook
 const selectAllNotes = handler<
@@ -699,6 +713,9 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
   // State for "New Note" prompt modal
   const showNewNotePrompt = Cell.of<boolean>(false);
   const newNoteTitle = Cell.of<string>("");
+
+  // Backlinks - populated by backlinks-index.tsx
+  const backlinks = Cell.of<MentionableCharm[]>([]);
 
   // State for inline title editing
   const isEditingTitle = Cell.of<boolean>(false);
@@ -1247,11 +1264,49 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
             </ct-vstack>
           </ct-card>
         </div>
+
+        {/* Backlinks footer - show charms that link to this notebook */}
+        <ct-hstack
+          slot="footer"
+          gap="2"
+          padding="3"
+          style={{
+            display: computed(() =>
+              backlinks.get().length > 0 ? "flex" : "none"
+            ),
+            alignItems: "center",
+            borderTop: "1px solid var(--ct-color-border, #e5e5e7)",
+            flexWrap: "wrap",
+          }}
+        >
+          <span
+            style={{
+              fontSize: "12px",
+              lineHeight: "28px",
+              color: "var(--ct-color-text-secondary, #666)",
+            }}
+          >
+            Linked from:
+          </span>
+          {backlinks.map((charm) => (
+            <ct-button
+              variant="ghost"
+              size="sm"
+              onClick={handleBacklinkClick({ charm })}
+              style={{ fontSize: "12px" }}
+            >
+              {charm?.[NAME]}
+            </ct-button>
+          ))}
+        </ct-hstack>
       </ct-screen>
     ),
     title,
     notes,
     noteCount,
+    backlinks,
+    // Make notes discoverable via [[ autocomplete system-wide
+    mentionable: notes,
     // LLM-callable streams for omnibot integration
     createNote: handleCreateNote({ notes, allCharms }),
     createNotes: handleCreateNotes({ notes, allCharms }),
