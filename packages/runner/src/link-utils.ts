@@ -404,12 +404,24 @@ export function sanitizeSchemaForLinks(
     return schema;
   }
 
+  // Collect existing $defs names to avoid collisions
+  const existingDefNames = new Set<string>();
+  if (typeof schema === "object" && schema !== null && "$defs" in schema) {
+    const existingDefs = (schema as any).$defs;
+    if (existingDefs && typeof existingDefs === "object") {
+      for (const name of Object.keys(existingDefs)) {
+        existingDefNames.add(name);
+      }
+    }
+  }
+
   // Context for tracking circular references and generating $defs
   const context: SanitizeContext = {
     seen: new Map(),
     inProgress: new Set(),
     defs: {},
     defCounter: 0,
+    reservedNames: existingDefNames,
     options,
   };
 
@@ -437,6 +449,8 @@ interface SanitizeContext {
   defs: Record<string, any>;
   // Counter for generating unique def names
   defCounter: number;
+  // Reserved def names (from existing $defs in input schema)
+  reservedNames: Set<string>;
   // Options
   options: { keepStreams?: boolean };
 }
@@ -466,8 +480,11 @@ function recursiveStripAsCellAndStreamFromSchema(
 
   // Cycle detection: if we're currently processing this schema, we have a cycle
   if (context.inProgress.has(schema)) {
-    // Generate a unique name for this circular schema
-    const defName = `CircularSchema_${context.defCounter++}`;
+    // Generate a unique name for this circular schema, avoiding collisions
+    let defName: string;
+    do {
+      defName = `CircularSchema_${context.defCounter++}`;
+    } while (context.reservedNames.has(defName) || defName in context.defs);
 
     // Create a $ref to the definition we'll create
     const ref = { $ref: `#/$defs/${defName}` };
@@ -491,11 +508,30 @@ function recursiveStripAsCellAndStreamFromSchema(
 
   // Recursively process all object properties
   for (const [key, value] of Object.entries(result)) {
-    // Skip $defs and $ref - these are handled specially
-    if (key === "$defs" || key === "$ref") continue;
+    // Skip $ref - it's just a string pointer, not a schema to process
+    if (key === "$ref") continue;
 
     if (value && typeof value === "object") {
-      if (Array.isArray(value)) {
+      if (key === "$defs") {
+        // Process each definition in $defs (they contain schemas that may have asCell/asStream)
+        const processedDefs: Record<string, any> = {};
+        for (
+          const [defName, defSchema] of Object.entries(
+            value as Record<string, any>,
+          )
+        ) {
+          if (defSchema && typeof defSchema === "object") {
+            processedDefs[defName] = recursiveStripAsCellAndStreamFromSchema(
+              defSchema,
+              context,
+              depth + 1,
+            );
+          } else {
+            processedDefs[defName] = defSchema;
+          }
+        }
+        result[key] = processedDefs;
+      } else if (Array.isArray(value)) {
         // Handle arrays
         result[key] = value.map((item) =>
           typeof item === "object" && item !== null
