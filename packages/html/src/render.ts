@@ -239,7 +239,10 @@ const bindChildren = (
           if (childValue && "$alias" in childValue) {
             childValue = "";
           } else {
-            console.warn("unexpected object when value was expected", childValue);
+            console.warn(
+              "unexpected object when value was expected",
+              childValue,
+            );
             childValue = JSON.stringify(childValue);
           }
         }
