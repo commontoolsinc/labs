@@ -46,6 +46,9 @@ if (isDeno()) {
   // Browser: use hash-wasm (WASM SHA-256, ~3x faster than @noble/hashes)
   try {
     const hasher: IHasher = await createSHA256();
+    // Note: This hash function is synchronous (no awaits between init/update/digest).
+    // In JS's single-threaded model, synchronous code runs to completion without
+    // interruption, so the shared hasher instance is safe from interleaving.
     const wasmSha256 = (payload: Uint8Array): Uint8Array => {
       hasher.init();
       hasher.update(payload);
@@ -97,7 +100,8 @@ const isUnclaimed = (
 export const refer = <T>(source: T): Reference.View<T> => {
   // Cache {the, of} patterns (unclaimed facts)
   if (isUnclaimed(source)) {
-    const key = `${source.the}|${source.of}`;
+    // Use null character as delimiter to avoid collisions if the/of contain '|'
+    const key = `${source.the}\0${source.of}`;
     const cached = unclaimedCache.get(key);
     if (cached) {
       // Move to end for LRU behavior
