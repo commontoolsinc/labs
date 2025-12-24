@@ -176,8 +176,8 @@ const sidebarGoToNote = handler<
   return navigateTo(note);
 });
 
-// Navigate to a notebook from sidebar
-const sidebarGoToNotebook = handler<
+// Navigate to a notebook from sidebar (currently unused - kept for future use)
+const _sidebarGoToNotebook = handler<
   void,
   { notebook: Cell<NotebookCharm>; sidebarOpen: Cell<boolean> }
 >((_, { notebook, sidebarOpen }) => {
@@ -307,7 +307,7 @@ const Note = pattern<Input, Output>(({ title, content, isHidden, noteId }) => {
     let myId = "";
     try {
       myId = JSON.parse(JSON.stringify(noteId)) as string;
-    } catch {}
+    } catch { /* ignore parse errors */ }
 
     const items: Array<{
       note: NoteCharm;

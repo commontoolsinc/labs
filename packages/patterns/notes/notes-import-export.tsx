@@ -131,7 +131,8 @@ function filterAndFormatNotesPlain(
 
 // Filter charms to only include notes and format as markdown with HTML comment blocks
 // Takes a combined input object since lift() only accepts one argument
-const filterAndFormatNotes = lift(
+// Currently unused - kept for potential future use
+const _filterAndFormatNotes = lift(
   (input: {
     charms: NoteCharm[];
     notebooks: NotebookCharm[];
