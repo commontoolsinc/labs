@@ -750,6 +750,12 @@ const handleSetTitle = handler<
   { newTitle: string; result?: Cell<unknown> },
   { title: Cell<string> }
 >(({ newTitle, result }, { title }) => {
+  if (newTitle === undefined || newTitle === null) {
+    if (result) {
+      result.set({ success: false, error: "newTitle parameter is required" });
+    }
+    return;
+  }
   title.set(newTitle);
   if (result) result.set({ success: true, title: newTitle });
 });
