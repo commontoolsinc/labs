@@ -59,10 +59,12 @@
             MerkleReference,
             objectHash,
             hashIt,
-            stableStringify,
+            fastStableStringify,
+            safeStableStringify,
             { sha256 },
             { blake2b },
-            { createSHA256 },
+            { blake3 },
+            { createSHA256, createBLAKE3 },
             dagCbor,
             { CID },
             multihash,
@@ -71,8 +73,10 @@
             import("https://esm.sh/object-hash@3.0.0"),
             import("https://esm.sh/hash-it@6.0.0"),
             import("https://esm.sh/fast-json-stable-stringify@2.1.0"),
+            import("https://esm.sh/safe-stable-stringify@2.5.0"),
             import("https://esm.sh/@noble/hashes@1.4.0/sha256"),
             import("https://esm.sh/@noble/hashes@1.4.0/blake2b"),
+            import("https://esm.sh/@noble/hashes@1.4.0/blake3"),
             import("https://esm.sh/hash-wasm@4.11.0"),
             import("https://esm.sh/@ipld/dag-cbor@9.2.1"),
             import("https://esm.sh/multiformats@13.3.2/cid"),
@@ -219,11 +223,18 @@
           const hashFunctions = {};
           hashFunctions["noble"] = (data) => sha256(data);
 
-          const hasher = await createSHA256();
+          const sha256Hasher = await createSHA256();
           hashFunctions["hash-wasm"] = (data) => {
-            hasher.init();
-            hasher.update(data);
-            return hasher.digest("binary");
+            sha256Hasher.init();
+            sha256Hasher.update(data);
+            return sha256Hasher.digest("binary");
+          };
+
+          const blake3Hasher = await createBLAKE3();
+          hashFunctions["blake3-wasm"] = (data) => {
+            blake3Hasher.init();
+            blake3Hasher.update(data);
+            return blake3Hasher.digest("binary");
           };
 
           statusDiv.textContent = "Creating strategies...";
@@ -245,6 +256,13 @@
           strategies["merkle-reference[hash-wasm]"] = (obj) =>
             treeBuilderWasm.refer(obj).toString();
 
+          // merkle-reference with blake3-wasm
+          const treeBuilderBlake3 = MerkleReference.Tree.createBuilder(
+            hashFunctions["blake3-wasm"],
+          );
+          strategies["merkle-reference[blake3-wasm]"] = (obj) =>
+            treeBuilderBlake3.refer(obj).toString();
+
           // object-hash
           strategies["object-hash"] = (obj) => objectHash.default(obj);
 
@@ -252,23 +270,18 @@
           strategies["hash-it"] = (obj) =>
             hashIt.default(obj).toString();
 
-          // stable-stringify with all hash functions
+          // safe-stable-stringify with all hash functions
           for (
             const [hashName, hashFn] of Object.entries(hashFunctions)
           ) {
-            strategies[`stable-stringify+${hashName}`] = (obj) => {
-              const str = stableStringify.default(obj);
+            strategies[`safe-stable-stringify+${hashName}`] = (obj) => {
+              const str = safeStableStringify.default(obj);
               return toHex(hashFn(encoder.encode(str)));
             };
           }
-          strategies["stable-stringify+blake2b"] = (obj) => {
-            const str = stableStringify.default(obj);
-            return toHex(blake2b256(encoder.encode(str)));
-          };
-
-          // JSON.stringify (UNSTABLE baseline)
-          strategies["JSON.stringify (UNSTABLE)"] = (obj) => {
-            return toHex(sha256(encoder.encode(JSON.stringify(obj))));
+          strategies["safe-stable-stringify+blake3"] = (obj) => {
+            const str = safeStableStringify.default(obj);
+            return toHex(blake3(encoder.encode(str)));
           };
 
           // dag-cbor with all hash functions
@@ -278,16 +291,8 @@
             strategies[`dag-cbor+${hashName}`] = (obj) =>
               toHex(hashFn(dagCbor.encode(obj)));
           }
-          strategies["dag-cbor+blake2b"] = (obj) =>
-            toHex(blake2b256(dagCbor.encode(obj)));
-
-          // dag-cbor+CID
-          strategies["dag-cbor+CID"] = (obj) => {
-            const encoded = dagCbor.encode(obj);
-            const hash = sha256(encoded);
-            const digest = multihash.create(0x12, hash);
-            return CID.createV1(0x71, digest).toString();
-          };
+          strategies["dag-cbor+blake3"] = (obj) =>
+            toHex(blake3(dagCbor.encode(obj)));
 
           // Benchmark with fresh objects (no caching)
           async function benchmark(strategy, templateData, iterations) {

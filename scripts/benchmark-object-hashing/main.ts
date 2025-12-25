@@ -19,8 +19,12 @@ const objectHash = await import("https://esm.sh/object-hash@3.0.0");
 // @ts-ignore - dynamic import from esm.sh
 const hashIt = await import("https://esm.sh/hash-it@6.0.0");
 // @ts-ignore - dynamic import from esm.sh
-const stableStringify = await import(
+const fastStableStringify = await import(
   "https://esm.sh/fast-json-stable-stringify@2.1.0"
+);
+// @ts-ignore - dynamic import from esm.sh
+const safeStableStringify = await import(
+  "https://esm.sh/safe-stable-stringify@2.5.0"
 );
 // @ts-ignore - dynamic import from esm.sh
 const { sha256 } = await import("https://esm.sh/@noble/hashes@1.4.0/sha256");
@@ -31,7 +35,11 @@ const { blake2b } = await import(
 // Create a 256-bit blake2b hasher
 const blake2b256 = (data: Uint8Array) => blake2b(data, { dkLen: 32 });
 // @ts-ignore - dynamic import from esm.sh
-const { createSHA256 } = await import("https://esm.sh/hash-wasm@4.11.0");
+const { blake3 } = await import("https://esm.sh/@noble/hashes@1.4.0/blake3");
+// @ts-ignore - dynamic import from esm.sh
+const { createSHA256, createBLAKE3 } = await import(
+  "https://esm.sh/hash-wasm@4.11.0"
+);
 // @ts-ignore - dynamic import from esm.sh
 const dagCbor = await import("https://esm.sh/@ipld/dag-cbor@9.2.1");
 // @ts-ignore - dynamic import from esm.sh
@@ -762,12 +770,20 @@ async function createHashFunctions() {
   // Noble hashes (default for merkle-reference)
   functions["noble"] = (data: Uint8Array) => sha256(data);
 
-  // hash-wasm
-  const hasher = await createSHA256();
+  // hash-wasm SHA-256
+  const sha256Hasher = await createSHA256();
   functions["hash-wasm"] = (data: Uint8Array) => {
-    hasher.init();
-    hasher.update(data);
-    return hasher.digest("binary");
+    sha256Hasher.init();
+    sha256Hasher.update(data);
+    return sha256Hasher.digest("binary");
+  };
+
+  // hash-wasm BLAKE3
+  const blake3Hasher = await createBLAKE3();
+  functions["blake3-wasm"] = (data: Uint8Array) => {
+    blake3Hasher.init();
+    blake3Hasher.update(data);
+    return blake3Hasher.digest("binary");
   };
 
   // Node crypto (only in Deno/Node)
@@ -820,20 +836,43 @@ async function createStrategies() {
   const toHex = (hash: Uint8Array) =>
     Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
 
-  // stable-stringify with all hash functions
+  // fast-json-stable-stringify with all hash functions
   for (const [hashName, hashFn] of Object.entries(hashFunctions)) {
-    strategies[`stable-stringify+${hashName}`] = (obj: any) => {
-      const str = stableStringify.default(obj);
+    strategies[`fast-stable-stringify+${hashName}`] = (obj: any) => {
+      const str = fastStableStringify.default(obj);
       const data = encoder.encode(str);
       return toHex(hashFn(data));
     };
   }
 
-  // stable-stringify + blake2b
-  strategies["stable-stringify+blake2b"] = (obj: any) => {
-    const str = stableStringify.default(obj);
+  // fast-json-stable-stringify + blake2b
+  strategies["fast-stable-stringify+blake2b"] = (obj: any) => {
+    const str = fastStableStringify.default(obj);
     const data = encoder.encode(str);
     return toHex(blake2b256(data));
+  };
+
+  // safe-stable-stringify with all hash functions
+  for (const [hashName, hashFn] of Object.entries(hashFunctions)) {
+    strategies[`safe-stable-stringify+${hashName}`] = (obj: any) => {
+      const str = safeStableStringify.default(obj);
+      const data = encoder.encode(str);
+      return toHex(hashFn(data));
+    };
+  }
+
+  // safe-stable-stringify + blake2b
+  strategies["safe-stable-stringify+blake2b"] = (obj: any) => {
+    const str = safeStableStringify.default(obj);
+    const data = encoder.encode(str);
+    return toHex(blake2b256(data));
+  };
+
+  // safe-stable-stringify + blake3
+  strategies["safe-stable-stringify+blake3"] = (obj: any) => {
+    const str = safeStableStringify.default(obj);
+    const data = encoder.encode(str);
+    return toHex(blake3(data));
   };
 
   // JSON.stringify (baseline - NOT stable for property order)
@@ -855,6 +894,12 @@ async function createStrategies() {
   strategies["dag-cbor+blake2b"] = (obj: any) => {
     const encoded = dagCbor.encode(obj);
     return toHex(blake2b256(encoded));
+  };
+
+  // DAG-CBOR + blake3
+  strategies["dag-cbor+blake3"] = (obj: any) => {
+    const encoded = dagCbor.encode(obj);
+    return toHex(blake3(encoded));
   };
 
   // DAG-CBOR with CID (Content Identifier - full IPLD approach)
