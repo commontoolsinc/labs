@@ -11,6 +11,7 @@ import {
   patternTool,
   Stream,
   UI,
+  type VNode,
   wish,
 } from "commontools";
 
@@ -58,6 +59,8 @@ type Output = {
   grep: Stream<{ query: string }>;
   translate: Stream<{ language: string }>;
   editContent: Stream<{ detail: { value: string } }>;
+  /** Minimal UI for embedding in containers like Record. Use via ct-render variant="embedded". */
+  embeddedUI: VNode;
 };
 
 const _updateTitle = handler<
@@ -362,6 +365,23 @@ const Note = pattern<Input, Output>(({ title, content, isHidden, noteId }) => {
   // The only way to serialize a pattern, apparently?
   const patternJson = computed(() => JSON.stringify(Note));
 
+  // Editor component - used in both full UI and embeddedUI
+  const editorUI = (
+    <ct-code-editor
+      $value={content}
+      $mentionable={mentionable}
+      $mentioned={mentioned}
+      $pattern={patternJson}
+      onbacklink-click={handleCharmLinkClick({})}
+      onbacklink-create={handleNewBacklink({ mentionable })}
+      language="text/markdown"
+      theme="light"
+      wordWrap
+      tabIndent
+      lineNumbers
+    />
+  );
+
   return {
     [NAME]: computed(() => `📝 ${title.get()}`),
     [UI]: (
@@ -641,19 +661,7 @@ const Note = pattern<Input, Output>(({ title, content, isHidden, noteId }) => {
           </ct-hstack>
         </ct-vstack>
 
-        <ct-code-editor
-          $value={content}
-          $mentionable={mentionable}
-          $mentioned={mentioned}
-          $pattern={patternJson}
-          onbacklink-click={handleCharmLinkClick({})}
-          onbacklink-create={handleNewBacklink({ mentionable })}
-          language="text/markdown"
-          theme="light"
-          wordWrap
-          tabIndent
-          lineNumbers
-        />
+        {editorUI}
 
         <ct-hstack slot="footer">
           {backlinks?.map((charm) => (
@@ -701,6 +709,8 @@ const Note = pattern<Input, Output>(({ title, content, isHidden, noteId }) => {
       { content },
     ),
     editContent: handleEditContent({ content }),
+    // Minimal UI for embedding in containers (e.g., Record modules)
+    embeddedUI: editorUI,
   };
 });
 
