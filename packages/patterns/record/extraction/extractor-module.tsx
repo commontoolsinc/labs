@@ -49,15 +49,15 @@ interface ExtractorModuleInput {
   parentSubCharms: Cell<SubCharmEntry[]>;
   parentTrashedSubCharms: Cell<TrashedSubCharmEntry[]>;
   // Source selection state (index -> selected, default true)
-  sourceSelections?: Default<Record<number, boolean>, Record<number, never>>;
+  sourceSelections: Cell<Default<Record<number, boolean>, Record<number, never>>>;
   // Trash selection state (index -> should trash, default false)
-  trashSelections?: Default<Record<number, boolean>, Record<number, never>>;
+  trashSelections: Cell<Default<Record<number, boolean>, Record<number, never>>>;
   // Field selections for preview
-  selections?: Default<Record<string, boolean>, Record<string, never>>;
+  selections: Cell<Default<Record<string, boolean>, Record<string, never>>>;
   // Extraction phase
-  extractPhase?: Default<"select" | "extracting" | "preview", "select">;
+  extractPhase: Cell<Default<"select" | "extracting" | "preview", "select">>;
   // Combined content for extraction (built from sources)
-  extractionPrompt?: Default<string, "">;
+  extractionPrompt: Cell<Default<string, "">>;
 }
 
 interface ExtractorModuleOutput {
@@ -379,7 +379,7 @@ const dismiss = handler<
  */
 function createToggleSourceHandler(
   index: number,
-  sourceSelections: Cell<Record<number, boolean>>,
+  sourceSelections: Cell<Default<Record<number, boolean>, Record<number, never>>>,
 ) {
   return handler<unknown, Record<string, never>>(
     () => {
@@ -399,7 +399,7 @@ function createToggleSourceHandler(
  */
 function createToggleTrashHandler(
   index: number,
-  trashSelections: Cell<Record<number, boolean>>,
+  trashSelections: Cell<Default<Record<number, boolean>, Record<number, never>>>,
 ) {
   return handler<unknown, Record<string, never>>(
     () => {
@@ -420,10 +420,10 @@ function createToggleTrashHandler(
 const startExtraction = handler<
   unknown,
   {
-    sourceSelectionsCell: Cell<Record<number, boolean>>;
+    sourceSelectionsCell: Cell<Default<Record<number, boolean>, Record<number, never>>>;
     parentSubCharmsCell: Cell<SubCharmEntry[]>;
-    extractionPromptCell: Cell<string>;
-    extractPhaseCell: Cell<string>;
+    extractionPromptCell: Cell<Default<string, "">>;
+    extractPhaseCell: Cell<Default<"select" | "extracting" | "preview", "select">>;
   }
 >(
   (
@@ -468,8 +468,8 @@ const applySelected = handler<
     parentSubCharmsCell: Cell<SubCharmEntry[]>;
     parentTrashedSubCharmsCell: Cell<TrashedSubCharmEntry[]>;
     extractionResultValue: Record<string, unknown> | null;
-    selectionsCell: Cell<Record<string, boolean>>;
-    trashSelectionsCell: Cell<Record<number, boolean>>;
+    selectionsCell: Cell<Default<Record<string, boolean>, Record<string, never>>>;
+    trashSelectionsCell: Cell<Default<Record<number, boolean>, Record<number, never>>>;
   }
 >(
   (
@@ -667,32 +667,32 @@ export const ExtractorModule = recipe<
     // Check if any sources are selected
     const hasSelectedSources = computed(() => {
       const sources = extractableSources;
-      const selections = sourceSelections || {};
+      const selectionsMap = sourceSelections.get() || {};
       if (!sources || sources.length === 0) return false;
       // At least one source must not be explicitly deselected
       return sources.some((s: ExtractableSource) =>
-        selections[s.index] !== false
+        selectionsMap[s.index] !== false
       );
     });
 
     // Count selected sources
     const selectedSourceCount = computed(() => {
       const sources = extractableSources;
-      const selections = sourceSelections || {};
+      const selectionsMap = sourceSelections.get() || {};
       if (!sources) return 0;
       return sources.filter((s: ExtractableSource) =>
-        selections[s.index] !== false
+        selectionsMap[s.index] !== false
       ).length;
     });
 
     // Build OCR prompts for selected photos
     const photoSources = computed(() => {
       const sources = extractableSources;
-      const selections = sourceSelections || {};
+      const selectionsMap = sourceSelections.get() || {};
       if (!sources) return [];
       return sources.filter(
         (s: ExtractableSource) =>
-          s.type === "photo" && s.requiresOCR && selections[s.index] !== false,
+          s.type === "photo" && s.requiresOCR && selectionsMap[s.index] !== false,
       );
     });
 
@@ -764,7 +764,7 @@ export const ExtractorModule = recipe<
     const selectedCount = computed(() => {
       const p = preview;
       if (!p?.fields) return 0;
-      const sel = selections || {};
+      const sel = selections.get() || {};
       return p.fields.filter((f: ExtractedField) => {
         const key = `${f.targetModule}.${f.fieldName}`;
         return sel[key] !== false; // Default is selected
@@ -773,7 +773,7 @@ export const ExtractorModule = recipe<
 
     // Determine current phase based on state
     const currentPhase = computed(() => {
-      const phase = extractPhase || "select";
+      const phase = extractPhase.get() || "select";
       if (phase === "extracting") {
         if (extraction.pending) return "extracting";
         if (extraction.error) return "error";
@@ -800,9 +800,9 @@ export const ExtractorModule = recipe<
     // Count sources selected for trash
     const trashCount = computed(() => {
       const sources = extractableSources;
-      const trash = trashSelections || {};
+      const trashMap = trashSelections.get() || {};
       if (!sources) return 0;
-      return sources.filter((s: ExtractableSource) => trash[s.index] === true)
+      return sources.filter((s: ExtractableSource) => trashMap[s.index] === true)
         .length;
     });
 
@@ -906,13 +906,11 @@ export const ExtractorModule = recipe<
                           type="checkbox"
                           checked={computed(
                             () =>
-                              (sourceSelections || {})[source.index] !== false,
+                              (sourceSelections.get() || {})[source.index] !== false,
                           )}
                           onChange={createToggleSourceHandler(
                             source.index,
-                            sourceSelections as unknown as Cell<
-                              Record<number, boolean>
-                            >,
+                            sourceSelections,
                           )({})}
                           style={{ marginTop: "2px" }}
                         />
@@ -996,10 +994,10 @@ export const ExtractorModule = recipe<
                         !hasSelectedSources || ocrPending
                       )}
                       onClick={startExtraction({
-                        sourceSelectionsCell: sourceSelections as unknown as Cell<Record<number, boolean>>,
+                        sourceSelectionsCell: sourceSelections,
                         parentSubCharmsCell: parentSubCharms,
-                        extractionPromptCell: extractionPrompt as unknown as Cell<string>,
-                        extractPhaseCell: extractPhase as unknown as Cell<string>,
+                        extractionPromptCell: extractionPrompt,
+                        extractPhaseCell: extractPhase,
                       })}
                       style={{
                         padding: "8px 16px",
@@ -1208,13 +1206,11 @@ export const ExtractorModule = recipe<
                       <input
                         type="checkbox"
                         checked={computed(
-                          () => (trashSelections || {})[source.index] === true,
+                          () => (trashSelections.get() || {})[source.index] === true,
                         )}
                         onChange={createToggleTrashHandler(
                           source.index,
-                          trashSelections as unknown as Cell<
-                            Record<number, boolean>
-                          >,
+                          trashSelections,
                         )({})}
                       />
                       <span style={{ fontSize: "13px", color: "#6b7280" }}>
@@ -1271,8 +1267,8 @@ export const ExtractorModule = recipe<
                     parentSubCharmsCell: parentSubCharms,
                     parentTrashedSubCharmsCell: parentTrashedSubCharms,
                     extractionResultValue: extraction.result as Record<string, unknown> | null,
-                    selectionsCell: selections as unknown as Cell<Record<string, boolean>>,
-                    trashSelectionsCell: trashSelections as unknown as Cell<Record<number, boolean>>,
+                    selectionsCell: selections,
+                    trashSelectionsCell: trashSelections,
                   })}
                   style={{
                     padding: "8px 16px",
