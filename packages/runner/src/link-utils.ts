@@ -407,7 +407,7 @@ export function sanitizeSchemaForLinks(
   // Collect existing $defs names to avoid collisions
   const existingDefNames = new Set<string>();
   if (typeof schema === "object" && schema !== null && "$defs" in schema) {
-    const existingDefs = (schema as any).$defs;
+    const existingDefs = schema.$defs;
     if (existingDefs && typeof existingDefs === "object") {
       for (const name of Object.keys(existingDefs)) {
         existingDefNames.add(name);
@@ -430,7 +430,7 @@ export function sanitizeSchemaForLinks(
   // If we generated any $defs, add them to the root schema
   if (Object.keys(context.defs).length > 0) {
     // Merge with any existing $defs
-    const existingDefs = (result as any)?.$defs || {};
+    const existingDefs = result?.$defs || {};
     return {
       ...result,
       $defs: { ...existingDefs, ...context.defs },
