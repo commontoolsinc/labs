@@ -715,8 +715,8 @@ const cancelStandaloneNotebookPrompt = handler<
   standaloneNotebookTitle.set("");
 });
 
-// Handler to create a new notebook (without navigating) - kept for compatibility
-const createNotebook = handler<
+// Handler to create a new notebook (without navigating) - kept for potential future use
+const _createNotebook = handler<
   Record<string, never>,
   { allCharms: Cell<NoteCharm[]> }
 >((_, { allCharms }) => {
