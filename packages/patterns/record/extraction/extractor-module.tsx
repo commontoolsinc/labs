@@ -62,6 +62,16 @@ interface ExtractorModuleInput {
   extractPhase: Cell<Default<"select" | "extracting" | "preview", "select">>;
   // Combined content for extraction (built from sources)
   extractionPrompt: Cell<Default<string, "">>;
+  // Notes cleanup state
+  cleanupNotesEnabled: Cell<Default<boolean, true>>;
+  // Snapshot of Notes content at extraction start (for cleanup comparison)
+  notesContentSnapshot: Cell<Default<string, "">>;
+  // Cleanup application status tracking
+  cleanupApplyStatus: Cell<
+    Default<"pending" | "success" | "failed" | "skipped", "pending">
+  >;
+  // Apply in progress guard (prevents double-click race condition)
+  applyInProgress: Cell<Default<boolean, false>>;
 }
 
 interface ExtractorModuleOutput {
@@ -70,6 +80,13 @@ interface ExtractorModuleOutput {
   selections?: Default<Record<string, boolean>, Record<string, never>>;
   extractPhase?: Default<"select" | "extracting" | "preview", "select">;
   extractionPrompt?: Default<string, "">;
+  cleanupNotesEnabled?: Default<boolean, true>;
+  notesContentSnapshot?: Default<string, "">;
+  cleanupApplyStatus?: Default<
+    "pending" | "success" | "failed" | "skipped",
+    "pending"
+  >;
+  applyInProgress?: Default<boolean, false>;
 }
 
 // ===== Constants =====
@@ -93,6 +110,19 @@ const OCR_SYSTEM_PROMPT =
 Return ONLY the extracted text, preserving formatting and line breaks.
 Do not add any commentary, explanation, or formatting like markdown.
 If no text is visible, return an empty string.`;
+
+const NOTES_CLEANUP_SYSTEM_PROMPT =
+  `You are a notes cleanup tool. Your ONLY output must be the cleaned text itself - nothing else.
+
+Given original notes and a list of extracted fields, output a cleaned version with extracted data removed.
+
+Rules:
+1. Remove lines containing ONLY extracted data (e.g., "Email: john@example.com", "Phone: 555-1234")
+2. Keep narrative text not captured in extracted fields
+3. Keep formatting (headers, bullets, blank lines) where they make sense
+4. If notes become empty, output empty string
+
+CRITICAL: Output ONLY the cleaned text. No explanations, no markdown formatting, no commentary, no "here is the result", no thinking out loud. Just the cleaned content.`;
 
 // ===== Helper Functions =====
 
@@ -436,6 +466,7 @@ const startExtraction = handler<
     extractPhaseCell: Cell<
       Default<"select" | "extracting" | "preview", "select">
     >;
+    notesContentSnapshotCell: Cell<Default<string, "">>;
   }
 >(
   (
@@ -445,6 +476,7 @@ const startExtraction = handler<
       parentSubCharmsCell,
       extractionPromptCell,
       extractPhaseCell,
+      notesContentSnapshotCell,
     },
   ) => {
     // Use .get() to read Cell values inside handler
@@ -454,6 +486,7 @@ const startExtraction = handler<
 
     // Build combined content from selected sources
     const parts: string[] = [];
+    let notesContent = "";
 
     for (const source of sources) {
       // Skip if explicitly deselected
@@ -462,6 +495,10 @@ const startExtraction = handler<
       if (source.type === "notes" || source.type === "text-import") {
         if (source.content) {
           parts.push(`--- ${source.label} ---\n${source.content}`);
+          // Capture Notes content for cleanup preview
+          if (source.type === "notes") {
+            notesContent = source.content;
+          }
         }
       }
       // Note: Photo OCR would need pre-computed results stored in state
@@ -470,14 +507,13 @@ const startExtraction = handler<
     const combinedContent = parts.join("\n\n");
 
     if (combinedContent.trim()) {
+      // Snapshot Notes content for cleanup comparison
+      notesContentSnapshotCell.set(notesContent as any);
       extractionPromptCell.set(combinedContent as any);
       extractPhaseCell.set("extracting" as any);
     }
   },
 );
-
-// Guard to prevent double-click race condition
-let applyInProgress = false;
 
 /**
  * Handler to apply selected extractions - defined at module scope
@@ -494,6 +530,12 @@ const applySelected = handler<
     trashSelectionsCell: Cell<
       Default<Record<number, boolean>, Record<number, never>>
     >;
+    cleanupEnabledValue: boolean;
+    cleanedNotesValue: string;
+    cleanupApplyStatusCell: Cell<
+      Default<"pending" | "success" | "failed" | "skipped", "pending">
+    >;
+    applyInProgressCell: Cell<Default<boolean, false>>;
   }
 >(
   (
@@ -504,14 +546,18 @@ const applySelected = handler<
       extractionResultValue,
       selectionsCell,
       trashSelectionsCell,
+      cleanupEnabledValue,
+      cleanedNotesValue,
+      cleanupApplyStatusCell,
+      applyInProgressCell,
     },
   ) => {
-    // Prevent double-click race condition
-    if (applyInProgress) {
+    // Prevent double-click race condition using Cell state
+    if (applyInProgressCell.get()) {
       console.debug("[Extract] Apply already in progress, ignoring");
       return;
     }
-    applyInProgress = true;
+    applyInProgressCell.set(true as any);
 
     try {
       // Read Cells inside handler, filter out malformed entries
@@ -661,11 +707,47 @@ const applySelected = handler<
         return;
       }
 
-      // Collect indices to trash (sources + self)
+      // Apply Notes cleanup if enabled and we have cleaned content
+      // NOTE: We use the editContent stream handler instead of Cell key navigation
+      // because the ct-code-editor is subscribed to the original content Cell reference,
+      // not Cell references created via .key() navigation (they share data but have
+      // separate subscription points).
+      if (cleanupEnabledValue && cleanedNotesValue !== undefined) {
+        const notesEntry = current.find((e) => e?.type === "notes");
+        if (notesEntry) {
+          try {
+            const notesCharm = notesEntry.charm as {
+              editContent?: { send?: (data: unknown) => void };
+            };
+            if (notesCharm?.editContent?.send) {
+              notesCharm.editContent.send({ detail: { value: cleanedNotesValue } });
+              cleanupApplyStatusCell.set("success" as any);
+              console.debug("[Extract] Applied Notes cleanup via editContent stream");
+            } else {
+              cleanupApplyStatusCell.set("failed" as any);
+              console.warn(
+                "[Extract] Notes charm doesn't have editContent.send",
+                notesCharm,
+              );
+            }
+          } catch (e) {
+            cleanupApplyStatusCell.set("failed" as any);
+            console.warn("[Extract] Failed to apply Notes cleanup:", e);
+          }
+        } else {
+          cleanupApplyStatusCell.set("failed" as any);
+          console.warn("[Extract] Notes entry not found for cleanup");
+        }
+      } else {
+        cleanupApplyStatusCell.set("skipped" as any);
+      }
+
+      // Collect indices to trash (sources + self, excluding Notes)
       const indicesToTrash: number[] = [];
 
-      // Add selected source indices to trash list
+      // Add selected source indices to trash list (excluding Notes - Notes is never trashed)
       for (const source of sourcesData) {
+        if (source.type === "notes") continue; // Never trash Notes
         if (toTrash[source.index] === true) {
           indicesToTrash.push(source.index);
         }
@@ -696,7 +778,7 @@ const applySelected = handler<
       const final = [...remaining, ...newEntries];
       parentSubCharmsCell.set(final);
     } finally {
-      applyInProgress = false;
+      applyInProgressCell.set(false as any);
     }
   },
 );
@@ -717,6 +799,10 @@ export const ExtractorModule = recipe<
       selections,
       extractPhase,
       extractionPrompt,
+      cleanupNotesEnabled,
+      notesContentSnapshot,
+      cleanupApplyStatus,
+      applyInProgress,
     },
   ) => {
     // Use FULL registry schema - enables extraction to create new modules
@@ -839,6 +925,20 @@ export const ExtractorModule = recipe<
       }).length;
     });
 
+    // Total changes count includes Notes cleanup when enabled
+    const totalChangesCount = computed(() => {
+      // Dereference selectedCount to get the actual number value
+      const baseCount = Number(selectedCount) || 0;
+      // Add 1 for Notes cleanup if enabled and has actual changes
+      const rawEnabled = cleanupNotesEnabled.get();
+      const enabled = typeof rawEnabled === "boolean" ? rawEnabled : true;
+      const hasChanges = Boolean(hasNotesChanges);
+      if (enabled && hasChanges) {
+        return baseCount + 1;
+      }
+      return baseCount;
+    });
+
     // Determine current phase based on state
     const currentPhase = computed(() => {
       const phase = extractPhase.get() || "select";
@@ -865,15 +965,96 @@ export const ExtractorModule = recipe<
       }).join("\n");
     });
 
-    // Count sources selected for trash
+    // Build cleanup prompt for Notes - only when extraction succeeds and Notes was used
+    const cleanupPrompt = computed(() => {
+      const rawSnapshot = notesContentSnapshot.get();
+      // Handle Default type - may be object or string
+      const snapshot = typeof rawSnapshot === "string" ? rawSnapshot : "";
+      const rawPhase = extractPhase.get();
+      const phase = typeof rawPhase === "string" ? rawPhase : "select";
+
+      // Only generate cleanup when we have extraction results and Notes content
+      if (phase !== "extracting" && phase !== "preview") return undefined;
+      if (!extraction.result) return undefined;
+      if (!snapshot.trim()) return undefined;
+
+      // Build a summary of what was extracted
+      const extractedSummary: string[] = [];
+      const result = extraction.result as Record<string, unknown>;
+      for (const [key, value] of Object.entries(result)) {
+        if (value !== null && value !== undefined) {
+          const formattedValue = Array.isArray(value)
+            ? value.join(", ")
+            : String(value);
+          extractedSummary.push(`- ${key}: ${formattedValue}`);
+        }
+      }
+
+      if (extractedSummary.length === 0) return undefined;
+
+      return `Original notes:
+${snapshot}
+
+Extracted fields to remove:
+${extractedSummary.join("\n")}`;
+    });
+
+    // Cleanup call - runs in parallel with extraction review
+    const notesCleanup = generateText({
+      system: NOTES_CLEANUP_SYSTEM_PROMPT,
+      prompt: cleanupPrompt,
+      model: "anthropic:claude-haiku-4-5",
+    });
+
+    // Check if Notes cleanup is pending
+    const cleanupPending = computed(() => {
+      const rawSnapshot = notesContentSnapshot.get();
+      const snapshot = typeof rawSnapshot === "string" ? rawSnapshot : "";
+      if (!snapshot.trim()) return false;
+      return Boolean(notesCleanup.pending);
+    });
+
+    // Check if cleanup has an error
+    const cleanupHasError = computed(() => {
+      return Boolean(notesCleanup.error);
+    });
+
+    // Get the cleaned Notes content (or original if cleanup disabled/failed)
+    const cleanedNotesContent = computed(() => {
+      const rawEnabled = cleanupNotesEnabled.get();
+      const enabled = typeof rawEnabled === "boolean" ? rawEnabled : true;
+      const rawSnapshot = notesContentSnapshot.get();
+      const snapshot = typeof rawSnapshot === "string" ? rawSnapshot : "";
+
+      if (!enabled) return snapshot;
+      if (notesCleanup.error) return snapshot;
+      if (!notesCleanup.result) return snapshot;
+
+      // Validate result - should be string
+      const result = notesCleanup.result;
+      if (typeof result !== "string") return snapshot;
+
+      return result.trim();
+    });
+
+    // Check if there are meaningful changes to Notes
+    const hasNotesChanges = computed(() => {
+      const rawSnapshot = notesContentSnapshot.get();
+      const snapshot = typeof rawSnapshot === "string" ? rawSnapshot : "";
+      if (!snapshot.trim()) return false;
+
+      const cleaned = cleanedNotesContent;
+      return cleaned !== snapshot;
+    });
+
+    // Count sources selected for trash (excluding Notes - Notes is never trashed)
     const trashCount = computed(() => {
       const sources = extractableSources;
       const trashMap = trashSelections.get() || {};
       if (!sources) return 0;
       return sources.filter((s: ExtractableSource) =>
-        trashMap[s.index] === true
-      )
-        .length;
+        s.type !== "notes" && trashMap[s.index] === true
+      ).length;
     });
 
     return {
@@ -1069,6 +1250,7 @@ export const ExtractorModule = recipe<
                         parentSubCharmsCell: parentSubCharms,
                         extractionPromptCell: extractionPrompt,
                         extractPhaseCell: extractPhase,
+                        notesContentSnapshotCell: notesContentSnapshot,
                       })}
                       style={{
                         padding: "8px 16px",
@@ -1234,9 +1416,222 @@ export const ExtractorModule = recipe<
                 </div>
               </div>
 
-              {/* Trash sources section */}
+              {/* Notes cleanup section */}
               {ifElse(
-                computed(() => extractableSources.length > 0),
+                computed(() => {
+                  const rawSnapshot = notesContentSnapshot.get();
+                  const snapshot = typeof rawSnapshot === "string"
+                    ? rawSnapshot
+                    : "";
+                  return snapshot.trim().length > 0;
+                }),
+                <div
+                  style={{
+                    background: "white",
+                    borderRadius: "6px",
+                    border: "1px solid #e5e7eb",
+                    padding: "12px",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: "500",
+                        color: "#374151",
+                        fontSize: "13px",
+                      }}
+                    >
+                      Clean up Notes
+                    </div>
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        fontSize: "12px",
+                        color: "#6b7280",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={cleanupNotesEnabled}
+                        onChange={() => {
+                          const rawCurrent = cleanupNotesEnabled.get();
+                          const current = typeof rawCurrent === "boolean"
+                            ? rawCurrent
+                            : true;
+                          cleanupNotesEnabled.set(!current as any);
+                        }}
+                      />
+                      Enable cleanup
+                    </label>
+                  </div>
+
+                  {/* Cleanup pending indicator */}
+                  {ifElse(
+                    cleanupPending,
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        padding: "8px",
+                        background: "#f3f4f6",
+                        borderRadius: "6px",
+                        fontSize: "13px",
+                        color: "#6b7280",
+                      }}
+                    >
+                      <ct-loader size="sm" />
+                      <span>Generating cleanup preview...</span>
+                    </div>,
+                    <div>
+                      {/* Cleanup error message */}
+                      {ifElse(
+                        cleanupHasError,
+                        <div
+                          style={{
+                            padding: "8px",
+                            background: "#fee2e2",
+                            borderRadius: "6px",
+                            fontSize: "13px",
+                            color: "#991b1b",
+                            marginBottom: "8px",
+                          }}
+                        >
+                          Cleanup failed - Notes will remain unchanged
+                        </div>,
+                        null,
+                      )}
+
+                      {/* Before/After preview when cleanup enabled */}
+                      {ifElse(
+                        computed(() => {
+                          const rawEnabled = cleanupNotesEnabled.get();
+                          const enabled = typeof rawEnabled === "boolean"
+                            ? rawEnabled
+                            : true;
+                          return enabled && hasNotesChanges;
+                        }),
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                          <div
+                            style={{
+                              fontSize: "12px",
+                              color: "#9ca3af",
+                            }}
+                          >
+                            Extracted data will be removed from Notes:
+                          </div>
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "1fr 1fr",
+                              gap: "8px",
+                            }}
+                          >
+                            <div>
+                              <div
+                                style={{
+                                  fontSize: "11px",
+                                  color: "#ef4444",
+                                  fontWeight: "500",
+                                  marginBottom: "4px",
+                                }}
+                              >
+                                Before:
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: "12px",
+                                  color: "#6b7280",
+                                  background: "#fef2f2",
+                                  padding: "8px",
+                                  borderRadius: "4px",
+                                  whiteSpace: "pre-wrap",
+                                  maxHeight: "120px",
+                                  overflow: "auto",
+                                  fontFamily: "monospace",
+                                }}
+                              >
+                                {notesContentSnapshot}
+                              </div>
+                            </div>
+                            <div>
+                              <div
+                                style={{
+                                  fontSize: "11px",
+                                  color: "#22c55e",
+                                  fontWeight: "500",
+                                  marginBottom: "4px",
+                                }}
+                              >
+                                After:
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: "12px",
+                                  color: "#6b7280",
+                                  background: "#f0fdf4",
+                                  padding: "8px",
+                                  borderRadius: "4px",
+                                  whiteSpace: "pre-wrap",
+                                  maxHeight: "120px",
+                                  overflow: "auto",
+                                  fontFamily: "monospace",
+                                }}
+                              >
+                                {ifElse(
+                                  computed(() => cleanedNotesContent === ""),
+                                  <span style={{ fontStyle: "italic", color: "#9ca3af" }}>
+                                    (empty)
+                                  </span>,
+                                  cleanedNotesContent,
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>,
+                        <div
+                          style={{
+                            fontSize: "12px",
+                            color: "#9ca3af",
+                            fontStyle: "italic",
+                          }}
+                        >
+                          {ifElse(
+                            computed(() => {
+                              const rawEnabled = cleanupNotesEnabled.get();
+                              const enabled = typeof rawEnabled === "boolean"
+                                ? rawEnabled
+                                : true;
+                              return !enabled;
+                            }),
+                            "Cleanup disabled - Notes will remain unchanged",
+                            "No changes needed to Notes content",
+                          )}
+                        </div>,
+                      )}
+                    </div>,
+                  )}
+                </div>,
+                null,
+              )}
+
+              {/* Trash imported sources section (Photos, Text Imports only - not Notes) */}
+              {ifElse(
+                computed(() =>
+                  extractableSources.filter((s: ExtractableSource) =>
+                    s.type !== "notes"
+                  ).length > 0
+                ),
                 <div
                   style={{
                     background: "white",
@@ -1253,7 +1648,7 @@ export const ExtractorModule = recipe<
                       fontSize: "13px",
                     }}
                   >
-                    Trash sources after applying?
+                    Trash imported sources?
                   </div>
                   <div
                     style={{
@@ -1262,35 +1657,65 @@ export const ExtractorModule = recipe<
                       marginBottom: "8px",
                     }}
                   >
-                    Select sources to move to trash:
+                    Select imported files to move to trash:
                   </div>
-                  {extractableSources.map((source: ExtractableSource) => (
-                    <div
-                      key={source.index + 1000}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        padding: "6px 0",
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={computed(
-                          () =>
-                            (trashSelections.get() || {})[source.index] ===
-                              true,
-                        )}
-                        onChange={createToggleTrashHandler(
-                          source.index,
-                          trashSelections,
-                        )({})}
-                      />
-                      <span style={{ fontSize: "13px", color: "#6b7280" }}>
-                        {source.icon} {source.label}
-                      </span>
-                    </div>
-                  ))}
+                  {extractableSources
+                    .filter((source: ExtractableSource) => source.type !== "notes")
+                    .map((source: ExtractableSource) => (
+                      <div
+                        key={source.index + 1000}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          padding: "6px 0",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={computed(
+                            () =>
+                              (trashSelections.get() || {})[source.index] ===
+                                true,
+                          )}
+                          onChange={createToggleTrashHandler(
+                            source.index,
+                            trashSelections,
+                          )({})}
+                        />
+                        <span style={{ fontSize: "13px", color: "#6b7280" }}>
+                          {source.icon} {source.label}
+                        </span>
+                      </div>
+                    ))}
+                </div>,
+                null,
+              )}
+
+              {/* Cleanup failure warning */}
+              {ifElse(
+                computed(() => {
+                  const status = cleanupApplyStatus.get();
+                  return status === "failed";
+                }),
+                <div
+                  style={{
+                    padding: "12px",
+                    background: "#fef2f2",
+                    border: "1px solid #fecaca",
+                    borderRadius: "6px",
+                    color: "#991b1b",
+                    fontSize: "13px",
+                  }}
+                >
+                  <div style={{ fontWeight: "500", marginBottom: "4px" }}>
+                    Warning: Notes cleanup failed
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#dc2626" }}>
+                    The extracted fields were applied successfully, but the Notes
+                    module could not be cleaned up. The original content remains
+                    unchanged. Check the console for details.
+                  </div>
                 </div>,
                 null,
               )}
@@ -1336,6 +1761,7 @@ export const ExtractorModule = recipe<
                 </button>
                 <button
                   type="button"
+                  disabled={cleanupPending}
                   onClick={applySelected({
                     parentSubCharmsCell: parentSubCharms,
                     parentTrashedSubCharmsCell: parentTrashedSubCharms,
@@ -1344,27 +1770,48 @@ export const ExtractorModule = recipe<
                       | null,
                     selectionsCell: selections,
                     trashSelectionsCell: trashSelections,
+                    cleanupEnabledValue: (() => {
+                      const rawEnabled = cleanupNotesEnabled.get();
+                      return typeof rawEnabled === "boolean" ? rawEnabled : true;
+                    })(),
+                    cleanedNotesValue: (() => {
+                      // Dereference the computed value
+                      const value = cleanedNotesContent;
+                      return typeof value === "string" ? value : "";
+                    })(),
+                    cleanupApplyStatusCell: cleanupApplyStatus,
+                    applyInProgressCell: applyInProgress,
                   })}
                   style={{
                     padding: "8px 16px",
-                    background: "#059669",
+                    background: computed(() =>
+                      cleanupPending ? "#d1d5db" : "#059669"
+                    ),
                     color: "white",
                     border: "none",
                     borderRadius: "6px",
-                    cursor: "pointer",
+                    cursor: computed(() =>
+                      cleanupPending ? "not-allowed" : "pointer"
+                    ),
                     fontSize: "14px",
                     fontWeight: "500",
                   }}
                 >
-                  Apply {selectedCount} Change{ifElse(
-                    computed(() => selectedCount !== 1),
-                    "s",
-                    "",
-                  )}
                   {ifElse(
-                    computed(() => trashCount > 0),
-                    <span>& Trash {trashCount}</span>,
-                    "",
+                    cleanupPending,
+                    "Preparing cleanup...",
+                    <>
+                      Apply {totalChangesCount} Change{ifElse(
+                        computed(() => totalChangesCount !== 1),
+                        "s",
+                        "",
+                      )}
+                      {ifElse(
+                        computed(() => trashCount > 0),
+                        <span>& Trash {trashCount}</span>,
+                        "",
+                      )}
+                    </>,
                   )}
                 </button>
               </div>
@@ -1378,6 +1825,10 @@ export const ExtractorModule = recipe<
       selections,
       extractPhase,
       extractionPrompt,
+      cleanupNotesEnabled,
+      notesContentSnapshot,
+      cleanupApplyStatus,
+      applyInProgress,
     };
   },
 );
