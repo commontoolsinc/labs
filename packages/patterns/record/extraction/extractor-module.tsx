@@ -28,7 +28,11 @@ import {
   recipe,
   UI,
 } from "commontools";
-import { createSubCharm } from "../registry.ts";
+import {
+  buildExtractionSchema as buildFullSchema,
+  createSubCharm,
+  getFieldToTypeMapping as getFullFieldMapping,
+} from "../registry.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "../types.ts";
 import type {
   ExtractableSource,
@@ -36,12 +40,7 @@ import type {
   ExtractionPreview,
 } from "./types.ts";
 import type { JSONSchema } from "./schema-utils.ts";
-import {
-  buildFullExtractionSchema,
-  getFullFieldToTypeMapping,
-  getResultSchema,
-  getSchemaForType,
-} from "./schema-utils.ts";
+import { getResultSchema, getSchemaForType } from "./schema-utils.ts";
 
 // ===== Types =====
 
@@ -219,7 +218,7 @@ function buildPreview(
   subCharms: readonly SubCharmEntry[],
 ): ExtractionPreview {
   // Use FULL field-to-type mapping from registry - enables creating new modules
-  const fieldToType = getFullFieldToTypeMapping();
+  const fieldToType = getFullFieldMapping();
   const fields: ExtractedField[] = [];
   const byModule: Record<string, ExtractedField[]> = {};
 
@@ -656,7 +655,7 @@ export const ExtractorModule = recipe<
     // Use FULL registry schema - enables extraction to create new modules
     // This includes all available module types, not just existing ones
     const extractSchema = computed(() => {
-      return buildFullExtractionSchema();
+      return buildFullSchema() as JSONSchema;
     });
 
     // Scan for extractable sources
