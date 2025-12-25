@@ -32,23 +32,23 @@ async function main() {
     const page = await browser.newPage();
 
     // Set up console message listener
-    page.on("console", (msg) => {
-      console.log(msg.text());
+    page.addEventListener("console", (e: any) => {
+      console.log(e.detail.text);
     });
 
     // Set up error listener
-    page.on("pageerror", (err) => {
-      console.error("Page error:", err);
+    page.addEventListener("pageerror", (e: any) => {
+      console.error("Page error:", e.detail);
     });
 
     // Navigate to the HTML file
-    await page.goto(htmlUrl, { waitUntil: "networkidle" });
+    await page.goto(htmlUrl, { waitUntil: "networkidle0" });
 
     // Wait for benchmark to complete
     console.log("Waiting for benchmark to complete...\n");
     await page.waitForFunction(
       () => (window as any).benchmarkComplete === true,
-      { timeout: 300000 }, // 5 minutes timeout
+      { timeout: 600000 }, // 10 minutes timeout
     );
 
     // Get results
