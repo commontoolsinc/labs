@@ -336,6 +336,14 @@ export PATH="$HOME/.deno/bin:$PATH"
 
 For persistent configuration, add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.).
 
+Verify the installation:
+
+```bash
+deno --version
+```
+
+**Note:** Deno is **not** available via `apt-get` or other system package managers. Always use the official curl-based installer above.
+
 #### SSL Certificate Issues
 
 In some CI/test environments, you may encounter SSL certificate errors when Deno downloads npm packages:
