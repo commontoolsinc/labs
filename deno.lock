@@ -1768,9 +1768,12 @@
     "https://esm.sh/@noble/hashes@1.3.3/denonext/sha256.mjs": "7e540005bfe6da5ca43347d4e61f70b89adf89e839c0a6f0fad1adcc54314a07",
     "https://esm.sh/@noble/hashes@1.3.3/denonext/utils.mjs": "f8a6599c038cbdca9bd1228c7580329f011d6eb4baeaa826ffa11979d9512983",
     "https://esm.sh/@noble/hashes@1.4.0/blake2b": "58ec1c74e56637883556c8e8c1efcc94f5e407c258475dbc3fcf22e3f63e1c1f",
+    "https://esm.sh/@noble/hashes@1.4.0/blake3": "58f66c9bbd0a4edb1fbe43713d3f2ac8b2418aac7acca8f3b368051e3a61ccd7",
     "https://esm.sh/@noble/hashes@1.4.0/denonext/_assert.mjs": "7695fe9689e3799e477b2e5bf8408a142bbfdf7d714d13214f5a5c82e84251e3",
     "https://esm.sh/@noble/hashes@1.4.0/denonext/_md.mjs": "1a4204591ee5255fba4e7c20a38156a522d448111cfb7713558c5266ecc5b3f2",
     "https://esm.sh/@noble/hashes@1.4.0/denonext/blake2b.mjs": "38359ee07ffb05f1ba79555b1b5c3c7f055b6632bbf551a27cadbe3fd3c8c18c",
+    "https://esm.sh/@noble/hashes@1.4.0/denonext/blake2s.mjs": "0f4f1862fbe5815424463f594e701645ab68314d62e9a5c1592c0123e413f751",
+    "https://esm.sh/@noble/hashes@1.4.0/denonext/blake3.mjs": "80316391d99e0c8982fbb2b7268e0bced4469591b675f26d5f9b074a6060d799",
     "https://esm.sh/@noble/hashes@1.4.0/denonext/crypto.mjs": "fe23c9fadbbbdc205707e045b292d697448c1527874a9654850cb414aaa24d97",
     "https://esm.sh/@noble/hashes@1.4.0/denonext/esm/_blake.mjs": "9f64ff6ecb4e442f6305aad40d05cd649eb8b911ea64808edb011886a682c580",
     "https://esm.sh/@noble/hashes@1.4.0/denonext/esm/_u64.mjs": "18344d8b668ee8a0476824e59a9c3f8dfe26cadf0afe61b8cf54258c6954f802",
@@ -1842,7 +1845,9 @@
     "https://esm.sh/multiformats@13.4.2/denonext/hashes/digest.mjs": "45d75f8bb1c161dab27bba9b658642e9521f7305a984c3f34c254458b27aa714",
     "https://esm.sh/multiformats@13.4.2/denonext/link/interface.mjs": "73dc79d12d568e57399706e50d5a43c8d8e64ea0372a2e277ce727f45e49f325",
     "https://esm.sh/object-hash@3.0.0": "e218e75f3503f2bdd9f9b758658a59f8ce0a76c387ec49e979b5d2039373a97d",
-    "https://esm.sh/object-hash@3.0.0/denonext/object-hash.mjs": "a0de679d08f71d0ef12da988f1be37af4d050e5ef55e8a35d90d7d3489b3e9da"
+    "https://esm.sh/object-hash@3.0.0/denonext/object-hash.mjs": "a0de679d08f71d0ef12da988f1be37af4d050e5ef55e8a35d90d7d3489b3e9da",
+    "https://esm.sh/safe-stable-stringify@2.5.0": "8fae26be3ee4e8f6f1fc01e324853580cc299bae66f3b2d8e71bd2d8a1106ce6",
+    "https://esm.sh/safe-stable-stringify@2.5.0/denonext/safe-stable-stringify.mjs": "924a3f8922c879120dcfa8f3e5f6caed9428c57035e6f9d284df270f4ae1574f"
   },
   "workspace": {
     "dependencies": [
@@ -1858,10 +1863,13 @@
       "jsr:@std/http@1",
       "jsr:@std/path@1",
       "jsr:@std/testing@1",
+      "npm:fast-json-stable-stringify@^2.1.0",
       "npm:hash-wasm@^4.11.0",
       "npm:lit@^3.3.0",
       "npm:merkle-reference@^2.2.0",
       "npm:multiformats@^13.3.2",
+      "npm:object-hash@3",
+      "npm:safe-stable-stringify@^2.5.0",
       "npm:turndown@^7.1.2",
       "npm:zod@^3.24.1"
     ],
