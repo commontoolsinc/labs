@@ -13,13 +13,18 @@ property order don't change the hash.
    - `hash-wasm` - WebAssembly SHA-256 (~3x faster than pure JS)
    - `node:crypto` - Native crypto (Deno/Node only, hardware accelerated)
 
-2. **object-hash** - Popular npm package for object hashing
+2. **dag-cbor** - IPFS/IPLD canonical encoding (used in production by IPFS):
+   - `dag-cbor+sha256` - DAG-CBOR encoding with SHA-256
+   - `dag-cbor+blake2b` - DAG-CBOR encoding with BLAKE2b-256 (faster hash)
+   - `dag-cbor+CID` - Full IPLD Content Identifier (CIDv1)
 
-3. **hash-it** - Fast object hashing library
+3. **object-hash** - Popular npm package for object hashing
 
-4. **stable-stringify+noble** - fast-json-stable-stringify + @noble/hashes SHA-256
+4. **hash-it** - Fast object hashing library
 
-5. **JSON.stringify+noble (UNSTABLE)** - Baseline using regular JSON.stringify
+5. **stable-stringify+noble** - fast-json-stable-stringify + @noble/hashes SHA-256
+
+6. **JSON.stringify+noble (UNSTABLE)** - Baseline using regular JSON.stringify
    (NOT stable for property order)
 
 ### Test Data Structures
@@ -67,10 +72,12 @@ All dependencies are loaded from esm.sh at runtime, so no packages need to be
 added to the repository:
 
 - merkle-reference@2.2.0
+- @ipld/dag-cbor@9.2.1
+- multiformats@13.3.2 (CID and multihash support)
 - object-hash@3.0.0
 - hash-it@6.0.0
 - fast-json-stable-stringify@2.1.0
-- @noble/hashes@1.4.0
+- @noble/hashes@1.4.0 (sha256 and blake2b)
 - hash-wasm@4.11.0
 
 ## Output
@@ -93,6 +100,9 @@ Environment: Deno
 merkle-reference[noble]                  ✓ STABLE
 merkle-reference[hash-wasm]              ✓ STABLE
 merkle-reference[node:crypto]            ✓ STABLE
+dag-cbor+sha256                          ✓ STABLE
+dag-cbor+blake2b                         ✓ STABLE
+dag-cbor+CID                             ✓ STABLE
 object-hash                              ✓ STABLE
 hash-it                                  ✓ STABLE
 stable-stringify+noble                   ✓ STABLE
@@ -103,6 +113,8 @@ JSON.stringify+noble (UNSTABLE)          ✗ UNSTABLE
 merkle-reference[noble]                  45.23ms (221K ops/sec)
 merkle-reference[hash-wasm]              32.15ms (311K ops/sec)
 merkle-reference[node:crypto]            28.94ms (345K ops/sec)
+dag-cbor+sha256                          35.67ms (280K ops/sec)
+dag-cbor+blake2b                         31.45ms (318K ops/sec)
 object-hash                              38.67ms (258K ops/sec)
 ...
 
@@ -112,6 +124,8 @@ Strategy                                simple      nested      array       ...
 --------------------------------------------------------------------------------
 merkle-reference[noble]                 221K        198K        245K        ...
 merkle-reference[hash-wasm]             311K        287K        356K        ...
+dag-cbor+sha256                         280K        255K        290K        ...
+dag-cbor+blake2b                        318K        289K        330K        ...
 ...
 ```
 
@@ -125,6 +139,21 @@ merkle-reference[hash-wasm]             311K        287K        356K        ...
 - **Deep vs Broad** - Deep tests recursion handling; broad tests property
   iteration performance
 - **Sparse arrays** - Tests handling of undefined/empty array elements
+
+## Why DAG-CBOR?
+
+DAG-CBOR (Directed Acyclic Graph - Concise Binary Object Representation) is
+specifically designed for content-addressable data and is battle-tested in
+production by IPFS and related systems. Key advantages:
+
+- **Canonical encoding**: Guaranteed stable hashing (property order normalized)
+- **Binary format**: More compact than JSON-based approaches
+- **IPLD ecosystem**: Interoperability with IPFS, Filecoin, and other systems
+- **Link support**: Native support for content-addressed links between objects
+- **Production proven**: Used at scale in decentralized systems
+
+DAG-CBOR could be a simpler alternative to `merkle-reference` if you need stable
+object hashing but not the full Merkle tree structure.
 
 ## Current Usage
 
