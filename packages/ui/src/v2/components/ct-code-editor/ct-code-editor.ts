@@ -158,12 +158,19 @@ export class CTCodeEditor extends BaseElement {
   private _themeComp = new Compartment();
   private _cleanupFns: Array<() => void> = [];
   private _mentionableUnsub: (() => void) | null = null;
+  // Track when we're updating the Cell from editor changes to avoid feedback loops
+  // that cause cursor jumping. When true, Cell subscription callbacks should skip
+  // updating the editor since the value came from the editor itself.
+  private _updatingCellFromEditor = false;
   private _cellController = createStringCellController(this, {
     timing: {
       strategy: "debounce",
       delay: 500,
     },
     onChange: (newValue: string, oldValue: string) => {
+      // Reset the flag after the debounced Cell update completes.
+      // This allows future external Cell changes to sync to the editor.
+      this._updatingCellFromEditor = false;
       this.emit("ct-change", {
         value: newValue,
         oldValue,
@@ -605,17 +612,33 @@ export class CTCodeEditor extends BaseElement {
   }
 
   private _updateEditorFromCellValue(): void {
+    // Skip if this update originated from the editor itself (user typing).
+    // This prevents a feedback loop where: user types → Cell updates → this
+    // method fires → cursor jumps to position 0. The editor already has the
+    // correct content since it was the source of the change.
+    if (this._updatingCellFromEditor) {
+      return;
+    }
+
     // Update editor content when cell value changes externally
     if (this._editorView) {
       const newValue = this.getValue();
       const currentValue = this._editorView.state.doc.toString();
       if (newValue !== currentValue) {
+        // Preserve cursor position when syncing external changes.
+        // Clamp to new document length in case the new content is shorter.
+        const currentSelection = this._editorView.state.selection.main;
+        const newLength = newValue.length;
+        const anchorPos = Math.min(currentSelection.anchor, newLength);
+        const headPos = Math.min(currentSelection.head, newLength);
+
         this._editorView.dispatch({
           changes: {
             from: 0,
             to: this._editorView.state.doc.length,
             insert: newValue,
           },
+          selection: { anchor: anchorPos, head: headPos },
         });
       }
     }
@@ -855,6 +878,10 @@ export class CTCodeEditor extends BaseElement {
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !this.readonly) {
           const value = update.state.doc.toString();
+          // Mark that we're updating the Cell from editor changes.
+          // This flag prevents _updateEditorFromCellValue from running
+          // when the Cell subscription fires, avoiding cursor jump to 0,0.
+          this._updatingCellFromEditor = true;
           this.setValue(value);
           // Keep $mentioned current as user types
           this._updateMentionedFromContent();
