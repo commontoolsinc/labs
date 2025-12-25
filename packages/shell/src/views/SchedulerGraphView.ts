@@ -20,6 +20,7 @@ interface LayoutNode {
   parentId?: string;
   childCount?: number;
   collapsedChildCount?: number; // Number of hidden children when collapsed
+  preview?: string; // Function body preview for hover tooltip
   reads?: string[]; // Diagnostic: cell paths this action reads
   writes?: string[]; // Diagnostic: cell paths this action writes
 }
@@ -177,6 +178,13 @@ export class XSchedulerGraph extends LitElement {
       color: #cbd5e1;
     }
 
+    .graph-wrapper {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+      position: relative;
+    }
+
     .graph-container {
       flex: 1;
       overflow: auto;
@@ -221,6 +229,16 @@ export class XSchedulerGraph extends LitElement {
 
     .node-input .node-rect {
       fill: #065f46; /* emerald-800 */
+    }
+
+    .node-inactive .node-rect {
+      fill: #374151; /* gray-700 */
+      opacity: 0.7;
+    }
+
+    .node-inactive .node-label {
+      fill: #9ca3af; /* gray-400 */
+      font-style: italic;
     }
 
     .node-dirty .node-rect {
@@ -431,6 +449,11 @@ export class XSchedulerGraph extends LitElement {
       color: #8b5cf6;
     }
 
+    .node-selected .node-rect {
+      stroke: #f59e0b;
+      stroke-width: 3;
+    }
+
     /* Size boost animation for triggered nodes when zoomed out */
     @keyframes node-size-boost {
       0%, 100% {
@@ -544,10 +567,206 @@ export class XSchedulerGraph extends LitElement {
       color: #6ee7b7;
     }
 
+    .type-badge.inactive {
+      background: #374151;
+      color: #9ca3af;
+      font-style: italic;
+    }
+
+    /* Table wrapper for detail pane layout */
+    .table-wrapper {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .table-wrapper .table-container {
+      flex: 1;
+      overflow: auto;
+    }
+
+    .table-wrapper .detail-pane {
+      width: 350px;
+      flex-shrink: 0;
+      border-left: 1px solid #334155;
+    }
+
+    /* Expand/collapse toggle button */
+    .expand-toggle {
+      background: none;
+      border: none;
+      color: #64748b;
+      cursor: pointer;
+      padding: 0;
+      width: 1.25rem;
+      font-size: 0.625rem;
+      text-align: center;
+      transition: color 0.15s;
+    }
+
+    .expand-toggle:hover {
+      color: #94a3b8;
+    }
+
+    /* Parent row styling */
+    .stats-table tr.parent-row {
+      background: #1a2744;
+    }
+
+    .stats-table tr.parent-row td {
+      border-bottom-color: #334155;
+    }
+
+    /* Selected row styling */
+    .stats-table tr.selected td {
+      background: #1e3a5f;
+    }
+
+    .stats-table tr.selected:hover td {
+      background: #234768;
+    }
+
+    /* Child row styling */
+    .stats-table tr.child-row {
+      background: #0c1322;
+    }
+
+    .stats-table tr.child-row td {
+      border-bottom-color: #1e293b;
+    }
+
+    .child-indent {
+      color: #475569;
+      margin-right: 0.25rem;
+    }
+
+    /* Aggregated stats styling */
+    .aggregated {
+      color: #94a3b8;
+      font-style: italic;
+    }
+
+    .child-count {
+      color: #64748b;
+      font-size: 0.625rem;
+      margin-left: 0.25rem;
+    }
+
     .view-toggle {
       display: flex;
       gap: 0;
       margin-left: 0.5rem;
+    }
+
+    .detail-pane {
+      width: 320px;
+      flex-shrink: 0;
+      background: #1e293b;
+      border-left: 1px solid #475569;
+      padding: 0.75rem;
+      overflow-y: auto;
+      font-size: 0.75rem;
+    }
+
+    .detail-pane-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid #475569;
+    }
+
+    .detail-pane-title {
+      font-weight: 600;
+      color: #f1f5f9;
+      font-size: 0.875rem;
+    }
+
+    .detail-pane-close {
+      background: none;
+      border: none;
+      color: #94a3b8;
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 0.25rem;
+    }
+
+    .detail-pane-close:hover {
+      color: #f1f5f9;
+    }
+
+    .detail-section {
+      margin-bottom: 0.75rem;
+    }
+
+    .detail-section-title {
+      font-weight: 600;
+      color: #94a3b8;
+      font-size: 0.6875rem;
+      text-transform: uppercase;
+      margin-bottom: 0.25rem;
+    }
+
+    .detail-section-content {
+      color: #cbd5e1;
+      font-family: monospace;
+      font-size: 0.6875rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .detail-stats {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.5rem;
+    }
+
+    .detail-stat {
+      background: #0f172a;
+      padding: 0.5rem;
+      border-radius: 0.25rem;
+    }
+
+    .detail-stat-label {
+      color: #64748b;
+      font-size: 0.625rem;
+      text-transform: uppercase;
+    }
+
+    .detail-stat-value {
+      color: #f1f5f9;
+      font-size: 0.875rem;
+      font-weight: 600;
+    }
+
+    .detail-preview {
+      background: #0f172a;
+      padding: 0.5rem;
+      border-radius: 0.25rem;
+      font-family: monospace;
+      font-size: 0.625rem;
+      color: #94a3b8;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 150px;
+      overflow-y: auto;
+    }
+
+    .detail-cell-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .detail-cell {
+      background: #0f172a;
+      padding: 0.25rem 0.5rem;
+      border-radius: 0.25rem;
+      font-family: monospace;
+      font-size: 0.625rem;
+      color: #94a3b8;
+      word-break: break-all;
     }
   `;
 
@@ -568,6 +787,9 @@ export class XSchedulerGraph extends LitElement {
 
   @state()
   private selectedEdge: LayoutEdge | null = null;
+
+  @state()
+  private selectedNode: LayoutNode | null = null;
 
   @state()
   private tooltipPosition = { x: 0, y: 0 };
@@ -593,6 +815,9 @@ export class XSchedulerGraph extends LitElement {
 
   @state()
   private tableSortAscending = false;
+
+  @state()
+  private tableExpandedParents = new Set<string>();
 
   @query(".graph-container")
   private graphContainer?: HTMLElement;
@@ -754,6 +979,7 @@ export class XSchedulerGraph extends LitElement {
           parentId: effParent,
           childCount: effChildCount > 0 ? effChildCount : undefined,
           collapsedChildCount: collapsedChildCounts.get(nodeId),
+          preview: originalNode?.preview,
           reads: originalNode?.reads,
           writes: originalNode?.writes,
         });
@@ -940,6 +1166,7 @@ export class XSchedulerGraph extends LitElement {
 
   private handleRefresh(): void {
     this.debuggerController?.requestGraphSnapshot();
+    this.requestUpdate();
   }
 
   private handleModeToggle(pullMode: boolean): void {
@@ -961,6 +1188,7 @@ export class XSchedulerGraph extends LitElement {
   private handleEdgeClick(e: MouseEvent, edge: LayoutEdge): void {
     e.stopPropagation();
 
+    this.selectedNode = null; // Clear node selection
     if (this.selectedEdge?.id === edge.id) {
       this.selectedEdge = null;
     } else {
@@ -969,8 +1197,20 @@ export class XSchedulerGraph extends LitElement {
     }
   }
 
+  private handleNodeClick(e: MouseEvent, node: LayoutNode): void {
+    e.stopPropagation();
+
+    this.selectedEdge = null; // Clear edge selection
+    if (this.selectedNode?.id === node.id) {
+      this.selectedNode = null;
+    } else {
+      this.selectedNode = node;
+    }
+  }
+
   private handleContainerClick(): void {
     this.selectedEdge = null;
+    this.selectedNode = null;
   }
 
   private handleZoomIn(): void {
@@ -1163,7 +1403,10 @@ export class XSchedulerGraph extends LitElement {
         <button
           type="button"
           class="action-button"
-          @click="${() => this.debuggerController?.clearHistoricalEdges()}"
+          @click="${() => {
+            this.debuggerController?.clearHistoricalEdges();
+            this.requestUpdate();
+          }}"
           title="Clear historical edges"
         >
           Clear History
@@ -1216,6 +1459,8 @@ export class XSchedulerGraph extends LitElement {
     // Boost triggered nodes when zoomed out below readable threshold
     const shouldBoost = isTriggered && this.shouldBoostTriggeredNodes;
 
+    const isSelected = this.selectedNode?.id === node.id;
+
     const nodeClass = [
       "node-group",
       `node-${node.type}`,
@@ -1223,6 +1468,7 @@ export class XSchedulerGraph extends LitElement {
       node.isPending ? "node-pending" : "",
       isTriggered ? "node-triggered" : "",
       shouldBoost ? "node-boosted" : "",
+      isSelected ? "node-selected" : "",
     ]
       .filter(Boolean)
       .join(" ");
@@ -1230,11 +1476,12 @@ export class XSchedulerGraph extends LitElement {
     const x = node.x - node.width / 2;
     const y = node.y - node.height / 2;
 
-    // Build tooltip with reads/writes diagnostic info
+    // Build tooltip with preview and reads/writes diagnostic info
     let tooltip: string;
     if (node.type === "input") {
       tooltip = `${node.fullId}\n(Source cell - no writer)`;
     } else {
+      const previewInfo = node.preview ? `\n\n${node.preview}` : "";
       const readsInfo = node.reads?.length
         ? `\nReads (${node.reads.length}): ${
           node.reads.slice(0, 5).join(", ")
@@ -1245,13 +1492,15 @@ export class XSchedulerGraph extends LitElement {
           node.writes.slice(0, 5).join(", ")
         }${node.writes.length > 5 ? "..." : ""}`
         : "\nWrites: none";
-      tooltip = `${node.fullId}${readsInfo}${writesInfo}`;
+      tooltip = `${node.fullId}${previewInfo}${readsInfo}${writesInfo}`;
     }
 
     return svgTag`
       <g
         class="${nodeClass}"
         transform="translate(${x}, ${y})"
+        @click="${(e: MouseEvent) => this.handleNodeClick(e, node)}"
+        style="cursor: pointer;"
       >
         <title>${tooltip}</title>
         <rect
@@ -1548,6 +1797,172 @@ export class XSchedulerGraph extends LitElement {
     `;
   }
 
+  private renderDetailPane(): TemplateResult | null {
+    if (!this.selectedNode && !this.selectedEdge) return null;
+
+    const formatTime = (ms: number) => {
+      if (ms === 0) return "-";
+      if (ms < 1) return `${(ms * 1000).toFixed(0)}µs`;
+      if (ms < 1000) return `${ms.toFixed(1)}ms`;
+      return `${(ms / 1000).toFixed(2)}s`;
+    };
+
+    if (this.selectedNode) {
+      const node = this.selectedNode;
+      return html`
+        <div class="detail-pane">
+          <div class="detail-pane-header">
+            <span class="detail-pane-title">
+              <span class="type-badge ${node.type}">${node.type}</span>
+              ${node.label}
+            </span>
+            <button
+              class="detail-pane-close"
+              @click="${() => (this.selectedNode = null)}"
+            >
+              ×
+            </button>
+          </div>
+
+          <div class="detail-section">
+            <div class="detail-section-title">ID</div>
+            <div class="detail-section-content">${node.fullId}</div>
+          </div>
+
+          ${node.stats
+            ? html`
+                <div class="detail-section">
+                  <div class="detail-section-title">Stats</div>
+                  <div class="detail-stats">
+                    <div class="detail-stat">
+                      <div class="detail-stat-label">Runs</div>
+                      <div class="detail-stat-value">${node.stats.runCount}</div>
+                    </div>
+                    <div class="detail-stat">
+                      <div class="detail-stat-label">Total</div>
+                      <div class="detail-stat-value">
+                        ${formatTime(node.stats.totalTime)}
+                      </div>
+                    </div>
+                    <div class="detail-stat">
+                      <div class="detail-stat-label">Average</div>
+                      <div class="detail-stat-value">
+                        ${formatTime(node.stats.averageTime)}
+                      </div>
+                    </div>
+                    <div class="detail-stat">
+                      <div class="detail-stat-label">Last</div>
+                      <div class="detail-stat-value">
+                        ${formatTime(node.stats.lastRunTime)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              `
+            : ""}
+
+          ${node.preview
+            ? html`
+                <div class="detail-section">
+                  <div class="detail-section-title">Code Preview</div>
+                  <div class="detail-preview">${node.preview}</div>
+                </div>
+              `
+            : ""}
+
+          ${node.reads && node.reads.length > 0
+            ? html`
+                <div class="detail-section">
+                  <div class="detail-section-title">
+                    Reads (${node.reads.length})
+                  </div>
+                  <div class="detail-cell-list">
+                    ${node.reads.map(
+                      (r) => html`<div class="detail-cell">${r}</div>`,
+                    )}
+                  </div>
+                </div>
+              `
+            : ""}
+
+          ${node.writes && node.writes.length > 0
+            ? html`
+                <div class="detail-section">
+                  <div class="detail-section-title">
+                    Writes (${node.writes.length})
+                  </div>
+                  <div class="detail-cell-list">
+                    ${node.writes.map(
+                      (w) => html`<div class="detail-cell">${w}</div>`,
+                    )}
+                  </div>
+                </div>
+              `
+            : ""}
+        </div>
+      `;
+    }
+
+    if (this.selectedEdge) {
+      const fromNode = this.layoutNodes.get(this.selectedEdge.from);
+      const toNode = this.layoutNodes.get(this.selectedEdge.to);
+
+      return html`
+        <div class="detail-pane">
+          <div class="detail-pane-header">
+            <span class="detail-pane-title">Edge</span>
+            <button
+              class="detail-pane-close"
+              @click="${() => (this.selectedEdge = null)}"
+            >
+              ×
+            </button>
+          </div>
+
+          <div class="detail-section">
+            <div class="detail-section-title">From</div>
+            <div class="detail-section-content">
+              ${fromNode?.label ?? this.selectedEdge.from}
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <div class="detail-section-title">To</div>
+            <div class="detail-section-content">
+              ${toNode?.label ?? this.selectedEdge.to}
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <div class="detail-section-title">
+              Cells (${this.selectedEdge.cells.length})
+            </div>
+            <div class="detail-cell-list">
+              ${this.selectedEdge.cells.length > 0
+                ? this.selectedEdge.cells.map(
+                    (c) => html`<div class="detail-cell">${c}</div>`,
+                  )
+                : html`<div class="detail-cell">(no cells tracked)</div>`}
+            </div>
+          </div>
+
+          ${this.selectedEdge.isHistorical
+            ? html`
+                <div
+                  class="detail-section"
+                  style="color: #f59e0b; font-style: italic;"
+                >
+                  This edge is historical (no longer active)
+                </div>
+              `
+            : ""}
+        </div>
+      `;
+    }
+
+    return null;
+  }
+
   private renderLegend(): TemplateResult {
     return html`
       <div class="legend">
@@ -1580,13 +1995,16 @@ export class XSchedulerGraph extends LitElement {
       ${this.renderToolbar()}
       ${this.viewMode === "graph"
         ? html`
-            <div
-              class="graph-container"
-              @click="${this.handleContainerClick}"
-              @wheel="${this.handleWheel}"
-            >
-              ${this.renderGraph()} ${this.renderTooltip()}
-              ${this.renderLegend()}
+            <div class="graph-wrapper">
+              <div
+                class="graph-container"
+                @click="${this.handleContainerClick}"
+                @wheel="${this.handleWheel}"
+              >
+                ${this.renderGraph()} ${this.renderTooltip()}
+                ${this.renderLegend()}
+              </div>
+              ${this.renderDetailPane()}
             </div>
           `
         : this.renderTable()}
@@ -1594,40 +2012,95 @@ export class XSchedulerGraph extends LitElement {
   }
 
   private renderTable(): TemplateResult {
-    // Get all nodes with stats and sort them
-    const nodesWithStats = Array.from(this.layoutNodes.values())
+    // Get all nodes with stats
+    const allNodesWithStats = Array.from(this.layoutNodes.values())
       .filter((n) => n.type !== "input" && n.stats)
       .map((n) => ({
         id: n.id,
         fullId: n.fullId,
         label: n.label,
         type: n.type,
+        preview: n.preview,
+        parentId: n.parentId,
         runCount: n.stats?.runCount ?? 0,
         totalTime: n.stats?.totalTime ?? 0,
         avgTime: n.stats?.averageTime ?? 0,
         lastTime: n.stats?.lastRunTime ?? 0,
         lastTimestamp: n.stats?.lastRunTimestamp ?? 0,
+        reads: n.reads,
+        writes: n.writes,
       }));
 
-    // Sort based on current column
-    nodesWithStats.sort((a, b) => {
-      let cmp = 0;
-      switch (this.tableSortColumn) {
-        case "totalTime":
-          cmp = b.totalTime - a.totalTime;
-          break;
-        case "runCount":
-          cmp = b.runCount - a.runCount;
-          break;
-        case "avgTime":
-          cmp = b.avgTime - a.avgTime;
-          break;
-        case "lastTime":
-          cmp = b.lastTime - a.lastTime;
-          break;
+    // Build parent-child hierarchy with aggregated stats
+    type NodeWithStats = (typeof allNodesWithStats)[0];
+    interface GroupedNode extends NodeWithStats {
+      children: NodeWithStats[];
+      aggregatedTotalTime: number;
+      aggregatedRunCount: number;
+      isParent: boolean;
+    }
+
+    const nodeById = new Map(allNodesWithStats.map((n) => [n.id, n]));
+    const childrenByParent = new Map<string, NodeWithStats[]>();
+
+    // Group children by parent
+    for (const node of allNodesWithStats) {
+      if (node.parentId && nodeById.has(node.parentId)) {
+        if (!childrenByParent.has(node.parentId)) {
+          childrenByParent.set(node.parentId, []);
+        }
+        childrenByParent.get(node.parentId)!.push(node);
       }
-      return this.tableSortAscending ? -cmp : cmp;
-    });
+    }
+
+    // Create grouped nodes (top-level = no parent or parent not in our list)
+    const groupedNodes: GroupedNode[] = [];
+    const processedChildren = new Set<string>();
+
+    for (const node of allNodesWithStats) {
+      // Skip if this is a child of a visible parent
+      if (node.parentId && nodeById.has(node.parentId)) {
+        processedChildren.add(node.id);
+        continue;
+      }
+
+      const children = childrenByParent.get(node.id) ?? [];
+      const aggregatedTotalTime = node.totalTime +
+        children.reduce((sum, c) => sum + c.totalTime, 0);
+      const aggregatedRunCount = node.runCount +
+        children.reduce((sum, c) => sum + c.runCount, 0);
+
+      groupedNodes.push({
+        ...node,
+        children,
+        aggregatedTotalTime,
+        aggregatedRunCount,
+        isParent: children.length > 0,
+      });
+    }
+
+    // Sort based on current column
+    const sortNodes = (nodes: GroupedNode[]) => {
+      nodes.sort((a, b) => {
+        let cmp = 0;
+        switch (this.tableSortColumn) {
+          case "totalTime":
+            cmp = b.aggregatedTotalTime - a.aggregatedTotalTime;
+            break;
+          case "runCount":
+            cmp = b.aggregatedRunCount - a.aggregatedRunCount;
+            break;
+          case "avgTime":
+            cmp = b.avgTime - a.avgTime;
+            break;
+          case "lastTime":
+            cmp = b.lastTime - a.lastTime;
+            break;
+        }
+        return this.tableSortAscending ? -cmp : cmp;
+      });
+    };
+    sortNodes(groupedNodes);
 
     const sortIndicator = (col: typeof this.tableSortColumn) => {
       const isSorted = this.tableSortColumn === col;
@@ -1651,64 +2124,175 @@ export class XSchedulerGraph extends LitElement {
       return `${(ms / 1000).toFixed(2)}s`;
     };
 
+    const toggleExpand = (id: string, e: Event) => {
+      e.stopPropagation();
+      if (this.tableExpandedParents.has(id)) {
+        this.tableExpandedParents.delete(id);
+      } else {
+        this.tableExpandedParents.add(id);
+      }
+      this.requestUpdate();
+    };
+
+    const handleRowClick = (node: NodeWithStats) => {
+      // Find the layout node and select it
+      const layoutNode = this.layoutNodes.get(node.id);
+      if (layoutNode) {
+        this.selectedNode = layoutNode;
+        this.selectedEdge = null;
+      }
+    };
+
+    const renderRow = (
+      n: NodeWithStats,
+      isChild: boolean = false,
+      parentNode?: GroupedNode,
+    ) => {
+      const isSelected = this.selectedNode?.id === n.id;
+      return html`
+        <tr
+          class="${isChild ? "child-row" : ""} ${isSelected ? "selected" : ""}"
+          title="${n.fullId}${n.preview ? `\n\n${n.preview}` : ""}"
+          @click="${() => handleRowClick(n)}"
+        >
+          <td class="col-type">
+            <span class="type-badge ${n.type}">${n.type}</span>
+          </td>
+          <td class="col-name">
+            ${isChild ? html`<span class="child-indent">└─</span>` : ""}
+            ${n.label}
+          </td>
+          <td class="col-number">${n.runCount}</td>
+          <td class="col-number">${formatTime(n.totalTime)}</td>
+          <td class="col-number">${formatTime(n.avgTime)}</td>
+          <td class="col-number">${formatTime(n.lastTime)}</td>
+        </tr>
+      `;
+    };
+
+    const renderGroupedRow = (n: GroupedNode) => {
+      const isExpanded = this.tableExpandedParents.has(n.id);
+      const isSelected = this.selectedNode?.id === n.id;
+      const rows: TemplateResult[] = [];
+
+      // Parent row with aggregated stats
+      rows.push(html`
+        <tr
+          class="parent-row ${isSelected ? "selected" : ""}"
+          title="${n.fullId}${n.preview ? `\n\n${n.preview}` : ""}"
+          @click="${() => handleRowClick(n)}"
+        >
+          <td class="col-type">
+            <span class="type-badge ${n.type}">${n.type}</span>
+          </td>
+          <td class="col-name">
+            ${n.isParent
+              ? html`<button
+                  class="expand-toggle"
+                  @click="${(e: Event) => toggleExpand(n.id, e)}"
+                >
+                  ${isExpanded ? "▼" : "▶"}
+                </button>`
+              : ""}
+            ${n.label}
+            ${n.isParent
+              ? html`<span class="child-count">(${n.children.length})</span>`
+              : ""}
+          </td>
+          <td class="col-number">
+            ${n.isParent && !isExpanded
+              ? html`<span class="aggregated">${n.aggregatedRunCount}</span>`
+              : n.runCount}
+          </td>
+          <td class="col-number">
+            ${n.isParent && !isExpanded
+              ? html`<span class="aggregated"
+                  >${formatTime(n.aggregatedTotalTime)}</span
+                >`
+              : formatTime(n.totalTime)}
+          </td>
+          <td class="col-number">${formatTime(n.avgTime)}</td>
+          <td class="col-number">${formatTime(n.lastTime)}</td>
+        </tr>
+      `);
+
+      // Child rows (if expanded)
+      if (isExpanded && n.children.length > 0) {
+        // Sort children too
+        const sortedChildren = [...n.children].sort((a, b) => {
+          let cmp = 0;
+          switch (this.tableSortColumn) {
+            case "totalTime":
+              cmp = b.totalTime - a.totalTime;
+              break;
+            case "runCount":
+              cmp = b.runCount - a.runCount;
+              break;
+            case "avgTime":
+              cmp = b.avgTime - a.avgTime;
+              break;
+            case "lastTime":
+              cmp = b.lastTime - a.lastTime;
+              break;
+          }
+          return this.tableSortAscending ? -cmp : cmp;
+        });
+        for (const child of sortedChildren) {
+          rows.push(renderRow(child, true, n));
+        }
+      }
+
+      return rows;
+    };
+
     return html`
-      <div class="table-container">
-        <table class="stats-table">
-          <thead>
-            <tr>
-              <th class="col-type">Type</th>
-              <th class="col-name">Action</th>
-              <th
-                class="col-number ${this.tableSortColumn === "runCount"
-                  ? "sorted"
-                  : ""}"
-                @click="${() => handleSort("runCount")}"
-              >
-                Runs ${sortIndicator("runCount")}
-              </th>
-              <th
-                class="col-number ${this.tableSortColumn === "totalTime"
-                  ? "sorted"
-                  : ""}"
-                @click="${() => handleSort("totalTime")}"
-              >
-                Total ${sortIndicator("totalTime")}
-              </th>
-              <th
-                class="col-number ${this.tableSortColumn === "avgTime"
-                  ? "sorted"
-                  : ""}"
-                @click="${() => handleSort("avgTime")}"
-              >
-                Avg ${sortIndicator("avgTime")}
-              </th>
-              <th
-                class="col-number ${this.tableSortColumn === "lastTime"
-                  ? "sorted"
-                  : ""}"
-                @click="${() => handleSort("lastTime")}"
-              >
-                Last ${sortIndicator("lastTime")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            ${nodesWithStats.map(
-              (n) => html`
-                <tr title="${n.fullId}">
-                  <td class="col-type">
-                    <span class="type-badge ${n.type}">${n.type}</span>
-                  </td>
-                  <td class="col-name">${n.label}</td>
-                  <td class="col-number">${n.runCount}</td>
-                  <td class="col-number">${formatTime(n.totalTime)}</td>
-                  <td class="col-number">${formatTime(n.avgTime)}</td>
-                  <td class="col-number">${formatTime(n.lastTime)}</td>
-                </tr>
-              `,
-            )}
-          </tbody>
-        </table>
+      <div class="table-wrapper">
+        <div class="table-container">
+          <table class="stats-table">
+            <thead>
+              <tr>
+                <th class="col-type">Type</th>
+                <th class="col-name">Action</th>
+                <th
+                  class="col-number ${this.tableSortColumn === "runCount"
+                    ? "sorted"
+                    : ""}"
+                  @click="${() => handleSort("runCount")}"
+                >
+                  Runs ${sortIndicator("runCount")}
+                </th>
+                <th
+                  class="col-number ${this.tableSortColumn === "totalTime"
+                    ? "sorted"
+                    : ""}"
+                  @click="${() => handleSort("totalTime")}"
+                >
+                  Total ${sortIndicator("totalTime")}
+                </th>
+                <th
+                  class="col-number ${this.tableSortColumn === "avgTime"
+                    ? "sorted"
+                    : ""}"
+                  @click="${() => handleSort("avgTime")}"
+                >
+                  Avg ${sortIndicator("avgTime")}
+                </th>
+                <th
+                  class="col-number ${this.tableSortColumn === "lastTime"
+                    ? "sorted"
+                    : ""}"
+                  @click="${() => handleSort("lastTime")}"
+                >
+                  Last ${sortIndicator("lastTime")}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              ${groupedNodes.map((n) => renderGroupedRow(n))}
+            </tbody>
+          </table>
+        </div>
+        ${this.renderDetailPane()}
       </div>
     `;
   }

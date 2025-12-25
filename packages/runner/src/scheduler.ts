@@ -166,7 +166,8 @@ export class Scheduler {
   private pullMode = true;
 
   // Compute time tracking for cycle-aware scheduling
-  private actionStats = new WeakMap<Action, ActionStats>();
+  // Keyed by action ID (source location) to persist stats across action recreation
+  private actionStats = new Map<string, ActionStats>();
   // Cycle detection during dependency collection
   private collectStack = new Set<Action>();
 
@@ -263,6 +264,16 @@ export class Scheduler {
       const result = this.consoleHandler({ metadata, method, args });
       console[method].apply(console, result);
     });
+  }
+
+  /**
+   * Gets a stable identifier for an action based on its source location.
+   * Prefers .src (set as backup) over .name, falls back to "anonymous".
+   * This ID is used for stats tracking to persist across action recreation.
+   */
+  private getActionId(action: Action): string {
+    return (action as Action & { src?: string }).src || action.name ||
+      "anonymous";
   }
 
   /**
@@ -939,18 +950,14 @@ export class Scheduler {
     const edges: SchedulerGraphEdge[] = [];
     const actionById = new Map<string, Action>();
 
-    // Helper to get action ID - prefer .src (backup) over .name
-    const getActionId = (action: Action): string =>
-      (action as Action & { src?: string }).src || action.name || "anonymous";
-
     // Build nodes from all known actions (effects + computations)
     for (const action of [...this.effects, ...this.computations]) {
-      const id = getActionId(action);
+      const id = this.getActionId(action);
       actionById.set(id, action);
 
       // Get parent-child relationships
       const parent = this.actionParent.get(action);
-      const parentId = parent ? getActionId(parent) : undefined;
+      const parentId = parent ? this.getActionId(parent) : undefined;
       const children = this.actionChildren.get(action);
       const childCount = children ? children.size : undefined;
 
@@ -966,11 +973,12 @@ export class Scheduler {
       nodes.push({
         id,
         type: this.effects.has(action) ? "effect" : "computation",
-        stats: this.actionStats.get(action),
+        stats: this.actionStats.get(id),
         isDirty: this.dirty.has(action),
         isPending: this.pending.has(action),
         parentId,
         childCount: childCount && childCount > 0 ? childCount : undefined,
+        preview: (action as Action & { module?: { implementation?: { preview?: string } } }).module?.implementation?.preview,
         reads,
         writes,
       });
@@ -978,11 +986,11 @@ export class Scheduler {
 
     // Build edges from dependents map
     for (const action of [...this.effects, ...this.computations]) {
-      const actionId = getActionId(action);
+      const actionId = this.getActionId(action);
       const deps = this.dependents.get(action);
       if (deps) {
         for (const dependent of deps) {
-          const dependentId = getActionId(dependent);
+          const dependentId = this.getActionId(dependent);
           // Find overlapping cells between action's writes and dependent's reads
           const cells = this.findOverlappingCells(action, dependent);
           edges.push({
@@ -1000,7 +1008,7 @@ export class Scheduler {
     const writtenEntities = new Set<string>();
 
     for (const action of [...this.effects, ...this.computations]) {
-      const actionId = getActionId(action);
+      const actionId = this.getActionId(action);
       const deps = this.dependencies.get(action);
       if (deps) {
         for (const read of deps.reads) {
@@ -1046,8 +1054,8 @@ export class Scheduler {
     for (const action of [...this.effects, ...this.computations]) {
       const parent = this.actionParent.get(action);
       if (parent) {
-        const parentId = getActionId(parent);
-        const childId = getActionId(action);
+        const parentId = this.getActionId(parent);
+        const childId = this.getActionId(action);
         // Only add if both nodes exist in the graph
         if (actionById.has(parentId)) {
           edges.push({
@@ -1057,6 +1065,20 @@ export class Scheduler {
             edgeType: "parent",
           });
         }
+      }
+    }
+
+    // Add inactive nodes for actions that have stats but are no longer registered
+    // This preserves visibility of actions that were unsubscribed
+    for (const [actionId, stats] of this.actionStats) {
+      if (!actionById.has(actionId)) {
+        nodes.push({
+          id: actionId,
+          type: "inactive",
+          stats,
+          isDirty: false,
+          isPending: false,
+        });
       }
     }
 
@@ -1266,10 +1288,12 @@ export class Scheduler {
   /**
    * Records the execution time for an action.
    * Updates running statistics including run count, total time, and average time.
+   * Stats are keyed by action ID (source location) to persist across action recreation.
    */
   private recordActionTime(action: Action, elapsed: number): void {
     const now = performance.now();
-    const existing = this.actionStats.get(action);
+    const actionId = this.getActionId(action);
+    const existing = this.actionStats.get(actionId);
     if (existing) {
       existing.runCount++;
       existing.totalTime += elapsed;
@@ -1277,7 +1301,7 @@ export class Scheduler {
       existing.lastRunTime = elapsed;
       existing.lastRunTimestamp = now;
     } else {
-      this.actionStats.set(action, {
+      this.actionStats.set(actionId, {
         runCount: 1,
         totalTime: elapsed,
         averageTime: elapsed,
@@ -1293,9 +1317,13 @@ export class Scheduler {
   /**
    * Returns the execution statistics for an action, if available.
    * Useful for diagnostics and determining cycle convergence strategy.
+   * Accepts either an Action or an action ID string.
    */
-  getActionStats(action: Action): ActionStats | undefined {
-    return this.actionStats.get(action);
+  getActionStats(action: Action | string): ActionStats | undefined {
+    const actionId = typeof action === "string"
+      ? action
+      : this.getActionId(action);
+    return this.actionStats.get(actionId);
   }
 
   // ============================================================
@@ -1400,7 +1428,7 @@ export class Scheduler {
     // Check if already has a manual debounce set
     if (this.actionDebounce.has(action)) return;
 
-    const stats = this.actionStats.get(action);
+    const stats = this.actionStats.get(this.getActionId(action));
     if (!stats) return;
 
     // Need minimum runs before auto-detecting
@@ -1458,7 +1486,7 @@ export class Scheduler {
     const throttleMs = this.actionThrottle.get(action);
     if (!throttleMs) return false;
 
-    const stats = this.actionStats.get(action);
+    const stats = this.actionStats.get(this.getActionId(action));
     if (!stats) return false; // No stats yet, action hasn't run
 
     const elapsed = performance.now() - stats.lastRunTimestamp;

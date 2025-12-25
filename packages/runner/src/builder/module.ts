@@ -26,7 +26,7 @@ import { generateHandlerSchema } from "../schema.ts";
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,
 ): ModuleFactory<T, R> {
-  // Attach source location to function implementations for debugging
+  // Attach source location and preview to function implementations for debugging
   if (typeof moduleSpec.implementation === "function") {
     const location = getExternalSourceLocation();
     if (location) {
@@ -37,6 +37,12 @@ export function createNodeFactory<T = any, R = any>(
       // Also set .src as backup (name can be finicky)
       (moduleSpec.implementation as { src?: string }).src = location;
     }
+    // Store function body preview for hover tooltips
+    const fnStr = moduleSpec.implementation.toString();
+    (moduleSpec.implementation as { preview?: string }).preview = fnStr.slice(
+      0,
+      200,
+    );
   }
 
   const module: Module & toJSON = {
@@ -189,7 +195,7 @@ function handlerInternal<E, T>(
     }
   }
 
-  // Attach source location to handler function for debugging
+  // Attach source location and preview to handler function for debugging
   if (typeof handler === "function") {
     const location = getExternalSourceLocation();
     if (location) {
@@ -200,6 +206,9 @@ function handlerInternal<E, T>(
       // Also set .src as backup (name can be finicky)
       (handler as { src?: string }).src = location;
     }
+    // Store function body preview for hover tooltips
+    const fnStr = handler.toString();
+    (handler as { preview?: string }).preview = fnStr.slice(0, 200);
   }
 
   const schema = generateHandlerSchema(
