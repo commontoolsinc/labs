@@ -365,6 +365,22 @@ apk add --no-cache ca-certificates
 sudo update-ca-certificates
 ```
 
+#### Claude Code for Web Proxy Issues
+
+When running in Claude Code for Web, Deno npm package downloads may intermittently fail with "unsuccessful tunnel" errors:
+
+```
+error: Failed caching npm package: client error (Connect): unsuccessful tunnel
+```
+
+This occurs because the web sandbox routes all traffic through an egress proxy. Deno respects `HTTP_PROXY`/`HTTPS_PROXY` environment variables, but the proxy connection can be unstable. **Workarounds:**
+
+1. **Retry the command** - Each run caches more packages, so repeated attempts will eventually succeed
+2. **Use Bun instead** - Bun 1.3.2 is pre-installed and handles the proxy more reliably
+3. **Run locally** - For extensive testing, use a local development environment
+
+For more details, see [Getting Node.js and npm Working in Claude Code for Web](https://www.wunsch.dk/blog/claude-code-web-connectivity/).
+
 ### Running Tests
 
 - Check typings with `deno task check`.
