@@ -925,20 +925,6 @@ export const ExtractorModule = recipe<
       }).length;
     });
 
-    // Total changes count includes Notes cleanup when enabled
-    const totalChangesCount = computed(() => {
-      // Dereference selectedCount to get the actual number value
-      const baseCount = Number(selectedCount) || 0;
-      // Add 1 for Notes cleanup if enabled and has actual changes
-      const rawEnabled = cleanupNotesEnabled.get();
-      const enabled = typeof rawEnabled === "boolean" ? rawEnabled : true;
-      const hasChanges = Boolean(hasNotesChanges);
-      if (enabled && hasChanges) {
-        return baseCount + 1;
-      }
-      return baseCount;
-    });
-
     // Determine current phase based on state
     const currentPhase = computed(() => {
       const phase = extractPhase.get() || "select";
@@ -1045,6 +1031,20 @@ ${extractedSummary.join("\n")}`;
 
       const cleaned = cleanedNotesContent;
       return cleaned !== snapshot;
+    });
+
+    // Total changes count includes Notes cleanup when enabled
+    const totalChangesCount = computed(() => {
+      // Dereference selectedCount to get the actual number value
+      const baseCount = Number(selectedCount) || 0;
+      // Add 1 for Notes cleanup if enabled and has actual changes
+      const rawEnabled = cleanupNotesEnabled.get();
+      const enabled = typeof rawEnabled === "boolean" ? rawEnabled : true;
+      const hasChanges = Boolean(hasNotesChanges);
+      if (enabled && hasChanges) {
+        return baseCount + 1;
+      }
+      return baseCount;
     });
 
     // Count sources selected for trash (excluding Notes - Notes is never trashed)
