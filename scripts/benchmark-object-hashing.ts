@@ -25,9 +25,11 @@ const stableStringify = await import(
 // @ts-ignore - dynamic import from esm.sh
 const { sha256 } = await import("https://esm.sh/@noble/hashes@1.4.0/sha256");
 // @ts-ignore - dynamic import from esm.sh
-const { blake2b256 } = await import(
+const { blake2b } = await import(
   "https://esm.sh/@noble/hashes@1.4.0/blake2b"
 );
+// Create a 256-bit blake2b hasher
+const blake2b256 = (data: Uint8Array) => blake2b(data, { dkLen: 32 });
 // @ts-ignore - dynamic import from esm.sh
 const { createSHA256 } = await import("https://esm.sh/hash-wasm@4.11.0");
 // @ts-ignore - dynamic import from esm.sh
@@ -100,6 +102,423 @@ const testData = {
       },
     },
   },
+
+  // VDOM-like structures (simulating complex UI)
+  vdom: {
+    // Simple component
+    simpleComponent: {
+      type: "div",
+      props: {
+        className: "container mx-auto p-4",
+        style: { display: "flex", flexDirection: "column" },
+      },
+      children: [
+        { type: "h1", props: { className: "text-2xl font-bold" }, children: ["Hello World"] },
+        { type: "p", props: { className: "text-gray-600" }, children: ["Welcome to our app"] },
+      ],
+    },
+
+    // Form with inputs (typical form component)
+    formComponent: {
+      type: "form",
+      props: {
+        className: "space-y-4",
+        onSubmit: "handleSubmit",
+        method: "POST",
+      },
+      children: Array.from({ length: 20 }, (_, i) => ({
+        type: "div",
+        props: { className: "form-group" },
+        children: [
+          {
+            type: "label",
+            props: { htmlFor: `field-${i}`, className: "block text-sm font-medium" },
+            children: [`Field ${i}`],
+          },
+          {
+            type: "input",
+            props: {
+              type: i % 3 === 0 ? "email" : i % 3 === 1 ? "password" : "text",
+              id: `field-${i}`,
+              name: `field_${i}`,
+              className: "mt-1 block w-full rounded-md border-gray-300",
+              placeholder: `Enter field ${i}`,
+              required: i < 5,
+              disabled: false,
+              autoComplete: i % 2 === 0 ? "on" : "off",
+            },
+            children: [],
+          },
+        ],
+      })),
+    },
+
+    // Data table (common UI pattern)
+    dataTable: {
+      type: "table",
+      props: { className: "min-w-full divide-y divide-gray-200" },
+      children: [
+        {
+          type: "thead",
+          props: { className: "bg-gray-50" },
+          children: [{
+            type: "tr",
+            props: {},
+            children: ["ID", "Name", "Email", "Role", "Status", "Actions"].map(h => ({
+              type: "th",
+              props: { className: "px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase" },
+              children: [h],
+            })),
+          }],
+        },
+        {
+          type: "tbody",
+          props: { className: "bg-white divide-y divide-gray-200" },
+          children: Array.from({ length: 100 }, (_, i) => ({
+            type: "tr",
+            props: { key: `row-${i}`, className: i % 2 === 0 ? "bg-white" : "bg-gray-50" },
+            children: [
+              { type: "td", props: { className: "px-6 py-4 whitespace-nowrap" }, children: [String(i + 1)] },
+              { type: "td", props: { className: "px-6 py-4 whitespace-nowrap" }, children: [`User ${i}`] },
+              { type: "td", props: { className: "px-6 py-4 whitespace-nowrap" }, children: [`user${i}@example.com`] },
+              { type: "td", props: { className: "px-6 py-4 whitespace-nowrap" }, children: [i % 3 === 0 ? "Admin" : "User"] },
+              {
+                type: "span",
+                props: {
+                  className: `px-2 py-1 rounded-full text-xs ${i % 4 === 0 ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"}`,
+                },
+                children: [i % 4 === 0 ? "Active" : "Inactive"],
+              },
+              {
+                type: "div",
+                props: { className: "flex space-x-2" },
+                children: [
+                  { type: "button", props: { className: "text-blue-600 hover:text-blue-800", onClick: `edit(${i})` }, children: ["Edit"] },
+                  { type: "button", props: { className: "text-red-600 hover:text-red-800", onClick: `delete(${i})` }, children: ["Delete"] },
+                ],
+              },
+            ],
+          })),
+        },
+      ],
+    },
+
+    // Complex dashboard layout (deeply nested, many components)
+    dashboard: (() => {
+      const createCard = (title: string, content: any) => ({
+        type: "div",
+        props: { className: "bg-white rounded-lg shadow p-6" },
+        children: [
+          { type: "h3", props: { className: "text-lg font-semibold mb-4" }, children: [title] },
+          content,
+        ],
+      });
+
+      const createChart = (id: string) => ({
+        type: "div",
+        props: { className: "chart-container", id, style: { height: 300 } },
+        children: Array.from({ length: 30 }, (_, i) => ({
+          type: "div",
+          props: {
+            className: "bar",
+            style: { height: `${Math.random() * 100}%`, width: "3%" },
+            "data-value": Math.floor(Math.random() * 1000),
+          },
+          children: [],
+        })),
+      });
+
+      const createSidebar = () => ({
+        type: "nav",
+        props: { className: "w-64 bg-gray-800 min-h-screen p-4" },
+        children: Array.from({ length: 15 }, (_, i) => ({
+          type: "a",
+          props: {
+            href: `/section/${i}`,
+            className: "flex items-center px-4 py-2 text-gray-300 hover:bg-gray-700 rounded",
+          },
+          children: [
+            { type: "svg", props: { className: "w-5 h-5 mr-3", viewBox: "0 0 20 20" }, children: [] },
+            { type: "span", props: {}, children: [`Menu Item ${i + 1}`] },
+          ],
+        })),
+      });
+
+      return {
+        type: "div",
+        props: { className: "flex min-h-screen bg-gray-100" },
+        children: [
+          createSidebar(),
+          {
+            type: "main",
+            props: { className: "flex-1 p-8" },
+            children: [
+              {
+                type: "header",
+                props: { className: "mb-8" },
+                children: [
+                  { type: "h1", props: { className: "text-3xl font-bold" }, children: ["Dashboard"] },
+                  {
+                    type: "div",
+                    props: { className: "flex space-x-4 mt-4" },
+                    children: Array.from({ length: 4 }, (_, i) => ({
+                      type: "div",
+                      props: { className: "bg-white rounded-lg shadow p-4 flex-1" },
+                      children: [
+                        { type: "p", props: { className: "text-gray-500 text-sm" }, children: [`Metric ${i + 1}`] },
+                        { type: "p", props: { className: "text-2xl font-bold" }, children: [String(Math.floor(Math.random() * 10000))] },
+                      ],
+                    })),
+                  },
+                ],
+              },
+              {
+                type: "div",
+                props: { className: "grid grid-cols-2 gap-6" },
+                children: [
+                  createCard("Revenue Chart", createChart("revenue")),
+                  createCard("User Growth", createChart("users")),
+                  createCard("Activity Feed", {
+                    type: "ul",
+                    props: { className: "space-y-3" },
+                    children: Array.from({ length: 20 }, (_, i) => ({
+                      type: "li",
+                      props: { className: "flex items-center space-x-3 p-2 hover:bg-gray-50 rounded" },
+                      children: [
+                        { type: "div", props: { className: "w-8 h-8 rounded-full bg-blue-500" }, children: [] },
+                        {
+                          type: "div",
+                          props: {},
+                          children: [
+                            { type: "p", props: { className: "text-sm font-medium" }, children: [`User ${i} performed action`] },
+                            { type: "p", props: { className: "text-xs text-gray-500" }, children: [`${i + 1} minutes ago`] },
+                          ],
+                        },
+                      ],
+                    })),
+                  }),
+                  createCard("Recent Orders", {
+                    type: "table",
+                    props: { className: "w-full" },
+                    children: Array.from({ length: 10 }, (_, i) => ({
+                      type: "tr",
+                      props: { className: "border-b" },
+                      children: [
+                        { type: "td", props: { className: "py-2" }, children: [`#${1000 + i}`] },
+                        { type: "td", props: { className: "py-2" }, children: [`$${(Math.random() * 500).toFixed(2)}`] },
+                        { type: "td", props: { className: "py-2" }, children: [i % 3 === 0 ? "Completed" : "Pending"] },
+                      ],
+                    })),
+                  }),
+                ],
+              },
+            ],
+          },
+        ],
+      };
+    })(),
+
+    // Full page app (very complex, simulates entire SPA)
+    fullPageApp: (() => {
+      const createNavbar = () => ({
+        type: "nav",
+        props: { className: "bg-white shadow-lg fixed w-full z-50" },
+        children: [{
+          type: "div",
+          props: { className: "max-w-7xl mx-auto px-4" },
+          children: [{
+            type: "div",
+            props: { className: "flex justify-between h-16" },
+            children: [
+              {
+                type: "div",
+                props: { className: "flex items-center" },
+                children: [
+                  { type: "img", props: { src: "/logo.svg", className: "h-8 w-8" }, children: [] },
+                  { type: "span", props: { className: "ml-2 text-xl font-bold" }, children: ["MyApp"] },
+                ],
+              },
+              {
+                type: "div",
+                props: { className: "flex items-center space-x-4" },
+                children: ["Home", "Features", "Pricing", "About", "Contact"].map(item => ({
+                  type: "a",
+                  props: { href: `/${item.toLowerCase()}`, className: "text-gray-600 hover:text-gray-900" },
+                  children: [item],
+                })),
+              },
+              {
+                type: "div",
+                props: { className: "flex items-center space-x-2" },
+                children: [
+                  { type: "button", props: { className: "px-4 py-2 text-gray-600" }, children: ["Login"] },
+                  { type: "button", props: { className: "px-4 py-2 bg-blue-600 text-white rounded-lg" }, children: ["Sign Up"] },
+                ],
+              },
+            ],
+          }],
+        }],
+      });
+
+      const createHeroSection = () => ({
+        type: "section",
+        props: { className: "pt-24 pb-12 bg-gradient-to-r from-blue-500 to-purple-600" },
+        children: [{
+          type: "div",
+          props: { className: "max-w-7xl mx-auto px-4 text-center text-white" },
+          children: [
+            { type: "h1", props: { className: "text-5xl font-bold mb-6" }, children: ["Build Amazing Products"] },
+            { type: "p", props: { className: "text-xl mb-8 opacity-90" }, children: ["The all-in-one platform for modern teams"] },
+            {
+              type: "div",
+              props: { className: "flex justify-center space-x-4" },
+              children: [
+                { type: "button", props: { className: "px-8 py-3 bg-white text-blue-600 rounded-lg font-semibold" }, children: ["Get Started"] },
+                { type: "button", props: { className: "px-8 py-3 border-2 border-white rounded-lg font-semibold" }, children: ["Learn More"] },
+              ],
+            },
+          ],
+        }],
+      });
+
+      const createFeatureGrid = () => ({
+        type: "section",
+        props: { className: "py-16 bg-gray-50" },
+        children: [{
+          type: "div",
+          props: { className: "max-w-7xl mx-auto px-4" },
+          children: [
+            { type: "h2", props: { className: "text-3xl font-bold text-center mb-12" }, children: ["Features"] },
+            {
+              type: "div",
+              props: { className: "grid grid-cols-3 gap-8" },
+              children: Array.from({ length: 9 }, (_, i) => ({
+                type: "div",
+                props: { className: "bg-white p-6 rounded-xl shadow-md hover:shadow-lg transition" },
+                children: [
+                  {
+                    type: "div",
+                    props: { className: "w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4" },
+                    children: [{ type: "svg", props: { className: "w-6 h-6 text-blue-600" }, children: [] }],
+                  },
+                  { type: "h3", props: { className: "text-lg font-semibold mb-2" }, children: [`Feature ${i + 1}`] },
+                  { type: "p", props: { className: "text-gray-600" }, children: ["Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt."] },
+                ],
+              })),
+            },
+          ],
+        }],
+      });
+
+      const createPricingSection = () => ({
+        type: "section",
+        props: { className: "py-16" },
+        children: [{
+          type: "div",
+          props: { className: "max-w-7xl mx-auto px-4" },
+          children: [
+            { type: "h2", props: { className: "text-3xl font-bold text-center mb-12" }, children: ["Pricing"] },
+            {
+              type: "div",
+              props: { className: "grid grid-cols-3 gap-8" },
+              children: [
+                { name: "Starter", price: 9, features: 5 },
+                { name: "Pro", price: 29, features: 10 },
+                { name: "Enterprise", price: 99, features: 20 },
+              ].map((plan, i) => ({
+                type: "div",
+                props: {
+                  className: `bg-white p-8 rounded-xl shadow-md ${i === 1 ? "ring-2 ring-blue-500 scale-105" : ""}`,
+                },
+                children: [
+                  { type: "h3", props: { className: "text-xl font-semibold mb-4" }, children: [plan.name] },
+                  {
+                    type: "p",
+                    props: { className: "text-4xl font-bold mb-6" },
+                    children: [`$${plan.price}`, { type: "span", props: { className: "text-lg text-gray-500" }, children: ["/mo"] }],
+                  },
+                  {
+                    type: "ul",
+                    props: { className: "space-y-3 mb-8" },
+                    children: Array.from({ length: plan.features }, (_, j) => ({
+                      type: "li",
+                      props: { className: "flex items-center" },
+                      children: [
+                        { type: "svg", props: { className: "w-5 h-5 text-green-500 mr-2" }, children: [] },
+                        { type: "span", props: {}, children: [`Feature ${j + 1}`] },
+                      ],
+                    })),
+                  },
+                  {
+                    type: "button",
+                    props: { className: `w-full py-3 rounded-lg font-semibold ${i === 1 ? "bg-blue-600 text-white" : "bg-gray-100"}` },
+                    children: ["Choose Plan"],
+                  },
+                ],
+              })),
+            },
+          ],
+        }],
+      });
+
+      const createFooter = () => ({
+        type: "footer",
+        props: { className: "bg-gray-900 text-white py-12" },
+        children: [{
+          type: "div",
+          props: { className: "max-w-7xl mx-auto px-4" },
+          children: [
+            {
+              type: "div",
+              props: { className: "grid grid-cols-4 gap-8 mb-8" },
+              children: ["Product", "Company", "Resources", "Legal"].map((section, i) => ({
+                type: "div",
+                props: {},
+                children: [
+                  { type: "h4", props: { className: "font-semibold mb-4" }, children: [section] },
+                  {
+                    type: "ul",
+                    props: { className: "space-y-2" },
+                    children: Array.from({ length: 5 }, (_, j) => ({
+                      type: "li",
+                      props: {},
+                      children: [{ type: "a", props: { href: "#", className: "text-gray-400 hover:text-white" }, children: [`${section} Link ${j + 1}`] }],
+                    })),
+                  },
+                ],
+              })),
+            },
+            {
+              type: "div",
+              props: { className: "border-t border-gray-800 pt-8 flex justify-between" },
+              children: [
+                { type: "p", props: { className: "text-gray-400" }, children: ["© 2024 MyApp. All rights reserved."] },
+                {
+                  type: "div",
+                  props: { className: "flex space-x-4" },
+                  children: ["Twitter", "GitHub", "LinkedIn"].map(social => ({
+                    type: "a",
+                    props: { href: "#", className: "text-gray-400 hover:text-white" },
+                    children: [social],
+                  })),
+                },
+              ],
+            },
+          ],
+        }],
+      });
+
+      return {
+        type: "div",
+        props: { className: "min-h-screen" },
+        children: [
+          createNavbar(),
+          { type: "main", props: {}, children: [createHeroSection(), createFeatureGrid(), createPricingSection()] },
+          createFooter(),
+        ],
+      };
+    })(),
+  },
 };
 
 // Helper to create different hash functions for merkle-reference
@@ -136,12 +555,19 @@ async function createStrategies() {
   const hashFunctions = await createHashFunctions();
   const strategies: Record<string, (obj: any) => string> = {};
 
+  // merkle-reference with default (noble) hash function
+  strategies["merkle-reference[noble]"] = (obj: any) => {
+    const ref = MerkleReference.refer(obj);
+    return ref.toString();
+  };
+
   // merkle-reference with different hash functions
   for (const [name, hashFn] of Object.entries(hashFunctions)) {
+    if (name === "noble") continue; // Already handled above
     const treeBuilder = MerkleReference.Tree.createBuilder(hashFn);
     strategies[`merkle-reference[${name}]`] = (obj: any) => {
       const ref = treeBuilder.refer(obj);
-      return ref.hash.toString();
+      return ref.toString();
     };
   }
 
@@ -155,45 +581,46 @@ async function createStrategies() {
     return hashIt.default(obj).toString();
   };
 
-  // fast-json-stable-stringify + noble sha256
-  strategies["stable-stringify+noble"] = (obj: any) => {
+  // All combinations of serialization + hash function
+  const encoder = new TextEncoder();
+  const toHex = (hash: Uint8Array) =>
+    Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
+
+  // stable-stringify with all hash functions
+  for (const [hashName, hashFn] of Object.entries(hashFunctions)) {
+    strategies[`stable-stringify+${hashName}`] = (obj: any) => {
+      const str = stableStringify.default(obj);
+      const data = encoder.encode(str);
+      return toHex(hashFn(data));
+    };
+  }
+
+  // stable-stringify + blake2b
+  strategies["stable-stringify+blake2b"] = (obj: any) => {
     const str = stableStringify.default(obj);
-    const encoder = new TextEncoder();
     const data = encoder.encode(str);
-    const hash = sha256(data);
-    return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join(
-      "",
-    );
+    return toHex(blake2b256(data));
   };
 
   // JSON.stringify (baseline - NOT stable for property order)
   strategies["JSON.stringify+noble (UNSTABLE)"] = (obj: any) => {
     const str = JSON.stringify(obj);
-    const encoder = new TextEncoder();
     const data = encoder.encode(str);
-    const hash = sha256(data);
-    return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join(
-      "",
-    );
+    return toHex(sha256(data));
   };
 
-  // DAG-CBOR approaches (used in IPFS/IPLD)
-  // DAG-CBOR with SHA-256 (most common in IPFS)
-  strategies["dag-cbor+sha256"] = (obj: any) => {
-    const encoded = dagCbor.encode(obj);
-    const hash = sha256(encoded);
-    return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join(
-      "",
-    );
-  };
+  // DAG-CBOR with all hash functions
+  for (const [hashName, hashFn] of Object.entries(hashFunctions)) {
+    strategies[`dag-cbor+${hashName}`] = (obj: any) => {
+      const encoded = dagCbor.encode(obj);
+      return toHex(hashFn(encoded));
+    };
+  }
 
-  // DAG-CBOR with BLAKE2b-256 (faster alternative)
+  // DAG-CBOR + blake2b
   strategies["dag-cbor+blake2b"] = (obj: any) => {
     const encoded = dagCbor.encode(obj);
-    const hash = blake2b256(encoded);
-    return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join(
-      "",
-    );
+    return toHex(blake2b256(encoded));
   };
 
   // DAG-CBOR with CID (Content Identifier - full IPLD approach)
@@ -209,21 +636,27 @@ async function createStrategies() {
   return strategies;
 }
 
-// Benchmark runner
+// Benchmark runner with fresh object cloning to avoid cache effects
 async function benchmark(
   name: string,
-  fn: () => void,
+  strategy: (obj: any) => string,
+  templateData: any,
   iterations: number = 1000,
 ): Promise<number> {
-  // Warmup
+  // Pre-generate cloned objects to exclude clone time from measurement
+  // Use JSON serialization as it's what we're testing against anyway
+  const jsonStr = JSON.stringify(templateData);
+  const objects = Array.from({ length: iterations }, () => JSON.parse(jsonStr));
+
+  // Warmup with fresh objects
   for (let i = 0; i < Math.min(100, iterations / 10); i++) {
-    fn();
+    strategy(objects[i % objects.length]);
   }
 
-  // Actual benchmark
+  // Actual benchmark - each iteration gets a fresh object (different reference)
   const start = performance.now();
   for (let i = 0; i < iterations; i++) {
-    fn();
+    strategy(objects[i]);
   }
   const end = performance.now();
 
@@ -283,6 +716,12 @@ async function main() {
     },
     { category: "large", name: "sparse", data: testData.large.sparse, iterations: 1000 },
     { category: "large", name: "complex", data: testData.large.complex, iterations: 100 },
+    // VDOM-like structures
+    { category: "vdom", name: "simpleComp", data: testData.vdom.simpleComponent, iterations: 10000 },
+    { category: "vdom", name: "form", data: testData.vdom.formComponent, iterations: 1000 },
+    { category: "vdom", name: "dataTable", data: testData.vdom.dataTable, iterations: 100 },
+    { category: "vdom", name: "dashboard", data: testData.vdom.dashboard, iterations: 100 },
+    { category: "vdom", name: "fullPage", data: testData.vdom.fullPageApp, iterations: 50 },
   ];
 
   for (const testCase of testCases) {
@@ -292,7 +731,8 @@ async function main() {
       try {
         const time = await benchmark(
           strategyName,
-          () => strategy(testCase.data),
+          strategy,
+          testCase.data,
           testCase.iterations,
         );
         const opsPerSec = (testCase.iterations / time) * 1000;
