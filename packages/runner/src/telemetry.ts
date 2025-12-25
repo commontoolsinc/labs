@@ -16,12 +16,13 @@ import type * as Inspector from "./storage/inspector.ts";
 // Types for scheduler graph visualization
 export interface SchedulerGraphNode {
   id: string; // action.name (includes code location), or "input:space/entity" for inputs
-  type: "effect" | "computation" | "input"; // input = source cell with no writer
+  type: "effect" | "computation" | "input" | "inactive"; // inactive = has stats but no longer registered
   stats?: ActionStats;
   isDirty: boolean;
   isPending: boolean;
   parentId?: string; // ID of parent action if this was created during parent's execution
   childCount?: number; // Number of child actions created during this action's execution
+  preview?: string; // First ~200 chars of function body for hover tooltips
   // Diagnostic info: what cells this action reads and writes
   reads?: string[]; // space/entity paths this action reads
   writes?: string[]; // space/entity paths this action writes (mightWrite)
