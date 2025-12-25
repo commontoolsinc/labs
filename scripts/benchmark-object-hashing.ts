@@ -25,7 +25,17 @@ const stableStringify = await import(
 // @ts-ignore - dynamic import from esm.sh
 const { sha256 } = await import("https://esm.sh/@noble/hashes@1.4.0/sha256");
 // @ts-ignore - dynamic import from esm.sh
+const { blake2b256 } = await import(
+  "https://esm.sh/@noble/hashes@1.4.0/blake2b"
+);
+// @ts-ignore - dynamic import from esm.sh
 const { createSHA256 } = await import("https://esm.sh/hash-wasm@4.11.0");
+// @ts-ignore - dynamic import from esm.sh
+const dagCbor = await import("https://esm.sh/@ipld/dag-cbor@9.2.1");
+// @ts-ignore - dynamic import from esm.sh
+const { CID } = await import("https://esm.sh/multiformats@13.3.2/cid");
+// @ts-ignore - dynamic import from esm.sh
+const multihash = await import("https://esm.sh/multiformats@13.3.2/hashes/digest");
 
 // Test data structures
 const testData = {
@@ -165,6 +175,35 @@ async function createStrategies() {
     return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join(
       "",
     );
+  };
+
+  // DAG-CBOR approaches (used in IPFS/IPLD)
+  // DAG-CBOR with SHA-256 (most common in IPFS)
+  strategies["dag-cbor+sha256"] = (obj: any) => {
+    const encoded = dagCbor.encode(obj);
+    const hash = sha256(encoded);
+    return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join(
+      "",
+    );
+  };
+
+  // DAG-CBOR with BLAKE2b-256 (faster alternative)
+  strategies["dag-cbor+blake2b"] = (obj: any) => {
+    const encoded = dagCbor.encode(obj);
+    const hash = blake2b256(encoded);
+    return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join(
+      "",
+    );
+  };
+
+  // DAG-CBOR with CID (Content Identifier - full IPLD approach)
+  strategies["dag-cbor+CID"] = (obj: any) => {
+    const encoded = dagCbor.encode(obj);
+    const hash = sha256(encoded);
+    // Create CID v1 with dag-cbor codec (0x71) and sha2-256 (0x12)
+    const digest = multihash.create(0x12, hash);
+    const cid = CID.createV1(0x71, digest);
+    return cid.toString();
   };
 
   return strategies;

@@ -76,14 +76,22 @@
           hashIt,
           stableStringify,
           { sha256 },
-          { createSHA256 }
+          { blake2b256 },
+          { createSHA256 },
+          dagCbor,
+          { CID },
+          multihash
         ] = await Promise.all([
           import('https://esm.sh/merkle-reference@2.2.0'),
           import('https://esm.sh/object-hash@3.0.0'),
           import('https://esm.sh/hash-it@6.0.0'),
           import('https://esm.sh/fast-json-stable-stringify@2.1.0'),
           import('https://esm.sh/@noble/hashes@1.4.0/sha256'),
-          import('https://esm.sh/hash-wasm@4.11.0')
+          import('https://esm.sh/@noble/hashes@1.4.0/blake2b'),
+          import('https://esm.sh/hash-wasm@4.11.0'),
+          import('https://esm.sh/@ipld/dag-cbor@9.2.1'),
+          import('https://esm.sh/multiformats@13.3.2/cid'),
+          import('https://esm.sh/multiformats@13.3.2/hashes/digest')
         ]);
 
         statusDiv.textContent = 'Creating test data...';
@@ -209,6 +217,31 @@
           const data = encoder.encode(str);
           const hash = sha256(data);
           return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
+        };
+
+        // DAG-CBOR approaches (used in IPFS/IPLD)
+        // DAG-CBOR with SHA-256 (most common in IPFS)
+        strategies["dag-cbor+sha256"] = (obj) => {
+          const encoded = dagCbor.encode(obj);
+          const hash = sha256(encoded);
+          return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
+        };
+
+        // DAG-CBOR with BLAKE2b-256 (faster alternative)
+        strategies["dag-cbor+blake2b"] = (obj) => {
+          const encoded = dagCbor.encode(obj);
+          const hash = blake2b256(encoded);
+          return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
+        };
+
+        // DAG-CBOR with CID (Content Identifier - full IPLD approach)
+        strategies["dag-cbor+CID"] = (obj) => {
+          const encoded = dagCbor.encode(obj);
+          const hash = sha256(encoded);
+          // Create CID v1 with dag-cbor codec (0x71) and sha2-256 (0x12)
+          const digest = multihash.create(0x12, hash);
+          const cid = CID.createV1(0x71, digest);
+          return cid.toString();
         };
 
         // Test stability
