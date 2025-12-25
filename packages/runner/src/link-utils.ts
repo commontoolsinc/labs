@@ -377,6 +377,12 @@ export function createDataCellURI(
 
 /**
  * Traverse schema and remove all asCell and asStream flags.
+ * Also handles circular references by using JSON Schema $ref.
+ *
+ * When circular references are detected, they are extracted to a $defs
+ * section and replaced with $ref pointers. This ensures the output can
+ * be safely serialized with JSON.stringify without exponential growth
+ * or circular reference errors.
  */
 export function sanitizeSchemaForLinks(
   schema: JSONSchema,
@@ -390,18 +396,75 @@ export function sanitizeSchemaForLinks(
   schema: JSONSchema | undefined,
   options: { keepStreams?: boolean } = {},
 ): JSONSchema | undefined {
-  return recursiveStripAsCellAndStreamFromSchema(schema, options);
+  if (
+    schema === null ||
+    schema === undefined ||
+    typeof schema === "boolean"
+  ) {
+    return schema;
+  }
+
+  // Collect existing $defs names to avoid collisions
+  const existingDefNames = new Set<string>();
+  if (typeof schema === "object" && schema !== null && "$defs" in schema) {
+    const existingDefs = schema.$defs;
+    if (existingDefs && typeof existingDefs === "object") {
+      for (const name of Object.keys(existingDefs)) {
+        existingDefNames.add(name);
+      }
+    }
+  }
+
+  // Context for tracking circular references and generating $defs
+  const context: SanitizeContext = {
+    seen: new Map(),
+    inProgress: new Set(),
+    defs: {},
+    defCounter: 0,
+    reservedNames: existingDefNames,
+    options,
+  };
+
+  const result = recursiveStripAsCellAndStreamFromSchema(schema, context, 0);
+
+  // If we generated any $defs, add them to the root schema
+  if (Object.keys(context.defs).length > 0) {
+    // Merge with any existing $defs
+    const existingDefs = result?.$defs || {};
+    return {
+      ...result,
+      $defs: { ...existingDefs, ...context.defs },
+    };
+  }
+
+  return result;
+}
+
+interface SanitizeContext {
+  // Maps original schema objects to their processed results
+  seen: Map<any, any>;
+  // Tracks schemas currently being processed (for cycle detection)
+  inProgress: Set<any>;
+  // Accumulated $defs for circular schemas
+  defs: Record<string, any>;
+  // Counter for generating unique def names
+  defCounter: number;
+  // Reserved def names (from existing $defs in input schema)
+  reservedNames: Set<string>;
+  // Options
+  options: { keepStreams?: boolean };
 }
 
 function recursiveStripAsCellAndStreamFromSchema(
   schema: any,
-  options: { keepStreams?: boolean },
-  seen: Map<any, any> = new Map(),
-  depth: number = 0,
+  context: SanitizeContext,
+  depth: number,
 ): any {
   // Handle null/undefined/boolean schemas
   if (
-    schema === null || typeof schema !== "object" || typeof schema === "boolean"
+    schema === null ||
+    typeof schema !== "object" ||
+    typeof schema === "boolean"
   ) {
     return schema;
   }
@@ -410,46 +473,93 @@ function recursiveStripAsCellAndStreamFromSchema(
   // JSON Schema shouldn't need more than ~50 levels of nesting in practice
   if (depth > 100) return schema;
 
-  // Already seen, return previously processed result (handles cycles and shared refs)
-  if (seen.has(schema)) return seen.get(schema);
+  // If we've already fully processed this schema, return the result
+  if (context.seen.has(schema) && !context.inProgress.has(schema)) {
+    return context.seen.get(schema);
+  }
+
+  // Cycle detection: if we're currently processing this schema, we have a cycle
+  if (context.inProgress.has(schema)) {
+    // Generate a unique name for this circular schema, avoiding collisions
+    let defName: string;
+    do {
+      defName = `CircularSchema_${context.defCounter++}`;
+    } while (context.reservedNames.has(defName) || defName in context.defs);
+
+    // Create a $ref to the definition we'll create
+    const ref = { $ref: `#/$defs/${defName}` };
+
+    // Store the ref as the result for this schema
+    // The actual definition will be added when we finish processing
+    context.seen.set(schema, ref);
+
+    return ref;
+  }
+
+  // Mark as in-progress
+  context.inProgress.add(schema);
 
   // Create a copy to avoid mutating the original
-  const result = { ...schema };
-
-  // Register result BEFORE recursing to handle cycles correctly
-  // (same pattern as cell.ts:recursivelyAddIDIfNeeded)
-  seen.set(schema, result);
+  const result: any = { ...schema };
 
   // Remove asCell and asStream flags from this level
-  delete (result as any).asCell;
-  if (!options.keepStreams) delete (result as any).asStream;
+  delete result.asCell;
+  if (!context.options.keepStreams) delete result.asStream;
 
   // Recursively process all object properties
   for (const [key, value] of Object.entries(result)) {
+    // Skip $ref - it's just a string pointer, not a schema to process
+    if (key === "$ref") continue;
+
     if (value && typeof value === "object") {
-      if (Array.isArray(value)) {
-        // Handle arrays
-        (result as any)[key] = value.map((item) =>
-          typeof item === "object" && item !== null
-            ? recursiveStripAsCellAndStreamFromSchema(
-              item,
-              options,
-              seen,
+      if (key === "$defs") {
+        // Process each definition in $defs (they contain schemas that may have asCell/asStream)
+        const processedDefs: Record<string, any> = {};
+        for (
+          const [defName, defSchema] of Object.entries(
+            value as Record<string, any>,
+          )
+        ) {
+          if (defSchema && typeof defSchema === "object") {
+            processedDefs[defName] = recursiveStripAsCellAndStreamFromSchema(
+              defSchema,
+              context,
               depth + 1,
-            )
+            );
+          } else {
+            processedDefs[defName] = defSchema;
+          }
+        }
+        result[key] = processedDefs;
+      } else if (Array.isArray(value)) {
+        // Handle arrays
+        result[key] = value.map((item) =>
+          typeof item === "object" && item !== null
+            ? recursiveStripAsCellAndStreamFromSchema(item, context, depth + 1)
             : item
         );
       } else {
         // Handle objects
-        (result as any)[key] = recursiveStripAsCellAndStreamFromSchema(
+        result[key] = recursiveStripAsCellAndStreamFromSchema(
           value,
-          options,
-          seen,
+          context,
           depth + 1,
         );
       }
     }
   }
+
+  // Check if this schema was marked as circular while processing
+  const existingRef = context.seen.get(schema);
+  if (existingRef && existingRef.$ref) {
+    // This schema is part of a cycle - add it to $defs
+    const defName = existingRef.$ref.replace("#/$defs/", "");
+    context.defs[defName] = result;
+  }
+
+  // Mark as done and store result
+  context.inProgress.delete(schema);
+  context.seen.set(schema, result);
 
   return result;
 }
