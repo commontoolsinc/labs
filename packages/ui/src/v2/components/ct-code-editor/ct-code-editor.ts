@@ -158,19 +158,18 @@ export class CTCodeEditor extends BaseElement {
   private _themeComp = new Compartment();
   private _cleanupFns: Array<() => void> = [];
   private _mentionableUnsub: (() => void) | null = null;
-  // Track when we're updating the Cell from editor changes to avoid feedback loops
-  // that cause cursor jumping. When true, Cell subscription callbacks should skip
-  // updating the editor since the value came from the editor itself.
-  private _updatingCellFromEditor = false;
+  // Track the hash of the last content we sent to the Cell. When a Cell
+  // subscription fires, we compare the incoming value's hash to this.
+  // If they match, this is our own change echoing back - skip the update
+  // to avoid cursor jumping. This approach works correctly with concurrent
+  // edits from other users (unlike a simple boolean flag).
+  private _lastEditorContentHash: number | null = null;
   private _cellController = createStringCellController(this, {
     timing: {
       strategy: "debounce",
       delay: 500,
     },
     onChange: (newValue: string, oldValue: string) => {
-      // Reset the flag after the debounced Cell update completes.
-      // This allows future external Cell changes to sync to the editor.
-      this._updatingCellFromEditor = false;
       this.emit("ct-change", {
         value: newValue,
         oldValue,
@@ -602,6 +601,20 @@ export class CTCodeEditor extends BaseElement {
     this._cellController.setValue(newValue);
   }
 
+  /**
+   * Simple string hash for content comparison.
+   * Used to detect when a Cell update is our own change echoing back.
+   */
+  private _hashContent(str: string): number {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return hash;
+  }
+
   override connectedCallback() {
     super.connectedCallback();
   }
@@ -612,36 +625,46 @@ export class CTCodeEditor extends BaseElement {
   }
 
   private _updateEditorFromCellValue(): void {
-    // Skip if this update originated from the editor itself (user typing).
-    // This prevents a feedback loop where: user types → Cell updates → this
-    // method fires → cursor jumps to position 0. The editor already has the
-    // correct content since it was the source of the change.
-    if (this._updatingCellFromEditor) {
+    if (!this._editorView) return;
+
+    const newValue = this.getValue();
+    const currentValue = this._editorView.state.doc.toString();
+
+    // Early exit if content is identical (common case)
+    if (newValue === currentValue) {
       return;
     }
 
-    // Update editor content when cell value changes externally
-    if (this._editorView) {
-      const newValue = this.getValue();
-      const currentValue = this._editorView.state.doc.toString();
-      if (newValue !== currentValue) {
-        // Preserve cursor position when syncing external changes.
-        // Clamp to new document length in case the new content is shorter.
-        const currentSelection = this._editorView.state.selection.main;
-        const newLength = newValue.length;
-        const anchorPos = Math.min(currentSelection.anchor, newLength);
-        const headPos = Math.min(currentSelection.head, newLength);
-
-        this._editorView.dispatch({
-          changes: {
-            from: 0,
-            to: this._editorView.state.doc.length,
-            insert: newValue,
-          },
-          selection: { anchor: anchorPos, head: headPos },
-        });
-      }
+    // Check if this update is our own change echoing back from the Cell.
+    // When user types, we update _lastEditorContentHash immediately, then
+    // the debounced Cell update fires. When the Cell subscription notifies
+    // us, we compare hashes - if they match, this is our own change.
+    const newValueHash = this._hashContent(newValue);
+    if (this._lastEditorContentHash === newValueHash) {
+      // This is our own change coming back - the editor already has this
+      // content (or very similar content with same hash). Skip to avoid
+      // cursor jump. Clear the hash so future identical external updates
+      // can still come through.
+      this._lastEditorContentHash = null;
+      return;
     }
+
+    // This is a genuine external update - sync to editor.
+    // Preserve cursor position, clamping to new document length.
+    const currentSelection = this._editorView.state.selection.main;
+    const newLength = newValue.length;
+    const anchorPos = Math.min(currentSelection.anchor, newLength);
+    const headPos = Math.min(currentSelection.head, newLength);
+
+    this._editorView.dispatch({
+      changes: {
+        from: 0,
+        to: this._editorView.state.doc.length,
+        insert: newValue,
+      },
+      selection: { anchor: anchorPos, head: headPos },
+    });
+
     // Ensure mentioned charms reflect external value changes
     this._updateMentionedFromContent();
   }
@@ -878,10 +901,10 @@ export class CTCodeEditor extends BaseElement {
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !this.readonly) {
           const value = update.state.doc.toString();
-          // Mark that we're updating the Cell from editor changes.
-          // This flag prevents _updateEditorFromCellValue from running
-          // when the Cell subscription fires, avoiding cursor jump to 0,0.
-          this._updatingCellFromEditor = true;
+          // Store hash of content we're sending to Cell. When the Cell
+          // subscription fires back with this same content, we'll recognize
+          // it as our own change and skip the update to avoid cursor jump.
+          this._lastEditorContentHash = this._hashContent(value);
           this.setValue(value);
           // Keep $mentioned current as user types
           this._updateMentionedFromContent();
