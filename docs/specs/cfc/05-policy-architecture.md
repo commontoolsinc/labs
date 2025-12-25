@@ -296,3 +296,174 @@ Every policy that authorizes requests **should** include error exchange rules. W
 - Debugging becomes difficult
 
 This is a **safe** default (no information leaks), but operationally limiting. Policy authors should explicitly consider error handling for their contexts.
+
+---
+
+## 5.5 Policy Certification Integrity
+
+Policy certification adds integrity atoms that attest outputs were produced under specific policy constraints. This enables downstream consumers to require that data was processed according to certain rules.
+
+### 5.5.1 The Core Concept
+
+```
+PolicyCertified { policy: PolicyID, enforcer: Principal }
+```
+
+**Distinction from code hash integrity**:
+- `CodeHash(h)` → attests WHAT code ran
+- `PolicyCertified(P)` → attests UNDER WHAT CONSTRAINTS code ran
+
+The runtime automatically adds `PolicyCertified` atoms when computation occurs in a policy-governed context. Patterns don't explicitly request certification—it's a consequence of the execution environment.
+
+### 5.5.2 How Certification Works
+
+When the runtime executes a pattern under policy P:
+
+1. **Policy enforcement**: Runtime enforces P's constraints during execution (e.g., blocks disallowed model calls, restricts network access)
+2. **Automatic attestation**: If execution completes successfully under P, outputs automatically gain `PolicyCertified(P)`
+3. **Verifiable log**: The attestation is recorded in the runtime's verifiable log (existing infrastructure)
+
+```
+Pattern executes under Policy("ApprovedModels"):
+  - Pattern calls claude-3 ✓ (allowed)
+  - Pattern calls random-model ✗ (blocked by policy)
+  - Execution completes
+  - Output gains: PolicyCertified(ApprovedModels, runtime)
+```
+
+### 5.5.3 Data Flow and Weakest Link
+
+When computation mixes data from different policy contexts, certification follows the **weakest link** principle:
+
+**Default rule**: Output is only certified for a policy if ALL inputs were processed under that policy.
+
+```
+Input A: PolicyCertified(ApprovedModels)
+Input B: PolicyCertified(ApprovedModels)
+Output:  PolicyCertified(ApprovedModels) ✓
+
+Input A: PolicyCertified(ApprovedModels)
+Input B: (no certification)
+Output:  (no ApprovedModels certification)
+```
+
+**Fine-grained variant**: If the system tracks which output properties were influenced by which inputs, certification can be preserved for properties that only depend on certified inputs.
+
+```
+Output.summary: depends only on Input A → PolicyCertified(ApprovedModels)
+Output.metadata: depends on Input B → (no certification)
+```
+
+### 5.5.4 Composing Multiple Certifications
+
+Downstream patterns can require multiple policy certifications:
+
+```typescript
+// Pattern requires inputs certified under multiple policies
+input: {
+  analysis: {
+    integrity: [
+      "PolicyCertified(ApprovedModels)",
+      "PolicyCertified(GDPRCompliant)"
+    ]
+  }
+}
+```
+
+Both certifications must be present for the input to be accepted.
+
+### 5.5.5 Example: ML Model Restrictions
+
+**Policy definition**:
+```
+Policy "ApprovedModels":
+  allowedModels: [gpt-4, claude-3, llama-3]
+  requireLogging: true
+  noFineTunedVariants: true (without explicit approval)
+```
+
+**Execution**:
+```
+Pattern runs, calls claude-3
+  → Runtime verifies claude-3 ∈ allowedModels ✓
+  → Runtime logs the call ✓
+  → Execution completes
+  → Output gains PolicyCertified(ApprovedModels)
+```
+
+**Downstream requirement**:
+```typescript
+// A pattern that only accepts model-certified analysis
+interface CertifiedAnalysis {
+  content: string;
+  // @integrity PolicyCertified(ApprovedModels)
+}
+
+export default pattern<{ analysis: CertifiedAnalysis }, Report>({
+  generateReport: ({ analysis }) => {
+    // Can trust analysis used only approved models
+    return { ... };
+  }
+});
+```
+
+### 5.5.6 Use Cases
+
+| Policy Type | What It Certifies | Example Use |
+|-------------|-------------------|-------------|
+| **Model restrictions** | Only approved ML models influenced output | Enterprise AI governance |
+| **Regulatory compliance** | Processing followed GDPR/HIPAA rules | Healthcare, finance |
+| **Geographic constraints** | Computation ran in specific jurisdiction | Data sovereignty |
+| **Audit requirements** | All access was logged | Compliance reporting |
+| **Human oversight** | Human reviewed before release | High-stakes decisions |
+
+### 5.5.7 Scope and Limitations
+
+**What policy certification covers**:
+- Constraints the runtime can enforce (model calls, network access, etc.)
+- Rules that are mechanically verifiable during execution
+
+**What it doesn't cover**:
+- User actions outside the runtime (copy-paste, screenshots)
+- Semantic correctness of the computation
+- Constraints that require human judgment
+
+**Trust model**: Policy certification is the runtime's attestation. It's as trustworthy as the runtime itself. The attestation is recorded in the verifiable log, providing an audit trail.
+
+### 5.5.8 Retroactive Verification via Compute Receipts
+
+The runtime produces **auditable compute receipts** that record the full execution trace. This enables retroactive policy verification:
+
+1. **At execution time**: Runtime attests `PolicyCertified(P)` based on enforcement during execution
+2. **After the fact**: Any party with access to the compute receipt can independently verify that policy P was followed
+
+**Implications**:
+- Policy certification isn't just "trust the runtime said so"—it's independently verifiable from the execution record
+- Auditors can verify compliance without re-running the computation
+- Disputes about whether a policy was followed can be resolved by inspecting the receipt
+- New policies can be checked against historical computations (with caveats—see below)
+
+**Retroactive policy application**:
+```
+Compute receipt from T=yesterday
+New policy defined at T=today
+
+Can verify: "Did yesterday's computation happen to satisfy today's policy?"
+Cannot claim: "Yesterday's output was PolicyCertified(TodaysPolicy)"
+  (certification requires policy to be in effect during execution)
+```
+
+The distinction matters: retroactive verification answers "did this satisfy constraints X?" but doesn't provide the same trust guarantees as execution-time enforcement (which could have blocked violations).
+
+### 5.5.9 Relationship to Contextual Integrity
+
+Policy certification maps to CI's transmission principles. A transmission principle like "medical data may only be processed by certified healthcare systems" translates to:
+
+```
+Exchange rule:
+  pre: [MedicalData]
+  guard: [PolicyCertified(HealthcareCertified)]
+  post: [MedicalData, ProcessedByHealthcare]
+```
+
+The certification provides the integrity evidence that the transmission principle was satisfied.

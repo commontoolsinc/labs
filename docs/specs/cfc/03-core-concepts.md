@@ -200,6 +200,8 @@ The distinction matters for understanding how integrity is minted:
 
 Integrity facts are minted only by trusted code and are non-malleable.
 
+**Policy certification integrity**: A special class of integrity atom attests that data was produced under a specific policy regime being enforced. For example, `PolicyCertified(ApprovedModels)` indicates the output was computed while a policy restricting ML model usage was in effect. See Section 5.5 for details.
+
 ---
 
 ## 3.4 Control (PC) Integrity
