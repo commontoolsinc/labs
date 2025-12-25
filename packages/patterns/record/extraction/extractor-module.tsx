@@ -708,31 +708,51 @@ const applySelected = handler<
       }
 
       // Apply Notes cleanup if enabled and we have cleaned content
-      // NOTE: We use the editContent stream handler instead of Cell key navigation
-      // because the ct-code-editor is subscribed to the original content Cell reference,
-      // not Cell references created via .key() navigation (they share data but have
-      // separate subscription points).
+      // We try multiple approaches:
+      // 1. editContent stream handler (preferred - triggers UI reactivity)
+      // 2. Cell key navigation fallback (data saves, UI may need refresh)
       if (cleanupEnabledValue && cleanedNotesValue !== undefined) {
-        const notesEntry = current.find((e) => e?.type === "notes");
+        const notesIndex = current.findIndex((e) => e?.type === "notes");
+        const notesEntry = notesIndex >= 0 ? current[notesIndex] : undefined;
         if (notesEntry) {
+          let cleanupSucceeded = false;
+
+          // Approach 1: Try editContent.send (best for UI reactivity)
           try {
             const notesCharm = notesEntry.charm as {
               editContent?: { send?: (data: unknown) => void };
             };
             if (notesCharm?.editContent?.send) {
               notesCharm.editContent.send({ detail: { value: cleanedNotesValue } });
-              cleanupApplyStatusCell.set("success" as any);
+              cleanupSucceeded = true;
               console.debug("[Extract] Applied Notes cleanup via editContent stream");
-            } else {
-              cleanupApplyStatusCell.set("failed" as any);
-              console.warn(
-                "[Extract] Notes charm doesn't have editContent.send",
-                notesCharm,
-              );
             }
           } catch (e) {
-            cleanupApplyStatusCell.set("failed" as any);
-            console.warn("[Extract] Failed to apply Notes cleanup:", e);
+            console.warn("[Extract] editContent.send failed:", e);
+          }
+
+          // Approach 2: Fallback to Cell key navigation
+          if (!cleanupSucceeded) {
+            try {
+              (parentSubCharmsCell as any).key(notesIndex).key("charm").key(
+                "content",
+              ).set(cleanedNotesValue);
+              cleanupSucceeded = true;
+              console.debug(
+                "[Extract] Applied Notes cleanup via Cell key navigation (UI may need refresh)",
+              );
+            } catch (e) {
+              console.warn("[Extract] Cell key navigation failed:", e);
+            }
+          }
+
+          cleanupApplyStatusCell.set(
+            cleanupSucceeded ? ("success" as any) : ("failed" as any),
+          );
+          if (!cleanupSucceeded) {
+            console.warn(
+              "[Extract] All Notes cleanup approaches failed",
+            );
           }
         } else {
           cleanupApplyStatusCell.set("failed" as any);
