@@ -15,7 +15,11 @@ import type { JSONSchema } from "./schema-utils-pure.ts";
 // Registry import for fallback - only used for legacy entries without stored schema.
 // This import pulls in all module patterns which require commontools runtime.
 // Tests that only use stored schema won't trigger the fallback path.
-import { getDefinition } from "../registry.ts";
+import {
+  buildExtractionSchema as buildRegistrySchema,
+  getDefinition,
+  getFieldToTypeMapping as getRegistryFieldMapping,
+} from "../registry.ts";
 
 // Import helpers from pure module
 import { getResultSchema, isInternalModule } from "./schema-utils-pure.ts";
@@ -247,4 +251,29 @@ export function getFieldToTypeMapping(
   }
 
   return fieldToType;
+}
+
+/**
+ * Build extraction schema from ALL available module types in the registry.
+ *
+ * This is different from buildExtractionSchema/buildExtractionSchemaFromCell which
+ * only use existing modules. This function enables extraction to discover and create
+ * new modules for fields that don't exist yet.
+ *
+ * @returns Combined JSON Schema with properties from ALL registry module types
+ */
+export function buildFullExtractionSchema(): JSONSchema {
+  return buildRegistrySchema() as JSONSchema;
+}
+
+/**
+ * Get field-to-type mapping from ALL available module types in the registry.
+ *
+ * This is different from getFieldToTypeMapping which only uses existing modules.
+ * This function enables extraction to create new modules for extracted fields.
+ *
+ * @returns Map of field names to module types for ALL available modules
+ */
+export function getFullFieldToTypeMapping(): Record<string, string> {
+  return getRegistryFieldMapping();
 }

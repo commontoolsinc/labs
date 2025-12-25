@@ -3,14 +3,15 @@
  * Extractor Module - Controller sub-charm for LLM-assisted field extraction
  *
  * This is a "controller module" that acts on the parent Record's state.
- * It receives the parent's Cells as INPUT, extracts data from pasted text,
- * shows a diff preview, and updates existing modules when confirmed.
+ * It scans existing Notes, Text Imports, and Photos in the Record,
+ * extracts structured data from their content, and updates modules.
  *
  * Key architecture:
  * - Receives parentSubCharms and parentTrashedSubCharms as INPUT Cells
- * - Uses generateObject() with registry's buildExtractionSchema()
- * - Shows diff view: currentValue → extractedValue for each field
- * - Writes to modules via charm.key(fieldName).set(value)
+ * - Scans for extractable sources: notes, text-import (text), photo (OCR)
+ * - Uses generateObject() with dynamic schema from existing modules
+ * - Shows diff view: currentValue -> extractedValue for each field
+ * - Optionally trashes source modules after successful extraction
  * - Auto-trashes itself after successful apply
  */
 
@@ -19,23 +20,28 @@ import {
   computed,
   type Default,
   generateObject,
+  generateText,
   handler,
   ifElse,
+  type ImageData,
   NAME,
   recipe,
   UI,
 } from "commontools";
 import { createSubCharm } from "../registry.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "../types.ts";
-import type { ExtractedField, ExtractionPreview } from "./types.ts";
+import type {
+  ExtractableSource,
+  ExtractedField,
+  ExtractionPreview,
+} from "./types.ts";
 import type { JSONSchema } from "./schema-utils.ts";
 import {
-  buildExtractionSchemaFromCell,
-  getFieldToTypeMapping,
+  buildFullExtractionSchema,
+  getFullFieldToTypeMapping,
   getResultSchema,
   getSchemaForType,
 } from "./schema-utils.ts";
-import { SmartTextInput } from "./smart-text-input.tsx";
 
 // ===== Types =====
 
@@ -43,16 +49,24 @@ interface ExtractorModuleInput {
   // Parent's Cells - passed as INPUT so they survive serialization
   parentSubCharms: Cell<SubCharmEntry[]>;
   parentTrashedSubCharms: Cell<TrashedSubCharmEntry[]>;
-  // Internal state
-  inputText?: Default<string, "">;
-  extractionPrompt?: Default<string, "">; // Only set when user clicks Extract
+  // Source selection state (index -> selected, default true)
+  sourceSelections?: Default<Record<number, boolean>, Record<number, never>>;
+  // Trash selection state (index -> should trash, default false)
+  trashSelections?: Default<Record<number, boolean>, Record<number, never>>;
+  // Field selections for preview
   selections?: Default<Record<string, boolean>, Record<string, never>>;
+  // Extraction phase
+  extractPhase?: Default<"select" | "extracting" | "preview", "select">;
+  // Combined content for extraction (built from sources)
+  extractionPrompt?: Default<string, "">;
 }
 
 interface ExtractorModuleOutput {
-  inputText?: Default<string, "">;
-  extractionPrompt?: Default<string, "">;
+  sourceSelections?: Default<Record<number, boolean>, Record<number, never>>;
+  trashSelections?: Default<Record<number, boolean>, Record<number, never>>;
   selections?: Default<Record<string, boolean>, Record<string, never>>;
+  extractPhase?: Default<"select" | "extracting" | "preview", "select">;
+  extractionPrompt?: Default<string, "">;
 }
 
 // ===== Constants =====
@@ -70,6 +84,12 @@ Rules:
 7. Be conservative - only extract what you're confident about
 
 Return a JSON object with the extracted fields. Use null for fields without data.`;
+
+const OCR_SYSTEM_PROMPT =
+  `You are an OCR system. Extract all text from the provided image.
+Return ONLY the extracted text, preserving formatting and line breaks.
+Do not add any commentary, explanation, or formatting like markdown.
+If no text is visible, return an empty string.`;
 
 // ===== Helper Functions =====
 
@@ -198,8 +218,8 @@ function buildPreview(
   extracted: Record<string, unknown>,
   subCharms: readonly SubCharmEntry[],
 ): ExtractionPreview {
-  // Use dynamic field-to-type mapping from stored schemas (falls back to registry)
-  const fieldToType = getFieldToTypeMapping(subCharms);
+  // Use FULL field-to-type mapping from registry - enables creating new modules
+  const fieldToType = getFullFieldToTypeMapping();
   const fields: ExtractedField[] = [];
   const byModule: Record<string, ExtractedField[]> = {};
 
@@ -235,6 +255,103 @@ function buildPreview(
   return { fields, byModule };
 }
 
+/**
+ * Scan sub-charms for extractable content sources
+ */
+function scanExtractableSources(
+  subCharms: readonly SubCharmEntry[],
+): ExtractableSource[] {
+  const sources: ExtractableSource[] = [];
+
+  subCharms.forEach((entry, index) => {
+    if (!entry) return;
+
+    if (entry.type === "notes") {
+      // Notes module - extract content
+      const charm = entry.charm as Record<string, unknown>;
+      const contentCell = charm?.content;
+      const content = typeof contentCell === "object" &&
+          contentCell !== null &&
+          "get" in contentCell
+        ? (contentCell as { get: () => unknown }).get()
+        : contentCell;
+
+      if (content && typeof content === "string" && content.trim()) {
+        sources.push({
+          index,
+          type: "notes",
+          icon: "\u{1F4DD}", // 📝
+          label: "Notes",
+          preview: content.slice(0, 100) + (content.length > 100 ? "..." : ""),
+          content,
+        });
+      }
+    } else if (entry.type === "text-import") {
+      // Text Import module - extract content and filename
+      const charm = entry.charm as Record<string, unknown>;
+      const contentCell = charm?.content;
+      const filenameCell = charm?.filename;
+
+      const content = typeof contentCell === "object" &&
+          contentCell !== null &&
+          "get" in contentCell
+        ? (contentCell as { get: () => unknown }).get()
+        : contentCell;
+
+      const filename = typeof filenameCell === "object" &&
+          filenameCell !== null &&
+          "get" in filenameCell
+        ? (filenameCell as { get: () => unknown }).get()
+        : filenameCell;
+
+      if (content && typeof content === "string" && content.trim()) {
+        const label = (filename && typeof filename === "string")
+          ? filename
+          : "Text Import";
+        sources.push({
+          index,
+          type: "text-import",
+          icon: "\u{1F4C4}", // 📄
+          label,
+          preview: content.slice(0, 100) + (content.length > 100 ? "..." : ""),
+          content,
+        });
+      }
+    } else if (entry.type === "photo") {
+      // Photo module - needs OCR
+      const charm = entry.charm as Record<string, unknown>;
+      const imageCell = charm?.image;
+      const labelCell = charm?.label;
+
+      const image = typeof imageCell === "object" &&
+          imageCell !== null &&
+          "get" in imageCell
+        ? (imageCell as { get: () => unknown }).get() as ImageData | null
+        : imageCell as ImageData | null;
+
+      const label = typeof labelCell === "object" &&
+          labelCell !== null &&
+          "get" in labelCell
+        ? (labelCell as { get: () => unknown }).get()
+        : labelCell;
+
+      if (image && (image.data || image.url)) {
+        sources.push({
+          index,
+          type: "photo",
+          icon: "\u{1F4F7}", // 📷
+          label: (label && typeof label === "string") ? label : "Photo",
+          preview: "[Image - will use OCR]",
+          requiresOCR: true,
+          imageData: image,
+        });
+      }
+    }
+  });
+
+  return sources;
+}
+
 // ===== Handlers =====
 
 /**
@@ -259,111 +376,151 @@ const dismiss = handler<
 });
 
 /**
- * Toggle a field selection on/off
- * Note: Currently unused but kept for future per-field toggle UI
+ * Create a toggle source handler for a specific index
  */
-const _toggleField = handler<
-  unknown,
-  { selections: Cell<Record<string, boolean>>; fieldKey: string }
->((_event, { selections, fieldKey }) => {
-  const current = selections.get() || {};
-  selections.set({
-    ...current,
-    [fieldKey]: !current[fieldKey],
-  });
-});
+function createToggleSourceHandler(
+  index: number,
+  sourceSelections: Cell<Record<number, boolean>>,
+) {
+  return handler<unknown, Record<string, never>>(
+    () => {
+      const current = sourceSelections.get() || {};
+      // Default is selected (true), so toggle means: if undefined or true -> false, if false -> true
+      const currentValue = current[index] !== false;
+      sourceSelections.set({
+        ...current,
+        [index]: !currentValue,
+      });
+    },
+  );
+}
 
 /**
- * Trigger extraction - copies inputText to extractionPrompt
- * This is the only way extraction starts (not automatic on typing)
+ * Create a toggle trash handler for a specific index
  */
-const triggerExtraction = handler<
-  unknown,
-  { inputText: Cell<string>; extractionPrompt: Cell<string> }
->((_event, { inputText, extractionPrompt }) => {
-  const text = inputText.get() || "";
-  extractionPrompt.set(text);
-});
+function createToggleTrashHandler(
+  index: number,
+  trashSelections: Cell<Record<number, boolean>>,
+) {
+  return handler<unknown, Record<string, never>>(
+    () => {
+      const current = trashSelections.get() || {};
+      // Default is not selected (false)
+      const currentValue = current[index] === true;
+      trashSelections.set({
+        ...current,
+        [index]: !currentValue,
+      });
+    },
+  );
+}
 
 /**
- * Apply selected extractions to modules, then auto-trash self
- * Creates missing modules automatically if needed
+ * Handler to start extraction - defined at module scope
+ */
+const startExtraction = handler<
+  unknown,
+  {
+    sourceSelectionsCell: Cell<Record<number, boolean>>;
+    parentSubCharmsCell: Cell<SubCharmEntry[]>;
+    extractionPromptCell: Cell<string>;
+    extractPhaseCell: Cell<string>;
+  }
+>(
+  (
+    _event,
+    { sourceSelectionsCell, parentSubCharmsCell, extractionPromptCell, extractPhaseCell },
+  ) => {
+    // Use .get() to read Cell values inside handler
+    const selectionsMap = sourceSelectionsCell.get() || {};
+    const subCharmsData = parentSubCharmsCell.get() || [];
+    const sources = scanExtractableSources(subCharmsData);
+
+    // Build combined content from selected sources
+    const parts: string[] = [];
+
+    for (const source of sources) {
+      // Skip if explicitly deselected
+      if (selectionsMap[source.index] === false) continue;
+
+      if (source.type === "notes" || source.type === "text-import") {
+        if (source.content) {
+          parts.push(`--- ${source.label} ---\n${source.content}`);
+        }
+      }
+      // Note: Photo OCR would need pre-computed results stored in state
+    }
+
+    const combinedContent = parts.join("\n\n");
+
+    if (combinedContent.trim()) {
+      extractionPromptCell.set(combinedContent as any);
+      extractPhaseCell.set("extracting" as any);
+    }
+  },
+);
+
+/**
+ * Handler to apply selected extractions - defined at module scope
  */
 const applySelected = handler<
   unknown,
   {
-    parentSubCharms: Cell<SubCharmEntry[]>;
-    parentTrashedSubCharms: Cell<TrashedSubCharmEntry[]>;
-    preview: ExtractionPreview;
-    selections: Cell<Record<string, boolean>>;
+    parentSubCharmsCell: Cell<SubCharmEntry[]>;
+    parentTrashedSubCharmsCell: Cell<TrashedSubCharmEntry[]>;
+    extractionResultValue: Record<string, unknown> | null;
+    selectionsCell: Cell<Record<string, boolean>>;
+    trashSelectionsCell: Cell<Record<number, boolean>>;
   }
->((
-  _event,
-  { parentSubCharms, parentTrashedSubCharms, preview, selections },
-) => {
-  const current: SubCharmEntry[] = [...(parentSubCharms.get() || [])];
-  const subCharms = current; // For schema lookups
-  const selected = selections.get() || {};
+>(
+  (
+    _event,
+    {
+      parentSubCharmsCell,
+      parentTrashedSubCharmsCell,
+      extractionResultValue,
+      selectionsCell,
+      trashSelectionsCell,
+    },
+  ) => {
+    // Read Cells inside handler
+    const subCharmsData = parentSubCharmsCell.get() || [];
+    const extractionResult = extractionResultValue;
+    if (!extractionResult) return;
 
-  // Group fields by target module
-  const fieldsByModule: Record<string, ExtractedField[]> = {};
-  for (const field of preview.fields) {
-    const fieldKey = `${field.targetModule}.${field.fieldName}`;
-    if (selected[fieldKey] === false) continue;
+    const previewData = buildPreview(extractionResult, subCharmsData);
+    const sourcesData = scanExtractableSources(subCharmsData);
 
-    if (!fieldsByModule[field.targetModule]) {
-      fieldsByModule[field.targetModule] = [];
-    }
-    fieldsByModule[field.targetModule].push(field);
-  }
+    if (!previewData || !previewData.fields) return;
 
-  // Collect new entries to add (batched to avoid multiple set() calls)
-  const newEntries: SubCharmEntry[] = [];
+    const current: SubCharmEntry[] = [...(parentSubCharmsCell.get() || [])];
+    const subCharms = current; // For schema lookups
+    const selected = selectionsCell.get() || {};
+    const toTrash = trashSelectionsCell.get() || {};
 
-  // Process each module type
-  for (const [moduleType, fields] of Object.entries(fieldsByModule)) {
-    const existingIndex = current.findIndex((e) => e?.type === moduleType);
+    // Group fields by target module
+    const fieldsByModule: Record<string, ExtractedField[]> = {};
+    for (const field of previewData.fields) {
+      const fieldKey = `${field.targetModule}.${field.fieldName}`;
+      if (selected[fieldKey] === false) continue;
 
-    if (existingIndex >= 0) {
-      // Module exists - use Cell navigation to update fields
-      for (const field of fields) {
-        // Validate extracted value against schema
-        const fieldSchema = getFieldSchema(
-          subCharms,
-          moduleType,
-          field.fieldName,
-        );
-        const isValid = validateFieldValue(field.extractedValue, fieldSchema);
-
-        if (!isValid) {
-          const actualType = Array.isArray(field.extractedValue)
-            ? "array"
-            : typeof field.extractedValue;
-          console.warn(
-            `[Extract] Type mismatch for ${moduleType}.${field.fieldName}: ` +
-              `expected ${fieldSchema?.type}, got ${actualType}. ` +
-              `Value: ${JSON.stringify(field.extractedValue)}. Skipping field.`,
-          );
-          continue; // Skip this field
-        }
-
-        try {
-          // Only write if validation passed
-          (parentSubCharms as any).key(existingIndex).key("charm").key(
-            field.fieldName,
-          ).set(field.extractedValue);
-        } catch (e) {
-          console.warn(`Failed to set ${moduleType}.${field.fieldName}:`, e);
-        }
+      if (!fieldsByModule[field.targetModule]) {
+        fieldsByModule[field.targetModule] = [];
       }
-    } else if (moduleType !== "notes") {
-      // Module doesn't exist - create it with initial values
-      // Notes module is special (needs linkPattern), skip auto-creation
-      try {
-        // Build initial values object from extracted fields
-        const initialValues: Record<string, unknown> = {};
+      fieldsByModule[field.targetModule].push(field);
+    }
+
+    // Collect new entries to add (batched to avoid multiple set() calls)
+    const newEntries: SubCharmEntry[] = [];
+
+    // Process each module type
+    for (const [moduleType, fields] of Object.entries(fieldsByModule)) {
+      const existingIndex = current.findIndex((e) => e?.type === moduleType);
+
+      if (existingIndex >= 0) {
+        // Module exists - use Cell navigation to update fields
         for (const field of fields) {
-          // Validate before adding to initialValues
+          // Validate extracted value against schema
           const fieldSchema = getFieldSchema(
             subCharms,
             moduleType,
@@ -376,51 +533,107 @@ const applySelected = handler<
               ? "array"
               : typeof field.extractedValue;
             console.warn(
-              `[Extract] Type mismatch for new module ${moduleType}.${field.fieldName}: ` +
+              `[Extract] Type mismatch for ${moduleType}.${field.fieldName}: ` +
                 `expected ${fieldSchema?.type}, got ${actualType}. ` +
-                `Value: ${
-                  JSON.stringify(field.extractedValue)
-                }. Skipping field.`,
+                `Value: ${JSON.stringify(field.extractedValue)}. Skipping field.`,
             );
             continue; // Skip this field
           }
 
-          initialValues[field.fieldName] = field.extractedValue;
+          try {
+            // Only write if validation passed
+            (parentSubCharmsCell as any).key(existingIndex).key("charm").key(
+              field.fieldName,
+            ).set(field.extractedValue);
+          } catch (e) {
+            console.warn(`Failed to set ${moduleType}.${field.fieldName}:`, e);
+          }
         }
-        // Create module with initial values passed to the recipe
+      } else if (moduleType !== "notes") {
+        // Module doesn't exist - create it with initial values
+        try {
+          // Build initial values object from extracted fields
+          const initialValues: Record<string, unknown> = {};
+          for (const field of fields) {
+            // Validate before adding to initialValues
+            const fieldSchema = getFieldSchema(
+              subCharms,
+              moduleType,
+              field.fieldName,
+            );
+            const isValid = validateFieldValue(field.extractedValue, fieldSchema);
 
-        // Only create module if we have at least one valid field
-        if (Object.keys(initialValues).length > 0) {
-          const newCharm = createSubCharm(moduleType, initialValues);
-          // Capture schema at creation time for dynamic discovery
-          const schema = getResultSchema(newCharm);
-          newEntries.push({
-            type: moduleType,
-            pinned: false,
-            charm: newCharm,
-            schema,
-          });
+            if (!isValid) {
+              const actualType = Array.isArray(field.extractedValue)
+                ? "array"
+                : typeof field.extractedValue;
+              console.warn(
+                `[Extract] Type mismatch for new module ${moduleType}.${field.fieldName}: ` +
+                  `expected ${fieldSchema?.type}, got ${actualType}. ` +
+                  `Value: ${
+                    JSON.stringify(field.extractedValue)
+                  }. Skipping field.`,
+              );
+              continue; // Skip this field
+            }
+
+            initialValues[field.fieldName] = field.extractedValue;
+          }
+
+          // Only create module if we have at least one valid field
+          if (Object.keys(initialValues).length > 0) {
+            const newCharm = createSubCharm(moduleType, initialValues);
+            // Capture schema at creation time for dynamic discovery
+            const schema = getResultSchema(newCharm);
+            newEntries.push({
+              type: moduleType,
+              pinned: false,
+              charm: newCharm,
+              schema,
+            });
+          }
+        } catch (e) {
+          console.warn(`Failed to create module ${moduleType}:`, e);
         }
-      } catch (e) {
-        console.warn(`Failed to create module ${moduleType}:`, e);
       }
     }
-  }
 
-  // Batch: add all new modules and remove self in a single set()
-  const selfEntry = current.find((e) => e?.type === "extractor");
-  const withoutSelf = current.filter((e) => e?.type !== "extractor");
-  const final = [...withoutSelf, ...newEntries];
-  parentSubCharms.set(final);
+    // Collect indices to trash (sources + self)
+    const indicesToTrash: number[] = [];
 
-  // Trash self
-  if (selfEntry) {
-    parentTrashedSubCharms.push({
-      ...selfEntry,
-      trashedAt: new Date().toISOString(),
-    });
-  }
-});
+    // Add selected source indices to trash list
+    for (const source of sourcesData) {
+      if (toTrash[source.index] === true) {
+        indicesToTrash.push(source.index);
+      }
+    }
+
+    // Find self (extractor) index
+    const selfIndex = current.findIndex((e) => e?.type === "extractor");
+    if (selfIndex >= 0) {
+      indicesToTrash.push(selfIndex);
+    }
+
+    // Sort descending to preserve indices when removing
+    indicesToTrash.sort((a, b) => b - a);
+
+    // Move items to trash
+    for (const idx of indicesToTrash) {
+      const entry = current[idx];
+      if (entry) {
+        parentTrashedSubCharmsCell.push({
+          ...entry,
+          trashedAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    // Build final list: remove trashed items, add new entries
+    const remaining = current.filter((_, i) => !indicesToTrash.includes(i));
+    const final = [...remaining, ...newEntries];
+    parentSubCharmsCell.set(final);
+  },
+);
 
 // ===== The Pattern =====
 
@@ -433,45 +646,113 @@ export const ExtractorModule = recipe<
     {
       parentSubCharms,
       parentTrashedSubCharms,
-      inputText,
-      extractionPrompt,
+      sourceSelections,
+      trashSelections,
       selections,
+      extractPhase,
+      extractionPrompt,
     },
   ) => {
-    // Dynamic schema discovery - builds schema from stored entry.schema (with registry fallback)
+    // Use FULL registry schema - enables extraction to create new modules
+    // This includes all available module types, not just existing ones
     const extractSchema = computed(() => {
-      return buildExtractionSchemaFromCell(parentSubCharms);
+      return buildFullExtractionSchema();
     });
 
-    // SmartTextInput - provides text, file upload, and image OCR input
-    const smartTextInput = SmartTextInput({
-      $value: inputText,
-      placeholder:
-        "Paste text, upload a file, or snap a photo of a business card...",
-      rows: 4,
+    // Scan for extractable sources
+    const extractableSources = computed((): ExtractableSource[] => {
+      const subCharms = parentSubCharms.get() || [];
+      return scanExtractableSources(subCharms);
     });
 
-    // Reactive extraction - only runs when extractionPrompt is set (user clicked Extract)
-    // The framework caches by content hash, so same text won't re-extract
+    // Check if any sources are selected
+    const hasSelectedSources = computed(() => {
+      const sources = extractableSources;
+      const selections = sourceSelections || {};
+      if (!sources || sources.length === 0) return false;
+      // At least one source must not be explicitly deselected
+      return sources.some((s: ExtractableSource) =>
+        selections[s.index] !== false
+      );
+    });
+
+    // Count selected sources
+    const selectedSourceCount = computed(() => {
+      const sources = extractableSources;
+      const selections = sourceSelections || {};
+      if (!sources) return 0;
+      return sources.filter((s: ExtractableSource) =>
+        selections[s.index] !== false
+      ).length;
+    });
+
+    // Build OCR prompts for selected photos
+    const photoSources = computed(() => {
+      const sources = extractableSources;
+      const selections = sourceSelections || {};
+      if (!sources) return [];
+      return sources.filter(
+        (s: ExtractableSource) =>
+          s.type === "photo" && s.requiresOCR && selections[s.index] !== false,
+      );
+    });
+
+    // Build OCR prompt for the first selected photo
+    // For simplicity, we handle one photo at a time
+    const ocrPrompt = computed(() => {
+      const photos = photoSources;
+      if (!photos || photos.length === 0) return undefined;
+
+      // Get the first selected photo
+      const photo = photos[0];
+      if (!photo?.imageData) return undefined;
+
+      const imageUrl = photo.imageData.data || photo.imageData.url;
+      if (!imageUrl) return undefined;
+
+      return [
+        { type: "image" as const, image: imageUrl },
+        {
+          type: "text" as const,
+          text: "Extract all text from this image exactly as written.",
+        },
+      ];
+    });
+
+    // Single OCR call for the first photo
+    const ocr = generateText({
+      system: OCR_SYSTEM_PROMPT,
+      prompt: ocrPrompt,
+      model: "anthropic:claude-sonnet-4-5",
+    });
+
+    // Check if OCR is pending
+    const ocrPending = computed(() => {
+      const photos = photoSources;
+      if (!photos || photos.length === 0) return false;
+      return Boolean(ocr.pending);
+    });
+
+    // Get OCR results as a map (index -> text)
+    const ocrResults = computed((): Record<number, string> => {
+      const photos = photoSources;
+      const results: Record<number, string> = {};
+      if (!photos || photos.length === 0) return results;
+
+      // For the first photo, use the OCR result
+      if (photos[0] && ocr.result) {
+        results[photos[0].index] = ocr.result as string;
+      }
+      return results;
+    });
+
+    // Reactive extraction - only runs when extractionPrompt is set
     const extraction = generateObject({
       system: EXTRACTION_SYSTEM_PROMPT,
-      prompt: extractionPrompt, // Only triggers when user clicks Extract button
-      schema: extractSchema as any, // Dynamic schema from stored entry.schema
-      model: "anthropic:claude-haiku-4-5", // Fast & cheap model for extraction
+      prompt: extractionPrompt,
+      schema: extractSchema as any,
+      model: "anthropic:claude-haiku-4-5",
     } as any);
-
-    // Check if we have any text to extract (for UI display)
-    // inputText is a reactive reference - must use computed() to track changes
-    const hasText = computed(() => {
-      const text = inputText || "";
-      return text.trim().length > 0;
-    });
-
-    // Check if extraction has been triggered
-    const hasTriggered = computed(() => {
-      const prompt = extractionPrompt || "";
-      return prompt.trim().length > 0;
-    });
 
     // Build preview from extraction result
     const preview = computed((): ExtractionPreview | null => {
@@ -485,30 +766,26 @@ export const ExtractorModule = recipe<
       const p = preview;
       if (!p?.fields) return 0;
       const sel = selections || {};
-      return p.fields.filter((f) => {
+      return p.fields.filter((f: ExtractedField) => {
         const key = `${f.targetModule}.${f.fieldName}`;
         return sel[key] !== false; // Default is selected
       }).length;
     });
 
-    // Determine current phase
-    const phase = computed(() => {
-      // If no text entered yet, stay idle
-      if (!hasText) return "idle";
-      // If text entered but not triggered, show "ready" state with Extract button
-      if (!hasTriggered) return "ready";
-      // After triggering, show extraction states
-      if (extraction.pending) return "extracting";
-      if (extraction.error) return "error";
-      if (preview?.fields?.length) return "preview";
-      return "idle";
+    // Determine current phase based on state
+    const currentPhase = computed(() => {
+      const phase = extractPhase || "select";
+      if (phase === "extracting") {
+        if (extraction.pending) return "extracting";
+        if (extraction.error) return "error";
+        if (preview?.fields?.length) return "preview";
+        if (extraction.result && !preview?.fields?.length) return "no-results";
+        return "extracting";
+      }
+      return phase;
     });
 
-    // Show extract button when ready (text entered but not triggered)
-    const showExtractButton = computed(() => hasText && !hasTriggered);
-
     // Format extracted fields as text for preview display
-    // Build directly from extraction.result to avoid double-computed issues
     const previewText = computed(() => {
       if (!extraction.result) return "No fields extracted";
       const subCharms = parentSubCharms.get() || [];
@@ -517,8 +794,17 @@ export const ExtractorModule = recipe<
       return previewData.fields.map((f: ExtractedField) => {
         const current = formatValue(f.currentValue);
         const extracted = formatValue(f.extractedValue);
-        return `${f.targetModule}.${f.fieldName}: ${current} → ${extracted}`;
+        return `${f.targetModule}.${f.fieldName}: ${current} -> ${extracted}`;
       }).join("\n");
+    });
+
+    // Count sources selected for trash
+    const trashCount = computed(() => {
+      const sources = extractableSources;
+      const trash = trashSelections || {};
+      if (!sources) return 0;
+      return sources.filter((s: ExtractableSource) => trash[s.index] === true)
+        .length;
     });
 
     return {
@@ -542,9 +828,9 @@ export const ExtractorModule = recipe<
           >
             <span style={{ color: "#92400e", fontWeight: "500" }}>
               {ifElse(
-                computed(() => phase === "preview"),
+                computed(() => currentPhase === "preview"),
                 "Review Changes",
-                "Extract from Text",
+                "AI Extract",
               )}
             </span>
             <button
@@ -560,77 +846,197 @@ export const ExtractorModule = recipe<
               }}
               title="Dismiss"
             >
-              ✕
+              x
             </button>
           </div>
 
-          {/* Idle/Ready state - text input with Extract button */}
+          {/* Select Sources Phase */}
           {ifElse(
-            computed(() =>
-              phase === "idle" || phase === "ready" || phase === "error"
-            ),
+            computed(() => currentPhase === "select"),
             <div
               style={{ display: "flex", flexDirection: "column", gap: "12px" }}
             >
-              {/* SmartTextInput: supports text, file upload, and image OCR */}
-              {smartTextInput.ui.complete}
               {ifElse(
-                computed(() => phase === "error"),
+                computed(() => extractableSources.length === 0),
                 <div
                   style={{
-                    padding: "8px 12px",
-                    background: "#fee2e2",
+                    padding: "16px",
+                    background: "white",
                     borderRadius: "6px",
-                    color: "#991b1b",
-                    fontSize: "13px",
+                    textAlign: "center",
+                    color: "#6b7280",
                   }}
                 >
-                  Extraction failed. Try different text or check the format.
+                  <div style={{ marginBottom: "8px" }}>
+                    No extractable sources found.
+                  </div>
+                  <div style={{ fontSize: "13px" }}>
+                    Add Notes, Text Import, or Photo modules first.
+                  </div>
                 </div>,
-                null,
-              )}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                  {ifElse(
-                    hasText,
-                    "Ready to extract",
-                    "Enter some text to extract from",
-                  )}
-                </div>
-                {ifElse(
-                  showExtractButton,
-                  <button
-                    type="button"
-                    onClick={triggerExtraction({ inputText, extractionPrompt })}
+                <div>
+                  <div
                     style={{
-                      padding: "8px 16px",
-                      background: "#f59e0b",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      fontSize: "14px",
-                      fontWeight: "500",
+                      marginBottom: "8px",
+                      fontSize: "13px",
+                      color: "#6b7280",
                     }}
                   >
-                    ✨ Extract
-                  </button>,
-                  null,
-                )}
-              </div>
+                    Select sources to extract from:
+                  </div>
+                  <div
+                    style={{
+                      background: "white",
+                      borderRadius: "6px",
+                      border: "1px solid #e5e7eb",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {extractableSources.map((source: ExtractableSource) => (
+                      <div
+                        key={source.index}
+                        style={{
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: "8px",
+                          padding: "10px 12px",
+                          borderBottom: "1px solid #f3f4f6",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={computed(
+                            () =>
+                              (sourceSelections || {})[source.index] !== false,
+                          )}
+                          onChange={createToggleSourceHandler(
+                            source.index,
+                            sourceSelections as unknown as Cell<
+                              Record<number, boolean>
+                            >,
+                          )({})}
+                          style={{ marginTop: "2px" }}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              marginBottom: "4px",
+                            }}
+                          >
+                            <span>{source.icon}</span>
+                            <span
+                              style={{ fontWeight: "500", color: "#374151" }}
+                            >
+                              {source.label}
+                            </span>
+                            {source.requiresOCR && (
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  color: "#6b7280",
+                                  background: "#f3f4f6",
+                                  padding: "1px 6px",
+                                  borderRadius: "4px",
+                                }}
+                              >
+                                OCR
+                              </span>
+                            )}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "12px",
+                              color: "#9ca3af",
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                          >
+                            {source.preview}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* OCR pending indicator */}
+                  {ifElse(
+                    ocrPending,
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        padding: "8px",
+                        background: "#f3f4f6",
+                        borderRadius: "6px",
+                        fontSize: "13px",
+                        color: "#6b7280",
+                      }}
+                    >
+                      <ct-loader size="sm" />
+                      <span>Running OCR on photos...</span>
+                    </div>,
+                    null,
+                  )}
+
+                  {/* Extract button */}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      marginTop: "8px",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      disabled={computed(() =>
+                        !hasSelectedSources || ocrPending
+                      )}
+                      onClick={startExtraction({
+                        sourceSelectionsCell: sourceSelections as unknown as Cell<Record<number, boolean>>,
+                        parentSubCharmsCell: parentSubCharms,
+                        extractionPromptCell: extractionPrompt as unknown as Cell<string>,
+                        extractPhaseCell: extractPhase as unknown as Cell<string>,
+                      })}
+                      style={{
+                        padding: "8px 16px",
+                        background: computed(() =>
+                          hasSelectedSources && !ocrPending
+                            ? "#f59e0b"
+                            : "#d1d5db"
+                        ),
+                        color: "white",
+                        border: "none",
+                        borderRadius: "6px",
+                        cursor: computed(() => hasSelectedSources && !ocrPending
+                          ? "pointer"
+                          : "not-allowed"
+                        ),
+                        fontSize: "14px",
+                        fontWeight: "500",
+                      }}
+                    >
+                      Extract from {selectedSourceCount} source
+                      {ifElse(
+                        computed(() => selectedSourceCount !== 1),
+                        "s",
+                        "",
+                      )}
+                    </button>
+                  </div>
+                </div>,
+              )}
             </div>,
             null,
           )}
 
           {/* Extracting state */}
           {ifElse(
-            computed(() => phase === "extracting"),
+            computed(() => currentPhase === "extracting"),
             <div
               style={{
                 display: "flex",
@@ -646,13 +1052,91 @@ export const ExtractorModule = recipe<
             null,
           )}
 
+          {/* Error state */}
+          {ifElse(
+            computed(() => currentPhase === "error"),
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "12px" }}
+            >
+              <div
+                style={{
+                  padding: "12px",
+                  background: "#fee2e2",
+                  borderRadius: "6px",
+                  color: "#991b1b",
+                  fontSize: "13px",
+                }}
+              >
+                Extraction failed. Try again or add more content.
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  extractPhase.set("select");
+                  extractionPrompt.set("");
+                }}
+                style={{
+                  padding: "8px 16px",
+                  background: "#f59e0b",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "6px",
+                  cursor: "pointer",
+                  fontSize: "14px",
+                }}
+              >
+                Try Again
+              </button>
+            </div>,
+            null,
+          )}
+
+          {/* No results state */}
+          {ifElse(
+            computed(() => currentPhase === "no-results"),
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "12px" }}
+            >
+              <div
+                style={{
+                  padding: "12px",
+                  background: "#f3f4f6",
+                  borderRadius: "6px",
+                  color: "#6b7280",
+                  fontSize: "13px",
+                  textAlign: "center",
+                }}
+              >
+                No structured data found in the selected sources.
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  extractPhase.set("select");
+                  extractionPrompt.set("");
+                }}
+                style={{
+                  padding: "8px 16px",
+                  background: "white",
+                  border: "1px solid #d1d5db",
+                  borderRadius: "6px",
+                  cursor: "pointer",
+                  fontSize: "14px",
+                }}
+              >
+                Back to Sources
+              </button>
+            </div>,
+            null,
+          )}
+
           {/* Preview state - diff view */}
           {ifElse(
-            computed(() => phase === "preview"),
+            computed(() => currentPhase === "preview"),
             <div
               style={{ display: "flex", flexDirection: "column", gap: "16px" }}
             >
-              {/* Simple field list - render flat list of extracted fields */}
+              {/* Extracted fields */}
               <div
                 style={{
                   background: "white",
@@ -675,11 +1159,73 @@ export const ExtractorModule = recipe<
                     fontSize: "13px",
                     color: "#6b7280",
                     whiteSpace: "pre-wrap",
+                    fontFamily: "monospace",
                   }}
                 >
                   {previewText}
                 </div>
               </div>
+
+              {/* Trash sources section */}
+              {ifElse(
+                computed(() => extractableSources.length > 0),
+                <div
+                  style={{
+                    background: "white",
+                    borderRadius: "6px",
+                    border: "1px solid #e5e7eb",
+                    padding: "12px",
+                  }}
+                >
+                  <div
+                    style={{
+                      marginBottom: "8px",
+                      fontWeight: "500",
+                      color: "#374151",
+                      fontSize: "13px",
+                    }}
+                  >
+                    Trash sources after applying?
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      color: "#9ca3af",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Select sources to move to trash:
+                  </div>
+                  {extractableSources.map((source: ExtractableSource) => (
+                    <div
+                      key={source.index + 1000}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        padding: "6px 0",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={computed(
+                          () => (trashSelections || {})[source.index] === true,
+                        )}
+                        onChange={createToggleTrashHandler(
+                          source.index,
+                          trashSelections as unknown as Cell<
+                            Record<number, boolean>
+                          >,
+                        )({})}
+                      />
+                      <span style={{ fontSize: "13px", color: "#6b7280" }}>
+                        {source.icon} {source.label}
+                      </span>
+                    </div>
+                  ))}
+                </div>,
+                null,
+              )}
 
               {/* Action buttons */}
               <div
@@ -689,6 +1235,23 @@ export const ExtractorModule = recipe<
                   justifyContent: "flex-end",
                 }}
               >
+                <button
+                  type="button"
+                  onClick={() => {
+                    extractPhase.set("select");
+                    extractionPrompt.set("");
+                  }}
+                  style={{
+                    padding: "8px 16px",
+                    background: "white",
+                    border: "1px solid #d1d5db",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    fontSize: "14px",
+                  }}
+                >
+                  Back
+                </button>
                 <button
                   type="button"
                   onClick={dismiss({ parentSubCharms, parentTrashedSubCharms })}
@@ -706,10 +1269,11 @@ export const ExtractorModule = recipe<
                 <button
                   type="button"
                   onClick={applySelected({
-                    parentSubCharms,
-                    parentTrashedSubCharms,
-                    preview: preview as ExtractionPreview,
-                    selections,
+                    parentSubCharmsCell: parentSubCharms,
+                    parentTrashedSubCharmsCell: parentTrashedSubCharms,
+                    extractionResultValue: extraction.result as Record<string, unknown> | null,
+                    selectionsCell: selections as unknown as Cell<Record<string, boolean>>,
+                    trashSelectionsCell: trashSelections as unknown as Cell<Record<number, boolean>>,
                   })}
                   style={{
                     padding: "8px 16px",
@@ -727,6 +1291,11 @@ export const ExtractorModule = recipe<
                     "s",
                     "",
                   )}
+                  {ifElse(
+                    computed(() => trashCount > 0),
+                    <span>& Trash {trashCount}</span>,
+                    "",
+                  )}
                 </button>
               </div>
             </div>,
@@ -734,9 +1303,11 @@ export const ExtractorModule = recipe<
           )}
         </div>
       ),
-      inputText,
-      extractionPrompt,
+      sourceSelections,
+      trashSelections,
       selections,
+      extractPhase,
+      extractionPrompt,
     };
   },
 );
