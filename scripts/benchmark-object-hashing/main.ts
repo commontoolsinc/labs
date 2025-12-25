@@ -37,7 +37,9 @@ const dagCbor = await import("https://esm.sh/@ipld/dag-cbor@9.2.1");
 // @ts-ignore - dynamic import from esm.sh
 const { CID } = await import("https://esm.sh/multiformats@13.3.2/cid");
 // @ts-ignore - dynamic import from esm.sh
-const multihash = await import("https://esm.sh/multiformats@13.3.2/hashes/digest");
+const multihash = await import(
+  "https://esm.sh/multiformats@13.3.2/hashes/digest"
+);
 
 // Test data structures
 const testData = {
@@ -113,8 +115,16 @@ const testData = {
         style: { display: "flex", flexDirection: "column" },
       },
       children: [
-        { type: "h1", props: { className: "text-2xl font-bold" }, children: ["Hello World"] },
-        { type: "p", props: { className: "text-gray-600" }, children: ["Welcome to our app"] },
+        {
+          type: "h1",
+          props: { className: "text-2xl font-bold" },
+          children: ["Hello World"],
+        },
+        {
+          type: "p",
+          props: { className: "text-gray-600" },
+          children: ["Welcome to our app"],
+        },
       ],
     },
 
@@ -132,7 +142,10 @@ const testData = {
         children: [
           {
             type: "label",
-            props: { htmlFor: `field-${i}`, className: "block text-sm font-medium" },
+            props: {
+              htmlFor: `field-${i}`,
+              className: "block text-sm font-medium",
+            },
             children: [`Field ${i}`],
           },
           {
@@ -164,11 +177,16 @@ const testData = {
           children: [{
             type: "tr",
             props: {},
-            children: ["ID", "Name", "Email", "Role", "Status", "Actions"].map(h => ({
-              type: "th",
-              props: { className: "px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase" },
-              children: [h],
-            })),
+            children: ["ID", "Name", "Email", "Role", "Status", "Actions"].map(
+              (h) => ({
+                type: "th",
+                props: {
+                  className:
+                    "px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase",
+                },
+                children: [h],
+              }),
+            ),
           }],
         },
         {
@@ -176,16 +194,39 @@ const testData = {
           props: { className: "bg-white divide-y divide-gray-200" },
           children: Array.from({ length: 100 }, (_, i) => ({
             type: "tr",
-            props: { key: `row-${i}`, className: i % 2 === 0 ? "bg-white" : "bg-gray-50" },
+            props: {
+              key: `row-${i}`,
+              className: i % 2 === 0 ? "bg-white" : "bg-gray-50",
+            },
             children: [
-              { type: "td", props: { className: "px-6 py-4 whitespace-nowrap" }, children: [String(i + 1)] },
-              { type: "td", props: { className: "px-6 py-4 whitespace-nowrap" }, children: [`User ${i}`] },
-              { type: "td", props: { className: "px-6 py-4 whitespace-nowrap" }, children: [`user${i}@example.com`] },
-              { type: "td", props: { className: "px-6 py-4 whitespace-nowrap" }, children: [i % 3 === 0 ? "Admin" : "User"] },
+              {
+                type: "td",
+                props: { className: "px-6 py-4 whitespace-nowrap" },
+                children: [String(i + 1)],
+              },
+              {
+                type: "td",
+                props: { className: "px-6 py-4 whitespace-nowrap" },
+                children: [`User ${i}`],
+              },
+              {
+                type: "td",
+                props: { className: "px-6 py-4 whitespace-nowrap" },
+                children: [`user${i}@example.com`],
+              },
+              {
+                type: "td",
+                props: { className: "px-6 py-4 whitespace-nowrap" },
+                children: [i % 3 === 0 ? "Admin" : "User"],
+              },
               {
                 type: "span",
                 props: {
-                  className: `px-2 py-1 rounded-full text-xs ${i % 4 === 0 ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"}`,
+                  className: `px-2 py-1 rounded-full text-xs ${
+                    i % 4 === 0
+                      ? "bg-green-100 text-green-800"
+                      : "bg-gray-100 text-gray-800"
+                  }`,
                 },
                 children: [i % 4 === 0 ? "Active" : "Inactive"],
               },
@@ -193,8 +234,22 @@ const testData = {
                 type: "div",
                 props: { className: "flex space-x-2" },
                 children: [
-                  { type: "button", props: { className: "text-blue-600 hover:text-blue-800", onClick: `edit(${i})` }, children: ["Edit"] },
-                  { type: "button", props: { className: "text-red-600 hover:text-red-800", onClick: `delete(${i})` }, children: ["Delete"] },
+                  {
+                    type: "button",
+                    props: {
+                      className: "text-blue-600 hover:text-blue-800",
+                      onClick: `edit(${i})`,
+                    },
+                    children: ["Edit"],
+                  },
+                  {
+                    type: "button",
+                    props: {
+                      className: "text-red-600 hover:text-red-800",
+                      onClick: `delete(${i})`,
+                    },
+                    children: ["Delete"],
+                  },
                 ],
               },
             ],
@@ -209,7 +264,11 @@ const testData = {
         type: "div",
         props: { className: "bg-white rounded-lg shadow p-6" },
         children: [
-          { type: "h3", props: { className: "text-lg font-semibold mb-4" }, children: [title] },
+          {
+            type: "h3",
+            props: { className: "text-lg font-semibold mb-4" },
+            children: [title],
+          },
           content,
         ],
       });
@@ -217,7 +276,7 @@ const testData = {
       const createChart = (id: string) => ({
         type: "div",
         props: { className: "chart-container", id, style: { height: 300 } },
-        children: Array.from({ length: 30 }, (_, i) => ({
+        children: Array.from({ length: 30 }, (_) => ({
           type: "div",
           props: {
             className: "bar",
@@ -235,10 +294,15 @@ const testData = {
           type: "a",
           props: {
             href: `/section/${i}`,
-            className: "flex items-center px-4 py-2 text-gray-300 hover:bg-gray-700 rounded",
+            className:
+              "flex items-center px-4 py-2 text-gray-300 hover:bg-gray-700 rounded",
           },
           children: [
-            { type: "svg", props: { className: "w-5 h-5 mr-3", viewBox: "0 0 20 20" }, children: [] },
+            {
+              type: "svg",
+              props: { className: "w-5 h-5 mr-3", viewBox: "0 0 20 20" },
+              children: [],
+            },
             { type: "span", props: {}, children: [`Menu Item ${i + 1}`] },
           ],
         })),
@@ -257,16 +321,30 @@ const testData = {
                 type: "header",
                 props: { className: "mb-8" },
                 children: [
-                  { type: "h1", props: { className: "text-3xl font-bold" }, children: ["Dashboard"] },
+                  {
+                    type: "h1",
+                    props: { className: "text-3xl font-bold" },
+                    children: ["Dashboard"],
+                  },
                   {
                     type: "div",
                     props: { className: "flex space-x-4 mt-4" },
                     children: Array.from({ length: 4 }, (_, i) => ({
                       type: "div",
-                      props: { className: "bg-white rounded-lg shadow p-4 flex-1" },
+                      props: {
+                        className: "bg-white rounded-lg shadow p-4 flex-1",
+                      },
                       children: [
-                        { type: "p", props: { className: "text-gray-500 text-sm" }, children: [`Metric ${i + 1}`] },
-                        { type: "p", props: { className: "text-2xl font-bold" }, children: [String(Math.floor(Math.random() * 10000))] },
+                        {
+                          type: "p",
+                          props: { className: "text-gray-500 text-sm" },
+                          children: [`Metric ${i + 1}`],
+                        },
+                        {
+                          type: "p",
+                          props: { className: "text-2xl font-bold" },
+                          children: [String(Math.floor(Math.random() * 10000))],
+                        },
                       ],
                     })),
                   },
@@ -283,15 +361,32 @@ const testData = {
                     props: { className: "space-y-3" },
                     children: Array.from({ length: 20 }, (_, i) => ({
                       type: "li",
-                      props: { className: "flex items-center space-x-3 p-2 hover:bg-gray-50 rounded" },
+                      props: {
+                        className:
+                          "flex items-center space-x-3 p-2 hover:bg-gray-50 rounded",
+                      },
                       children: [
-                        { type: "div", props: { className: "w-8 h-8 rounded-full bg-blue-500" }, children: [] },
+                        {
+                          type: "div",
+                          props: {
+                            className: "w-8 h-8 rounded-full bg-blue-500",
+                          },
+                          children: [],
+                        },
                         {
                           type: "div",
                           props: {},
                           children: [
-                            { type: "p", props: { className: "text-sm font-medium" }, children: [`User ${i} performed action`] },
-                            { type: "p", props: { className: "text-xs text-gray-500" }, children: [`${i + 1} minutes ago`] },
+                            {
+                              type: "p",
+                              props: { className: "text-sm font-medium" },
+                              children: [`User ${i} performed action`],
+                            },
+                            {
+                              type: "p",
+                              props: { className: "text-xs text-gray-500" },
+                              children: [`${i + 1} minutes ago`],
+                            },
                           ],
                         },
                       ],
@@ -304,9 +399,21 @@ const testData = {
                       type: "tr",
                       props: { className: "border-b" },
                       children: [
-                        { type: "td", props: { className: "py-2" }, children: [`#${1000 + i}`] },
-                        { type: "td", props: { className: "py-2" }, children: [`$${(Math.random() * 500).toFixed(2)}`] },
-                        { type: "td", props: { className: "py-2" }, children: [i % 3 === 0 ? "Completed" : "Pending"] },
+                        {
+                          type: "td",
+                          props: { className: "py-2" },
+                          children: [`#${1000 + i}`],
+                        },
+                        {
+                          type: "td",
+                          props: { className: "py-2" },
+                          children: [`$${(Math.random() * 500).toFixed(2)}`],
+                        },
+                        {
+                          type: "td",
+                          props: { className: "py-2" },
+                          children: [i % 3 === 0 ? "Completed" : "Pending"],
+                        },
                       ],
                     })),
                   }),
@@ -334,25 +441,47 @@ const testData = {
                 type: "div",
                 props: { className: "flex items-center" },
                 children: [
-                  { type: "img", props: { src: "/logo.svg", className: "h-8 w-8" }, children: [] },
-                  { type: "span", props: { className: "ml-2 text-xl font-bold" }, children: ["MyApp"] },
+                  {
+                    type: "img",
+                    props: { src: "/logo.svg", className: "h-8 w-8" },
+                    children: [],
+                  },
+                  {
+                    type: "span",
+                    props: { className: "ml-2 text-xl font-bold" },
+                    children: ["MyApp"],
+                  },
                 ],
               },
               {
                 type: "div",
                 props: { className: "flex items-center space-x-4" },
-                children: ["Home", "Features", "Pricing", "About", "Contact"].map(item => ({
-                  type: "a",
-                  props: { href: `/${item.toLowerCase()}`, className: "text-gray-600 hover:text-gray-900" },
-                  children: [item],
-                })),
+                children: ["Home", "Features", "Pricing", "About", "Contact"]
+                  .map((item) => ({
+                    type: "a",
+                    props: {
+                      href: `/${item.toLowerCase()}`,
+                      className: "text-gray-600 hover:text-gray-900",
+                    },
+                    children: [item],
+                  })),
               },
               {
                 type: "div",
                 props: { className: "flex items-center space-x-2" },
                 children: [
-                  { type: "button", props: { className: "px-4 py-2 text-gray-600" }, children: ["Login"] },
-                  { type: "button", props: { className: "px-4 py-2 bg-blue-600 text-white rounded-lg" }, children: ["Sign Up"] },
+                  {
+                    type: "button",
+                    props: { className: "px-4 py-2 text-gray-600" },
+                    children: ["Login"],
+                  },
+                  {
+                    type: "button",
+                    props: {
+                      className: "px-4 py-2 bg-blue-600 text-white rounded-lg",
+                    },
+                    children: ["Sign Up"],
+                  },
                 ],
               },
             ],
@@ -362,19 +491,43 @@ const testData = {
 
       const createHeroSection = () => ({
         type: "section",
-        props: { className: "pt-24 pb-12 bg-gradient-to-r from-blue-500 to-purple-600" },
+        props: {
+          className: "pt-24 pb-12 bg-gradient-to-r from-blue-500 to-purple-600",
+        },
         children: [{
           type: "div",
           props: { className: "max-w-7xl mx-auto px-4 text-center text-white" },
           children: [
-            { type: "h1", props: { className: "text-5xl font-bold mb-6" }, children: ["Build Amazing Products"] },
-            { type: "p", props: { className: "text-xl mb-8 opacity-90" }, children: ["The all-in-one platform for modern teams"] },
+            {
+              type: "h1",
+              props: { className: "text-5xl font-bold mb-6" },
+              children: ["Build Amazing Products"],
+            },
+            {
+              type: "p",
+              props: { className: "text-xl mb-8 opacity-90" },
+              children: ["The all-in-one platform for modern teams"],
+            },
             {
               type: "div",
               props: { className: "flex justify-center space-x-4" },
               children: [
-                { type: "button", props: { className: "px-8 py-3 bg-white text-blue-600 rounded-lg font-semibold" }, children: ["Get Started"] },
-                { type: "button", props: { className: "px-8 py-3 border-2 border-white rounded-lg font-semibold" }, children: ["Learn More"] },
+                {
+                  type: "button",
+                  props: {
+                    className:
+                      "px-8 py-3 bg-white text-blue-600 rounded-lg font-semibold",
+                  },
+                  children: ["Get Started"],
+                },
+                {
+                  type: "button",
+                  props: {
+                    className:
+                      "px-8 py-3 border-2 border-white rounded-lg font-semibold",
+                  },
+                  children: ["Learn More"],
+                },
               ],
             },
           ],
@@ -388,21 +541,45 @@ const testData = {
           type: "div",
           props: { className: "max-w-7xl mx-auto px-4" },
           children: [
-            { type: "h2", props: { className: "text-3xl font-bold text-center mb-12" }, children: ["Features"] },
+            {
+              type: "h2",
+              props: { className: "text-3xl font-bold text-center mb-12" },
+              children: ["Features"],
+            },
             {
               type: "div",
               props: { className: "grid grid-cols-3 gap-8" },
               children: Array.from({ length: 9 }, (_, i) => ({
                 type: "div",
-                props: { className: "bg-white p-6 rounded-xl shadow-md hover:shadow-lg transition" },
+                props: {
+                  className:
+                    "bg-white p-6 rounded-xl shadow-md hover:shadow-lg transition",
+                },
                 children: [
                   {
                     type: "div",
-                    props: { className: "w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4" },
-                    children: [{ type: "svg", props: { className: "w-6 h-6 text-blue-600" }, children: [] }],
+                    props: {
+                      className:
+                        "w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4",
+                    },
+                    children: [{
+                      type: "svg",
+                      props: { className: "w-6 h-6 text-blue-600" },
+                      children: [],
+                    }],
                   },
-                  { type: "h3", props: { className: "text-lg font-semibold mb-2" }, children: [`Feature ${i + 1}`] },
-                  { type: "p", props: { className: "text-gray-600" }, children: ["Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt."] },
+                  {
+                    type: "h3",
+                    props: { className: "text-lg font-semibold mb-2" },
+                    children: [`Feature ${i + 1}`],
+                  },
+                  {
+                    type: "p",
+                    props: { className: "text-gray-600" },
+                    children: [
+                      "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.",
+                    ],
+                  },
                 ],
               })),
             },
@@ -417,7 +594,11 @@ const testData = {
           type: "div",
           props: { className: "max-w-7xl mx-auto px-4" },
           children: [
-            { type: "h2", props: { className: "text-3xl font-bold text-center mb-12" }, children: ["Pricing"] },
+            {
+              type: "h2",
+              props: { className: "text-3xl font-bold text-center mb-12" },
+              children: ["Pricing"],
+            },
             {
               type: "div",
               props: { className: "grid grid-cols-3 gap-8" },
@@ -428,14 +609,24 @@ const testData = {
               ].map((plan, i) => ({
                 type: "div",
                 props: {
-                  className: `bg-white p-8 rounded-xl shadow-md ${i === 1 ? "ring-2 ring-blue-500 scale-105" : ""}`,
+                  className: `bg-white p-8 rounded-xl shadow-md ${
+                    i === 1 ? "ring-2 ring-blue-500 scale-105" : ""
+                  }`,
                 },
                 children: [
-                  { type: "h3", props: { className: "text-xl font-semibold mb-4" }, children: [plan.name] },
+                  {
+                    type: "h3",
+                    props: { className: "text-xl font-semibold mb-4" },
+                    children: [plan.name],
+                  },
                   {
                     type: "p",
                     props: { className: "text-4xl font-bold mb-6" },
-                    children: [`$${plan.price}`, { type: "span", props: { className: "text-lg text-gray-500" }, children: ["/mo"] }],
+                    children: [`$${plan.price}`, {
+                      type: "span",
+                      props: { className: "text-lg text-gray-500" },
+                      children: ["/mo"],
+                    }],
                   },
                   {
                     type: "ul",
@@ -444,14 +635,26 @@ const testData = {
                       type: "li",
                       props: { className: "flex items-center" },
                       children: [
-                        { type: "svg", props: { className: "w-5 h-5 text-green-500 mr-2" }, children: [] },
-                        { type: "span", props: {}, children: [`Feature ${j + 1}`] },
+                        {
+                          type: "svg",
+                          props: { className: "w-5 h-5 text-green-500 mr-2" },
+                          children: [],
+                        },
+                        {
+                          type: "span",
+                          props: {},
+                          children: [`Feature ${j + 1}`],
+                        },
                       ],
                     })),
                   },
                   {
                     type: "button",
-                    props: { className: `w-full py-3 rounded-lg font-semibold ${i === 1 ? "bg-blue-600 text-white" : "bg-gray-100"}` },
+                    props: {
+                      className: `w-full py-3 rounded-lg font-semibold ${
+                        i === 1 ? "bg-blue-600 text-white" : "bg-gray-100"
+                      }`,
+                    },
                     children: ["Choose Plan"],
                   },
                 ],
@@ -471,18 +674,32 @@ const testData = {
             {
               type: "div",
               props: { className: "grid grid-cols-4 gap-8 mb-8" },
-              children: ["Product", "Company", "Resources", "Legal"].map((section, i) => ({
+              children: ["Product", "Company", "Resources", "Legal"].map((
+                section,
+                _i,
+              ) => ({
                 type: "div",
                 props: {},
                 children: [
-                  { type: "h4", props: { className: "font-semibold mb-4" }, children: [section] },
+                  {
+                    type: "h4",
+                    props: { className: "font-semibold mb-4" },
+                    children: [section],
+                  },
                   {
                     type: "ul",
                     props: { className: "space-y-2" },
                     children: Array.from({ length: 5 }, (_, j) => ({
                       type: "li",
                       props: {},
-                      children: [{ type: "a", props: { href: "#", className: "text-gray-400 hover:text-white" }, children: [`${section} Link ${j + 1}`] }],
+                      children: [{
+                        type: "a",
+                        props: {
+                          href: "#",
+                          className: "text-gray-400 hover:text-white",
+                        },
+                        children: [`${section} Link ${j + 1}`],
+                      }],
                     })),
                   },
                 ],
@@ -490,15 +707,24 @@ const testData = {
             },
             {
               type: "div",
-              props: { className: "border-t border-gray-800 pt-8 flex justify-between" },
+              props: {
+                className: "border-t border-gray-800 pt-8 flex justify-between",
+              },
               children: [
-                { type: "p", props: { className: "text-gray-400" }, children: ["© 2024 MyApp. All rights reserved."] },
+                {
+                  type: "p",
+                  props: { className: "text-gray-400" },
+                  children: ["© 2024 MyApp. All rights reserved."],
+                },
                 {
                   type: "div",
                   props: { className: "flex space-x-4" },
-                  children: ["Twitter", "GitHub", "LinkedIn"].map(social => ({
+                  children: ["Twitter", "GitHub", "LinkedIn"].map((social) => ({
                     type: "a",
-                    props: { href: "#", className: "text-gray-400 hover:text-white" },
+                    props: {
+                      href: "#",
+                      className: "text-gray-400 hover:text-white",
+                    },
                     children: [social],
                   })),
                 },
@@ -513,7 +739,15 @@ const testData = {
         props: { className: "min-h-screen" },
         children: [
           createNavbar(),
-          { type: "main", props: {}, children: [createHeroSection(), createFeatureGrid(), createPricingSection()] },
+          {
+            type: "main",
+            props: {},
+            children: [
+              createHeroSection(),
+              createFeatureGrid(),
+              createPricingSection(),
+            ],
+          },
           createFooter(),
         ],
       };
@@ -538,7 +772,7 @@ async function createHashFunctions() {
 
   // Node crypto (only in Deno/Node)
   try {
-    // @ts-ignore
+    // @ts-ignore: dynamic import of node:crypto for Deno compatibility
     const nodeCrypto = await import("node:crypto");
     functions["node:crypto"] = (data: Uint8Array) => {
       return nodeCrypto.createHash("sha256").update(data).digest();
@@ -637,12 +871,12 @@ async function createStrategies() {
 }
 
 // Benchmark runner with fresh object cloning to avoid cache effects
-async function benchmark(
-  name: string,
+function benchmark(
+  _name: string,
   strategy: (obj: any) => string,
   templateData: any,
   iterations: number = 1000,
-): Promise<number> {
+): number {
   // Pre-generate cloned objects to exclude clone time from measurement
   // Use JSON serialization as it's what we're testing against anyway
   const jsonStr = JSON.stringify(templateData);
@@ -680,9 +914,7 @@ function testStability(strategy: (obj: any) => string): boolean {
 async function main() {
   console.log("=== Object Hashing Benchmark ===\n");
   console.log(
-    `Environment: ${
-      typeof Deno !== "undefined" ? "Deno" : "Browser/Node"
-    }\n`,
+    `Environment: ${typeof Deno !== "undefined" ? "Deno" : "Browser/Node"}\n`,
   );
 
   const strategies = await createStrategies();
@@ -702,26 +934,91 @@ async function main() {
   > = {};
 
   const testCases = [
-    { category: "small", name: "simple", data: testData.small.simple, iterations: 10000 },
-    { category: "small", name: "nested", data: testData.small.nested, iterations: 10000 },
-    { category: "small", name: "array", data: testData.small.array, iterations: 10000 },
-    { category: "small", name: "mixed", data: testData.small.mixed, iterations: 10000 },
-    { category: "large", name: "wide", data: testData.large.wide, iterations: 1000 },
-    { category: "large", name: "deep", data: testData.large.deep, iterations: 1000 },
+    {
+      category: "small",
+      name: "simple",
+      data: testData.small.simple,
+      iterations: 10000,
+    },
+    {
+      category: "small",
+      name: "nested",
+      data: testData.small.nested,
+      iterations: 10000,
+    },
+    {
+      category: "small",
+      name: "array",
+      data: testData.small.array,
+      iterations: 10000,
+    },
+    {
+      category: "small",
+      name: "mixed",
+      data: testData.small.mixed,
+      iterations: 10000,
+    },
+    {
+      category: "large",
+      name: "wide",
+      data: testData.large.wide,
+      iterations: 1000,
+    },
+    {
+      category: "large",
+      name: "deep",
+      data: testData.large.deep,
+      iterations: 1000,
+    },
     {
       category: "large",
       name: "largeArray",
       data: testData.large.largeArray,
       iterations: 100,
     },
-    { category: "large", name: "sparse", data: testData.large.sparse, iterations: 1000 },
-    { category: "large", name: "complex", data: testData.large.complex, iterations: 100 },
+    {
+      category: "large",
+      name: "sparse",
+      data: testData.large.sparse,
+      iterations: 1000,
+    },
+    {
+      category: "large",
+      name: "complex",
+      data: testData.large.complex,
+      iterations: 100,
+    },
     // VDOM-like structures
-    { category: "vdom", name: "simpleComp", data: testData.vdom.simpleComponent, iterations: 10000 },
-    { category: "vdom", name: "form", data: testData.vdom.formComponent, iterations: 1000 },
-    { category: "vdom", name: "dataTable", data: testData.vdom.dataTable, iterations: 100 },
-    { category: "vdom", name: "dashboard", data: testData.vdom.dashboard, iterations: 100 },
-    { category: "vdom", name: "fullPage", data: testData.vdom.fullPageApp, iterations: 50 },
+    {
+      category: "vdom",
+      name: "simpleComp",
+      data: testData.vdom.simpleComponent,
+      iterations: 10000,
+    },
+    {
+      category: "vdom",
+      name: "form",
+      data: testData.vdom.formComponent,
+      iterations: 1000,
+    },
+    {
+      category: "vdom",
+      name: "dataTable",
+      data: testData.vdom.dataTable,
+      iterations: 100,
+    },
+    {
+      category: "vdom",
+      name: "dashboard",
+      data: testData.vdom.dashboard,
+      iterations: 100,
+    },
+    {
+      category: "vdom",
+      name: "fullPage",
+      data: testData.vdom.fullPageApp,
+      iterations: 50,
+    },
   ];
 
   for (const testCase of testCases) {

@@ -1,8 +1,8 @@
 # Object Hashing Benchmark
 
-This benchmark compares `merkle-reference` against various alternatives for stable
-object hashing, where "stable" means that minor non-semantic differences like
-property order don't change the hash.
+This benchmark compares `merkle-reference` against various alternatives for
+stable object hashing, where "stable" means that minor non-semantic differences
+like property order don't change the hash.
 
 ## What's Tested
 
@@ -22,7 +22,8 @@ property order don't change the hash.
 
 4. **hash-it** - Fast object hashing library
 
-5. **stable-stringify+noble** - fast-json-stable-stringify + @noble/hashes SHA-256
+5. **stable-stringify+noble** - fast-json-stable-stringify + @noble/hashes
+   SHA-256
 
 6. **JSON.stringify+noble (UNSTABLE)** - Baseline using regular JSON.stringify
    (NOT stable for property order)
@@ -30,12 +31,14 @@ property order don't change the hash.
 ### Test Data Structures
 
 **Small structures:**
+
 - Simple object: `{ a: 1, b: 2, c: 3 }`
 - Nested object: `{ a: { b: { c: 1 } } }`
 - Array: `[1, 2, 3, 4, 5]`
 - Mixed: `{ a: [1, 2], b: { c: 3 }, d: "hello" }`
 
 **Large structures:**
+
 - Wide (1000 properties)
 - Deep (100 levels of nesting)
 - Large array (1000 objects)
@@ -48,22 +51,22 @@ property order don't change the hash.
 
 ```bash
 # Run in Deno environment
-deno run --allow-net --allow-read --allow-env scripts/benchmark-object-hashing.ts
+deno run --allow-net --allow-read --allow-env scripts/benchmark-object-hashing/main.ts
 
 # Or use the wrapper
-deno run --allow-net --allow-read --allow-env scripts/benchmark-object-hashing-deno.ts
+deno run --allow-net --allow-read --allow-env scripts/benchmark-object-hashing/deno.ts
 ```
 
 ### Headless Chrome
 
 ```bash
 # Run in headless Chrome browser
-deno run --allow-net --allow-read --allow-env --allow-run scripts/benchmark-object-hashing-chrome.ts
+deno run --allow-net --allow-read --allow-env --allow-run --allow-write scripts/benchmark-object-hashing/chrome.ts
 ```
 
 ### Browser (Manual)
 
-Open `scripts/benchmark-object-hashing-browser.html` in any browser to run the
+Open `scripts/benchmark-object-hashing/browser.html` in any browser to run the
 benchmark interactively.
 
 ## Dependencies

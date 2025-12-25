@@ -6,7 +6,7 @@
  * This script runs the benchmark in a headless Chrome browser using Astral.
  *
  * Usage:
- *   deno run --allow-net --allow-read --allow-env --allow-run scripts/benchmark-object-hashing-chrome.ts
+ *   deno run --allow-net --allow-read --allow-env --allow-run scripts/benchmark-object-hashing/chrome.ts
  */
 
 import { launch } from "@astral/astral";
@@ -17,7 +17,7 @@ async function main() {
 
   // Get the path to the HTML file
   const scriptDir = new URL(".", import.meta.url).pathname;
-  const htmlPath = join(scriptDir, "benchmark-object-hashing-browser.html");
+  const htmlPath = join(scriptDir, "browser.html");
   const htmlUrl = `file://${htmlPath}`;
 
   console.log(`Loading benchmark from: ${htmlUrl}\n`);

@@ -6,7 +6,7 @@
  * This script executes the benchmark in Deno environment.
  *
  * Usage:
- *   deno run --allow-net --allow-read --allow-env scripts/benchmark-object-hashing-deno.ts
+ *   deno run --allow-net --allow-read --allow-env scripts/benchmark-object-hashing/deno.ts
  */
 
-import "./benchmark-object-hashing.ts";
+import "./main.ts";

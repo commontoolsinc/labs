@@ -18,18 +18,32 @@ const [
   { createSHA256 },
   dagCbor,
   { CID },
-  multihash
+  multihash,
 ] = await Promise.all([
-  import('https://esm.sh/merkle-reference@2.2.0').catch(() => import('merkle-reference')),
-  import('https://esm.sh/object-hash@3.0.0').catch(() => import('object-hash')),
-  import('https://esm.sh/hash-it@6.0.0').catch(() => import('hash-it')),
-  import('https://esm.sh/fast-json-stable-stringify@2.1.0').catch(() => import('fast-json-stable-stringify')),
-  import('https://esm.sh/@noble/hashes@1.4.0/sha256').catch(() => import('@noble/hashes/sha256')),
-  import('https://esm.sh/@noble/hashes@1.4.0/blake2b').catch(() => import('@noble/hashes/blake2b')),
-  import('https://esm.sh/hash-wasm@4.11.0').catch(() => import('hash-wasm')),
-  import('https://esm.sh/@ipld/dag-cbor@9.2.1').catch(() => import('@ipld/dag-cbor')),
-  import('https://esm.sh/multiformats@13.3.2/cid').catch(() => import('multiformats/cid')),
-  import('https://esm.sh/multiformats@13.3.2/hashes/digest').catch(() => import('multiformats/hashes/digest'))
+  import("https://esm.sh/merkle-reference@2.2.0").catch(() =>
+    import("merkle-reference")
+  ),
+  import("https://esm.sh/object-hash@3.0.0").catch(() => import("object-hash")),
+  import("https://esm.sh/hash-it@6.0.0").catch(() => import("hash-it")),
+  import("https://esm.sh/fast-json-stable-stringify@2.1.0").catch(() =>
+    import("fast-json-stable-stringify")
+  ),
+  import("https://esm.sh/@noble/hashes@1.4.0/sha256").catch(() =>
+    import("@noble/hashes/sha256")
+  ),
+  import("https://esm.sh/@noble/hashes@1.4.0/blake2b").catch(() =>
+    import("@noble/hashes/blake2b")
+  ),
+  import("https://esm.sh/hash-wasm@4.11.0").catch(() => import("hash-wasm")),
+  import("https://esm.sh/@ipld/dag-cbor@9.2.1").catch(() =>
+    import("@ipld/dag-cbor")
+  ),
+  import("https://esm.sh/multiformats@13.3.2/cid").catch(() =>
+    import("multiformats/cid")
+  ),
+  import("https://esm.sh/multiformats@13.3.2/hashes/digest").catch(() =>
+    import("multiformats/hashes/digest")
+  ),
 ]);
 
 // Create a 256-bit blake2b hasher
@@ -142,7 +156,9 @@ async function createStrategies() {
     const encoder = new TextEncoder();
     const data = encoder.encode(str);
     const hash = sha256(data);
-    return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
+    return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join(
+      "",
+    );
   };
 
   strategies["JSON.stringify+noble (UNSTABLE)"] = (obj) => {
@@ -150,7 +166,9 @@ async function createStrategies() {
     const encoder = new TextEncoder();
     const data = encoder.encode(str);
     const hash = sha256(data);
-    return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
+    return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join(
+      "",
+    );
   };
 
   // DAG-CBOR approaches
@@ -158,14 +176,18 @@ async function createStrategies() {
     const encode = dagCbor.encode || dagCbor;
     const encoded = encode(obj);
     const hash = sha256(encoded);
-    return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
+    return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join(
+      "",
+    );
   };
 
   strategies["dag-cbor+blake2b"] = (obj) => {
     const encode = dagCbor.encode || dagCbor;
     const encoded = encode(obj);
     const hash = blake2b256(encoded);
-    return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
+    return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join(
+      "",
+    );
   };
 
   strategies["dag-cbor+CID"] = (obj) => {
@@ -180,7 +202,7 @@ async function createStrategies() {
   return strategies;
 }
 
-async function benchmark(fn, iterations = 1000) {
+function benchmark(fn, iterations = 1000) {
   for (let i = 0; i < Math.min(100, iterations / 10); i++) {
     fn();
   }
@@ -222,15 +244,60 @@ async function main() {
   const results = {};
 
   const testCases = [
-    { category: "small", name: "simple", data: testData.small.simple, iterations: 10000 },
-    { category: "small", name: "nested", data: testData.small.nested, iterations: 10000 },
-    { category: "small", name: "array", data: testData.small.array, iterations: 10000 },
-    { category: "small", name: "mixed", data: testData.small.mixed, iterations: 10000 },
-    { category: "large", name: "wide", data: testData.large.wide, iterations: 1000 },
-    { category: "large", name: "deep", data: testData.large.deep, iterations: 1000 },
-    { category: "large", name: "largeArray", data: testData.large.largeArray, iterations: 100 },
-    { category: "large", name: "sparse", data: testData.large.sparse, iterations: 1000 },
-    { category: "large", name: "complex", data: testData.large.complex, iterations: 100 },
+    {
+      category: "small",
+      name: "simple",
+      data: testData.small.simple,
+      iterations: 10000,
+    },
+    {
+      category: "small",
+      name: "nested",
+      data: testData.small.nested,
+      iterations: 10000,
+    },
+    {
+      category: "small",
+      name: "array",
+      data: testData.small.array,
+      iterations: 10000,
+    },
+    {
+      category: "small",
+      name: "mixed",
+      data: testData.small.mixed,
+      iterations: 10000,
+    },
+    {
+      category: "large",
+      name: "wide",
+      data: testData.large.wide,
+      iterations: 1000,
+    },
+    {
+      category: "large",
+      name: "deep",
+      data: testData.large.deep,
+      iterations: 1000,
+    },
+    {
+      category: "large",
+      name: "largeArray",
+      data: testData.large.largeArray,
+      iterations: 100,
+    },
+    {
+      category: "large",
+      name: "sparse",
+      data: testData.large.sparse,
+      iterations: 1000,
+    },
+    {
+      category: "large",
+      name: "complex",
+      data: testData.large.complex,
+      iterations: 100,
+    },
   ];
 
   for (const testCase of testCases) {
