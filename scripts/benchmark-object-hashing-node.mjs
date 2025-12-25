@@ -14,7 +14,7 @@ const [
   hashIt,
   stableStringify,
   { sha256 },
-  { blake2b256 },
+  { blake2b },
   { createSHA256 },
   dagCbor,
   { CID },
@@ -31,6 +31,9 @@ const [
   import('https://esm.sh/multiformats@13.3.2/cid').catch(() => import('multiformats/cid')),
   import('https://esm.sh/multiformats@13.3.2/hashes/digest').catch(() => import('multiformats/hashes/digest'))
 ]);
+
+// Create a 256-bit blake2b hasher
+const blake2b256 = (data) => blake2b(data, { dkLen: 32 });
 
 // Test data structures
 const testData = {
