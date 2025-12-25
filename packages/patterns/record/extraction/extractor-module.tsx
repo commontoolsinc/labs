@@ -49,9 +49,13 @@ interface ExtractorModuleInput {
   parentSubCharms: Cell<SubCharmEntry[]>;
   parentTrashedSubCharms: Cell<TrashedSubCharmEntry[]>;
   // Source selection state (index -> selected, default true)
-  sourceSelections: Cell<Default<Record<number, boolean>, Record<number, never>>>;
+  sourceSelections: Cell<
+    Default<Record<number, boolean>, Record<number, never>>
+  >;
   // Trash selection state (index -> should trash, default false)
-  trashSelections: Cell<Default<Record<number, boolean>, Record<number, never>>>;
+  trashSelections: Cell<
+    Default<Record<number, boolean>, Record<number, never>>
+  >;
   // Field selections for preview
   selections: Cell<Default<Record<string, boolean>, Record<string, never>>>;
   // Extraction phase
@@ -379,7 +383,9 @@ const dismiss = handler<
  */
 function createToggleSourceHandler(
   index: number,
-  sourceSelections: Cell<Default<Record<number, boolean>, Record<number, never>>>,
+  sourceSelections: Cell<
+    Default<Record<number, boolean>, Record<number, never>>
+  >,
 ) {
   return handler<unknown, Record<string, never>>(
     () => {
@@ -399,7 +405,9 @@ function createToggleSourceHandler(
  */
 function createToggleTrashHandler(
   index: number,
-  trashSelections: Cell<Default<Record<number, boolean>, Record<number, never>>>,
+  trashSelections: Cell<
+    Default<Record<number, boolean>, Record<number, never>>
+  >,
 ) {
   return handler<unknown, Record<string, never>>(
     () => {
@@ -420,15 +428,24 @@ function createToggleTrashHandler(
 const startExtraction = handler<
   unknown,
   {
-    sourceSelectionsCell: Cell<Default<Record<number, boolean>, Record<number, never>>>;
+    sourceSelectionsCell: Cell<
+      Default<Record<number, boolean>, Record<number, never>>
+    >;
     parentSubCharmsCell: Cell<SubCharmEntry[]>;
     extractionPromptCell: Cell<Default<string, "">>;
-    extractPhaseCell: Cell<Default<"select" | "extracting" | "preview", "select">>;
+    extractPhaseCell: Cell<
+      Default<"select" | "extracting" | "preview", "select">
+    >;
   }
 >(
   (
     _event,
-    { sourceSelectionsCell, parentSubCharmsCell, extractionPromptCell, extractPhaseCell },
+    {
+      sourceSelectionsCell,
+      parentSubCharmsCell,
+      extractionPromptCell,
+      extractPhaseCell,
+    },
   ) => {
     // Use .get() to read Cell values inside handler
     const selectionsMap = sourceSelectionsCell.get() || {};
@@ -459,6 +476,9 @@ const startExtraction = handler<
   },
 );
 
+// Guard to prevent double-click race condition
+let applyInProgress = false;
+
 /**
  * Handler to apply selected extractions - defined at module scope
  */
@@ -468,8 +488,12 @@ const applySelected = handler<
     parentSubCharmsCell: Cell<SubCharmEntry[]>;
     parentTrashedSubCharmsCell: Cell<TrashedSubCharmEntry[]>;
     extractionResultValue: Record<string, unknown> | null;
-    selectionsCell: Cell<Default<Record<string, boolean>, Record<string, never>>>;
-    trashSelectionsCell: Cell<Default<Record<number, boolean>, Record<number, never>>>;
+    selectionsCell: Cell<
+      Default<Record<string, boolean>, Record<string, never>>
+    >;
+    trashSelectionsCell: Cell<
+      Default<Record<number, boolean>, Record<number, never>>
+    >;
   }
 >(
   (
@@ -482,92 +506,79 @@ const applySelected = handler<
       trashSelectionsCell,
     },
   ) => {
-    // Read Cells inside handler
-    const subCharmsData = parentSubCharmsCell.get() || [];
-    const extractionResult = extractionResultValue;
-    if (!extractionResult) return;
-
-    const previewData = buildPreview(extractionResult, subCharmsData);
-    const sourcesData = scanExtractableSources(subCharmsData);
-
-    if (!previewData || !previewData.fields) return;
-
-    const current: SubCharmEntry[] = [...(parentSubCharmsCell.get() || [])];
-    const subCharms = current; // For schema lookups
-    const selected = selectionsCell.get() || {};
-    const toTrash = trashSelectionsCell.get() || {};
-
-    // Group fields by target module
-    const fieldsByModule: Record<string, ExtractedField[]> = {};
-    for (const field of previewData.fields) {
-      const fieldKey = `${field.targetModule}.${field.fieldName}`;
-      if (selected[fieldKey] === false) continue;
-
-      if (!fieldsByModule[field.targetModule]) {
-        fieldsByModule[field.targetModule] = [];
-      }
-      fieldsByModule[field.targetModule].push(field);
+    // Prevent double-click race condition
+    if (applyInProgress) {
+      console.debug("[Extract] Apply already in progress, ignoring");
+      return;
     }
+    applyInProgress = true;
 
-    // Collect new entries to add (batched to avoid multiple set() calls)
-    const newEntries: SubCharmEntry[] = [];
+    try {
+      // Read Cells inside handler, filter out malformed entries
+      const rawSubCharms = parentSubCharmsCell.get() || [];
+      const subCharmsData = rawSubCharms.filter(
+        (e): e is SubCharmEntry =>
+          e != null && typeof e === "object" && "type" in e,
+      );
+      const extractionResult = extractionResultValue;
+      if (!extractionResult) return;
 
-    // Process each module type
-    for (const [moduleType, fields] of Object.entries(fieldsByModule)) {
-      const existingIndex = current.findIndex((e) => e?.type === moduleType);
+      const previewData = buildPreview(extractionResult, subCharmsData);
+      const sourcesData = scanExtractableSources(subCharmsData);
 
-      if (existingIndex >= 0) {
-        // Module exists - use Cell navigation to update fields
-        for (const field of fields) {
-          // Validate extracted value against schema
-          const fieldSchema = getFieldSchema(
-            subCharms,
-            moduleType,
-            field.fieldName,
-          );
-          const isValid = validateFieldValue(field.extractedValue, fieldSchema);
+      if (!previewData || !previewData.fields) return;
 
-          if (!isValid) {
-            const actualType = Array.isArray(field.extractedValue)
-              ? "array"
-              : typeof field.extractedValue;
-            console.warn(
-              `[Extract] Type mismatch for ${moduleType}.${field.fieldName}: ` +
-                `expected ${fieldSchema?.type}, got ${actualType}. ` +
-                `Value: ${JSON.stringify(field.extractedValue)}. Skipping field.`,
-            );
-            continue; // Skip this field
-          }
+      // Filter current entries too (defensive)
+      const current: SubCharmEntry[] = (parentSubCharmsCell.get() || []).filter(
+        (e): e is SubCharmEntry =>
+          e != null && typeof e === "object" && "type" in e,
+      );
+      const subCharms = current; // For schema lookups
+      const selected = selectionsCell.get() || {};
+      const toTrash = trashSelectionsCell.get() || {};
 
-          try {
-            // Only write if validation passed
-            (parentSubCharmsCell as any).key(existingIndex).key("charm").key(
-              field.fieldName,
-            ).set(field.extractedValue);
-          } catch (e) {
-            console.warn(`Failed to set ${moduleType}.${field.fieldName}:`, e);
-          }
+      // Group fields by target module
+      const fieldsByModule: Record<string, ExtractedField[]> = {};
+      for (const field of previewData.fields) {
+        const fieldKey = `${field.targetModule}.${field.fieldName}`;
+        if (selected[fieldKey] === false) continue;
+
+        if (!fieldsByModule[field.targetModule]) {
+          fieldsByModule[field.targetModule] = [];
         }
-      } else if (moduleType !== "notes") {
-        // Module doesn't exist - create it with initial values
-        try {
-          // Build initial values object from extracted fields
-          const initialValues: Record<string, unknown> = {};
+        fieldsByModule[field.targetModule].push(field);
+      }
+
+      // Track success - only trash extractor if at least one update succeeded
+      let anySuccess = false;
+
+      // Collect new entries to add (batched to avoid multiple set() calls)
+      const newEntries: SubCharmEntry[] = [];
+
+      // Process each module type
+      for (const [moduleType, fields] of Object.entries(fieldsByModule)) {
+        const existingIndex = current.findIndex((e) => e?.type === moduleType);
+
+        if (existingIndex >= 0) {
+          // Module exists - use Cell navigation to update fields
           for (const field of fields) {
-            // Validate before adding to initialValues
+            // Validate extracted value against schema
             const fieldSchema = getFieldSchema(
               subCharms,
               moduleType,
               field.fieldName,
             );
-            const isValid = validateFieldValue(field.extractedValue, fieldSchema);
+            const isValid = validateFieldValue(
+              field.extractedValue,
+              fieldSchema,
+            );
 
             if (!isValid) {
               const actualType = Array.isArray(field.extractedValue)
                 ? "array"
                 : typeof field.extractedValue;
               console.warn(
-                `[Extract] Type mismatch for new module ${moduleType}.${field.fieldName}: ` +
+                `[Extract] Type mismatch for ${moduleType}.${field.fieldName}: ` +
                   `expected ${fieldSchema?.type}, got ${actualType}. ` +
                   `Value: ${
                     JSON.stringify(field.extractedValue)
@@ -576,61 +587,117 @@ const applySelected = handler<
               continue; // Skip this field
             }
 
-            initialValues[field.fieldName] = field.extractedValue;
+            try {
+              // Only write if validation passed
+              (parentSubCharmsCell as any).key(existingIndex).key("charm").key(
+                field.fieldName,
+              ).set(field.extractedValue);
+              anySuccess = true;
+            } catch (e) {
+              console.warn(
+                `Failed to set ${moduleType}.${field.fieldName}:`,
+                e,
+              );
+            }
           }
+        } else if (moduleType !== "notes") {
+          // Module doesn't exist - create it with initial values
+          try {
+            // Build initial values object from extracted fields
+            const initialValues: Record<string, unknown> = {};
+            for (const field of fields) {
+              // Validate before adding to initialValues
+              const fieldSchema = getFieldSchema(
+                subCharms,
+                moduleType,
+                field.fieldName,
+              );
+              const isValid = validateFieldValue(
+                field.extractedValue,
+                fieldSchema,
+              );
 
-          // Only create module if we have at least one valid field
-          if (Object.keys(initialValues).length > 0) {
-            const newCharm = createSubCharm(moduleType, initialValues);
-            // Capture schema at creation time for dynamic discovery
-            const schema = getResultSchema(newCharm);
-            newEntries.push({
-              type: moduleType,
-              pinned: false,
-              charm: newCharm,
-              schema,
-            });
+              if (!isValid) {
+                const actualType = Array.isArray(field.extractedValue)
+                  ? "array"
+                  : typeof field.extractedValue;
+                console.warn(
+                  `[Extract] Type mismatch for new module ${moduleType}.${field.fieldName}: ` +
+                    `expected ${fieldSchema?.type}, got ${actualType}. ` +
+                    `Value: ${
+                      JSON.stringify(field.extractedValue)
+                    }. Skipping field.`,
+                );
+                continue; // Skip this field
+              }
+
+              initialValues[field.fieldName] = field.extractedValue;
+            }
+
+            // Only create module if we have at least one valid field
+            if (Object.keys(initialValues).length > 0) {
+              const newCharm = createSubCharm(moduleType, initialValues);
+              // Capture schema at creation time for dynamic discovery
+              const schema = getResultSchema(newCharm);
+              newEntries.push({
+                type: moduleType,
+                pinned: false,
+                charm: newCharm,
+                schema,
+              });
+              anySuccess = true;
+            }
+          } catch (e) {
+            console.warn(`Failed to create module ${moduleType}:`, e);
           }
-        } catch (e) {
-          console.warn(`Failed to create module ${moduleType}:`, e);
         }
       }
-    }
 
-    // Collect indices to trash (sources + self)
-    const indicesToTrash: number[] = [];
-
-    // Add selected source indices to trash list
-    for (const source of sourcesData) {
-      if (toTrash[source.index] === true) {
-        indicesToTrash.push(source.index);
+      // Only proceed with trashing if at least one update succeeded
+      if (!anySuccess) {
+        console.warn(
+          "[Extract] No updates succeeded, keeping extractor for retry",
+        );
+        return;
       }
-    }
 
-    // Find self (extractor) index
-    const selfIndex = current.findIndex((e) => e?.type === "extractor");
-    if (selfIndex >= 0) {
-      indicesToTrash.push(selfIndex);
-    }
+      // Collect indices to trash (sources + self)
+      const indicesToTrash: number[] = [];
 
-    // Sort descending to preserve indices when removing
-    indicesToTrash.sort((a, b) => b - a);
-
-    // Move items to trash
-    for (const idx of indicesToTrash) {
-      const entry = current[idx];
-      if (entry) {
-        parentTrashedSubCharmsCell.push({
-          ...entry,
-          trashedAt: new Date().toISOString(),
-        });
+      // Add selected source indices to trash list
+      for (const source of sourcesData) {
+        if (toTrash[source.index] === true) {
+          indicesToTrash.push(source.index);
+        }
       }
-    }
 
-    // Build final list: remove trashed items, add new entries
-    const remaining = current.filter((_, i) => !indicesToTrash.includes(i));
-    const final = [...remaining, ...newEntries];
-    parentSubCharmsCell.set(final);
+      // Find self (extractor) index - only trash if updates succeeded
+      const selfIndex = current.findIndex((e) => e?.type === "extractor");
+      if (selfIndex >= 0) {
+        indicesToTrash.push(selfIndex);
+      }
+
+      // Sort descending to preserve indices when removing
+      indicesToTrash.sort((a, b) => b - a);
+
+      // Move items to trash
+      for (const idx of indicesToTrash) {
+        const entry = current[idx];
+        if (entry) {
+          parentTrashedSubCharmsCell.push({
+            ...entry,
+            trashedAt: new Date().toISOString(),
+          });
+        }
+      }
+
+      // Build final list: remove trashed items, add new entries
+      const remaining = current.filter((_, i) => !indicesToTrash.includes(i));
+      const final = [...remaining, ...newEntries];
+      parentSubCharmsCell.set(final);
+    } finally {
+      applyInProgress = false;
+    }
   },
 );
 
@@ -692,7 +759,8 @@ export const ExtractorModule = recipe<
       if (!sources) return [];
       return sources.filter(
         (s: ExtractableSource) =>
-          s.type === "photo" && s.requiresOCR && selectionsMap[s.index] !== false,
+          s.type === "photo" && s.requiresOCR &&
+          selectionsMap[s.index] !== false,
       );
     });
 
@@ -802,7 +870,9 @@ export const ExtractorModule = recipe<
       const sources = extractableSources;
       const trashMap = trashSelections.get() || {};
       if (!sources) return 0;
-      return sources.filter((s: ExtractableSource) => trashMap[s.index] === true)
+      return sources.filter((s: ExtractableSource) =>
+        trashMap[s.index] === true
+      )
         .length;
     });
 
@@ -906,7 +976,8 @@ export const ExtractorModule = recipe<
                           type="checkbox"
                           checked={computed(
                             () =>
-                              (sourceSelections.get() || {})[source.index] !== false,
+                              (sourceSelections.get() || {})[source.index] !==
+                                false,
                           )}
                           onChange={createToggleSourceHandler(
                             source.index,
@@ -1206,7 +1277,9 @@ export const ExtractorModule = recipe<
                       <input
                         type="checkbox"
                         checked={computed(
-                          () => (trashSelections.get() || {})[source.index] === true,
+                          () =>
+                            (trashSelections.get() || {})[source.index] ===
+                              true,
                         )}
                         onChange={createToggleTrashHandler(
                           source.index,
@@ -1266,7 +1339,9 @@ export const ExtractorModule = recipe<
                   onClick={applySelected({
                     parentSubCharmsCell: parentSubCharms,
                     parentTrashedSubCharmsCell: parentTrashedSubCharms,
-                    extractionResultValue: extraction.result as Record<string, unknown> | null,
+                    extractionResultValue: extraction.result as
+                      | Record<string, unknown>
+                      | null,
                     selectionsCell: selections,
                     trashSelectionsCell: trashSelections,
                   })}
