@@ -663,8 +663,60 @@ const _toggleSelectedVisibility = handler<
   selectedIndices.set([]);
 });
 
-// Handler to create a new notebook (without navigating)
-const createNotebook = handler<
+// Handler to show the standalone "New Notebook" modal
+const showStandaloneNotebookModal = handler<
+  void,
+  { showStandaloneNotebookPrompt: Cell<boolean> }
+>((_, { showStandaloneNotebookPrompt }) =>
+  showStandaloneNotebookPrompt.set(true)
+);
+
+// Handler to create notebook with user-provided name and navigate to it
+const createStandaloneNotebookAndOpen = handler<
+  void,
+  {
+    standaloneNotebookTitle: Cell<string>;
+    showStandaloneNotebookPrompt: Cell<boolean>;
+    allCharms: Cell<NoteCharm[]>;
+  }
+>((_, { standaloneNotebookTitle, showStandaloneNotebookPrompt, allCharms }) => {
+  const title = standaloneNotebookTitle.get().trim() || "New Notebook";
+  const nb = Notebook({ title });
+  allCharms.push(nb as unknown as NoteCharm);
+  showStandaloneNotebookPrompt.set(false);
+  standaloneNotebookTitle.set("");
+  return navigateTo(nb);
+});
+
+// Handler to create notebook and stay in modal to create another
+const createStandaloneNotebookAndContinue = handler<
+  void,
+  {
+    standaloneNotebookTitle: Cell<string>;
+    allCharms: Cell<NoteCharm[]>;
+  }
+>((_, { standaloneNotebookTitle, allCharms }) => {
+  const title = standaloneNotebookTitle.get().trim() || "New Notebook";
+  const nb = Notebook({ title });
+  allCharms.push(nb as unknown as NoteCharm);
+  // Keep modal open, just clear the title for the next notebook
+  standaloneNotebookTitle.set("");
+});
+
+// Handler to cancel the standalone notebook prompt
+const cancelStandaloneNotebookPrompt = handler<
+  void,
+  {
+    showStandaloneNotebookPrompt: Cell<boolean>;
+    standaloneNotebookTitle: Cell<string>;
+  }
+>((_, { showStandaloneNotebookPrompt, standaloneNotebookTitle }) => {
+  showStandaloneNotebookPrompt.set(false);
+  standaloneNotebookTitle.set("");
+});
+
+// Handler to create a new notebook (without navigating) - kept for potential future use
+const _createNotebook = handler<
   Record<string, never>,
   { allCharms: Cell<NoteCharm[]> }
 >((_, { allCharms }) => {
@@ -1099,6 +1151,12 @@ const deleteNotebooksOnly = handler<
   const notebooksList = notebooks.get();
   const allCharmsList = allCharms.get();
 
+  // Guard: require explicit selection
+  if (!selected || selected.length === 0) {
+    showDeleteNotebookModal.set(false);
+    return;
+  }
+
   // Collect all notes from selected notebooks and make them visible
   for (const idx of selected) {
     const nb = notebooksList[idx];
@@ -1117,18 +1175,27 @@ const deleteNotebooksOnly = handler<
     }
   }
 
-  // Get notebook names to identify them in allCharms
-  const notebooksToDelete: string[] = [];
-  for (const idx of selected) {
-    const nb = notebooksList[idx];
-    const name = (nb as any)?.[NAME];
-    if (name) notebooksToDelete.push(name);
+  // Find which indices in allCharms are notebooks (to map selected -> allCharms indices)
+  const notebookIndicesInAllCharms: number[] = [];
+  for (let i = 0; i < allCharmsList.length; i++) {
+    const name = (allCharmsList[i] as any)?.[NAME];
+    if (typeof name === "string" && name.startsWith("📓")) {
+      notebookIndicesInAllCharms.push(i);
+    }
   }
 
-  // Remove notebooks from allCharms (permanent delete)
-  const filteredCharms = allCharmsList.filter((charm: any) => {
-    const name = charm?.[NAME];
-    return !name || !notebooksToDelete.includes(name);
+  // Map selected notebook indices to allCharms indices
+  const allCharmsIndicesToDelete: Set<number> = new Set();
+  for (const selectedIdx of selected) {
+    const allCharmsIdx = notebookIndicesInAllCharms[selectedIdx];
+    if (allCharmsIdx !== undefined) {
+      allCharmsIndicesToDelete.add(allCharmsIdx);
+    }
+  }
+
+  // Remove by allCharms index
+  const filteredCharms = allCharmsList.filter((_, i) => {
+    return !allCharmsIndicesToDelete.has(i);
   });
   allCharms.set(filteredCharms);
 
@@ -1153,6 +1220,12 @@ const deleteNotebooksAndNotes = handler<
   const notebooksList = notebooks.get();
   const allCharmsList = allCharms.get();
 
+  // Guard: require explicit selection
+  if (!selected || selected.length === 0) {
+    showDeleteNotebookModal.set(false);
+    return;
+  }
+
   // Collect all noteIds from selected notebooks
   const noteIdsToDelete: string[] = [];
   for (const idx of selected) {
@@ -1164,20 +1237,30 @@ const deleteNotebooksAndNotes = handler<
     }
   }
 
-  // Get notebook names to identify them in allCharms
-  const notebooksToDelete: string[] = [];
-  for (const idx of selected) {
-    const nb = notebooksList[idx];
-    const name = (nb as any)?.[NAME];
-    if (name) notebooksToDelete.push(name);
+  // Find which indices in allCharms are notebooks (to map selected -> allCharms indices)
+  const notebookIndicesInAllCharms: number[] = [];
+  for (let i = 0; i < allCharmsList.length; i++) {
+    const name = (allCharmsList[i] as any)?.[NAME];
+    if (typeof name === "string" && name.startsWith("📓")) {
+      notebookIndicesInAllCharms.push(i);
+    }
   }
 
-  // Remove notebooks AND notes from allCharms
-  const filteredCharms = allCharmsList.filter((charm: any) => {
-    const name = charm?.[NAME];
+  // Map selected notebook indices to allCharms indices
+  const allCharmsIndicesToDelete: Set<number> = new Set();
+  for (const selectedIdx of selected) {
+    const allCharmsIdx = notebookIndicesInAllCharms[selectedIdx];
+    if (allCharmsIdx !== undefined) {
+      allCharmsIndicesToDelete.add(allCharmsIdx);
+    }
+  }
+
+  // Remove notebooks by index AND notes by noteId
+  const filteredCharms = allCharmsList.filter((charm: any, i) => {
+    // Remove if it's a notebook to delete (by index)
+    if (allCharmsIndicesToDelete.has(i)) return false;
+    // Remove if it's a note to delete (by noteId)
     const noteId = charm?.noteId;
-    // Remove if it's a notebook to delete OR a note to delete
-    if (name && notebooksToDelete.includes(name)) return false;
     if (noteId && noteIdsToDelete.includes(noteId)) return false;
     return true;
   });
@@ -1578,10 +1661,14 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
     selectedNotebookIndices.get().length > 0
   );
 
-  // State for "New Notebook" prompt modal
+  // State for "New Notebook" prompt modal (for add/move to notebook flows)
   const showNewNotebookPrompt = Cell.of<boolean>(false);
   const newNotebookName = Cell.of<string>("");
   const pendingNotebookAction = Cell.of<"add" | "move" | "">(""); // Track which action triggered the modal
+
+  // State for standalone "New Notebook" modal (from New button)
+  const showStandaloneNotebookPrompt = Cell.of<boolean>(false);
+  const standaloneNotebookTitle = Cell.of<string>("");
 
   // State for duplicate detection modal during import
   const showDuplicateModal = Cell.of<boolean>(false);
@@ -2016,7 +2103,9 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                     size="sm"
                     variant="ghost"
                     title="New Notebook"
-                    onClick={createNotebook({ allCharms })}
+                    onClick={showStandaloneNotebookModal({
+                      showStandaloneNotebookPrompt,
+                    })}
                     style={{
                       padding: "6px 12px",
                       display: "flex",
@@ -2123,58 +2212,59 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                   </ct-vstack>
                 )}
 
-                {/* Action Bar - OUTSIDE conditional for reactivity */}
-                {hasNotebookSelection && (
-                  <ct-hstack
-                    padding="3"
-                    gap="3"
-                    style={{
-                      background: "var(--ct-color-bg-secondary, #f5f5f7)",
-                      borderRadius: "8px",
-                      alignItems: "center",
-                      marginTop: "8px",
-                    }}
+                {/* Action Bar - Use CSS display to keep DOM alive (preserves handler streams) */}
+                <ct-hstack
+                  padding="3"
+                  gap="3"
+                  style={{
+                    display: computed(() =>
+                      hasNotebookSelection ? "flex" : "none"
+                    ),
+                    background: "var(--ct-color-bg-secondary, #f5f5f7)",
+                    borderRadius: "8px",
+                    alignItems: "center",
+                    marginTop: "8px",
+                  }}
+                >
+                  <span style={{ fontSize: "13px", fontWeight: "500" }}>
+                    {selectedNotebookCount} selected
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  <ct-button
+                    size="sm"
+                    variant="ghost"
+                    onClick={exportSelectedNotebooks({
+                      notebooks,
+                      selectedNotebookIndices,
+                      showExportNotebooksModal,
+                      exportNotebooksMarkdown,
+                    })}
                   >
-                    <span style={{ fontSize: "13px", fontWeight: "500" }}>
-                      {selectedNotebookCount} selected
-                    </span>
-                    <span style={{ flex: 1 }} />
-                    <ct-button
-                      size="sm"
-                      variant="ghost"
-                      onClick={exportSelectedNotebooks({
-                        notebooks,
-                        selectedNotebookIndices,
-                        showExportNotebooksModal,
-                        exportNotebooksMarkdown,
-                      })}
-                    >
-                      <span>↑</span> Export
-                    </ct-button>
-                    <ct-button
-                      size="sm"
-                      variant="ghost"
-                      onClick={duplicateSelectedNotebooks({
-                        notebooks,
-                        selectedNotebookIndices,
-                        allCharms,
-                      })}
-                    >
-                      Duplicate
-                    </ct-button>
-                    <ct-button
-                      size="sm"
-                      variant="ghost"
-                      onClick={confirmDeleteNotebooks({
-                        selectedNotebookIndices,
-                        showDeleteNotebookModal,
-                      })}
-                      style={{ color: "var(--ct-color-danger, #dc3545)" }}
-                    >
-                      Delete
-                    </ct-button>
-                  </ct-hstack>
-                )}
+                    <span>↑</span> Export
+                  </ct-button>
+                  <ct-button
+                    size="sm"
+                    variant="ghost"
+                    onClick={duplicateSelectedNotebooks({
+                      notebooks,
+                      selectedNotebookIndices,
+                      allCharms,
+                    })}
+                  >
+                    Duplicate
+                  </ct-button>
+                  <ct-button
+                    size="sm"
+                    variant="ghost"
+                    onClick={confirmDeleteNotebooks({
+                      selectedNotebookIndices,
+                      showDeleteNotebookModal,
+                    })}
+                    style={{ color: "var(--ct-color-danger, #dc3545)" }}
+                  >
+                    Delete
+                  </ct-button>
+                </ct-hstack>
               </ct-vstack>
             </ct-card>
           </ct-vstack>
@@ -2224,6 +2314,61 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                     notes,
                     allCharms,
                     notebooks,
+                  })}
+                >
+                  Create
+                </ct-button>
+              </ct-hstack>
+            </ct-vstack>
+          </ct-card>
+        </div>
+
+        {/* Standalone New Notebook Modal - for the "New" button in Notebooks section */}
+        <div
+          style={{
+            display: computed(() =>
+              showStandaloneNotebookPrompt.get() ? "flex" : "none"
+            ),
+            position: "fixed",
+            inset: "0",
+            background: "rgba(0,0,0,0.5)",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: "9999",
+          }}
+        >
+          <ct-card style={{ minWidth: "320px", padding: "24px" }}>
+            <ct-vstack gap="4">
+              <h3 style={{ margin: 0 }}>New Notebook</h3>
+              <ct-input
+                $value={standaloneNotebookTitle}
+                placeholder="Enter notebook name..."
+              />
+              <ct-hstack gap="2" style={{ justifyContent: "flex-end" }}>
+                <ct-button
+                  variant="ghost"
+                  onClick={cancelStandaloneNotebookPrompt({
+                    showStandaloneNotebookPrompt,
+                    standaloneNotebookTitle,
+                  })}
+                >
+                  Cancel
+                </ct-button>
+                <ct-button
+                  variant="ghost"
+                  onClick={createStandaloneNotebookAndContinue({
+                    standaloneNotebookTitle,
+                    allCharms,
+                  })}
+                >
+                  Create Another
+                </ct-button>
+                <ct-button
+                  variant="primary"
+                  onClick={createStandaloneNotebookAndOpen({
+                    standaloneNotebookTitle,
+                    showStandaloneNotebookPrompt,
+                    allCharms,
                   })}
                 >
                   Create
