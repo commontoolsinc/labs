@@ -768,6 +768,40 @@ export class XSchedulerGraph extends LitElement {
       color: #94a3b8;
       word-break: break-all;
     }
+
+    .adjacent-nodes {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .adjacent-node {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.375rem 0.5rem;
+      background: #0f172a;
+      border-radius: 0.25rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .adjacent-node:hover {
+      background: #1e3a5f;
+    }
+
+    .adjacent-node .type-badge {
+      flex-shrink: 0;
+    }
+
+    .adjacent-node-label {
+      font-family: monospace;
+      font-size: 0.6875rem;
+      color: #e2e8f0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
   `;
 
   @property({ attribute: false })
@@ -807,7 +841,7 @@ export class XSchedulerGraph extends LitElement {
   private collapsedParents = new Set<string>();
 
   @state()
-  private viewMode: "graph" | "table" = "graph";
+  private viewMode: "graph" | "table" = "table";
 
   @state()
   private tableSortColumn: "totalTime" | "runCount" | "avgTime" | "lastTime" =
@@ -1213,6 +1247,36 @@ export class XSchedulerGraph extends LitElement {
     this.selectedNode = null;
   }
 
+  private selectNodeById(nodeId: string): void {
+    const node = this.layoutNodes.get(nodeId);
+    if (node) {
+      this.selectedEdge = null;
+      this.selectedNode = node;
+    }
+  }
+
+  private getInboundNodes(nodeId: string): LayoutNode[] {
+    // Find edges where this node is the target (other nodes depend on this)
+    const inboundEdges = this.layoutEdges.filter(
+      (e) => e.to === nodeId && e.edgeType !== "parent",
+    );
+    const nodeIds = [...new Set(inboundEdges.map((e) => e.from))];
+    return nodeIds
+      .map((id) => this.layoutNodes.get(id))
+      .filter((n): n is LayoutNode => n !== undefined);
+  }
+
+  private getOutboundNodes(nodeId: string): LayoutNode[] {
+    // Find edges where this node is the source (this node depends on others)
+    const outboundEdges = this.layoutEdges.filter(
+      (e) => e.from === nodeId && e.edgeType !== "parent",
+    );
+    const nodeIds = [...new Set(outboundEdges.map((e) => e.to))];
+    return nodeIds
+      .map((id) => this.layoutNodes.get(id))
+      .filter((n): n is LayoutNode => n !== undefined);
+  }
+
   private handleZoomIn(): void {
     this.zoomAroundCenter(this.zoomLevel * 1.25);
   }
@@ -1223,6 +1287,51 @@ export class XSchedulerGraph extends LitElement {
 
   private handleZoomReset(): void {
     this.zoomToFit();
+  }
+
+  private centerOnNode(nodeId: string): void {
+    const node = this.layoutNodes.get(nodeId);
+    if (!node) return;
+
+    const container = this.graphContainer;
+    if (!container) return;
+
+    // Set zoom to 50%
+    const targetZoom = 0.5;
+    this.zoomLevel = targetZoom;
+
+    // After render, center on the node
+    requestAnimationFrame(() => {
+      const containerWidth = container.clientWidth;
+      const containerHeight = container.clientHeight;
+
+      // Calculate scroll position to center the node
+      const nodeCenterX = node.x + node.width / 2;
+      const nodeCenterY = node.y + node.height / 2;
+
+      const scrollLeft = nodeCenterX * targetZoom - containerWidth / 2;
+      const scrollTop = nodeCenterY * targetZoom - containerHeight / 2;
+
+      container.scrollLeft = Math.max(0, scrollLeft);
+      container.scrollTop = Math.max(0, scrollTop);
+    });
+  }
+
+  private switchToGraphView(): void {
+    const hadSelection = this.selectedNode !== null;
+    const selectedId = this.selectedNode?.id;
+
+    this.viewMode = "graph";
+
+    // If there was a selection, center on it after the graph renders
+    if (hadSelection && selectedId) {
+      // Wait for layout to complete before centering
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          this.centerOnNode(selectedId);
+        });
+      });
+    }
   }
 
   private handleWheel(e: WheelEvent): void {
@@ -1357,7 +1466,7 @@ export class XSchedulerGraph extends LitElement {
           <button
             type="button"
             class="toggle-button ${this.viewMode === "graph" ? "active" : ""}"
-            @click="${() => (this.viewMode = "graph")}"
+            @click="${() => this.switchToGraphView()}"
             title="Graph view"
           >
             Graph
@@ -1898,7 +2007,63 @@ export class XSchedulerGraph extends LitElement {
                 </div>
               </div>
             `
-            : ""}
+            : ""} ${(() => {
+              const inbound = this.getInboundNodes(node.id);
+              return inbound.length > 0
+                ? html`
+                  <div class="detail-section">
+                    <div class="detail-section-title">
+                      Dependents (${inbound.length})
+                    </div>
+                    <div class="adjacent-nodes">
+                      ${inbound.map(
+                        (n) =>
+                          html`
+                            <div
+                              class="adjacent-node"
+                              @click="${() => this.selectNodeById(n.id)}"
+                              title="${n.fullId}"
+                            >
+                              <span class="type-badge ${n.type}">${n
+                                .type}</span>
+                              <span class="adjacent-node-label">${n
+                                .label}</span>
+                            </div>
+                          `,
+                      )}
+                    </div>
+                  </div>
+                `
+                : "";
+            })()} ${(() => {
+              const outbound = this.getOutboundNodes(node.id);
+              return outbound.length > 0
+                ? html`
+                  <div class="detail-section">
+                    <div class="detail-section-title">
+                      Dependencies (${outbound.length})
+                    </div>
+                    <div class="adjacent-nodes">
+                      ${outbound.map(
+                        (n) =>
+                          html`
+                            <div
+                              class="adjacent-node"
+                              @click="${() => this.selectNodeById(n.id)}"
+                              title="${n.fullId}"
+                            >
+                              <span class="type-badge ${n.type}">${n
+                                .type}</span>
+                              <span class="adjacent-node-label">${n
+                                .label}</span>
+                            </div>
+                          `,
+                      )}
+                    </div>
+                  </div>
+                `
+                : "";
+            })()}
         </div>
       `;
     }
@@ -2152,7 +2317,7 @@ export class XSchedulerGraph extends LitElement {
     const renderRow = (
       n: NodeWithStats,
       isChild: boolean = false,
-      parentNode?: GroupedNode,
+      _parentNode?: GroupedNode,
     ) => {
       const isSelected = this.selectedNode?.id === n.id;
       return html`
