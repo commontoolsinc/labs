@@ -468,8 +468,8 @@ export class Scheduler {
 
     const pathsByEntity = addressesToPathByEntity(reads);
 
-    logger.debug("schedule", () => [
-      `[RESUBSCRIBE] Action: ${action.name || "anonymous"}`,
+    logger.debug("schedule-resubscribe", () => [
+      `Action: ${action.name || "anonymous"}`,
       `Entities: ${pathsByEntity.size}`,
       `Reads: ${reads.length}`,
     ]);
@@ -489,15 +489,15 @@ export class Scheduler {
       );
       this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
 
-      logger.debug("schedule", () => [
-        `[RESUBSCRIBE] Registered action for ${spaceAndURI}`,
+      logger.debug("schedule-resubscribe-path", () => [
+        `Registered action for ${spaceAndURI}`,
         `Paths: ${pathsWithValues.map((p) => p.join("/")).join(", ")}`,
       ]);
     }
 
     this.cancels.set(action, () => {
-      logger.debug("schedule", () => [
-        `[UNSUBSCRIBE] Action: ${action.name || "anonymous"}`,
+      logger.debug("schedule-unsubscribe", () => [
+        `Action: ${action.name || "anonymous"}`,
         `Entities: ${entities.size}`,
       ]);
       for (const spaceAndURI of entities) {
@@ -745,8 +745,8 @@ export class Scheduler {
         const space = notification.space;
 
         // Log notification details
-        logger.debug("schedule", () => [
-          `[NOTIFICATION] Type: ${notification.type}`,
+        logger.debug("schedule-notification", () => [
+          `Type: ${notification.type}`,
           `Space: ${space}`,
           `Has source: ${
             "source" in notification ? notification.source : "none"
@@ -760,8 +760,8 @@ export class Scheduler {
           let changeIndex = 0;
           for (const change of notification.changes) {
             changeIndex++;
-            logger.debug("schedule", () => [
-              `[CHANGE ${changeIndex}]`,
+            logger.debug("schedule-change", () => [
+              `Change #${changeIndex}`,
               `Address: ${change.address.id}/${change.address.path.join("/")}`,
               `Before: ${JSON.stringify(change.before)}`,
               `After: ${JSON.stringify(change.after)}`,
@@ -772,8 +772,8 @@ export class Scheduler {
             });
 
             if (change.address.type !== "application/json") {
-              logger.debug("schedule", () => [
-                `[CHANGE ${changeIndex}] Skipping non-JSON type: ${change.address.type}`,
+              logger.debug("schedule-change-skip", () => [
+                `Change #${changeIndex} skipping non-JSON type: ${change.address.type}`,
               ]);
               continue;
             }
@@ -782,8 +782,8 @@ export class Scheduler {
             const paths = this.triggers.get(spaceAndURI);
 
             if (paths) {
-              logger.debug("schedule", () => [
-                `[CHANGE ${changeIndex}] Found ${paths.size} registered actions for ${spaceAndURI}`,
+              logger.debug("schedule-change-match", () => [
+                `Change #${changeIndex} found ${paths.size} registered actions for ${spaceAndURI}`,
               ]);
 
               const triggeredActions = determineTriggeredActions(
@@ -793,13 +793,13 @@ export class Scheduler {
                 change.address.path,
               );
 
-              logger.debug("schedule", () => [
-                `[CHANGE ${changeIndex}] Triggered ${triggeredActions.length} actions`,
+              logger.debug("schedule-change-trigger", () => [
+                `Change #${changeIndex} triggered ${triggeredActions.length} actions`,
               ]);
 
               for (const action of triggeredActions) {
-                logger.debug("schedule", () => [
-                  `[TRIGGERED] Action for ${spaceAndURI}/${
+                logger.debug("schedule-trigger", () => [
+                  `Action for ${spaceAndURI}/${
                     change.address.path.join("/")
                   }`,
                   `Action name: ${action.name || "anonymous"}`,
@@ -1564,8 +1564,8 @@ export class Scheduler {
         } catch (error) {
           // If populateDependencies fails, log and continue
           // The action will still run and discover its real dependencies
-          logger.debug("schedule", () => [
-            `[DEP-COLLECT] Error populating dependencies for ${
+          logger.debug("schedule-dep-error", () => [
+            `Error populating dependencies for ${
               action.name || "anonymous"
             }: ${error}`,
           ]);
@@ -1605,8 +1605,8 @@ export class Scheduler {
           }
         });
 
-        logger.debug("schedule", () => [
-          `[DEP-COLLECT] Collected dependencies for ${
+        logger.debug("schedule-dep-collect", () => [
+          `Collected dependencies for ${
             action.name || "anonymous"
           }: ${log.reads.length} reads, ${log.writes.length} writes, ${entities.size} entities`,
         ]);
@@ -1774,8 +1774,8 @@ export class Scheduler {
           try {
             populateDependencies(depTx);
           } catch (error) {
-            logger.debug("schedule", () => [
-              `[DEP-COLLECT-POST-EVENT] Error populating dependencies for ${
+            logger.debug("schedule-dep-error-post-event", () => [
+              `Error populating dependencies for ${
                 action.name || "anonymous"
               }: ${error}`,
             ]);
@@ -1810,8 +1810,8 @@ export class Scheduler {
             }
           });
 
-          logger.debug("schedule", () => [
-            `[DEP-COLLECT-POST-EVENT] Collected dependencies for ${
+          logger.debug("schedule-dep-collect-post-event", () => [
+            `Collected dependencies for ${
               action.name || "anonymous"
             }`,
           ]);
@@ -1868,8 +1868,8 @@ export class Scheduler {
             try {
               populateDependencies(depTx);
             } catch (error) {
-              logger.debug("schedule", () => [
-                `[DEP-COLLECT] Error collecting deps for ${action.name}: ${error}`,
+              logger.debug("schedule-dep-error-pre-run", () => [
+                `Error collecting deps for ${action.name}: ${error}`,
               ]);
             }
             const log = txToReactivityLog(depTx);
@@ -1923,8 +1923,8 @@ export class Scheduler {
           for (const seed of initialSeeds) {
             this.collectDirtyDependencies(seed, workSet);
           }
-          logger.debug("schedule", () => [
-            `[EXECUTE PULL MODE] Effects: ${initialSeeds.size}, Dirty deps added: ${
+          logger.debug("schedule-execute-pull", () => [
+            `Pull mode: Effects: ${initialSeeds.size}, Dirty deps added: ${
               workSet.size - initialSeeds.size
             }`,
           ]);
@@ -1963,8 +1963,8 @@ export class Scheduler {
         this.actionParent,
       );
 
-      logger.debug("schedule", () => [
-        `[EXECUTE] Running ${order.length} actions (settle iteration ${settleIter})`,
+      logger.debug("schedule-execute", () => [
+        `Running ${order.length} actions (settle iteration ${settleIter})`,
       ]);
 
       // Implicit cycle detection for effects:
