@@ -1,27 +1,34 @@
-import { isObject, isRecord } from "@commontools/utils/types";
 import {
   type Cancel,
-  type Cell,
-  convertCellsToLinks,
+  type CellHandle,
   effect,
-  isCell,
+  isCellHandle,
+  isVNode,
+  type Props,
+  type RenderNode,
+  serializeCellHandles,
   UI,
   useCancelGroup,
-} from "@commontools/runner";
-import { isVNode, type Props, type RenderNode, type VNode } from "./jsx.ts";
-import { vdomSchema } from "@commontools/runner/schemas";
+  type VNode,
+} from "@commontools/runtime-client";
 
-export type SetPropHandler = <T>(
-  target: T,
-  key: string,
-  value: unknown,
-) => void;
+import {
+  cleanEventProp,
+  createCyclePlaceholder,
+  isEventProp,
+  isRenderableCell,
+  listen,
+  sanitizeEvent,
+  sanitizeNode,
+  setPropDefault,
+  type SetPropHandler,
+} from "./render-utils.ts";
 
 export interface RenderOptions {
   setProp?: SetPropHandler;
   document?: Document;
   /** The root cell for auto-wrapping with ct-cell-context on [UI] traversal */
-  rootCell?: Cell;
+  rootCell?: CellHandle<VNode>;
 }
 
 /**
@@ -33,25 +40,32 @@ export interface RenderOptions {
  */
 export const render = (
   parent: HTMLElement,
-  view: VNode | Cell<VNode>,
+  view: VNode | CellHandle<VNode>,
   options: RenderOptions = {},
 ): Cancel => {
-  // Initialize visited set with the original cell for cycle detection
-  const visited = new Set<object>();
-  let rootCell: Cell | undefined;
+  let rootCell: CellHandle<VNode> | undefined;
 
-  if (isCell(view)) {
-    visited.add(view);
-    rootCell = view; // Capture the original cell for ct-cell-context wrapping
-    view = view.asSchema(vdomSchema);
+  if (isCellHandle(view)) {
+    rootCell = view as CellHandle<VNode>; // Capture the original cell for ct-cell-context wrapping
+    // Don't apply vdomSchema to CellHandle - it causes the worker to return
+    // cell references (SigilLinks) instead of actual values, which creates
+    // infinite chains of CellHandles that need resolution.
   }
 
   // Pass rootCell through options if we have one
   const optionsWithCell = rootCell ? { ...options, rootCell } : options;
 
   return effect(
-    view,
-    (view: VNode) => renderImpl(parent, view, optionsWithCell, visited),
+    view as VNode,
+    (view: VNode) => {
+      // Create a fresh visited set for each render pass.
+      // This prevents false cycle detection when re-rendering with updated values.
+      const visited = new Set<object>();
+      if (rootCell) {
+        visited.add(rootCell);
+      }
+      return renderImpl(parent, view, optionsWithCell, visited);
+    },
   );
 };
 
@@ -70,11 +84,8 @@ export const renderImpl = (
   visited: Set<object> = new Set(),
 ): Cancel => {
   // If there is no valid vnode, don't render anything
-  if (view === undefined) {
-    // Likely that content hasn't loaded yet
-    return () => {};
-  }
-  if (!isVNode(view)) {
+  // Likely that content hasn't loaded yet
+  if (view === undefined || !isVNode(view)) {
     return () => {};
   }
   const [root, cancel] = renderNode(view, options, visited);
@@ -90,18 +101,10 @@ export const renderImpl = (
 
 export default render;
 
-/** Create a placeholder element indicating a circular reference was detected */
-const createCyclePlaceholder = (document: Document): HTMLSpanElement => {
-  const element = document.createElement("span");
-  element.textContent = "🔄";
-  element.title = "Circular reference detected";
-  return element;
-};
-
 /** Check if a cell has been visited, using .equals() for cell comparison */
 const hasVisitedCell = (
   visited: Set<object>,
-  cell: Cell<unknown>,
+  cell: { equals(other: unknown): boolean },
 ): boolean => {
   for (const item of visited) {
     if (cell.equals(item)) {
@@ -116,9 +119,8 @@ const renderNode = (
   options: RenderOptions = {},
   visited: Set<object> = new Set(),
 ): [HTMLElement | null, Cancel] => {
-  const [cancel, addCancel] = useCancelGroup();
-
   const document = options.document ?? globalThis.document;
+  const [cancel, addCancel] = useCancelGroup();
 
   // Check if we should wrap with ct-cell-context (when traversing [UI] with a rootCell)
   const shouldWrapWithContext = node[UI] && options.rootCell;
@@ -149,12 +151,11 @@ const renderNode = (
   visited.add(node);
 
   const sanitizedNode = sanitizeNode(node);
-
   if (!sanitizedNode) {
     return [null, cancel];
   }
 
-  const element = (options.document ?? globalThis.document).createElement(
+  const element = document.createElement(
     sanitizedNode.name,
   );
 
@@ -175,7 +176,7 @@ const renderNode = (
   if (cellForContext && element) {
     const wrapper = document.createElement(
       "ct-cell-context",
-    ) as HTMLElement & { cell?: Cell };
+    ) as HTMLElement & { cell?: CellHandle<VNode> };
     wrapper.cell = cellForContext;
     wrapper.appendChild(element);
     return [wrapper, cancel];
@@ -202,25 +203,39 @@ const bindChildren = (
   ): { node: ChildNode; cancel: Cancel } => {
     const document = options.document ?? globalThis.document;
 
-    // Check for cell cycle before setting up effect (using .equals() for comparison)
-    if (isCell(child) && hasVisitedCell(visited, child)) {
+    // Check for cell cycle before setting up effect
+    if (
+      isRenderableCell(child) &&
+      hasVisitedCell(visited, child as unknown as CellHandle<unknown>)
+    ) {
       return { node: createCyclePlaceholder(document), cancel: () => {} };
     }
 
     // Track if this child is a cell for the visited set
-    const childIsCell = isCell(child);
+    const childIsCell = isRenderableCell(child);
 
     let currentNode: ChildNode | null = null;
-    const cancel = effect(child, (childValue) => {
+
+    const cancel = effect(child, (childValue) => renderValue(childValue));
+
+    function renderValue(value: RenderNode): Cancel | undefined {
+      if (Array.isArray(value)) {
+        const cancels = value.map((node) => renderValue(node));
+        return () => cancels.forEach((c) => c && c());
+      }
+      if (isCellHandle(value)) {
+        return effect(value, (resolved) => renderValue(resolved as RenderNode));
+      }
+
       let newRendered: { node: ChildNode; cancel: Cancel };
-      if (isVNode(childValue)) {
+      if (isVNode(value)) {
         // Create visited set for this child's subtree (cloned to avoid sibling interference)
         const childVisited = new Set(visited);
         if (childIsCell) {
           childVisited.add(child);
         }
         const [childElement, childCancel] = renderNode(
-          childValue,
+          value,
           options,
           childVisited,
         );
@@ -229,25 +244,20 @@ const bindChildren = (
           cancel: childCancel ?? (() => {}),
         };
       } else {
+        let textValue: string | number | boolean = value as
+          | string
+          | number
+          | boolean;
         if (
-          childValue === null || childValue === undefined ||
-          childValue === false
+          textValue === null || textValue === undefined ||
+          textValue === false
         ) {
-          childValue = "";
-        } else if (typeof childValue === "object") {
-          // Handle unresolved alias objects gracefully - render empty until resolved
-          if (childValue && "$alias" in childValue) {
-            childValue = "";
-          } else {
-            console.warn(
-              "unexpected object when value was expected",
-              childValue,
-            );
-            childValue = JSON.stringify(childValue);
-          }
+          textValue = "";
+        } else if (typeof textValue === "object") {
+          textValue = JSON.stringify(textValue);
         }
         newRendered = {
-          node: document.createTextNode(childValue.toString()),
+          node: document.createTextNode(textValue.toString()),
           cancel: () => {},
         };
       }
@@ -264,7 +274,7 @@ const bindChildren = (
 
       currentNode = newRendered.node;
       return newRendered.cancel;
-    });
+    }
 
     return { node: currentNode!, cancel };
   };
@@ -315,10 +325,10 @@ const bindChildren = (
     for (let i = 0; i < newKeyOrder.length; i++) {
       const key = newKeyOrder[i];
       const desiredNode = newMapping.get(key)!.node;
-      // If there's no node at this position, or it’s different, insert desiredNode there.
+      // If there's no node at this position, or it's different, insert desiredNode there.
       if (domNodes[i] !== desiredNode) {
         // Using domNodes[i] (which may be undefined) is equivalent to appending
-        // if there’s no node at that index.
+        // if there's no node at that index.
         element.insertBefore(desiredNode, domNodes[i] ?? null);
       }
     }
@@ -329,7 +339,7 @@ const bindChildren = (
   // Set up a reactive effect so that changes to the children array are diffed and applied.
   const cancelArrayEffect = effect(
     children,
-    (childrenVal) => updateChildren(childrenVal),
+    (val) => updateChildren(val),
   );
 
   // Return a cancel function that tears down the effect and cleans up any rendered nodes.
@@ -347,280 +357,36 @@ const bindProps = (
   props: Props,
   options: RenderOptions,
 ): Cancel => {
-  const setProperty = options.setProp ?? setProp;
+  const setProperty = options.setProp ?? setPropDefault;
   const [cancel, addCancel] = useCancelGroup();
   for (const [propKey, propValue] of Object.entries(props)) {
-    if (isCell(propValue)) {
-      // If prop is an event, we need to add an event listener
-      if (isEventProp(propKey)) {
-        const key = cleanEventProp(propKey);
-        if (key != null) {
-          const cancel = listen(element, key, (event) => {
-            const sanitizedEvent = sanitizeEvent(event);
-            propValue.send(sanitizedEvent);
-          });
-          addCancel(cancel);
-        }
-      } else if (propKey.startsWith("$")) {
-        // Properties starting with $ get passed in as raw values, useful for
-        // e.g. passing a cell itself instead of its value.
-        const key = propKey.slice(1);
-        setProperty(element, key, propValue);
-      } else {
-        const cancel = effect(propValue, (replacement) => {
-          // Replacements are set as properties not attributes to avoid
-          // string serialization of complex datatypes.
-          setProperty(element, propKey, replacement);
+    if (!isRenderableCell(propValue)) {
+      setProperty(element, propKey, propValue);
+      continue;
+    }
+    // If prop is an event, we need to add an event listener
+    if (isEventProp(propKey)) {
+      const key = cleanEventProp(propKey);
+      if (key != null) {
+        const cancel = listen(element, key, (event) => {
+          const sanitizedEvent = serializeCellHandles(sanitizeEvent(event));
+          propValue.send(sanitizedEvent);
         });
         addCancel(cancel);
       }
+    } else if (propKey.startsWith("$")) {
+      // Properties starting with $ get passed in as raw values, useful for
+      // e.g. passing a cell itself instead of its value.
+      const key = propKey.slice(1);
+      setProperty(element, key, propValue);
     } else {
-      setProperty(element, propKey, propValue);
+      const cancel = effect(propValue, (replacement) => {
+        // Replacements are set as properties not attributes to avoid
+        // string serialization of complex datatypes.
+        setProperty(element, propKey, replacement);
+      });
+      addCancel(cancel);
     }
   }
   return cancel;
 };
-
-const isEventProp = (key: string) => key.startsWith("on");
-
-const cleanEventProp = (key: string) => {
-  if (!key.startsWith("on")) {
-    return null;
-  }
-  return key.slice(2).toLowerCase();
-};
-
-/** Attach an event listener, returning a function to cancel the listener */
-const listen = (
-  element: HTMLElement,
-  key: string,
-  callback: (event: Event) => void,
-) => {
-  element.addEventListener(key, callback);
-  return () => {
-    element.removeEventListener(key, callback);
-  };
-};
-
-/**
- * Converts a React-style CSS object to a CSS string.
- * Supports vendor prefixes, pixel value shorthand, and comprehensive CSS properties.
- * @param styleObject - The style object with React-style camelCase properties
- * @returns A CSS string suitable for the style attribute
- */
-export const styleObjectToCssString = (
-  styleObject: Record<string, any>,
-): string => {
-  return Object.entries(styleObject)
-    .map(([key, value]) => {
-      // Skip if value is null or undefined
-      if (value == null) return "";
-
-      // Convert camelCase to kebab-case, handling vendor prefixes
-      let cssKey = key;
-
-      // CSS custom properties (--*) are case-sensitive and should not be transformed
-      if (!key.startsWith("--")) {
-        // Handle vendor prefixes (WebkitTransform -> -webkit-transform)
-        if (/^(webkit|moz|ms|o)[A-Z]/.test(key)) {
-          cssKey = "-" + key;
-        }
-
-        // Convert camelCase to kebab-case
-        cssKey = cssKey.replace(/([A-Z])/g, "-$1").toLowerCase();
-      }
-
-      // Convert value to string
-      let cssValue = value;
-
-      // Add 'px' suffix to numeric values for properties that need it
-      // Exceptions: properties that accept unitless numbers
-      const unitlessProperties = new Set([
-        "animation-iteration-count",
-        "column-count",
-        "fill-opacity",
-        "flex",
-        "flex-grow",
-        "flex-shrink",
-        "font-weight",
-        "line-height",
-        "opacity",
-        "order",
-        "orphans",
-        "stroke-opacity",
-        "widows",
-        "z-index",
-        "zoom",
-      ]);
-
-      if (
-        typeof value === "number" &&
-        !cssKey.startsWith("--") && // CSS custom properties should never get px
-        !unitlessProperties.has(cssKey) &&
-        value !== 0
-      ) {
-        cssValue = `${value}px`;
-      } else {
-        cssValue = String(value);
-      }
-
-      return `${cssKey}: ${cssValue}`;
-    })
-    .filter((s) => s !== "")
-    .join("; ");
-};
-
-const setProp = <T>(target: T, key: string, value: unknown) => {
-  // Handle style object specially - convert to CSS string
-  if (
-    key === "style" &&
-    target instanceof HTMLElement &&
-    isRecord(value)
-  ) {
-    const cssString = styleObjectToCssString(value);
-    if (target.getAttribute("style") !== cssString) {
-      target.setAttribute("style", cssString);
-    }
-    return;
-  }
-
-  // Handle data-* attributes specially - they need to be set as HTML attributes
-  // to populate the dataset property correctly
-  if (key.startsWith("data-") && target instanceof Element) {
-    // If value is null or undefined, remove the attribute
-    if (value == null) {
-      if (target.hasAttribute(key)) {
-        target.removeAttribute(key);
-      }
-    } else {
-      const currentValue = target.getAttribute(key);
-      const newValue = String(value);
-      if (currentValue !== newValue) {
-        target.setAttribute(key, newValue);
-      }
-    }
-  } else if (target[key as keyof T] !== value) {
-    target[key as keyof T] = value as T[keyof T];
-  }
-};
-
-const sanitizeScripts = (node: VNode): VNode | null => {
-  if (node.name === "script") {
-    return null;
-  }
-  if (!isCell(node.props) && !isObject(node.props)) {
-    node = { ...node, props: {} };
-  }
-  if (!isCell(node.children) && !Array.isArray(node.children)) {
-    node = { ...node, children: [] };
-  }
-
-  return node;
-};
-
-let sanitizeNode = sanitizeScripts;
-
-export const setNodeSanitizer = (fn: (node: VNode) => VNode | null) => {
-  sanitizeNode = fn;
-};
-
-export type EventSanitizer<T> = (event: Event) => T;
-
-export const passthroughEvent: EventSanitizer<Event> = (event: Event): Event =>
-  event;
-
-const allowListedEventProperties = [
-  "type", // general
-  "key", // keyboard event
-  "code", // keyboard event
-  "repeat", // keyboard event
-  "altKey", // keyboard & mouse event
-  "ctrlKey", // keyboard & mouse event
-  "metaKey", // keyboard & mouse event
-  "shiftKey", // keyboard & mouse event
-  "inputType", // input event
-  "data", // input event
-  "button", // mouse event
-  "buttons", // mouse event
-];
-
-const allowListedEventTargetProperties = [
-  "name", // general input
-  "value", // general input
-  "checked", // checkbox
-  "selected", // option
-  "selectedIndex", // select
-];
-
-/**
- * Sanitize an event so it can be serialized.
- *
- * NOTE: This isn't yet vetted for security, it's just a coarse first pass with
- * the primary objective of making events serializable.
- *
- * E.g. one glaring omission is that this can leak data via bubbling and we
- * should sanitize quite differently if the target isn't the same as
- * eventTarget.
- *
- * This code also doesn't make any effort to only copy properties that are
- * allowed on various event types, or otherwise tailor sanitization to the event
- * type.
- *
- * @param event - The event to sanitize.
- * @returns The serializable event.
- */
-export function serializableEvent<T>(event: Event): T {
-  const eventObject: Record<string, unknown> = {};
-  for (const property of allowListedEventProperties) {
-    eventObject[property] = event[property as keyof Event];
-  }
-
-  const targetObject: Record<string, unknown> = {};
-  for (const property of allowListedEventTargetProperties) {
-    targetObject[property] = event.target?.[property as keyof EventTarget];
-  }
-
-  const { target } = event;
-
-  if (isSelectElement(target) && target.selectedOptions) {
-    // To support multiple selections, we create serializable option elements
-    targetObject.selectedOptions = Array.from(target.selectedOptions)
-      .map(
-        (option) => ({ value: option.value }),
-      );
-  }
-
-  // Copy dataset as a plain object for serialization
-  if (isObject(target) && "dataset" in target && isRecord(target.dataset)) {
-    const dataset: Record<string, string> = {};
-    for (const key in target.dataset) {
-      // String() to normalize, just in case
-      dataset[key] = String(target.dataset[key]);
-    }
-    if (Object.keys(dataset).length > 0) {
-      targetObject.dataset = dataset;
-    }
-  }
-
-  if (Object.keys(targetObject).length > 0) eventObject.target = targetObject;
-
-  if ((event as CustomEvent).detail !== undefined) {
-    // Could be anything, but should only come from our own custom elements.
-    // Step below will remove any direct references.
-    eventObject.detail = (event as CustomEvent).detail;
-  }
-
-  return convertCellsToLinks(eventObject) as T;
-}
-
-let sanitizeEvent: EventSanitizer<unknown> = serializableEvent;
-
-export const setEventSanitizer = (sanitize: EventSanitizer<unknown>) => {
-  sanitizeEvent = sanitize;
-};
-
-function isSelectElement(value: unknown): value is HTMLSelectElement {
-  return !!(value && typeof value === "object" && ("tagName" in value) &&
-    typeof value.tagName === "string" &&
-    value.tagName.toUpperCase() === "SELECT");
-}

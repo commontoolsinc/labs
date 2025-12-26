@@ -9,7 +9,7 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 
 /**
@@ -107,7 +107,7 @@ function processItem(item: AutocompleteItem): ProcessedItem {
  * @attr {boolean} disabled - Whether the component is disabled
  *
  * @prop {AutocompleteItem[]} items - Items to choose from
- * @prop {Cell<string>|Cell<string[]>|string|string[]} value - Selected value(s) - supports Cell binding
+ * @prop {CellHandle<string>|CellHandle<string[]>|string|string[]} value - Selected value(s) - supports Cell binding
  *
  * @fires ct-change - Fired when value changes: { value, oldValue }
  * @fires ct-select - Fired when an item is selected: { value, label, group?, isCustom, data? }
@@ -334,8 +334,8 @@ export class CTAutocomplete extends BaseElement {
     // Public properties
     declare items: AutocompleteItem[];
     declare value:
-      | Cell<string>
-      | Cell<string[]>
+      | CellHandle<string>
+      | CellHandle<string[]>
       | string
       | string[]
       | undefined;
@@ -449,7 +449,7 @@ export class CTAutocomplete extends BaseElement {
 
       // Initialize cell controller binding
       this._cellController.bind(
-        this.value as Cell<string | string[]> | string | string[],
+        this.value as CellHandle<string | string[]> | string | string[],
       );
 
       applyThemeToElement(this, this.theme ?? defaultTheme);
@@ -461,7 +461,7 @@ export class CTAutocomplete extends BaseElement {
       // If the value property itself changed (e.g., switched to a different cell)
       if (changedProperties.has("value")) {
         this._cellController.bind(
-          this.value as Cell<string | string[]> | string | string[],
+          this.value as CellHandle<string | string[]> | string | string[],
         );
       }
 

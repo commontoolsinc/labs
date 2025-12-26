@@ -1,5 +1,5 @@
 import { ReactiveController, ReactiveControllerHost } from "lit";
-import { type Cell, isCell } from "@commontools/runner";
+import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
 import {
   InputTimingController,
   type InputTimingOptions,
@@ -15,16 +15,16 @@ export interface CellControllerOptions<T> {
   timing?: InputTimingOptions;
 
   /**
-   * Custom getter function for extracting values from Cell<T> | T
+   * Custom getter function for extracting values from CellHandle<T> | T
    * Defaults to standard Cell.get() or direct value access
    */
-  getValue?: (value: Cell<T> | T) => Readonly<T>;
+  getValue?: (value: CellHandle<T> | T) => Readonly<T>;
 
   /**
-   * Custom setter function for updating Cell<T> | T values
+   * Custom setter function for updating CellHandle<T> | T values
    * Defaults to standard transaction-based Cell.set() or direct assignment
    */
-  setValue?: (value: Cell<T> | T, newValue: T, oldValue: T) => void;
+  setValue?: (value: CellHandle<T> | T, newValue: T, oldValue: T) => void;
 
   /**
    * Custom change handler called when value changes
@@ -54,7 +54,7 @@ export interface CellControllerOptions<T> {
 }
 
 /**
- * A reactive controller that manages Cell<T> | T integration for Lit components.
+ * A reactive controller that manages CellHandle<T> | T integration for Lit components.
  * Handles subscription lifecycle, transaction management, and timing strategies.
  *
  * This controller eliminates boilerplate code by providing a unified interface
@@ -105,7 +105,7 @@ export interface CellControllerOptions<T> {
 export class CellController<T> implements ReactiveController {
   private host: ReactiveControllerHost;
   private options: Required<CellControllerOptions<T>>;
-  private _currentValue: Cell<T> | T | undefined;
+  private _currentValue: CellHandle<T> | T | undefined;
   private _cellUnsubscribe: (() => void) | null = null;
   private _inputTiming?: InputTimingController;
 
@@ -136,7 +136,7 @@ export class CellController<T> implements ReactiveController {
   /**
    * Set the current value reference and set up subscriptions
    */
-  bind(value: Cell<T> | T): void {
+  bind(value: CellHandle<T> | T): void {
     if (this._currentValue !== value) {
       this._cleanupCellSubscription();
       this._currentValue = value;
@@ -145,7 +145,7 @@ export class CellController<T> implements ReactiveController {
   }
 
   /**
-   * Get the current value from Cell<T> | T
+   * Get the current value from CellHandle<T> | T
    */
   getValue(): Readonly<T> {
     if (this._currentValue === undefined || this._currentValue === null) {
@@ -218,15 +218,17 @@ export class CellController<T> implements ReactiveController {
   /**
    * Check if current value is a Cell
    */
-  isCell(): boolean {
-    return isCell(this._currentValue);
+  hasCell(): boolean {
+    return isCellHandle(this._currentValue);
   }
 
   /**
    * Get the underlying Cell (if applicable)
    */
-  getCell(): Cell<T> | null {
-    return isCell(this._currentValue) ? this._currentValue : null;
+  getCell(): CellHandle<T> | null {
+    return isCellHandle(this._currentValue)
+      ? this._currentValue as CellHandle<T>
+      : null;
   }
 
   // ReactiveController implementation
@@ -244,18 +246,20 @@ export class CellController<T> implements ReactiveController {
   }
 
   // Private methods
-  private defaultGetValue(value: Cell<T> | T): T {
-    if (isCell(value)) {
-      return value.getAsQueryResult?.() || (undefined as T);
+  private defaultGetValue(value: CellHandle<T> | T): T {
+    if (isCellHandle(value)) {
+      return (value as CellHandle<T>).get();
     }
-    return value || (undefined as T);
+    return value as T;
   }
 
-  private defaultSetValue(value: Cell<T> | T, newValue: T, _oldValue: T): void {
-    if (isCell(value)) {
-      const tx = value.runtime.edit();
-      value.withTx(tx).set(newValue);
-      tx.commit();
+  private defaultSetValue(
+    value: CellHandle<T> | T,
+    newValue: T,
+    _oldValue: T,
+  ): void {
+    if (isCellHandle(value)) {
+      value.set(newValue);
     } else {
       // For non-Cell values, we can't directly modify them
       // This should be handled by the component's property system
@@ -264,8 +268,8 @@ export class CellController<T> implements ReactiveController {
   }
 
   private _setupCellSubscription(): void {
-    if (isCell(this._currentValue)) {
-      this._cellUnsubscribe = this._currentValue.sink(() => {
+    if (isCellHandle(this._currentValue)) {
+      this._cellUnsubscribe = this._currentValue.subscribe(() => {
         if (this.options.triggerUpdate) {
           this.host.requestUpdate();
         }
@@ -293,11 +297,11 @@ export class StringCellController extends CellController<string> {
       timing: { strategy: "debounce", delay: 300 },
       ...options,
       getValue: options.getValue || ((value) => {
-        if (isCell(value)) {
-          return value.get?.() || "";
+        if (isCellHandle(value)) {
+          return (value as CellHandle<string>).get() || "";
         }
         // Handle empty strings explicitly - don't treat them as falsy
-        return value === undefined || value === null ? "" : value;
+        return value === undefined || value === null ? "" : value as string;
       }),
     });
   }
@@ -315,10 +319,10 @@ export class BooleanCellController extends CellController<boolean> {
       timing: { strategy: "immediate" }, // Booleans usually update immediately
       ...options,
       getValue: options.getValue || ((value) => {
-        if (isCell(value)) {
-          return value.get?.() || false;
+        if (isCellHandle(value)) {
+          return (value as CellHandle<boolean>).get() || false;
         }
-        return value || false;
+        return value as boolean || false;
       }),
     });
   }
@@ -343,10 +347,10 @@ export class ArrayCellController<T> extends CellController<T[]> {
       timing: { strategy: "immediate" }, // Arrays usually update immediately
       ...options,
       getValue: options.getValue || ((value) => {
-        if (isCell(value)) {
-          return value.get?.() || [];
+        if (isCellHandle(value)) {
+          return (value as CellHandle<T[]>).get() || [];
         }
-        return value || [];
+        return value as T[] || [];
       }),
     });
   }
@@ -355,13 +359,9 @@ export class ArrayCellController<T> extends CellController<T[]> {
    * Add an item to the array
    */
   addItem(item: T): void {
-    if (this.isCell()) {
-      // Use Cell's native push method for efficient array mutation
-      // Must wrap in transaction like other Cell operations
+    if (this.hasCell()) {
       const cell = this.getCell()!;
-      const tx = cell.runtime.edit();
-      cell.withTx(tx).push(item);
-      tx.commit();
+      cell.push(item);
     } else {
       // Fallback for plain arrays
       const currentArray = this.getValue();
@@ -385,14 +385,10 @@ export class ArrayCellController<T> extends CellController<T[]> {
     const currentArray = this.getValue();
     const index = currentArray.indexOf(oldItem);
     if (index !== -1) {
-      if (this.isCell()) {
-        // Use Cell's native key() method for direct element mutation
-        // Must wrap in transaction like other Cell operations
+      if (this.hasCell()) {
         const cell = this.getCell()!;
-        const tx = cell.runtime.edit();
         const itemCell = cell.key(index);
-        itemCell.withTx(tx).set(newItem);
-        tx.commit();
+        itemCell.set(newItem);
       } else {
         // Fallback for plain arrays
         const newArray = [...currentArray];

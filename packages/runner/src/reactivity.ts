@@ -1,12 +1,18 @@
 import { Cancel, isCancel, noOp } from "./cancel.ts";
 
-export type SinkableCell<T = unknown> = {
-  sink: (callback: (value: T) => Cancel | undefined | void) => Cancel;
+export const Subscribe = Symbol.for("$subscribe");
+
+export type SubscriptionCell<T = unknown> = {
+  [Subscribe]: (callback: SubscriptionCallback<T>) => Cancel;
 };
 
-export function isSinkableCell(value: unknown): value is SinkableCell {
-  return typeof value === "object" && !!value && "sink" in value &&
-    typeof value.sink === "function";
+export type SubscriptionCallback<T> = (value: T) => Cancel | undefined | void;
+
+// This is mostly to abstract using both `CellHandle` and `Cell` in the
+// renderer, with some older tests using the latter.
+export function isSubscriptionCell(value: unknown): value is SubscriptionCell {
+  return typeof value === "object" && !!value && Subscribe in value &&
+    typeof value[Subscribe] === "function";
 }
 
 /**
@@ -19,11 +25,11 @@ export function isSinkableCell(value: unknown): value is SinkableCell {
  * @returns {function} - A function to cancel the effect.
  */
 export const effect = <T>(
-  value: SinkableCell<T> | T,
-  callback: (value: T) => Cancel | undefined | void,
+  value: SubscriptionCell<T> | T,
+  callback: SubscriptionCallback<T>,
 ): Cancel => {
-  if (isSinkableCell(value)) {
-    return value.sink(callback);
+  if (isSubscriptionCell(value)) {
+    return value[Subscribe](callback);
   } else {
     const cancel = callback(value as T);
     return isCancel(cancel) ? cancel : noOp;

@@ -1,6 +1,6 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
-import { Cell } from "@commontools/runner";
+import { CellHandle } from "@commontools/runtime-client";
 import { CTCharm } from "../ct-charm/ct-charm.ts";
 
 declare global {
@@ -39,7 +39,7 @@ export interface PlaidAuthData {
  *
  * @element ct-plaid-link
  *
- * @attr {Cell<PlaidAuthData>} auth - Cell containing Plaid authentication data
+ * @attr {CellHandle<PlaidAuthData>} auth - Cell containing Plaid authentication data
  * @attr {string[]} products - Array of Plaid products to use (default: ['transactions'])
  *
  * @example
@@ -54,7 +54,7 @@ export class CTPlaidLink extends BaseElement {
     plaidScriptLoaded: { type: Boolean },
   };
 
-  declare auth: Cell<PlaidAuthData> | undefined;
+  declare auth: CellHandle<PlaidAuthData> | undefined;
   declare products: string[];
   declare isLoading: boolean;
   declare authStatus: string;
@@ -122,7 +122,7 @@ export class CTPlaidLink extends BaseElement {
     this.isLoading = true;
     this.authStatus = "Creating link session...";
 
-    const authCellId = JSON.stringify(this.auth?.getAsLink());
+    const authCellId = JSON.stringify(this.auth?.ref());
 
     const container = CTCharm.findCharmContainer(this);
     if (!container) {
@@ -264,7 +264,7 @@ export class CTPlaidLink extends BaseElement {
     this.isLoading = true;
     this.authStatus = "Removing bank connection...";
 
-    const authCellId = JSON.stringify(this.auth?.getAsLink());
+    const authCellId = JSON.stringify(this.auth?.ref());
 
     try {
       const response = await fetch(

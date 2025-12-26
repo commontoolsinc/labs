@@ -80,6 +80,9 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { ensureNotRenderThread } from "@commontools/utils/env";
+import { Subscribe, SubscriptionCallback } from "./reactivity.ts";
+ensureNotRenderThread();
 
 // Shared map factory instance for all cells
 let mapFactory: NodeFactory<any, any> | undefined;
@@ -929,7 +932,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     ) as unknown as Cell<T>;
   }
 
-  sink(callback: (value: Readonly<T>) => Cancel | undefined | void): Cancel {
+  sink(callback: SubscriptionCallback<Readonly<T>>): Cancel {
     // Check if this is a stream
     if (this.isStream()) {
       // Stream behavior: add listener
@@ -945,6 +948,10 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       if (!this.synced) this.sync(); // No await, just kicking this off
       return subscribeToReferencedDocs(callback, this.runtime, this.link);
     }
+  }
+
+  [Subscribe](callback: SubscriptionCallback<Readonly<T>>): Cancel {
+    return this.sink(callback);
   }
 
   sync(): Promise<Cell<T>> | Cell<T> {

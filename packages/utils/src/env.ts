@@ -5,5 +5,17 @@ export function isDeno(): boolean {
 }
 
 export function isBrowser(): boolean {
-  return !isDeno() && ("document" in globalThis);
+  return !isDeno() && ("fetch" in globalThis);
+}
+
+export function isWorkerThread(): boolean {
+  return isDeno() ? ("close" in globalThis) : ("importScripts" in globalThis);
+}
+
+export function ensureNotRenderThread() {
+  if (isBrowser() && !isWorkerThread()) {
+    throw new Error(
+      "This component must not run in the browser's main thread.",
+    );
+  }
 }

@@ -1,11 +1,11 @@
-import type { Cell } from "@commontools/runner";
+import type { CellHandle } from "@commontools/runtime-client";
 
 /**
  * State information for an active drag operation.
  */
 export interface DragState {
-  /** The Cell being dragged */
-  cell: Cell;
+  /** The CellHandle being dragged */
+  cell: CellHandle;
   /** Optional type identifier for filtering drop zones */
   type?: string;
   /** The source element that initiated the drag */

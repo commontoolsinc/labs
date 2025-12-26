@@ -1,7 +1,7 @@
 import { ReactiveController, ReactiveControllerHost } from "lit";
 import { BaseView } from "../views/BaseView.ts";
-import { navigate } from "./navigate.ts";
-import { AppState } from "./app/mod.ts";
+import { navigate } from "../../shared/navigate.ts";
+import { AppState } from "../../shared/mod.ts";
 
 // Reactive controller host is XAppView, define some interfaces
 // to avoid a recursive dependency.

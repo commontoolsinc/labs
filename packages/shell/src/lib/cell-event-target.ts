@@ -1,4 +1,5 @@
-import { Cancel, Cell } from "@commontools/runner";
+import { Cancel } from "@commontools/runtime-client";
+import { CellHandle } from "@commontools/runtime-client";
 import { assert } from "@std/assert";
 
 export class CellUpdateEvent<T> extends CustomEvent<T> {
@@ -7,16 +8,20 @@ export class CellUpdateEvent<T> extends CustomEvent<T> {
   }
 }
 
-// Wraps a `Cell` as an `EventTarget`, firing `"update"`
+// Wraps a `CellHandle` as an `EventTarget`, firing `"update"`
 // events when the cell's sink callback is fired.
 export class CellEventTarget<T> extends EventTarget {
-  #cell: Cell<T>;
+  #cell: CellHandle<T>;
   #cancel?: Cancel;
   #subscribers = 0;
 
-  constructor(cell: Cell<T>) {
+  constructor(cell: CellHandle<T>) {
     super();
     this.#cell = cell;
+  }
+
+  cell() {
+    return this.#cell;
   }
 
   #isEnabled(): boolean {
@@ -25,7 +30,7 @@ export class CellEventTarget<T> extends EventTarget {
 
   #enable() {
     assert(!this.#isEnabled());
-    this.#cancel = this.#cell.sink((value) => {
+    this.#cancel = this.#cell.subscribe((value) => {
       this.dispatchEvent(new CellUpdateEvent(value));
     });
   }

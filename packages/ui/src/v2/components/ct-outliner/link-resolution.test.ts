@@ -4,7 +4,7 @@ import { TreeOperations } from "./tree-operations.ts";
 import { CTOutliner } from "./ct-outliner.ts";
 import { createMockShadowRoot } from "./test-utils.ts";
 import type { Node, Tree } from "./types.ts";
-import { Runtime } from "@commontools/runner";
+import { Runtime } from "@commontools/runtime-client";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 

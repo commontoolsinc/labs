@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { UI } from "@commontools/api";
 import * as assert from "./assert.ts";
-import { isVNode } from "../src/jsx.ts";
+import { isVNode } from "@commontools/runtime-client";
 
 describe("jsx dom fragments support", () => {
   it("dom fragments should work", () => {

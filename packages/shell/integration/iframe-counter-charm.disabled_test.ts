@@ -1,3 +1,5 @@
+// @ts-nocheck - This test file is disabled and uses the old CharmController API
+// that has been replaced by CharmHandle with the RuntimeClient implementation.
 /**
  * Integration test for iframe counter recipe.
  *
