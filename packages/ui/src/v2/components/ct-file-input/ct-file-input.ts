@@ -416,6 +416,7 @@ export class CTFileInput extends BaseElement {
   }
 
   private _handleButtonClick() {
+    this.emit("ct-click"); // Emit before opening file picker
     const input = this.shadowRoot?.querySelector(
       'input[type="file"]',
     ) as HTMLInputElement;
