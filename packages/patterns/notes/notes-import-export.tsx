@@ -3200,7 +3200,9 @@ Note content here with any markdown...
           <ct-card style={{ minWidth: "300px", padding: "32px" }}>
             <ct-vstack gap="4" style={{ alignItems: "center" }}>
               <h3 style={{ margin: 0 }}>
-                {computed(() => importComplete.get() ? "Done!" : "Importing...")}
+                {computed(() =>
+                  importComplete.get() ? "Done!" : "Importing..."
+                )}
               </h3>
               <p
                 style={{
@@ -3220,7 +3222,9 @@ Note content here with any markdown...
                   borderRadius: "2px",
                   overflow: "hidden",
                   position: "relative",
-                  display: computed(() => importComplete.get() ? "none" : "block"),
+                  display: computed(() =>
+                    importComplete.get() ? "none" : "block"
+                  ),
                 }}
               >
                 <div
@@ -3241,7 +3245,9 @@ Note content here with any markdown...
               <ct-button
                 variant="default"
                 style={{
-                  display: computed(() => importComplete.get() ? "block" : "none"),
+                  display: computed(() =>
+                    importComplete.get() ? "block" : "none"
+                  ),
                   marginTop: "8px",
                 }}
                 onClick={() => showImportProgressModal.set(false)}
