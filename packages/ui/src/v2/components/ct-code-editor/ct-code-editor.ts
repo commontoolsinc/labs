@@ -602,7 +602,7 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Simple string hash for content comparison.
+   * Simple string hash (djb2 variant) for content comparison.
    * Used to detect when a Cell update is our own change echoing back.
    */
   private _hashContent(str: string): number {
@@ -610,7 +610,7 @@ export class CTCodeEditor extends BaseElement {
     for (let i = 0; i < str.length; i++) {
       const char = str.charCodeAt(i);
       hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32-bit integer
+      hash = hash | 0; // Force 32-bit signed integer
     }
     return hash;
   }
@@ -643,14 +643,20 @@ export class CTCodeEditor extends BaseElement {
     if (this._lastEditorContentHash === newValueHash) {
       // This is our own change coming back - the editor already has this
       // content (or very similar content with same hash). Skip to avoid
-      // cursor jump. Clear the hash so future identical external updates
-      // can still come through.
-      this._lastEditorContentHash = null;
+      // cursor jump. Don't clear the hash here - if user is still typing
+      // the same content, we want to keep skipping echoes. The hash will
+      // be cleared when we apply an external update below, or when cleanup
+      // runs on disconnect.
       return;
     }
 
-    // This is a genuine external update - sync to editor.
-    // Preserve cursor position, clamping to new document length.
+    // This is a genuine external update. Clear any stored hash since we're
+    // now syncing to external state - any future echoes of user's pending
+    // debounced changes should be compared fresh.
+    this._lastEditorContentHash = null;
+
+    // Sync external update to editor, preserving cursor position.
+    // Clamp cursor to new document length in case content is shorter.
     const currentSelection = this._editorView.state.selection.main;
     const newLength = newValue.length;
     const anchorPos = Math.min(currentSelection.anchor, newLength);
@@ -719,6 +725,8 @@ export class CTCodeEditor extends BaseElement {
     }
     this._cleanupFns.forEach((fn) => fn());
     this._cleanupFns = [];
+    // Clear hash to prevent stale state on reconnect
+    this._lastEditorContentHash = null;
     if (this._editorView) {
       this._editorView.destroy();
       this._editorView = undefined;
