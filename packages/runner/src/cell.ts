@@ -80,9 +80,9 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { Logger } from "@commontools/utils/logger";
+import { getLogger } from "@commontools/utils/logger";
 
-const logger = Logger.getLogger("cell");
+const logger = getLogger("cell");
 
 /**
  * Deeply traverse a value to access all properties.
