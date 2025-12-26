@@ -421,7 +421,10 @@ const handleImportFileUpload = handler<
   const base64Part = dataUrl.split(",")[1];
   if (!base64Part) return;
 
-  const content = atob(base64Part);
+  // Decode base64 properly for UTF-8 (atob alone corrupts non-ASCII chars)
+  const binaryString = atob(base64Part);
+  const bytes = Uint8Array.from(binaryString, (char) => char.charCodeAt(0));
+  const content = new TextDecoder().decode(bytes);
   const parsed = parseMarkdownToNotesPlain(content);
   if (parsed.length === 0) return;
 
@@ -3179,6 +3182,23 @@ Note content here with any markdown...
                   </ct-button>
                 </ct-hstack>
               </div>
+              {/* Cancel button - always visible even when paste section is hidden */}
+              <ct-button
+                variant="ghost"
+                style={{
+                  display: computed(() =>
+                    showPasteSection.get() ? "none" : "block"
+                  ),
+                  marginTop: "12px",
+                }}
+                onClick={closeImportModal({
+                  showImportModal,
+                  importMarkdown,
+                  showPasteSection,
+                })}
+              >
+                Cancel
+              </ct-button>
             </ct-vstack>
           </ct-card>
         </div>
