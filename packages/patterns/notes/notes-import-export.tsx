@@ -1280,8 +1280,8 @@ const cancelDeleteNotebooks = handler<
   showDeleteNotebookModal.set(false);
 });
 
-// Handler to duplicate selected notebooks
-const duplicateSelectedNotebooks = handler<
+// Handler to clone selected notebooks (shallow copy - shares note references)
+const cloneSelectedNotebooks = handler<
   Record<string, never>,
   {
     notebooks: Cell<NotebookCharm[]>;
@@ -1306,12 +1306,62 @@ const duplicateSelectedNotebooks = handler<
       );
 
       copies.push(Notebook({
-        title: baseTitle + " (Copy)",
+        title: baseTitle + " (Clone)",
         notes: [...(original?.notes ?? [])], // Shallow copy - reference same notes
       }) as unknown as NoteCharm);
     }
   }
   allCharms.push(...copies);
+  selectedNotebookIndices.set([]);
+});
+
+// Handler to duplicate selected notebooks (deep copy - new independent note instances)
+const duplicateSelectedNotebooks = handler<
+  Record<string, never>,
+  {
+    notebooks: Cell<NotebookCharm[]>;
+    selectedNotebookIndices: Cell<number[]>;
+    allCharms: Cell<NoteCharm[]>;
+  }
+>((_, { notebooks, selectedNotebookIndices, allCharms }) => {
+  const selected = selectedNotebookIndices.get();
+  const notebooksList = notebooks.get();
+
+  const newItems: NoteCharm[] = [];
+
+  for (const idx of selected) {
+    const original = notebooksList[idx];
+    if (original) {
+      // Create NEW note instances for each note in the notebook
+      const newNotes = (original.notes ?? []).map((note) =>
+        Note({
+          title: note.title ?? "Note",
+          content: note.content ?? "",
+          isHidden: true,
+          noteId: generateId(),
+        }) as unknown as NoteCharm
+      );
+
+      // Add new notes to collection (visible in All Notes)
+      newItems.push(...newNotes);
+
+      // Extract just the base title (strip emoji and count)
+      const rawTitle = (original as any)?.[NAME] ?? original?.title ??
+        "Notebook";
+      const baseTitle = rawTitle.replace(/^📓\s*/, "").replace(
+        /\s*\(\d+\)$/,
+        "",
+      );
+
+      // Create new notebook with the new independent notes
+      newItems.push(Notebook({
+        title: baseTitle + " (Copy)",
+        notes: newNotes,
+      }) as unknown as NoteCharm);
+    }
+  }
+
+  allCharms.push(...newItems);
   selectedNotebookIndices.set([]);
 });
 
@@ -2241,6 +2291,17 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                     })}
                   >
                     <span>↑</span> Export
+                  </ct-button>
+                  <ct-button
+                    size="sm"
+                    variant="ghost"
+                    onClick={cloneSelectedNotebooks({
+                      notebooks,
+                      selectedNotebookIndices,
+                      allCharms,
+                    })}
+                  >
+                    Clone
                   </ct-button>
                   <ct-button
                     size="sm"
