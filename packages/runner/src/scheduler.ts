@@ -799,9 +799,7 @@ export class Scheduler {
 
               for (const action of triggeredActions) {
                 logger.debug("schedule-trigger", () => [
-                  `Action for ${spaceAndURI}/${
-                    change.address.path.join("/")
-                  }`,
+                  `Action for ${spaceAndURI}/${change.address.path.join("/")}`,
                   `Action name: ${action.name || "anonymous"}`,
                   `Mode: ${this.pullMode ? "pull" : "push"}`,
                   `Type: ${
@@ -978,7 +976,9 @@ export class Scheduler {
         isPending: this.pending.has(action),
         parentId,
         childCount: childCount && childCount > 0 ? childCount : undefined,
-        preview: (action as Action & { module?: { implementation?: { preview?: string } } }).module?.implementation?.preview,
+        preview: (action as Action & {
+          module?: { implementation?: { preview?: string } };
+        }).module?.implementation?.preview,
         reads,
         writes,
       });
@@ -1811,9 +1811,7 @@ export class Scheduler {
           });
 
           logger.debug("schedule-dep-collect-post-event", () => [
-            `Collected dependencies for ${
-              action.name || "anonymous"
-            }`,
+            `Collected dependencies for ${action.name || "anonymous"}`,
           ]);
         }
       }
