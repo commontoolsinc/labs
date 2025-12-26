@@ -89,6 +89,28 @@ const createNoteAndOpen = handler<
   return navigateTo(newNote);
 });
 
+// Handler to create note and stay in modal to create another
+const createNoteAndContinue = handler<
+  void,
+  {
+    newNoteTitle: Cell<string>;
+    notes: Cell<NoteCharm[]>;
+    allCharms: Cell<NoteCharm[]>;
+  }
+>((_, { newNoteTitle, notes, allCharms }) => {
+  const title = newNoteTitle.get() || "New Note";
+  const newNote = Note({
+    title,
+    content: "",
+    isHidden: true,
+    noteId: generateId(),
+  });
+  allCharms.push(newNote as unknown as NoteCharm);
+  notes.push(newNote as unknown as NoteCharm);
+  // Keep modal open, just clear the title for the next note
+  newNoteTitle.set("");
+});
+
 // Handler to cancel new note prompt
 const cancelNewNotePrompt = handler<
   void,
@@ -1248,6 +1270,16 @@ const Notebook = pattern<Input, Output>(({ title, notes, isNotebook }) => {
                   })}
                 >
                   Cancel
+                </ct-button>
+                <ct-button
+                  variant="ghost"
+                  onClick={createNoteAndContinue({
+                    newNoteTitle,
+                    notes,
+                    allCharms,
+                  })}
+                >
+                  Create Another
                 </ct-button>
                 <ct-button
                   variant="primary"
