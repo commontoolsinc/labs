@@ -80,6 +80,9 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { Logger } from "@commontools/utils/logger";
+
+const logger = Logger.getLogger("cell");
 
 /**
  * Deeply traverse a value to access all properties.
@@ -563,7 +566,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 
   get(options?: { traverseCells?: boolean }): Readonly<T> {
     if (!this.synced) this.sync(); // No await, just kicking this off
-    return validateAndTransform(
+    const begin = performance.now();
+    const value = validateAndTransform(
       this.runtime,
       this.tx,
       this.link,
@@ -571,6 +575,15 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       [],
       options,
     );
+    const elapsed = performance.now() - begin;
+    if (elapsed > 10) {
+      logger.warn(
+        `get >${Math.floor(elapsed - (elapsed % 10))}ms`,
+        `get() took ${Math.floor(elapsed)}ms`,
+        this.link,
+      );
+    }
+    return value;
   }
 
   /**
