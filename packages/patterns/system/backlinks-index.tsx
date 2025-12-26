@@ -4,13 +4,13 @@ import { Cell, lift, NAME, OpaqueRef, pattern, UI } from "commontools";
 export type MentionableCharm = {
   [NAME]?: string;
   isHidden?: boolean;
-  mentioned: MentionableCharm[];
-  backlinks: MentionableCharm[];
+  mentioned?: MentionableCharm[];
+  backlinks?: MentionableCharm[];
 };
 
 export type WriteableBacklinks = {
-  mentioned: WriteableBacklinks[];
-  backlinks: Cell<WriteableBacklinks[]>;
+  mentioned?: WriteableBacklinks[];
+  backlinks?: Cell<WriteableBacklinks[]>;
 };
 
 type Input = {

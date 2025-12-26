@@ -42,6 +42,8 @@ export function charmId(charm: Cell<unknown>): string | undefined {
   return typeof idValue === "string" ? idValue : undefined;
 }
 
+
+
 /**
  * Filters an array of charms by removing any that match the target cell
  */

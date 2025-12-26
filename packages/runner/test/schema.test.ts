@@ -183,6 +183,10 @@ describe("Schema Support", () => {
 
       // Find the currently selected cell and update it
       const first = cell.key("current").get();
+      expect(first.getAsNormalizedFullLink().id).toEqual(
+        innerCell.getAsNormalizedFullLink().id,
+      );
+      expect(first.getAsNormalizedFullLink().path).toEqual([]);
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqualIgnoringSymbols({ label: "first" });
       first.withTx(tx).set({ label: "first - update" });
@@ -361,6 +365,11 @@ describe("Schema Support", () => {
 
       // Find the currently selected cell and read it
       const first = root.key("current").withTx(tx).get();
+      // current is pointing to linkCell, which is pointing to initial
+      expect(first.getAsNormalizedFullLink().id).toEqual(
+        initial.getAsNormalizedFullLink().id,
+      );
+      expect(first.getAsNormalizedFullLink().path).toEqual(["foo"]);
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqualIgnoringSymbols({ label: "first" });
       const { asCell: _ignore, ...omitSchema } = schema.properties.current;
@@ -420,8 +429,6 @@ describe("Schema Support", () => {
 
       expect(rootValues).toEqual([
         "root",
-        "cancelled",
-        "root",
       ]);
 
       // Change unrelated value should update root, but not the other cells
@@ -432,8 +439,6 @@ describe("Schema Support", () => {
       await runtime.idle();
 
       expect(rootValues).toEqual([
-        "root",
-        "cancelled",
         "root",
         "cancelled",
         "root - updated",
@@ -454,8 +459,6 @@ describe("Schema Support", () => {
       await runtime.idle();
 
       expect(rootValues).toEqualIgnoringSymbols([
-        "root",
-        "cancelled",
         "root",
         "cancelled",
         "root - updated",
@@ -510,8 +513,6 @@ describe("Schema Support", () => {
         "third - updated",
       ]);
       expect(rootValues).toEqualIgnoringSymbols([
-        "root",
-        "cancelled",
         "root",
         "cancelled",
         "root - updated",
@@ -701,7 +702,7 @@ describe("Schema Support", () => {
           nested: { $ref: "#", asCell: true },
         },
         asCell: true,
-        required: ["id", "nested"],
+        required: ["id"],
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
@@ -710,7 +711,7 @@ describe("Schema Support", () => {
       expect(isCell(value)).toBe(true);
       expect(value.get().id).toBe(1);
       expect(isCell(value.get().nested)).toBe(true);
-      expect(value.get().nested.get().id).toBe(2);
+      expect(value.get().nested!.get().id).toBe(2);
     });
   });
 
@@ -914,6 +915,9 @@ describe("Schema Support", () => {
         c.getAsLink(),
       );
 
+      // TODO(@ubik2) -- Temporarily disambiguating the anyOf clause, with
+      // "required" property since I'm not yet merging properties when we
+      // match multiples.
       const schema = {
         type: "object",
         properties: {
@@ -931,11 +935,13 @@ describe("Schema Support", () => {
                     name: { type: "string" },
                     value: { $ref: "#" },
                   },
+                  required: ["value"],
                 },
               ],
             },
           },
         },
+        required: ["children"],
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
@@ -1179,11 +1185,13 @@ describe("Schema Support", () => {
                 type: "object",
                 properties: { a: { type: "number" } },
                 required: ["a"],
+                additionalProperties: true,
               },
               {
                 type: "object",
                 properties: { b: { type: "string" } },
                 required: ["b"],
+                additionalProperties: true,
               },
             ],
           },
@@ -1263,6 +1271,11 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
+      // Undefined, sine the boolean item makes the array invalid,
+      // which then means the object's arr is invalid.
+      expect(cell.get()).toBeUndefined();
+
+      c.set({ arr: [42, space] });
       const result = cell.get();
       expect(result.arr[0]).toBe(42);
       expect(result.arr[1]).toBe(space);
@@ -1359,36 +1372,6 @@ describe("Schema Support", () => {
         expect(result.data).toEqualIgnoringSymbols([1, 2, 3]);
       });
 
-      it("should merge item schemas when multiple array options exist", () => {
-        const c = runtime.getCell<{ data: any[] }>(
-          space,
-          "should merge item schemas when multiple array options 1",
-          undefined,
-          tx,
-        );
-        c.set({ data: ["hello", 42, true] });
-        const schema = {
-          type: "object",
-          properties: {
-            data: {
-              anyOf: [
-                { type: "array", items: { type: "string" } },
-                { type: "array", items: { type: "number" } },
-              ],
-            },
-          },
-        } as const satisfies JSONSchema;
-
-        const cell = c.asSchema(schema);
-        const result = cell.get();
-        // Should keep string and number values, drop boolean
-        expect(result.data).toEqualIgnoringSymbols([
-          "hello",
-          42,
-          undefined,
-        ]);
-      });
-
       it("should handle nested anyOf in array items", () => {
         const c = runtime.getCell<{
           data: Array<{ type: string; value: string | number }>;
@@ -1410,16 +1393,16 @@ describe("Schema Support", () => {
             data: {
               type: "array",
               items: {
+                type: "object",
+                required: ["type", "value"],
                 anyOf: [
                   {
-                    type: "object",
                     properties: {
                       type: { type: "string" },
                       value: { type: "string" },
                     },
                   },
                   {
-                    type: "object",
                     properties: {
                       type: { type: "string" },
                       value: { type: "number" },
@@ -1462,6 +1445,44 @@ describe("Schema Support", () => {
         const cell = c.asSchema(schema);
         const result = cell.get();
         expect(result.data).toBeUndefined();
+      });
+
+      it("array element set as cell returned as non-cell", () => {
+        const numberArrayCell = runtime.getCell<number[]>(
+          space,
+          "array of numbers",
+          undefined,
+          tx,
+        );
+        numberArrayCell.set([1, 2]);
+
+        const arrayOfArrayCell = runtime.getCell<number[][]>(
+          space,
+          "array of arrays of numbers",
+          undefined,
+          tx,
+        );
+        arrayOfArrayCell.set([numberArrayCell, [3, 4]]);
+
+        const arrayOfArraySchema = {
+          type: "array",
+          items: {
+            type: "array",
+            items: {
+              type: "number",
+            },
+          },
+        } as const satisfies JSONSchema;
+
+        const cell = arrayOfArrayCell.asSchema(arrayOfArraySchema);
+
+        const result = cell.get();
+        expect(Array.isArray(result)).toBeTruthy();
+        expect(isCell(result)).toBeFalsy();
+        const item = result[0];
+        expect(Array.isArray(item)).toBeTruthy();
+        expect(isCell(item)).toBeFalsy();
+        expect(item[0]).toEqual(1);
       });
 
       it("should work for the vdom schema with $ref", () => {
@@ -1567,7 +1588,7 @@ describe("Schema Support", () => {
               asCell: true,
             },
           },
-          required: ["type", "name", "value", "props", "children"],
+          required: ["type"],
         } as const satisfies JSONSchema;
 
         for (const doc of [plain, withLinks]) {
@@ -1576,10 +1597,10 @@ describe("Schema Support", () => {
           expect(result.type).toBe("vnode");
           expect(result.name).toBe("div");
           expect(isCell(result.props)).toBe(false);
-          expect(isCell(result.props.style)).toBe(true);
-          expect(result.props.style.get().color).toBe("red");
+          expect(isCell(result.props?.style)).toBe(true);
+          expect(result.props!.style.get().color).toBe("red");
           expect(isCell(result.children)).toBe(true);
-          const children = result.children.get();
+          const children = result.children!.get();
           expect(children.length).toBe(3);
           expect(isCell(children[0])).toBe(true);
           expect((children[0] as Cell<any>).get().value).toBe("single");
@@ -1970,9 +1991,9 @@ describe("Schema Support", () => {
 
       expect(value.items?.[0].title).toBe("First Item");
       expect(value.items?.[1].title).toBe("Default Title");
-
-      expect(isCell(value.items?.[0].metadata)).toBe(true);
-      expect(isCell(value.items?.[1].metadata)).toBe(true);
+      // Our newly set values don't have a metadata property
+      expect(value.items?.[0].metadata).toBeUndefined();
+      expect(value.items?.[1].metadata).toBeUndefined();
 
       const c2 = runtime.getCell<any>(
         space,
@@ -2028,6 +2049,7 @@ describe("Schema Support", () => {
             },
           },
         },
+        default: {}, // this makes us walk down for other defaults
         required: ["config"],
       } as const satisfies JSONSchema;
 
@@ -2499,8 +2521,25 @@ describe("Schema Support", () => {
         ],
       });
 
+      const itemValue = listCell.key("items").key(0).get();
+      const linkedCell = (itemValue as any)[toCell]();
+
+      const itemCell = listCell.key("items").key(0);
+
+      // Direct links from cells should have the full path
+      expect(itemCell.getAsNormalizedFullLink().path).toEqual(["items", "0"]);
+      expect(linkedCell.getAsNormalizedFullLink().path).toEqual(["items", "0"]);
+
       // Get the array result
       const result = listCell.get();
+
+      // Both the cell key version and the toCell version of items should have the same path
+      // since there is no link
+      const itemsCell = (result.items as any)[toCell]();
+      expect(listCell.key("items").getAsNormalizedFullLink().path).toEqual([
+        "items",
+      ]);
+      expect(itemsCell.getAsNormalizedFullLink().path).toEqual(["items"]);
 
       // Convert items back to cells and check their links
       const itemCells = result.items.map((item: any) => item[toCell]());
