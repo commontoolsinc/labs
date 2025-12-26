@@ -123,8 +123,13 @@ function filterAndFormatNotesPlain(
     return `${NOTE_START_MARKER} title="${escapedTitle}" noteId="${noteId}" notebooks="${notebooksStr}" -->\n\n${content}\n\n${NOTE_END_MARKER}`;
   });
 
+  // Add timestamp header (ignored by import regex which only looks for COMMON_NOTE_START)
+  const timestamp = new Date().toISOString();
+  const header =
+    `<!-- Common Tools Export - ${timestamp} -->\n<!-- Notes: ${notes.length} -->\n\n`;
+
   return {
-    markdown: formatted.join("\n\n"),
+    markdown: header + formatted.join("\n\n"),
     count: notes.length,
   };
 }
@@ -333,6 +338,7 @@ function performImport(
   if (newItems.length > 0) {
     allCharms.set([...allCharms.get(), ...newItems]);
   }
+  // Note: onComplete is called synchronously at the end of this function
 
   // === PHASE 3: Build title→ID map and link mentions ===
   // Use allCharms.key(index).resolveAsCell() to get the actual charm Cell
@@ -385,9 +391,88 @@ function performImport(
     }
   }
 
-  // Call completion callback
+  // Call completion callback synchronously
   onComplete?.();
 }
+
+// Handler for file upload in import modal - reads file and triggers import directly
+const handleImportFileUpload = handler<
+  { detail: { files: Array<{ url: string; name: string }> } },
+  {
+    importMarkdown: Cell<string>;
+    notes: Cell<NoteCharm[]>;
+    allCharms: Cell<NoteCharm[]>;
+    notebooks: Cell<NotebookCharm[]>;
+    showDuplicateModal: Cell<boolean>;
+    detectedDuplicates: Cell<DetectedDuplicate[]>;
+    pendingImportData: Cell<string>;
+    showImportModal: Cell<boolean>;
+    showImportProgressModal: Cell<boolean>;
+    importProgressMessage: Cell<string>;
+    importComplete: Cell<boolean>;
+    showPasteSection?: Cell<boolean>;
+  }
+>(({ detail }, state) => {
+  const files = detail?.files ?? [];
+  if (files.length === 0) return;
+
+  // data URL format: "data:text/plain;base64,..." or "data:text/markdown;base64,..."
+  const dataUrl = files[0].url;
+  const base64Part = dataUrl.split(",")[1];
+  if (!base64Part) return;
+
+  // Decode base64 properly for UTF-8 (atob alone corrupts non-ASCII chars)
+  const binaryString = atob(base64Part);
+  const bytes = Uint8Array.from(binaryString, (char) => char.charCodeAt(0));
+  const content = new TextDecoder().decode(bytes);
+  const parsed = parseMarkdownToNotesPlain(content);
+  if (parsed.length === 0) return;
+
+  // Get existing notes for duplicate detection
+  const existingNotes = state.notes.get();
+  const existingByTitle = new Map<string, NoteCharm>();
+  existingNotes.forEach((note: any) => {
+    const title = note?.title;
+    if (title) existingByTitle.set(title, note);
+  });
+
+  // Detect duplicates
+  const duplicates: DetectedDuplicate[] = [];
+  for (const noteData of parsed) {
+    const existing = existingByTitle.get(noteData.title);
+    if (existing) {
+      duplicates.push({
+        title: noteData.title,
+        noteId: noteData.noteId,
+        existingNotebook: "this space",
+      });
+    }
+  }
+
+  if (duplicates.length > 0) {
+    // Store pending import and show duplicate modal
+    state.pendingImportData.set(content);
+    state.detectedDuplicates.set(duplicates);
+    state.showDuplicateModal.set(true);
+    state.showImportModal.set(false);
+    state.showPasteSection?.set(true); // Reset for next time
+  } else {
+    // Set all state BEFORE showing modal to avoid default state flicker
+    state.showImportModal.set(false);
+    state.showPasteSection?.set(true); // Reset for next time
+    state.importComplete.set(false);
+    state.importProgressMessage.set(`Importing ${parsed.length} notes...`);
+    // NOW show the modal (after state is set)
+    state.showImportProgressModal.set(true);
+
+    // Run import synchronously
+    performImport(parsed, state.allCharms, state.notebooks, new Set());
+
+    // Mark import as complete
+    state.importProgressMessage.set(`Imported ${parsed.length} notes!`);
+    state.importComplete.set(true);
+  }
+});
 
 // Handler to analyze import and detect duplicates
 const analyzeImport = handler<
@@ -402,6 +487,10 @@ const analyzeImport = handler<
     pendingImportData: Cell<string>;
     showImportModal?: Cell<boolean>;
     importStatus?: Cell<string>;
+    showImportProgressModal?: Cell<boolean>;
+    importProgressMessage?: Cell<string>;
+    importComplete?: Cell<boolean>;
+    showPasteSection?: Cell<boolean>;
   }
 >((_, state) => {
   const {
@@ -414,6 +503,10 @@ const analyzeImport = handler<
     pendingImportData,
     showImportModal,
     importStatus: _importStatus,
+    showImportProgressModal,
+    importProgressMessage,
+    importComplete,
+    showPasteSection,
   } = state;
   const markdown = importMarkdown.get();
   const parsed = parseMarkdownToNotesPlain(markdown);
@@ -448,12 +541,25 @@ const analyzeImport = handler<
     showDuplicateModal.set(true);
     // Close import modal if open (duplicate modal will take over)
     showImportModal?.set(false);
+    showPasteSection?.set(true); // Reset for next time
   } else {
-    // Import directly (synchronous)
-    performImport(parsed, allCharms, notebooks, new Set(), undefined, () => {
-      importMarkdown.set("");
-      showImportModal?.set(false);
-    });
+    // Clear markdown and close import modal
+    importMarkdown.set("");
+    showImportModal?.set(false);
+    showPasteSection?.set(true); // Reset for next time
+
+    // Set all state BEFORE showing modal to avoid default state flicker
+    importComplete?.set(false);
+    importProgressMessage?.set(`Importing ${parsed.length} notes...`);
+    // NOW show the modal
+    showImportProgressModal?.set(true);
+
+    // Run import synchronously
+    performImport(parsed, allCharms, notebooks, new Set());
+
+    // Mark import as complete
+    importProgressMessage?.set(`Imported ${parsed.length} notes!`);
+    importComplete?.set(true);
   }
 });
 
@@ -468,6 +574,9 @@ const importSkipDuplicates = handler<
     showDuplicateModal: Cell<boolean>;
     importMarkdown: Cell<string>;
     importStatus?: Cell<string>;
+    showImportProgressModal?: Cell<boolean>;
+    importProgressMessage?: Cell<string>;
+    importComplete?: Cell<boolean>;
   }
 >((_, state) => {
   const markdown = state.pendingImportData.get();
@@ -476,20 +585,26 @@ const importSkipDuplicates = handler<
 
   // Build skip set from duplicate titles
   const skipTitles = new Set(duplicates.map((d) => d.title));
+  const importCount = parsed.length - skipTitles.size;
 
-  performImport(
-    parsed,
-    state.allCharms,
-    state.notebooks,
-    skipTitles,
-    undefined,
-    () => {
-      state.pendingImportData.set("");
-      state.detectedDuplicates.set([]);
-      state.showDuplicateModal.set(false);
-      state.importMarkdown.set("");
-    },
-  );
+  // Clear data and close duplicate modal
+  state.pendingImportData.set("");
+  state.detectedDuplicates.set([]);
+  state.importMarkdown.set("");
+  state.showDuplicateModal.set(false);
+
+  // Set all state BEFORE showing modal to avoid default state flicker
+  state.importComplete?.set(false);
+  state.importProgressMessage?.set(`Importing ${importCount} notes...`);
+  // NOW show the modal
+  state.showImportProgressModal?.set(true);
+
+  // Run import synchronously
+  performImport(parsed, state.allCharms, state.notebooks, skipTitles);
+
+  // Mark import as complete
+  state.importProgressMessage?.set(`Imported ${importCount} notes!`);
+  state.importComplete?.set(true);
 });
 
 // Handler to import all notes (including duplicates as copies)
@@ -503,24 +618,32 @@ const importAllAsCopies = handler<
     detectedDuplicates: Cell<DetectedDuplicate[]>;
     importMarkdown: Cell<string>;
     importStatus?: Cell<string>;
+    showImportProgressModal?: Cell<boolean>;
+    importProgressMessage?: Cell<string>;
+    importComplete?: Cell<boolean>;
   }
 >((_, state) => {
   const markdown = state.pendingImportData.get();
   const parsed = parseMarkdownToNotesPlain(markdown);
 
-  performImport(
-    parsed,
-    state.allCharms,
-    state.notebooks,
-    new Set(),
-    undefined,
-    () => {
-      state.pendingImportData.set("");
-      state.detectedDuplicates.set([]);
-      state.showDuplicateModal.set(false);
-      state.importMarkdown.set("");
-    },
-  );
+  // Clear data and close duplicate modal
+  state.pendingImportData.set("");
+  state.detectedDuplicates.set([]);
+  state.importMarkdown.set("");
+  state.showDuplicateModal.set(false);
+
+  // Set all state BEFORE showing modal to avoid default state flicker
+  state.importComplete?.set(false);
+  state.importProgressMessage?.set(`Importing ${parsed.length} notes...`);
+  // NOW show the modal
+  state.showImportProgressModal?.set(true);
+
+  // Run import synchronously
+  performImport(parsed, state.allCharms, state.notebooks, new Set());
+
+  // Mark import as complete
+  state.importProgressMessage?.set(`Imported ${parsed.length} notes!`);
+  state.importComplete?.set(true);
 });
 
 // Handler to cancel import
@@ -535,6 +658,14 @@ const cancelImport = handler<
   state.showDuplicateModal.set(false);
   state.detectedDuplicates.set([]);
   state.pendingImportData.set("");
+});
+
+// Handler to hide paste section when Upload File button is clicked
+const hidePasteSection = handler<
+  Record<string, never>,
+  { showPasteSection: Cell<boolean> }
+>((_, { showPasteSection }) => {
+  showPasteSection.set(false);
 });
 
 // Legacy handler for direct import (no duplicate check)
@@ -552,9 +683,8 @@ const _importNotes = handler<
 
   if (parsed.length === 0) return;
 
-  performImport(parsed, allCharms, notebooks, new Set(), importStatus, () => {
-    importMarkdown.set("");
-  });
+  performImport(parsed, allCharms, notebooks, new Set(), importStatus);
+  importMarkdown.set("");
 });
 
 // Handler to toggle note visibility in default-app listing
@@ -1407,12 +1537,17 @@ const exportSelectedNotebooks = handler<
 
   // Format as markdown with notebook info
   if (allNotes.length > 0) {
-    const markdown = allNotes.map((note) => {
+    const lines = allNotes.map((note) => {
       const escapedTitle = note.title.replace(/"/g, "&quot;");
       return `${NOTE_START_MARKER} title="${escapedTitle}" notebooks="${note.notebookName}" -->\n\n${note.content}\n\n${NOTE_END_MARKER}`;
-    }).join("\n\n");
+    });
 
-    exportNotebooksMarkdown.set(markdown);
+    // Add timestamp header (ignored by import regex which only looks for COMMON_NOTE_START)
+    const timestamp = new Date().toISOString();
+    const header =
+      `<!-- Common Tools Export - ${timestamp} -->\n<!-- Notes: ${allNotes.length}, Notebooks: ${selected.length} -->\n\n`;
+
+    exportNotebooksMarkdown.set(header + lines.join("\n\n"));
   } else {
     exportNotebooksMarkdown.set(
       "<!-- No notes found in selected notebooks -->",
@@ -1633,10 +1768,16 @@ const openImportModal = handler<
 // Handler to close Import modal
 const closeImportModal = handler<
   void,
-  { showImportModal: Cell<boolean>; importMarkdown: Cell<string> }
->((_, { showImportModal, importMarkdown }) => {
+  {
+    showImportModal: Cell<boolean>;
+    importMarkdown: Cell<string>;
+    showPasteSection?: Cell<boolean>;
+  }
+>((_, { showImportModal, importMarkdown, showPasteSection }) => {
   showImportModal.set(false);
   importMarkdown.set("");
+  // Reset paste section visibility for next time modal opens
+  showPasteSection?.set(true);
 });
 
 // Plain function to get notebooks containing a note (with name and reference for navigation)
@@ -1745,6 +1886,13 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
   const showImportModal = Cell.of<boolean>(false);
   const importStatus = Cell.of<string>(""); // Status message during import
 
+  // State for Import progress modal (super modal in front of others)
+  const showImportProgressModal = Cell.of<boolean>(false);
+  const importProgressMessage = Cell.of<string>("Importing notes...");
+  const importComplete = Cell.of<boolean>(false);
+  // State to hide paste section when Upload File button is clicked
+  const showPasteSection = Cell.of<boolean>(true);
+
   // Computed items for ct-select dropdowns (notebooks + "New Notebook...")
   // ct-select has proper bidirectional DOM sync, unlike native <select>
   const notebookAddItems = computed(() => [
@@ -1764,6 +1912,19 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
     { label: "────────────", value: "_divider", disabled: true },
     { label: "New Notebook...", value: "new" },
   ]);
+
+  // Helper to generate export filename with timestamp
+  const getExportFilename = (prefix: string) => {
+    const now = new Date();
+    const timestamp = now.toISOString().slice(0, 19).replace(/[T:]/g, "-");
+    return `${prefix}-${timestamp}.md`;
+  };
+
+  // Computed filenames for exports (re-evaluate each time modal is shown)
+  const notesExportFilename = computed(() => getExportFilename("notes-export"));
+  const notebooksExportFilename = computed(() =>
+    getExportFilename("notebooks-export")
+  );
 
   // Pre-compute all note memberships in ONE central reactive expression
   // This ensures proper dependency tracking when notebooks are added/removed
@@ -2514,6 +2675,9 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                     showDuplicateModal,
                     importMarkdown,
                     importStatus,
+                    showImportProgressModal,
+                    importProgressMessage,
+                    importComplete,
                   })}
                 >
                   Skip Duplicates
@@ -2528,6 +2692,9 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                     detectedDuplicates,
                     importMarkdown,
                     importStatus,
+                    showImportProgressModal,
+                    importProgressMessage,
+                    importComplete,
                   })}
                 >
                   Import as Copies
@@ -2785,7 +2952,7 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                 </ct-button>
                 <ct-file-download
                   $data={exportNotebooksMarkdown}
-                  filename="notebooks-export.md"
+                  filename={notebooksExportFilename}
                   mime-type="text/markdown"
                   variant="secondary"
                   onct-download-success={closeExportNotebooksModal({
@@ -2866,7 +3033,7 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                 </ct-button>
                 <ct-file-download
                   $data={exportedMarkdown}
-                  filename="notes-export.md"
+                  filename={notesExportFilename}
                   mime-type="text/markdown"
                   variant="secondary"
                   onct-download-success={closeExportAllModal({
@@ -2913,62 +3080,208 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                   color: "var(--ct-color-text-secondary, #6e6e73)",
                 }}
               >
-                Paste exported markdown below. Notes are wrapped in{" "}
+                Upload a file or paste exported markdown. Notes are wrapped in
+                {" "}
                 <code style={{ fontSize: "12px" }}>
                   &lt;!-- COMMON_NOTE_START --&gt;
                 </code>{" "}
                 blocks.
               </p>
-              <ct-code-editor
-                $value={importMarkdown}
-                language="text/markdown"
-                theme="light"
-                wordWrap
-                lineNumbers
+              <ct-file-input
+                accept=".md,.txt,.markdown"
+                buttonText="📄 Upload File"
+                variant="outline"
+                showPreview={false}
+                onct-click={hidePasteSection({ showPasteSection })}
+                onct-change={handleImportFileUpload({
+                  importMarkdown,
+                  notes,
+                  allCharms,
+                  notebooks,
+                  showDuplicateModal,
+                  detectedDuplicates,
+                  pendingImportData,
+                  showImportModal,
+                  showImportProgressModal,
+                  importProgressMessage,
+                  importComplete,
+                  showPasteSection,
+                })}
+              />
+              {/* Paste section - hidden when Upload File button is clicked */}
+              <div
                 style={{
-                  minHeight: "200px",
-                  maxHeight: "400px",
-                  overflow: "auto",
+                  display: computed(() =>
+                    showPasteSection.get() ? "block" : "none"
+                  ),
                 }}
-                placeholder={`<!-- COMMON_NOTE_START title="Note Title" -->
+              >
+                <p
+                  style={{
+                    textAlign: "center",
+                    color: "var(--ct-color-text-secondary, #6e6e73)",
+                    margin: "4px 0",
+                    fontSize: "12px",
+                  }}
+                >
+                  — or paste markdown below —
+                </p>
+                <ct-code-editor
+                  $value={importMarkdown}
+                  language="text/markdown"
+                  theme="light"
+                  wordWrap
+                  lineNumbers
+                  style={{
+                    minHeight: "200px",
+                    maxHeight: "400px",
+                    overflow: "auto",
+                  }}
+                  placeholder={`<!-- COMMON_NOTE_START title="Note Title" -->
 
 Note content here with any markdown...
 
 <!-- COMMON_NOTE_END -->`}
-              />
-              <ct-hstack gap="3" style={{ justifyContent: "flex-end" }}>
-                <ct-button
-                  variant="ghost"
-                  onClick={closeImportModal({
-                    showImportModal,
-                    importMarkdown,
-                  })}
-                >
-                  Cancel
-                </ct-button>
-                <ct-button
-                  variant="primary"
-                  onClick={analyzeImport({
-                    importMarkdown,
-                    notes,
-                    allCharms,
-                    notebooks,
-                    showDuplicateModal,
-                    detectedDuplicates,
-                    pendingImportData,
-                    showImportModal,
-                    importStatus,
-                  })}
+                />
+                <ct-hstack gap="3" style={{ justifyContent: "flex-end" }}>
+                  <ct-button
+                    variant="ghost"
+                    onClick={closeImportModal({
+                      showImportModal,
+                      importMarkdown,
+                      showPasteSection,
+                    })}
+                  >
+                    Cancel
+                  </ct-button>
+                  <ct-button
+                    variant="primary"
+                    onClick={analyzeImport({
+                      importMarkdown,
+                      notes,
+                      allCharms,
+                      notebooks,
+                      showDuplicateModal,
+                      detectedDuplicates,
+                      pendingImportData,
+                      showImportModal,
+                      importStatus,
+                      showImportProgressModal,
+                      importProgressMessage,
+                      importComplete,
+                      showPasteSection,
+                    })}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <span style={{ fontSize: "14px" }}>📥</span>
+                    <span>Import</span>
+                  </ct-button>
+                </ct-hstack>
+              </div>
+              {/* Cancel button - always visible even when paste section is hidden */}
+              <ct-button
+                variant="ghost"
+                style={{
+                  display: computed(() =>
+                    showPasteSection.get() ? "none" : "block"
+                  ),
+                  marginTop: "12px",
+                }}
+                onClick={closeImportModal({
+                  showImportModal,
+                  importMarkdown,
+                  showPasteSection,
+                })}
+              >
+                Cancel
+              </ct-button>
+            </ct-vstack>
+          </ct-card>
+        </div>
+
+        {/* Import Progress Modal - super modal in front of all others */}
+        <div
+          style={{
+            display: computed(() =>
+              showImportProgressModal.get() ? "flex" : "none"
+            ),
+            position: "fixed",
+            inset: "0",
+            background: "rgba(0,0,0,0.7)",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: "99999",
+          }}
+        >
+          <ct-card style={{ minWidth: "300px", padding: "32px" }}>
+            <ct-vstack gap="4" style={{ alignItems: "center" }}>
+              <h3 style={{ margin: 0 }}>
+                {computed(() =>
+                  importComplete.get() ? "Done!" : "Importing..."
+                )}
+              </h3>
+              <p
+                style={{
+                  margin: 0,
+                  color: "var(--ct-color-text-secondary, #6e6e73)",
+                  fontSize: "14px",
+                }}
+              >
+                {computed(() => importProgressMessage.get())}
+              </p>
+              {/* Indeterminate progress bar - hide when complete */}
+              <div
+                style={{
+                  width: "100%",
+                  height: "4px",
+                  background: "var(--ct-color-bg-secondary, #e5e5e7)",
+                  borderRadius: "2px",
+                  overflow: "hidden",
+                  position: "relative",
+                  display: computed(() =>
+                    importComplete.get() ? "none" : "block"
+                  ),
+                }}
+              >
+                <div
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    height: "100%",
+                    width: "40%",
+                    background:
+                      "var(--ct-color-primary, var(--ct-color-blue-500, #3b82f6))",
+                    borderRadius: "2px",
+                    animation: "indeterminate 1s infinite linear",
                   }}
-                >
-                  <span style={{ fontSize: "14px" }}>📥</span>
-                  <span>Import</span>
-                </ct-button>
-              </ct-hstack>
+                />
+              </div>
+              {/* Done button - show when complete */}
+              <ct-button
+                variant="default"
+                style={{
+                  display: computed(() =>
+                    importComplete.get() ? "block" : "none"
+                  ),
+                  marginTop: "8px",
+                }}
+                onClick={() => showImportProgressModal.set(false)}
+              >
+                Done
+              </ct-button>
+              <style>
+                {`
+                  @keyframes indeterminate {
+                    0% { transform: translateX(-100%); }
+                    100% { transform: translateX(250%); }
+                  }
+                `}
+              </style>
             </ct-vstack>
           </ct-card>
         </div>
