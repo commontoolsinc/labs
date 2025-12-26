@@ -158,11 +158,15 @@ export class CTCodeEditor extends BaseElement {
   private _themeComp = new Compartment();
   private _cleanupFns: Array<() => void> = [];
   private _mentionableUnsub: (() => void) | null = null;
-  // Track the hash of the last content we sent to the Cell. When a Cell
-  // subscription fires, we compare the incoming value's hash to this.
-  // If they match, this is our own change echoing back - skip the update
-  // to avoid cursor jumping. This approach works correctly with concurrent
-  // edits from other users (unlike a simple boolean flag).
+  // Track hash of editor content for echo detection. When user types, we store
+  // the hash immediately. When Cell subscription fires, we check if the editor
+  // content still matches this hash. If yes, skip the Cell update (whether it's
+  // an old stale value or our echo) to preserve cursor position. This prevents
+  // the race condition where Cell fires with old value before debounce completes.
+  //
+  // Limitation: External updates that arrive during the debounce window (while
+  // editor content matches stored hash) will be skipped. They'll be applied once
+  // the debounce fires and the hash is cleared.
   private _lastEditorContentHash: number | null = null;
   private _cellController = createStringCellController(this, {
     timing: {
@@ -630,29 +634,39 @@ export class CTCodeEditor extends BaseElement {
     const newValue = this.getValue();
     const currentValue = this._editorView.state.doc.toString();
 
+    // DEBUG: Trace the update flow
+    console.log(`[ct-code-editor] _updateEditorFromCellValue: newValue="${newValue.slice(0,20)}", currentValue="${currentValue.slice(0,20)}", hash=${this._lastEditorContentHash}`);
+
     // Early exit if content is identical (common case)
     if (newValue === currentValue) {
+      // Clear hash when editor and Cell are in sync - no pending changes
+      console.log(`[ct-code-editor] Content identical, clearing hash`);
+      this._lastEditorContentHash = null;
       return;
     }
 
-    // Check if this update is our own change echoing back from the Cell.
-    // When user types, we update _lastEditorContentHash immediately, then
-    // the debounced Cell update fires. When the Cell subscription notifies
-    // us, we compare hashes - if they match, this is our own change.
-    const newValueHash = this._hashContent(newValue);
-    if (this._lastEditorContentHash === newValueHash) {
-      // This is our own change coming back - the editor already has this
-      // content (or very similar content with same hash). Skip to avoid
-      // cursor jump. Don't clear the hash here - if user is still typing
-      // the same content, we want to keep skipping echoes. The hash will
-      // be cleared when we apply an external update below, or when cleanup
-      // runs on disconnect.
+    // Echo detection: Compare current editor content against stored hash.
+    // If they match, the user recently typed this content and we're in the
+    // debounce window. Skip ANY Cell updates during this window to preserve
+    // cursor position, whether they're:
+    // - Stale old values (the race condition we're fixing)
+    // - Our own echo (after debounce fires, caught by string equality above)
+    // - External updates (will be applied after debounce clears the hash)
+    const currentValueHash = this._hashContent(currentValue);
+    console.log(`[ct-code-editor] currentValueHash=${currentValueHash}, storedHash=${this._lastEditorContentHash}`);
+
+    if (this._lastEditorContentHash !== null &&
+        this._lastEditorContentHash === currentValueHash) {
+      // Editor content matches what user typed. We're in the debounce window.
+      // Skip this Cell update to preserve cursor. Hash will be cleared when
+      // debounce fires and editor/Cell sync (string equality check above).
+      console.log(`[ct-code-editor] Hash match! Skipping update to preserve cursor`);
       return;
     }
 
-    // This is a genuine external update. Clear any stored hash since we're
-    // now syncing to external state - any future echoes of user's pending
-    // debounced changes should be compared fresh.
+    // Either hash is null (no pending edit) or editor content has changed
+    // (user kept typing). Clear hash and apply the Cell update.
+    console.log(`[ct-code-editor] Applying Cell update, clearing hash`);
     this._lastEditorContentHash = null;
 
     // Sync external update to editor, preserving cursor position.
@@ -909,9 +923,10 @@ export class CTCodeEditor extends BaseElement {
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !this.readonly) {
           const value = update.state.doc.toString();
-          // Store hash of content we're sending to Cell. When the Cell
-          // subscription fires back with this same content, we'll recognize
-          // it as our own change and skip the update to avoid cursor jump.
+          // Store hash of current editor content. When the Cell subscription
+          // fires, we'll check if the editor still has this content. If yes,
+          // we're in the debounce window and should skip Cell updates to
+          // preserve cursor position.
           this._lastEditorContentHash = this._hashContent(value);
           this.setValue(value);
           // Keep $mentioned current as user types
