@@ -233,8 +233,8 @@ export const read = (
       result.ok && address.path.length === 1 && address.path[0] === "source"
     ) {
       const value = result.ok.value;
-      logger.debug("storage", () => [
-        `[SOURCE PATH] Read source path for ${address.id}`,
+      logger.debug("storage-source-read", () => [
+        `Read source path for ${address.id}`,
         `Value type: ${typeof value}`,
         `Value: ${JSON.stringify(value)}`,
       ]);
@@ -248,8 +248,8 @@ export const read = (
             address: result.ok.address,
             value: parsedValue,
           };
-          logger.debug("storage", () => [
-            `[SOURCE PATH] Parsed JSON string to object`,
+          logger.debug("storage-source-parse", () => [
+            `Parsed JSON string to object`,
             `Result: ${JSON.stringify(parsedValue)}`,
           ]);
         } catch (e) {
@@ -322,7 +322,13 @@ export const commit = async (
       const { writer, storage } = ready;
       const replica = writer ? storage.open(writer.did()).replica : null;
       const changes = replica ? archive.get(replica.did()) : null;
-      const promise = (changes && changes.facts.length > 0)
+      const hasWrites = changes && changes.facts.length > 0;
+      if (hasWrites) {
+        logger.debug("storage-commit-writes", () => [
+          `Committing ${changes.facts.length} writes to replica`,
+        ]);
+      }
+      const promise = hasWrites
         ? replica!.commit(changes, transaction)
         : Promise.resolve({ ok: {} });
 

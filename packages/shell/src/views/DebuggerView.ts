@@ -5,6 +5,7 @@ import type { RuntimeTelemetryMarkerResult } from "@commontools/runner";
 import { isRecord } from "@commontools/utils/types";
 import type { DebuggerController } from "../lib/debugger-controller.ts";
 import "./SchedulerGraphView.ts"; // Register x-scheduler-graph component
+import type { Logger, LoggerBreakdown } from "@commontools/utils/logger";
 
 /**
  * Hierarchical topic definitions for filtering telemetry events.
@@ -600,6 +601,160 @@ export class XDebuggerView extends LitElement {
       font-size: 0.75rem;
       line-height: 1.5;
     }
+
+    /* Loggers pane styles */
+    .loggers-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem;
+      border-bottom: 1px solid #334155;
+      background-color: #1e293b;
+    }
+
+    .loggers-total {
+      margin-left: auto;
+      color: #94a3b8;
+      font-family: monospace;
+      font-size: 0.75rem;
+    }
+
+    .loggers-empty {
+      color: #64748b;
+      font-style: italic;
+      text-align: center;
+      padding: 2rem;
+      font-size: 0.75rem;
+    }
+
+    .loggers-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.125rem;
+      padding: 0.5rem;
+      overflow-y: auto;
+    }
+
+    .logger-item {
+      background-color: #1e293b;
+      border-radius: 0.375rem;
+      border: 1px solid #334155;
+      overflow: hidden;
+    }
+
+    .logger-item.disabled {
+      opacity: 0.5;
+    }
+
+    .logger-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.375rem 0.5rem;
+      cursor: pointer;
+      font-size: 0.75rem;
+    }
+
+    .logger-header:hover {
+      background-color: #334155;
+    }
+
+    .logger-expand {
+      color: #64748b;
+      font-size: 0.625rem;
+      width: 1rem;
+      text-align: center;
+    }
+
+    .logger-name {
+      color: #e2e8f0;
+      font-family: monospace;
+      flex: 1;
+    }
+
+    .logger-count {
+      color: #94a3b8;
+      font-family: monospace;
+    }
+
+    .logger-toggle {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.875rem;
+      padding: 0 0.25rem;
+    }
+
+    .logger-toggle.on {
+      color: #10b981;
+    }
+
+    .logger-toggle.off {
+      color: #64748b;
+    }
+
+    .logger-keys {
+      padding: 0.25rem 0.5rem 0.5rem 1.5rem;
+      border-top: 1px solid #334155;
+      background-color: #0f172a;
+    }
+
+    .logger-key {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.125rem 0;
+      font-size: 0.6875rem;
+      font-family: monospace;
+    }
+
+    .key-name {
+      color: #cbd5e1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+
+    .key-counts {
+      display: flex;
+      gap: 0.5rem;
+      color: #64748b;
+    }
+
+    .count-debug {
+      color: #6b7280;
+    }
+
+    .count-info {
+      color: #10b981;
+    }
+
+    .count-warn {
+      color: #eab308;
+    }
+
+    .count-error {
+      color: #ef4444;
+    }
+
+    .count-total {
+      color: #94a3b8;
+      font-weight: 500;
+    }
+
+    .delta {
+      font-size: 0.625rem;
+      margin-left: 0.25rem;
+    }
+
+    .delta.positive {
+      color: #10b981;
+    }
+
+    .delta.negative {
+      color: #3b82f6;
+    }
   `;
 
   @property({ type: Boolean })
@@ -612,10 +767,21 @@ export class XDebuggerView extends LitElement {
   debuggerController?: DebuggerController;
 
   @state()
-  private _activeTab: "events" | "watch" | "scheduler" = "events";
+  private _activeTab: "events" | "watch" | "scheduler" | "loggers" = "events";
 
   @state()
   private activeSubtopics = new Set<string>();
+
+  // Logger stats tracking
+  @state()
+  private loggerBaseline: Record<string, LoggerBreakdown | number> | null =
+    null;
+
+  @state()
+  private loggerSample: Record<string, LoggerBreakdown | number> | null = null;
+
+  @state()
+  private expandedLoggers = new Set<string>();
 
   @state()
   private openDropdowns = new Set<TopicKey>();
@@ -1152,6 +1318,214 @@ export class XDebuggerView extends LitElement {
     return `#${shortId}`;
   }
 
+  // ============================================================
+  // Logger stats methods
+  // ============================================================
+
+  private getLoggerRegistry(): Record<string, Logger> {
+    const global = globalThis as unknown as {
+      commontools?: { logger?: Record<string, Logger> };
+    };
+    return global.commontools?.logger ?? {};
+  }
+
+  private getLoggerBreakdown(): Record<string, LoggerBreakdown | number> {
+    const global = globalThis as unknown as {
+      commontools?: {
+        getLoggerCountsBreakdown?: () => Record<string, LoggerBreakdown | number>;
+      };
+    };
+    return global.commontools?.getLoggerCountsBreakdown?.() ?? { total: 0 };
+  }
+
+  private getBreakdownTotal(
+    breakdown: Record<string, LoggerBreakdown | number> | null,
+  ): number {
+    if (!breakdown) return 0;
+    const total = breakdown.total;
+    return typeof total === "number" ? total : 0;
+  }
+
+  private sampleLoggerCounts(): void {
+    this.loggerSample = this.getLoggerBreakdown();
+  }
+
+  private resetBaseline(): void {
+    this.loggerBaseline = this.getLoggerBreakdown();
+    this.sampleLoggerCounts();
+  }
+
+  private toggleLogger(name: string): void {
+    const registry = this.getLoggerRegistry();
+    const logger = registry[name];
+    if (logger) {
+      logger.disabled = !logger.disabled;
+      this.requestUpdate();
+    }
+  }
+
+  private toggleExpandLogger(name: string): void {
+    if (this.expandedLoggers.has(name)) {
+      this.expandedLoggers.delete(name);
+    } else {
+      this.expandedLoggers.add(name);
+    }
+    this.requestUpdate();
+  }
+
+  private getDelta(current: number, baseline: number | undefined): number {
+    return current - (baseline ?? 0);
+  }
+
+  private formatDelta(delta: number): string {
+    if (delta === 0) return "0";
+    return delta > 0 ? `+${delta}` : `${delta}`;
+  }
+
+  private renderLoggers(): TemplateResult {
+    const sample = this.loggerSample ?? this.getLoggerBreakdown();
+    const baseline = this.loggerBaseline;
+    const registry = this.getLoggerRegistry();
+    const loggerNames = Object.keys(sample).filter((k) => k !== "total");
+
+    if (loggerNames.length === 0) {
+      return html`
+        <div class="loggers-empty">
+          No loggers registered yet.
+        </div>
+      `;
+    }
+
+    const sampleTotal = this.getBreakdownTotal(sample);
+    const baselineTotal = this.getBreakdownTotal(baseline);
+    const totalDelta = this.getDelta(sampleTotal, baselineTotal);
+
+    return html`
+      <div class="loggers-toolbar">
+        <button
+          type="button"
+          class="action-button"
+          @click="${() => this.resetBaseline()}"
+          title="Reset baseline to current counts"
+        >
+          Reset Baseline
+        </button>
+        <button
+          type="button"
+          class="action-button"
+          @click="${() => this.sampleLoggerCounts()}"
+          title="Sample current counts"
+        >
+          Sample
+        </button>
+        <span class="loggers-total">
+          Total: ${sampleTotal}
+          ${baseline
+            ? html`<span class="delta ${totalDelta > 0
+                  ? "positive"
+                  : totalDelta < 0
+                  ? "negative"
+                  : ""}">(${this.formatDelta(totalDelta)})</span>`
+            : ""}
+        </span>
+      </div>
+      <div class="loggers-list">
+        ${loggerNames.map((name) => {
+          const loggerData = sample[name] as LoggerBreakdown;
+          const baselineData = baseline?.[name] as LoggerBreakdown | undefined;
+          const logger = registry[name];
+          const isExpanded = this.expandedLoggers.has(name);
+          const isDisabled = logger?.disabled ?? false;
+          const delta = this.getDelta(loggerData.total, baselineData?.total);
+
+          return html`
+            <div class="logger-item ${isDisabled ? "disabled" : ""}">
+              <div class="logger-header" @click="${() =>
+                this.toggleExpandLogger(name)}">
+                <span class="logger-expand">${isExpanded ? "▼" : "▶"}</span>
+                <span class="logger-name">${name}</span>
+                <span class="logger-count">
+                  ${loggerData.total}
+                  ${baseline
+                    ? html`<span class="delta ${delta > 0
+                          ? "positive"
+                          : delta < 0
+                          ? "negative"
+                          : ""}">(${this.formatDelta(delta)})</span>`
+                    : ""}
+                </span>
+                <button
+                  type="button"
+                  class="logger-toggle ${isDisabled ? "off" : "on"}"
+                  @click="${(e: Event) => {
+                    e.stopPropagation();
+                    this.toggleLogger(name);
+                  }}"
+                  title="${isDisabled
+                    ? "Logger is disabled - click to enable"
+                    : "Logger is enabled - click to disable"}"
+                >
+                  ${isDisabled ? "○" : "●"}
+                </button>
+              </div>
+              ${isExpanded
+                ? html`
+                    <div class="logger-keys">
+                      ${Object.entries(loggerData)
+                        .filter(([k]) => k !== "total")
+                        .sort((a, b) =>
+                          (b[1] as { total: number }).total -
+                          (a[1] as { total: number }).total
+                        )
+                        .map(([key, counts]) => {
+                          const c = counts as {
+                            debug: number;
+                            info: number;
+                            warn: number;
+                            error: number;
+                            total: number;
+                          };
+                          const baselineCounts = baselineData?.[key] as
+                            | typeof c
+                            | undefined;
+                          const keyDelta = this.getDelta(
+                            c.total,
+                            baselineCounts?.total,
+                          );
+                          return html`
+                            <div class="logger-key">
+                              <span class="key-name">${key}</span>
+                              <span class="key-counts">
+                                <span class="count-debug" title="debug">${c.debug}</span>
+                                <span class="count-info" title="info">${c.info}</span>
+                                <span class="count-warn" title="warn">${c.warn}</span>
+                                <span class="count-error" title="error">${c.error}</span>
+                                <span class="count-total">
+                                  = ${c.total}
+                                  ${baseline
+                                    ? html`<span class="delta ${keyDelta > 0
+                                          ? "positive"
+                                          : keyDelta < 0
+                                          ? "negative"
+                                          : ""}">(${this.formatDelta(
+                                          keyDelta,
+                                        )})</span>`
+                                    : ""}
+                                </span>
+                              </span>
+                            </div>
+                          `;
+                        })}
+                    </div>
+                  `
+                : ""}
+            </div>
+          `;
+        })}
+      </div>
+    `;
+  }
+
   private renderTabs() {
     return html`
       <div class="tabs-container">
@@ -1179,6 +1553,17 @@ export class XDebuggerView extends LitElement {
           }}"
         >
           Scheduler
+        </button>
+        <button
+          type="button"
+          class="tab-button ${this._activeTab === "loggers" ? "active" : ""}"
+          @click="${() => {
+            this._activeTab = "loggers";
+            // Sample current counts when tab is opened
+            this.sampleLoggerCounts();
+          }}"
+        >
+          Loggers
         </button>
       </div>
     `;
@@ -1356,6 +1741,14 @@ export class XDebuggerView extends LitElement {
                   .debuggerController="${this.debuggerController}"
                   style="flex: 1; min-height: 0;"
                 ></x-scheduler-graph>
+              `
+              : this._activeTab === "loggers"
+              ? html`
+                <div class="content-area ${this.resizeController.isResizing
+                  ? "resizing"
+                  : ""}">
+                  ${this.renderLoggers()}
+                </div>
               `
               : this._activeTab === "events"
               ? html`
