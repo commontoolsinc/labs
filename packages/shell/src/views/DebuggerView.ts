@@ -1462,10 +1462,10 @@ export class XDebuggerView extends LitElement {
                     this.toggleLogger(name);
                   }}"
                   title="${isDisabled
-                    ? "Logger is disabled - click to enable"
-                    : "Logger is enabled - click to disable"}"
+                    ? "Console output muted - click to unmute"
+                    : "Console output active - click to mute"}"
                 >
-                  ${isDisabled ? "○" : "●"}
+                  ${isDisabled ? "🔇" : "🔊"}
                 </button>
               </div>
               ${isExpanded
