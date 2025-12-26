@@ -1353,7 +1353,10 @@ export class XDebuggerView extends LitElement {
   private getLoggerBreakdown(): Record<string, LoggerBreakdown | number> {
     const global = globalThis as unknown as {
       commontools?: {
-        getLoggerCountsBreakdown?: () => Record<string, LoggerBreakdown | number>;
+        getLoggerCountsBreakdown?: () => Record<
+          string,
+          LoggerBreakdown | number
+        >;
       };
     };
     return global.commontools?.getLoggerCountsBreakdown?.() ?? { total: 0 };
@@ -1452,13 +1455,14 @@ export class XDebuggerView extends LitElement {
           Sample
         </button>
         <span class="loggers-total">
-          Total: ${sampleTotal}
-          ${baseline
-            ? html`<span class="delta ${totalDelta > 0
-                  ? "positive"
-                  : totalDelta < 0
-                  ? "negative"
-                  : ""}">(${this.formatDelta(totalDelta)})</span>`
+          Total: ${sampleTotal} ${baseline
+            ? html`
+              <span class="delta ${totalDelta > 0
+                ? "positive"
+                : totalDelta < 0
+                ? "negative"
+                : ""}">(${this.formatDelta(totalDelta)})</span>
+            `
             : ""}
         </span>
       </div>
@@ -1479,13 +1483,14 @@ export class XDebuggerView extends LitElement {
                 <span class="logger-expand">${isExpanded ? "▼" : "▶"}</span>
                 <span class="logger-name">${name}</span>
                 <span class="logger-count">
-                  ${loggerData.total}
-                  ${baseline
-                    ? html`<span class="delta ${delta > 0
-                          ? "positive"
-                          : delta < 0
-                          ? "negative"
-                          : ""}">(${this.formatDelta(delta)})</span>`
+                  ${loggerData.total} ${baseline
+                    ? html`
+                      <span class="delta ${delta > 0
+                        ? "positive"
+                        : delta < 0
+                        ? "negative"
+                        : ""}">(${this.formatDelta(delta)})</span>
+                    `
                     : ""}
                 </span>
                 <span class="logger-controls" @click="${(e: Event) =>
@@ -1525,54 +1530,59 @@ export class XDebuggerView extends LitElement {
               </div>
               ${isExpanded
                 ? html`
-                    <div class="logger-keys">
-                      ${Object.entries(loggerData)
-                        .filter(([k]) => k !== "total")
-                        .sort((a, b) =>
-                          (b[1] as { total: number }).total -
-                          (a[1] as { total: number }).total
-                        )
-                        .map(([key, counts]) => {
-                          const c = counts as {
-                            debug: number;
-                            info: number;
-                            warn: number;
-                            error: number;
-                            total: number;
-                          };
-                          const baselineCounts = baselineData?.[key] as
-                            | typeof c
-                            | undefined;
-                          const keyDelta = this.getDelta(
-                            c.total,
-                            baselineCounts?.total,
-                          );
-                          return html`
-                            <div class="logger-key">
-                              <span class="key-name">${key}</span>
-                              <span class="key-counts">
-                                <span class="count-debug" title="debug">${c.debug}</span>
-                                <span class="count-info" title="info">${c.info}</span>
-                                <span class="count-warn" title="warn">${c.warn}</span>
-                                <span class="count-error" title="error">${c.error}</span>
-                                <span class="count-total">
-                                  = ${c.total}
-                                  ${baseline
-                                    ? html`<span class="delta ${keyDelta > 0
-                                          ? "positive"
-                                          : keyDelta < 0
-                                          ? "negative"
-                                          : ""}">(${this.formatDelta(
-                                          keyDelta,
-                                        )})</span>`
-                                    : ""}
-                                </span>
+                  <div class="logger-keys">
+                    ${Object.entries(loggerData)
+                      .filter(([k]) => k !== "total")
+                      .sort((a, b) =>
+                        (b[1] as { total: number }).total -
+                        (a[1] as { total: number }).total
+                      )
+                      .map(([key, counts]) => {
+                        const c = counts as {
+                          debug: number;
+                          info: number;
+                          warn: number;
+                          error: number;
+                          total: number;
+                        };
+                        const baselineCounts = baselineData?.[key] as
+                          | typeof c
+                          | undefined;
+                        const keyDelta = this.getDelta(
+                          c.total,
+                          baselineCounts?.total,
+                        );
+                        return html`
+                          <div class="logger-key">
+                            <span class="key-name">${key}</span>
+                            <span class="key-counts">
+                              <span class="count-debug" title="debug">${c
+                                .debug}</span>
+                              <span class="count-info" title="info">${c
+                                .info}</span>
+                              <span class="count-warn" title="warn">${c
+                                .warn}</span>
+                              <span class="count-error" title="error">${c
+                                .error}</span>
+                              <span class="count-total">
+                                = ${c.total} ${baseline
+                                  ? html`
+                                    <span class="delta ${keyDelta > 0
+                                      ? "positive"
+                                      : keyDelta < 0
+                                      ? "negative"
+                                      : ""}">(${this.formatDelta(
+                                        keyDelta,
+                                      )})</span>
+                                  `
+                                  : ""}
                               </span>
-                            </div>
-                          `;
-                        })}
-                    </div>
-                  `
+                            </span>
+                          </div>
+                        `;
+                      })}
+                  </div>
+                `
                 : ""}
             </div>
           `;

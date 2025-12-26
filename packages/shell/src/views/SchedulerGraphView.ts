@@ -1831,73 +1831,73 @@ export class XSchedulerGraph extends LitElement {
 
           ${node.stats
             ? html`
-                <div class="detail-section">
-                  <div class="detail-section-title">Stats</div>
-                  <div class="detail-stats">
-                    <div class="detail-stat">
-                      <div class="detail-stat-label">Runs</div>
-                      <div class="detail-stat-value">${node.stats.runCount}</div>
+              <div class="detail-section">
+                <div class="detail-section-title">Stats</div>
+                <div class="detail-stats">
+                  <div class="detail-stat">
+                    <div class="detail-stat-label">Runs</div>
+                    <div class="detail-stat-value">${node.stats.runCount}</div>
+                  </div>
+                  <div class="detail-stat">
+                    <div class="detail-stat-label">Total</div>
+                    <div class="detail-stat-value">
+                      ${formatTime(node.stats.totalTime)}
                     </div>
-                    <div class="detail-stat">
-                      <div class="detail-stat-label">Total</div>
-                      <div class="detail-stat-value">
-                        ${formatTime(node.stats.totalTime)}
-                      </div>
+                  </div>
+                  <div class="detail-stat">
+                    <div class="detail-stat-label">Average</div>
+                    <div class="detail-stat-value">
+                      ${formatTime(node.stats.averageTime)}
                     </div>
-                    <div class="detail-stat">
-                      <div class="detail-stat-label">Average</div>
-                      <div class="detail-stat-value">
-                        ${formatTime(node.stats.averageTime)}
-                      </div>
-                    </div>
-                    <div class="detail-stat">
-                      <div class="detail-stat-label">Last</div>
-                      <div class="detail-stat-value">
-                        ${formatTime(node.stats.lastRunTime)}
-                      </div>
+                  </div>
+                  <div class="detail-stat">
+                    <div class="detail-stat-label">Last</div>
+                    <div class="detail-stat-value">
+                      ${formatTime(node.stats.lastRunTime)}
                     </div>
                   </div>
                 </div>
-              `
-            : ""}
-
-          ${node.preview
+              </div>
+            `
+            : ""} ${node.preview
             ? html`
-                <div class="detail-section">
-                  <div class="detail-section-title">Code Preview</div>
-                  <div class="detail-preview">${node.preview}</div>
-                </div>
-              `
-            : ""}
-
-          ${node.reads && node.reads.length > 0
+              <div class="detail-section">
+                <div class="detail-section-title">Code Preview</div>
+                <div class="detail-preview">${node.preview}</div>
+              </div>
+            `
+            : ""} ${node.reads && node.reads.length > 0
             ? html`
-                <div class="detail-section">
-                  <div class="detail-section-title">
-                    Reads (${node.reads.length})
-                  </div>
-                  <div class="detail-cell-list">
-                    ${node.reads.map(
-                      (r) => html`<div class="detail-cell">${r}</div>`,
-                    )}
-                  </div>
+              <div class="detail-section">
+                <div class="detail-section-title">
+                  Reads (${node.reads.length})
                 </div>
-              `
-            : ""}
-
-          ${node.writes && node.writes.length > 0
+                <div class="detail-cell-list">
+                  ${node.reads.map(
+                    (r) =>
+                      html`
+                        <div class="detail-cell">${r}</div>
+                      `,
+                  )}
+                </div>
+              </div>
+            `
+            : ""} ${node.writes && node.writes.length > 0
             ? html`
-                <div class="detail-section">
-                  <div class="detail-section-title">
-                    Writes (${node.writes.length})
-                  </div>
-                  <div class="detail-cell-list">
-                    ${node.writes.map(
-                      (w) => html`<div class="detail-cell">${w}</div>`,
-                    )}
-                  </div>
+              <div class="detail-section">
+                <div class="detail-section-title">
+                  Writes (${node.writes.length})
                 </div>
-              `
+                <div class="detail-cell-list">
+                  ${node.writes.map(
+                    (w) =>
+                      html`
+                        <div class="detail-cell">${w}</div>
+                      `,
+                  )}
+                </div>
+              </div>
+            `
             : ""}
         </div>
       `;
@@ -1940,21 +1940,26 @@ export class XSchedulerGraph extends LitElement {
             <div class="detail-cell-list">
               ${this.selectedEdge.cells.length > 0
                 ? this.selectedEdge.cells.map(
-                    (c) => html`<div class="detail-cell">${c}</div>`,
-                  )
-                : html`<div class="detail-cell">(no cells tracked)</div>`}
+                  (c) =>
+                    html`
+                      <div class="detail-cell">${c}</div>
+                    `,
+                )
+                : html`
+                  <div class="detail-cell">(no cells tracked)</div>
+                `}
             </div>
           </div>
 
           ${this.selectedEdge.isHistorical
             ? html`
-                <div
-                  class="detail-section"
-                  style="color: #f59e0b; font-style: italic;"
-                >
-                  This edge is historical (no longer active)
-                </div>
-              `
+              <div
+                class="detail-section"
+                style="color: #f59e0b; font-style: italic;"
+              >
+                This edge is historical (no longer active)
+              </div>
+            `
             : ""}
         </div>
       `;
@@ -1992,21 +1997,20 @@ export class XSchedulerGraph extends LitElement {
 
   override render(): TemplateResult {
     return html`
-      ${this.renderToolbar()}
-      ${this.viewMode === "graph"
+      ${this.renderToolbar()} ${this.viewMode === "graph"
         ? html`
-            <div class="graph-wrapper">
-              <div
-                class="graph-container"
-                @click="${this.handleContainerClick}"
-                @wheel="${this.handleWheel}"
-              >
-                ${this.renderGraph()} ${this.renderTooltip()}
-                ${this.renderLegend()}
-              </div>
-              ${this.renderDetailPane()}
+          <div class="graph-wrapper">
+            <div
+              class="graph-container"
+              @click="${this.handleContainerClick}"
+              @wheel="${this.handleWheel}"
+            >
+              ${this.renderGraph()} ${this.renderTooltip()} ${this
+                .renderLegend()}
             </div>
-          `
+            ${this.renderDetailPane()}
+          </div>
+        `
         : this.renderTable()}
     `;
   }
@@ -2105,7 +2109,9 @@ export class XSchedulerGraph extends LitElement {
     const sortIndicator = (col: typeof this.tableSortColumn) => {
       const isSorted = this.tableSortColumn === col;
       const arrow = this.tableSortAscending ? "▲" : "▼";
-      return html`<span class="sort-indicator">${isSorted ? arrow : ""}</span>`;
+      return html`
+        <span class="sort-indicator">${isSorted ? arrow : ""}</span>
+      `;
     };
 
     const handleSort = (col: typeof this.tableSortColumn) => {
@@ -2159,8 +2165,11 @@ export class XSchedulerGraph extends LitElement {
             <span class="type-badge ${n.type}">${n.type}</span>
           </td>
           <td class="col-name">
-            ${isChild ? html`<span class="child-indent">└─</span>` : ""}
-            ${n.label}
+            ${isChild
+              ? html`
+                <span class="child-indent">└─</span>
+              `
+              : ""} ${n.label}
           </td>
           <td class="col-number">${n.runCount}</td>
           <td class="col-number">${formatTime(n.totalTime)}</td>
@@ -2187,28 +2196,34 @@ export class XSchedulerGraph extends LitElement {
           </td>
           <td class="col-name">
             ${n.isParent
-              ? html`<button
+              ? html`
+                <button
                   class="expand-toggle"
                   @click="${(e: Event) => toggleExpand(n.id, e)}"
                 >
                   ${isExpanded ? "▼" : "▶"}
-                </button>`
-              : ""}
-            ${n.label}
-            ${n.isParent
-              ? html`<span class="child-count">(${n.children.length})</span>`
+                </button>
+              `
+              : ""} ${n.label} ${n.isParent
+              ? html`
+                <span class="child-count">(${n.children.length})</span>
+              `
               : ""}
           </td>
           <td class="col-number">
             ${n.isParent && !isExpanded
-              ? html`<span class="aggregated">${n.aggregatedRunCount}</span>`
+              ? html`
+                <span class="aggregated">${n.aggregatedRunCount}</span>
+              `
               : n.runCount}
           </td>
           <td class="col-number">
             ${n.isParent && !isExpanded
-              ? html`<span class="aggregated"
-                  >${formatTime(n.aggregatedTotalTime)}</span
-                >`
+              ? html`
+                <span class="aggregated">${formatTime(
+                  n.aggregatedTotalTime,
+                )}</span>
+              `
               : formatTime(n.totalTime)}
           </td>
           <td class="col-number">${formatTime(n.avgTime)}</td>
