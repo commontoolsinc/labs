@@ -693,6 +693,27 @@ export class XDebuggerView extends LitElement {
       color: #64748b;
     }
 
+    .logger-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+      margin-left: auto;
+    }
+
+    .logger-level {
+      background-color: #1e293b;
+      color: #94a3b8;
+      border: 1px solid #334155;
+      border-radius: 3px;
+      font-size: 0.625rem;
+      padding: 0.125rem 0.25rem;
+      cursor: pointer;
+    }
+
+    .logger-level:hover {
+      border-color: #475569;
+    }
+
     .logger-keys {
       padding: 0.25rem 0.5rem 0.5rem 1.5rem;
       border-top: 1px solid #334155;
@@ -1364,6 +1385,18 @@ export class XDebuggerView extends LitElement {
     }
   }
 
+  private setLoggerLevel(
+    name: string,
+    level: "debug" | "info" | "warn" | "error",
+  ): void {
+    const registry = this.getLoggerRegistry();
+    const logger = registry[name];
+    if (logger) {
+      logger.level = level;
+      this.requestUpdate();
+    }
+  }
+
   private toggleExpandLogger(name: string): void {
     if (this.expandedLoggers.has(name)) {
       this.expandedLoggers.delete(name);
@@ -1436,6 +1469,7 @@ export class XDebuggerView extends LitElement {
           const logger = registry[name];
           const isExpanded = this.expandedLoggers.has(name);
           const isDisabled = logger?.disabled ?? false;
+          const currentLevel = logger?.level ?? "info";
           const delta = this.getDelta(loggerData.total, baselineData?.total);
 
           return html`
@@ -1454,19 +1488,40 @@ export class XDebuggerView extends LitElement {
                           : ""}">(${this.formatDelta(delta)})</span>`
                     : ""}
                 </span>
-                <button
-                  type="button"
-                  class="logger-toggle ${isDisabled ? "off" : "on"}"
-                  @click="${(e: Event) => {
-                    e.stopPropagation();
-                    this.toggleLogger(name);
-                  }}"
-                  title="${isDisabled
-                    ? "Console output muted - click to unmute"
-                    : "Console output active - click to mute"}"
-                >
-                  ${isDisabled ? "🔇" : "🔊"}
-                </button>
+                <span class="logger-controls" @click="${(e: Event) =>
+                  e.stopPropagation()}">
+                  <select
+                    class="logger-level"
+                    .value="${currentLevel}"
+                    @change="${(e: Event) => {
+                      const select = e.target as HTMLSelectElement;
+                      this.setLoggerLevel(
+                        name,
+                        select.value as "debug" | "info" | "warn" | "error",
+                      );
+                    }}"
+                    title="Minimum log level for console output"
+                  >
+                    <option value="debug" ?selected="${currentLevel ===
+                      "debug"}">debug</option>
+                    <option value="info" ?selected="${currentLevel ===
+                      "info"}">info</option>
+                    <option value="warn" ?selected="${currentLevel ===
+                      "warn"}">warn</option>
+                    <option value="error" ?selected="${currentLevel ===
+                      "error"}">error</option>
+                  </select>
+                  <button
+                    type="button"
+                    class="logger-toggle ${isDisabled ? "off" : "on"}"
+                    @click="${() => this.toggleLogger(name)}"
+                    title="${isDisabled
+                      ? "Logger disabled - click to enable"
+                      : "Logger enabled - click to disable"}"
+                  >
+                    ${isDisabled ? "○" : "●"}
+                  </button>
+                </span>
               </div>
               ${isExpanded
                 ? html`
