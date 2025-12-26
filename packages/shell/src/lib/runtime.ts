@@ -90,19 +90,19 @@ export class RuntimeInternals extends EventTarget {
       this.#isHomeSpace ? "home" : "space-root",
     );
     this.#spaceRootPatternId = pattern.id;
-    await this.#patternCache.add(pattern);
+    this.#patternCache.add(pattern);
     return pattern;
   }
 
   async getPattern(id: string): Promise<CharmController<NameSchema>> {
     this.#check();
-    const cached = await this.#patternCache.get(id);
+    const cached = this.#patternCache.get(id);
     if (cached) {
       return cached;
     }
 
     const pattern = await this.#cc.get(id, true, nameSchema);
-    await this.#patternCache.add(pattern);
+    this.#patternCache.add(pattern);
     return pattern;
   }
 
@@ -240,10 +240,14 @@ export class RuntimeInternals extends EventTarget {
           }
         };
 
-        // Await storage being synced, at least for now, as the page fully
-        // reloads. Once we have in-page navigation with reloading, we don't
-        // need this anymore
-        runtime.storageManager.synced().then(async () => {
+        // For same-space navigation, skip waiting for storage sync.
+        // Storage syncs in background - we don't need to block navigation.
+        // Cross-space navigation requires sync because page will reload.
+        const syncPromise = isCrossSpace
+          ? runtime.storageManager.synced()
+          : Promise.resolve();
+
+        syncPromise.then(() => {
           // Only add to local charm list for same-space navigation
           // Cross-space charms belong to their own space's list
           if (!isCrossSpace) {
@@ -261,8 +265,10 @@ export class RuntimeInternals extends EventTarget {
               // happening as part of the runtime built-in function, not up in
               // the shell layer...
 
-              // Add target charm to the charm list
-              await charmManager.add([target]);
+              // Add target charm to the charm list (fire-and-forget)
+              charmManager.add([target]).catch((err) => {
+                console.error("[navigateCallback] Failed to add charm:", err);
+              });
             }
           }
 
@@ -309,15 +315,22 @@ class PatternCache {
     this.cc = cc;
   }
 
-  async add(pattern: CharmController<NameSchema>) {
+  add(pattern: CharmController<NameSchema>) {
     this.cache.set(pattern.id, pattern);
-    await this.cc.manager().trackRecentCharm(pattern.getCell());
+    // Fire-and-forget: trackRecentCharm updates the recent charms list
+    // but is not critical for navigation - let it run in background
+    this.cc.manager().trackRecentCharm(pattern.getCell()).catch((err) => {
+      console.error("[PatternCache] Failed to track recent charm:", err);
+    });
   }
 
-  async get(id: string): Promise<CharmController<NameSchema> | undefined> {
+  get(id: string): CharmController<NameSchema> | undefined {
     const cached = this.cache.get(id);
     if (cached) {
-      await this.cc.manager().trackRecentCharm(cached.getCell());
+      // Fire-and-forget: trackRecentCharm is not critical for navigation
+      this.cc.manager().trackRecentCharm(cached.getCell()).catch((err) => {
+        console.error("[PatternCache] Failed to track recent charm:", err);
+      });
       return cached;
     }
   }
