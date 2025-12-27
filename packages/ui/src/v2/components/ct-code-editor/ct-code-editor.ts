@@ -170,6 +170,7 @@ export class CTCodeEditor extends BaseElement {
   // and skips setValue for Cell-originated changes, preventing the
   // feedback loop: Cell → Editor → updateListener → setValue → Cell...
   private static _cellSyncAnnotation = Annotation.define<boolean>();
+  private _lastTypingTimestamp: number = 0;
   private _cellController = createStringCellController(this, {
     timing: {
       strategy: "debounce",
@@ -619,6 +620,14 @@ export class CTCodeEditor extends BaseElement {
   private _updateEditorFromCellValue(): void {
     if (!this._editorView) return;
 
+    // Defer external updates during active typing to preserve cursor position.
+    // The debounce window is 500ms (from CellController).
+    const DEBOUNCE_WINDOW = 500;
+    const timeSinceTyping = Date.now() - this._lastTypingTimestamp;
+    if (timeSinceTyping < DEBOUNCE_WINDOW) {
+      return; // Let the debounced Cell update handle it instead
+    }
+
     const newValue = this.getValue();
     const currentValue = this._editorView.state.doc.toString();
 
@@ -714,6 +723,8 @@ export class CTCodeEditor extends BaseElement {
 
     // If the value property itself changed (e.g., switched to a different cell)
     if (changedProperties.has("value")) {
+      // Cancel pending debounced updates from old Cell to prevent race condition
+      this._cellController.cancel();
       this._cellController.bind(this.value);
       this._updateEditorFromCellValue();
     }
@@ -890,6 +901,10 @@ export class CTCodeEditor extends BaseElement {
           (tr) => tr.annotation(CTCodeEditor._cellSyncAnnotation),
         );
         if (update.docChanged && !this.readonly && !isCellSync) {
+          // Track typing timestamp for any non-Cell-originated change.
+          // This includes actual user typing, Playwright simulated input, and
+          // test helpers. The important distinction is Cell-originated vs not.
+          this._lastTypingTimestamp = Date.now();
           const value = update.state.doc.toString();
           this.setValue(value);
           // Keep $mentioned current as user types
@@ -905,6 +920,7 @@ export class CTCodeEditor extends BaseElement {
         },
         blur: () => {
           this._cellController.onBlur();
+          this._lastTypingTimestamp = 0; // Reset typing state when leaving editor
           this.emit("ct-blur");
           return false;
         },

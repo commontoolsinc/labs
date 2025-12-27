@@ -865,13 +865,17 @@ async function clearEditor(page: Page): Promise<void> {
       const ctEditor = findCtCodeEditor(document);
       if (ctEditor && ctEditor._editorView) {
         const view = ctEditor._editorView;
-        // Clear editor content. We use select-all + delete to trigger the
-        // updateListener naturally, which will call setValue with empty string.
-        // This is simpler than accessing private annotations.
+        // Clear editor content using the Cell sync annotation to prevent
+        // triggering the typing timestamp. This allows subsequent external
+        // Cell updates to apply immediately without being deferred.
+        const annotation = ctEditor.constructor._cellSyncAnnotation;
         view.dispatch({
           changes: { from: 0, to: view.state.doc.length, insert: "" },
-          selection: { anchor: 0, head: 0 }
+          selection: { anchor: 0, head: 0 },
+          annotations: annotation ? annotation.of(true) : undefined
         });
+        // Also reset the typing timestamp directly for safety
+        ctEditor._lastTypingTimestamp = 0;
       }
     })()
   `);
