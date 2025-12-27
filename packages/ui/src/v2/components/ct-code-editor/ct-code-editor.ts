@@ -662,6 +662,8 @@ export class CTCodeEditor extends BaseElement {
     this._updateMentionedFromContent();
   }
 
+  private _cellSyncUnsub: (() => void) | null = null;
+
   private _setupCellSyncHandler(): void {
     // Create a custom Cell sync handler that integrates with the CellController
     // but provides the special CodeMirror synchronization logic
@@ -674,7 +676,7 @@ export class CTCodeEditor extends BaseElement {
     if (this._cellController.isCell()) {
       const cell = this._cellController.getCell();
       if (cell) {
-        const unsubscribe = cell.sink(() => {
+        this._cellSyncUnsub = cell.sink(() => {
           // First update the editor content
           this._updateEditorFromCellValue();
           // Then trigger component update if originally enabled
@@ -682,8 +684,14 @@ export class CTCodeEditor extends BaseElement {
             this.requestUpdate();
           }
         });
-        this._cleanupFns.push(unsubscribe);
       }
+    }
+  }
+
+  private _cleanupCellSyncHandler(): void {
+    if (this._cellSyncUnsub) {
+      this._cellSyncUnsub();
+      this._cellSyncUnsub = null;
     }
   }
 
@@ -706,6 +714,7 @@ export class CTCodeEditor extends BaseElement {
   }
 
   private _cleanup(): void {
+    this._cleanupCellSyncHandler();
     if (this._mentionableUnsub) {
       this._mentionableUnsub();
       this._mentionableUnsub = null;
@@ -725,7 +734,12 @@ export class CTCodeEditor extends BaseElement {
     if (changedProperties.has("value")) {
       // Cancel pending debounced updates from old Cell to prevent race condition
       this._cellController.cancel();
+      // Reset typing timestamp so new Cell's content syncs immediately
+      this._lastTypingTimestamp = 0;
+      // Clean up old Cell subscription and set up new one
+      this._cleanupCellSyncHandler();
       this._cellController.bind(this.value);
+      this._setupCellSyncHandler();
       this._updateEditorFromCellValue();
     }
 
