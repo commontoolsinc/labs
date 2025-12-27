@@ -865,19 +865,13 @@ async function clearEditor(page: Page): Promise<void> {
       const ctEditor = findCtCodeEditor(document);
       if (ctEditor && ctEditor._editorView) {
         const view = ctEditor._editorView;
-        // Set guard flag to prevent updateListener from triggering setValue
-        ctEditor._updatingFromCell = true;
-        try {
-          view.dispatch({
-            changes: { from: 0, to: view.state.doc.length, insert: "" },
-            // Also reset cursor to position 0 for clean state
-            selection: { anchor: 0, head: 0 }
-          });
-        } finally {
-          ctEditor._updatingFromCell = false;
-        }
-        // Clear the hash to allow external updates to apply
-        ctEditor._lastEditorContentHash = null;
+        // Clear editor content. We use select-all + delete to trigger the
+        // updateListener naturally, which will call setValue with empty string.
+        // This is simpler than accessing private annotations.
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: "" },
+          selection: { anchor: 0, head: 0 }
+        });
       }
     })()
   `);

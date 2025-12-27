@@ -4,7 +4,12 @@ import { styles } from "./styles.ts";
 import { basicSetup } from "codemirror";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { indentWithTab } from "@codemirror/commands";
-import { Compartment, EditorState, Extension } from "@codemirror/state";
+import {
+  Annotation,
+  Compartment,
+  EditorState,
+  Extension,
+} from "@codemirror/state";
 import { indentUnit, LanguageSupport } from "@codemirror/language";
 import { javascript as createJavaScript } from "@codemirror/lang-javascript";
 import { markdown as createMarkdown } from "@codemirror/lang-markdown";
@@ -158,21 +163,13 @@ export class CTCodeEditor extends BaseElement {
   private _themeComp = new Compartment();
   private _cleanupFns: Array<() => void> = [];
   private _mentionableUnsub: (() => void) | null = null;
-  // Track hash of editor content for echo detection. When user types, we store
-  // the hash immediately. When Cell subscription fires, we check if the editor
-  // content still matches this hash. If yes, skip the Cell update (whether it's
-  // an old stale value or our echo) to preserve cursor position. This prevents
-  // the race condition where Cell fires with old value before debounce completes.
-  //
-  // Limitation: External updates that arrive during the debounce window (while
-  // editor content matches stored hash) will be skipped. They'll be applied once
-  // the debounce fires and the hash is cleared.
-  private _lastEditorContentHash: number | null = null;
-  // Guard flag to prevent updateListener from triggering setValue when we're
-  // applying a Cell update to the editor. Without this, dispatching changes
-  // to the editor triggers the updateListener, which calls setValue, creating
-  // a feedback loop: Cell → Editor → setValue → Cell → Editor...
-  private _updatingFromCell = false;
+
+  // Transaction annotation to mark Cell-originated updates.
+  // This is the idiomatic CodeMirror 6 way to distinguish programmatic
+  // changes from user input. The updateListener checks this annotation
+  // and skips setValue for Cell-originated changes, preventing the
+  // feedback loop: Cell → Editor → updateListener → setValue → Cell...
+  private static _cellSyncAnnotation = Annotation.define<boolean>();
   private _cellController = createStringCellController(this, {
     timing: {
       strategy: "debounce",
@@ -610,20 +607,6 @@ export class CTCodeEditor extends BaseElement {
     this._cellController.setValue(newValue);
   }
 
-  /**
-   * Simple string hash (djb2 variant) for content comparison.
-   * Used to detect when a Cell update is our own change echoing back.
-   */
-  private _hashContent(str: string): number {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash | 0; // Force 32-bit signed integer
-    }
-    return hash;
-  }
-
   override connectedCallback() {
     super.connectedCallback();
   }
@@ -639,58 +622,32 @@ export class CTCodeEditor extends BaseElement {
     const newValue = this.getValue();
     const currentValue = this._editorView.state.doc.toString();
 
-    // Early exit if content is identical (common case)
+    // Skip if content already matches - handles both echoes and stale values.
+    // This is the key check that prevents cursor jumping: if the editor
+    // already has the content the Cell is trying to set, do nothing.
     if (newValue === currentValue) {
-      // Clear hash when editor and Cell are in sync - no pending changes
-      this._lastEditorContentHash = null;
       return;
     }
 
-    // Echo detection: Compare current editor content against stored hash.
-    // If they match, the user recently typed this content and we're in the
-    // debounce window. Skip ANY Cell updates during this window to preserve
-    // cursor position, whether they're:
-    // - Stale old values (the race condition we're fixing)
-    // - Our own echo (after debounce fires, caught by string equality above)
-    // - External updates (will be applied after debounce clears the hash)
-    const currentValueHash = this._hashContent(currentValue);
-
-    if (
-      this._lastEditorContentHash !== null &&
-      this._lastEditorContentHash === currentValueHash
-    ) {
-      // Editor content matches what user typed. We're in the debounce window.
-      // Skip this Cell update to preserve cursor. Hash will be cleared when
-      // debounce fires and editor/Cell sync (string equality check above).
-      return;
-    }
-
-    // Either hash is null (no pending edit) or editor content has changed
-    // (user kept typing). Clear hash and apply the Cell update.
-    this._lastEditorContentHash = null;
-
-    // Sync external update to editor, preserving cursor position.
+    // Apply external update to editor, preserving cursor position.
     // Clamp cursor to new document length in case content is shorter.
     const currentSelection = this._editorView.state.selection.main;
     const newLength = newValue.length;
     const anchorPos = Math.min(currentSelection.anchor, newLength);
     const headPos = Math.min(currentSelection.head, newLength);
 
-    // Set guard flag to prevent updateListener from triggering setValue
-    // when we dispatch this Cell-originated update to the editor.
-    this._updatingFromCell = true;
-    try {
-      this._editorView.dispatch({
-        changes: {
-          from: 0,
-          to: this._editorView.state.doc.length,
-          insert: newValue,
-        },
-        selection: { anchor: anchorPos, head: headPos },
-      });
-    } finally {
-      this._updatingFromCell = false;
-    }
+    // Use transaction annotation to mark this as a Cell-originated change.
+    // The updateListener checks for this annotation and skips setValue,
+    // preventing the feedback loop: Cell → Editor → setValue → Cell...
+    this._editorView.dispatch({
+      changes: {
+        from: 0,
+        to: this._editorView.state.doc.length,
+        insert: newValue,
+      },
+      selection: { anchor: anchorPos, head: headPos },
+      annotations: CTCodeEditor._cellSyncAnnotation.of(true),
+    });
 
     // Ensure mentioned charms reflect external value changes
     this._updateMentionedFromContent();
@@ -746,8 +703,6 @@ export class CTCodeEditor extends BaseElement {
     }
     this._cleanupFns.forEach((fn) => fn());
     this._cleanupFns = [];
-    // Clear hash to prevent stale state on reconnect
-    this._lastEditorContentHash = null;
     if (this._editorView) {
       this._editorView.destroy();
       this._editorView = undefined;
@@ -929,15 +884,13 @@ export class CTCodeEditor extends BaseElement {
       this._themeComp.of(this.theme === "dark" ? oneDark : []),
       EditorView.updateListener.of((update) => {
         // Only process user-initiated changes, not Cell-originated updates.
-        // The _updatingFromCell flag prevents a feedback loop where:
-        // Cell update → dispatch → updateListener → setValue → Cell update...
-        if (update.docChanged && !this.readonly && !this._updatingFromCell) {
+        // Check if any transaction has the Cell sync annotation - if so, skip.
+        // This prevents the feedback loop: Cell → Editor → setValue → Cell...
+        const isCellSync = update.transactions.some(
+          (tr) => tr.annotation(CTCodeEditor._cellSyncAnnotation),
+        );
+        if (update.docChanged && !this.readonly && !isCellSync) {
           const value = update.state.doc.toString();
-          // Store hash of current editor content. When the Cell subscription
-          // fires, we'll check if the editor still has this content. If yes,
-          // we're in the debounce window and should skip Cell updates to
-          // preserve cursor position.
-          this._lastEditorContentHash = this._hashContent(value);
           this.setValue(value);
           // Keep $mentioned current as user types
           this._updateMentionedFromContent();
