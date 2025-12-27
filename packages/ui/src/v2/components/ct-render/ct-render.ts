@@ -18,6 +18,7 @@ const DEBUG_LOGGING = false;
  * - `thumbnail`: Icon/thumbnail view for grid displays. Maps to `thumbnailUI`.
  * - `sidebar`: Optimized layout for sidebar/navigation contexts. Maps to `sidebarUI`.
  * - `fab`: Floating action button UI. Maps to `fabUI`.
+ * - `settings`: Configuration/settings panel (shown in modals). Maps to `settingsUI`.
  * - `embedded`: Minimal UI without chrome for embedding in containers. Maps to `embeddedUI`.
  *              Used when a pattern is rendered as a module inside another pattern (e.g., Note in Record).
  */
@@ -27,6 +28,7 @@ export type UIVariant =
   | "thumbnail"
   | "sidebar"
   | "fab"
+  | "settings"
   | "embedded";
 
 /**
@@ -39,6 +41,7 @@ const VARIANT_TO_KEY: Record<UIVariant, string | null> = {
   thumbnail: "thumbnailUI",
   sidebar: "sidebarUI",
   fab: "fabUI",
+  settings: "settingsUI",
   embedded: "embeddedUI",
 };
 
