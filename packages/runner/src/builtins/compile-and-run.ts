@@ -1,3 +1,48 @@
+/**
+ * compileAndRun builtin - Compile TypeScript patterns and run them dynamically.
+ *
+ * ## Compilation Caching
+ *
+ * This module maintains an in-memory LRU cache of compiled recipes to avoid
+ * redundant TypeScript compilation. Key features:
+ *
+ * - **Cache key**: Content hash of program files (via merkle-reference)
+ * - **LRU eviction**: Max 1000 entries to bound memory on long-running servers
+ * - **Single-flight**: Concurrent requests for the same code share one compilation
+ * - **No negative caching**: Failed compilations are not cached (allows retry)
+ *
+ * ## Performance Characteristics
+ *
+ * - First compilation: 100-300ms (full TypeScript compilation)
+ * - Cache hit: <1ms (instant return)
+ * - Single-flight hit: Same as first compilation (waits on shared promise)
+ *
+ * ## Monitoring
+ *
+ * Use `getCompilationStats()` to monitor cache effectiveness. These functions
+ * are exported from the builtins index for debugging purposes:
+ * ```ts
+ * // Internal debugging only - not part of public API
+ * import { getCompilationStats } from "./builtins/index.ts";
+ * console.log(getCompilationStats());
+ * // { cacheHits: 42, singleFlightHits: 3, cacheMisses: 5, cacheEvictions: 0, cacheSize: 5, hitRate: "90.0%" }
+ * ```
+ *
+ * ## Usage with fetchProgram
+ *
+ * This builtin is typically used with `fetchProgram` for lazy-loading patterns:
+ * ```ts
+ * const { result: program } = fetchProgram({ url: "./my-pattern.tsx" });
+ * const { result, error } = compileAndRun({
+ *   files: program?.files ?? [],
+ *   main: program?.main ?? "",
+ *   input: { someArg: 42 },
+ * });
+ * ```
+ *
+ * @module
+ */
+
 import { type BuiltInCompileAndRunParams } from "commontools";
 import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
@@ -6,6 +51,96 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Program } from "@commontools/js-compiler";
 import { CompilerError } from "@commontools/js-compiler/typescript";
+import { Recipe } from "../builder/types.ts";
+import { getLogger } from "@commontools/utils/logger";
+
+const logger = getLogger("compile-and-run");
+
+// -----------------------------------------------------------------------------
+// Compilation Cache (LRU)
+// -----------------------------------------------------------------------------
+// Caches compiled Recipe objects by content hash to avoid redundant compilation.
+// Uses LRU eviction to bound memory usage on long-running servers like
+// background-charm-service.
+// -----------------------------------------------------------------------------
+
+/** Maximum number of compiled recipes to cache. */
+const MAX_CACHE_SIZE = 1000;
+
+/** In-memory compilation cache keyed by content hash. */
+const compilationCache = new Map<string, Recipe>();
+
+/** Tracks in-progress compilations for single-flight deduplication. */
+const inProgressCompilations = new Map<string, Promise<Recipe>>();
+
+// Performance counters
+let cacheHits = 0;
+let singleFlightHits = 0;
+let cacheMisses = 0;
+let cacheEvictions = 0;
+
+/** Add to cache with LRU eviction. */
+function cacheSet(hash: string, recipe: Recipe) {
+  // Delete first to update insertion order (Map maintains insertion order)
+  if (compilationCache.has(hash)) {
+    compilationCache.delete(hash);
+  }
+  compilationCache.set(hash, recipe);
+
+  // Evict oldest entries if over limit
+  while (compilationCache.size > MAX_CACHE_SIZE) {
+    const oldestKey = compilationCache.keys().next().value;
+    if (oldestKey) {
+      compilationCache.delete(oldestKey);
+      cacheEvictions++;
+    }
+  }
+}
+
+/** Get from cache and refresh LRU position. */
+function cacheGet(hash: string): Recipe | undefined {
+  const recipe = compilationCache.get(hash);
+  if (recipe) {
+    // Move to end (most recently used) by re-inserting
+    compilationCache.delete(hash);
+    compilationCache.set(hash, recipe);
+  }
+  return recipe;
+}
+
+/**
+ * Get compilation cache statistics for monitoring.
+ *
+ * @returns Object with cache metrics including hit rate
+ */
+export function getCompilationStats() {
+  const totalRequests = cacheHits + singleFlightHits + cacheMisses;
+  return {
+    cacheHits,
+    singleFlightHits,
+    cacheMisses,
+    cacheEvictions,
+    cacheSize: compilationCache.size,
+    maxCacheSize: MAX_CACHE_SIZE,
+    // Hit rate = requests that didn't require a new compilation
+    hitRate: totalRequests > 0
+      ? (((cacheHits + singleFlightHits) / totalRequests) * 100).toFixed(1) +
+        "%"
+      : "N/A",
+  };
+}
+
+/**
+ * Clear the compilation cache. Useful for testing or forcing recompilation.
+ */
+export function clearCompilationCache() {
+  compilationCache.clear();
+  inProgressCompilations.clear();
+  cacheHits = 0;
+  singleFlightHits = 0;
+  cacheMisses = 0;
+  cacheEvictions = 0;
+}
 
 /**
  * Compile a recipe/module and run it.
@@ -191,40 +326,80 @@ export function compileAndRun(
     // Capture requestId for this compilation run
     const thisRequestId = requestId;
 
-    const compilePromise = runtime.harness.run(program)
-      .catch(
-        (err) => {
-          // Only process this error if the request hasn't been superseded
-          if (requestId !== thisRequestId) return;
-          if (abortController?.signal.aborted) return;
+    // Check compilation cache first (LRU)
+    const cachedRecipe = cacheGet(hash);
+    let compilePromise: Promise<Recipe | undefined>;
 
-          runtime.editWithRetry((asyncTx) => {
-            // Extract structured errors if this is a CompilerError
-            if (err instanceof CompilerError) {
-              const structuredErrors = err.errors.map((e) => ({
-                line: e.line ?? 1,
-                column: e.column ?? 1,
-                message: e.message,
-                type: e.type,
-                file: e.file,
-              }));
-              errors.withTx(asyncTx).set(structuredErrors);
-            } else {
-              error.withTx(asyncTx).set(
-                err.message + (err.stack ? "\n" + err.stack : ""),
-              );
-            }
-          });
-        },
-      ).finally(() => {
-        // Only update pending if this is still the current request
+    if (cachedRecipe) {
+      // Cache hit - use cached recipe
+      cacheHits++;
+      logger.debug("compile-and-run", `Cache HIT for ${program.main}`);
+      compilePromise = Promise.resolve(cachedRecipe);
+    } else if (inProgressCompilations.has(hash)) {
+      // Single-flight: reuse in-progress compilation (avoid duplicate work)
+      singleFlightHits++;
+      logger.debug(
+        "compile-and-run",
+        `Reusing in-flight compilation for ${program.main}`,
+      );
+      compilePromise = inProgressCompilations.get(hash)!;
+    } else {
+      // Cache miss - compile and cache
+      cacheMisses++;
+      const startTime = performance.now();
+
+      const actualCompilePromise = runtime.harness.run(program)
+        .then((recipe) => {
+          const elapsed = performance.now() - startTime;
+          logger.info(
+            "compile-and-run",
+            `Compiled ${program.main} in ${elapsed.toFixed(0)}ms`,
+          );
+          // Cache the successful result (LRU)
+          cacheSet(hash, recipe);
+          return recipe;
+        })
+        .finally(() => {
+          inProgressCompilations.delete(hash);
+        });
+
+      inProgressCompilations.set(hash, actualCompilePromise);
+      compilePromise = actualCompilePromise;
+    }
+
+    compilePromise.catch(
+      (err) => {
+        // Only process this error if the request hasn't been superseded
         if (requestId !== thisRequestId) return;
-        // Always clear pending state, even if cancelled, to avoid stuck state
+        if (abortController?.signal.aborted) return;
 
         runtime.editWithRetry((asyncTx) => {
-          pending.withTx(asyncTx).set(false);
+          // Extract structured errors if this is a CompilerError
+          if (err instanceof CompilerError) {
+            const structuredErrors = err.errors.map((e) => ({
+              line: e.line ?? 1,
+              column: e.column ?? 1,
+              message: e.message,
+              type: e.type,
+              file: e.file,
+            }));
+            errors.withTx(asyncTx).set(structuredErrors);
+          } else {
+            error.withTx(asyncTx).set(
+              err.message + (err.stack ? "\n" + err.stack : ""),
+            );
+          }
         });
+      },
+    ).finally(() => {
+      // Only update pending if this is still the current request
+      if (requestId !== thisRequestId) return;
+      // Always clear pending state, even if cancelled, to avoid stuck state
+
+      runtime.editWithRetry((asyncTx) => {
+        pending.withTx(asyncTx).set(false);
       });
+    });
 
     compilePromise.then((recipe) => {
       // Only run the result if this is still the current request
