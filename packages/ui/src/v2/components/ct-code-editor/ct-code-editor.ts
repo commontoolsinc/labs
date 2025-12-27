@@ -168,6 +168,11 @@ export class CTCodeEditor extends BaseElement {
   // editor content matches stored hash) will be skipped. They'll be applied once
   // the debounce fires and the hash is cleared.
   private _lastEditorContentHash: number | null = null;
+  // Guard flag to prevent updateListener from triggering setValue when we're
+  // applying a Cell update to the editor. Without this, dispatching changes
+  // to the editor triggers the updateListener, which calls setValue, creating
+  // a feedback loop: Cell → Editor → setValue → Cell → Editor...
+  private _updatingFromCell = false;
   private _cellController = createStringCellController(this, {
     timing: {
       strategy: "debounce",
@@ -634,13 +639,9 @@ export class CTCodeEditor extends BaseElement {
     const newValue = this.getValue();
     const currentValue = this._editorView.state.doc.toString();
 
-    // DEBUG: Trace the update flow
-    console.log(`[ct-code-editor] _updateEditorFromCellValue: newValue="${newValue.slice(0,20)}", currentValue="${currentValue.slice(0,20)}", hash=${this._lastEditorContentHash}`);
-
     // Early exit if content is identical (common case)
     if (newValue === currentValue) {
       // Clear hash when editor and Cell are in sync - no pending changes
-      console.log(`[ct-code-editor] Content identical, clearing hash`);
       this._lastEditorContentHash = null;
       return;
     }
@@ -653,20 +654,19 @@ export class CTCodeEditor extends BaseElement {
     // - Our own echo (after debounce fires, caught by string equality above)
     // - External updates (will be applied after debounce clears the hash)
     const currentValueHash = this._hashContent(currentValue);
-    console.log(`[ct-code-editor] currentValueHash=${currentValueHash}, storedHash=${this._lastEditorContentHash}`);
 
-    if (this._lastEditorContentHash !== null &&
-        this._lastEditorContentHash === currentValueHash) {
+    if (
+      this._lastEditorContentHash !== null &&
+      this._lastEditorContentHash === currentValueHash
+    ) {
       // Editor content matches what user typed. We're in the debounce window.
       // Skip this Cell update to preserve cursor. Hash will be cleared when
       // debounce fires and editor/Cell sync (string equality check above).
-      console.log(`[ct-code-editor] Hash match! Skipping update to preserve cursor`);
       return;
     }
 
     // Either hash is null (no pending edit) or editor content has changed
     // (user kept typing). Clear hash and apply the Cell update.
-    console.log(`[ct-code-editor] Applying Cell update, clearing hash`);
     this._lastEditorContentHash = null;
 
     // Sync external update to editor, preserving cursor position.
@@ -676,14 +676,21 @@ export class CTCodeEditor extends BaseElement {
     const anchorPos = Math.min(currentSelection.anchor, newLength);
     const headPos = Math.min(currentSelection.head, newLength);
 
-    this._editorView.dispatch({
-      changes: {
-        from: 0,
-        to: this._editorView.state.doc.length,
-        insert: newValue,
-      },
-      selection: { anchor: anchorPos, head: headPos },
-    });
+    // Set guard flag to prevent updateListener from triggering setValue
+    // when we dispatch this Cell-originated update to the editor.
+    this._updatingFromCell = true;
+    try {
+      this._editorView.dispatch({
+        changes: {
+          from: 0,
+          to: this._editorView.state.doc.length,
+          insert: newValue,
+        },
+        selection: { anchor: anchorPos, head: headPos },
+      });
+    } finally {
+      this._updatingFromCell = false;
+    }
 
     // Ensure mentioned charms reflect external value changes
     this._updateMentionedFromContent();
@@ -921,7 +928,10 @@ export class CTCodeEditor extends BaseElement {
       // Theme (dark -> oneDark)
       this._themeComp.of(this.theme === "dark" ? oneDark : []),
       EditorView.updateListener.of((update) => {
-        if (update.docChanged && !this.readonly) {
+        // Only process user-initiated changes, not Cell-originated updates.
+        // The _updatingFromCell flag prevents a feedback loop where:
+        // Cell update → dispatch → updateListener → setValue → Cell update...
+        if (update.docChanged && !this.readonly && !this._updatingFromCell) {
           const value = update.state.doc.toString();
           // Store hash of current editor content. When the Cell subscription
           // fires, we'll check if the editor still has this content. If yes,

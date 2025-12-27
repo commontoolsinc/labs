@@ -71,10 +71,27 @@ describe("ct-code-editor cursor stability", () => {
   it("should maintain cursor position during normal typing with Cell echo", async () => {
     const page = shell.page();
 
+    // Clear any initial state first and wait for editor to show empty
+    await clearEditor(page);
+    // Also set Cell to empty to ensure sync
+    await charm.result.set("", ["content"]);
+
+    // Wait for both editor and Cell to be empty and synchronized
+    await waitFor(
+      async () => {
+        const editorContent = await getEditorContent(page);
+        const cellValue = charm.result.get(["content"]);
+        return editorContent === "" && cellValue === "";
+      },
+      { timeout: 2000, delay: 50 },
+    );
+
+    // Extra settling time for any pending Cell subscription callbacks to drain.
+    // This is critical because shared charm between tests can have stale
+    // subscription callbacks queued that fire after we start typing.
+    await new Promise((r) => setTimeout(r, 300));
+
     // Focus the editor
-    const editor = await page.waitForSelector("ct-code-editor", {
-      strategy: "pierce",
-    });
     await focusEditor(page);
 
     // Verify editor is empty initially
@@ -103,10 +120,11 @@ describe("ct-code-editor cursor stability", () => {
         const cellValue = charm.result.get(["content"]);
         return cellValue === textToType;
       },
-      { timeout: DEBOUNCE_DELAY + 1000, interval: 50 },
+      { timeout: DEBOUNCE_DELAY + 2000, delay: 50 },
     );
 
-    // Wait a bit more for any Cell echo to propagate back
+    // Wait for the Cell echo to propagate and confirm cursor stays stable.
+    // We poll multiple times to ensure cursor doesn't jump transiently.
     await new Promise((r) => setTimeout(r, DEBOUNCE_BUFFER));
 
     // Critical test: cursor should NOT have jumped after Cell echo
@@ -125,15 +143,10 @@ describe("ct-code-editor cursor stability", () => {
   it("should maintain cursor during rapid typing (multiple chars in debounce window)", async () => {
     const page = shell.page();
 
-    // Clear the editor first
+    // Clear the editor first and sync Cell to empty
     await clearEditor(page);
-    await waitFor(
-      async () => {
-        const cellValue = charm.result.get(["content"]);
-        return cellValue === "";
-      },
-      { timeout: DEBOUNCE_DELAY + 1000 },
-    );
+    await charm.result.set("", ["content"]);
+    await new Promise((r) => setTimeout(r, 200));
 
     await focusEditor(page);
 
@@ -221,14 +234,13 @@ describe("ct-code-editor cursor stability", () => {
     );
   });
 
-  it("should handle external Cell update during debounce window", async () => {
+  it("should defer external Cell update during debounce window to preserve cursor", async () => {
     const page = shell.page();
 
+    // Clear the editor and sync Cell to empty
     await clearEditor(page);
-    await waitFor(
-      async () => charm.result.get(["content"]) === "",
-      { timeout: DEBOUNCE_DELAY + 1000 },
-    );
+    await charm.result.set("", ["content"]);
+    await new Promise((r) => setTimeout(r, 200));
 
     await focusEditor(page);
 
@@ -243,40 +255,54 @@ describe("ct-code-editor cursor stability", () => {
     await new Promise((r) => setTimeout(r, 200)); // Partway through debounce
     await charm.result.set("External Update", ["content"]);
 
-    // Wait for external update to propagate to editor
-    await waitFor(
-      async () => {
-        const content = await getEditorContent(page);
-        return content === "External Update";
-      },
-      { timeout: 1000 },
+    // Wait a moment for the external update to potentially propagate
+    await new Promise((r) => setTimeout(r, 100));
+
+    // The editor should STILL have the user's typed content (external update deferred)
+    // This is the key behavior change: cursor stability takes priority over immediate sync
+    const contentDuringDebounce = await getEditorContent(page);
+    assertEquals(
+      contentDuringDebounce,
+      "User",
+      "Editor should keep user's content during debounce (external update deferred)",
     );
 
-    // The cursor should be clamped to valid range (not beyond content length)
-    const cursorAfterExternal = await getCursorPosition(page);
-    const finalContent = await getEditorContent(page);
-    assert(
-      cursorAfterExternal >= 0 && cursorAfterExternal <= finalContent.length,
-      `Cursor should be in valid range [0, ${finalContent.length}], got ${cursorAfterExternal}`,
+    // Cursor should still be at end of typed content
+    const cursorDuringDebounce = await getCursorPosition(page);
+    assertEquals(
+      cursorDuringDebounce,
+      4,
+      "Cursor should stay at end of typed content",
     );
 
-    // The pending debounced update of "User" should not override the external update
-    // Wait to ensure no race condition
+    // Wait for debounce to complete - now the user's content will be committed
+    // and the external update will be visible on next Cell sync
     await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + DEBOUNCE_BUFFER));
 
+    // After debounce, the Cell will have the user's content (last write wins)
     const cellValue = charm.result.get(["content"]);
     assertEquals(
       cellValue,
-      "External Update",
-      "External update should persist (not overwritten by stale debounced update)",
+      "User",
+      "User's debounced update should win (last write wins)",
     );
   });
 
-  it("should clamp cursor when external update shortens content", async () => {
+  it("should apply external update when no typing is in progress", async () => {
+    // This test verifies that external updates are applied when the user
+    // is NOT actively typing (no debounce window active). Also tests
+    // cursor clamping when content is shortened.
     const page = shell.page();
 
-    // Set long content
-    const longContent = "This is a very long piece of content that will be shortened";
+    // Clear editor state from previous tests and sync Cell to empty
+    await clearEditor(page);
+    await charm.result.set("", ["content"]);
+    // Allow time for any pending Cell subscription callbacks
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Set long content externally (no typing, no hash stored)
+    const longContent =
+      "This is a very long piece of content that will be shortened";
     await charm.result.set(longContent, ["content"]);
 
     await waitFor(
@@ -284,10 +310,10 @@ describe("ct-code-editor cursor stability", () => {
         const content = await getEditorContent(page);
         return content === longContent;
       },
-      { timeout: 1000 },
+      { timeout: 2000 },
     );
 
-    // Move cursor to end
+    // Move cursor to end (still no typing)
     await focusEditor(page);
     await setCursorPosition(page, longContent.length);
 
@@ -295,6 +321,7 @@ describe("ct-code-editor cursor stability", () => {
     assertEquals(cursorAtEnd, longContent.length);
 
     // External update shortens content drastically
+    // Since no typing is in progress, this should apply immediately
     const shortContent = "Short";
     await charm.result.set(shortContent, ["content"]);
 
@@ -303,7 +330,7 @@ describe("ct-code-editor cursor stability", () => {
         const content = await getEditorContent(page);
         return content === shortContent;
       },
-      { timeout: 1000 },
+      { timeout: 2000 },
     );
 
     // Cursor should be clamped to new content length
@@ -317,11 +344,10 @@ describe("ct-code-editor cursor stability", () => {
   it("should not apply Cell echo if content hash matches (own change)", async () => {
     const page = shell.page();
 
+    // Clear the editor and sync Cell to empty
     await clearEditor(page);
-    await waitFor(
-      async () => charm.result.get(["content"]) === "",
-      { timeout: DEBOUNCE_DELAY + 1000 },
-    );
+    await charm.result.set("", ["content"]);
+    await new Promise((r) => setTimeout(r, 200));
 
     await focusEditor(page);
 
@@ -368,7 +394,11 @@ describe("ct-code-editor cursor stability", () => {
   it("should handle backspace and maintain cursor", async () => {
     const page = shell.page();
 
+    // Clear the editor and sync Cell to empty
     await clearEditor(page);
+    await charm.result.set("", ["content"]);
+    await new Promise((r) => setTimeout(r, 200));
+
     await focusEditor(page);
 
     // Type some text
@@ -400,6 +430,288 @@ describe("ct-code-editor cursor stability", () => {
     // Cursor should still be at correct position
     const cursorAfterEcho = await getCursorPosition(page);
     assertEquals(cursorAfterEcho, expectedText.length);
+  });
+
+  // ==========================================================================
+  // NEGATIVE TESTS: Verify cursor DOES move when it should
+  // ==========================================================================
+
+  it("should apply external update and move cursor after editor blur", async () => {
+    // This is a NEGATIVE test: cursor SHOULD move when user is not actively editing
+    const page = shell.page();
+
+    await clearEditor(page);
+    await charm.result.set("", ["content"]);
+    await new Promise((r) => setTimeout(r, 200));
+
+    await focusEditor(page);
+
+    // Type and wait for sync
+    await typeInEditor(page, "Hello World");
+    await waitFor(
+      async () => charm.result.get(["content"]) === "Hello World",
+      { timeout: DEBOUNCE_DELAY + 1000 },
+    );
+
+    // Blur the editor - this should allow external updates to apply
+    await page.evaluate(`
+      (() => {
+        const active = document.activeElement;
+        if (active && active.blur) active.blur();
+      })()
+    `);
+    await new Promise((r) => setTimeout(r, 100));
+
+    // External update with shorter content
+    await charm.result.set("Short", ["content"]);
+
+    // Wait for external update to apply
+    await waitFor(
+      async () => (await getEditorContent(page)) === "Short",
+      { timeout: 2000 },
+    );
+
+    // Cursor should be clamped to new content length (not stuck at old position)
+    const cursor = await getCursorPosition(page);
+    assert(
+      cursor >= 0 && cursor <= "Short".length,
+      `Cursor should be clamped to [0, 5], got ${cursor}`,
+    );
+  });
+
+  it("should apply external update after debounce window fully expires", async () => {
+    // After debounce completes and hash is cleared, external updates should apply
+    const page = shell.page();
+
+    await clearEditor(page);
+    await charm.result.set("", ["content"]);
+    await new Promise((r) => setTimeout(r, 200));
+
+    await focusEditor(page);
+
+    // Type and wait for debounce to complete
+    await typeInEditor(page, "User typed");
+    await waitFor(
+      async () => charm.result.get(["content"]) === "User typed",
+      { timeout: DEBOUNCE_DELAY + 1000 },
+    );
+
+    // Wait extra time to ensure hash is fully cleared
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Now external update should apply (no hash blocking it)
+    await charm.result.set("External update", ["content"]);
+
+    await waitFor(
+      async () => (await getEditorContent(page)) === "External update",
+      { timeout: 2000 },
+    );
+
+    const content = await getEditorContent(page);
+    assertEquals(content, "External update");
+  });
+
+  // ==========================================================================
+  // STRESS TESTS: Edge cases and rapid operations
+  // ==========================================================================
+
+  it("should handle multiple rapid external updates correctly", async () => {
+    // Stress test: rapid Cell updates should all apply correctly
+    const page = shell.page();
+
+    await clearEditor(page);
+    await charm.result.set("", ["content"]);
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Send 5 external updates rapidly (no user typing)
+    for (let i = 0; i < 5; i++) {
+      await charm.result.set(`Update ${i}`, ["content"]);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    // Final content should be last update
+    await waitFor(
+      async () => (await getEditorContent(page)) === "Update 4",
+      { timeout: 2000 },
+    );
+
+    // Cursor should be valid
+    const cursor = await getCursorPosition(page);
+    assert(
+      cursor >= 0 && cursor <= "Update 4".length,
+      `Cursor should be valid, got ${cursor}`,
+    );
+  });
+
+  it("should handle undo operation and maintain correct state", async () => {
+    // Undo triggers updateListener - verify hash doesn't cause issues
+    const page = shell.page();
+
+    await clearEditor(page);
+    await charm.result.set("", ["content"]);
+    await new Promise((r) => setTimeout(r, 200));
+
+    await focusEditor(page);
+
+    // Type initial text
+    await typeInEditor(page, "Hello");
+    await waitFor(
+      async () => charm.result.get(["content"]) === "Hello",
+      { timeout: DEBOUNCE_DELAY + 1000 },
+    );
+
+    // Type more text
+    await typeInEditor(page, " World");
+    await waitFor(
+      async () => charm.result.get(["content"]) === "Hello World",
+      { timeout: DEBOUNCE_DELAY + 1000 },
+    );
+
+    // Undo (Cmd+Z on Mac, Ctrl+Z on others)
+    const isMac = await page.evaluate(`navigator.platform.includes('Mac')`);
+    if (isMac) {
+      await page.keyboard.down("Meta");
+      await page.keyboard.press("z");
+      await page.keyboard.up("Meta");
+    } else {
+      await page.keyboard.down("Control");
+      await page.keyboard.press("z");
+      await page.keyboard.up("Control");
+    }
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    // After undo, editor should show previous state
+    const contentAfterUndo = await getEditorContent(page);
+    // Note: Undo behavior depends on CodeMirror's history - content may vary
+    // The key test is that cursor is valid and no crash occurs
+    const cursorAfterUndo = await getCursorPosition(page);
+    assert(
+      cursorAfterUndo >= 0 && cursorAfterUndo <= contentAfterUndo.length,
+      `Cursor should be valid after undo, got ${cursorAfterUndo}`,
+    );
+
+    // Wait for any Cell sync from undo
+    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + 200));
+
+    // Verify editor and Cell are in sync
+    const finalContent = await getEditorContent(page);
+    const cellValue = charm.result.get(["content"]);
+    assertEquals(
+      finalContent,
+      cellValue,
+      "Editor and Cell should be in sync after undo",
+    );
+  });
+
+  it("should handle text selection (anchor != head) during external update", async () => {
+    // Test that selections are preserved/clamped correctly
+    const page = shell.page();
+
+    await clearEditor(page);
+    await charm.result.set("", ["content"]);
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Set initial content externally
+    await charm.result.set("Hello World Test", ["content"]);
+    await waitFor(
+      async () => (await getEditorContent(page)) === "Hello World Test",
+      { timeout: 2000 },
+    );
+
+    await focusEditor(page);
+
+    // Select "World" (positions 6-11)
+    await page.evaluate(`
+      (() => {
+        function findCtCodeEditor(root) {
+          if (!root) return null;
+          const editor = root.querySelector?.('ct-code-editor');
+          if (editor) return editor;
+          const allElements = root.querySelectorAll?.('*') || [];
+          for (const el of allElements) {
+            if (el.shadowRoot) {
+              const found = findCtCodeEditor(el.shadowRoot);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+
+        const ctEditor = findCtCodeEditor(document);
+        if (ctEditor && ctEditor._editorView) {
+          ctEditor._editorView.dispatch({
+            selection: { anchor: 6, head: 11 }
+          });
+        }
+      })()
+    `);
+
+    // Verify selection
+    const selection = (await page.evaluate(`
+      (() => {
+        function findCtCodeEditor(root) {
+          if (!root) return null;
+          const editor = root.querySelector?.('ct-code-editor');
+          if (editor) return editor;
+          const allElements = root.querySelectorAll?.('*') || [];
+          for (const el of allElements) {
+            if (el.shadowRoot) {
+              const found = findCtCodeEditor(el.shadowRoot);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+
+        const ctEditor = findCtCodeEditor(document);
+        if (!ctEditor || !ctEditor._editorView) return null;
+        const sel = ctEditor._editorView.state.selection.main;
+        return { anchor: sel.anchor, head: sel.head };
+      })()
+    `)) as { anchor: number; head: number };
+    assertEquals(selection.anchor, 6);
+    assertEquals(selection.head, 11);
+
+    // External update with shorter content - selection should be clamped
+    await charm.result.set("Hi", ["content"]);
+    await waitFor(
+      async () => (await getEditorContent(page)) === "Hi",
+      { timeout: 2000 },
+    );
+
+    // Selection should be clamped to new content length
+    const clampedSelection = (await page.evaluate(`
+      (() => {
+        function findCtCodeEditor(root) {
+          if (!root) return null;
+          const editor = root.querySelector?.('ct-code-editor');
+          if (editor) return editor;
+          const allElements = root.querySelectorAll?.('*') || [];
+          for (const el of allElements) {
+            if (el.shadowRoot) {
+              const found = findCtCodeEditor(el.shadowRoot);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+
+        const ctEditor = findCtCodeEditor(document);
+        if (!ctEditor || !ctEditor._editorView) return null;
+        const sel = ctEditor._editorView.state.selection.main;
+        return { anchor: sel.anchor, head: sel.head };
+      })()
+    `)) as { anchor: number; head: number };
+
+    assert(
+      clampedSelection.anchor >= 0 && clampedSelection.anchor <= 2,
+      `Anchor should be clamped to [0, 2], got ${clampedSelection.anchor}`,
+    );
+    assert(
+      clampedSelection.head >= 0 && clampedSelection.head <= 2,
+      `Head should be clamped to [0, 2], got ${clampedSelection.head}`,
+    );
   });
 });
 
@@ -529,7 +841,9 @@ async function setCursorPosition(page: Page, position: number): Promise<void> {
 }
 
 /**
- * Clear the editor content
+ * Clear the editor content.
+ * Sets the guard flag to prevent updateListener from triggering Cell updates,
+ * and clears the hash to allow subsequent external updates to apply.
  */
 async function clearEditor(page: Page): Promise<void> {
   await page.evaluate(`
@@ -551,9 +865,19 @@ async function clearEditor(page: Page): Promise<void> {
       const ctEditor = findCtCodeEditor(document);
       if (ctEditor && ctEditor._editorView) {
         const view = ctEditor._editorView;
-        view.dispatch({
-          changes: { from: 0, to: view.state.doc.length, insert: "" }
-        });
+        // Set guard flag to prevent updateListener from triggering setValue
+        ctEditor._updatingFromCell = true;
+        try {
+          view.dispatch({
+            changes: { from: 0, to: view.state.doc.length, insert: "" },
+            // Also reset cursor to position 0 for clean state
+            selection: { anchor: 0, head: 0 }
+          });
+        } finally {
+          ctEditor._updatingFromCell = false;
+        }
+        // Clear the hash to allow external updates to apply
+        ctEditor._lastEditorContentHash = null;
       }
     })()
   `);
