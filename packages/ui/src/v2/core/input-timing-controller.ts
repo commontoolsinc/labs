@@ -117,10 +117,11 @@ export class InputTimingController implements ReactiveController {
 
     // For debounce, execute any pending callback immediately on blur
     if (this.options.strategy === "debounce" && this.timeoutId !== null) {
+      // Save the callback before cancel() clears it
+      const callback = this.pendingCallback;
       this.cancel();
-      if (this.pendingCallback) {
-        this.pendingCallback();
-        this.pendingCallback = null;
+      if (callback) {
+        callback();
       }
     }
   }
