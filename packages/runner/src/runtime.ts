@@ -259,6 +259,9 @@ export class Runtime {
       this.defaultFrame = undefined;
     }
 
+    // Dispose the Engine (clears TypeScriptCompiler, UnsafeEvalRuntime source maps, console hook)
+    this.harness.dispose();
+
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern
   }
