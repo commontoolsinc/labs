@@ -13,58 +13,7 @@
 // =============================================================================
 
 import type { SubCharmType } from "./types.ts";
-
-// Import metadata and patterns from peer patterns
-import {
-  BirthdayModule,
-  MODULE_METADATA as BirthdayMeta,
-} from "../birthday.tsx";
-import { MODULE_METADATA as RatingMeta, RatingModule } from "../rating.tsx";
-import { MODULE_METADATA as TagsMeta, TagsModule } from "../tags.tsx";
-import { MODULE_METADATA as StatusMeta, StatusModule } from "../status.tsx";
-import { AddressModule, MODULE_METADATA as AddressMeta } from "../address.tsx";
-import {
-  MODULE_METADATA as TimelineMeta,
-  TimelineModule,
-} from "../timeline.tsx";
-import { MODULE_METADATA as SocialMeta, SocialModule } from "../social.tsx";
-import { LinkModule, MODULE_METADATA as LinkMeta } from "../link.tsx";
-import {
-  LocationModule,
-  MODULE_METADATA as LocationMeta,
-} from "../location.tsx";
-import {
-  MODULE_METADATA as RelationshipMeta,
-  RelationshipModule,
-} from "../relationship.tsx";
-import {
-  GiftPrefsModule,
-  MODULE_METADATA as GiftPrefsMeta,
-} from "../giftprefs.tsx";
-import { MODULE_METADATA as TimingMeta, TimingModule } from "../timing.tsx";
-import {
-  AgeCategoryModule,
-  MODULE_METADATA as AgeCategoryMeta,
-} from "../age-category.tsx";
-import {
-  DietaryRestrictionsModule,
-  MODULE_METADATA as DietaryMeta,
-} from "../dietary-restrictions.tsx";
-import { EmailModule, MODULE_METADATA as EmailMeta } from "../email.tsx";
-import { MODULE_METADATA as PhoneMeta, PhoneModule } from "../phone.tsx";
-import {
-  MODULE_METADATA as RecordIconMeta,
-  RecordIconModule,
-} from "../record-icon.tsx";
-import {
-  MODULE_METADATA as NicknameMeta,
-  NicknameModule,
-} from "../nickname.tsx";
-import {
-  MODULE_METADATA as SimpleListMeta,
-  SimpleListModule,
-} from "../simple-list.tsx";
-import type { ModuleMetadata } from "../container-protocol.ts";
+import { getRecipeEnvironment } from "commontools";
 
 // NOTE: TypePickerMeta is NOT imported here to avoid circular dependency:
 // type-picker.tsx -> template-registry.ts -> registry.ts -> type-picker.tsx
@@ -76,16 +25,12 @@ import type { ModuleMetadata } from "../container-protocol.ts";
 // NOTE: TypePickerModule is imported directly in record.tsx to avoid circular dependency
 // and because it needs ContainerCoordinationContext
 
-// Type for pattern constructors - returns unknown since we store heterogeneous charm types
-// Now accepts optional initial values for import/restore functionality
-type PatternConstructor = (initialValues?: Record<string, unknown>) => unknown;
-
 export interface SubCharmDefinition {
   type: SubCharmType;
   label: string;
   icon: string;
-  // Pattern constructor for creating instances (can accept initial values)
-  createInstance: PatternConstructor;
+  // URL to the module pattern file
+  url: string;
   // Internal modules don't appear in "Add" dropdown (e.g., type-picker)
   internal?: boolean;
   // Multi-instance modules show "add another" button (e.g., email, phone)
@@ -95,96 +40,254 @@ export interface SubCharmDefinition {
   fieldMapping?: string[];
 }
 
-// Helper to create SubCharmDefinition from ModuleMetadata
-// The moduleFactory is the actual recipe function that accepts input
-function fromMetadata(
-  meta: ModuleMetadata,
-  moduleFactory: (input: Record<string, unknown>) => unknown,
-): SubCharmDefinition {
-  return {
-    type: meta.type as SubCharmType,
-    label: meta.label,
-    icon: meta.icon,
-    // createInstance now accepts optional initial values
-    createInstance: (initialValues?: Record<string, unknown>) =>
-      moduleFactory(initialValues || {}),
-    internal: meta.internal,
-    allowMultiple: meta.allowMultiple,
-    schema: meta.schema,
-    fieldMapping: meta.fieldMapping,
-  };
-}
-
 // Static registry - defines available sub-charm types
-// Now built from peer pattern metadata
+// URLs are relative to packages/patterns/ directory
 export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
   // Notes is special - must be created in record.tsx with linkPattern
   notes: {
     type: "notes",
     label: "Notes",
     icon: "\u{1F4DD}", // 📝
-    createInstance: () => {
-      throw new Error(
-        "Notes must be created directly with linkPattern, not through registry",
-      );
-    },
+    url: "notes/note.tsx",
     schema: {
       content: { type: "string", description: "Free-form notes and content" },
     },
     fieldMapping: ["content", "notes"],
   },
 
-  // Data modules - imported from peer patterns
-  // Each module factory receives initial values when createInstance is called
-  birthday: fromMetadata(BirthdayMeta, (init) => BirthdayModule(init as any)),
-  rating: fromMetadata(RatingMeta, (init) => RatingModule(init as any)),
-  tags: fromMetadata(TagsMeta, (init) => TagsModule(init as any)),
-  status: fromMetadata(StatusMeta, (init) => StatusModule(init as any)),
-  address: fromMetadata(AddressMeta, (init) => AddressModule(init as any)),
-  timeline: fromMetadata(TimelineMeta, (init) => TimelineModule(init as any)),
-  social: fromMetadata(SocialMeta, (init) => SocialModule(init as any)),
-  link: fromMetadata(LinkMeta, (init) => LinkModule(init as any)),
-  location: fromMetadata(LocationMeta, (init) => LocationModule(init as any)),
-  relationship: fromMetadata(
-    RelationshipMeta,
-    (init) => RelationshipModule(init as any),
-  ),
-  giftprefs: fromMetadata(
-    GiftPrefsMeta,
-    (init) => GiftPrefsModule(init as any),
-  ),
-  timing: fromMetadata(TimingMeta, (init) => TimingModule(init as any)),
-  "age-category": fromMetadata(
-    AgeCategoryMeta,
-    (init) => AgeCategoryModule(init as any),
-  ),
-  "dietary-restrictions": fromMetadata(
-    DietaryMeta,
-    (init) => DietaryRestrictionsModule(init as any),
-  ),
-  email: fromMetadata(EmailMeta, (init) => EmailModule(init as any)),
-  phone: fromMetadata(PhoneMeta, (init) => PhoneModule(init as any)),
-  "record-icon": fromMetadata(
-    RecordIconMeta,
-    (init) => RecordIconModule(init as any),
-  ),
-  nickname: fromMetadata(NicknameMeta, (init) => NicknameModule(init as any)),
-  "simple-list": fromMetadata(
-    SimpleListMeta,
-    (init) => SimpleListModule(init as any),
-  ),
+  // Data modules - loaded dynamically via URL
+  birthday: {
+    type: "birthday",
+    label: "Birthday",
+    icon: "\u{1F382}", // 🎂
+    url: "birthday.tsx",
+    schema: {
+      birthDate: {
+        type: "string",
+        description: "Birth date (MM-DD or YYYY-MM-DD)",
+      },
+      birthYear: { type: "number", description: "Birth year (YYYY)" },
+    },
+    fieldMapping: ["birthDate", "birthYear", "birthday"],
+  },
+  rating: {
+    type: "rating",
+    label: "Rating",
+    icon: "\u2B50", // ⭐
+    url: "rating.tsx",
+    schema: {
+      rating: { type: "number", description: "Rating (1-5 stars)" },
+    },
+    fieldMapping: ["rating", "stars"],
+  },
+  tags: {
+    type: "tags",
+    label: "Tags",
+    icon: "\u{1F3F7}\uFE0F", // 🏷️
+    url: "tags.tsx",
+    allowMultiple: false,
+    schema: {
+      tags: { type: "array", description: "List of tags" },
+    },
+    fieldMapping: ["tags"],
+  },
+  status: {
+    type: "status",
+    label: "Status",
+    icon: "\u{1F6A6}", // 🚦
+    url: "status.tsx",
+    schema: {
+      status: {
+        type: "string",
+        description: "Status (active, inactive, completed, etc.)",
+      },
+    },
+    fieldMapping: ["status"],
+  },
+  address: {
+    type: "address",
+    label: "Address",
+    icon: "\u{1F3E0}", // 🏠
+    url: "address.tsx",
+    allowMultiple: true,
+    schema: {
+      address: { type: "string", description: "Street address" },
+      label: {
+        type: "string",
+        description: "Address label (Home, Work, etc.)",
+      },
+    },
+    fieldMapping: ["address"],
+  },
+  timeline: {
+    type: "timeline",
+    label: "Timeline",
+    icon: "\u{1F4C5}", // 📅
+    url: "timeline.tsx",
+    schema: {
+      events: { type: "array", description: "Timeline events" },
+    },
+    fieldMapping: ["timeline", "events"],
+  },
+  social: {
+    type: "social",
+    label: "Social",
+    icon: "\u{1F517}", // 🔗
+    url: "social.tsx",
+    schema: {
+      social: { type: "object", description: "Social media links" },
+    },
+    fieldMapping: ["social", "twitter", "linkedin", "github"],
+  },
+  link: {
+    type: "link",
+    label: "Link",
+    icon: "\u{1F517}", // 🔗
+    url: "link.tsx",
+    schema: {
+      url: { type: "string", description: "URL" },
+      title: { type: "string", description: "Link title" },
+    },
+    fieldMapping: ["url", "link"],
+  },
+  location: {
+    type: "location",
+    label: "Location",
+    icon: "\u{1F30D}", // 🌍
+    url: "location.tsx",
+    schema: {
+      latitude: { type: "number", description: "Latitude" },
+      longitude: { type: "number", description: "Longitude" },
+    },
+    fieldMapping: ["location", "latitude", "longitude", "coordinates"],
+  },
+  relationship: {
+    type: "relationship",
+    label: "Relationship",
+    icon: "\u{1F465}", // 👥
+    url: "relationship.tsx",
+    schema: {
+      relationship: {
+        type: "string",
+        description: "Relationship type (friend, family, colleague, etc.)",
+      },
+    },
+    fieldMapping: ["relationship"],
+  },
+  giftprefs: {
+    type: "giftprefs",
+    label: "Gift Preferences",
+    icon: "\u{1F381}", // 🎁
+    url: "giftprefs.tsx",
+    schema: {
+      favorites: { type: "array", description: "Favorite things" },
+      dislikes: { type: "array", description: "Things to avoid" },
+    },
+    fieldMapping: ["favorites", "dislikes", "gifts", "preferences"],
+  },
+  timing: {
+    type: "timing",
+    label: "Timing",
+    icon: "\u23F1\uFE0F", // ⏱️
+    url: "timing.tsx",
+    schema: {
+      prepTime: { type: "number", description: "Preparation time (minutes)" },
+      cookTime: { type: "number", description: "Cooking time (minutes)" },
+    },
+    fieldMapping: ["prepTime", "cookTime", "totalTime", "timing"],
+  },
+  "age-category": {
+    type: "age-category",
+    label: "Age Category",
+    icon: "\u{1F476}", // 👶
+    url: "age-category.tsx",
+    schema: {
+      category: {
+        type: "string",
+        description: "Age category (child, teen, adult, senior)",
+      },
+    },
+    fieldMapping: ["ageCategory", "age"],
+  },
+  "dietary-restrictions": {
+    type: "dietary-restrictions",
+    label: "Dietary Restrictions",
+    icon: "\u{1F957}", // 🥗
+    url: "dietary-restrictions.tsx",
+    schema: {
+      restrictions: { type: "array", description: "Dietary restrictions" },
+    },
+    fieldMapping: ["dietary", "restrictions", "allergies"],
+  },
+  email: {
+    type: "email",
+    label: "Email",
+    icon: "\u2709\uFE0F", // ✉️
+    url: "email.tsx",
+    allowMultiple: true,
+    schema: {
+      email: { type: "string", description: "Email address" },
+      label: {
+        type: "string",
+        description: "Email label (Personal, Work, etc.)",
+      },
+    },
+    fieldMapping: ["email"],
+  },
+  phone: {
+    type: "phone",
+    label: "Phone",
+    icon: "\u{1F4DE}", // 📞
+    url: "phone.tsx",
+    allowMultiple: true,
+    schema: {
+      phone: { type: "string", description: "Phone number" },
+      label: {
+        type: "string",
+        description: "Phone label (Mobile, Home, Work, etc.)",
+      },
+    },
+    fieldMapping: ["phone", "mobile", "telephone"],
+  },
+  "record-icon": {
+    type: "record-icon",
+    label: "Icon",
+    icon: "\u{1F3A8}", // 🎨
+    url: "record-icon.tsx",
+    internal: true,
+    schema: {
+      icon: { type: "string", description: "Custom icon emoji" },
+    },
+    fieldMapping: ["icon"],
+  },
+  nickname: {
+    type: "nickname",
+    label: "Nickname",
+    icon: "\u{1F4DB}", // 📛
+    url: "nickname.tsx",
+    allowMultiple: true,
+    schema: {
+      nickname: { type: "string", description: "Nickname or alias" },
+    },
+    fieldMapping: ["nickname", "alias"],
+  },
+  "simple-list": {
+    type: "simple-list",
+    label: "Checklist",
+    icon: "\u2611\uFE0F", // ☑️
+    url: "simple-list.tsx",
+    schema: {
+      items: { type: "array", description: "List items" },
+    },
+    fieldMapping: ["items", "checklist", "list"],
+  },
 
   // Controller modules - TypePicker needs special handling in record.tsx
-  // Metadata is inlined here to avoid circular dependency (see note at top)
   "type-picker": {
     type: "type-picker",
     label: "Type Picker",
     icon: "\u{1F3AF}", // 🎯 target emoji
-    createInstance: () => {
-      throw new Error(
-        "Use TypePickerModule directly with ContainerCoordinationContext",
-      );
-    },
+    url: "type-picker.tsx",
     internal: true,
   },
   // ExtractorModule is imported directly in record.tsx
@@ -192,15 +295,24 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     type: "extractor",
     label: "AI Extract",
     icon: "\u2728", // ✨
-    // createInstance is a no-op - record.tsx imports ExtractorModule directly
-    createInstance: () => {
-      throw new Error("Use ExtractorModule directly, not through registry");
-    },
+    url: "record/extraction/extractor-module.tsx",
     internal: false, // Show in Add dropdown - user can add this
   },
 };
 
-// Helper functions
+// ===== Dynamic Module Loading Types =====
+
+export interface ModuleLoadInfo {
+  url: string;
+  definition: SubCharmDefinition;
+}
+
+export interface ModuleLoadError {
+  error: string;
+}
+
+// ===== Helper Functions =====
+
 export function getAvailableTypes(): SubCharmDefinition[] {
   return Object.values(SUB_CHARM_REGISTRY);
 }
@@ -216,17 +328,27 @@ export function getDefinition(
   return SUB_CHARM_REGISTRY[type];
 }
 
-// Create a new sub-charm instance by type, optionally with initial values
-// Used for import/restore functionality
-export function createSubCharm(
+/**
+ * Get module URL for dynamic loading.
+ * Returns either { url, definition } for success or { error } for failure.
+ */
+export function getModuleUrl(
   type: string,
-  initialValues?: Record<string, unknown>,
-): unknown {
+): ModuleLoadInfo | ModuleLoadError {
   const def = SUB_CHARM_REGISTRY[type];
   if (!def) {
-    throw new Error(`Unknown sub-charm type: ${type}`);
+    return { error: `Unknown module type: ${type}` };
   }
-  return def.createInstance(initialValues);
+
+  // Get base URL from recipe environment
+  const env = getRecipeEnvironment();
+  // deno-lint-ignore no-explicit-any
+  const baseUrl = (env as any)?.baseUrl || "";
+
+  // Construct full URL - def.url is relative to packages/patterns/
+  const url = baseUrl ? `${baseUrl}/${def.url}` : def.url;
+
+  return { url, definition: def };
 }
 
 // Phase 2: Build combined extraction schema

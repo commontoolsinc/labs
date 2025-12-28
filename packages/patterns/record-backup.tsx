@@ -26,7 +26,8 @@ import {
   wish,
 } from "commontools";
 
-import { createSubCharm, getDefinition } from "./record/registry.ts";
+import { getDefinition, getModuleUrl } from "./record/registry.ts";
+import { fetchAndRunPattern } from "./system/common-tools.tsx";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 import Record from "./record.tsx";
 import Note from "./notes/note.tsx";
@@ -360,16 +361,26 @@ function parseImportJson(jsonText: string): {
 }
 
 /**
+ * Result from creating a module during import.
+ * Notes are created synchronously; other modules are async.
+ */
+interface ImportModuleResult {
+  charm: unknown; // The charm instance (may be reactive for async modules)
+  pending?: boolean; // True while async module is loading
+  error?: string; // Error message if loading failed
+}
+
+/**
  * Create a module from imported data
- * Returns the charm instance or null if type is unknown
+ * Returns ImportModuleResult or null if type is unknown
  * Throws if module creation fails
  */
 function createModuleFromData(
   type: string,
   data: Record<string, unknown>,
   recordPatternJson: string,
-): unknown | null {
-  // Special handling for notes - needs embedded flag and linkPattern
+): ImportModuleResult | null {
+  // Special handling for notes - needs embedded flag and linkPattern (synchronous)
   if (type === "notes") {
     // Type-safe content extraction
     let content = "";
@@ -391,7 +402,7 @@ function createModuleFromData(
     if (!note) {
       throw new Error("Note constructor returned null/undefined");
     }
-    return note;
+    return { charm: note }; // Synchronous - no pending/error
   }
 
   // Check if type is known
@@ -403,12 +414,24 @@ function createModuleFromData(
   // Coerce data types to match schema
   const coercedData = coerceDataTypes(type, data);
 
-  // Create module with imported data
-  const charm = createSubCharm(type, coercedData);
-  if (!charm) {
-    throw new Error(`createSubCharm for "${type}" returned null/undefined`);
+  // Get module URL and load dynamically
+  const loadInfo = getModuleUrl(type);
+  if ("error" in loadInfo) {
+    console.warn(`Cannot import module "${type}": ${loadInfo.error}`);
+    return null;
   }
-  return charm;
+
+  // Create module with imported data via fetchAndRunPattern
+  // Store loaded directly - it's a reactive reference that updates when pattern loads
+  const loaded = fetchAndRunPattern({
+    url: loadInfo.url,
+    args: Cell.of(coercedData),
+  });
+
+  // Return the loaded result - charm will be populated reactively when ready
+  return {
+    charm: loaded, // Store directly, extract .cell at render time
+  };
 }
 
 /**
@@ -460,13 +483,13 @@ const importRecords = handler<
 
       for (const moduleData of recordData.modules) {
         try {
-          const charm = createModuleFromData(
+          const moduleResult = createModuleFromData(
             moduleData.type,
             moduleData.data,
             recordPatternJson,
           );
 
-          if (charm === null) {
+          if (moduleResult === null) {
             // Unknown module type - skip with warning
             result.errors.push({
               record: recordData.title,
@@ -480,7 +503,9 @@ const importRecords = handler<
           subCharms.push({
             type: moduleData.type,
             pinned: moduleData.pinned,
-            charm,
+            charm: moduleResult.charm,
+            pending: moduleResult.pending,
+            error: moduleResult.error,
           });
         } catch (e) {
           result.errors.push({
@@ -497,13 +522,13 @@ const importRecords = handler<
 
       for (const moduleData of recordData.trashedModules) {
         try {
-          const charm = createModuleFromData(
+          const moduleResult = createModuleFromData(
             moduleData.type,
             moduleData.data,
             recordPatternJson,
           );
 
-          if (charm === null) {
+          if (moduleResult === null) {
             result.errors.push({
               record: recordData.title,
               module: `${moduleData.type} (trashed)`,
@@ -516,7 +541,9 @@ const importRecords = handler<
           trashedSubCharms.push({
             type: moduleData.type,
             pinned: moduleData.pinned,
-            charm,
+            charm: moduleResult.charm,
+            pending: moduleResult.pending,
+            error: moduleResult.error,
             trashedAt: moduleData.trashedAt,
           });
         } catch (e) {

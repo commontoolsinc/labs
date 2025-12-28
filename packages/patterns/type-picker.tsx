@@ -21,10 +21,12 @@ import type {
   ModuleMetadata,
 } from "./container-protocol.ts";
 import {
-  createTemplateModules,
   getTemplateList,
   type TemplateDefinition,
 } from "./record/template-registry.ts";
+import { getModuleUrl } from "./record/registry.ts";
+import { fetchAndRunPattern } from "./system/common-tools.tsx";
+import Note from "./notes/note.tsx";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 
 // ===== Self-Describing Metadata =====
@@ -52,17 +54,46 @@ interface TypePickerOutput {
 
 // Apply a template and trash self
 // Note: We find self by type "type-picker" since there should only be one
+/**
+ * Create a module charm by type.
+ * Notes are created synchronously, other modules are loaded via fetchAndRunPattern.
+ */
+function createModuleByType(
+  type: string,
+  initialValues?: Record<string, unknown>,
+): unknown {
+  if (type === "notes") {
+    return Note(initialValues || {});
+  }
+
+  // Get module URL and load dynamically
+  const loadInfo = getModuleUrl(type);
+  if ("error" in loadInfo) {
+    console.warn(`Cannot create module "${type}": ${loadInfo.error}`);
+    return undefined;
+  }
+
+  // fetchAndRunPattern returns { cell, error } or undefined while pending
+  // Return the loaded result directly - it will be undefined initially, then { cell, error }
+  // The reactive system will update when loading completes
+  const loaded = fetchAndRunPattern({
+    url: loadInfo.url,
+    args: Cell.of(initialValues || {}),
+  });
+
+  // Return loaded directly - ct-render will access .cell reactively
+  return loaded;
+}
+
 // Handler receives the context components separately for proper typing
 const applyTemplate = handler<
   unknown,
   {
     entries: Cell<SubCharmEntry[]>;
     trashedEntries: Cell<TrashedSubCharmEntry[]>;
-    // deno-lint-ignore no-explicit-any
-    createModule: any;
     templateId: string;
   }
->((_event, { entries, trashedEntries, createModule, templateId }) => {
+>((_event, { entries, trashedEntries, templateId }) => {
   const current = entries.get() || [];
 
   // Find and keep the notes module (should be first)
@@ -75,12 +106,27 @@ const applyTemplate = handler<
   // Find self by type (there should only be one type-picker)
   const selfEntry = current.find((e) => e?.type === "type-picker");
 
-  // Create factory for Notes using context's createModule
-  const createNotesCharm = () => createModule("notes");
+  // Get template definition to know which modules to create
+  const templateDef = getTemplateList().find((t) => t.id === templateId);
+  if (!templateDef) {
+    console.warn(`TypePicker: Unknown template "${templateId}"`);
+    return;
+  }
 
-  // Create template modules (skip notes since we keep existing one)
-  const templateEntries = createTemplateModules(templateId, createNotesCharm);
-  const newModules = templateEntries.filter((e) => e.type !== "notes");
+  // Create modules for this template (skip notes - we keep existing one)
+  const newModules: SubCharmEntry[] = [];
+  for (const moduleType of templateDef.modules) {
+    if (moduleType === "notes") continue; // Keep existing notes
+
+    const charm = createModuleByType(moduleType);
+    if (charm !== undefined) {
+      newModules.push({
+        type: moduleType,
+        pinned: templateDef.defaultPinned.includes(moduleType),
+        charm,
+      });
+    }
+  }
 
   // Build new list: notes + new template modules (excluding type-picker)
   const updatedList = [
@@ -132,7 +178,8 @@ const dismiss = handler<
 export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
   ({ context, dismissed }) => {
     // Extract context components for handlers
-    const { entries, trashedEntries, createModule } = context;
+    // Note: createModule is not used - we handle module creation directly in handlers
+    const { entries, trashedEntries } = context;
 
     // Get templates to display (excluding blank)
     const templates = getTemplateList().filter(
@@ -189,7 +236,6 @@ export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
                 onClick={applyTemplate({
                   entries,
                   trashedEntries,
-                  createModule,
                   templateId: template.id,
                 })}
                 style={{

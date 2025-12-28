@@ -25,14 +25,14 @@ import {
   recipe,
   UI,
 } from "commontools";
-import { createSubCharm } from "../registry.ts";
+import { getModuleUrl } from "../registry.ts";
+import { fetchAndRunPattern } from "../../system/common-tools.tsx";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "../types.ts";
 import type { ExtractedField, ExtractionPreview } from "./types.ts";
 import type { JSONSchema } from "./schema-utils.ts";
 import {
   buildExtractionSchemaFromCell,
   getFieldToTypeMapping,
-  getResultSchema,
   getSchemaForType,
 } from "./schema-utils.ts";
 import { SmartTextInput } from "./smart-text-input.tsx";
@@ -391,14 +391,26 @@ const applySelected = handler<
 
         // Only create module if we have at least one valid field
         if (Object.keys(initialValues).length > 0) {
-          const newCharm = createSubCharm(moduleType, initialValues);
-          // Capture schema at creation time for dynamic discovery
-          const schema = getResultSchema(newCharm);
+          // Get module URL and load dynamically
+          const loadInfo = getModuleUrl(moduleType);
+          if ("error" in loadInfo) {
+            console.warn(
+              `Cannot create module "${moduleType}": ${loadInfo.error}`,
+            );
+            continue;
+          }
+
+          // Create module with initial values via fetchAndRunPattern
+          // Store loaded directly - it's a reactive reference that updates when pattern loads
+          const loaded = fetchAndRunPattern({
+            url: loadInfo.url,
+            args: Cell.of(initialValues),
+          });
+
           newEntries.push({
             type: moduleType,
             pinned: false,
-            charm: newCharm,
-            schema,
+            charm: loaded, // Store directly, extract .cell at render time
           });
         }
       } catch (e) {
