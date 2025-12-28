@@ -16,6 +16,7 @@
     "./storage/telemetry": "./src/storage/telemetry.ts",
     "./traverse": "./src/traverse.ts",
     "./storage/cache": "./src/storage/cache.ts",
-    "./storage/cache.deno": "./src/storage/cache.deno.ts"
+    "./storage/cache.deno": "./src/storage/cache.deno.ts",
+    "./harness/runtime-modules": "./src/harness/runtime-modules.ts"
   }
 }

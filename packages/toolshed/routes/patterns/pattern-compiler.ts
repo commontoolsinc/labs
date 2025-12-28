@@ -12,19 +12,8 @@ import {
 } from "@commontools/ts-transformers";
 import { refer } from "@commontools/memory/reference";
 import { StaticCacheFS } from "@commontools/static";
+import { RuntimeModuleIdentifiers } from "@commontools/runner/harness/runtime-modules";
 import { PatternsServer } from "./patterns-server.ts";
-
-/**
- * Runtime module identifiers that are resolved at runtime, not bundled.
- * These match the identifiers in packages/runner/src/harness/runtime-modules.ts
- */
-const RUNTIME_MODULE_IDENTIFIERS = [
-  "commontools",
-  "turndown",
-  "@commontools/html",
-  "@commontools/builder",
-  "@commontools/runner",
-];
 
 /**
  * Console hook script injected into compiled patterns.
@@ -156,11 +145,19 @@ class LocalPatternResolver implements ProgramResolver {
 }
 
 /**
+ * Program with optional mainExport field.
+ * Matches RuntimeProgram from packages/runner/src/harness/types.ts
+ */
+type ProgramWithExport = Program & {
+  mainExport?: string;
+};
+
+/**
  * Pre-transform program with cts-enable directive and path prefixing.
- * Simplified version of packages/runner/src/harness/pretransform.ts
+ * Matches packages/runner/src/harness/pretransform.ts
  */
 function pretransformProgram(
-  program: Program,
+  program: ProgramWithExport,
   id: string,
 ): Program {
   // Transform cts-enable directives
@@ -175,6 +172,8 @@ function pretransformProgram(
 
   const exportNameds = `export * from "${prefix(main)}";`;
   const exportDefault = `export { default } from "${prefix(main)}";`;
+  // Only include default export if mainExport is "default" or undefined
+  const hasDefault = !program.mainExport || program.mainExport === "default";
 
   const files = [
     ...transformedFiles.map((source) => ({
@@ -183,7 +182,7 @@ function pretransformProgram(
     })),
     {
       name: `/index.ts`,
-      contents: `${exportNameds}\n${exportDefault}`,
+      contents: `${exportNameds}${hasDefault ? `\n${exportDefault}` : ""}`,
     },
   ];
 
@@ -216,6 +215,8 @@ export class PatternCompiler {
   private staticCache = new StaticCacheFS();
   private patternsServer = new PatternsServer();
   private initPromise: Promise<TypeScriptCompiler> | null = null;
+  /** Track in-flight compilations to prevent thundering herd */
+  private inFlight = new Map<string, Promise<CompiledPattern>>();
 
   /**
    * Lazily initialize the TypeScript compiler.
@@ -247,6 +248,28 @@ export class PatternCompiler {
     filename: string,
     options: CompileOptions = {},
   ): Promise<CompiledPattern> {
+    // Check if compilation is already in progress for this file
+    const existing = this.inFlight.get(filename);
+    if (existing) return existing;
+
+    // Start compilation and track it
+    const promise = this.doCompile(filename, options);
+    this.inFlight.set(filename, promise);
+
+    try {
+      return await promise;
+    } finally {
+      this.inFlight.delete(filename);
+    }
+  }
+
+  /**
+   * Internal compilation implementation.
+   */
+  private async doCompile(
+    filename: string,
+    options: CompileOptions,
+  ): Promise<CompiledPattern> {
     const { noCheck = true, includeSourceMap = true } = options;
 
     // 1. Get the compiler (lazy initialization)
@@ -257,7 +280,7 @@ export class PatternCompiler {
 
     // 3. Resolve the full program (main + all imports)
     const program = await compiler.resolveProgram(resolver, {
-      runtimeModules: RUNTIME_MODULE_IDENTIFIERS,
+      runtimeModules: RuntimeModuleIdentifiers,
     });
 
     // 4. Compute content hash for caching
@@ -282,10 +305,10 @@ export class PatternCompiler {
     const result = compiler.compile(transformed, {
       filename: `${shortHash}.js`,
       noCheck,
-      runtimeModules: RUNTIME_MODULE_IDENTIFIERS,
+      runtimeModules: RuntimeModuleIdentifiers,
       beforeTransformers: (prog) =>
         new CommonToolsTransformerPipeline().toFactories(prog),
-      // Don't export all - just the main module exports
+      bundleExportAll: true, // Matches Engine behavior - produces { main, exportMap }
       injectedScript: CONSOLE_HOOK_SCRIPT,
     });
 

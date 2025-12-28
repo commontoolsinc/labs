@@ -3,7 +3,6 @@ import { patternCompiler } from "./pattern-compiler.ts";
 import {
   compareETags,
   createCacheHeaders,
-  generateETag,
 } from "@commontools/static/etag";
 import { encodeBase64 } from "@std/encoding/base64";
 
@@ -46,8 +45,8 @@ export const getCompiledPattern = async (
       includeSourceMap: true,
     });
 
-    // Generate ETag from compiled JS content
-    const etag = await generateETag(new TextEncoder().encode(compiled.js));
+    // Use contentHash as ETag (same source = same output, deterministic compilation)
+    const etag = `"${compiled.contentHash}"`;
 
     // Check If-None-Match header for cache validation
     const ifNoneMatch = c.req.header("If-None-Match");
