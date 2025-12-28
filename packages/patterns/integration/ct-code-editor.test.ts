@@ -713,7 +713,437 @@ describe("ct-code-editor cursor stability", () => {
       `Head should be clamped to [0, 2], got ${clampedSelection.head}`,
     );
   });
+
+  // ==========================================================================
+  // ADVERSARIAL TESTS: Race conditions, timing attacks, edge cases
+  // ==========================================================================
+
+  it("ADVERSARIAL: Cell update at exact debounce boundary should not corrupt state", async () => {
+    // This tests the race condition where a Cell update arrives exactly
+    // when the debounce timer fires. The fix should handle this gracefully.
+    const page = shell.page();
+
+    await resetEditorState(page, charm);
+
+    await focusEditor(page);
+
+    // Type some text
+    await page.keyboard.type("Test");
+
+    // Wait for ALMOST the full debounce window (490ms of 500ms)
+    await new Promise((r) => setTimeout(r, 490));
+
+    // Send external update at the boundary
+    await charm.result.set("External at boundary", ["content"]);
+
+    // Let the race play out
+    await new Promise((r) => setTimeout(r, 200));
+
+    // After settling, editor and Cell should match
+    await waitFor(
+      async () => {
+        const e = await getEditorContent(page);
+        const c = charm.result.get(["content"]);
+        return e === c;
+      },
+      { timeout: 2000 },
+    );
+
+    // Cursor should be valid
+    const cursor = await getCursorPosition(page);
+    const finalContent = await getEditorContent(page);
+    assert(
+      cursor >= 0 && cursor <= finalContent.length,
+      `Cursor ${cursor} should be valid for content length ${finalContent.length}`,
+    );
+  });
+
+  it("ADVERSARIAL: Rapid alternating type-Cell-type-Cell pattern", async () => {
+    // Simulates a pathological case: user types, Cell updates, user types again
+    // repeatedly. This can expose issues with timestamp tracking.
+    const page = shell.page();
+
+    await resetEditorState(page, charm);
+
+    await focusEditor(page);
+
+    // Alternating pattern: type → Cell → type → Cell → type
+    for (let i = 0; i < 3; i++) {
+      // Type a character
+      await page.keyboard.type(`${i}`);
+
+      // Small delay to ensure typing is registered
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Send Cell update (different content to force conflict)
+      await charm.result.set(`External-${i}`, ["content"]);
+
+      // Another small delay
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    // Let things settle
+    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + 200));
+
+    // Editor should be in a consistent state
+    const content = await getEditorContent(page);
+    const cursor = await getCursorPosition(page);
+
+    assert(
+      cursor >= 0 && cursor <= content.length,
+      `Cursor ${cursor} should be valid for content length ${content.length}`,
+    );
+
+    // Verify Cell and editor are in sync
+    const cellValue = charm.result.get(["content"]) as string;
+    assertEquals(
+      content,
+      cellValue,
+      "Editor and Cell should be in sync after settling",
+    );
+  });
+
+  it("ADVERSARIAL: Multiple Cell updates while user is continuously typing", async () => {
+    // User types continuously (letters every 50ms) while external updates
+    // bombard the Cell. The editor should not corrupt or crash.
+    const page = shell.page();
+
+    await resetEditorState(page, charm);
+
+    await focusEditor(page);
+
+    // Start typing in the background (simulated)
+    const typingPromise = (async () => {
+      for (let i = 0; i < 10; i++) {
+        await page.keyboard.type(String.fromCharCode(65 + i)); // A, B, C...
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    })();
+
+    // Bombard with Cell updates concurrently
+    const cellBombardPromise = (async () => {
+      for (let i = 0; i < 5; i++) {
+        await new Promise((r) => setTimeout(r, 80));
+        await charm.result.set(`Bombard-${i}`, ["content"]);
+      }
+    })();
+
+    // Wait for both to complete
+    await Promise.all([typingPromise, cellBombardPromise]);
+
+    // Let debounce complete
+    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + 200));
+
+    // Final state should be consistent
+    const content = await getEditorContent(page);
+    const cursor = await getCursorPosition(page);
+    const cellValue = charm.result.get(["content"]) as string;
+
+    // Cursor must be valid
+    assert(
+      cursor >= 0 && cursor <= content.length,
+      `Cursor ${cursor} should be valid for content length ${content.length}`,
+    );
+
+    // Editor and Cell should be in sync
+    assertEquals(
+      content,
+      cellValue,
+      "Editor and Cell should be in sync after chaos",
+    );
+  });
+
+  it("ADVERSARIAL: Empty string Cell update during typing", async () => {
+    // Edge case: Cell is set to empty while user is typing.
+    // This can cause cursor position > content length if not handled.
+    const page = shell.page();
+
+    await resetEditorState(page, charm);
+
+    await focusEditor(page);
+
+    // Type some content
+    await page.keyboard.type("Hello World");
+
+    const cursorAfterTyping = await getCursorPosition(page);
+    assertEquals(cursorAfterTyping, 11);
+
+    // Immediately try to clear via Cell (within debounce window)
+    await charm.result.set("", ["content"]);
+
+    // Wait a bit but not full debounce
+    await new Promise((r) => setTimeout(r, 100));
+
+    // User continues typing
+    await page.keyboard.type("More");
+
+    // Let everything settle
+    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + 200));
+
+    // Editor should have user's content (user's typing wins during debounce)
+    const finalContent = await getEditorContent(page);
+    const cursor = await getCursorPosition(page);
+
+    assert(
+      cursor >= 0 && cursor <= finalContent.length,
+      `Cursor ${cursor} should be valid`,
+    );
+
+    // Content should contain what user typed (at least partially)
+    assert(
+      finalContent.length > 0,
+      "Editor should have content from user typing",
+    );
+  });
+
+  it("ADVERSARIAL: Very long content replacement should clamp cursor correctly", async () => {
+    // Test: set very long content, position cursor at end, then replace with short content.
+    // Cursor should be clamped, not left at an invalid position.
+    const page = shell.page();
+
+    await resetEditorState(page, charm);
+
+    // Set very long content
+    const longContent = "A".repeat(1000);
+    await charm.result.set(longContent, ["content"]);
+
+    await waitFor(
+      async () => (await getEditorContent(page)) === longContent,
+      { timeout: 2000 },
+    );
+
+    // Position cursor at the very end
+    await focusEditor(page);
+    await setCursorPosition(page, 1000);
+
+    const cursorAtEnd = await getCursorPosition(page);
+    assertEquals(cursorAtEnd, 1000, "Cursor should be at end of long content");
+
+    // Replace with very short content
+    await charm.result.set("X", ["content"]);
+
+    await waitFor(
+      async () => (await getEditorContent(page)) === "X",
+      { timeout: 2000 },
+    );
+
+    // Cursor should be clamped to valid range [0, 1]
+    const clampedCursor = await getCursorPosition(page);
+    assert(
+      clampedCursor >= 0 && clampedCursor <= 1,
+      `Cursor should be clamped to [0, 1], got ${clampedCursor}`,
+    );
+  });
+
+  it("ADVERSARIAL: Cell echo with slightly modified content should apply", async () => {
+    // Edge case: Cell echoes back content that's ALMOST the same as what
+    // was typed but with a small modification (e.g., trailing whitespace trimmed).
+    // The hash comparison should detect this and apply the update.
+    const page = shell.page();
+
+    await resetEditorState(page, charm);
+
+    await focusEditor(page);
+
+    // Type content with trailing spaces
+    await page.keyboard.type("Hello   ");
+
+    const cursorAfterTyping = await getCursorPosition(page);
+    assertEquals(cursorAfterTyping, 8); // "Hello   " is 8 chars
+
+    // Wait for debounce to send to Cell
+    await waitFor(
+      async () => charm.result.get(["content"]) === "Hello   ",
+      { timeout: DEBOUNCE_DELAY + 1000 },
+    );
+
+    // Simulate backend trimming the content
+    await charm.result.set("Hello", ["content"]);
+
+    // Wait for the update to apply
+    await waitFor(
+      async () => (await getEditorContent(page)) === "Hello",
+      { timeout: 2000 },
+    );
+
+    // Cursor should be clamped to new length
+    const finalCursor = await getCursorPosition(page);
+    assert(
+      finalCursor >= 0 && finalCursor <= 5,
+      `Cursor should be clamped to [0, 5], got ${finalCursor}`,
+    );
+  });
+
+  it("ADVERSARIAL: Typing during blur should not lose content", async () => {
+    // Edge case: user types, then blurs before debounce completes.
+    // The blur handler should flush any pending content.
+    const page = shell.page();
+
+    await resetEditorState(page, charm);
+
+    await focusEditor(page);
+
+    // Type some content
+    await page.keyboard.type("Pre-blur content");
+
+    // Immediately blur (before debounce)
+    await page.evaluate(`
+      (() => {
+        const active = document.activeElement;
+        if (active && active.blur) active.blur();
+      })()
+    `);
+
+    // Wait for blur handler to flush content
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Content should be saved to Cell
+    const cellValue = charm.result.get(["content"]) as string;
+    assertEquals(
+      cellValue,
+      "Pre-blur content",
+      "Content should be flushed on blur",
+    );
+  });
+
+  it("ADVERSARIAL: Special characters should not break hash comparison", async () => {
+    // Test with unicode, emoji, newlines - characters that might affect hashing
+    const page = shell.page();
+
+    await resetEditorState(page, charm);
+
+    await focusEditor(page);
+
+    // Type content with special characters
+    const specialContent = "Hello 世界 🎉\nNew line\ttab";
+    await page.keyboard.type(specialContent);
+
+    const cursorAfterTyping = await getCursorPosition(page);
+    assertEquals(cursorAfterTyping, specialContent.length);
+
+    // Wait for debounce
+    await waitFor(
+      async () => charm.result.get(["content"]) === specialContent,
+      { timeout: DEBOUNCE_DELAY + 1000 },
+    );
+
+    await new Promise((r) => setTimeout(r, DEBOUNCE_BUFFER));
+
+    // Cursor should not jump
+    const cursorAfterEcho = await getCursorPosition(page);
+    assertEquals(
+      cursorAfterEcho,
+      specialContent.length,
+      "Cursor should not jump with special characters",
+    );
+  });
+
+  it("ADVERSARIAL: Repeated identical Cell updates should be no-ops", async () => {
+    // Sending the same content repeatedly to Cell should not cause cursor jumps
+    const page = shell.page();
+
+    await resetEditorState(page, charm);
+
+    // Set initial content
+    await charm.result.set("Static content", ["content"]);
+    await waitFor(
+      async () => (await getEditorContent(page)) === "Static content",
+      { timeout: 2000 },
+    );
+
+    // Focus and position cursor in the middle
+    await focusEditor(page);
+    await setCursorPosition(page, 7);
+
+    const initialCursor = await getCursorPosition(page);
+    assertEquals(initialCursor, 7);
+
+    // Send same content 10 times rapidly
+    for (let i = 0; i < 10; i++) {
+      await charm.result.set("Static content", ["content"]);
+      await new Promise((r) => setTimeout(r, 20));
+    }
+
+    // Wait for any potential updates
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Cursor should not have moved (identical content = no-op)
+    const finalCursor = await getCursorPosition(page);
+    assertEquals(
+      finalCursor,
+      7,
+      "Cursor should not move when identical content is set",
+    );
+  });
+
+  it("ADVERSARIAL: Typing exactly at debounce expiry should commit correctly", async () => {
+    // Type, wait EXACTLY until debounce expires, then type again.
+    // Both inputs should be committed.
+    const page = shell.page();
+
+    await resetEditorState(page, charm);
+
+    await focusEditor(page);
+
+    // First typing burst
+    await page.keyboard.type("First");
+
+    // Wait for debounce to complete
+    await waitFor(
+      async () => charm.result.get(["content"]) === "First",
+      { timeout: DEBOUNCE_DELAY + 1000 },
+    );
+
+    // Verify Cell has first content
+    assertEquals(charm.result.get(["content"]) as string, "First");
+
+    // Immediately type more
+    await page.keyboard.type("Second");
+
+    const cursorAfterSecond = await getCursorPosition(page);
+    assertEquals(cursorAfterSecond, 11); // "FirstSecond"
+
+    // Wait for second debounce
+    await waitFor(
+      async () => charm.result.get(["content"]) === "FirstSecond",
+      { timeout: DEBOUNCE_DELAY + 1000 },
+    );
+
+    await new Promise((r) => setTimeout(r, DEBOUNCE_BUFFER));
+
+    // Cursor should still be correct
+    const finalCursor = await getCursorPosition(page);
+    assertEquals(finalCursor, 11);
+  });
 });
+
+/**
+ * Reset editor state to empty for test isolation.
+ * This is critical for adversarial tests that need clean state.
+ */
+async function resetEditorState(
+  page: Page,
+  charmController: CharmController,
+): Promise<void> {
+  // Clear editor using annotation to avoid triggering typing timestamp
+  await clearEditor(page);
+
+  // Also clear Cell
+  await charmController.result.set("", ["content"]);
+
+  // Wait for both to be empty and synchronized
+  await waitFor(
+    async () => {
+      const editorContent = await getEditorContent(page);
+      const cellValue = charmController.result.get(["content"]);
+      return editorContent === "" && cellValue === "";
+    },
+    { timeout: 2000, delay: 50 },
+  );
+
+  // Extra settling time for any pending subscription callbacks
+  await new Promise((r) => setTimeout(r, 300));
+}
 
 /**
  * Get current cursor position in the ct-code-editor
