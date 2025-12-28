@@ -46,6 +46,8 @@ type Input = {
   content?: Cell<Default<string, "">>;
   isHidden?: Default<boolean, false>;
   noteId?: Default<string, "">;
+  /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
+  linkPattern?: Cell<Default<string, "">>;
 };
 
 /** Represents a small #note a user took to remember some text. */
@@ -246,472 +248,492 @@ const menuGoToRecentNote = handler<
   return navigateTo(note);
 });
 
-const Note = pattern<Input, Output>(({ title, content, isHidden, noteId }) => {
-  const { allCharms } = wish<{ allCharms: MinimalCharm[] }>("/");
-  const mentionable = wish<Default<MentionableCharm[], []>>(
-    "#mentionable",
-  );
-  const recentCharms = wish<MinimalCharm[]>("#recent");
-  const mentioned = Cell.of<MentionableCharm[]>([]);
+const Note = pattern<Input, Output>(
+  ({ title, content, isHidden, noteId, linkPattern }) => {
+    const { allCharms } = wish<{ allCharms: MinimalCharm[] }>("/");
+    const mentionable = wish<Default<MentionableCharm[], []>>(
+      "#mentionable",
+    );
+    const recentCharms = wish<MinimalCharm[]>("#recent");
+    const mentioned = Cell.of<MentionableCharm[]>([]);
 
-  // Dropdown menu state
-  const menuOpen = Cell.of(false);
+    // Dropdown menu state
+    const menuOpen = Cell.of(false);
 
-  // Sidebar menu state (hamburger)
-  const sidebarOpen = Cell.of(false);
+    // Sidebar menu state (hamburger)
+    const sidebarOpen = Cell.of(false);
 
-  // State for inline title editing
-  const isEditingTitle = Cell.of<boolean>(false);
+    // State for inline title editing
+    const isEditingTitle = Cell.of<boolean>(false);
 
-  // Filter to find all notebooks (using 📓 prefix in NAME)
-  const notebooks = computed(() =>
-    allCharms.filter((charm: any) => {
-      const name = charm?.[NAME];
-      return typeof name === "string" && name.startsWith("📓");
-    }) as unknown as NotebookCharm[]
-  );
+    // Filter to find all notebooks (using 📓 prefix in NAME)
+    const notebooks = computed(() =>
+      allCharms.filter((charm: any) => {
+        const name = charm?.[NAME];
+        return typeof name === "string" && name.startsWith("📓");
+      }) as unknown as NotebookCharm[]
+    );
 
-  // Check if "All Notes" charm exists in the space
-  const allNotesCharm = computed(() =>
-    allCharms.find((charm: any) => {
-      const name = charm?.[NAME];
-      return typeof name === "string" && name.startsWith("All Notes");
-    })
-  );
+    // Check if "All Notes" charm exists in the space
+    const allNotesCharm = computed(() =>
+      allCharms.find((charm: any) => {
+        const name = charm?.[NAME];
+        return typeof name === "string" && name.startsWith("All Notes");
+      })
+    );
 
-  // Filter recent charms for notes only (📝 prefix), excluding current note
-  const recentNotes = computed(() => {
-    let myId = "";
-    try {
-      myId = JSON.parse(JSON.stringify(noteId)) as string;
-    } catch { /* ignore */ }
+    // Filter recent charms for notes only (📝 prefix), excluding current note
+    const recentNotes = computed(() => {
+      let myId = "";
+      try {
+        myId = JSON.parse(JSON.stringify(noteId)) as string;
+      } catch { /* ignore */ }
 
-    return (recentCharms ?? []).filter((charm: any) => {
-      const name = charm?.[NAME];
-      if (typeof name !== "string" || !name.startsWith("📝")) return false;
-      // Exclude current note
-      return charm?.noteId !== myId;
-    }).slice(0, 5) as NoteCharm[]; // Limit to 5 recent
-  });
+      return (recentCharms ?? []).filter((charm: any) => {
+        const name = charm?.[NAME];
+        if (typeof name !== "string" || !name.startsWith("📝")) return false;
+        // Exclude current note
+        return charm?.noteId !== myId;
+      }).slice(0, 5) as NoteCharm[]; // Limit to 5 recent
+    });
 
-  // Compute which notebooks contain this note by noteId
-  const containingNotebookNames = computed(() => {
-    // Get our noteId as a resolved string (proxies don't auto-resolve for own inputs)
-    let myId: string;
-    try {
-      myId = JSON.parse(JSON.stringify(noteId)) as string;
-    } catch {
-      myId = "";
-    }
-    if (!myId) return [] as string[];
+    // Compute which notebooks contain this note by noteId
+    const containingNotebookNames = computed(() => {
+      // Get our noteId as a resolved string (proxies don't auto-resolve for own inputs)
+      let myId: string;
+      try {
+        myId = JSON.parse(JSON.stringify(noteId)) as string;
+      } catch {
+        myId = "";
+      }
+      if (!myId) return [] as string[];
 
-    const result: string[] = [];
-    for (const nb of notebooks) {
-      const nbNotes = (nb as any)?.notes ?? [];
-      const nbName = (nb as any)?.[NAME] ?? "";
-      for (const n of nbNotes) {
-        if (n?.noteId === myId) {
-          result.push(nbName);
-          break;
+      const result: string[] = [];
+      for (const nb of notebooks) {
+        const nbNotes = (nb as any)?.notes ?? [];
+        const nbName = (nb as any)?.[NAME] ?? "";
+        for (const n of nbNotes) {
+          if (n?.noteId === myId) {
+            result.push(nbName);
+            break;
+          }
         }
       }
-    }
-    return result;
-  });
-
-  // Compute the actual notebooks (with notes) that contain this note
-  // Use .filter() to preserve proxy chain (manual push loses it)
-  const containingNotebooks = computed(() => {
-    let myId: string;
-    try {
-      myId = JSON.parse(JSON.stringify(noteId)) as string;
-    } catch {
-      myId = "";
-    }
-    if (!myId) return [] as NotebookCharm[];
-
-    return notebooks.filter((nb) => {
-      const nbNotes = (nb as any)?.notes ?? [];
-      return nbNotes.some((n: any) => n?.noteId === myId);
+      return result;
     });
-  });
 
-  // Flattened sidebar items: notebooks and their notes in single array
-  // Enables single-level map to pass sidebarOpen to handlers
-  const sidebarItems = computed(() => {
-    let myId = "";
-    try {
-      myId = JSON.parse(JSON.stringify(noteId)) as string;
-    } catch { /* ignore parse errors */ }
-
-    const items: Array<{
-      note: NoteCharm;
-      current: number; // 1 = yes, 0 = no
-    }> = [];
-    for (const notebook of containingNotebooks) {
-      for (const note of (notebook.notes ?? []) as NoteCharm[]) {
-        items.push({
-          note,
-          current: note?.noteId === myId ? 1 : 0,
-        });
+    // Compute the actual notebooks (with notes) that contain this note
+    // Use .filter() to preserve proxy chain (manual push loses it)
+    const containingNotebooks = computed(() => {
+      let myId: string;
+      try {
+        myId = JSON.parse(JSON.stringify(noteId)) as string;
+      } catch {
+        myId = "";
       }
-    }
-    return items;
-  });
+      if (!myId) return [] as NotebookCharm[];
 
-  // populated in backlinks-index.tsx
-  const backlinks = Cell.of<MentionableCharm[]>([]);
+      return notebooks.filter((nb) => {
+        const nbNotes = (nb as any)?.notes ?? [];
+        return nbNotes.some((n: any) => n?.noteId === myId);
+      });
+    });
 
-  // The only way to serialize a pattern, apparently?
-  const patternJson = computed(() => JSON.stringify(Note));
+    // Flattened sidebar items: notebooks and their notes in single array
+    // Enables single-level map to pass sidebarOpen to handlers
+    const sidebarItems = computed(() => {
+      let myId = "";
+      try {
+        myId = JSON.parse(JSON.stringify(noteId)) as string;
+      } catch { /* ignore parse errors */ }
 
-  // Editor component - used in both full UI and embeddedUI
-  const editorUI = (
-    <ct-code-editor
-      $value={content}
-      $mentionable={mentionable}
-      $mentioned={mentioned}
-      $pattern={patternJson}
-      onbacklink-click={handleCharmLinkClick({})}
-      onbacklink-create={handleNewBacklink({ mentionable })}
-      language="text/markdown"
-      theme="light"
-      wordWrap
-      tabIndent
-      lineNumbers
-    />
-  );
+      const items: Array<{
+        note: NoteCharm;
+        current: number; // 1 = yes, 0 = no
+      }> = [];
+      for (const notebook of containingNotebooks) {
+        for (const note of (notebook.notes ?? []) as NoteCharm[]) {
+          items.push({
+            note,
+            current: note?.noteId === myId ? 1 : 0,
+          });
+        }
+      }
+      return items;
+    });
 
-  return {
-    [NAME]: computed(() => `📝 ${title.get()}`),
-    [UI]: (
-      <ct-screen>
-        <ct-vstack
-          slot="header"
-          gap="2"
-          padding="4"
-          style={{
-            borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
-          }}
-        >
-          <ct-hstack
-            gap="3"
-            style={{ alignItems: "center" }}
+    // populated in backlinks-index.tsx
+    const backlinks = Cell.of<MentionableCharm[]>([]);
+
+    // Use provided linkPattern or default to creating new Notes
+    // linkPattern is a Cell<string> - access reactively, not as raw string
+    const patternJson = computed(() => {
+      // deno-lint-ignore no-explicit-any
+      const lpValue = (linkPattern as any)?.get?.() ?? linkPattern;
+      const custom = typeof lpValue === "string" ? lpValue.trim() : "";
+      return custom || JSON.stringify(Note);
+    });
+
+    // Editor component - used in both full UI and embeddedUI
+    const editorUI = (
+      <ct-code-editor
+        $value={content}
+        $mentionable={mentionable}
+        $mentioned={mentioned}
+        $pattern={patternJson}
+        onbacklink-click={handleCharmLinkClick({})}
+        onbacklink-create={handleNewBacklink({ mentionable })}
+        language="text/markdown"
+        theme="light"
+        wordWrap
+        tabIndent
+        lineNumbers
+      />
+    );
+
+    return {
+      [NAME]: computed(() => `📝 ${title.get()}`),
+      [UI]: (
+        <ct-screen>
+          <ct-vstack
+            slot="header"
+            gap="2"
+            padding="4"
+            style={{
+              borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
+            }}
           >
-            {/* Hamburger menu button - only show if note is in at least one notebook */}
-            <div
-              style={{
-                display: computed(() =>
-                  containingNotebooks.length > 0 ? "flex" : "none"
-                ),
-              }}
+            <ct-hstack
+              gap="3"
+              style={{ alignItems: "center" }}
             >
-              <ct-button
-                variant="ghost"
-                onClick={toggleSidebar({ sidebarOpen })}
+              {/* Hamburger menu button - only show if note is in at least one notebook */}
+              <div
                 style={{
-                  padding: "6px 8px",
-                  minWidth: "32px",
-                  borderRadius: "6px",
+                  display: computed(() =>
+                    containingNotebooks.length > 0 ? "flex" : "none"
+                  ),
                 }}
-                title="Show notebook notes"
               >
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "3px",
-                    width: "18px",
-                  }}
-                >
-                  <div
-                    style={{
-                      height: "2px",
-                      background: "currentColor",
-                      borderRadius: "1px",
-                    }}
-                  />
-                  <div
-                    style={{
-                      height: "2px",
-                      background: "currentColor",
-                      borderRadius: "1px",
-                    }}
-                  />
-                  <div
-                    style={{
-                      height: "2px",
-                      background: "currentColor",
-                      borderRadius: "1px",
-                    }}
-                  />
-                </div>
-              </ct-button>
-            </div>
-
-            {/* Sidebar backdrop */}
-            <div
-              onClick={closeSidebar({ sidebarOpen })}
-              style={{
-                display: computed(() => (sidebarOpen.get() ? "block" : "none")),
-                position: "fixed",
-                inset: "0",
-                background: "rgba(0,0,0,0.3)",
-                zIndex: "998",
-              }}
-            />
-
-            {/* Sidebar dropdown with notes grouped by notebook */}
-            <ct-vstack
-              gap="0"
-              style={{
-                display: computed(() => (sidebarOpen.get() ? "flex" : "none")),
-                position: "fixed",
-                top: "60px",
-                left: "16px",
-                background: "var(--ct-color-bg, white)",
-                border: "1px solid var(--ct-color-border, #e5e5e7)",
-                borderRadius: "12px",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-                minWidth: "220px",
-                maxWidth: "300px",
-                maxHeight: "70vh",
-                overflow: "auto",
-                zIndex: "1000",
-                padding: "8px 0",
-              }}
-            >
-              {sidebarItems.map((item) => (
                 <ct-button
                   variant="ghost"
-                  onClick={sidebarGoToNote({ note: item.note, sidebarOpen })}
+                  onClick={toggleSidebar({ sidebarOpen })}
                   style={{
-                    justifyContent: "flex-start",
-                    padding: "2px 16px",
-                    fontSize: "13px",
-                    opacity: item.current === 1 ? 0.5 : 1,
+                    padding: "6px 8px",
+                    minWidth: "32px",
+                    borderRadius: "6px",
                   }}
+                  title="Show notebook notes"
                 >
-                  {item.current === 1 ? "✓ " : "   "}
-                  {item.note?.[NAME] ?? "Untitled"}
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "3px",
+                      width: "18px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: "2px",
+                        background: "currentColor",
+                        borderRadius: "1px",
+                      }}
+                    />
+                    <div
+                      style={{
+                        height: "2px",
+                        background: "currentColor",
+                        borderRadius: "1px",
+                      }}
+                    />
+                    <div
+                      style={{
+                        height: "2px",
+                        background: "currentColor",
+                        borderRadius: "1px",
+                      }}
+                    />
+                  </div>
                 </ct-button>
-              ))}
-            </ct-vstack>
-
-            {/* Editable Title - click to edit */}
-            <div
-              style={{
-                display: computed(() => isEditingTitle.get() ? "none" : "flex"),
-                alignItems: "center",
-                gap: "8px",
-                cursor: "pointer",
-                flex: 1,
-              }}
-              onClick={startEditingTitle({ isEditingTitle })}
-            >
-              <span style={{ margin: 0, fontSize: "15px", fontWeight: "600" }}>
-                {title}
-              </span>
-            </div>
-            <div
-              style={{
-                display: computed(() => isEditingTitle.get() ? "flex" : "none"),
-                flex: 1,
-                marginRight: "12px",
-              }}
-            >
-              <ct-input
-                $value={title}
-                placeholder="Note title..."
-                style={{ flex: 1 }}
-                onct-blur={stopEditingTitle({ isEditingTitle })}
-                onct-keydown={handleTitleKeydown({ isEditingTitle })}
-              />
-            </div>
-            <ct-button
-              variant="ghost"
-              onClick={toggleMenu({ menuOpen })}
-              style={{
-                padding: "8px 16px",
-                fontSize: "16px",
-                borderRadius: "8px",
-              }}
-            >
-              Notebooks {"\u25BE"}
-            </ct-button>
-
-            {/* Backdrop to close menu when clicking outside */}
-            <div
-              onClick={closeMenu({ menuOpen })}
-              style={{
-                display: computed(() => (menuOpen.get() ? "block" : "none")),
-                position: "fixed",
-                inset: "0",
-                zIndex: "999",
-              }}
-            />
-
-            {/* Dropdown Menu */}
-            <ct-vstack
-              gap="0"
-              style={{
-                display: computed(() => (menuOpen.get() ? "flex" : "none")),
-                position: "fixed",
-                top: "112px",
-                right: "16px",
-                background: "var(--ct-color-bg, white)",
-                border: "1px solid var(--ct-color-border, #e5e5e7)",
-                borderRadius: "12px",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-                minWidth: "180px",
-                zIndex: "1000",
-                padding: "4px",
-              }}
-            >
-              <ct-button
-                variant="ghost"
-                onClick={menuNewNote({ menuOpen, allCharms })}
-                style={{ justifyContent: "flex-start" }}
-              >
-                {"\u00A0\u00A0"}📝 New Note
-              </ct-button>
-
-              {/* Recent Notes section - only show if there are recent notes */}
-              <div
-                style={{
-                  display: computed(() =>
-                    recentNotes.length > 0 ? "block" : "none"
-                  ),
-                  height: "1px",
-                  background: "var(--ct-color-border, #e5e5e7)",
-                  margin: "4px 8px",
-                }}
-              />
-              <div
-                style={{
-                  display: computed(() =>
-                    recentNotes.length > 0 ? "block" : "none"
-                  ),
-                  padding: "4px 12px 2px",
-                  fontSize: "11px",
-                  color: "var(--ct-color-text-secondary, #666)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.5px",
-                }}
-              >
-                Recent
               </div>
-              {recentNotes.map((note) => (
-                <ct-button
-                  variant="ghost"
-                  onClick={menuGoToRecentNote({ menuOpen, note })}
-                  style={{ justifyContent: "flex-start", fontSize: "13px" }}
-                >
-                  {"\u00A0\u00A0"}
-                  {note[NAME]}
-                </ct-button>
-              ))}
 
-              {/* Divider */}
+              {/* Sidebar backdrop */}
               <div
+                onClick={closeSidebar({ sidebarOpen })}
                 style={{
-                  height: "1px",
-                  background: "var(--ct-color-border, #e5e5e7)",
-                  margin: "4px 8px",
+                  display: computed(
+                    () => (sidebarOpen.get() ? "block" : "none"),
+                  ),
+                  position: "fixed",
+                  inset: "0",
+                  background: "rgba(0,0,0,0.3)",
+                  zIndex: "998",
                 }}
               />
 
-              {/* List of notebooks with ✓ for membership */}
-              {notebooks.map((notebook) => (
+              {/* Sidebar dropdown with notes grouped by notebook */}
+              <ct-vstack
+                gap="0"
+                style={{
+                  display: computed(
+                    () => (sidebarOpen.get() ? "flex" : "none"),
+                  ),
+                  position: "fixed",
+                  top: "60px",
+                  left: "16px",
+                  background: "var(--ct-color-bg, white)",
+                  border: "1px solid var(--ct-color-border, #e5e5e7)",
+                  borderRadius: "12px",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                  minWidth: "220px",
+                  maxWidth: "300px",
+                  maxHeight: "70vh",
+                  overflow: "auto",
+                  zIndex: "1000",
+                  padding: "8px 0",
+                }}
+              >
+                {sidebarItems.map((item) => (
+                  <ct-button
+                    variant="ghost"
+                    onClick={sidebarGoToNote({ note: item.note, sidebarOpen })}
+                    style={{
+                      justifyContent: "flex-start",
+                      padding: "2px 16px",
+                      fontSize: "13px",
+                      opacity: item.current === 1 ? 0.5 : 1,
+                    }}
+                  >
+                    {item.current === 1 ? "✓ " : "   "}
+                    {item.note?.[NAME] ?? "Untitled"}
+                  </ct-button>
+                ))}
+              </ct-vstack>
+
+              {/* Editable Title - click to edit */}
+              <div
+                style={{
+                  display: computed(() =>
+                    isEditingTitle.get() ? "none" : "flex"
+                  ),
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: "pointer",
+                  flex: 1,
+                }}
+                onClick={startEditingTitle({ isEditingTitle })}
+              >
+                <span
+                  style={{ margin: 0, fontSize: "15px", fontWeight: "600" }}
+                >
+                  {title}
+                </span>
+              </div>
+              <div
+                style={{
+                  display: computed(() =>
+                    isEditingTitle.get() ? "flex" : "none"
+                  ),
+                  flex: 1,
+                  marginRight: "12px",
+                }}
+              >
+                <ct-input
+                  $value={title}
+                  placeholder="Note title..."
+                  style={{ flex: 1 }}
+                  onct-blur={stopEditingTitle({ isEditingTitle })}
+                  onct-keydown={handleTitleKeydown({ isEditingTitle })}
+                />
+              </div>
+              <ct-button
+                variant="ghost"
+                onClick={toggleMenu({ menuOpen })}
+                style={{
+                  padding: "8px 16px",
+                  fontSize: "16px",
+                  borderRadius: "8px",
+                }}
+              >
+                Notebooks {"\u25BE"}
+              </ct-button>
+
+              {/* Backdrop to close menu when clicking outside */}
+              <div
+                onClick={closeMenu({ menuOpen })}
+                style={{
+                  display: computed(() => (menuOpen.get() ? "block" : "none")),
+                  position: "fixed",
+                  inset: "0",
+                  zIndex: "999",
+                }}
+              />
+
+              {/* Dropdown Menu */}
+              <ct-vstack
+                gap="0"
+                style={{
+                  display: computed(() => (menuOpen.get() ? "flex" : "none")),
+                  position: "fixed",
+                  top: "112px",
+                  right: "16px",
+                  background: "var(--ct-color-bg, white)",
+                  border: "1px solid var(--ct-color-border, #e5e5e7)",
+                  borderRadius: "12px",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                  minWidth: "180px",
+                  zIndex: "1000",
+                  padding: "4px",
+                }}
+              >
                 <ct-button
                   variant="ghost"
-                  onClick={menuGoToNotebook({ menuOpen, notebook })}
+                  onClick={menuNewNote({ menuOpen, allCharms })}
                   style={{ justifyContent: "flex-start" }}
                 >
-                  {"\u00A0\u00A0"}
-                  {notebook[NAME]}
-                  {computed(() => {
-                    const nbName = (notebook as any)?.[NAME] ?? "";
-                    return containingNotebookNames.includes(nbName) ? " ✓" : "";
-                  })}
+                  {"\u00A0\u00A0"}📝 New Note
                 </ct-button>
-              ))}
 
-              {/* Divider + All Notes - only show if All Notes charm exists */}
-              <div
-                style={{
-                  display: computed(() => allNotesCharm ? "block" : "none"),
-                  height: "1px",
-                  background: "var(--ct-color-border, #e5e5e7)",
-                  margin: "4px 8px",
-                }}
-              />
+                {/* Recent Notes section - only show if there are recent notes */}
+                <div
+                  style={{
+                    display: computed(() =>
+                      recentNotes.length > 0 ? "block" : "none"
+                    ),
+                    height: "1px",
+                    background: "var(--ct-color-border, #e5e5e7)",
+                    margin: "4px 8px",
+                  }}
+                />
+                <div
+                  style={{
+                    display: computed(() =>
+                      recentNotes.length > 0 ? "block" : "none"
+                    ),
+                    padding: "4px 12px 2px",
+                    fontSize: "11px",
+                    color: "var(--ct-color-text-secondary, #666)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.5px",
+                  }}
+                >
+                  Recent
+                </div>
+                {recentNotes.map((note) => (
+                  <ct-button
+                    variant="ghost"
+                    onClick={menuGoToRecentNote({ menuOpen, note })}
+                    style={{ justifyContent: "flex-start", fontSize: "13px" }}
+                  >
+                    {"\u00A0\u00A0"}
+                    {note[NAME]}
+                  </ct-button>
+                ))}
 
+                {/* Divider */}
+                <div
+                  style={{
+                    height: "1px",
+                    background: "var(--ct-color-border, #e5e5e7)",
+                    margin: "4px 8px",
+                  }}
+                />
+
+                {/* List of notebooks with ✓ for membership */}
+                {notebooks.map((notebook) => (
+                  <ct-button
+                    variant="ghost"
+                    onClick={menuGoToNotebook({ menuOpen, notebook })}
+                    style={{ justifyContent: "flex-start" }}
+                  >
+                    {"\u00A0\u00A0"}
+                    {notebook[NAME]}
+                    {computed(() => {
+                      const nbName = (notebook as any)?.[NAME] ?? "";
+                      return containingNotebookNames.includes(nbName)
+                        ? " ✓"
+                        : "";
+                    })}
+                  </ct-button>
+                ))}
+
+                {/* Divider + All Notes - only show if All Notes charm exists */}
+                <div
+                  style={{
+                    display: computed(() => allNotesCharm ? "block" : "none"),
+                    height: "1px",
+                    background: "var(--ct-color-border, #e5e5e7)",
+                    margin: "4px 8px",
+                  }}
+                />
+
+                <ct-button
+                  variant="ghost"
+                  onClick={menuAllNotebooks({ menuOpen, allCharms })}
+                  style={{
+                    display: computed(() => allNotesCharm ? "flex" : "none"),
+                    justifyContent: "flex-start",
+                  }}
+                >
+                  {"\u00A0\u00A0"}📁 All Notes
+                </ct-button>
+              </ct-vstack>
+            </ct-hstack>
+          </ct-vstack>
+
+          {editorUI}
+
+          <ct-hstack slot="footer">
+            {backlinks?.map((charm) => (
               <ct-button
-                variant="ghost"
-                onClick={menuAllNotebooks({ menuOpen, allCharms })}
-                style={{
-                  display: computed(() => allNotesCharm ? "flex" : "none"),
-                  justifyContent: "flex-start",
-                }}
+                onClick={handleCharmLinkClicked({ charm })}
               >
-                {"\u00A0\u00A0"}📁 All Notes
+                {charm?.[NAME]}
               </ct-button>
-            </ct-vstack>
+            ))}
           </ct-hstack>
-        </ct-vstack>
-
-        {editorUI}
-
-        <ct-hstack slot="footer">
-          {backlinks?.map((charm) => (
-            <ct-button
-              onClick={handleCharmLinkClicked({ charm })}
-            >
-              {charm?.[NAME]}
-            </ct-button>
-          ))}
-        </ct-hstack>
-      </ct-screen>
-    ),
-    title,
-    content,
-    mentioned,
-    backlinks,
-    isHidden,
-    noteId,
-    grep: patternTool(
-      ({ query, content }: { query: string; content: string }) => {
-        return computed(() => {
-          return content.split("\n").filter((c) => c.includes(query));
-        });
-      },
-      { content },
-    ),
-    translate: patternTool(
-      (
-        { language, content }: {
-          language: string;
-          content: string;
+        </ct-screen>
+      ),
+      title,
+      content,
+      mentioned,
+      backlinks,
+      isHidden,
+      noteId,
+      grep: patternTool(
+        ({ query, content }: { query: string; content: string }) => {
+          return computed(() => {
+            return content.split("\n").filter((c) => c.includes(query));
+          });
         },
-      ) => {
-        const genResult = generateText({
-          system: computed(() => `Translate the content to ${language}.`),
-          prompt: computed(() => `<to_translate>${content}</to_translate>`),
-        });
+        { content },
+      ),
+      translate: patternTool(
+        (
+          { language, content }: {
+            language: string;
+            content: string;
+          },
+        ) => {
+          const genResult = generateText({
+            system: computed(() => `Translate the content to ${language}.`),
+            prompt: computed(() => `<to_translate>${content}</to_translate>`),
+          });
 
-        return computed(() => {
-          if (genResult.pending) return undefined;
-          if (genResult.result == null) return "Error occured";
-          return genResult.result;
-        });
-      },
-      { content },
-    ),
-    editContent: handleEditContent({ content }),
-    // Minimal UI for embedding in containers (e.g., Record modules)
-    embeddedUI: editorUI,
-  };
-});
+          return computed(() => {
+            if (genResult.pending) return undefined;
+            if (genResult.result == null) return "Error occured";
+            return genResult.result;
+          });
+        },
+        { content },
+      ),
+      editContent: handleEditContent({ content }),
+      // Minimal UI for embedding in containers (e.g., Record modules)
+      embeddedUI: editorUI,
+    };
+  },
+);
 
 export default Note;
