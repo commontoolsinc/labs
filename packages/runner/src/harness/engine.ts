@@ -240,6 +240,27 @@ export class Engine extends EventTarget implements Harness {
     }
     return this.internals;
   }
+
+  /**
+   * Clean up resources held by the engine.
+   * Clears accumulated source maps and other state to prevent memory leaks.
+   */
+  dispose(): void {
+    // Clear global console hook to prevent memory leak via the Engine reference
+    // @ts-ignore: Dynamic property access for cleanup - globalThis doesn't have this symbol typed
+    if (globalThis[RUNTIME_ENGINE_CONSOLE_HOOK]) {
+      // @ts-ignore: Dynamic property deletion - TypeScript doesn't understand symbol-keyed globalThis properties
+      delete globalThis[RUNTIME_ENGINE_CONSOLE_HOOK];
+    }
+
+    if (this.internals) {
+      // Clear the UnsafeEvalRuntime which holds accumulated source maps
+      this.internals.runtime.clear();
+
+      // Clear references to allow GC
+      this.internals = undefined;
+    }
+  }
 }
 
 function computeId(program: Program): string {

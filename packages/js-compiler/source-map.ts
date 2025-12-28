@@ -1,5 +1,15 @@
 import { SourceMap } from "./interface.ts";
 import { MappedPosition, SourceMapConsumer } from "source-map-js";
+import { getLogger } from "@commontools/utils/logger";
+
+const logger = getLogger("source-map");
+
+/**
+ * Maximum number of source maps to cache in memory.
+ * When exceeded, oldest (least recently used) entries are evicted.
+ * Set conservatively to prevent OOM in long-running processes.
+ */
+const MAX_SOURCE_MAP_CACHE_SIZE = 50;
 
 // Parses strings like the following into function, filename, line and columns:
 /// ```
@@ -18,8 +28,71 @@ export class SourceMapParser {
   private sourceMaps = new Map<string, SourceMap>();
   private consumers = new Map<string, SourceMapConsumer>();
 
+  /**
+   * Evict oldest source maps if cache exceeds MAX_SOURCE_MAP_CACHE_SIZE.
+   * Uses Map insertion order for LRU - oldest entries are first.
+   */
+  private evictIfNeeded(): void {
+    while (this.sourceMaps.size > MAX_SOURCE_MAP_CACHE_SIZE) {
+      const oldestFilename = this.sourceMaps.keys().next().value;
+      if (oldestFilename === undefined) break;
+
+      // Remove from both caches
+      this.sourceMaps.delete(oldestFilename);
+      this.consumers.delete(oldestFilename);
+
+      logger.debug(
+        "source-map",
+        `Evicted source map ${oldestFilename} (cache size: ${this.sourceMaps.size})`,
+      );
+    }
+  }
+
+  /**
+   * Touch a source map to mark it as recently used (moves to end of Map).
+   * Call this on cache hits to maintain LRU order.
+   */
+  private touch(filename: string): void {
+    // Re-insert sourceMaps entry to move to end
+    const sourceMap = this.sourceMaps.get(filename);
+    if (sourceMap) {
+      this.sourceMaps.delete(filename);
+      this.sourceMaps.set(filename, sourceMap);
+    }
+
+    // Re-insert consumers entry to move to end (if exists)
+    const consumer = this.consumers.get(filename);
+    if (consumer) {
+      this.consumers.delete(filename);
+      this.consumers.set(filename, consumer);
+    }
+  }
+
   load(filename: string, sourceMap: SourceMap) {
+    // If already exists, touch to mark as recently used
+    if (this.sourceMaps.has(filename)) {
+      this.touch(filename);
+      return;
+    }
+
     this.sourceMaps.set(filename, sourceMap);
+    this.evictIfNeeded();
+  }
+
+  /**
+   * Clear all accumulated source maps and consumers.
+   * Used for cleanup when the runtime is disposed.
+   */
+  clear(): void {
+    this.sourceMaps.clear();
+    this.consumers.clear();
+  }
+
+  /**
+   * Get the number of loaded source maps (for diagnostics/testing).
+   */
+  get size(): number {
+    return this.sourceMaps.size;
   }
 
   // Fixes stack traces to use source map from eval. Strangely, both Deno and
@@ -38,6 +111,9 @@ export class SourceMapParser {
       const columnNum = parseInt(match[4], 10);
 
       if (!this.sourceMaps.has(filename)) return line;
+
+      // Touch to mark as recently used for LRU
+      this.touch(filename);
 
       if (/AMDLoader/.test(fnName) && lineNum === 1) {
         return CT_INTERNAL;
