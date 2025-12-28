@@ -100,6 +100,7 @@ export class CTRender extends BaseElement {
   private _cleanup?: () => void;
   private _isRenderInProgress = false;
   private _hasRendered = false;
+  private _cellValueUnsubscribe?: () => void;
 
   // Debug helpers
   private _instanceId = DEBUG_LOGGING
@@ -155,6 +156,14 @@ export class CTRender extends BaseElement {
         // Only re-render if the cell actually changed
         shouldRerender = !oldCell || !this.cell || !oldCell.equals(this.cell);
         this._log("cell property changed, should rerender:", shouldRerender);
+
+        if (shouldRerender) {
+          // Reset render state when cell changes - ensures we'll render the new cell
+          this._hasRendered = false;
+        }
+
+        // Set up subscription to cell value changes
+        this._setupCellValueSubscription();
       }
 
       if (variantChanged) {
@@ -172,6 +181,39 @@ export class CTRender extends BaseElement {
         this._renderCell();
       }
     }
+  }
+
+  /**
+   * Subscribe to cell value changes to handle async loading.
+   * This enables ct-render to work with cells that start undefined
+   * and later transition to a valid charm (e.g., from fetchAndRunPattern).
+   */
+  private _setupCellValueSubscription() {
+    // Clean up any existing subscription
+    this._cleanupCellValueSubscription();
+
+    if (!this.cell) {
+      this._log("no cell to subscribe to");
+      return;
+    }
+
+    this._log("setting up cell value subscription");
+
+    this._cellValueUnsubscribe = this.cell.sink((value) => {
+      this._log(
+        "cell value changed:",
+        value ? "truthy" : "falsy",
+        "hasRendered:",
+        this._hasRendered,
+      );
+
+      // Trigger render if we have a value but haven't rendered yet.
+      // This handles async loading where the cell starts undefined.
+      if (value && !this._hasRendered && !this._isRenderInProgress) {
+        this._log("triggering render due to cell value becoming available");
+        this._renderCell();
+      }
+    });
   }
 
   private async _loadAndRenderRecipe(
@@ -250,6 +292,23 @@ export class CTRender extends BaseElement {
       return;
     }
 
+    // Check if cell value is defined - if not, wait for subscription to trigger
+    // This handles async loading where the Cell exists but its value is undefined
+    let cellValue: unknown;
+    try {
+      cellValue = this.cell.get();
+    } catch {
+      cellValue = undefined;
+    }
+
+    if (cellValue === undefined || cellValue === null) {
+      this._log(
+        "cell value is undefined/null, waiting for value to become available",
+      );
+      // Don't set _hasRendered - subscription will trigger render when value becomes available
+      return;
+    }
+
     // Mark render as in progress
     this._isRenderInProgress = true;
     try {
@@ -289,6 +348,14 @@ export class CTRender extends BaseElement {
     }
   }
 
+  private _cleanupCellValueSubscription() {
+    if (this._cellValueUnsubscribe) {
+      this._log("cleaning up cell value subscription");
+      this._cellValueUnsubscribe();
+      this._cellValueUnsubscribe = undefined;
+    }
+  }
+
   private _handleRenderError(error: unknown) {
     console.error("[ct-render] Error rendering cell:", error);
 
@@ -307,7 +374,11 @@ export class CTRender extends BaseElement {
     // Cancel any in-progress renders
     this._isRenderInProgress = false;
 
+    // Reset render state
+    this._hasRendered = false;
+
     // Clean up
+    this._cleanupCellValueSubscription();
     this._cleanupPreviousRender();
   }
 }
