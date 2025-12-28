@@ -6,21 +6,19 @@ import {
   type Source,
   TypeScriptCompiler,
 } from "@commontools/js-compiler";
-import {
-  CommonToolsTransformerPipeline,
-  transformCtDirective,
-} from "@commontools/ts-transformers";
+import { CommonToolsTransformerPipeline } from "@commontools/ts-transformers";
 import { refer } from "@commontools/memory/reference";
 import { StaticCacheFS } from "@commontools/static";
 import { RuntimeModuleIdentifiers } from "@commontools/runner/harness/runtime-modules";
+import { pretransformProgram } from "@commontools/runner/harness/pretransform";
+import { CONSOLE_HOOK_SCRIPT } from "@commontools/runner/harness/engine";
+import type { RuntimeProgram } from "@commontools/runner/harness/types";
+import {
+  Semaphore,
+  SemaphoreQueueFullError,
+} from "@commontools/utils/semaphore";
 import { PatternsServer } from "./patterns-server.ts";
 import { normalize } from "@std/path/posix";
-
-/**
- * Console hook script injected into compiled patterns.
- * This mirrors the pattern from packages/runner/src/harness/engine.ts
- */
-const CONSOLE_HOOK_SCRIPT = `const console = globalThis.RUNTIME_ENGINE_CONSOLE_HOOK;`;
 
 /**
  * Compiled pattern result with metadata.
@@ -67,69 +65,11 @@ export class PathTraversalError extends Error {
   }
 }
 
-/**
- * Default maximum number of concurrent compilations.
- * Limits CPU usage under load while still allowing parallelism.
- */
+/** Default maximum number of concurrent compilations. */
 const DEFAULT_MAX_CONCURRENT_COMPILATIONS = 4;
 
-/**
- * Simple counting semaphore for limiting concurrent async operations.
- * Uses a FIFO queue to ensure fair ordering of waiters.
- */
-class Semaphore {
-  private available: number;
-  private waitQueue: Array<() => void> = [];
-
-  constructor(maxConcurrent: number) {
-    this.available = maxConcurrent;
-  }
-
-  /**
-   * Acquire a permit from the semaphore.
-   * Blocks (via promise) if no permits are available.
-   */
-  async acquire(): Promise<void> {
-    if (this.available > 0) {
-      this.available--;
-      return;
-    }
-
-    // No permits available, wait in queue
-    return new Promise<void>((resolve) => {
-      this.waitQueue.push(resolve);
-    });
-  }
-
-  /**
-   * Release a permit back to the semaphore.
-   * If there are waiters, the next one in queue is awakened.
-   */
-  release(): void {
-    const nextWaiter = this.waitQueue.shift();
-    if (nextWaiter) {
-      // Hand the permit directly to the next waiter
-      nextWaiter();
-    } else {
-      // No waiters, return permit to pool
-      this.available++;
-    }
-  }
-
-  /**
-   * Get the number of currently available permits.
-   */
-  get availablePermits(): number {
-    return this.available;
-  }
-
-  /**
-   * Get the number of waiters in the queue.
-   */
-  get queueLength(): number {
-    return this.waitQueue.length;
-  }
-}
+/** Default maximum queue depth for waiting compilations (backpressure). */
+const DEFAULT_MAX_QUEUE_DEPTH = 100;
 
 /**
  * Creates a promise that rejects after the specified timeout.
@@ -292,54 +232,6 @@ class LocalPatternResolver implements ProgramResolver {
 }
 
 /**
- * Program with optional mainExport field.
- * Matches RuntimeProgram from packages/runner/src/harness/types.ts
- */
-type ProgramWithExport = Program & {
-  mainExport?: string;
-};
-
-/**
- * Pre-transform program with cts-enable directive and path prefixing.
- * Matches packages/runner/src/harness/pretransform.ts
- */
-function pretransformProgram(
-  program: ProgramWithExport,
-  id: string,
-): Program {
-  // Transform cts-enable directives
-  const transformedFiles = program.files.map((source) => ({
-    name: source.name,
-    contents: transformCtDirective(source.contents),
-  }));
-
-  // Add prefix to all files and create index entry
-  const main = program.main;
-  const prefix = (filename: string) => `/${id}${filename}`;
-
-  const exportNameds = `export * from "${prefix(main)}";`;
-  const exportDefault = `export { default } from "${prefix(main)}";`;
-  // Only include default export if mainExport is "default" or undefined
-  const hasDefault = !program.mainExport || program.mainExport === "default";
-
-  const files = [
-    ...transformedFiles.map((source) => ({
-      name: prefix(source.name),
-      contents: source.contents,
-    })),
-    {
-      name: `/index.ts`,
-      contents: `${exportNameds}${hasDefault ? `\n${exportDefault}` : ""}`,
-    },
-  ];
-
-  return {
-    main: `/index.ts`,
-    files,
-  };
-}
-
-/**
  * Compute a content-addressable cache key for a program.
  */
 function computeCacheKey(program: Program): string {
@@ -359,6 +251,13 @@ export interface PatternCompilerOptions {
    * Default: 4
    */
   maxConcurrency?: number;
+
+  /**
+   * Maximum number of requests that can queue waiting for a compilation slot.
+   * When exceeded, requests fail fast with SemaphoreQueueFullError.
+   * Default: 100
+   */
+  maxQueueDepth?: number;
 }
 
 /**
@@ -376,15 +275,25 @@ export class PatternCompiler {
   private staticCache = new StaticCacheFS();
   private patternsServer = new PatternsServer();
   private initPromise: Promise<TypeScriptCompiler> | null = null;
-  /** Track in-flight compilations to prevent thundering herd */
+  /**
+   * Track in-flight compilations to prevent thundering herd.
+   *
+   * NOTE: This uses filename as key, while the cache uses contentHash.
+   * This means concurrent requests for the same filename will coalesce,
+   * but if the file changes mid-compilation, the second request won't
+   * reuse the first's result (since the contentHash will differ).
+   * This is an acceptable trade-off: content-based dedup would require
+   * reading all files before we could deduplicate requests.
+   */
   private inFlight = new Map<string, Promise<CompiledPattern>>();
   /** Semaphore to limit concurrent compilations */
   private compilationSemaphore: Semaphore;
 
   constructor(options: PatternCompilerOptions = {}) {
-    const maxConcurrency =
-      options.maxConcurrency ?? DEFAULT_MAX_CONCURRENT_COMPILATIONS;
-    this.compilationSemaphore = new Semaphore(maxConcurrency);
+    const maxConcurrent = options.maxConcurrency ??
+      DEFAULT_MAX_CONCURRENT_COMPILATIONS;
+    const maxQueueDepth = options.maxQueueDepth ?? DEFAULT_MAX_QUEUE_DEPTH;
+    this.compilationSemaphore = new Semaphore({ maxConcurrent, maxQueueDepth });
   }
 
   /**
@@ -480,8 +389,8 @@ export class PatternCompiler {
             js: cached.result.js,
             sourceMap: includeSourceMap ? cached.result.sourceMap : undefined,
             contentHash: cached.contentHash,
-            filename:
-              cached.result.filename || `${contentHash.substring(0, 12)}.js`,
+            filename: cached.result.filename ||
+              `${contentHash.substring(0, 12)}.js`,
           };
         }
 
@@ -541,6 +450,13 @@ export class PatternCompiler {
 }
 
 /**
- * Singleton pattern compiler instance for the handler.
+ * Create a new PatternCompiler instance.
+ *
+ * @param options - Configuration options
+ * @returns New PatternCompiler instance
  */
-export const patternCompiler = new PatternCompiler();
+export function createPatternCompiler(
+  options?: PatternCompilerOptions,
+): PatternCompiler {
+  return new PatternCompiler(options);
+}

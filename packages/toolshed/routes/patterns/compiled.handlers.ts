@@ -1,10 +1,23 @@
 import type { Context } from "@hono/hono";
-import { patternCompiler, PathTraversalError } from "./pattern-compiler.ts";
 import {
-  compareETags,
-  createCacheHeaders,
-} from "@commontools/static/etag";
+  createPatternCompiler,
+  PathTraversalError,
+} from "./pattern-compiler.ts";
+import { compareETags, createCacheHeaders } from "@commontools/static/etag";
 import { encodeBase64 } from "@std/encoding/base64";
+
+/**
+ * Module-scoped pattern compiler instance.
+ * Created on first use (lazy initialization).
+ */
+let patternCompiler: ReturnType<typeof createPatternCompiler> | null = null;
+
+function getPatternCompiler() {
+  if (!patternCompiler) {
+    patternCompiler = createPatternCompiler();
+  }
+  return patternCompiler;
+}
 
 /**
  * Sanitize error messages to remove sensitive information like absolute file paths.
@@ -55,15 +68,11 @@ export const getCompiledPattern = async (
   const { filename } = c.req.param();
 
   try {
-    // Security: validate filename doesn't contain path traversal
-    // Block .. sequences that could escape the patterns directory
+    // Security: validate filename format before compilation
     // Block leading / which would create absolute paths in URL resolution
     // Block : to prevent URL scheme injection (e.g., file:///etc/passwd)
-    // Allow internal / for subdirectory access (e.g., record/registry.ts)
-    if (
-      filename.includes("..") || filename.startsWith("/") ||
-      filename.includes(":")
-    ) {
+    // Note: Path traversal (..) is handled by validatePatternPath in the compiler
+    if (filename.startsWith("/") || filename.includes(":")) {
       return c.json(
         { error: "Invalid file path" },
         400,
@@ -71,7 +80,7 @@ export const getCompiledPattern = async (
     }
 
     // Compile the pattern (uses LRU cache internally)
-    const compiled = await patternCompiler.compile(filename, {
+    const compiled = await getPatternCompiler().compile(filename, {
       noCheck: true, // Skip type checking for speed
       includeSourceMap: true,
     });
@@ -97,8 +106,11 @@ export const getCompiledPattern = async (
     if (compiled.sourceMap) {
       const sourceMapJson = JSON.stringify(compiled.sourceMap);
       // Use encodeBase64 which handles UTF-8 properly (btoa only works with Latin1)
-      const sourceMapBase64 = encodeBase64(new TextEncoder().encode(sourceMapJson));
-      js += `\n//# sourceMappingURL=data:application/json;base64,${sourceMapBase64}`;
+      const sourceMapBase64 = encodeBase64(
+        new TextEncoder().encode(sourceMapJson),
+      );
+      js +=
+        `\n//# sourceMappingURL=data:application/json;base64,${sourceMapBase64}`;
     }
 
     // Create cache headers with ETag

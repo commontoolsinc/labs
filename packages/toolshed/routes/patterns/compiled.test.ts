@@ -100,13 +100,26 @@ describe("Compiled Patterns API", () => {
       expect(json.error).toBe("Pattern not found");
     });
 
-    it("blocks path traversal with ..", async () => {
+    it("allows valid filenames with double dots (foo..bar.tsx)", async () => {
+      // foo..bar.tsx is a valid filename, not a path traversal
+      // It should return 404 (file not found), not 400 (invalid path)
       const response = await app.request(
         "/api/patterns/compiled/foo..bar.tsx",
       );
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(404);
       const json = await response.json();
-      expect(json.error).toBe("Invalid file path");
+      expect(json.error).toBe("Pattern not found");
+    });
+
+    it("path traversal in URL is normalized by router", async () => {
+      // The HTTP router normalizes ".." in URLs before reaching the handler
+      // So /api/patterns/compiled/../../../etc/passwd becomes /etc/passwd
+      // which doesn't match our route pattern and returns 404
+      const response = await app.request(
+        "/api/patterns/compiled/../../../etc/passwd",
+      );
+      // Router normalizes path, so we get 404 not 400
+      expect(response.status).toBe(404);
     });
 
     it("blocks URL scheme injection", async () => {

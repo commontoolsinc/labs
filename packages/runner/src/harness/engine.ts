@@ -23,8 +23,17 @@ import { refer } from "@commontools/memory/reference";
 import { StaticCache } from "@commontools/static";
 import { pretransformProgram } from "./pretransform.ts";
 
-const RUNTIME_ENGINE_CONSOLE_HOOK = "RUNTIME_ENGINE_CONSOLE_HOOK";
-const INJECTED_SCRIPT =
+/**
+ * Global variable name used to inject the console shim.
+ * Exported for use by server-side compilation.
+ */
+export const RUNTIME_ENGINE_CONSOLE_HOOK = "RUNTIME_ENGINE_CONSOLE_HOOK";
+
+/**
+ * Script injected into compiled patterns to hook console.
+ * Exported for use by server-side compilation.
+ */
+export const CONSOLE_HOOK_SCRIPT =
   `const console = globalThis.${RUNTIME_ENGINE_CONSOLE_HOOK};`;
 
 declare global {
@@ -158,7 +167,7 @@ export class Engine extends EventTarget implements Harness {
     const output = await compiler.compile(resolvedProgram, {
       filename,
       noCheck: options.noCheck,
-      injectedScript: INJECTED_SCRIPT,
+      injectedScript: CONSOLE_HOOK_SCRIPT,
       runtimeModules: Engine.runtimeModuleNames(),
       bundleExportAll: true,
       getTransformedProgram: options.getTransformedProgram,

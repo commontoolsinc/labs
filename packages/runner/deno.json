@@ -17,6 +17,9 @@
     "./traverse": "./src/traverse.ts",
     "./storage/cache": "./src/storage/cache.ts",
     "./storage/cache.deno": "./src/storage/cache.deno.ts",
-    "./harness/runtime-modules": "./src/harness/runtime-modules.ts"
+    "./harness/runtime-modules": "./src/harness/runtime-modules.ts",
+    "./harness/pretransform": "./src/harness/pretransform.ts",
+    "./harness/engine": "./src/harness/engine.ts",
+    "./harness/types": "./src/harness/types.ts"
   }
 }
