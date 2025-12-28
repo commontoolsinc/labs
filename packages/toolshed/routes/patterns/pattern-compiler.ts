@@ -14,6 +14,7 @@ import { refer } from "@commontools/memory/reference";
 import { StaticCacheFS } from "@commontools/static";
 import { RuntimeModuleIdentifiers } from "@commontools/runner/harness/runtime-modules";
 import { PatternsServer } from "./patterns-server.ts";
+import { normalize } from "@std/path/posix";
 
 /**
  * Console hook script injected into compiled patterns.
@@ -39,6 +40,112 @@ export interface CompileOptions {
   noCheck?: boolean;
   /** Include source map in result (default: true) */
   includeSourceMap?: boolean;
+  /** Compilation timeout in milliseconds (default: 30000) */
+  timeoutMs?: number;
+}
+
+/** Default compilation timeout in milliseconds */
+const DEFAULT_COMPILATION_TIMEOUT_MS = 30_000;
+
+/**
+ * Error thrown when compilation times out.
+ */
+export class CompilationTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Compilation timed out after ${timeoutMs / 1000}s`);
+    this.name = "CompilationTimeoutError";
+  }
+}
+
+/**
+ * Error thrown when a path traversal attack is detected.
+ */
+export class PathTraversalError extends Error {
+  constructor(path: string) {
+    super(`Path traversal detected: "${path}" escapes patterns directory`);
+    this.name = "PathTraversalError";
+  }
+}
+
+/**
+ * Default maximum number of concurrent compilations.
+ * Limits CPU usage under load while still allowing parallelism.
+ */
+const DEFAULT_MAX_CONCURRENT_COMPILATIONS = 4;
+
+/**
+ * Simple counting semaphore for limiting concurrent async operations.
+ * Uses a FIFO queue to ensure fair ordering of waiters.
+ */
+class Semaphore {
+  private available: number;
+  private waitQueue: Array<() => void> = [];
+
+  constructor(maxConcurrent: number) {
+    this.available = maxConcurrent;
+  }
+
+  /**
+   * Acquire a permit from the semaphore.
+   * Blocks (via promise) if no permits are available.
+   */
+  async acquire(): Promise<void> {
+    if (this.available > 0) {
+      this.available--;
+      return;
+    }
+
+    // No permits available, wait in queue
+    return new Promise<void>((resolve) => {
+      this.waitQueue.push(resolve);
+    });
+  }
+
+  /**
+   * Release a permit back to the semaphore.
+   * If there are waiters, the next one in queue is awakened.
+   */
+  release(): void {
+    const nextWaiter = this.waitQueue.shift();
+    if (nextWaiter) {
+      // Hand the permit directly to the next waiter
+      nextWaiter();
+    } else {
+      // No waiters, return permit to pool
+      this.available++;
+    }
+  }
+
+  /**
+   * Get the number of currently available permits.
+   */
+  get availablePermits(): number {
+    return this.available;
+  }
+
+  /**
+   * Get the number of waiters in the queue.
+   */
+  get queueLength(): number {
+    return this.waitQueue.length;
+  }
+}
+
+/**
+ * Creates a promise that rejects after the specified timeout.
+ * Returns both the promise and a cleanup function to clear the timeout.
+ */
+function createTimeout(
+  timeoutMs: number,
+): { promise: Promise<never>; cleanup: () => void } {
+  let timeoutId: ReturnType<typeof setTimeout>;
+  const promise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new CompilationTimeoutError(timeoutMs));
+    }, timeoutMs);
+  });
+  const cleanup = () => clearTimeout(timeoutId);
+  return { promise, cleanup };
 }
 
 /**
@@ -99,6 +206,45 @@ class PatternCompileCache {
 }
 
 /**
+ * Validates that a path stays within the patterns directory.
+ * Returns the normalized path (without leading slash) if valid.
+ * Throws PathTraversalError if the path escapes the patterns directory.
+ *
+ * @param path - The path to validate (with or without leading /)
+ * @returns The normalized path without leading slash
+ * @throws PathTraversalError if path escapes patterns directory
+ */
+export function validatePatternPath(path: string): string {
+  // Normalize the path to resolve .. and . sequences
+  // The normalize function handles paths like "/foo/../../../etc/passwd"
+  // and converts them to "/etc/passwd"
+  const normalizedPath = normalize(path);
+
+  // Remove leading slash for internal use
+  const withoutLeadingSlash = normalizedPath.startsWith("/")
+    ? normalizedPath.substring(1)
+    : normalizedPath;
+
+  // After normalization:
+  // - Valid: "foo/bar.ts", "system/app.tsx"
+  // - Invalid: "../etc/passwd", "../../etc/passwd"
+  // A normalized path that starts with ".." means it tried to escape root
+  if (
+    withoutLeadingSlash.startsWith("..") ||
+    withoutLeadingSlash.startsWith("/")
+  ) {
+    throw new PathTraversalError(path);
+  }
+
+  // Also reject empty paths (edge case where path was just "/" or similar)
+  if (withoutLeadingSlash === "" || withoutLeadingSlash === ".") {
+    throw new PathTraversalError(path);
+  }
+
+  return withoutLeadingSlash;
+}
+
+/**
  * Program resolver that reads from the local patterns directory.
  * Used for server-side compilation of patterns.
  */
@@ -115,9 +261,9 @@ class LocalPatternResolver implements ProgramResolver {
 
   async main(): Promise<Source> {
     if (!this.mainContent) {
-      this.mainContent = await this.patternsServer.getText(
-        this.mainFilename.substring(1),
-      );
+      // Security: validate path stays within patterns directory
+      const validatedPath = validatePatternPath(this.mainFilename);
+      this.mainContent = await this.patternsServer.getText(validatedPath);
     }
     return {
       name: this.mainFilename,
@@ -132,8 +278,9 @@ class LocalPatternResolver implements ProgramResolver {
     }
 
     try {
-      const filename = identifier.substring(1); // Remove leading /
-      const contents = await this.patternsServer.getText(filename);
+      // Security: validate path stays within patterns directory
+      const validatedPath = validatePatternPath(identifier);
+      const contents = await this.patternsServer.getText(validatedPath);
       return { name: identifier, contents };
     } catch (error) {
       if (error instanceof Deno.errors.NotFound) {
@@ -203,11 +350,25 @@ function computeCacheKey(program: Program): string {
 }
 
 /**
+ * Options for configuring the PatternCompiler.
+ */
+export interface PatternCompilerOptions {
+  /**
+   * Maximum number of concurrent compilations.
+   * Limits CPU usage under load while still allowing parallelism.
+   * Default: 4
+   */
+  maxConcurrency?: number;
+}
+
+/**
  * Server-side pattern compiler with LRU caching.
  *
  * Compiles TypeScript patterns to JavaScript, caching results by content hash.
  * This moves compilation from client to server, where it can be shared across
  * all users.
+ *
+ * Limits concurrent compilations to prevent CPU exhaustion under load.
  */
 export class PatternCompiler {
   private cache = new PatternCompileCache();
@@ -217,6 +378,14 @@ export class PatternCompiler {
   private initPromise: Promise<TypeScriptCompiler> | null = null;
   /** Track in-flight compilations to prevent thundering herd */
   private inFlight = new Map<string, Promise<CompiledPattern>>();
+  /** Semaphore to limit concurrent compilations */
+  private compilationSemaphore: Semaphore;
+
+  constructor(options: PatternCompilerOptions = {}) {
+    const maxConcurrency =
+      options.maxConcurrency ?? DEFAULT_MAX_CONCURRENT_COMPILATIONS;
+    this.compilationSemaphore = new Semaphore(maxConcurrency);
+  }
 
   /**
    * Lazily initialize the TypeScript compiler.
@@ -265,63 +434,95 @@ export class PatternCompiler {
 
   /**
    * Internal compilation implementation.
+   * Acquires a semaphore permit to limit concurrent compilations.
    */
   private async doCompile(
     filename: string,
     options: CompileOptions,
   ): Promise<CompiledPattern> {
-    const { noCheck = true, includeSourceMap = true } = options;
+    const {
+      noCheck = true,
+      includeSourceMap = true,
+      timeoutMs = DEFAULT_COMPILATION_TIMEOUT_MS,
+    } = options;
 
-    // 1. Get the compiler (lazy initialization)
-    const compiler = await this.getCompiler();
+    // Acquire semaphore permit to limit concurrent compilations
+    await this.compilationSemaphore.acquire();
 
-    // 2. Create resolver for this pattern
-    const resolver = new LocalPatternResolver(this.patternsServer, filename);
+    try {
+      // Create timeout to prevent hanging on pathological inputs
+      const { promise: timeoutPromise, cleanup: cleanupTimeout } =
+        createTimeout(timeoutMs);
 
-    // 3. Resolve the full program (main + all imports)
-    const program = await compiler.resolveProgram(resolver, {
-      runtimeModules: RuntimeModuleIdentifiers,
-    });
+      // Wrap compilation work in an async function for Promise.race
+      const compilationWork = async (): Promise<CompiledPattern> => {
+        // 1. Get the compiler (lazy initialization)
+        const compiler = await this.getCompiler();
 
-    // 4. Compute content hash for caching
-    const contentHash = computeCacheKey(program);
+        // 2. Create resolver for this pattern
+        const resolver = new LocalPatternResolver(
+          this.patternsServer,
+          filename,
+        );
 
-    // 5. Check cache
-    const cached = this.cache.get(contentHash);
-    if (cached) {
-      return {
-        js: cached.result.js,
-        sourceMap: includeSourceMap ? cached.result.sourceMap : undefined,
-        contentHash: cached.contentHash,
-        filename: cached.result.filename || `${contentHash.substring(0, 12)}.js`,
+        // 3. Resolve the full program (main + all imports)
+        const program = await compiler.resolveProgram(resolver, {
+          runtimeModules: RuntimeModuleIdentifiers,
+        });
+
+        // 4. Compute content hash for caching
+        const contentHash = computeCacheKey(program);
+
+        // 5. Check cache
+        const cached = this.cache.get(contentHash);
+        if (cached) {
+          return {
+            js: cached.result.js,
+            sourceMap: includeSourceMap ? cached.result.sourceMap : undefined,
+            contentHash: cached.contentHash,
+            filename:
+              cached.result.filename || `${contentHash.substring(0, 12)}.js`,
+          };
+        }
+
+        // 6. Pre-transform the program
+        const shortHash = contentHash.substring(0, 12);
+        const transformed = pretransformProgram(program, shortHash);
+
+        // 7. Compile to JavaScript
+        const result = compiler.compile(transformed, {
+          filename: `${shortHash}.js`,
+          noCheck,
+          runtimeModules: RuntimeModuleIdentifiers,
+          beforeTransformers: (prog) =>
+            new CommonToolsTransformerPipeline().toFactories(prog),
+          bundleExportAll: true, // Matches Engine behavior - produces { main, exportMap }
+          injectedScript: CONSOLE_HOOK_SCRIPT,
+        });
+
+        // 8. Cache the result
+        this.cache.set(contentHash, result, contentHash);
+
+        // 9. Return compiled pattern
+        return {
+          js: result.js,
+          sourceMap: includeSourceMap ? result.sourceMap : undefined,
+          contentHash,
+          filename: result.filename || `${shortHash}.js`,
+        };
       };
+
+      try {
+        // Race compilation against timeout
+        return await Promise.race([compilationWork(), timeoutPromise]);
+      } finally {
+        // Always clean up the timeout to prevent memory leaks
+        cleanupTimeout();
+      }
+    } finally {
+      // Always release the semaphore permit, even on errors or timeouts
+      this.compilationSemaphore.release();
     }
-
-    // 6. Pre-transform the program
-    const shortHash = contentHash.substring(0, 12);
-    const transformed = pretransformProgram(program, shortHash);
-
-    // 7. Compile to JavaScript
-    const result = compiler.compile(transformed, {
-      filename: `${shortHash}.js`,
-      noCheck,
-      runtimeModules: RuntimeModuleIdentifiers,
-      beforeTransformers: (prog) =>
-        new CommonToolsTransformerPipeline().toFactories(prog),
-      bundleExportAll: true, // Matches Engine behavior - produces { main, exportMap }
-      injectedScript: CONSOLE_HOOK_SCRIPT,
-    });
-
-    // 8. Cache the result
-    this.cache.set(contentHash, result, contentHash);
-
-    // 9. Return compiled pattern
-    return {
-      js: result.js,
-      sourceMap: includeSourceMap ? result.sourceMap : undefined,
-      contentHash,
-      filename: result.filename || `${shortHash}.js`,
-    };
   }
 
   /**

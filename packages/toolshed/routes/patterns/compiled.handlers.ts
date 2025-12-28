@@ -1,10 +1,41 @@
 import type { Context } from "@hono/hono";
-import { patternCompiler } from "./pattern-compiler.ts";
+import { patternCompiler, PathTraversalError } from "./pattern-compiler.ts";
 import {
   compareETags,
   createCacheHeaders,
 } from "@commontools/static/etag";
 import { encodeBase64 } from "@std/encoding/base64";
+
+/**
+ * Sanitize error messages to remove sensitive information like absolute file paths.
+ * Converts absolute paths to relative paths within the patterns directory.
+ *
+ * Example transformation:
+ * - Input: `/Users/alex/Code/labs/packages/patterns/system/foo.tsx(15,7): error TS2322`
+ * - Output: `system/foo.tsx(15,7): error TS2322`
+ *
+ * @param message - The error message to sanitize
+ * @returns Sanitized error message with paths redacted
+ */
+export function sanitizeErrorMessage(message: string): string {
+  // Pattern to match absolute file paths that contain "packages/patterns/"
+  // Captures everything after "packages/patterns/" including line/column info
+  // Handles both forward slashes (Unix) and backslashes (Windows)
+  const patternsPathRegex =
+    /(?:[A-Za-z]:)?[\\/](?:[^\s:'"<>|*?]+[\\/])*packages[\\/]patterns[\\/]([^\s:'"<>|*?]+)/g;
+
+  // Replace absolute paths containing packages/patterns with relative paths
+  let sanitized = message.replace(patternsPathRegex, "$1");
+
+  // Also redact any remaining absolute paths that might leak server structure
+  // Match paths like /Users/..., /home/..., C:\..., etc.
+  // Be careful to preserve relative paths and common error patterns
+  const absolutePathRegex =
+    /(?:[A-Za-z]:)?[\\/](?:Users|home|var|tmp|opt|etc|root|usr)[\\/][^\s:'"<>|*?]+/g;
+  sanitized = sanitized.replace(absolutePathRegex, "[redacted-path]");
+
+  return sanitized;
+}
 
 // Common CORS headers for all responses
 const CORS_HEADERS = {
@@ -84,6 +115,14 @@ export const getCompiledPattern = async (
       },
     });
   } catch (error) {
+    // Handle path traversal attempts (security)
+    if (error instanceof PathTraversalError) {
+      return c.json(
+        { error: "Invalid file path" },
+        400,
+      );
+    }
+
     // Handle not found errors
     if (error instanceof Deno.errors.NotFound) {
       return c.json(
@@ -98,7 +137,7 @@ export const getCompiledPattern = async (
       return c.json(
         {
           error: "Compilation failed",
-          details: error.message,
+          details: sanitizeErrorMessage(error.message),
         },
         500,
       );
