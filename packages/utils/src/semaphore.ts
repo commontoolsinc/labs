@@ -90,6 +90,7 @@ export class Semaphore {
   /**
    * Release a permit back to the semaphore.
    * If there are waiters, the next one in queue is awakened.
+   * Permits are clamped to maxConcurrent to prevent over-release bugs.
    */
   release(): void {
     const nextWaiter = this.waitQueue.shift();
@@ -97,8 +98,10 @@ export class Semaphore {
       // Hand the permit directly to the next waiter
       nextWaiter();
     } else {
-      // No waiters, return permit to pool
-      this.available++;
+      // No waiters, return permit to pool (clamped to max)
+      if (this.available < this.maxConcurrent) {
+        this.available++;
+      }
     }
   }
 

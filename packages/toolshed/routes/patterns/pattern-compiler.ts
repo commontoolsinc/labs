@@ -13,10 +13,9 @@ import { RuntimeModuleIdentifiers } from "@commontools/runner/harness/runtime-mo
 import { pretransformProgram } from "@commontools/runner/harness/pretransform";
 import { CONSOLE_HOOK_SCRIPT } from "@commontools/runner/harness/engine";
 import type { RuntimeProgram } from "@commontools/runner/harness/types";
-import {
-  Semaphore,
-  SemaphoreQueueFullError,
-} from "@commontools/utils/semaphore";
+import { Semaphore } from "@commontools/utils/semaphore";
+// Re-export for handler to catch
+export { SemaphoreQueueFullError } from "@commontools/utils/semaphore";
 import { PatternsServer } from "./patterns-server.ts";
 import { normalize } from "@std/path/posix";
 

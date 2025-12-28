@@ -1,7 +1,10 @@
 import type { Context } from "@hono/hono";
+import * as HttpStatusCodes from "stoker/http-status-codes";
 import {
+  CompilationTimeoutError,
   createPatternCompiler,
   PathTraversalError,
+  SemaphoreQueueFullError,
 } from "./pattern-compiler.ts";
 import { compareETags, createCacheHeaders } from "@commontools/static/etag";
 import { encodeBase64 } from "@std/encoding/base64";
@@ -9,6 +12,7 @@ import { encodeBase64 } from "@std/encoding/base64";
 /**
  * Module-scoped pattern compiler instance.
  * Created on first use (lazy initialization).
+ * Use `resetPatternCompiler()` in tests to get a fresh instance.
  */
 let patternCompiler: ReturnType<typeof createPatternCompiler> | null = null;
 
@@ -17,6 +21,15 @@ function getPatternCompiler() {
     patternCompiler = createPatternCompiler();
   }
   return patternCompiler;
+}
+
+/**
+ * Reset the pattern compiler instance.
+ * Useful in tests to ensure a clean state between test runs.
+ * @internal Exported for testing only
+ */
+export function resetPatternCompiler(): void {
+  patternCompiler = null;
 }
 
 /**
@@ -75,7 +88,7 @@ export const getCompiledPattern = async (
     if (filename.startsWith("/") || filename.includes(":")) {
       return c.json(
         { error: "Invalid file path" },
-        400,
+        HttpStatusCodes.BAD_REQUEST,
       );
     }
 
@@ -131,7 +144,7 @@ export const getCompiledPattern = async (
     if (error instanceof PathTraversalError) {
       return c.json(
         { error: "Invalid file path" },
-        400,
+        HttpStatusCodes.BAD_REQUEST,
       );
     }
 
@@ -139,11 +152,29 @@ export const getCompiledPattern = async (
     if (error instanceof Deno.errors.NotFound) {
       return c.json(
         { error: "Pattern not found" },
-        404,
+        HttpStatusCodes.NOT_FOUND,
       );
     }
 
-    // Handle compilation errors with details
+    // Handle server overload - queue is full
+    if (error instanceof SemaphoreQueueFullError) {
+      console.warn("Pattern compilation queue full:", error.message);
+      return c.json(
+        { error: "Server busy, try again later" },
+        HttpStatusCodes.SERVICE_UNAVAILABLE,
+      );
+    }
+
+    // Handle compilation timeout
+    if (error instanceof CompilationTimeoutError) {
+      console.error("Pattern compilation timed out:", error.message);
+      return c.json(
+        { error: "Compilation timed out" },
+        HttpStatusCodes.GATEWAY_TIMEOUT,
+      );
+    }
+
+    // Handle other compilation errors with details
     if (error instanceof Error) {
       console.error("Error compiling pattern:", error);
       return c.json(
@@ -151,14 +182,14 @@ export const getCompiledPattern = async (
           error: "Compilation failed",
           details: sanitizeErrorMessage(error.message),
         },
-        500,
+        HttpStatusCodes.INTERNAL_SERVER_ERROR,
       );
     }
 
     console.error("Unknown error compiling pattern:", error);
     return c.json(
       { error: "Internal server error" },
-      500,
+      HttpStatusCodes.INTERNAL_SERVER_ERROR,
     );
   }
 };

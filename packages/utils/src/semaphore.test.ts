@@ -32,13 +32,18 @@ describe("Semaphore", () => {
       expect(sem.availablePermits).toBe(2);
     });
 
-    it("does not exceed maxConcurrent on release", async () => {
+    it("clamps permits to maxConcurrent on over-release", async () => {
       const sem = new Semaphore({ maxConcurrent: 2 });
       expect(sem.availablePermits).toBe(2);
 
-      // Release without acquire - should still not exceed max
+      // Release without acquire - should be clamped to max
       sem.release();
-      expect(sem.availablePermits).toBe(3); // This is a design choice - caller must balance
+      expect(sem.availablePermits).toBe(2); // Clamped, not 3
+
+      // Multiple over-releases should still be clamped
+      sem.release();
+      sem.release();
+      expect(sem.availablePermits).toBe(2);
     });
   });
 
