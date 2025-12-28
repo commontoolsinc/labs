@@ -4,7 +4,12 @@ import { styles } from "./styles.ts";
 import { basicSetup } from "codemirror";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { indentWithTab } from "@codemirror/commands";
-import { Compartment, EditorState, Extension } from "@codemirror/state";
+import {
+  Annotation,
+  Compartment,
+  EditorState,
+  Extension,
+} from "@codemirror/state";
 import { indentUnit, LanguageSupport } from "@codemirror/language";
 import { javascript as createJavaScript } from "@codemirror/lang-javascript";
 import { markdown as createMarkdown } from "@codemirror/lang-markdown";
@@ -158,6 +163,15 @@ export class CTCodeEditor extends BaseElement {
   private _themeComp = new Compartment();
   private _cleanupFns: Array<() => void> = [];
   private _mentionableUnsub: (() => void) | null = null;
+
+  // Transaction annotation to mark Cell-originated updates.
+  // This is the idiomatic CodeMirror 6 way to distinguish programmatic
+  // changes from user input. The updateListener checks this annotation
+  // and skips setValue for Cell-originated changes, preventing the
+  // feedback loop: Cell → Editor → updateListener → setValue → Cell...
+  private static _cellSyncAnnotation = Annotation.define<boolean>();
+  private _lastTypingTimestamp: number = 0;
+  private _pendingExternalValue: string | null = null;
   private _cellController = createStringCellController(this, {
     timing: {
       strategy: "debounce",
@@ -605,23 +619,63 @@ export class CTCodeEditor extends BaseElement {
   }
 
   private _updateEditorFromCellValue(): void {
-    // Update editor content when cell value changes externally
-    if (this._editorView) {
-      const newValue = this.getValue();
-      const currentValue = this._editorView.state.doc.toString();
-      if (newValue !== currentValue) {
-        this._editorView.dispatch({
-          changes: {
-            from: 0,
-            to: this._editorView.state.doc.length,
-            insert: newValue,
-          },
-        });
-      }
+    if (!this._editorView) return;
+
+    const newValue = this.getValue();
+
+    // Defer external updates during active typing to preserve cursor position.
+    // The debounce window is 500ms (from CellController).
+    const DEBOUNCE_WINDOW = 500;
+    const timeSinceTyping = Date.now() - this._lastTypingTimestamp;
+    if (timeSinceTyping < DEBOUNCE_WINDOW) {
+      // Store the pending external value to apply after debounce expires
+      this._pendingExternalValue = newValue;
+      return;
     }
+
+    // Check if we have a pending external value that arrived during typing
+    const hasPendingExternal = this._pendingExternalValue !== null;
+    const valueToApply = this._pendingExternalValue ?? newValue;
+    this._pendingExternalValue = null;
+
+    const currentValue = this._editorView.state.doc.toString();
+
+    // Skip if content already matches - handles both echoes and stale values.
+    // This is the key check that prevents cursor jumping: if the editor
+    // already has the content the Cell is trying to set, do nothing.
+    if (valueToApply === currentValue) {
+      return;
+    }
+
+    // Apply external update to editor, preserving cursor position.
+    // Clamp cursor to new document length in case content is shorter.
+    const currentSelection = this._editorView.state.selection.main;
+    const newLength = valueToApply.length;
+    const anchorPos = Math.min(currentSelection.anchor, newLength);
+    const headPos = Math.min(currentSelection.head, newLength);
+
+    // Use transaction annotation to mark this as a Cell-originated change ONLY if
+    // it's a normal Cell echo. If we're applying a pending external value, do NOT
+    // use the annotation, so the update listener will call setValue and sync the Cell.
+    // This ensures no data loss: external updates deferred during typing are properly
+    // committed to the Cell after the debounce window expires.
+    this._editorView.dispatch({
+      changes: {
+        from: 0,
+        to: this._editorView.state.doc.length,
+        insert: valueToApply,
+      },
+      selection: { anchor: anchorPos, head: headPos },
+      annotations: hasPendingExternal
+        ? undefined
+        : CTCodeEditor._cellSyncAnnotation.of(true),
+    });
+
     // Ensure mentioned charms reflect external value changes
     this._updateMentionedFromContent();
   }
+
+  private _cellSyncUnsub: (() => void) | null = null;
 
   private _setupCellSyncHandler(): void {
     // Create a custom Cell sync handler that integrates with the CellController
@@ -635,7 +689,7 @@ export class CTCodeEditor extends BaseElement {
     if (this._cellController.isCell()) {
       const cell = this._cellController.getCell();
       if (cell) {
-        const unsubscribe = cell.sink(() => {
+        this._cellSyncUnsub = cell.sink(() => {
           // First update the editor content
           this._updateEditorFromCellValue();
           // Then trigger component update if originally enabled
@@ -643,8 +697,14 @@ export class CTCodeEditor extends BaseElement {
             this.requestUpdate();
           }
         });
-        this._cleanupFns.push(unsubscribe);
       }
+    }
+  }
+
+  private _cleanupCellSyncHandler(): void {
+    if (this._cellSyncUnsub) {
+      this._cellSyncUnsub();
+      this._cellSyncUnsub = null;
     }
   }
 
@@ -667,6 +727,7 @@ export class CTCodeEditor extends BaseElement {
   }
 
   private _cleanup(): void {
+    this._cleanupCellSyncHandler();
     if (this._mentionableUnsub) {
       this._mentionableUnsub();
       this._mentionableUnsub = null;
@@ -684,7 +745,16 @@ export class CTCodeEditor extends BaseElement {
 
     // If the value property itself changed (e.g., switched to a different cell)
     if (changedProperties.has("value")) {
+      // Cancel pending debounced updates from old Cell to prevent race condition
+      this._cellController.cancel();
+      // Reset typing timestamp so new Cell's content syncs immediately
+      this._lastTypingTimestamp = 0;
+      // Clear any pending external updates from the old Cell
+      this._pendingExternalValue = null;
+      // Clean up old Cell subscription and set up new one
+      this._cleanupCellSyncHandler();
       this._cellController.bind(this.value);
+      this._setupCellSyncHandler();
       this._updateEditorFromCellValue();
     }
 
@@ -853,7 +923,17 @@ export class CTCodeEditor extends BaseElement {
       // Theme (dark -> oneDark)
       this._themeComp.of(this.theme === "dark" ? oneDark : []),
       EditorView.updateListener.of((update) => {
-        if (update.docChanged && !this.readonly) {
+        // Only process user-initiated changes, not Cell-originated updates.
+        // Check if any transaction has the Cell sync annotation - if so, skip.
+        // This prevents the feedback loop: Cell → Editor → setValue → Cell...
+        const isCellSync = update.transactions.some(
+          (tr) => tr.annotation(CTCodeEditor._cellSyncAnnotation),
+        );
+        if (update.docChanged && !this.readonly && !isCellSync) {
+          // Track typing timestamp for any non-Cell-originated change.
+          // This includes actual user typing, Playwright simulated input, and
+          // test helpers. The important distinction is Cell-originated vs not.
+          this._lastTypingTimestamp = Date.now();
           const value = update.state.doc.toString();
           this.setValue(value);
           // Keep $mentioned current as user types
@@ -869,6 +949,8 @@ export class CTCodeEditor extends BaseElement {
         },
         blur: () => {
           this._cellController.onBlur();
+          this._lastTypingTimestamp = 0; // Reset typing state when leaving editor
+          this._pendingExternalValue = null; // Clear any pending external updates
           this.emit("ct-blur");
           return false;
         },
