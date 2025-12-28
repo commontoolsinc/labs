@@ -116,10 +116,8 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for debounce to complete and Cell to update
     await waitFor(
-      async () => {
-        const cellValue = charm.result.get(["content"]);
-        return cellValue === textToType;
-      },
+      // deno-lint-ignore require-await
+      async () => charm.result.get(["content"]) === textToType,
       { timeout: DEBOUNCE_DELAY + 2000, delay: 50 },
     );
 
@@ -167,10 +165,8 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for debounce to complete (only fires ONCE after last character)
     await waitFor(
-      async () => {
-        const cellValue = charm.result.get(["content"]);
-        return cellValue === fullText;
-      },
+      // deno-lint-ignore require-await
+      async () => charm.result.get(["content"]) === fullText,
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
@@ -195,6 +191,7 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for Cell to sync
     await waitFor(
+      // deno-lint-ignore require-await
       async () => charm.result.get(["content"]) === initialText,
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
@@ -219,6 +216,7 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for debounce
     await waitFor(
+      // deno-lint-ignore require-await
       async () => charm.result.get(["content"]) === expectedText,
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
@@ -360,6 +358,7 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for debounce to fire and Cell to update
     await waitFor(
+      // deno-lint-ignore require-await
       async () => charm.result.get(["content"]) === text,
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
@@ -404,6 +403,7 @@ describe("ct-code-editor cursor stability", () => {
     // Type some text
     await typeInEditor(page, "Hello World");
     await waitFor(
+      // deno-lint-ignore require-await
       async () => charm.result.get(["content"]) === "Hello World",
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
@@ -421,6 +421,7 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for debounce
     await waitFor(
+      // deno-lint-ignore require-await
       async () => charm.result.get(["content"]) === expectedText,
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
@@ -449,6 +450,7 @@ describe("ct-code-editor cursor stability", () => {
     // Type and wait for sync
     await typeInEditor(page, "Hello World");
     await waitFor(
+      // deno-lint-ignore require-await
       async () => charm.result.get(["content"]) === "Hello World",
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
@@ -492,6 +494,7 @@ describe("ct-code-editor cursor stability", () => {
     // Type and wait for debounce to complete
     await typeInEditor(page, "User typed");
     await waitFor(
+      // deno-lint-ignore require-await
       async () => charm.result.get(["content"]) === "User typed",
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
@@ -556,6 +559,7 @@ describe("ct-code-editor cursor stability", () => {
     // Type initial text
     await typeInEditor(page, "Hello");
     await waitFor(
+      // deno-lint-ignore require-await
       async () => charm.result.get(["content"]) === "Hello",
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
@@ -563,6 +567,7 @@ describe("ct-code-editor cursor stability", () => {
     // Type more text
     await typeInEditor(page, " World");
     await waitFor(
+      // deno-lint-ignore require-await
       async () => charm.result.get(["content"]) === "Hello World",
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
@@ -761,6 +766,11 @@ describe("ct-code-editor cursor stability", () => {
   it("ADVERSARIAL: Rapid alternating type-Cell-type-Cell pattern", async () => {
     // Simulates a pathological case: user types, Cell updates, user types again
     // repeatedly. This can expose issues with timestamp tracking.
+    //
+    // NEW BEHAVIOR: External updates that arrive during typing (within 500ms
+    // debounce window) are deferred and stored as _pendingExternalValue.
+    // After debounce expires, the pending external value is applied to prevent
+    // data loss. This means the LAST external update wins, not the user's typing.
     const page = shell.page();
 
     await resetEditorState(page, charm);
@@ -776,14 +786,18 @@ describe("ct-code-editor cursor stability", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       // Send Cell update (different content to force conflict)
+      // This will be deferred because we're within the debounce window
       await charm.result.set(`External-${i}`, ["content"]);
 
       // Another small delay
       await new Promise((r) => setTimeout(r, 100));
     }
 
-    // Let things settle
-    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + 200));
+    // Let things settle - the last external update should be applied
+    // Need to wait for TWO debounce cycles:
+    // 1. User's typing debounce (500ms) → writes "012" to Cell
+    // 2. Cell echoes → pending "External-2" applied → setValue debounce (500ms) → writes "External-2" to Cell
+    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY * 2 + 300));
 
     // Editor should be in a consistent state
     const content = await getEditorContent(page);
@@ -794,18 +808,32 @@ describe("ct-code-editor cursor stability", () => {
       `Cursor ${cursor} should be valid for content length ${content.length}`,
     );
 
-    // Verify Cell and editor are in sync
+    // NEW EXPECTATION: The last external update (External-2) should be applied
+    // after debounce expires, not the user's typed content (012).
+    // This preserves external data instead of dropping it.
     const cellValue = charm.result.get(["content"]) as string;
     assertEquals(
       content,
       cellValue,
       "Editor and Cell should be in sync after settling",
     );
+
+    // The final value should be the last external update
+    assertEquals(
+      content,
+      "External-2",
+      "Last external update should be applied after debounce (data preservation)",
+    );
   });
 
   it("ADVERSARIAL: Multiple Cell updates while user is continuously typing", async () => {
     // User types continuously (letters every 50ms) while external updates
     // bombard the Cell. The editor should not corrupt or crash.
+    //
+    // NEW BEHAVIOR: External updates that arrive during typing are deferred.
+    // Each new external update replaces the previous _pendingExternalValue.
+    // After debounce expires, the last pending external value is applied.
+    // This prevents data loss - external updates are preserved, not dropped.
     const page = shell.page();
 
     await resetEditorState(page, charm);
@@ -831,8 +859,10 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for both to complete
     await Promise.all([typingPromise, cellBombardPromise]);
 
-    // Let debounce complete
-    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + 200));
+    // Let debounce complete - need to wait for TWO debounce cycles:
+    // 1. User's typing debounce → writes typed content to Cell
+    // 2. Cell echoes → pending external applied → setValue debounce → writes external to Cell
+    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY * 2 + 300));
 
     // Final state should be consistent
     const content = await getEditorContent(page);
@@ -851,11 +881,28 @@ describe("ct-code-editor cursor stability", () => {
       cellValue,
       "Editor and Cell should be in sync after chaos",
     );
+
+    // NEW EXPECTATION: The last external update (Bombard-4) should be applied
+    // after debounce expires. This is correct behavior - we preserve external
+    // data instead of silently dropping it.
+    assertEquals(
+      content,
+      "Bombard-4",
+      "Last external update should win (data preservation over user typing)",
+    );
   });
 
   it("ADVERSARIAL: Empty string Cell update during typing", async () => {
     // Edge case: Cell is set to empty while user is typing.
     // This can cause cursor position > content length if not handled.
+    //
+    // ACTUAL BEHAVIOR: The empty string Cell update during typing is deferred.
+    // When the user continues typing, the user's content overwrites the Cell's
+    // empty string before the deferred update can be applied. This is a race
+    // condition where user typing wins. The key invariants to test:
+    // 1. Cursor remains valid (no crashes from cursor > content.length)
+    // 2. Editor and Cell are eventually consistent
+    // 3. Content matches one of the valid states (empty or user's content)
     const page = shell.page();
 
     await resetEditorState(page, charm);
@@ -869,30 +916,43 @@ describe("ct-code-editor cursor stability", () => {
     assertEquals(cursorAfterTyping, 11);
 
     // Immediately try to clear via Cell (within debounce window)
+    // Cell value becomes "", but editor still shows "Hello World" (deferred)
     await charm.result.set("", ["content"]);
 
     // Wait a bit but not full debounce
     await new Promise((r) => setTimeout(r, 100));
 
-    // User continues typing
+    // User continues typing - editor now has "Hello WorldMore"
+    // This triggers setValue which will overwrite the Cell's ""
     await page.keyboard.type("More");
 
     // Let everything settle
-    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + 200));
+    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + 300));
 
-    // Editor should have user's content (user's typing wins during debounce)
     const finalContent = await getEditorContent(page);
     const cursor = await getCursorPosition(page);
 
+    // CRITICAL: Cursor must be valid (no crash)
     assert(
       cursor >= 0 && cursor <= finalContent.length,
-      `Cursor ${cursor} should be valid`,
+      `Cursor ${cursor} should be valid for content length ${finalContent.length}`,
     );
 
-    // Content should contain what user typed (at least partially)
-    assert(
-      finalContent.length > 0,
-      "Editor should have content from user typing",
+    // Editor and Cell should be in sync
+    const cellValue = charm.result.get(["content"]) as string;
+    assertEquals(
+      finalContent,
+      cellValue,
+      "Editor and Cell should be in sync",
+    );
+
+    // Content should be user's typing (user won the race)
+    // The external "" arrived and set the Cell to "", but the user's
+    // subsequent typing overwrote it before the deferred update could apply.
+    assertEquals(
+      finalContent,
+      "Hello WorldMore",
+      "User's typing should win when they continue typing after external update",
     );
   });
 
@@ -953,6 +1013,7 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for debounce to send to Cell
     await waitFor(
+      // deno-lint-ignore require-await
       async () => charm.result.get(["content"]) === "Hello   ",
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
@@ -1023,6 +1084,7 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for debounce
     await waitFor(
+      // deno-lint-ignore require-await
       async () => charm.result.get(["content"]) === specialContent,
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
@@ -1090,6 +1152,7 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for debounce to complete
     await waitFor(
+      // deno-lint-ignore require-await
       async () => charm.result.get(["content"]) === "First",
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
@@ -1105,6 +1168,7 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for second debounce
     await waitFor(
+      // deno-lint-ignore require-await
       async () => charm.result.get(["content"]) === "FirstSecond",
       { timeout: DEBOUNCE_DELAY + 1000 },
     );

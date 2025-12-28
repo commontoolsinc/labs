@@ -171,6 +171,7 @@ export class CTCodeEditor extends BaseElement {
   // feedback loop: Cell → Editor → updateListener → setValue → Cell...
   private static _cellSyncAnnotation = Annotation.define<boolean>();
   private _lastTypingTimestamp: number = 0;
+  private _pendingExternalValue: string | null = null;
   private _cellController = createStringCellController(this, {
     timing: {
       strategy: "debounce",
@@ -620,42 +621,54 @@ export class CTCodeEditor extends BaseElement {
   private _updateEditorFromCellValue(): void {
     if (!this._editorView) return;
 
+    const newValue = this.getValue();
+
     // Defer external updates during active typing to preserve cursor position.
     // The debounce window is 500ms (from CellController).
     const DEBOUNCE_WINDOW = 500;
     const timeSinceTyping = Date.now() - this._lastTypingTimestamp;
     if (timeSinceTyping < DEBOUNCE_WINDOW) {
-      return; // Let the debounced Cell update handle it instead
+      // Store the pending external value to apply after debounce expires
+      this._pendingExternalValue = newValue;
+      return;
     }
 
-    const newValue = this.getValue();
+    // Check if we have a pending external value that arrived during typing
+    const hasPendingExternal = this._pendingExternalValue !== null;
+    const valueToApply = this._pendingExternalValue ?? newValue;
+    this._pendingExternalValue = null;
+
     const currentValue = this._editorView.state.doc.toString();
 
     // Skip if content already matches - handles both echoes and stale values.
     // This is the key check that prevents cursor jumping: if the editor
     // already has the content the Cell is trying to set, do nothing.
-    if (newValue === currentValue) {
+    if (valueToApply === currentValue) {
       return;
     }
 
     // Apply external update to editor, preserving cursor position.
     // Clamp cursor to new document length in case content is shorter.
     const currentSelection = this._editorView.state.selection.main;
-    const newLength = newValue.length;
+    const newLength = valueToApply.length;
     const anchorPos = Math.min(currentSelection.anchor, newLength);
     const headPos = Math.min(currentSelection.head, newLength);
 
-    // Use transaction annotation to mark this as a Cell-originated change.
-    // The updateListener checks for this annotation and skips setValue,
-    // preventing the feedback loop: Cell → Editor → setValue → Cell...
+    // Use transaction annotation to mark this as a Cell-originated change ONLY if
+    // it's a normal Cell echo. If we're applying a pending external value, do NOT
+    // use the annotation, so the update listener will call setValue and sync the Cell.
+    // This ensures no data loss: external updates deferred during typing are properly
+    // committed to the Cell after the debounce window expires.
     this._editorView.dispatch({
       changes: {
         from: 0,
         to: this._editorView.state.doc.length,
-        insert: newValue,
+        insert: valueToApply,
       },
       selection: { anchor: anchorPos, head: headPos },
-      annotations: CTCodeEditor._cellSyncAnnotation.of(true),
+      annotations: hasPendingExternal
+        ? undefined
+        : CTCodeEditor._cellSyncAnnotation.of(true),
     });
 
     // Ensure mentioned charms reflect external value changes
@@ -736,6 +749,8 @@ export class CTCodeEditor extends BaseElement {
       this._cellController.cancel();
       // Reset typing timestamp so new Cell's content syncs immediately
       this._lastTypingTimestamp = 0;
+      // Clear any pending external updates from the old Cell
+      this._pendingExternalValue = null;
       // Clean up old Cell subscription and set up new one
       this._cleanupCellSyncHandler();
       this._cellController.bind(this.value);
@@ -935,6 +950,7 @@ export class CTCodeEditor extends BaseElement {
         blur: () => {
           this._cellController.onBlur();
           this._lastTypingTimestamp = 0; // Reset typing state when leaving editor
+          this._pendingExternalValue = null; // Clear any pending external updates
           this.emit("ct-blur");
           return false;
         },

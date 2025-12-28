@@ -3,7 +3,7 @@
  * Integration test example for ct-code-editor with Cell binding.
  * Used to test cursor stability when typing with Cell sync.
  */
-import { Cell, Default, NAME, pattern, UI } from "commontools";
+import { Default, NAME, pattern, UI } from "commontools";
 
 interface Input {
   content: Default<string, "">;
@@ -33,7 +33,10 @@ export default pattern<Input>(({ content }) => {
         >
           <ct-code-editor $value={content} language="text/markdown" />
         </div>
-        <div id="content-display" style={{ padding: "8px", background: "#f5f5f5" }}>
+        <div
+          id="content-display"
+          style={{ padding: "8px", background: "#f5f5f5" }}
+        >
           Content: {content}
         </div>
       </div>
