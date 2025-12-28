@@ -155,13 +155,13 @@ const initializeRecord = lift(
       subCharms,
       trashedSubCharms,
       isInitialized,
-      recordPatternJson: _recordPatternJson,
+      recordPatternJson,
     },
   ) => {
-    void _recordPatternJson; // Kept for future wiki-link integration
     if ((currentCharms || []).length === 0) {
       // Create Note as default module (rendered via ct-render variant="embedded")
-      const notesCharm = Note({});
+      // Pass recordPatternJson so [[wiki-links]] create Record charms instead of Note charms
+      const notesCharm = Note({ linkPattern: recordPatternJson });
 
       // Build ContainerCoordinationContext for TypePicker
       const context: ContainerCoordinationContext<SubCharmEntry> = {
@@ -171,7 +171,7 @@ const initializeRecord = lift(
         >,
         createModule: (type: string) => {
           if (type === "notes") {
-            return Note({});
+            return Note({ linkPattern: recordPatternJson });
           }
           return createSubCharm(type);
         },
@@ -285,10 +285,9 @@ const addSubCharm = handler<
     subCharms: sc,
     trashedSubCharms: trash,
     selectedAddType: sat,
-    recordPatternJson: _recordPatternJson,
+    recordPatternJson,
   },
 ) => {
-  void _recordPatternJson; // Kept for future wiki-link integration
   const type = detail?.value;
   if (!type) return;
 
@@ -300,9 +299,10 @@ const addSubCharm = handler<
   const initialValues = nextLabel ? { label: nextLabel } : undefined;
 
   // Special case: create Note (rendered via ct-render variant="embedded")
+  // Pass recordPatternJson so [[wiki-links]] create Record charms instead of Note charms
   // Special case: create ExtractorModule as controller with parent Cells
   const charm = type === "notes"
-    ? Note({})
+    ? Note({ linkPattern: recordPatternJson })
     : type === "extractor"
     ? ExtractorModule({
       parentSubCharms: sc,

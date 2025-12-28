@@ -46,6 +46,8 @@ type Input = {
   content?: Cell<Default<string, "">>;
   isHidden?: Default<boolean, false>;
   noteId?: Default<string, "">;
+  /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
+  linkPattern?: Cell<Default<string, "">>;
 };
 
 /** Represents a small #note a user took to remember some text. */
@@ -246,7 +248,7 @@ const menuGoToRecentNote = handler<
   return navigateTo(note);
 });
 
-const Note = pattern<Input, Output>(({ title, content, isHidden, noteId }) => {
+const Note = pattern<Input, Output>(({ title, content, isHidden, noteId, linkPattern }) => {
   const { allCharms } = wish<{ allCharms: MinimalCharm[] }>("/");
   const mentionable = wish<Default<MentionableCharm[], []>>(
     "#mentionable",
@@ -362,8 +364,14 @@ const Note = pattern<Input, Output>(({ title, content, isHidden, noteId }) => {
   // populated in backlinks-index.tsx
   const backlinks = Cell.of<MentionableCharm[]>([]);
 
-  // The only way to serialize a pattern, apparently?
-  const patternJson = computed(() => JSON.stringify(Note));
+  // Use provided linkPattern or default to creating new Notes
+  // linkPattern is a Cell<string> - access reactively, not as raw string
+  const patternJson = computed(() => {
+    // deno-lint-ignore no-explicit-any
+    const lpValue = (linkPattern as any)?.get?.() ?? linkPattern;
+    const custom = typeof lpValue === "string" ? lpValue.trim() : "";
+    return custom || JSON.stringify(Note);
+  });
 
   // Editor component - used in both full UI and embeddedUI
   const editorUI = (
