@@ -708,6 +708,10 @@ export class Runner {
     // Clear the result recipe cache as well, since the actions have been
     // canceled
     this.resultRecipeCache.clear();
+    // Clear the function cache to prevent memory accumulation across test runs
+    this.functionCache.clear();
+    // Clear per-doc cancels
+    this.cancels.clear();
   }
 
   /**

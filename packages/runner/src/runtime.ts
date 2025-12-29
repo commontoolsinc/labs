@@ -253,6 +253,9 @@ export class Runtime {
     // Wait for any pending operations
     await this.scheduler.idle();
 
+    // Dispose the scheduler (clears pending actions, triggers, event handlers)
+    this.scheduler.dispose();
+
     // Pop the default frame
     if (this.defaultFrame) {
       popFrame(this.defaultFrame);
