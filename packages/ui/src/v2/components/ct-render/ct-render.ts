@@ -272,6 +272,38 @@ export class CTRender extends BaseElement {
     this._cleanup = render(this._renderContainer, uiCell as Cell<VNode>);
   }
 
+  /**
+   * Check if a cell is a subpath (created via .key()) vs a root cell.
+   *
+   * NOTE: This is a STRUCTURAL HEURISTIC, not a principled solution.
+   *
+   * The underlying problem is that Cells don't distinguish between:
+   *   1. "Async-loading undefined" - root cell from fetchAndRunPattern that is
+   *      temporarily undefined because data hasn't loaded yet
+   *   2. "Intentionally undefined" - subpath cell where the pattern explicitly
+   *      sets the property to undefined (e.g., sidebarUI: undefined)
+   *
+   * We use path.length as a proxy: root cells have path=[], subpath cells have
+   * path=["key"]. This works but conflates WHERE the cell points with WHETHER
+   * it's loading, which are independent concepts.
+   *
+   * PRINCIPLED SOLUTION: The codebase already has a pattern for async state:
+   * `{ pending: boolean, result: T, error: unknown }` used by fetchData,
+   * fetchProgram, compileAndRun, generateText, etc.
+   *
+   * A proper fix would:
+   *   1. Have async operations (fetchAndRunPattern) return an AsyncCellRef:
+   *      `{ cell: Cell<T>, pending: Cell<boolean>, error?: Cell<unknown> }`
+   *   2. ct-render accepts either Cell or AsyncCellRef
+   *   3. Check `pending` explicitly instead of inferring from undefined
+   *
+   * Or at the Cell level:
+   *   - Add `cell.isPending()` / `cell.pendingState()` methods
+   *   - Async builtins set pending state on result cells
+   *
+   * This aligns with React Suspense, Vue Suspense, and Svelte await blocks -
+   * all make loading state EXPLICIT rather than inferring from data values.
+   */
   private _isSubPath(cell: Cell<unknown>): boolean {
     const link = cell.getAsNormalizedFullLink();
     return Array.isArray(link?.path) && link.path.length > 0;
@@ -301,6 +333,8 @@ export class CTRender extends BaseElement {
     // For subpath cells (like .key("fabUI") or .key("sidebarUI")), we should
     // render immediately even if the value is undefined/null - the pattern
     // may intentionally set these properties to undefined (e.g., sidebarUI: undefined).
+    //
+    // See _isSubPath() comment for why this is a heuristic, not a principled solution.
     if (!isSubPath) {
       let cellValue: unknown;
       try {
