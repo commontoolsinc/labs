@@ -64,10 +64,7 @@ import {
   MODULE_METADATA as SimpleListMeta,
   SimpleListModule,
 } from "../simple-list.tsx";
-import {
-  MODULE_METADATA as PhotoMeta,
-  PhotoModule,
-} from "../photo.tsx";
+import { MODULE_METADATA as PhotoMeta, PhotoModule } from "../photo.tsx";
 import type { ModuleMetadata } from "../container-protocol.ts";
 
 // NOTE: TypePickerMeta is NOT imported here to avoid circular dependency:

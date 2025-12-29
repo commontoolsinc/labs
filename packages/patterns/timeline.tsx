@@ -47,7 +47,10 @@ interface TimelineModuleOutput {
 }
 
 // ===== The Pattern =====
-export const TimelineModule = pattern<TimelineModuleInput, TimelineModuleOutput>(
+export const TimelineModule = pattern<
+  TimelineModuleInput,
+  TimelineModuleOutput
+>(
   ({ startDate, targetDate, completedDate }) => {
     // Build display text based on what's set
     const displayText = computed(() => {

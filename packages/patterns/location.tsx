@@ -39,7 +39,10 @@ interface LocationModuleOutput {
 }
 
 // ===== The Pattern =====
-export const LocationModule = pattern<LocationModuleInput, LocationModuleOutput>(
+export const LocationModule = pattern<
+  LocationModuleInput,
+  LocationModuleOutput
+>(
   ({ locationName, locationAddress, coordinates }) => {
     const displayText = computed(() =>
       locationName || locationAddress || "Not set"

@@ -33,7 +33,10 @@ interface NicknameModuleOutput {
 }
 
 // ===== The Pattern =====
-export const NicknameModule = pattern<NicknameModuleInput, NicknameModuleOutput>(
+export const NicknameModule = pattern<
+  NicknameModuleInput,
+  NicknameModuleOutput
+>(
   ({ nickname }) => {
     // Build display text
     const displayText = computed(() => {

@@ -37,7 +37,10 @@ interface BirthdayModuleOutput {
 }
 
 // ===== The Pattern =====
-export const BirthdayModule = pattern<BirthdayModuleInput, BirthdayModuleOutput>(
+export const BirthdayModule = pattern<
+  BirthdayModuleInput,
+  BirthdayModuleOutput
+>(
   ({ birthDate, birthYear }) => {
     // Compute display text for NAME
     const displayText = computed(() => {
