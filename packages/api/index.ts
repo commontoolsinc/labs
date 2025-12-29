@@ -492,32 +492,69 @@ export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
 // OpaqueRef - Proxy-based variant of OpaqueCell
 // ============================================================================
 
+// ============================================================================
+// Depth Limiting Infrastructure (CT-1148)
+// ============================================================================
+// These types are used to prevent exponential type growth in recursive types.
+// Without depth limits, types like MaybeCellWrapped<T> and Opaque<T> cause
+// TypeScript to use 8GB+ of memory during compilation.
+
+// Restrict Depth to these numeric literal types
+type DepthLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+
+// Decrement map for recursion limit
+type Decrement = {
+  0: 0;
+  1: 0;
+  2: 1;
+  3: 2;
+  4: 3;
+  5: 4;
+  6: 5;
+  7: 6;
+  8: 7;
+  9: 8;
+};
+
+// Helper type to safely get decremented depth
+type DecrementDepth<D extends DepthLevel> = Decrement[D] & DepthLevel;
+
 /**
  * OpaqueRef is a variant of OpaqueCell with recursive proxy behavior.
  * Each key access returns another OpaqueRef, allowing chained property access.
  * This is temporary until AST transformation handles .key() automatically.
  *
  * OpaqueRef<Cell<T>> unwraps to Cell<T>.
+ * Depth-limited to prevent exponential type growth (CT-1148).
  */
-export type OpaqueRef<T> = [T] extends [AnyBrandedCell<any>] ? T
+export type OpaqueRef<T, Depth extends DepthLevel = 8> = [T] extends
+  [AnyBrandedCell<any>] ? T
   :
     & OpaqueCell<T>
-    & OpaqueRefInner<T>;
+    & OpaqueRefInner<T, Depth>;
 
 // Helper type for OpaqueRef's inner property/array mapping
 // Handles nullable types by extracting the non-null part for mapping
-type OpaqueRefInner<T> = [T] extends
-  [ArrayBuffer | ArrayBufferView | URL | Date] ? T
-  : [T] extends [Array<infer U>] ? Array<OpaqueRef<U>>
+// Depth-limited to prevent exponential type growth (CT-1148).
+// Default depth of 8 to handle deeply nested property access patterns.
+type OpaqueRefInner<T, Depth extends DepthLevel = 8> = Depth extends 0 ? T
+  : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
+  : [T] extends [Array<infer U>] ? Array<OpaqueRef<U, DecrementDepth<Depth>>>
   : [T] extends [AnyBrandedCell<any>] ? T
-  : [T] extends [object] ? { [K in keyof T]: OpaqueRef<T[K]> }
+  : [T] extends [object]
+    ? { [K in keyof T]: OpaqueRef<T[K], DecrementDepth<Depth>> }
   // For nullable types (T | null | undefined), extract and map the non-null part
   : [NonNullable<T>] extends [never] ? T
   // Handle nullable branded cells (e.g., (OpaqueCell<X> & X) | undefined) - don't wrap
   : [NonNullable<T>] extends [AnyBrandedCell<any>] ? T
-  : [NonNullable<T>] extends [Array<infer U>] ? Array<OpaqueRef<U>>
-  : [NonNullable<T>] extends [object]
-    ? { [K in keyof NonNullable<T>]: OpaqueRef<NonNullable<T>[K]> }
+  : [NonNullable<T>] extends [Array<infer U>]
+    ? Array<OpaqueRef<U, DecrementDepth<Depth>>>
+  : [NonNullable<T>] extends [object] ? {
+      [K in keyof NonNullable<T>]: OpaqueRef<
+        NonNullable<T>[K],
+        DecrementDepth<Depth>
+      >;
+    }
   : T;
 
 // ============================================================================
@@ -533,21 +570,34 @@ type OpaqueRefInner<T> = [T] extends
 export type CellLike<T> = AnyBrandedCell<MaybeCellWrapped<T>> & {
   [CELL_LIKE]?: unknown;
 };
-type MaybeCellWrapped<T> =
-  | T
-  | AnyBrandedCell<T>
-  | (T extends Array<infer U> ? Array<MaybeCellWrapped<U>>
-    : T extends object ? { [K in keyof T]: MaybeCellWrapped<T[K]> }
-    : never);
+
+/**
+ * MaybeCellWrapped allows T or any cell wrapping T at any nesting level.
+ * Depth-limited to prevent exponential type growth (CT-1148).
+ * Default depth of 4 provides good type safety without memory explosion.
+ */
+type MaybeCellWrapped<T, Depth extends DepthLevel = 4> = Depth extends 0
+  ? T | AnyBrandedCell<T> // At depth 0, stop recursing into objects
+  :
+    | T
+    | AnyBrandedCell<T>
+    | (T extends Array<infer U>
+      ? Array<MaybeCellWrapped<U, DecrementDepth<Depth>>>
+      : T extends object
+        ? { [K in keyof T]: MaybeCellWrapped<T[K], DecrementDepth<Depth>> }
+      : never);
 export declare const CELL_LIKE: unique symbol;
 
 /**
  * Helper type to transform Cell<T> to Opaque<T> in pattern/lift/handler inputs
+ * Depth-limited to prevent exponential type growth (CT-1148).
  */
-export type StripCell<T> = T extends AnyBrandedCell<infer U> ? StripCell<U>
+export type StripCell<T, Depth extends DepthLevel = 4> = Depth extends 0 ? T
+  : T extends AnyBrandedCell<infer U> ? StripCell<U, Depth>
   : T extends ArrayBuffer | ArrayBufferView | URL | Date ? T
-  : T extends Array<infer U> ? StripCell<U>[]
-  : T extends object ? { [K in keyof T]: StripCell<T[K]> }
+  : T extends Array<infer U> ? StripCell<U, DecrementDepth<Depth>>[]
+  : T extends object
+    ? { [K in keyof T]: StripCell<T[K], DecrementDepth<Depth>> }
   : T;
 
 /**
@@ -558,8 +608,13 @@ export type StripCell<T> = T extends AnyBrandedCell<infer U> ? StripCell<U>
  * Conceptually: T | AnyCell<T> at any nesting level, but we use OpaqueRef
  * for backward compatibility since it has the recursive proxy behavior that
  * allows property access (e.g., Opaque<{foo: string}> includes {foo: Opaque<string>}).
+ *
+ * Depth-limited to prevent exponential type growth (CT-1148).
+ * The 10-way union combined with recursive object mapping was causing
+ * TypeScript to use 8GB+ of memory. Default depth of 4 provides good
+ * type safety for typical pattern nesting levels.
  */
-export type Opaque<T> =
+export type Opaque<T, Depth extends DepthLevel = 4> =
   | T
   // We have to list them explicitly so Typescript can unwrap them. Doesn't seem
   // to work if we just say AnyBrandedCell<T>
@@ -572,8 +627,9 @@ export type Opaque<T> =
   | ComparableCell<T>
   | ReadonlyCell<T>
   | WriteonlyCell<T>
-  | (T extends Array<infer U> ? Array<Opaque<U>>
-    : T extends object ? { [K in keyof T]: Opaque<T[K]> }
+  | (Depth extends 0 ? T // At depth 0, stop recursing - just accept T directly
+    : T extends Array<infer U> ? Array<Opaque<U, DecrementDepth<Depth>>>
+    : T extends object ? { [K in keyof T]: Opaque<T[K], DecrementDepth<Depth>> }
     : T);
 
 /**
@@ -631,21 +687,36 @@ export type UnwrapCell<T> =
  * unwrapped. This is designed for use with cell method parameters, allowing
  * flexibility in how values are passed. The ID and ID_FIELD metadata symbols
  * allows controlling id generation and can only be passed to write operations.
+ *
+ * Depth-limited to prevent exponential type growth (CT-1148).
+ * The union branching (wrapped OR unwrapped) at every level was causing
+ * 2^N growth for objects with N keys.
  */
-export type AnyCellWrapping<T> =
+export type AnyCellWrapping<T, Depth extends DepthLevel = 4> = Depth extends 0
+  // At depth 0, just accept T or cell-wrapped T, no further recursion
+  ? T | AnyBrandedCell<T>
   // Handle existing AnyBrandedCell<> types, allowing unwrapping
-  T extends AnyBrandedCell<infer U>
-    ? AnyCellWrapping<U> | AnyBrandedCell<AnyCellWrapping<U>>
-    // Handle arrays
-    : T extends Array<infer U>
-      ? Array<AnyCellWrapping<U>> | AnyBrandedCell<Array<AnyCellWrapping<U>>>
-    // Handle objects (excluding null)
-    : T extends object ?
-        | { [K in keyof T]: AnyCellWrapping<T[K]> }
-          & { [ID]?: AnyCellWrapping<JSONValue>; [ID_FIELD]?: string }
-        | AnyBrandedCell<{ [K in keyof T]: AnyCellWrapping<T[K]> }>
-    // Handle primitives
-    : T | AnyBrandedCell<T>;
+  : T extends AnyBrandedCell<infer U> ?
+      | AnyCellWrapping<U, DecrementDepth<Depth>>
+      | AnyBrandedCell<AnyCellWrapping<U, DecrementDepth<Depth>>>
+  // Handle arrays
+  : T extends Array<infer U> ?
+      | Array<AnyCellWrapping<U, DecrementDepth<Depth>>>
+      | AnyBrandedCell<Array<AnyCellWrapping<U, DecrementDepth<Depth>>>>
+  // Handle objects (excluding null)
+  : T extends object ?
+      | (
+        & { [K in keyof T]: AnyCellWrapping<T[K], DecrementDepth<Depth>> }
+        & {
+          [ID]?: AnyCellWrapping<JSONValue, DecrementDepth<Depth>>;
+          [ID_FIELD]?: string;
+        }
+      )
+      | AnyBrandedCell<
+        { [K in keyof T]: AnyCellWrapping<T[K], DecrementDepth<Depth>> }
+      >
+  // Handle primitives
+  : T | AnyBrandedCell<T>;
 
 // Factory types
 
@@ -1115,10 +1186,14 @@ export type LiftFunction = {
 };
 
 // Helper type to make non-Cell and non-Stream properties readonly in handler state
-export type HandlerState<T> = T extends Cell<any> ? T
+// Depth-limited to prevent exponential type growth (CT-1148).
+export type HandlerState<T, Depth extends DepthLevel = 4> = Depth extends 0 ? T
+  : T extends Cell<any> ? T
   : T extends Stream<any> ? T
-  : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>>
-  : T extends object ? { readonly [K in keyof T]: HandlerState<T[K]> }
+  : T extends Array<infer U>
+    ? ReadonlyArray<HandlerState<U, DecrementDepth<Depth>>>
+  : T extends object
+    ? { readonly [K in keyof T]: HandlerState<T[K], DecrementDepth<Depth>> }
   : T;
 
 export type HandlerFunction = {
@@ -1650,25 +1725,8 @@ type ObjectFromProperties<
       : Record<string | number | symbol, never>
   );
 
-// Restrict Depth to these numeric literal types
-type DepthLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
-
-// Decrement map for recursion limit
-type Decrement = {
-  0: 0;
-  1: 0;
-  2: 1;
-  3: 2;
-  4: 3;
-  5: 4;
-  6: 5;
-  7: 6;
-  8: 7;
-  9: 8;
-};
-
-// Helper function to safely get decremented depth
-type DecrementDepth<D extends DepthLevel> = Decrement[D] & DepthLevel;
+// DepthLevel, Decrement, and DecrementDepth are defined earlier in the file
+// (see "Depth Limiting Infrastructure (CT-1148)" section)
 
 export type SchemaWithoutCell<
   T extends JSONSchema,

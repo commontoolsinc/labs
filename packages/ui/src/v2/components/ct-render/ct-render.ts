@@ -27,7 +27,8 @@ export type UIVariant =
   | "thumbnail"
   | "sidebar"
   | "fab"
-  | "embedded";
+  | "embedded"
+  | "settings";
 
 /**
  * Maps variant names to the property key to look for on the charm.
@@ -40,6 +41,7 @@ const VARIANT_TO_KEY: Record<UIVariant, string | null> = {
   sidebar: "sidebarUI",
   fab: "fabUI",
   embedded: "embeddedUI",
+  settings: "settingsUI",
 };
 
 /**
