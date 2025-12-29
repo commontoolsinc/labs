@@ -292,21 +292,30 @@ export class CTRender extends BaseElement {
       return;
     }
 
-    // Check if cell value is defined - if not, wait for subscription to trigger
-    // This handles async loading where the Cell exists but its value is undefined
-    let cellValue: unknown;
-    try {
-      cellValue = this.cell.get();
-    } catch {
-      cellValue = undefined;
-    }
+    const isSubPath = this._isSubPath(this.cell);
 
-    if (cellValue === undefined || cellValue === null) {
-      this._log(
-        "cell value is undefined/null, waiting for value to become available",
-      );
-      // Don't set _hasRendered - subscription will trigger render when value becomes available
-      return;
+    // For root charm cells (not subpaths), check if value is defined.
+    // If not, wait for subscription to trigger - this handles async loading
+    // where the Cell exists but the charm data hasn't loaded yet.
+    //
+    // For subpath cells (like .key("fabUI") or .key("sidebarUI")), we should
+    // render immediately even if the value is undefined/null - the pattern
+    // may intentionally set these properties to undefined (e.g., sidebarUI: undefined).
+    if (!isSubPath) {
+      let cellValue: unknown;
+      try {
+        cellValue = this.cell.get();
+      } catch {
+        cellValue = undefined;
+      }
+
+      if (cellValue === undefined || cellValue === null) {
+        this._log(
+          "root cell value is undefined/null, waiting for async load",
+        );
+        // Don't set _hasRendered - subscription will trigger render when value becomes available
+        return;
+      }
     }
 
     // Mark render as in progress
@@ -314,8 +323,6 @@ export class CTRender extends BaseElement {
     try {
       // Clean up any previous render
       this._cleanupPreviousRender();
-
-      const isSubPath = this._isSubPath(this.cell);
 
       if (isSubPath) {
         this._log("cell is a subpath, rendering directly");
