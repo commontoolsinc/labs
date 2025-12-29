@@ -6,9 +6,15 @@ import { type StaticCache } from "@commontools/static";
 // * "es2023"
 // * "jsx"
 // * "dom"
-export const getTypeScriptEnvironmentTypes = (() => {
+//
+// This is a module-level singleton that caches ~775KB of type definitions.
+// Use getTypeScriptEnvironmentTypes.clear() to release memory in tests.
+export const getTypeScriptEnvironmentTypes: {
+  (cache: StaticCache): Promise<Record<string, string>>;
+  clear: () => void;
+} = (() => {
   let cached: Record<string, string> | undefined;
-  return async (cache: StaticCache): Promise<Record<string, string>> => {
+  const fn = async (cache: StaticCache): Promise<Record<string, string>> => {
     if (cached) {
       return cached;
     }
@@ -23,4 +29,8 @@ export const getTypeScriptEnvironmentTypes = (() => {
     };
     return cached;
   };
+  fn.clear = () => {
+    cached = undefined;
+  };
+  return fn;
 })();
