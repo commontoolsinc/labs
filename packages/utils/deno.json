@@ -13,7 +13,6 @@
     "./types": "./src/types.ts",
     "./integration": "./src/integration.ts",
     "./zod-utils": "./src/zod-utils.ts",
-    "./logger": "./src/logger.ts",
-    "./semaphore": "./src/semaphore.ts"
+    "./logger": "./src/logger.ts"
   }
 }

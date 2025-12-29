@@ -3,8 +3,6 @@ import { cors } from "@hono/hono/cors";
 
 import * as handlers from "./patterns.handlers.ts";
 import * as routes from "./patterns.routes.ts";
-import * as compiledHandlers from "./compiled.handlers.ts";
-import * as compiledRoutes from "./compiled.routes.ts";
 
 const router = createRouter();
 
@@ -18,10 +16,6 @@ router.use(
   }),
 );
 
-// Compiled patterns endpoint (must be registered before raw patterns to take precedence)
-router.openapi(compiledRoutes.getCompiledPattern, compiledHandlers.getCompiledPattern);
-
-// Raw pattern source endpoint
 router.openapi(routes.getPattern, handlers.getPattern);
 
 export default router;
