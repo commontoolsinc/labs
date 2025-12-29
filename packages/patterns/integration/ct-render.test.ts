@@ -52,14 +52,20 @@ describe("ct-render integration test", () => {
       identity,
     });
 
+    // Use try/catch because element may become stale between waitForSelector and evaluate
     await waitFor(async () => {
-      const counterResult = await page.waitForSelector("#counter-result", {
-        strategy: "pierce",
-      });
-      const initialText = await counterResult.evaluate((el: HTMLElement) =>
-        el.textContent
-      );
-      return initialText?.trim() === "Counter is the 0th number";
+      try {
+        const counterResult = await page.waitForSelector("#counter-result", {
+          strategy: "pierce",
+          timeout: 500,
+        });
+        const initialText = await counterResult.evaluate((el: HTMLElement) =>
+          el.textContent
+        );
+        return initialText?.trim() === "Counter is the 0th number";
+      } catch (_) {
+        return false;
+      }
     });
 
     // Verify via direct operations that the ct-render structure works
@@ -102,15 +108,20 @@ describe("ct-render integration test", () => {
       identity,
     });
 
+    // Use try/catch because element may become stale between waitForSelector and evaluate
     await waitFor(async () => {
-      const counterResult = await page.waitForSelector("#counter-result", {
-        strategy: "pierce",
-      });
-      const textAfterUpdate = await counterResult.evaluate((el: HTMLElement) =>
-        el.textContent
-      );
-      return textAfterUpdate?.trim() ===
-        "Counter is the 5th number";
+      try {
+        const counterResult = await page.waitForSelector("#counter-result", {
+          strategy: "pierce",
+          timeout: 500,
+        });
+        const textAfterUpdate = await counterResult.evaluate((
+          el: HTMLElement,
+        ) => el.textContent);
+        return textAfterUpdate?.trim() === "Counter is the 5th number";
+      } catch (_) {
+        return false;
+      }
     });
   });
 
@@ -216,13 +227,18 @@ describe("ct-render subpath handling", () => {
     });
 
     // The main UI should render despite sidebarUI being undefined
+    // Use try/catch because waitForSelector throws on timeout, and waitFor doesn't catch exceptions
     await waitFor(async () => {
-      const mainUI = await page.waitForSelector("#main-ui", {
-        strategy: "pierce",
-        timeout: 5000,
-      });
-      const text = await mainUI.evaluate((el: HTMLElement) => el.textContent);
-      return text?.includes("This is the main UI");
+      try {
+        const mainUI = await page.waitForSelector("#main-ui", {
+          strategy: "pierce",
+          timeout: 500,
+        });
+        const text = await mainUI.evaluate((el: HTMLElement) => el.textContent);
+        return text?.includes("This is the main UI") ?? false;
+      } catch (_) {
+        return false;
+      }
     }, { timeout: 10000 });
 
     // Verify the title is rendered (check it contains expected text)
@@ -264,12 +280,17 @@ describe("ct-render subpath handling", () => {
     });
 
     // The main UI should be visible - this proves rendering wasn't blocked
+    // Use try/catch because waitForSelector throws on timeout, and waitFor doesn't catch exceptions
     await waitFor(async () => {
-      const mainUI = await page.waitForSelector("#main-ui", {
-        strategy: "pierce",
-        timeout: 5000,
-      });
-      return mainUI !== null;
+      try {
+        const mainUI = await page.waitForSelector("#main-ui", {
+          strategy: "pierce",
+          timeout: 500,
+        });
+        return mainUI !== null;
+      } catch (_) {
+        return false;
+      }
     }, { timeout: 10000 });
 
     // Verify the paragraph is visible
