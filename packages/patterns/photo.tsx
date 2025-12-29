@@ -42,6 +42,16 @@ export interface PhotoModuleInput {
   label: Default<string, "">;
 }
 
+// Output interface with unknown for UI properties to prevent OOM (CT-1148)
+// TypeScript infers deeply nested VNode types without this, causing memory explosion
+interface PhotoModuleOutput {
+  [NAME]: unknown;
+  [UI]: unknown;
+  settingsUI: unknown;
+  image: ImageData | null;
+  label: string;
+}
+
 // ===== Handlers =====
 
 // Handler to clear the photo
@@ -53,7 +63,7 @@ const clearPhoto = handler<
 });
 
 // ===== The Pattern =====
-export const PhotoModule = recipe<PhotoModuleInput, PhotoModuleInput>(
+export const PhotoModule = recipe<PhotoModuleInput, PhotoModuleOutput>(
   "PhotoModule",
   ({ image: inputImage, label }) => {
     // We use an array internally for ct-image-input compatibility
