@@ -17,7 +17,7 @@ import Note from "./note.tsx";
 // Simple random ID generator (crypto.randomUUID not available in pattern env)
 const generateId = () =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
-import Notebook from "./notebooks.tsx";
+import Notebook from "./notebook.tsx";
 
 // Types for notes in the space
 type NoteCharm = {

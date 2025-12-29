@@ -19,9 +19,9 @@ import { ALL_CHARMS_ID } from "./well-known.ts";
 import { type JSONSchema, type Recipe, UI } from "../builder/types.ts";
 import { getRecipeEnvironment } from "../env.ts";
 
-const WISH_TSX_PATH = getRecipeEnvironment().apiUrl + "api/patterns/wish.tsx";
+const WISH_TSX_PATH = getRecipeEnvironment().apiUrl + "api/patterns/system/wish.tsx";
 const SUGGESTION_TSX_PATH = getRecipeEnvironment().apiUrl +
-  "api/patterns/suggestion.tsx";
+  "api/patterns/system/suggestion.tsx";
 
 class WishError extends Error {
   constructor(message: string) {
