@@ -71,6 +71,8 @@ export type SubCharmType =
   | "record-icon"
   // List modules
   | "simple-list"
+  // Photo module
+  | "photo"
   // Controller modules (internal, not user-addable)
   | "type-picker"
   | "extractor";
