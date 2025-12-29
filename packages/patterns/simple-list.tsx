@@ -11,7 +11,7 @@ import {
   type Default,
   handler,
   NAME,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
@@ -53,6 +53,11 @@ export interface SimpleListModuleInput {
   items: Cell<Default<SimpleListItem[], []>>;
 }
 
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+interface SimpleListModuleOutput {
+  items: SimpleListItem[];
+}
+
 // ===== Handlers =====
 
 // Toggle indent on an item
@@ -83,12 +88,10 @@ const deleteItem = handler<
 });
 
 // ===== The Pattern =====
-export const SimpleListModule = recipe<
+export const SimpleListModule = pattern<
   SimpleListModuleInput,
-  SimpleListModuleInput
->(
-  "SimpleListModule",
-  ({ items }) => {
+  SimpleListModuleOutput
+>(({ items }) => {
     // Computed summary for NAME
     const displayText = computed(() => {
       const list = items.get() || [];

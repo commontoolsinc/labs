@@ -14,7 +14,7 @@ import {
   type Default,
   handler,
   NAME,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
@@ -93,6 +93,11 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Interface =====
 export interface AgeCategoryModuleInput {
   ageCategory: Default<AgeCategory, "adult">;
+}
+
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+interface AgeCategoryModuleOutput {
+  ageCategory: AgeCategory;
 }
 
 // ===== Constants =====
@@ -180,10 +185,10 @@ const handleGroupChange = handler<
 });
 
 // ===== The Pattern =====
-export const AgeCategoryModule = recipe<
+export const AgeCategoryModule = pattern<
   AgeCategoryModuleInput,
-  AgeCategoryModuleInput
->("AgeCategoryModule", ({ ageCategory }) => {
+  AgeCategoryModuleOutput
+>(({ ageCategory }) => {
   // Compute whether current category is in Adult group
   const currentIsAdult = computed(() => isAdultCategory(ageCategory));
 

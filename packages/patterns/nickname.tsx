@@ -6,7 +6,7 @@
  * like Record. Stores a nickname that can optionally be displayed as an alias
  * in the parent Record's display name.
  */
-import { computed, type Default, NAME, recipe, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -27,9 +27,13 @@ export interface NicknameModuleInput {
   nickname: Default<string, "">;
 }
 
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+interface NicknameModuleOutput {
+  nickname: string;
+}
+
 // ===== The Pattern =====
-export const NicknameModule = recipe<NicknameModuleInput, NicknameModuleInput>(
-  "NicknameModule",
+export const NicknameModule = pattern<NicknameModuleInput, NicknameModuleOutput>(
   ({ nickname }) => {
     // Build display text
     const displayText = computed(() => {

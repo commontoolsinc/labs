@@ -5,7 +5,7 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Stores URL, title, and description.
  */
-import { computed, type Default, NAME, recipe, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -31,9 +31,15 @@ export interface LinkModuleInput {
   description: Default<string, "">;
 }
 
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+interface LinkModuleOutput {
+  url: string;
+  linkTitle: string;
+  description: string;
+}
+
 // ===== The Pattern =====
-export const LinkModule = recipe<LinkModuleInput, LinkModuleInput>(
-  "LinkModule",
+export const LinkModule = pattern<LinkModuleInput, LinkModuleOutput>(
   ({ url, linkTitle, description }) => {
     const displayText = computed(() => linkTitle || url || "Not set");
 

@@ -5,7 +5,7 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Tracks birthday date and optional birth year.
  */
-import { computed, type Default, NAME, recipe, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -28,9 +28,16 @@ export interface BirthdayModuleInput {
   birthYear: Default<number | null, null>;
 }
 
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+// by avoiding deep type inference on recursive VNode/RenderNode types.
+// Extra fields like [UI] and [NAME] are still returned but not type-checked.
+interface BirthdayModuleOutput {
+  birthDate: string;
+  birthYear: number | null;
+}
+
 // ===== The Pattern =====
-export const BirthdayModule = recipe<BirthdayModuleInput, BirthdayModuleInput>(
-  "BirthdayModule",
+export const BirthdayModule = pattern<BirthdayModuleInput, BirthdayModuleOutput>(
   ({ birthDate, birthYear }) => {
     // Compute display text for NAME
     const displayText = computed(() => {

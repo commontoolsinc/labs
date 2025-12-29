@@ -11,7 +11,7 @@ import {
   type Default,
   handler,
   NAME,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
@@ -53,6 +53,13 @@ export interface GiftPrefsModuleInput {
   favorites: Default<string[], []>;
   /** Things to avoid (allergies, dislikes) */
   avoid: Default<string[], []>;
+}
+
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+interface GiftPrefsModuleOutput {
+  giftTier: GiftTier | "";
+  favorites: string[];
+  avoid: string[];
 }
 
 // ===== Constants =====
@@ -111,12 +118,10 @@ const removeAvoid = handler<
 });
 
 // ===== The Pattern =====
-export const GiftPrefsModule = recipe<
+export const GiftPrefsModule = pattern<
   GiftPrefsModuleInput,
-  GiftPrefsModuleInput
->(
-  "GiftPrefsModule",
-  ({ giftTier, favorites, avoid }) => {
+  GiftPrefsModuleOutput
+>(({ giftTier, favorites, avoid }) => {
     const favoriteInput = Cell.of<string>("");
     const avoidInput = Cell.of<string>("");
 

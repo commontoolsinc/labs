@@ -11,7 +11,7 @@ import {
   type Default,
   handler,
   NAME,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
@@ -52,6 +52,14 @@ export interface RelationshipModuleInput {
   howWeMet: Default<string, "">;
   /** Inner circle member */
   innerCircle: Default<boolean, false>;
+}
+
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+interface RelationshipModuleOutput {
+  relationTypes: string[];
+  closeness: ClosenessLevel | "";
+  howWeMet: string;
+  innerCircle: boolean;
 }
 
 // ===== Constants =====
@@ -97,12 +105,10 @@ const toggleInnerCircle = handler<
 });
 
 // ===== The Pattern =====
-export const RelationshipModule = recipe<
+export const RelationshipModule = pattern<
   RelationshipModuleInput,
-  RelationshipModuleInput
->(
-  "RelationshipModule",
-  ({ relationTypes, closeness, howWeMet, innerCircle }) => {
+  RelationshipModuleOutput
+>(({ relationTypes, closeness, howWeMet, innerCircle }) => {
     const displayText = computed(() => {
       const types = relationTypes || [];
       const count = types.length || 0;

@@ -5,7 +5,7 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Tracks project timeline with multiple date fields.
  */
-import { computed, type Default, NAME, recipe, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -39,9 +39,15 @@ export interface TimelineModuleInput {
   completedDate: Default<string, "">;
 }
 
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+interface TimelineModuleOutput {
+  startDate: string;
+  targetDate: string;
+  completedDate: string;
+}
+
 // ===== The Pattern =====
-export const TimelineModule = recipe<TimelineModuleInput, TimelineModuleInput>(
-  "TimelineModule",
+export const TimelineModule = pattern<TimelineModuleInput, TimelineModuleOutput>(
   ({ startDate, targetDate, completedDate }) => {
     // Build display text based on what's set
     const displayText = computed(() => {

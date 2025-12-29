@@ -5,7 +5,7 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Stores location name, address, and optional coordinates.
  */
-import { computed, type Default, NAME, recipe, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -31,9 +31,15 @@ export interface LocationModuleInput {
   coordinates: Default<string, "">;
 }
 
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+interface LocationModuleOutput {
+  locationName: string;
+  locationAddress: string;
+  coordinates: string;
+}
+
 // ===== The Pattern =====
-export const LocationModule = recipe<LocationModuleInput, LocationModuleInput>(
-  "LocationModule",
+export const LocationModule = pattern<LocationModuleInput, LocationModuleOutput>(
   ({ locationName, locationAddress, coordinates }) => {
     const displayText = computed(() =>
       locationName || locationAddress || "Not set"

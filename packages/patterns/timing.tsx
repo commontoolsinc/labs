@@ -5,7 +5,7 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Tracks prep, cook, and rest times with auto-calculated total.
  */
-import { computed, type Default, NAME, recipe, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -31,6 +31,14 @@ export interface TimingModuleInput {
   restTime: Default<number | null, null>;
 }
 
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+interface TimingModuleOutput {
+  prepTime: number | null;
+  cookTime: number | null;
+  restTime: number | null;
+  totalTime: number | null;
+}
+
 // ===== Helpers =====
 
 // Format minutes as "Xh Ym"
@@ -43,8 +51,7 @@ function formatTime(minutes: number | null): string {
 }
 
 // ===== The Pattern =====
-export const TimingModule = recipe<TimingModuleInput, TimingModuleInput>(
-  "TimingModule",
+export const TimingModule = pattern<TimingModuleInput, TimingModuleOutput>(
   ({ prepTime, cookTime, restTime }) => {
     // Compute total time
     const totalTime = computed(() => {
