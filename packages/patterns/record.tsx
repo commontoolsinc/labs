@@ -26,10 +26,11 @@ import {
   UI,
 } from "commontools";
 import {
-  createSubCharm,
   getAddableTypes,
   getDefinition,
+  getModuleUrl,
 } from "./record/registry.ts";
+import { fetchAndRunPattern } from "./system/common-tools.tsx";
 // Import Note directly - we create it inline with proper linkPattern
 // (avoids global state for passing Record's pattern JSON)
 import Note from "./notes/note.tsx";
@@ -91,6 +92,48 @@ interface RecordOutput {
   title?: Default<string, "">;
   subCharms?: Default<SubCharmEntry[], []>;
   trashedSubCharms?: Default<TrashedSubCharmEntry[], []>;
+}
+
+/**
+ * Extract charm cell from a stored module entry.
+ *
+ * When modules are stored in subCharms array, `entry.charm` can be:
+ * 1. A Cell/proxy from fetchAndRunPattern - wraps { cell, error } or undefined
+ * 2. A sync charm result (e.g., Note) - the charm Cell directly
+ * 3. undefined - not yet loaded
+ *
+ * This function unwraps fetchAndRunPattern results to get the actual charm Cell.
+ * It detects Cells by checking for a .get() method, then extracts the .cell
+ * property from the value if present.
+ */
+function getCharmCell(charm: unknown): any {
+  if (!charm) return undefined;
+
+  // Check if charm is a Cell/proxy (has .get method)
+  // This handles fetchAndRunPattern results which are Cells containing { cell, error }
+  if (
+    typeof charm === "object" &&
+    charm !== null &&
+    "get" in charm &&
+    typeof (charm as { get: unknown }).get === "function"
+  ) {
+    // Get the Cell's current value - this creates a reactive dependency when
+    // called inside a computed()
+    const value = (charm as { get: () => unknown }).get();
+    // Check if the value is a fetchAndRunPattern result with .cell property
+    if (value && typeof value === "object" && "cell" in value) {
+      return (value as { cell: unknown }).cell;
+    }
+    // Value doesn't have .cell - could be undefined (loading) or the charm itself
+    return value || undefined;
+  }
+
+  // Legacy path: direct { cell, error } object (shouldn't happen in current code)
+  if (typeof charm === "object" && charm !== null && "cell" in charm) {
+    return (charm as { cell: unknown }).cell;
+  }
+
+  return charm;
 }
 
 // ===== Auto-Initialize Notes + TypePicker (Two-Lift Pattern) =====
@@ -173,7 +216,17 @@ const initializeRecord = lift(
           if (type === "notes") {
             return Note({ linkPattern: recordPatternJson });
           }
-          return createSubCharm(type);
+          // Get module URL and load dynamically
+          const loadInfo = getModuleUrl(type);
+          if ("error" in loadInfo) {
+            console.warn(`Cannot create module "${type}": ${loadInfo.error}`);
+            return undefined;
+          }
+          // Return loaded result directly - fetchAndRunPattern returns { cell, error } or undefined
+          return fetchAndRunPattern({
+            url: loadInfo.url,
+            args: Cell.of({}),
+          });
         },
       };
 
@@ -298,26 +351,68 @@ const addSubCharm = handler<
   const nextLabel = getNextUnusedLabel(type, current);
   const initialValues = nextLabel ? { label: nextLabel } : undefined;
 
-  // Special case: create Note (rendered via ct-render variant="embedded")
-  // Pass recordPatternJson so [[wiki-links]] create Record charms instead of Note charms
-  // Special case: create ExtractorModule as controller with parent Cells
-  const charm = type === "notes"
-    ? Note({ linkPattern: recordPatternJson })
-    : type === "extractor"
-    ? ExtractorModule({
+  // Special case: create Note and Extractor synchronously (they need special context)
+  if (type === "notes") {
+    // Pass recordPatternJson so [[wiki-links]] create Record charms instead of Note charms
+    const charm = Note({ linkPattern: recordPatternJson });
+    const schema = getResultSchema(charm);
+    sc.set([...current, {
+      type,
+      pinned: false,
+      collapsed: false,
+      charm,
+      schema,
+    }]);
+    sat.set("");
+    return;
+  }
+
+  if (type === "extractor") {
+    const charm = ExtractorModule({
       parentSubCharms: sc,
       parentTrashedSubCharms: trash,
-    } as any)
-    : createSubCharm(type, initialValues);
+      // deno-lint-ignore no-explicit-any
+    } as any);
+    const schema = getResultSchema(charm);
+    sc.set([...current, {
+      type,
+      pinned: false,
+      collapsed: false,
+      charm,
+      schema,
+    }]);
+    sat.set("");
+    return;
+  }
 
-  // Capture schema at creation time for dynamic discovery
-  const schema = getResultSchema(charm);
+  // Other modules: load asynchronously via fetchAndRunPattern
+  const loadInfo = getModuleUrl(type);
+  if ("error" in loadInfo) {
+    console.warn(`Cannot create module "${type}": ${loadInfo.error}`);
+    sat.set("");
+    return;
+  }
+
+  // fetchAndRunPattern returns { cell, error } or undefined while pending
+  // The cell contains the instantiated pattern result once loaded
+  // IMPORTANT: Store `loaded` directly, not `loaded?.cell`
+  // At handler execution time, loaded is undefined. If we extract .cell now,
+  // we get undefined and lose the reactive reference.
+  // By storing `loaded` directly, ct-render can access .cell reactively when it becomes available.
+  const loaded = fetchAndRunPattern({
+    url: loadInfo.url,
+    args: Cell.of(initialValues || {}),
+  });
+
+  // Store loaded directly - it's a reactive reference that will update
+  // when the pattern finishes compiling
   sc.set([...current, {
     type,
     pinned: false,
     collapsed: false,
-    charm,
-    schema,
+    // Store the entire loaded result (undefined -> { cell, error })
+    // ct-render will extract .cell reactively
+    charm: loaded,
   }]);
   sat.set("");
 });
@@ -602,7 +697,21 @@ const handleAddModule = handler<
       // deno-lint-ignore no-explicit-any
     } as any);
   } else {
-    charm = createSubCharm(type, initialValues);
+    // Get module URL and load dynamically
+    const loadInfo = getModuleUrl(type);
+    if ("error" in loadInfo) {
+      if (result) {
+        result.set({
+          success: false,
+          error: `Cannot create module "${type}": ${loadInfo.error}`,
+        });
+      }
+      return;
+    }
+    charm = fetchAndRunPattern({
+      url: loadInfo.url,
+      args: Cell.of(initialValues),
+    });
   }
 
   // Capture schema at creation time
@@ -779,8 +888,17 @@ const createSibling = handler<
   const nextLabel = getNextUnusedLabel(entry.type, current);
   const initialValues = nextLabel ? { label: nextLabel } : undefined;
 
-  // Create new module of same type
-  const charm = createSubCharm(entry.type, initialValues);
+  // Create new module of same type using dynamic loading
+  const loadInfo = getModuleUrl(entry.type);
+  if ("error" in loadInfo) {
+    console.warn(`Cannot create module "${entry.type}": ${loadInfo.error}`);
+    return;
+  }
+
+  const charm = fetchAndRunPattern({
+    url: loadInfo.url,
+    args: Cell.of(initialValues || {}),
+  });
 
   // Insert after current position
   const updated = [...current];
@@ -1296,7 +1414,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                             }}
                           >
                             <ct-render
-                              $cell={entry.charm}
+                              $cell={computed(() => getCharmCell(entry.charm))}
                               variant="embedded"
                             />
                           </div>,
@@ -1548,7 +1666,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                               }}
                             >
                               <ct-render
-                                $cell={entry.charm}
+                                $cell={computed(() =>
+                                  getCharmCell(entry.charm)
+                                )}
                                 variant="embedded"
                               />
                             </div>,
@@ -1793,7 +1913,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                           }}
                         >
                           <ct-render
-                            $cell={entry.charm}
+                            $cell={computed(() => getCharmCell(entry.charm))}
                             variant="embedded"
                           />
                         </div>,

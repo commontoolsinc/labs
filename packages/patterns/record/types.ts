@@ -25,12 +25,16 @@ import type { JSONSchema } from "./extraction/schema-utils-pure.ts";
 /**
  * SubCharmEntry - An entry in the Record's sub-charms array.
  * Each entry holds a reference to an actual sub-charm pattern instance.
+ *
+ * Modules can be loaded asynchronously via fetchAndRunPattern.
+ * While loading, charm may be { cell: undefined, error: undefined }.
+ * When loaded, charm becomes { cell: <pattern output>, error?: string }.
  */
 export interface SubCharmEntry {
   type: string; // Module type identifier (e.g., "birthday", "email")
   pinned: boolean; // Pin state owned by Record (not the sub-charm)
   collapsed?: boolean; // Collapse state - when true, only header is shown (default: false/expanded)
-  charm: unknown; // Reference to the actual sub-charm pattern instance
+  charm: unknown; // Reference to the actual sub-charm pattern instance (may be { cell, error } for async modules)
   schema?: JSONSchema; // Schema captured at creation time for dynamic discovery
   note?: string; // User annotation about this module (visible to LLM reads, not extraction)
 }

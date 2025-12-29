@@ -1,7 +1,11 @@
 // template-registry.ts - Pre-assembled module sets ("lego sets")
 // Defines common record types and their associated modules
 
-import { createSubCharm } from "./registry.ts";
+import {
+  getModuleUrl,
+  type ModuleLoadError,
+  type ModuleLoadInfo,
+} from "./registry.ts";
 import type { SubCharmEntry } from "./types.ts";
 
 // ===== Template Types =====
@@ -153,23 +157,31 @@ export function inferTypeFromModules(moduleTypes: string[]): InferredType {
   return { type: "record", icon: "\u{1F4CB}", confidence: 0.5 };
 }
 
-// ===== Functions that require createSubCharm =====
+// ===== Template Module Creation =====
+
+/**
+ * Factory function type for creating modules.
+ * Called with module type and initial values, returns the charm.
+ * For pattern-level usage (fetchAndRunPattern), pass a factory that
+ * handles the async loading.
+ */
+export type ModuleFactory = (
+  type: string,
+  initialValues?: Record<string, unknown>,
+) => unknown;
 
 /**
  * Create all modules for a template, returning SubCharmEntry array.
  * Notes is pinned by default in all templates.
  *
- * Gracefully handles module creation failures - skips failed modules
- * and logs a warning rather than crashing the entire template application.
- *
  * @param templateId - ID of the template to create modules for
- * @param createNotesCharm - Factory function to create Notes charm with correct linkPattern.
- *                           Required because Notes needs the Record pattern JSON for wiki-links,
- *                           which avoids global state.
+ * @param createModule - Factory function to create module charms.
+ *                       This should handle async loading (e.g., via fetchAndRunPattern).
+ *                       For notes, can return synchronous Note() result.
  */
 export function createTemplateModules(
   templateId: string,
-  createNotesCharm?: () => unknown,
+  createModule: ModuleFactory,
 ): SubCharmEntry[] {
   const template = TEMPLATE_REGISTRY[templateId];
   if (!template) return [];
@@ -178,25 +190,14 @@ export function createTemplateModules(
 
   for (const moduleType of template.modules) {
     try {
-      // Special case: use factory for notes if provided
-      // Notes needs linkPattern which requires Record's pattern JSON
-      let charm: unknown;
-      if (moduleType === "notes") {
-        if (!createNotesCharm) {
-          console.warn(
-            `Template "${templateId}" includes notes but no createNotesCharm factory provided`,
-          );
-          continue;
-        }
-        charm = createNotesCharm();
-      } else {
-        charm = createSubCharm(moduleType);
+      const charm = createModule(moduleType);
+      if (charm !== undefined) {
+        entries.push({
+          type: moduleType,
+          pinned: template.defaultPinned.includes(moduleType),
+          charm,
+        });
       }
-      entries.push({
-        type: moduleType,
-        pinned: template.defaultPinned.includes(moduleType),
-        charm,
-      });
     } catch (error) {
       console.warn(
         `Failed to create module "${moduleType}" for template "${templateId}":`,
@@ -207,4 +208,24 @@ export function createTemplateModules(
   }
 
   return entries;
+}
+
+/**
+ * Get module loading info for a template.
+ * Returns URL info for each module type that can be dynamically loaded.
+ * The caller should use fetchAndRunPattern to load each module.
+ */
+export function getTemplateModuleUrls(
+  templateId: string,
+): Array<
+  { type: string; pinned: boolean; loadInfo: ModuleLoadInfo | ModuleLoadError }
+> {
+  const template = TEMPLATE_REGISTRY[templateId];
+  if (!template) return [];
+
+  return template.modules.map((moduleType) => ({
+    type: moduleType,
+    pinned: template.defaultPinned.includes(moduleType),
+    loadInfo: getModuleUrl(moduleType),
+  }));
 }
