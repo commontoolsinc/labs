@@ -173,8 +173,23 @@ export class CTCodeEditor extends BaseElement {
 
   // Flag indicating user is actively typing. When true, external Cell
   // updates are DISCARDED (not queued) to preserve user content.
-  // Set to true when user types, cleared when debounce callback executes.
-  // This implements "user typing wins" behavior.
+  // Set to true when user types, cleared when debounce callback executes
+  // or on blur/value property change.
+  //
+  // This implements "USER TYPING WINS" behavior with these semantics:
+  //   - During active typing, ALL external Cell updates are silently discarded
+  //   - After debounce (500ms of no typing), external updates apply normally
+  //   - User's content is ALWAYS preserved during active editing
+  //
+  // LIMITATIONS (intentional tradeoffs for single-user UX):
+  //   - NOT suitable for real-time collaboration (external edits are lost)
+  //   - Two browser tabs editing same Cell: last to stop typing wins
+  //   - No conflict notification or merge UI - updates are silently dropped
+  //   - Backend modifications during typing (e.g., auto-format) are discarded
+  //
+  // For collaborative editing, consider:
+  //   - @codemirror/collab (Operational Transform with central authority)
+  //   - Yjs/Y.Text (CRDT for automatic conflict-free merging)
   private _isTyping: boolean = false;
 
   private _cellController = createStringCellController(this, {
@@ -722,6 +737,10 @@ export class CTCodeEditor extends BaseElement {
   }
 
   private _cleanup(): void {
+    // Reset typing flag to prevent stale state if component is reconnected.
+    // Without this, _isTyping could remain true from a previous session,
+    // causing external Cell updates to be incorrectly discarded.
+    this._isTyping = false;
     this._cleanupCellSyncHandler();
     if (this._mentionableUnsub) {
       this._mentionableUnsub();

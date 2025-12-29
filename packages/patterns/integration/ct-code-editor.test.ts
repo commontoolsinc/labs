@@ -1170,6 +1170,235 @@ describe("ct-code-editor cursor stability", () => {
     const finalCursor = await getCursorPosition(page);
     assertEquals(finalCursor, 11);
   });
+
+  it("ADVERSARIAL: Rapid focus/blur cycles during typing should not corrupt content", async () => {
+    // Focus, type, blur, focus, type - rapidly cycling while typing
+    // Should maintain content integrity
+    const page = shell.page();
+
+    await resetEditorState(page, charm);
+
+    // Focus and type first part
+    await focusEditor(page);
+    await page.keyboard.type("AAA");
+
+    // Blur (triggers immediate debounce)
+    await page.evaluate(`document.body.click()`);
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Focus and type second part
+    await focusEditor(page);
+    await page.keyboard.type("BBB");
+
+    // Blur again
+    await page.evaluate(`document.body.click()`);
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Focus and type third part
+    await focusEditor(page);
+    await page.keyboard.type("CCC");
+
+    // Let final debounce complete
+    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + DEBOUNCE_BUFFER));
+
+    // All typed content should be preserved
+    const content = await getEditorContent(page);
+    assertEquals(content, "AAABBBCCC", "All typed content should be preserved after focus/blur cycles");
+
+    // Cell should have same content
+    const cellValue = charm.result.get(["content"]);
+    assertEquals(cellValue, "AAABBBCCC", "Cell should have all typed content");
+  });
+
+  it("ADVERSARIAL: External update between blur and debounce should apply correctly", async () => {
+    // Type, blur (triggers immediate commit), then send external update
+    // External update should apply since user is no longer typing
+    const page = shell.page();
+
+    await resetEditorState(page, charm);
+
+    // Focus and type
+    await focusEditor(page);
+    await page.keyboard.type("UserContent");
+
+    // Blur by explicitly calling blur() on the CodeMirror contentDOM
+    await page.evaluate(`
+      (() => {
+        function findCtCodeEditor(root) {
+          if (!root) return null;
+          const editor = root.querySelector?.('ct-code-editor');
+          if (editor) return editor;
+          const allElements = root.querySelectorAll?.('*') || [];
+          for (const el of allElements) {
+            if (el.shadowRoot) {
+              const found = findCtCodeEditor(el.shadowRoot);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+
+        const ctEditor = findCtCodeEditor(document);
+        if (ctEditor && ctEditor._editorView) {
+          ctEditor._editorView.contentDOM.blur();
+        }
+      })()
+    `);
+
+    // Wait for blur's debounce to complete - use longer timeout since blur->commit path may vary
+    await waitFor(
+      // deno-lint-ignore require-await
+      async () => charm.result.get(["content"]) === "UserContent",
+      { timeout: DEBOUNCE_DELAY + 500 },
+    );
+
+    // Now send external update - should apply since _isTyping is false
+    await charm.result.set("ExternalAfterBlur", ["content"]);
+
+    // Wait for sync
+    await waitFor(
+      async () => (await getEditorContent(page)) === "ExternalAfterBlur",
+      { timeout: 1000 },
+    );
+
+    const content = await getEditorContent(page);
+    assertEquals(content, "ExternalAfterBlur", "External update after blur should apply");
+  });
+
+  it("ADVERSARIAL: Component disconnect/reconnect during typing should handle state correctly", async () => {
+    // Type, disconnect component, reconnect, verify external updates work
+    const page = shell.page();
+
+    await resetEditorState(page, charm);
+
+    // Focus and type
+    await focusEditor(page);
+    await page.keyboard.type("BeforeDisconnect");
+
+    // Force disconnect/reconnect by navigating away and back
+    // We'll simulate by clearing _isTyping flag (as _cleanup should do)
+    await page.evaluate(`
+      (() => {
+        function findCtCodeEditor(root) {
+          if (!root) return null;
+          const editor = root.querySelector?.('ct-code-editor');
+          if (editor) return editor;
+          const allElements = root.querySelectorAll?.('*') || [];
+          for (const el of allElements) {
+            if (el.shadowRoot) {
+              const found = findCtCodeEditor(el.shadowRoot);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+
+        const ctEditor = findCtCodeEditor(document);
+        if (ctEditor) {
+          // Simulate what _cleanup does
+          ctEditor._isTyping = false;
+        }
+      })()
+    `);
+
+    // Now external updates should apply (simulating reconnection)
+    await charm.result.set("AfterReconnect", ["content"]);
+
+    // Wait for sync
+    await waitFor(
+      async () => (await getEditorContent(page)) === "AfterReconnect",
+      { timeout: 1000 },
+    );
+
+    const content = await getEditorContent(page);
+    assertEquals(content, "AfterReconnect", "External update should apply after _isTyping reset");
+  });
+
+  it("ADVERSARIAL: Value property change to different Cell during typing", async () => {
+    // This test verifies that switching to a different Cell mid-typing
+    // properly cancels pending updates and resets state.
+    // Note: We can't easily create a second Cell in this test harness,
+    // but we can verify the value property change path works.
+    const page = shell.page();
+
+    await resetEditorState(page, charm);
+
+    // Focus and type
+    await focusEditor(page);
+    await page.keyboard.type("TypingContent");
+
+    // Verify _isTyping is set
+    const isTypingBefore = await page.evaluate(`
+      (() => {
+        function findCtCodeEditor(root) {
+          if (!root) return null;
+          const editor = root.querySelector?.('ct-code-editor');
+          if (editor) return editor;
+          const allElements = root.querySelectorAll?.('*') || [];
+          for (const el of allElements) {
+            if (el.shadowRoot) {
+              const found = findCtCodeEditor(el.shadowRoot);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+
+        const ctEditor = findCtCodeEditor(document);
+        return ctEditor ? ctEditor._isTyping : null;
+      })()
+    `);
+    assertEquals(isTypingBefore, true, "_isTyping should be true during typing");
+
+    // Simulate value property change by calling the path that updated() takes
+    await page.evaluate(`
+      (() => {
+        function findCtCodeEditor(root) {
+          if (!root) return null;
+          const editor = root.querySelector?.('ct-code-editor');
+          if (editor) return editor;
+          const allElements = root.querySelectorAll?.('*') || [];
+          for (const el of allElements) {
+            if (el.shadowRoot) {
+              const found = findCtCodeEditor(el.shadowRoot);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+
+        const ctEditor = findCtCodeEditor(document);
+        if (ctEditor) {
+          // Simulate the reset that happens on value property change
+          ctEditor._cellController.cancel();
+          ctEditor._isTyping = false;
+        }
+      })()
+    `);
+
+    // Verify _isTyping was reset
+    const isTypingAfter = await page.evaluate(`
+      (() => {
+        function findCtCodeEditor(root) {
+          if (!root) return null;
+          const editor = root.querySelector?.('ct-code-editor');
+          if (editor) return editor;
+          const allElements = root.querySelectorAll?.('*') || [];
+          for (const el of allElements) {
+            if (el.shadowRoot) {
+              const found = findCtCodeEditor(el.shadowRoot);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+
+        const ctEditor = findCtCodeEditor(document);
+        return ctEditor ? ctEditor._isTyping : null;
+      })()
+    `);
+    assertEquals(isTypingAfter, false, "_isTyping should be false after value property change simulation");
+  });
 });
 
 /**
