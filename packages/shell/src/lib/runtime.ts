@@ -109,17 +109,23 @@ export class RuntimeInternals extends EventTarget {
   async dispose() {
     if (this.#disposed) return;
     this.#disposed = true;
+    // Unsubscribe from telemetry BEFORE stopping the runner.
+    // This prevents the "RuntimeInternals disposed" error when
+    // cancel callbacks trigger commits during disposal.
+    this.#telemetry.removeEventListener("telemetry", this.#onTelemetry);
     this.#inspector.close();
     await this.#cc.dispose();
   }
 
   #onInspectorUpdate = (command: Inspector.BroadcastCommand) => {
-    this.#check();
+    // Gracefully ignore if disposed (can happen during cleanup)
+    if (this.#disposed) return;
     this.#telemetry.processInspectorCommand(command);
   };
 
   #onTelemetry = (event: Event) => {
-    this.#check();
+    // Gracefully ignore if disposed (can happen during cleanup)
+    if (this.#disposed) return;
     const marker = (event as RuntimeTelemetryEvent).marker;
     this.#telemetryMarkers.push(marker);
     // Dispatch an event here so that views may subscribe,
