@@ -527,7 +527,7 @@ type DecrementDepth<D extends DepthLevel> = Decrement[D] & DepthLevel;
  * OpaqueRef<Cell<T>> unwraps to Cell<T>.
  * Depth-limited to prevent exponential type growth (CT-1148).
  */
-export type OpaqueRef<T, Depth extends DepthLevel = 4> = [T] extends
+export type OpaqueRef<T, Depth extends DepthLevel = 8> = [T] extends
   [AnyBrandedCell<any>] ? T
   :
     & OpaqueCell<T>
@@ -536,7 +536,8 @@ export type OpaqueRef<T, Depth extends DepthLevel = 4> = [T] extends
 // Helper type for OpaqueRef's inner property/array mapping
 // Handles nullable types by extracting the non-null part for mapping
 // Depth-limited to prevent exponential type growth (CT-1148).
-type OpaqueRefInner<T, Depth extends DepthLevel = 4> = Depth extends 0 ? T
+// Default depth of 8 to handle deeply nested property access patterns.
+type OpaqueRefInner<T, Depth extends DepthLevel = 8> = Depth extends 0 ? T
   : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
   : [T] extends [Array<infer U>] ? Array<OpaqueRef<U, DecrementDepth<Depth>>>
   : [T] extends [AnyBrandedCell<any>] ? T
