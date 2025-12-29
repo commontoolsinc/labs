@@ -1203,7 +1203,11 @@ describe("ct-code-editor cursor stability", () => {
 
     // All typed content should be preserved
     const content = await getEditorContent(page);
-    assertEquals(content, "AAABBBCCC", "All typed content should be preserved after focus/blur cycles");
+    assertEquals(
+      content,
+      "AAABBBCCC",
+      "All typed content should be preserved after focus/blur cycles",
+    );
 
     // Cell should have same content
     const cellValue = charm.result.get(["content"]);
@@ -1262,7 +1266,11 @@ describe("ct-code-editor cursor stability", () => {
     );
 
     const content = await getEditorContent(page);
-    assertEquals(content, "ExternalAfterBlur", "External update after blur should apply");
+    assertEquals(
+      content,
+      "ExternalAfterBlur",
+      "External update after blur should apply",
+    );
   });
 
   it("ADVERSARIAL: Component disconnect/reconnect during typing should handle state correctly", async () => {
@@ -1311,7 +1319,11 @@ describe("ct-code-editor cursor stability", () => {
     );
 
     const content = await getEditorContent(page);
-    assertEquals(content, "AfterReconnect", "External update should apply after _isTyping reset");
+    assertEquals(
+      content,
+      "AfterReconnect",
+      "External update should apply after _isTyping reset",
+    );
   });
 
   it("ADVERSARIAL: Value property change to different Cell during typing", async () => {
@@ -1348,7 +1360,11 @@ describe("ct-code-editor cursor stability", () => {
         return ctEditor ? ctEditor._isTyping : null;
       })()
     `);
-    assertEquals(isTypingBefore, true, "_isTyping should be true during typing");
+    assertEquals(
+      isTypingBefore,
+      true,
+      "_isTyping should be true during typing",
+    );
 
     // Simulate value property change by calling the path that updated() takes
     await page.evaluate(`
@@ -1397,7 +1413,11 @@ describe("ct-code-editor cursor stability", () => {
         return ctEditor ? ctEditor._isTyping : null;
       })()
     `);
-    assertEquals(isTypingAfter, false, "_isTyping should be false after value property change simulation");
+    assertEquals(
+      isTypingAfter,
+      false,
+      "_isTyping should be false after value property change simulation",
+    );
   });
 });
 
