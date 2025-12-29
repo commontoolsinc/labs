@@ -616,24 +616,18 @@ export function wish(
           console.log("[wish] Resolved to", resultCells.length, "cells");
           if (resultCells.length === 1) {
             // If it's one result, just return it directly
-            // Use the original cell from baseResolutions, not the resolved one
-            // This preserves the correct cell ID for navigation
-            const originalCell = baseResolutions[0].cell;
-            console.log(
-              "[wish] Single result, original cell:",
-              originalCell.getAsNormalizedFullLink(),
-            );
+            const resolvedCell = resultCells[0];
             console.log(
               "[wish] Single result, resolved cell:",
-              resultCells[0].getAsNormalizedFullLink(),
+              resolvedCell.getAsNormalizedFullLink(),
             );
 
-            // Sync the original cell to ensure data is loaded
-            await originalCell.sync();
-            console.log("[wish] Single result synced, returning original cell");
+            // Sync the resolved cell to ensure data is loaded
+            await resolvedCell.sync();
+            console.log("[wish] Single result synced");
             sendResult(tx, {
-              result: originalCell,
-              [UI]: cellLinkUI(originalCell),
+              result: resolvedCell,
+              [UI]: cellLinkUI(resolvedCell),
             });
           } else {
             // If it's multiple result, launch the wish pattern, which will
