@@ -19,10 +19,9 @@ import { UnsafeEvalIsolate, UnsafeEvalRuntime } from "./eval-runtime.ts";
 import { CommonToolsTransformerPipeline } from "@commontools/ts-transformers";
 import * as RuntimeModules from "./runtime-modules.ts";
 import { Runtime } from "../runtime.ts";
-import { refer } from "@commontools/memory/reference";
 import { StaticCache } from "@commontools/static";
 import { pretransformProgram } from "./pretransform.ts";
-import { CompilationCache } from "./compilation-cache.ts";
+import { CompilationCache, computeCacheKey } from "./compilation-cache.ts";
 
 const RUNTIME_ENGINE_CONSOLE_HOOK = "RUNTIME_ENGINE_CONSOLE_HOOK";
 const INJECTED_SCRIPT =
@@ -150,7 +149,7 @@ export class Engine extends EventTarget implements Harness {
   ): Promise<
     { main?: Exports; exportMap?: Record<string, Exports>; output: JsScript }
   > {
-    const id = options.identifier ?? computeId(program);
+    const id = options.identifier ?? computeCacheKey(program);
     const filename = options.filename ?? `${id}.js`;
     const mappedProgram = pretransformProgram(program, id);
     const resolver = new EngineProgramResolver(
@@ -282,12 +281,4 @@ export class Engine extends EventTarget implements Harness {
       this.internals = undefined;
     }
   }
-}
-
-function computeId(program: Program): string {
-  const source = [
-    program.main,
-    ...program.files.filter(({ name }) => !name.endsWith(".d.ts")),
-  ];
-  return refer(source).toString();
 }
