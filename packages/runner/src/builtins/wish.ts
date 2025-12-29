@@ -19,7 +19,8 @@ import { ALL_CHARMS_ID } from "./well-known.ts";
 import { type JSONSchema, type Recipe, UI } from "../builder/types.ts";
 import { getRecipeEnvironment } from "../env.ts";
 
-const WISH_TSX_PATH = getRecipeEnvironment().apiUrl + "api/patterns/system/wish.tsx";
+const WISH_TSX_PATH = getRecipeEnvironment().apiUrl +
+  "api/patterns/system/wish.tsx";
 const SUGGESTION_TSX_PATH = getRecipeEnvironment().apiUrl +
   "api/patterns/system/suggestion.tsx";
 
@@ -405,7 +406,11 @@ export function wish(
     input?: WishParams & { candidates?: Cell<unknown>[] },
     providedTx?: IExtendedStorageTransaction,
   ): Promise<Cell<WishState<any>>> {
-    console.log("[wish] launchWishPattern called with", input?.candidates?.length, "candidates");
+    console.log(
+      "[wish] launchWishPattern called with",
+      input?.candidates?.length,
+      "candidates",
+    );
     if (input) wishPatternInput = input;
 
     const tx = providedTx || runtime.edit();
@@ -436,8 +441,15 @@ export function wish(
 
     // Now run the pattern - await to ensure it's set up before returning
     if (wishPattern) {
-      console.log("[wish] launchWishPattern: Running pattern with input:", wishPatternInput);
-      await runtime.runSynced(wishPatternResultCell, wishPattern, wishPatternInput);
+      console.log(
+        "[wish] launchWishPattern: Running pattern with input:",
+        wishPatternInput,
+      );
+      await runtime.runSynced(
+        wishPatternResultCell,
+        wishPattern,
+        wishPatternInput,
+      );
       console.log("[wish] launchWishPattern: Pattern runSynced completed");
     } else {
       console.error("[wish] launchWishPattern: Pattern failed to load!");
@@ -509,7 +521,10 @@ export function wish(
   return async (tx: IExtendedStorageTransaction) => {
     const inputsWithTx = inputsCell.withTx(tx);
     const targetValue = inputsWithTx.asSchema(TARGET_SCHEMA).get();
-    console.log("[wish] Action triggered with targetValue:", JSON.stringify(targetValue));
+    console.log(
+      "[wish] Action triggered with targetValue:",
+      JSON.stringify(targetValue),
+    );
 
     // TODO(seefeld): Remove legacy wish string support mid December 2025
     if (typeof targetValue === "string") {
@@ -586,7 +601,11 @@ export function wish(
           };
           const ctx: WishContext = { runtime, tx, parentCell };
           const baseResolutions = resolveBase(parsed, ctx);
-          console.log("[wish] resolveBase returned", baseResolutions.length, "results");
+          console.log(
+            "[wish] resolveBase returned",
+            baseResolutions.length,
+            "results",
+          );
           const resultCells = baseResolutions.map((baseResolution) => {
             const combinedPath = baseResolution.pathPrefix
               ? [...baseResolution.pathPrefix, ...(path ?? [])]
@@ -600,8 +619,14 @@ export function wish(
             // Use the original cell from baseResolutions, not the resolved one
             // This preserves the correct cell ID for navigation
             const originalCell = baseResolutions[0].cell;
-            console.log("[wish] Single result, original cell:", originalCell.getAsNormalizedFullLink());
-            console.log("[wish] Single result, resolved cell:", resultCells[0].getAsNormalizedFullLink());
+            console.log(
+              "[wish] Single result, original cell:",
+              originalCell.getAsNormalizedFullLink(),
+            );
+            console.log(
+              "[wish] Single result, resolved cell:",
+              resultCells[0].getAsNormalizedFullLink(),
+            );
 
             // Sync the original cell to ensure data is loaded
             await originalCell.sync();
@@ -631,7 +656,10 @@ export function wish(
         }
       } else {
         // Otherwise it's a generic query, instantiate suggestion.tsx
-        console.log("[wish] Generic query, launching suggestion pattern:", query);
+        console.log(
+          "[wish] Generic query, launching suggestion pattern:",
+          query,
+        );
         sendResult(
           tx,
           launchSuggestionPattern(

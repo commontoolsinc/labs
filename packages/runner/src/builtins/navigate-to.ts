@@ -60,14 +60,20 @@ export function navigateTo(
       // Check if target is a wish state object with a result property
       // If so, navigate to the result cell instead of the wish state
       let actualTarget = target;
-      if (targetValue && typeof targetValue === 'object' && 'result' in targetValue) {
+      if (
+        targetValue && typeof targetValue === "object" &&
+        "result" in targetValue
+      ) {
         console.log("[navigateTo] Target is wish state, extracting .result");
         actualTarget = target.key("result");
       }
 
       // Resolve to root charm - follows links until path is empty
       const resolvedTarget = actualTarget.resolveAsCell();
-      console.log("[navigateTo] Navigating to resolved target:", resolvedTarget.getAsNormalizedFullLink());
+      console.log(
+        "[navigateTo] Navigating to resolved target:",
+        resolvedTarget.getAsNormalizedFullLink(),
+      );
 
       // Sync the target cell to ensure data is loaded before navigation
       await resolvedTarget.sync();
@@ -78,7 +84,9 @@ export function navigateTo(
       navigated = true;
       resultCell.set(true);
     } else {
-      console.log("[navigateTo] No target or target value is undefined, not navigating");
+      console.log(
+        "[navigateTo] No target or target value is undefined, not navigating",
+      );
     }
   };
 }
