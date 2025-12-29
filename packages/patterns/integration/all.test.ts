@@ -13,11 +13,6 @@ describe("Compile all recipes", () => {
     "chatbot-list-view.tsx",
     "chatbot-note-composed.tsx",
     "system/link-tool.tsx", // Utility handlers, not a standalone pattern
-    // photo.tsx is temporarily skipped to reduce cumulative runtime memory in CI.
-    // The TypeScript compilation fix (explicit output types) is in place, but
-    // running 50+ patterns sequentially in CI's 4GB heap limit still OOMs.
-    // photo.tsx works correctly - this is purely a CI memory constraint.
-    "photo.tsx",
   ];
 
   // Add a test for each pattern, but skip ones that have issues

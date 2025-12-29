@@ -441,3 +441,13 @@ export function popFrame(frame?: Frame): void {
 export function getTopFrame(): Frame | undefined {
   return frames.length ? frames[frames.length - 1] : undefined;
 }
+
+/**
+ * Clear all frames from the stack. Used during Runtime.dispose() to prevent
+ * memory leaks in tests that create multiple Runtimes sequentially.
+ * The frame stack is a module-level singleton, so if a Runtime doesn't pop
+ * all its frames (e.g., due to async errors), they accumulate indefinitely.
+ */
+export function clearFrameStack(): void {
+  frames.length = 0;
+}

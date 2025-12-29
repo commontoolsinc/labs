@@ -42,7 +42,7 @@ import { registerBuiltins } from "./builtins/index.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commontools/utils/env";
-import { popFrame, pushFrame } from "./builder/recipe.ts";
+import { clearFrameStack, popFrame, pushFrame } from "./builder/recipe.ts";
 import type { Frame } from "./builder/types.ts";
 import type { ConsoleMessage } from "./interface.ts";
 
@@ -258,6 +258,13 @@ export class Runtime {
       popFrame(this.defaultFrame);
       this.defaultFrame = undefined;
     }
+
+    // Clear the entire frame stack to handle any orphaned frames from async errors
+    // The frame stack is a module-level singleton, so we must clear it explicitly
+    clearFrameStack();
+
+    // Clear RecipeManager caches to prevent memory accumulation across test runs
+    this.recipeManager.dispose();
 
     // Dispose the Engine (clears TypeScriptCompiler, UnsafeEvalRuntime source maps, console hook)
     this.harness.dispose();
