@@ -22,6 +22,7 @@ import { Runtime } from "../runtime.ts";
 import { refer } from "@commontools/memory/reference";
 import { StaticCache } from "@commontools/static";
 import { pretransformProgram } from "./pretransform.ts";
+import { CompilationCache } from "./compilation-cache.ts";
 
 const RUNTIME_ENGINE_CONSOLE_HOOK = "RUNTIME_ENGINE_CONSOLE_HOOK";
 const INJECTED_SCRIPT =
@@ -89,6 +90,7 @@ interface Internals {
 export class Engine extends EventTarget implements Harness {
   private internals: Internals | undefined;
   private ctRuntime: Runtime;
+  private compilationCache: CompilationCache | undefined;
 
   constructor(ctRuntime: Runtime) {
     super();
@@ -96,6 +98,10 @@ export class Engine extends EventTarget implements Harness {
     // We install our console shim globally so that it can be referenced
     // by the eval script scope.
     globalThis[RUNTIME_ENGINE_CONSOLE_HOOK] = new Console(this);
+    // Initialize compilation cache if IndexedDB is available
+    if (CompilationCache.isAvailable()) {
+      this.compilationCache = new CompilationCache();
+    }
   }
 
   async initialize() {
@@ -155,16 +161,31 @@ export class Engine extends EventTarget implements Harness {
     const { compiler, isolate, runtimeExports, exportsCallback } = await this
       .getInternals();
     const resolvedProgram = await this.resolve(resolver);
-    const output = await compiler.compile(resolvedProgram, {
-      filename,
-      noCheck: options.noCheck,
-      injectedScript: INJECTED_SCRIPT,
-      runtimeModules: Engine.runtimeModuleNames(),
-      bundleExportAll: true,
-      getTransformedProgram: options.getTransformedProgram,
-      beforeTransformers: (program) =>
-        new CommonToolsTransformerPipeline().toFactories(program),
-    });
+
+    // Check compilation cache first (unless noCache option is set)
+    let output: JsScript;
+    const cachedOutput = options.noCache
+      ? undefined
+      : await this.compilationCache?.get(resolvedProgram);
+
+    if (cachedOutput) {
+      output = cachedOutput;
+    } else {
+      // Compile and cache the result
+      output = await compiler.compile(resolvedProgram, {
+        filename,
+        noCheck: options.noCheck,
+        injectedScript: INJECTED_SCRIPT,
+        runtimeModules: Engine.runtimeModuleNames(),
+        bundleExportAll: true,
+        getTransformedProgram: options.getTransformedProgram,
+        beforeTransformers: (program) =>
+          new CommonToolsTransformerPipeline().toFactories(program),
+      });
+
+      // Cache the compiled output (fire-and-forget)
+      this.compilationCache?.set(resolvedProgram, output).catch(() => {});
+    }
 
     if (!options.noRun) {
       const result = isolate.execute(output).invoke(runtimeExports)

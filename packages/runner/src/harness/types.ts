@@ -14,6 +14,8 @@ export interface TypeScriptHarnessProcessOptions {
   noCheck?: boolean;
   // Does not evaluate the recipe.
   noRun?: boolean;
+  // Bypasses the compilation cache (useful for debugging).
+  noCache?: boolean;
   // An identifer to use to uniquely identify the compiled
   // code when applying source maps.
   identifier?: string;
