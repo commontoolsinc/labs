@@ -55,7 +55,8 @@ const wishTool = pattern<WishToolParameters>(
       context,
     });
 
-    return when(wishResult, navigateTo(wishResult));
+    // Navigate to wishResult.result (the actual cell), not the entire wish state object
+    return when(wishResult.result, navigateTo(wishResult.result));
   },
 );
 

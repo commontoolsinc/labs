@@ -15,7 +15,7 @@ export function navigateTo(
   let navigated = false;
   let resultCell: Cell<boolean>;
 
-  return (tx: IExtendedStorageTransaction) => {
+  return async (tx: IExtendedStorageTransaction) => {
     // The main reason we might be called again after navigating is that the
     // transaction to update the result cell failed, so we'll just set it again.
     if (navigated) {
@@ -48,18 +48,17 @@ export function navigateTo(
     const target = inputsWithLog.get();
 
     // If we have a target and the value isn't `undefined`, navigate to it.
-    // TODO(seefeld): This might break once we support the not operation in
-    // client-side schema validation. Then we'll need another way to check for
-    // not undefined without subscribing deeper than the first level.
-    if (target && target.asSchema({ not: true }).get()) {
+    const targetValue = target?.asSchema({ not: true }).get();
+    if (target && targetValue) {
       if (!runtime.navigateCallback) {
         throw new Error("navigateCallback is not set");
       }
 
-      // Resolve to root charm (handles cells from wish().result which have
-      // non-empty paths like ["result"]). resolveAsCell() follows links
-      // transparently until path is empty.
+      // Resolve to root charm - follows links until path is empty
       const resolvedTarget = target.resolveAsCell();
+
+      // Sync the target cell to ensure data is loaded before navigation
+      await resolvedTarget.sync();
 
       runtime.navigateCallback(resolvedTarget);
 
