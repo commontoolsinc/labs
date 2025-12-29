@@ -16,7 +16,6 @@ export function navigateTo(
   let resultCell: Cell<boolean>;
 
   return async (tx: IExtendedStorageTransaction) => {
-    console.log("[navigateTo] Action triggered");
     // The main reason we might be called again after navigating is that the
     // transaction to update the result cell failed, so we'll just set it again.
     if (navigated) {
@@ -49,9 +48,7 @@ export function navigateTo(
     const target = inputsWithLog.get();
 
     // If we have a target and the value isn't `undefined`, navigate to it.
-    console.log("[navigateTo] target:", target);
     const targetValue = target?.asSchema({ not: true }).get();
-    console.log("[navigateTo] target value:", targetValue);
     if (target && targetValue) {
       if (!runtime.navigateCallback) {
         throw new Error("navigateCallback is not set");
@@ -59,23 +56,14 @@ export function navigateTo(
 
       // Resolve to root charm - follows links until path is empty
       const resolvedTarget = target.resolveAsCell();
-      console.log(
-        "[navigateTo] Navigating to resolved target:",
-        resolvedTarget.getAsNormalizedFullLink(),
-      );
 
       // Sync the target cell to ensure data is loaded before navigation
       await resolvedTarget.sync();
-      console.log("[navigateTo] Target synced, now navigating");
 
       runtime.navigateCallback(resolvedTarget);
 
       navigated = true;
       resultCell.set(true);
-    } else {
-      console.log(
-        "[navigateTo] No target or target value is undefined, not navigating",
-      );
     }
   };
 }

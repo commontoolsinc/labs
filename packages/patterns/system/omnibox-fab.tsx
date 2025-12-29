@@ -50,14 +50,10 @@ type WishToolParameters = { query: string; context?: Record<string, any> };
 
 const wishTool = pattern<WishToolParameters>(
   ({ query, context }) => {
-    console.log("[wishTool] Pattern running with query:", query);
     const wishResult = wish<any>({
       query,
       context,
     });
-
-    console.log("[wishTool] wishResult:", wishResult);
-    console.log("[wishTool] wishResult.result:", wishResult.result);
 
     // Navigate to wishResult.result (the actual cell), not the entire wish state object
     return when(wishResult.result, navigateTo(wishResult.result));
