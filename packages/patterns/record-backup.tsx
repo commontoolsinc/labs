@@ -77,6 +77,9 @@ interface Input {
   importJson: Default<string, "">;
 }
 
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+// by avoiding deep type inference on recursive VNode/RenderNode types.
+// Extra fields like [UI], [NAME] are still returned but not type-checked.
 interface Output {
   exportedJson: string;
   importJson: string;

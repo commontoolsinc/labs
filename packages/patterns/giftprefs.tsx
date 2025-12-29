@@ -11,7 +11,7 @@ import {
   type Default,
   handler,
   NAME,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
@@ -53,6 +53,13 @@ export interface GiftPrefsModuleInput {
   favorites: Default<string[], []>;
   /** Things to avoid (allergies, dislikes) */
   avoid: Default<string[], []>;
+}
+
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+interface GiftPrefsModuleOutput {
+  giftTier: GiftTier | "";
+  favorites: string[];
+  avoid: string[];
 }
 
 // ===== Constants =====
@@ -111,136 +118,133 @@ const removeAvoid = handler<
 });
 
 // ===== The Pattern =====
-export const GiftPrefsModule = recipe<
+export const GiftPrefsModule = pattern<
   GiftPrefsModuleInput,
-  GiftPrefsModuleInput
->(
-  "GiftPrefsModule",
-  ({ giftTier, favorites, avoid }) => {
-    const favoriteInput = Cell.of<string>("");
-    const avoidInput = Cell.of<string>("");
+  GiftPrefsModuleOutput
+>(({ giftTier, favorites, avoid }) => {
+  const favoriteInput = Cell.of<string>("");
+  const avoidInput = Cell.of<string>("");
 
-    const displayText = computed(() => {
-      const opt = TIER_OPTIONS.find((o) => o.value === giftTier);
-      return opt?.label || "Not set";
-    });
+  const displayText = computed(() => {
+    const opt = TIER_OPTIONS.find((o) => o.value === giftTier);
+    return opt?.label || "Not set";
+  });
 
-    return {
-      [NAME]: computed(() =>
-        `${MODULE_METADATA.icon} Gift Prefs: ${displayText}`
-      ),
-      [UI]: (
-        <ct-vstack style={{ gap: "16px" }}>
-          {/* Gift tier */}
-          <ct-vstack style={{ gap: "4px" }}>
-            <label style={{ fontSize: "12px", color: "#6b7280" }}>
-              Gift Giving Tier
-            </label>
-            <ct-select $value={giftTier} items={TIER_OPTIONS} />
-          </ct-vstack>
-
-          {/* Favorites */}
-          <ct-vstack style={{ gap: "8px" }}>
-            <label style={{ fontSize: "12px", color: "#6b7280" }}>
-              Favorites / Likes
-            </label>
-            <ct-hstack style={{ gap: "8px" }}>
-              <ct-input
-                $value={favoriteInput}
-                placeholder="Add favorite..."
-                style={{ flex: "1" }}
-              />
-              <ct-button onClick={addFavorite({ favorites, favoriteInput })}>
-                +
-              </ct-button>
-            </ct-hstack>
-            <ct-hstack style={{ gap: "6px", flexWrap: "wrap" }}>
-              {favorites.map((item: string, index: number) => (
-                <span
-                  key={index}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "4px",
-                    background: "#dcfce7",
-                    borderRadius: "12px",
-                    padding: "4px 10px",
-                    fontSize: "13px",
-                    color: "#166534",
-                  }}
-                >
-                  {item}
-                  <button
-                    type="button"
-                    onClick={removeFavorite({ favorites, index })}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      color: "#166534",
-                      padding: "0",
-                    }}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </ct-hstack>
-          </ct-vstack>
-
-          {/* Avoid */}
-          <ct-vstack style={{ gap: "8px" }}>
-            <label style={{ fontSize: "12px", color: "#6b7280" }}>
-              Avoid / Dislikes
-            </label>
-            <ct-hstack style={{ gap: "8px" }}>
-              <ct-input
-                $value={avoidInput}
-                placeholder="Add item to avoid..."
-                style={{ flex: "1" }}
-              />
-              <ct-button onClick={addAvoid({ avoid, avoidInput })}>+</ct-button>
-            </ct-hstack>
-            <ct-hstack style={{ gap: "6px", flexWrap: "wrap" }}>
-              {avoid.map((item: string, index: number) => (
-                <span
-                  key={index}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "4px",
-                    background: "#fee2e2",
-                    borderRadius: "12px",
-                    padding: "4px 10px",
-                    fontSize: "13px",
-                    color: "#991b1b",
-                  }}
-                >
-                  {item}
-                  <button
-                    type="button"
-                    onClick={removeAvoid({ avoid, index })}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      color: "#991b1b",
-                      padding: "0",
-                    }}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </ct-hstack>
-          </ct-vstack>
+  return {
+    [NAME]: computed(() =>
+      `${MODULE_METADATA.icon} Gift Prefs: ${displayText}`
+    ),
+    [UI]: (
+      <ct-vstack style={{ gap: "16px" }}>
+        {/* Gift tier */}
+        <ct-vstack style={{ gap: "4px" }}>
+          <label style={{ fontSize: "12px", color: "#6b7280" }}>
+            Gift Giving Tier
+          </label>
+          <ct-select $value={giftTier} items={TIER_OPTIONS} />
         </ct-vstack>
-      ),
-      giftTier,
-      favorites,
-      avoid,
-    };
-  },
-);
+
+        {/* Favorites */}
+        <ct-vstack style={{ gap: "8px" }}>
+          <label style={{ fontSize: "12px", color: "#6b7280" }}>
+            Favorites / Likes
+          </label>
+          <ct-hstack style={{ gap: "8px" }}>
+            <ct-input
+              $value={favoriteInput}
+              placeholder="Add favorite..."
+              style={{ flex: "1" }}
+            />
+            <ct-button onClick={addFavorite({ favorites, favoriteInput })}>
+              +
+            </ct-button>
+          </ct-hstack>
+          <ct-hstack style={{ gap: "6px", flexWrap: "wrap" }}>
+            {favorites.map((item: string, index: number) => (
+              <span
+                key={index}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  background: "#dcfce7",
+                  borderRadius: "12px",
+                  padding: "4px 10px",
+                  fontSize: "13px",
+                  color: "#166534",
+                }}
+              >
+                {item}
+                <button
+                  type="button"
+                  onClick={removeFavorite({ favorites, index })}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#166534",
+                    padding: "0",
+                  }}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </ct-hstack>
+        </ct-vstack>
+
+        {/* Avoid */}
+        <ct-vstack style={{ gap: "8px" }}>
+          <label style={{ fontSize: "12px", color: "#6b7280" }}>
+            Avoid / Dislikes
+          </label>
+          <ct-hstack style={{ gap: "8px" }}>
+            <ct-input
+              $value={avoidInput}
+              placeholder="Add item to avoid..."
+              style={{ flex: "1" }}
+            />
+            <ct-button onClick={addAvoid({ avoid, avoidInput })}>+</ct-button>
+          </ct-hstack>
+          <ct-hstack style={{ gap: "6px", flexWrap: "wrap" }}>
+            {avoid.map((item: string, index: number) => (
+              <span
+                key={index}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  background: "#fee2e2",
+                  borderRadius: "12px",
+                  padding: "4px 10px",
+                  fontSize: "13px",
+                  color: "#991b1b",
+                }}
+              >
+                {item}
+                <button
+                  type="button"
+                  onClick={removeAvoid({ avoid, index })}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#991b1b",
+                    padding: "0",
+                  }}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </ct-hstack>
+        </ct-vstack>
+      </ct-vstack>
+    ),
+    giftTier,
+    favorites,
+    avoid,
+  };
+});
 
 export default GiftPrefsModule;

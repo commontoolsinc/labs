@@ -29,8 +29,15 @@ export const getCompilerOptions = (): CompilerOptions => {
      */
 
     removeComments: true,
-    noEmitOnError: true,
-    declaration: true,
+    // CT-1143: noEmitOnError + declaration + outFile is a known pathological
+    // combination in TypeScript that causes multiple passes and exponential
+    // memory usage. See https://github.com/Microsoft/TypeScript/issues/7221
+    noEmitOnError: false,
+    // CT-1143: declaration: true requires the full type graph to be resolved
+    // for .d.ts generation, which is not needed for pattern compilation.
+    declaration: false,
+    // CT-1143: Skip type-checking of declaration files to reduce memory usage
+    skipLibCheck: true,
     // Enable source map generation.
     sourceMap: true,
     // We want the source map to include the original TypeScript files

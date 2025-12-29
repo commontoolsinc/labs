@@ -260,6 +260,12 @@ export class Engine extends EventTarget implements Harness {
       // Clear references to allow GC
       this.internals = undefined;
     }
+
+    // Clear module-level type definition caches to prevent memory accumulation
+    // across test runs. These caches hold ~830KB of TypeScript type definitions
+    // that would otherwise persist for the lifetime of the process.
+    getTypeScriptEnvironmentTypes.clear();
+    RuntimeModules.getTypes.clear();
   }
 }
 

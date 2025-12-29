@@ -19,7 +19,7 @@ import {
   handler,
   lift,
   NAME,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
@@ -67,6 +67,11 @@ export interface RestrictionEntry {
 
 export interface DietaryRestrictionsInput {
   restrictions: Default<RestrictionEntry[], []>;
+}
+
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+interface DietaryRestrictionsOutput {
+  restrictions: RestrictionEntry[];
 }
 
 // ===== Restriction Categories =====
@@ -1338,10 +1343,10 @@ const LEVEL_PRIORITY: Record<RestrictionLevel, number> = {
   absolute: 3,
 };
 
-export const DietaryRestrictionsModule = recipe<
+export const DietaryRestrictionsModule = pattern<
   DietaryRestrictionsInput,
-  DietaryRestrictionsInput
->("DietaryRestrictionsModule", ({ restrictions }) => {
+  DietaryRestrictionsOutput
+>(({ restrictions }) => {
   const selectedLevel = Cell.of<RestrictionLevel>("prefer");
 
   // Cache for impliedItems to avoid recomputation when restrictions haven't changed

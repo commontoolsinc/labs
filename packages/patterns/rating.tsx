@@ -11,7 +11,7 @@ import {
   type Default,
   handler,
   NAME,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
@@ -38,6 +38,11 @@ export interface RatingModuleInput {
   rating: Default<number | null, null>;
 }
 
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+interface RatingModuleOutput {
+  rating: number | null;
+}
+
 // ===== Handlers =====
 
 // Handler for rating selection - value is passed in context
@@ -51,8 +56,7 @@ const setRating = handler<
 });
 
 // ===== The Pattern =====
-export const RatingModule = recipe<RatingModuleInput, RatingModuleInput>(
-  "RatingModule",
+export const RatingModule = pattern<RatingModuleInput, RatingModuleOutput>(
   ({ rating }) => {
     const displayText = computed(() =>
       rating.get() ? `${rating.get()}/5` : "Not rated"

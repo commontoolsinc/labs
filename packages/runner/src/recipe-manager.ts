@@ -368,4 +368,16 @@ export class RecipeManager {
       this.pendingMetaById.set(recipeId, { ...pending, ...fields });
     }
   }
+
+  /**
+   * Clear all cached recipes and metadata. Used during Runtime.dispose()
+   * to prevent memory leaks in tests that create multiple Runtimes sequentially.
+   */
+  dispose(): void {
+    this.inProgressCompilations.clear();
+    this.recipeMetaCellById.clear();
+    this.recipeIdMap.clear();
+    this.pendingMetaById.clear();
+    // Note: recipeToIdMap is a WeakMap, will be GC'd when recipes are collected
+  }
 }

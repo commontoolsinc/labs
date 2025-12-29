@@ -48,6 +48,9 @@ export interface ModuleMetadata {
   /** If true, show "add another" button for multi-instance modules (e.g., email, phone) */
   allowMultiple?: boolean;
 
+  /** If true, module has a settingsUI for configuration */
+  hasSettings?: boolean;
+
   /** JSON Schema for the module's data (for LLM extraction) */
   schema?: Record<string, unknown>;
 

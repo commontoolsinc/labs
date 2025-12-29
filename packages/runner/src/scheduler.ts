@@ -332,6 +332,29 @@ export class Scheduler {
     });
   }
 
+  /**
+   * Clean up all scheduler resources. Called during Runtime.dispose()
+   * to prevent memory leaks in tests that create multiple Runtimes.
+   */
+  dispose(): void {
+    // Clear all pending actions
+    this.pending.clear();
+    this.triggers.clear();
+
+    // Clear event handlers and queue
+    this.eventQueue.length = 0;
+    this.eventHandlers.length = 0;
+
+    // Resolve any waiting idle promises
+    for (const resolve of this.idlePromises) {
+      resolve();
+    }
+    this.idlePromises.length = 0;
+
+    // Clear error handlers
+    this.errorHandlers.clear();
+  }
+
   queueEvent(
     eventLink: NormalizedFullLink,
     event: any,

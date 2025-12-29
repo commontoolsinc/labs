@@ -5,7 +5,7 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Provides status selection with predefined options.
  */
-import { computed, type Default, NAME, recipe, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -33,6 +33,11 @@ export interface StatusModuleInput {
   status: Default<StatusValue | "", "">;
 }
 
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+interface StatusModuleOutput {
+  status: StatusValue | "";
+}
+
 // ===== Constants =====
 const STATUS_OPTIONS = [
   { value: "", label: "Not set" },
@@ -44,8 +49,7 @@ const STATUS_OPTIONS = [
 ];
 
 // ===== The Pattern =====
-export const StatusModule = recipe<StatusModuleInput, StatusModuleInput>(
-  "StatusModule",
+export const StatusModule = pattern<StatusModuleInput, StatusModuleOutput>(
   ({ status }) => {
     const displayText = computed(() => {
       const opt = STATUS_OPTIONS.find((o) => o.value === status);

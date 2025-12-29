@@ -305,7 +305,10 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     if (!noCheck) {
       checker.typeCheck();
     }
-    checker.declarationCheck();
+    // CT-1143: declarationCheck() was causing exponential memory usage because
+    // it requires resolving the full type graph. With declaration: false in
+    // compiler options, this check is no longer needed or useful.
+    // checker.declarationCheck();
 
     const mainSource = tsProgram.getSourceFiles().find((source) =>
       source.fileName === program.main

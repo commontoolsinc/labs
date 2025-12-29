@@ -5,7 +5,7 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Stores social platform, handle, and profile URL.
  */
-import { computed, type Default, NAME, recipe, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -58,6 +58,13 @@ export interface SocialModuleInput {
   profileUrl: Default<string, "">;
 }
 
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+interface SocialModuleOutput {
+  platform: SocialPlatform | "";
+  handle: string;
+  profileUrl: string;
+}
+
 // ===== Constants =====
 const PLATFORM_OPTIONS = [
   { value: "", label: "Select platform" },
@@ -73,8 +80,7 @@ const PLATFORM_OPTIONS = [
 ];
 
 // ===== The Pattern =====
-export const SocialModule = recipe<SocialModuleInput, SocialModuleInput>(
-  "SocialModule",
+export const SocialModule = pattern<SocialModuleInput, SocialModuleOutput>(
   ({ platform, handle, profileUrl }) => {
     const displayText = computed(() => {
       const opt = PLATFORM_OPTIONS.find((o) => o.value === platform);

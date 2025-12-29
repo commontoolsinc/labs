@@ -18,6 +18,12 @@ type Input = {
   >;
 };
 
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+// by avoiding deep type inference on recursive VNode/RenderNode types.
+type Output = {
+  code: Cell<string>;
+};
+
 const updateCode = handler<
   { detail: { value: string } },
   { code: Cell<string> }
@@ -46,7 +52,7 @@ const handleEditContent = handler<
   },
 );
 
-export default pattern<Input>(({ code }) => {
+export default pattern<Input, Output>(({ code }) => {
   const { result, error, errors: _ } = compileAndRun({
     files: [{ name: "/main.tsx", contents: code }],
     main: "/main.tsx",

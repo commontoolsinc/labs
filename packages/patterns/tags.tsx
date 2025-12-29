@@ -11,7 +11,7 @@ import {
   type Default,
   handler,
   NAME,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
@@ -31,6 +31,11 @@ export const MODULE_METADATA: ModuleMetadata = {
 export interface TagsModuleInput {
   /** Tags or labels */
   tags: Default<string[], []>;
+}
+
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+interface TagsModuleOutput {
+  tags: string[];
 }
 
 // ===== Handlers =====
@@ -60,8 +65,7 @@ const removeTag = handler<
 });
 
 // ===== The Pattern =====
-export const TagsModule = recipe<TagsModuleInput, TagsModuleInput>(
-  "TagsModule",
+export const TagsModule = pattern<TagsModuleInput, TagsModuleOutput>(
   ({ tags }) => {
     const tagInput = Cell.of<string>("");
     const displayText = computed(() => {

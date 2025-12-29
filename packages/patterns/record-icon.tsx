@@ -8,7 +8,7 @@
  *
  * Uses the emoji-picker pattern for the selection UI.
  */
-import { computed, type Default, NAME, recipe, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 import EmojiPicker from "./emoji-picker.tsx";
 
@@ -30,11 +30,16 @@ export interface RecordIconModuleInput {
   icon: Default<string, "">;
 }
 
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+interface RecordIconModuleOutput {
+  icon: string;
+}
+
 // ===== The Pattern =====
-export const RecordIconModule = recipe<
+export const RecordIconModule = pattern<
   RecordIconModuleInput,
-  RecordIconModuleInput
->("RecordIconModule", ({ icon }) => {
+  RecordIconModuleOutput
+>(({ icon }) => {
   // Compose the emoji picker pattern
   const picker = EmojiPicker({ selectedEmoji: icon });
 

@@ -26,11 +26,16 @@ export function isRuntimeModuleIdentifier(
     RuntimeModuleIdentifiers.includes(value as RuntimeModuleIdentifier);
 }
 
-export const getTypes = (() => {
+// Module-level singleton that caches ~55KB of runtime module type definitions.
+// Use getTypes.clear() to release memory in tests.
+export const getTypes: {
+  (cache: StaticCache): Promise<Record<RuntimeModuleIdentifier, string>>;
+  clear: () => void;
+} = (() => {
   let depTypes:
     | Record<RuntimeModuleIdentifier, string>
     | undefined;
-  return async (cache: StaticCache) => {
+  const fn = async (cache: StaticCache) => {
     if (depTypes) {
       return depTypes;
     }
@@ -46,6 +51,10 @@ export const getTypes = (() => {
     };
     return depTypes;
   };
+  fn.clear = () => {
+    depTypes = undefined;
+  };
+  return fn;
 })();
 
 export function getExports() {
