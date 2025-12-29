@@ -1,3 +1,10 @@
+/**
+ * Schema Generator Transformer.
+ *
+ * CACHE_VERSION: Changes to this transformer affect compiled output.
+ * Bump CACHE_VERSION in packages/runner/src/harness/compilation-cache.ts
+ * when modifying transformation logic.
+ */
 import ts from "typescript";
 import {
   CT_HELPERS_IDENTIFIER,

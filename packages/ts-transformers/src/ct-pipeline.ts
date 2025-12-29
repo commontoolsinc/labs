@@ -1,3 +1,11 @@
+/**
+ * CommonTools transformer pipeline.
+ *
+ * CACHE_VERSION: Changes to this pipeline or any of its transformers affect compiled output.
+ * Bump CACHE_VERSION in packages/runner/src/harness/compilation-cache.ts when:
+ * - Adding, removing, or reordering transformers
+ * - Modifying any transformer in this pipeline
+ */
 import {
   OpaqueRefJSXTransformer,
   SchemaGeneratorTransformer,

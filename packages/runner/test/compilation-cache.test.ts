@@ -85,8 +85,17 @@ describe("computeCacheKey", () => {
 });
 
 describe("CompilationCache", () => {
-  // Note: IndexedDB is not available in Deno test environment,
-  // so these tests focus on memory cache behavior
+  // Note: IndexedDB is not available in Deno's test environment.
+  // These tests focus on memory cache behavior only.
+  //
+  // For IndexedDB persistence tests, see:
+  //   packages/runner/test/compilation-cache-idb.webtest.ts
+  //
+  // Run IndexedDB tests with:
+  //   deno task test:web test/compilation-cache-idb.webtest.ts
+  //
+  // Those tests use the deno-web-test framework to run in a real browser,
+  // which provides access to IndexedDB APIs.
 
   describe("isAvailable", () => {
     it("should return false when IndexedDB is not available", () => {

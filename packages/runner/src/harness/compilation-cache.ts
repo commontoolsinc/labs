@@ -17,10 +17,29 @@ const logger = getLogger("compilation-cache", { enabled: true, level: "warn" });
 
 /**
  * Cache version string. Increment when any of the following change:
- * - TypeScript version (npm:typescript in js-compiler/deno.json)
- * - Transformer pipeline (CommonToolsTransformerPipeline)
- * - Compiler options (js-compiler/typescript/options.ts)
- * - Cache entry structure (CachedCompilation interface)
+ *
+ * TypeScript compiler:
+ * - packages/js-compiler/deno.json (TypeScript version: npm:typescript)
+ * - packages/js-compiler/typescript/options.ts (compiler options)
+ * - packages/js-compiler/typescript/compiler.ts (compiler implementation)
+ *
+ * Bundling:
+ * - packages/js-compiler/typescript/bundler/bundle.ts (AMD bundle generation)
+ * - packages/js-compiler/typescript/bundler/amd-loader.ts (AMD loader runtime)
+ *
+ * Transformer pipeline:
+ * - packages/ts-transformers/src/ct-pipeline.ts (CommonToolsTransformerPipeline)
+ * - packages/ts-transformers/src/transformers/opaque-ref-jsx.ts
+ * - packages/ts-transformers/src/transformers/schema-injection.ts
+ * - packages/ts-transformers/src/transformers/schema-generator.ts
+ * - packages/ts-transformers/src/closures/transformer.ts
+ * - packages/ts-transformers/src/computed/transformer.ts
+ *
+ * Cache structure:
+ * - CachedCompilation interface below (bump ENTRY_SCHEMA_VERSION too)
+ *
+ * IMPORTANT: Forgetting to bump this version will cause users to get stale/broken
+ * cached code after compiler or transformer changes.
  */
 const CACHE_VERSION = "1";
 

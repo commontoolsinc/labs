@@ -1,3 +1,10 @@
+/**
+ * TypeScript compiler implementation.
+ *
+ * CACHE_VERSION: Changes to compilation logic affect compiled output.
+ * Bump CACHE_VERSION in packages/runner/src/harness/compilation-cache.ts
+ * when modifying this file.
+ */
 import {
   Compiler,
   JsScript,

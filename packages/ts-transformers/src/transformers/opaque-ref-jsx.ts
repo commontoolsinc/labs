@@ -1,3 +1,10 @@
+/**
+ * OpaqueRef JSX transformer.
+ *
+ * CACHE_VERSION: Changes to this transformer affect compiled output.
+ * Bump CACHE_VERSION in packages/runner/src/harness/compilation-cache.ts
+ * when modifying transformation logic.
+ */
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import {

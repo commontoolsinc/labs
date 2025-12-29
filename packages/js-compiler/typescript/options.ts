@@ -1,3 +1,10 @@
+/**
+ * TypeScript compiler options.
+ *
+ * CACHE_VERSION: Changes to these options affect compiled output.
+ * Bump CACHE_VERSION in packages/runner/src/harness/compilation-cache.ts
+ * when modifying compiler options.
+ */
 import type { CompilerOptions } from "typescript";
 import { JsxEmit, ModuleKind, ScriptTarget } from "typescript";
 
