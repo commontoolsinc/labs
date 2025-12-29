@@ -13,6 +13,12 @@ describe("Compile all recipes", () => {
     "chatbot-list-view.tsx",
     "chatbot-note-composed.tsx",
     "system/link-tool.tsx", // Utility handlers, not a standalone pattern
+    // CT-1143: These patterns import registry.ts which pulls in ALL 20 module
+    // patterns, causing TypeScript to build a massive type graph that requires
+    // 8GB+ heap for a SINGLE compilation. Skip until we implement dynamic loading
+    // or subprocess isolation for heavy patterns.
+    "record.tsx",
+    "record-backup.tsx",
   ];
 
   // Add a test for each pattern, but skip ones that have issues
