@@ -492,38 +492,6 @@ export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
 // OpaqueRef - Proxy-based variant of OpaqueCell
 // ============================================================================
 
-/**
- * OpaqueRef is a variant of OpaqueCell with recursive proxy behavior.
- * Each key access returns another OpaqueRef, allowing chained property access.
- * This is temporary until AST transformation handles .key() automatically.
- *
- * OpaqueRef<Cell<T>> unwraps to Cell<T>.
- */
-export type OpaqueRef<T> = [T] extends [AnyBrandedCell<any>] ? T
-  :
-    & OpaqueCell<T>
-    & OpaqueRefInner<T>;
-
-// Helper type for OpaqueRef's inner property/array mapping
-// Handles nullable types by extracting the non-null part for mapping
-type OpaqueRefInner<T> = [T] extends
-  [ArrayBuffer | ArrayBufferView | URL | Date] ? T
-  : [T] extends [Array<infer U>] ? Array<OpaqueRef<U>>
-  : [T] extends [AnyBrandedCell<any>] ? T
-  : [T] extends [object] ? { [K in keyof T]: OpaqueRef<T[K]> }
-  // For nullable types (T | null | undefined), extract and map the non-null part
-  : [NonNullable<T>] extends [never] ? T
-  // Handle nullable branded cells (e.g., (OpaqueCell<X> & X) | undefined) - don't wrap
-  : [NonNullable<T>] extends [AnyBrandedCell<any>] ? T
-  : [NonNullable<T>] extends [Array<infer U>] ? Array<OpaqueRef<U>>
-  : [NonNullable<T>] extends [object]
-    ? { [K in keyof NonNullable<T>]: OpaqueRef<NonNullable<T>[K]> }
-  : T;
-
-// ============================================================================
-// CellLike and Opaque - Utility types for accepting cells
-// ============================================================================
-
 // ============================================================================
 // Depth Limiting Infrastructure (CT-1148)
 // ============================================================================
@@ -550,6 +518,47 @@ type Decrement = {
 
 // Helper type to safely get decremented depth
 type DecrementDepth<D extends DepthLevel> = Decrement[D] & DepthLevel;
+
+/**
+ * OpaqueRef is a variant of OpaqueCell with recursive proxy behavior.
+ * Each key access returns another OpaqueRef, allowing chained property access.
+ * This is temporary until AST transformation handles .key() automatically.
+ *
+ * OpaqueRef<Cell<T>> unwraps to Cell<T>.
+ * Depth-limited to prevent exponential type growth (CT-1148).
+ */
+export type OpaqueRef<T, Depth extends DepthLevel = 4> = [T] extends
+  [AnyBrandedCell<any>] ? T
+  :
+    & OpaqueCell<T>
+    & OpaqueRefInner<T, Depth>;
+
+// Helper type for OpaqueRef's inner property/array mapping
+// Handles nullable types by extracting the non-null part for mapping
+// Depth-limited to prevent exponential type growth (CT-1148).
+type OpaqueRefInner<T, Depth extends DepthLevel = 4> = Depth extends 0 ? T
+  : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
+  : [T] extends [Array<infer U>] ? Array<OpaqueRef<U, DecrementDepth<Depth>>>
+  : [T] extends [AnyBrandedCell<any>] ? T
+  : [T] extends [object]
+    ? { [K in keyof T]: OpaqueRef<T[K], DecrementDepth<Depth>> }
+  // For nullable types (T | null | undefined), extract and map the non-null part
+  : [NonNullable<T>] extends [never] ? T
+  // Handle nullable branded cells (e.g., (OpaqueCell<X> & X) | undefined) - don't wrap
+  : [NonNullable<T>] extends [AnyBrandedCell<any>] ? T
+  : [NonNullable<T>] extends [Array<infer U>]
+    ? Array<OpaqueRef<U, DecrementDepth<Depth>>>
+  : [NonNullable<T>] extends [object] ? {
+      [K in keyof NonNullable<T>]: OpaqueRef<
+        NonNullable<T>[K],
+        DecrementDepth<Depth>
+      >;
+    }
+  : T;
+
+// ============================================================================
+// CellLike and Opaque - Utility types for accepting cells
+// ============================================================================
 
 /**
  * CellLike is a cell (AnyCell) whose nested values are Opaque.
@@ -580,11 +589,14 @@ export declare const CELL_LIKE: unique symbol;
 
 /**
  * Helper type to transform Cell<T> to Opaque<T> in pattern/lift/handler inputs
+ * Depth-limited to prevent exponential type growth (CT-1148).
  */
-export type StripCell<T> = T extends AnyBrandedCell<infer U> ? StripCell<U>
+export type StripCell<T, Depth extends DepthLevel = 4> = Depth extends 0 ? T
+  : T extends AnyBrandedCell<infer U> ? StripCell<U, Depth>
   : T extends ArrayBuffer | ArrayBufferView | URL | Date ? T
-  : T extends Array<infer U> ? StripCell<U>[]
-  : T extends object ? { [K in keyof T]: StripCell<T[K]> }
+  : T extends Array<infer U> ? StripCell<U, DecrementDepth<Depth>>[]
+  : T extends object
+    ? { [K in keyof T]: StripCell<T[K], DecrementDepth<Depth>> }
   : T;
 
 /**
@@ -1173,10 +1185,14 @@ export type LiftFunction = {
 };
 
 // Helper type to make non-Cell and non-Stream properties readonly in handler state
-export type HandlerState<T> = T extends Cell<any> ? T
+// Depth-limited to prevent exponential type growth (CT-1148).
+export type HandlerState<T, Depth extends DepthLevel = 4> = Depth extends 0 ? T
+  : T extends Cell<any> ? T
   : T extends Stream<any> ? T
-  : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>>
-  : T extends object ? { readonly [K in keyof T]: HandlerState<T[K]> }
+  : T extends Array<infer U>
+    ? ReadonlyArray<HandlerState<U, DecrementDepth<Depth>>>
+  : T extends object
+    ? { readonly [K in keyof T]: HandlerState<T[K], DecrementDepth<Depth>> }
   : T;
 
 export type HandlerFunction = {
