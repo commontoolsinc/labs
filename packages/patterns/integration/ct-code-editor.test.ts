@@ -767,10 +767,9 @@ describe("ct-code-editor cursor stability", () => {
     // Simulates a pathological case: user types, Cell updates, user types again
     // repeatedly. This can expose issues with timestamp tracking.
     //
-    // NEW BEHAVIOR: External updates that arrive during typing (within 500ms
-    // debounce window) are deferred and stored as _pendingExternalValue.
-    // After debounce expires, the pending external value is applied to prevent
-    // data loss. This means the LAST external update wins, not the user's typing.
+    // CORRECT BEHAVIOR: User typing WINS over external Cell updates. External
+    // updates that arrive during typing (within 500ms debounce window) are
+    // DISCARDED to preserve user content. This is the "user typing wins" model.
     const page = shell.page();
 
     await resetEditorState(page, charm);
@@ -786,18 +785,15 @@ describe("ct-code-editor cursor stability", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       // Send Cell update (different content to force conflict)
-      // This will be deferred because we're within the debounce window
+      // This will be DISCARDED because user is typing
       await charm.result.set(`External-${i}`, ["content"]);
 
       // Another small delay
       await new Promise((r) => setTimeout(r, 100));
     }
 
-    // Let things settle - the last external update should be applied
-    // Need to wait for TWO debounce cycles:
-    // 1. User's typing debounce (500ms) → writes "012" to Cell
-    // 2. Cell echoes → pending "External-2" applied → setValue debounce (500ms) → writes "External-2" to Cell
-    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY * 2 + 300));
+    // Let things settle - user's typed content should win
+    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + 300));
 
     // Editor should be in a consistent state
     const content = await getEditorContent(page);
@@ -808,9 +804,8 @@ describe("ct-code-editor cursor stability", () => {
       `Cursor ${cursor} should be valid for content length ${content.length}`,
     );
 
-    // NEW EXPECTATION: The last external update (External-2) should be applied
-    // after debounce expires, not the user's typed content (012).
-    // This preserves external data instead of dropping it.
+    // CORRECT EXPECTATION: User's typed content wins over external updates.
+    // External updates during typing are discarded to preserve user content.
     const cellValue = charm.result.get(["content"]) as string;
     assertEquals(
       content,
@@ -818,11 +813,11 @@ describe("ct-code-editor cursor stability", () => {
       "Editor and Cell should be in sync after settling",
     );
 
-    // The final value should be the last external update
+    // The final value should be the user's typed content
     assertEquals(
       content,
-      "External-2",
-      "Last external update should be applied after debounce (data preservation)",
+      "012",
+      "User's typed content should win over external updates",
     );
   });
 
@@ -830,10 +825,9 @@ describe("ct-code-editor cursor stability", () => {
     // User types continuously (letters every 50ms) while external updates
     // bombard the Cell. The editor should not corrupt or crash.
     //
-    // NEW BEHAVIOR: External updates that arrive during typing are deferred.
-    // Each new external update replaces the previous _pendingExternalValue.
-    // After debounce expires, the last pending external value is applied.
-    // This prevents data loss - external updates are preserved, not dropped.
+    // CORRECT BEHAVIOR: User typing WINS over external Cell updates. External
+    // updates that arrive during typing are DISCARDED to preserve user content.
+    // This is the "user typing wins" model - the user's input takes priority.
     const page = shell.page();
 
     await resetEditorState(page, charm);
@@ -859,10 +853,8 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for both to complete
     await Promise.all([typingPromise, cellBombardPromise]);
 
-    // Let debounce complete - need to wait for TWO debounce cycles:
-    // 1. User's typing debounce → writes typed content to Cell
-    // 2. Cell echoes → pending external applied → setValue debounce → writes external to Cell
-    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY * 2 + 300));
+    // Let debounce complete
+    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + 300));
 
     // Final state should be consistent
     const content = await getEditorContent(page);
@@ -882,13 +874,12 @@ describe("ct-code-editor cursor stability", () => {
       "Editor and Cell should be in sync after chaos",
     );
 
-    // NEW EXPECTATION: The last external update (Bombard-4) should be applied
-    // after debounce expires. This is correct behavior - we preserve external
-    // data instead of silently dropping it.
+    // CORRECT EXPECTATION: User's typed content wins over external updates.
+    // External updates during typing are discarded to preserve user content.
     assertEquals(
       content,
-      "Bombard-4",
-      "Last external update should win (data preservation over user typing)",
+      "ABCDEFGHIJ",
+      "User's typed content should win over external updates",
     );
   });
 
@@ -1337,7 +1328,7 @@ async function setCursorPosition(page: Page, position: number): Promise<void> {
 /**
  * Clear the editor content.
  * Sets the guard flag to prevent updateListener from triggering Cell updates,
- * and clears the hash to allow subsequent external updates to apply.
+ * and clears the _isTyping flag to allow subsequent external updates to apply.
  */
 async function clearEditor(page: Page): Promise<void> {
   await page.evaluate(`
@@ -1360,16 +1351,16 @@ async function clearEditor(page: Page): Promise<void> {
       if (ctEditor && ctEditor._editorView) {
         const view = ctEditor._editorView;
         // Clear editor content using the Cell sync annotation to prevent
-        // triggering the typing timestamp. This allows subsequent external
-        // Cell updates to apply immediately without being deferred.
+        // triggering the _isTyping flag. This allows subsequent external
+        // Cell updates to apply immediately.
         const annotation = ctEditor.constructor._cellSyncAnnotation;
         view.dispatch({
           changes: { from: 0, to: view.state.doc.length, insert: "" },
           selection: { anchor: 0, head: 0 },
           annotations: annotation ? annotation.of(true) : undefined
         });
-        // Also reset the typing timestamp directly for safety
-        ctEditor._lastTypingTimestamp = 0;
+        // Also reset the typing flag directly for safety
+        ctEditor._isTyping = false;
       }
     })()
   `);
