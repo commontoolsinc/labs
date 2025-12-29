@@ -8,7 +8,6 @@ import {
   NAME,
   pattern,
   UI,
-  VNode,
 } from "commontools";
 
 /**
@@ -20,12 +19,14 @@ type ImageChatInput = {
   model?: string;
 };
 
+// Output type with only data fields - prevents TypeScript OOM (CT-1143)
+// by avoiding deep type inference on recursive VNode/RenderNode types.
+// Extra fields like [UI] are still returned but not type-checked.
 type ImageChatOutput = {
   images: Cell<ImageData[]>;
   prompt: Cell<string>;
   response: string | undefined;
   pending: boolean | undefined;
-  ui: VNode;
 };
 
 export default pattern<ImageChatInput, ImageChatOutput>(
@@ -132,7 +133,6 @@ export default pattern<ImageChatInput, ImageChatOutput>(
       prompt,
       response: result,
       pending,
-      ui,
     };
   },
 );
