@@ -170,14 +170,38 @@ export class CTCodeEditor extends BaseElement {
   // and skips setValue for Cell-originated changes, preventing the
   // feedback loop: Cell → Editor → updateListener → setValue → Cell...
   private static _cellSyncAnnotation = Annotation.define<boolean>();
-  private _lastTypingTimestamp: number = 0;
-  private _pendingExternalValue: string | null = null;
+
+  // Flag indicating user is actively typing. When true, external Cell
+  // updates are DISCARDED (not queued) to preserve user content.
+  // Set to true when user types, cleared when debounce callback executes
+  // or on blur/value property change.
+  //
+  // This implements "USER TYPING WINS" behavior with these semantics:
+  //   - During active typing, ALL external Cell updates are silently discarded
+  //   - After debounce (500ms of no typing), external updates apply normally
+  //   - User's content is ALWAYS preserved during active editing
+  //
+  // LIMITATIONS (intentional tradeoffs for single-user UX):
+  //   - NOT suitable for real-time collaboration (external edits are lost)
+  //   - Two browser tabs editing same Cell: last to stop typing wins
+  //   - No conflict notification or merge UI - updates are silently dropped
+  //   - Backend modifications during typing (e.g., auto-format) are discarded
+  //
+  // For collaborative editing, consider:
+  //   - @codemirror/collab (Operational Transform with central authority)
+  //   - Yjs/Y.Text (CRDT for automatic conflict-free merging)
+  private _isTyping: boolean = false;
+
   private _cellController = createStringCellController(this, {
     timing: {
       strategy: "debounce",
       delay: 500,
     },
     onChange: (newValue: string, oldValue: string) => {
+      // Debounce has fired - user's content is now committed to Cell.
+      // Clear typing flag so external updates can apply again.
+      this._isTyping = false;
+
       this.emit("ct-change", {
         value: newValue,
         oldValue,
@@ -622,53 +646,39 @@ export class CTCodeEditor extends BaseElement {
     if (!this._editorView) return;
 
     const newValue = this.getValue();
+    const currentValue = this._editorView.state.doc.toString();
 
-    // Defer external updates during active typing to preserve cursor position.
-    // The debounce window is 500ms (from CellController).
-    const DEBOUNCE_WINDOW = 500;
-    const timeSinceTyping = Date.now() - this._lastTypingTimestamp;
-    if (timeSinceTyping < DEBOUNCE_WINDOW) {
-      // Store the pending external value to apply after debounce expires
-      this._pendingExternalValue = newValue;
+    // Skip if content already matches - handles Cell echoes.
+    // This is the key check that prevents cursor jumping: if the editor
+    // already has the content the Cell is trying to set, do nothing.
+    if (newValue === currentValue) {
       return;
     }
 
-    // Check if we have a pending external value that arrived during typing
-    const hasPendingExternal = this._pendingExternalValue !== null;
-    const valueToApply = this._pendingExternalValue ?? newValue;
-    this._pendingExternalValue = null;
-
-    const currentValue = this._editorView.state.doc.toString();
-
-    // Skip if content already matches - handles both echoes and stale values.
-    // This is the key check that prevents cursor jumping: if the editor
-    // already has the content the Cell is trying to set, do nothing.
-    if (valueToApply === currentValue) {
-      return;
+    // DISCARD external updates while user is actively typing.
+    // This implements "user typing wins" behavior - the user's content
+    // takes priority over any external Cell updates during active typing.
+    // The _isTyping flag is set when user types and cleared when the
+    // debounce callback executes (committing user content to Cell).
+    if (this._isTyping) {
+      return; // Simply discard, don't queue
     }
 
     // Apply external update to editor, preserving cursor position.
     // Clamp cursor to new document length in case content is shorter.
     const currentSelection = this._editorView.state.selection.main;
-    const newLength = valueToApply.length;
+    const newLength = newValue.length;
     const anchorPos = Math.min(currentSelection.anchor, newLength);
     const headPos = Math.min(currentSelection.head, newLength);
 
-    // Use transaction annotation to mark this as a Cell-originated change ONLY if
-    // it's a normal Cell echo. If we're applying a pending external value, do NOT
-    // use the annotation, so the update listener will call setValue and sync the Cell.
-    // This ensures no data loss: external updates deferred during typing are properly
-    // committed to the Cell after the debounce window expires.
     this._editorView.dispatch({
       changes: {
         from: 0,
         to: this._editorView.state.doc.length,
-        insert: valueToApply,
+        insert: newValue,
       },
       selection: { anchor: anchorPos, head: headPos },
-      annotations: hasPendingExternal
-        ? undefined
-        : CTCodeEditor._cellSyncAnnotation.of(true),
+      annotations: CTCodeEditor._cellSyncAnnotation.of(true),
     });
 
     // Ensure mentioned charms reflect external value changes
@@ -727,6 +737,10 @@ export class CTCodeEditor extends BaseElement {
   }
 
   private _cleanup(): void {
+    // Reset typing flag to prevent stale state if component is reconnected.
+    // Without this, _isTyping could remain true from a previous session,
+    // causing external Cell updates to be incorrectly discarded.
+    this._isTyping = false;
     this._cleanupCellSyncHandler();
     if (this._mentionableUnsub) {
       this._mentionableUnsub();
@@ -747,10 +761,8 @@ export class CTCodeEditor extends BaseElement {
     if (changedProperties.has("value")) {
       // Cancel pending debounced updates from old Cell to prevent race condition
       this._cellController.cancel();
-      // Reset typing timestamp so new Cell's content syncs immediately
-      this._lastTypingTimestamp = 0;
-      // Clear any pending external updates from the old Cell
-      this._pendingExternalValue = null;
+      // Reset typing flag so new Cell's content syncs immediately
+      this._isTyping = false;
       // Clean up old Cell subscription and set up new one
       this._cleanupCellSyncHandler();
       this._cellController.bind(this.value);
@@ -930,10 +942,10 @@ export class CTCodeEditor extends BaseElement {
           (tr) => tr.annotation(CTCodeEditor._cellSyncAnnotation),
         );
         if (update.docChanged && !this.readonly && !isCellSync) {
-          // Track typing timestamp for any non-Cell-originated change.
-          // This includes actual user typing, Playwright simulated input, and
-          // test helpers. The important distinction is Cell-originated vs not.
-          this._lastTypingTimestamp = Date.now();
+          // Mark user as actively typing. This flag blocks external Cell
+          // updates until the debounce callback fires, implementing
+          // "user typing wins" behavior.
+          this._isTyping = true;
           const value = update.state.doc.toString();
           this.setValue(value);
           // Keep $mentioned current as user types
@@ -949,8 +961,7 @@ export class CTCodeEditor extends BaseElement {
         },
         blur: () => {
           this._cellController.onBlur();
-          this._lastTypingTimestamp = 0; // Reset typing state when leaving editor
-          this._pendingExternalValue = null; // Clear any pending external updates
+          this._isTyping = false; // Reset typing state when leaving editor
           this.emit("ct-blur");
           return false;
         },
