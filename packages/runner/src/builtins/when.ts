@@ -16,6 +16,7 @@ export function when(
   runtime: Runtime,
 ): Action {
   return (tx: IExtendedStorageTransaction) => {
+    console.log("[when] Action triggered");
     const result = runtime.getCell<any>(
       parentCell.space,
       { when: cause },
@@ -27,6 +28,7 @@ export function when(
     const inputsWithLog = inputsCell.withTx(tx);
 
     const condition = inputsWithLog.key("condition").get();
+    console.log("[when] condition:", condition, "truthy:", !!condition);
 
     // && semantics: if truthy, return value; if falsy, return condition
     const ref = condition

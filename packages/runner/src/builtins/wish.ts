@@ -316,6 +316,7 @@ let wishPattern: Recipe | undefined;
 async function fetchWishPattern(
   runtime: Runtime,
 ): Promise<Recipe | undefined> {
+  console.log("[wish] fetchWishPattern: Starting fetch from", WISH_TSX_PATH);
   try {
     const program = await runtime.harness.resolve(
       new HttpProgramResolver(WISH_TSX_PATH),
@@ -324,13 +325,15 @@ async function fetchWishPattern(
     if (!program) {
       throw new WishError("Can't load wish.tsx");
     }
+    console.log("[wish] fetchWishPattern: Program resolved, compiling...");
     const pattern = await runtime.recipeManager.compileRecipe(program);
 
     if (!pattern) throw new WishError("Can't compile wish.tsx");
 
+    console.log("[wish] fetchWishPattern: Pattern compiled successfully");
     return pattern;
   } catch (e) {
-    console.error("Can't load wish.tsx", e);
+    console.error("[wish] fetchWishPattern: Failed to load wish.tsx", e);
     return undefined;
   }
 }
@@ -398,10 +401,11 @@ export function wish(
   let wishPatternInput: WishParams | undefined;
   let wishPatternResultCell: Cell<WishState<any>> | undefined;
 
-  function launchWishPattern(
+  async function launchWishPattern(
     input?: WishParams & { candidates?: Cell<unknown>[] },
     providedTx?: IExtendedStorageTransaction,
-  ) {
+  ): Promise<Cell<WishState<any>>> {
+    console.log("[wish] launchWishPattern called with", input?.candidates?.length, "candidates");
     if (input) wishPatternInput = input;
 
     const tx = providedTx || runtime.edit();
@@ -417,23 +421,29 @@ export function wish(
       addCancel(() => runtime.runner.stop(wishPatternResultCell!));
     }
 
+    // Wait for pattern to be loaded
     if (!wishPattern) {
+      console.log("[wish] launchWishPattern: Waiting for pattern to load...");
       if (!wishPatternFetchPromise) {
         wishPatternFetchPromise = fetchWishPattern(runtime).then((pattern) => {
           wishPattern = pattern;
           return pattern;
         });
       }
-      wishPatternFetchPromise.then((pattern) => {
-        if (pattern) {
-          launchWishPattern();
-        }
-      });
-    } else {
-      runtime.runSynced(wishPatternResultCell, wishPattern, wishPatternInput);
+      await wishPatternFetchPromise;
+      console.log("[wish] launchWishPattern: Pattern loaded:", !!wishPattern);
     }
 
-    if (!providedTx) tx.commit();
+    // Now run the pattern - await to ensure it's set up before returning
+    if (wishPattern) {
+      console.log("[wish] launchWishPattern: Running pattern with input:", wishPatternInput);
+      await runtime.runSynced(wishPatternResultCell, wishPattern, wishPatternInput);
+      console.log("[wish] launchWishPattern: Pattern runSynced completed");
+    } else {
+      console.error("[wish] launchWishPattern: Pattern failed to load!");
+    }
+
+    if (!providedTx) await tx.commit();
 
     return wishPatternResultCell;
   }
@@ -496,9 +506,10 @@ export function wish(
 
   // Wish action, reactive to changes in inputsCell and any cell we read during
   // initial resolution
-  return (tx: IExtendedStorageTransaction) => {
+  return async (tx: IExtendedStorageTransaction) => {
     const inputsWithTx = inputsCell.withTx(tx);
     const targetValue = inputsWithTx.asSchema(TARGET_SCHEMA).get();
+    console.log("[wish] Action triggered with targetValue:", JSON.stringify(targetValue));
 
     // TODO(seefeld): Remove legacy wish string support mid December 2025
     if (typeof targetValue === "string") {
@@ -517,6 +528,8 @@ export function wish(
           ? [...baseResolutions[0].pathPrefix, ...parsed.path]
           : parsed.path;
         const resolvedCell = resolvePath(baseResolutions[0].cell, combinedPath);
+        // Sync the cell to ensure data is loaded (required for pull-based scheduler)
+        await resolvedCell.sync();
         sendResult(tx, resolvedCell);
       } catch (e) {
         // Provide helpful feedback for common defaultPattern issues
@@ -565,6 +578,7 @@ export function wish(
 
       // If the query is a path or a hash tag, resolve it directly
       if (query.startsWith("/") || /^#[a-zA-Z0-9-]+$/.test(query)) {
+        console.log("[wish] Query matches path/hashtag pattern:", query);
         try {
           const parsed: ParsedWishTarget = {
             key: query as WishTag,
@@ -572,6 +586,7 @@ export function wish(
           };
           const ctx: WishContext = { runtime, tx, parentCell };
           const baseResolutions = resolveBase(parsed, ctx);
+          console.log("[wish] resolveBase returned", baseResolutions.length, "results");
           const resultCells = baseResolutions.map((baseResolution) => {
             const combinedPath = baseResolution.pathPrefix
               ? [...baseResolution.pathPrefix, ...(path ?? [])]
@@ -579,22 +594,31 @@ export function wish(
             const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
             return schema ? resolvedCell.asSchema(schema) : resolvedCell;
           });
+          console.log("[wish] Resolved to", resultCells.length, "cells");
           if (resultCells.length === 1) {
             // If it's one result, just return it directly
+            // Use the original cell from baseResolutions, not the resolved one
+            // This preserves the correct cell ID for navigation
+            const originalCell = baseResolutions[0].cell;
+            console.log("[wish] Single result, original cell:", originalCell.getAsNormalizedFullLink());
+            console.log("[wish] Single result, resolved cell:", resultCells[0].getAsNormalizedFullLink());
+
+            // Sync the original cell to ensure data is loaded
+            await originalCell.sync();
+            console.log("[wish] Single result synced, returning original cell");
             sendResult(tx, {
-              result: resultCells[0],
-              [UI]: cellLinkUI(resultCells[0]),
+              result: originalCell,
+              [UI]: cellLinkUI(originalCell),
             });
           } else {
             // If it's multiple result, launch the wish pattern, which will
             // immediately return the first candidate as result
-            sendResult(
-              tx,
-              launchWishPattern({
-                ...targetValue as WishParams,
-                candidates: resultCells,
-              }, tx),
-            );
+            console.log("[wish] Multiple results, launching wish pattern...");
+            const wishResultCell = await launchWishPattern({
+              ...targetValue as WishParams,
+              candidates: resultCells,
+            }, tx);
+            sendResult(tx, wishResultCell);
           }
         } catch (e) {
           const errorMsg = e instanceof WishError ? e.message : String(e);
@@ -607,6 +631,7 @@ export function wish(
         }
       } else {
         // Otherwise it's a generic query, instantiate suggestion.tsx
+        console.log("[wish] Generic query, launching suggestion pattern:", query);
         sendResult(
           tx,
           launchSuggestionPattern(

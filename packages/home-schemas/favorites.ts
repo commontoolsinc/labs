@@ -10,6 +10,7 @@ export const favoriteEntrySchema = {
   properties: {
     cell: { not: true, asCell: true },
     tag: { type: "string", default: "" },
+    userTags: { type: "array", items: { type: "string" }, default: [] },
   },
   required: ["cell"],
 } as const satisfies JSONSchema;
