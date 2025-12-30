@@ -533,7 +533,7 @@ Deno.bench(
 
 // Benchmark: Cell creation overhead
 Deno.bench(
-  "Overhead - create 100 cells",
+  "Overhead - create 100 cells (getCell + set)",
   { group: "overhead" },
   async () => {
     const { runtime, storageManager, tx } = setup();
@@ -546,6 +546,51 @@ Deno.bench(
         tx,
       );
       cell.set(i);
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
+
+// Benchmark: Just getCell without set
+Deno.bench(
+  "Overhead - 100x getCell only (no set)",
+  { group: "overhead" },
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    for (let i = 0; i < 100; i++) {
+      runtime.getCell<number>(
+        space,
+        `overhead-getcell-${i}`,
+        undefined,
+        tx,
+      );
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
+
+// Benchmark: set on pre-created cells
+Deno.bench(
+  "Overhead - 100x set on existing cells",
+  { group: "overhead" },
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Pre-create cells
+    // deno-lint-ignore no-explicit-any
+    const cells: any[] = [];
+    for (let i = 0; i < 100; i++) {
+      cells.push(
+        runtime.getCell<number>(space, `overhead-set-${i}`, undefined, tx),
+      );
+    }
+
+    // Measure just the sets
+    for (let i = 0; i < 100; i++) {
+      cells[i].set(i);
     }
 
     await cleanup(runtime, storageManager, tx);
