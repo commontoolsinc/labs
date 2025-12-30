@@ -8,6 +8,9 @@ import {
   addressesToPathByEntity,
   sortAndCompactPaths,
 } from "../src/reactive-dependencies.ts";
+import { createRef } from "../src/create-ref.ts";
+import { diffAndUpdate } from "../src/data-updating.ts";
+import { resolveLink } from "../src/link-resolution.ts";
 
 const signer = await Identity.fromPassphrase("bench operator");
 const space = signer.did();
@@ -608,6 +611,77 @@ Deno.bench(
   },
 );
 
+// Benchmark: commit after writes (triggers scheduler storage subscriptions)
+Deno.bench(
+  "Overhead - commit after 100 sets",
+  { group: "overhead" },
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Create and set 100 cells
+    for (let i = 0; i < 100; i++) {
+      const cell = runtime.getCell<number>(
+        space,
+        `overhead-commit-${i}`,
+        undefined,
+        tx,
+      );
+      cell.set(i);
+    }
+
+    // Measure commit separately
+    const start = performance.now();
+    await tx.commit();
+    const commitTime = performance.now() - start;
+
+    // Log commit time (won't show in bench output but useful for debugging)
+    if (commitTime > 100) {
+      console.log(`Commit took ${commitTime.toFixed(1)}ms`);
+    }
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+// Benchmark: just commit with no writes
+Deno.bench(
+  "Overhead - empty commit",
+  { group: "overhead" },
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+    await tx.commit();
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+// Benchmark: raw transaction writes (bypass Cell layer)
+Deno.bench(
+  "Overhead - 100 raw tx.write + commit",
+  { group: "overhead" },
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Write directly to transaction, bypassing Cell
+    for (let i = 0; i < 100; i++) {
+      tx.writeValueOrThrow(
+        {
+          space,
+          id: `test:raw-write-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        { value: i },
+      );
+    }
+
+    await tx.commit();
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
 // ============================================================================
 // MICRO-BENCHMARKS: Utility functions
 // ============================================================================
@@ -780,6 +854,139 @@ Deno.bench(
     }
 
     runtime.scheduler.unsubscribe(action);
+    await cleanup(runtime, storageManager, tx);
+  },
+);
+
+// ============================================================================
+// MICRO-BENCHMARKS: Cell layer internals
+// ============================================================================
+
+// Benchmark: createRef (merkle hashing)
+Deno.bench(
+  "Cell internals - createRef (100x)",
+  { group: "cell-internals" },
+  () => {
+    for (let i = 0; i < 100; i++) {
+      createRef({}, `cause-${i}`);
+    }
+  },
+);
+
+// Benchmark: createRef with complex object
+Deno.bench(
+  "Cell internals - createRef complex object (100x)",
+  { group: "cell-internals" },
+  () => {
+    for (let i = 0; i < 100; i++) {
+      createRef(
+        {
+          nested: { value: i, data: [1, 2, 3] },
+          another: { field: "test" },
+        },
+        `cause-${i}`,
+      );
+    }
+  },
+);
+
+// Benchmark: resolveLink
+Deno.bench(
+  "Cell internals - resolveLink (100x)",
+  { group: "cell-internals" },
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    const link = {
+      space,
+      id: "test:resolve-link" as const,
+      type: "application/json" as const,
+      path: [] as string[],
+    };
+
+    // Create the entity first
+    tx.writeValueOrThrow(
+      { space, id: "test:resolve-link", type: "application/json", path: [] },
+      { value: 42 },
+    );
+
+    for (let i = 0; i < 100; i++) {
+      resolveLink(runtime, tx, link);
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
+
+// Benchmark: diffAndUpdate on simple value
+Deno.bench(
+  "Cell internals - diffAndUpdate simple (100x)",
+  { group: "cell-internals" },
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Create entities first
+    for (let i = 0; i < 100; i++) {
+      tx.writeValueOrThrow(
+        {
+          space,
+          id: `test:diff-simple-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        { value: 0 },
+      );
+    }
+
+    // Measure diffAndUpdate
+    for (let i = 0; i < 100; i++) {
+      diffAndUpdate(
+        runtime,
+        tx,
+        {
+          space,
+          id: `test:diff-simple-${i}`,
+          type: "application/json",
+          path: ["value"],
+        },
+        i,
+      );
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
+
+// Benchmark: tx.readValueOrThrow (read from transaction)
+Deno.bench(
+  "Cell internals - tx.readValueOrThrow (100x)",
+  { group: "cell-internals" },
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Create entities first
+    for (let i = 0; i < 100; i++) {
+      tx.writeValueOrThrow(
+        {
+          space,
+          id: `test:read-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        { value: i },
+      );
+    }
+
+    // Measure reads
+    for (let i = 0; i < 100; i++) {
+      tx.readValueOrThrow({
+        space,
+        id: `test:read-${i}`,
+        type: "application/json",
+        path: [],
+      });
+    }
+
     await cleanup(runtime, storageManager, tx);
   },
 );
