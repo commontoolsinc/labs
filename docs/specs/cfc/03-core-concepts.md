@@ -80,7 +80,7 @@ Multiple rules can fire on the same clause:
 // Any of the three alternatives satisfies the clause
 ```
 
-**Growth is linear**: each exchange rule application adds one alternative to one clause. No exponential blowup.
+**Growth is linear**: in the common case, each exchange rule application adds one alternative to one clause. Some rules may also remove a matched alternative/requirement (e.g., dropping an `Expires(...)` constraint on derived metadata under guard); removals do not introduce blowup.
 
 ### 3.1.4 Access Check
 
@@ -201,7 +201,7 @@ Integrity facts are minted only by trusted code and are non-malleable.
 
 **Policy certification integrity**: A special class of integrity atom attests that data was produced under a specific policy regime being enforced. For example, `PolicyCertified(ApprovedModels)` indicates the output was computed while a policy restricting ML model usage was in effect. See Section 5.5 for details.
 
-**Modification integrity**: Handlers declare which fields they write to; the handler's identity (code hash) IS its integrity. Each handler is independent and only knows about itself. The pattern schema composes handler identities via union; the field's integrity is the disjunction of all handlers that write to it. See Section 8.15 for the full model.
+**Write authorization (modifications)**: Modifying stored state is authorized by a field-level **write-authority set** derived from handlers that declare `writes: true`. This is an access-control capability (“who may write”), not value integrity (“what may be believed”). See Section 8.15 for the full model.
 
 ---
 
@@ -257,11 +257,13 @@ CFC uses **spaces** as the primary mechanism for confidentiality in collaborativ
 
 ### 3.6.1 Space Principals
 
-Each piece of data belongs to exactly one space. The space is represented as a confidentiality principal:
+Each piece of stored data belongs to exactly one space. The space is represented as a confidentiality principal:
 
 - `Space(id=abc123)`
 
 Data inherits its space from the context in which it is created.
+
+**Note on examples**: Many examples write `User(Alice)` to mean “visible only to Alice.” In a concrete runtime, this is equivalent to placing the data in `PersonalSpace(Alice)` (Section 3.6.4). Spaces are the general mechanism; `User(·)` is often used as a shorthand in narrative examples.
 
 ### 3.6.2 Role Membership
 
@@ -292,6 +294,8 @@ This achieves **disjunctive authorization** without DNF labels: "any reader can 
 Each user has an implicit personal space where they are the sole owner:
 
 - `PersonalSpace(Alice)` with `owners: {Alice}, writers: {Alice}, readers: {Alice}`
+
+Personal spaces behave like spaces for role-based checks, but with fixed membership.
 
 Private data defaults to the user's personal space. The user may share by either:
 - moving/copying data to a shared space, or

@@ -409,16 +409,16 @@ const matchingProducts = allProducts.filter(p => matches(p, secretQuery));
 ```
 
 ```typescript
-interface CollectionLabel {
-  // Confidentiality of each member (may vary per member)
-  memberConfidentiality: Clause[];
-
-  // Confidentiality of the collection's membership/selection
-  membershipConfidentiality: Clause[];
-
-  // Collection-level integrity
-  integrity: Atom[];
-}
+// Conceptual model:
+// - The collection *container* has a label describing membership/selection.
+// - Each element retains its own label (content + integrity).
+//
+// Concrete representation in this spec:
+// - The array value at path `/items` carries membership confidentiality.
+// - The array elements at `/items/*` carry member confidentiality.
+//
+// This uses the existing per-path labeling machinery (Section 4.6.3 and Section 8.9):
+// the container path label and item path labels are distinct.
 ```
 
 **Implications**:
@@ -729,6 +729,10 @@ interface IFCTransitionAnnotations {
     codeHash: string;
     preservesIntegrity?: string[];  // Integrity types preserved
   };
+
+  // Store-field write authorization (derived from handlers declaring `writes: true`)
+  // Used only for in-place modifications (Section 8.15), not for computed outputs.
+  writeAuthorizedBy?: Atom[];
 }
 
 // Input-side annotations (on input schema paths)
@@ -750,7 +754,7 @@ interface IFCInputAnnotations {
 
 // Handler type annotations (on handler-declared fields)
 interface IFCHandlerTypeAnnotations {
-  // Handler writes to this field; integrity = handler identity (Section 8.15)
+  // Handler writes to this field; pattern compilation derives a write-authority set (Section 8.15)
   writes?: boolean;
   // Minimum integrity required on input (for reads)
   minIntegrity?: string;
@@ -761,12 +765,20 @@ interface IFCHandlerTypeAnnotations {
 
 ## 8.9 Runtime Label Propagation
 
+**Trust boundary note**: The propagation and verification steps in this section (including `refer(...)` comparisons for `exactCopyOf`) are performed by the trusted runtime/policy layer. Patterns/handlers are not trusted to assert label transitions; they are validated against the schema and runtime evidence at boundaries.
+
 ### 8.9.1 Propagation Algorithm
+
+In addition to content-based label transitions, the runtime MUST account for **flow-path confidentiality** (PC confidentiality): if a handler's control decisions (branching, gating, selection) are influenced by labeled inputs, the decision itself contributes confidentiality that must be joined onto downstream outputs (Section 8.11).
+
+For implementation clarity, the algorithm below models this as an explicit `pcConfidentiality` input computed by the runtime (potentially conservatively).
+At minimum, `pcConfidentiality` must include the confidentiality of any values that can influence which outputs are produced, selected, or routed. A conservative implementation may approximate this as the join of confidentiality of all inputs the handler can observe.
 
 ```typescript
 function propagateLabels(
   handler: Handler,
   inputLabels: Map<string, Label>,
+  pcConfidentiality: Clause[],
   outputValue: unknown,
   outputSchema: JSONSchema
 ): Map<string, Label> {
@@ -796,8 +808,8 @@ function propagateLabels(
       if (refer(inputValue).equals(refer(outputVal))) {
         outputLabels.set(path, inputLabels.get(inputPath)!);
       } else {
-        // Mismatch - treat as transformation
-        outputLabels.set(path, deriveTransformedLabel(inputLabels, handler));
+        // Mismatch: schema contract violated → reject handler output
+        throw new Error(`IFC exactCopyOf violation: ${path} is not an exact copy of ${inputPath}`);
       }
 
     } else if (ifc?.combinedFrom) {
@@ -813,10 +825,14 @@ function propagateLabels(
       outputLabels.set(path, deriveTransformedLabel(inputLabels, handler));
     }
 
+    // Add control/flow confidentiality (PC) to every output label.
+    // (Content labels come from the rules above; flow labels come from control.)
+    const outLabel = outputLabels.get(path)!;
+    outLabel.confidentiality = [...outLabel.confidentiality, ...pcConfidentiality];
+
     // Add any explicit integrity
     if (ifc?.addedIntegrity) {
-      const label = outputLabels.get(path)!;
-      label.integrity = [...label.integrity, ...ifc.addedIntegrity];
+      outLabel.integrity = [...outLabel.integrity, ...ifc.addedIntegrity];
     }
   }
 
@@ -863,8 +879,10 @@ At trusted boundaries (display, network egress, storage), the runtime validates 
 
 ```typescript
 function verifyTransition(
+  handler: Handler,
   inputLabels: Map<string, Label>,
   outputLabels: Map<string, Label>,
+  outputValue: unknown,
   schema: JSONSchema
 ): boolean {
   for (const [path, outputLabel] of outputLabels) {
@@ -877,10 +895,11 @@ function verifyTransition(
 
     // Verify integrity claims are justified
     if (ifc?.exactCopyOf) {
-      // Must actually be exact copy for integrity preservation
-      if (!verifyExactCopy(path, ifc.exactCopyOf)) {
-        return false;
-      }
+      // Must actually be exact copy
+      const inputPath = ifc.exactCopyOf;
+      const inputValue = getValueAtPath(handler.input, inputPath);
+      const outputVal = getValueAtPath(outputValue, path);
+      if (!refer(inputValue).equals(refer(outputVal))) return false;
     }
   }
   return true;
@@ -1327,13 +1346,13 @@ Each processing step should have isolated failure domains:
 
 ---
 
-## 8.15 Modification Integrity
+## 8.15 Modification Authorization (Write Authority)
 
 Previous sections describe label transitions for **computed values** (inputs → transformation → output). This section addresses **modifications**—updating stored data in place rather than computing new values.
 
 ### 8.15.1 Handler-Declared Write Capability
 
-Each handler declares which fields it writes to. The handler's identity (code hash) IS its integrity—no separate declaration needed.
+Each handler declares which fields it writes to. The handler's identity (code hash) is the unit of write authorization—no separate naming scheme is required.
 
 **Handler schema** (each handler only knows about itself):
 
@@ -1379,11 +1398,11 @@ Each handler declares which fields it writes to. The handler's identity (code ha
 }
 ```
 
-The `"ifc": { "writes": true }` annotation means "I write to this field." The handler's integrity is implicit—it's the handler's own identity (code hash).
+The `"ifc": { "writes": true }` annotation means “this handler writes this field.” Pattern compilation uses these declarations to derive a per-field **write-authority set**.
 
 ### 8.15.2 Schema Composes via Union
 
-The pattern schema composes handler identities via **union**. When handlers declare `"writes": true` on a field, the pattern's composed schema includes all their identities:
+The pattern schema composes write-authority via **union**. When handlers declare `"writes": true` on a field, the composed schema records the set of handler identities authorized to modify that field:
 
 ```json
 {
@@ -1394,10 +1413,10 @@ The pattern schema composes handler identities via **union**. When handlers decl
       "type": "number",
       "default": 0,
       "ifc": {
-        "integrity": [
-          { "type": "Handler", "id": "IncrementHandler" },
-          { "type": "Handler", "id": "DecrementHandler" },
-          { "type": "Handler", "id": "ResetHandler" }
+        "writeAuthorizedBy": [
+          { "type": "CodeHash", "hash": "sha256:increment-handler-..." },
+          { "type": "CodeHash", "hash": "sha256:decrement-handler-..." },
+          { "type": "CodeHash", "hash": "sha256:reset-handler-..." }
         ]
       }
     }
@@ -1405,40 +1424,29 @@ The pattern schema composes handler identities via **union**. When handlers decl
 }
 ```
 
-The field's integrity `[IncrementHandler | DecrementHandler | ResetHandler]` means:
-- Any of these handlers can write to this field
-- The field's integrity is the disjunction of handler identities
+The field's write-authority set means:
+- Any listed handler identity may write this field
 - Handlers don't need to know about each other
+- Authorization is stable until the schema changes
 
-### 8.15.3 Integrity is Stable
+### 8.15.3 Write Authority is Stable
 
-Field integrity is a property of the schema, not the value. It doesn't change per write:
+Write authority is a property of the schema, not the value. It does not change per write:
 
-| Event | Value | Integrity |
+| Event | Value | Write Authority |
 |-------|-------|-----------|
-| Creation (from default) | `0` | `[Increment \| Decrement \| Reset]` |
-| After increment | `1` | `[Increment \| Decrement \| Reset]` |
-| After decrement | `0` | `[Increment \| Decrement \| Reset]` |
-| After reset | `0` | `[Increment \| Decrement \| Reset]` |
+| Creation (from default) | `0` | `{Increment, Decrement, Reset}` |
+| After increment | `1` | `{Increment, Decrement, Reset}` |
+| After decrement | `0` | `{Increment, Decrement, Reset}` |
+| After reset | `0` | `{Increment, Decrement, Reset}` |
 
-After any sequence of operations, the integrity remains the same. We don't track which specific handler last wrote—any of them COULD have produced the current value.
+After any sequence of operations, the write-authority set remains the same.
 
 **Provenance tracking** (the actual sequence of operations) is an audit log concern, not a label concern.
 
-### 8.15.4 Default Value Endorsement
+### 8.15.4 Default Value Initialization
 
-Each handler endorses defaults at its own integrity level (its identity):
-
-- `IncrementHandler` can produce default `0` with integrity `[IncrementHandler]`
-- `DecrementHandler` can produce default `0` with integrity `[DecrementHandler]`
-- `ResetHandler` can produce default `0` with integrity `[ResetHandler]`
-
-When the pattern composes them:
-- Field has integrity `[IncrementHandler | DecrementHandler | ResetHandler]`
-- A default with ANY of these integrities satisfies the union
-- So the default (`0`) is validly endorsed
-
-This solves the bootstrapping problem: the default is endorsed by any handler that could produce it, and the union accepts any of them.
+Defaults are initialized by trusted runtime/pattern instantiation according to the schema. Write authorization applies to **subsequent modifications**; it does not require treating a default value as “written by” any particular handler.
 
 ### 8.15.5 Write Capability vs Minimum Integrity
 
@@ -1478,8 +1486,8 @@ Two distinct input constraints:
 ```
 
 A handler that reads AND writes the same field (like `increment` reading then incrementing `count`):
-- Can read fields whose integrity includes the handler's identity
-- Can write fields whose integrity includes the handler's identity
+- Reads are governed by confidentiality/integrity labels on the value (Sections 3–8)
+- Writes are governed by the field's `writeAuthorizedBy` set (Section 8.15)
 
 ### 8.15.6 Write Authorization
 
@@ -1490,11 +1498,11 @@ function authorizeWrite(
   handler: Handler,
   field: FieldSchema
 ): boolean {
-  const fieldIntegrity = field.integrity;  // e.g., [increment | decrement | reset]
-  const handlerIdentity = handler.identity;  // handler's code hash
+  const writeAuthorizedBy = field.ifc?.writeAuthorizedBy ?? [];
+  const handlerIdentity = { type: "CodeHash", hash: handler.identity };
 
-  // Handler's identity must be in the field's integrity union
-  return fieldIntegrity.includes(handlerIdentity);
+  // Handler identity must be present in the field's write-authority set
+  return writeAuthorizedBy.some(a => atomEquals(a, handlerIdentity));
 }
 ```
 
@@ -1541,9 +1549,9 @@ function authorizeWrite(
       "type": "number",
       "default": 0,
       "ifc": {
-        "integrity": [
-          { "type": "Handler", "id": "IncrementHandler" },
-          { "type": "Handler", "id": "DecrementHandler" }
+        "writeAuthorizedBy": [
+          { "type": "CodeHash", "hash": "sha256:increment-handler-..." },
+          { "type": "CodeHash", "hash": "sha256:decrement-handler-..." }
         ]
       }
     }
@@ -1553,17 +1561,17 @@ function authorizeWrite(
 
 **Lifecycle**:
 
-1. **Creation**: `count` exists with value `0`, integrity `[Increment | Decrement]`
+1. **Creation**: `count` exists with value `0`, write-authority `{Increment, Decrement}`
 
-2. **Increment**: `IncrementHandler` identity in union ✓ → write authorized
+2. **Increment**: `IncrementHandler` identity in write-authority set ✓ → write authorized
 
-3. **Malicious write**: External code identity not in union → rejected
+3. **Malicious write**: External code identity not in write-authority set → rejected
 
-4. **Decrement**: `DecrementHandler` identity in union ✓ → write authorized
+4. **Decrement**: `DecrementHandler` identity in write-authority set ✓ → write authorized
 
 ### 8.15.8 Cross-Pattern Reuse
 
-Because handler integrity is just their identity, they can be reused across patterns:
+Because write authorization is keyed by handler identity, handlers can be reused across patterns:
 
 ```json
 {
@@ -1574,10 +1582,10 @@ Because handler integrity is just their identity, they can be reused across patt
       "type": "number",
       "default": 0,
       "ifc": {
-        "integrity": [
-          { "type": "Handler", "id": "IncrementHandler" },
-          { "type": "Handler", "id": "DecrementHandler" },
-          { "type": "Handler", "id": "ClampHandler" }
+        "writeAuthorizedBy": [
+          { "type": "CodeHash", "hash": "sha256:increment-handler-..." },
+          { "type": "CodeHash", "hash": "sha256:decrement-handler-..." },
+          { "type": "CodeHash", "hash": "sha256:clamp-handler-..." }
         ]
       }
     }
@@ -1585,7 +1593,7 @@ Because handler integrity is just their identity, they can be reused across patt
 }
 ```
 
-The `IncrementHandler` doesn't know about `ClampHandler`—its identity is simply included in the union. The pattern composes them.
+The `IncrementHandler` doesn't know about `ClampHandler`—its identity is simply included in the write-authority set. The pattern composes them.
 
 ### 8.15.9 Event Integrity Requirements
 
@@ -1609,20 +1617,20 @@ Handlers can require integrity on their triggering events:
 
 This creates a two-layer check:
 1. **Event integrity**: Is this event trustworthy enough to trigger the handler?
-2. **Handler identity**: Is this handler's identity in the field's integrity union?
+2. **Write authorization**: Is this handler's identity in the field's write-authority set?
 
 ### 8.15.10 Modification vs Replacement
 
 | Operation | Example | Integrity model |
 |-----------|---------|-----------------|
-| **Modification** | `self.count++` | Handler identity must be in field's integrity union |
+| **Modification** | `self.count++` | Handler identity must be in field's write-authority set |
 | **Replacement** | `return { count: 5 }` | Standard transformation rules (Section 8.7) |
 
-Modification preserves the field's identity and uses handler identity for authorization. Replacement creates a new value with transformation-derived integrity.
+Modification preserves the field's identity and uses write authorization. Replacement creates a new value with transformation-derived integrity.
 
 ### 8.15.11 Compound Modifications
 
-When a handler modifies multiple fields, its identity must be in each field's integrity union:
+When a handler modifies multiple fields, its identity must be in each field's write-authority set:
 
 ```json
 {
@@ -1641,5 +1649,4 @@ When a handler modifies multiple fields, its identity must be in each field's in
 }
 ```
 
-The handler declares it writes to both fields; its identity is included in both fields' integrity unions.
-
+The handler declares it writes to both fields; its identity is included in both fields' write-authority sets.

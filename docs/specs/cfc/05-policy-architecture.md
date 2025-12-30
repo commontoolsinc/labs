@@ -467,3 +467,79 @@ Exchange rule:
 ```
 
 The certification provides the integrity evidence that the transmission principle was satisfied.
+
+---
+
+## 5.6 Provenance Integrity (Fetched Data)
+
+Confidentiality controls who may *learn* a value; integrity controls what may be *believed* about a value. For data fetched from external services, CFC uses provenance integrity to make explicit which claims are justified by trusted transport and trusted parsing.
+
+### 5.6.1 Network Provenance (Transport Evidence)
+
+The `fetch` boundary emits a non-malleable integrity fact describing how the response was obtained:
+
+```
+NetworkProvenance{
+  host,
+  tls,
+  tls_cert_hash?,
+  request_digest,
+  time,
+  code_hash
+}
+```
+
+This fact is minted only by trusted runtime code and binds the response to:
+- the intended destination (`host` / origin),
+- the security of the transport (`tls`, optional `tls_cert_hash`),
+- the endorsed request semantics (`request_digest`),
+- and the runtime implementation (`code_hash`).
+
+### 5.6.2 Schema-Validated Parsing (Translator Evidence)
+
+Policies SHOULD require that responses are translated by trusted components before integrity is attached. Typical translation steps include:
+- content-type checks,
+- schema validation,
+- normalization/canonicalization,
+- and strict rejection of unexpected fields.
+
+The translator may emit a parsing/translation integrity fact:
+
+```
+TranslatedBy{
+  endpoint_class,
+  schema_id,
+  translator_hash,
+  evidence
+}
+```
+
+### 5.6.3 Provider-Origin Claims (Optional, Conditional)
+
+Some external data supports stronger origin claims (e.g., "this email was authored by sender X") but these claims are *conditional* on trusting the provider as an intermediary.
+
+Example (email):
+
+```
+AuthoredBy{ message_id, sender=did:mailto:sender@example.com, provider=Gmail, evidence }
+TrustedProvider(Gmail)  ⊓  AuthoredBy(...)  ⇒  I_sender_authored(did:mailto:sender@...)
+```
+
+This keeps the trust assumption explicit: if the system does not trust Gmail as a provider, it MUST NOT treat `AuthoredBy` as establishing sender-authorship integrity.
+
+### 5.6.4 How Policies Use Provenance Integrity
+
+Policies commonly require provenance integrity as a guard for confidentiality exchange:
+
+- **Authority-only token untainting**: only drop/relax authority-only secrecy when the endorsed request and network provenance facts are present (Section 5.3).
+- **Error declassification**: only declassify structured error fields when `AuthorizedRequest` and `NetworkProvenance` prove the error is from the expected destination (Section 5.4).
+- **Safe derived facts**: only mint derived integrity (e.g., extracted attributes) when upstream provenance integrity is present.
+
+### 5.6.5 Non-Goals
+
+Provenance integrity does NOT claim:
+- that the remote service is honest,
+- that the response content is semantically correct,
+- or that transport/parsing is free of side channels.
+
+It claims only what the trusted boundary can justify: where the bytes came from and which trusted components processed them.

@@ -11,10 +11,12 @@ The specification uses a functional notation for atoms:
 ```
 User(did:key:alice)
 Space(space-abc123)
+PersonalSpace(did:key:alice)
 Ctx.Email(did:key:alice)
 GoogleAuth(did:key:alice)
 EmailSecret(did:key:alice, {did:key:bob, did:key:carol})
 AuthoredBy(did:mailto:hotel@example.com)
+Expires(1735689600)
 ```
 
 ### 4.1.2 Atom Representation (Concrete)
@@ -22,6 +24,23 @@ AuthoredBy(did:mailto:hotel@example.com)
 Atoms are represented as JSON objects with a `type` field and type-specific parameters:
 
 ```typescript
+// Policy principals appear in two forms:
+// - PolicyNameAtom: unbound (no hash), used in schemas and authoring-time annotations.
+// - PolicyRefAtom: bound (with hash), used in runtime labels and evidence.
+type PolicyNameAtom = {
+  // Policy principals are carried in confidentiality labels and are interpreted
+  // only by trusted evaluators at boundary points.
+  type: "Context" | "Policy";
+  name: string;
+  subject: DID;
+};
+
+type PolicyRefAtom = PolicyNameAtom & {
+  // Content hash of the referenced policy record (required in runtime labels).
+  // This binds the label to an immutable policy version.
+  hash: string;
+};
+
 type Atom =
   // Subject principals (users, services)
   | { type: "User"; subject: DID }
@@ -29,13 +48,18 @@ type Atom =
 
   // Space principals
   | { type: "Space"; id: SpaceID }
+  | { type: "PersonalSpace"; owner: DID }  // Equivalent to a per-user space principal
 
   // Context/policy principals (reference policy records)
-  | { type: "Context"; name: string; subject: DID }      // e.g., Ctx.Email(Alice)
-  | { type: "Policy"; name: string; subject: DID }       // e.g., GoogleAuth(Alice)
+  | PolicyNameAtom                                       // e.g., schema-time: Ctx.Email(Alice)
+  | PolicyRefAtom                                        // e.g., label-time: GoogleAuth(Alice, hash=...)
 
   // Resource classification
   | { type: "Resource"; class: string; subject: DID; scope?: unknown }
+
+  // Temporal constraints
+  | { type: "Expires"; timestamp: number }               // Absolute Unix timestamp
+  | { type: "TTL"; seconds: number }                     // Schema-time convenience; resolved to Expires at label creation
 
   // Conceptual principals (abstract concepts bound to implementations via trust)
   | { type: "Concept"; uri: string }                     // e.g., "https://commonfabric.org/concepts/age-rounding"
@@ -53,11 +77,16 @@ type Atom =
   // Verifier principals (trusted reviewers)
   | { type: "Verifier"; subject: DID; scope?: string }
 
-  // Integrity atoms
+  // Common integrity atoms (non-exhaustive)
   | { type: "CodeHash"; hash: string }
   | { type: "AuthoredBy"; sender: DID; messageId?: string }
   | { type: "EndorsedBy"; endorser: DID; action?: string }
-  | { type: "NetworkProvenance"; host: string; tls: boolean };
+  | { type: "HasRole"; principal: DID; space: SpaceID; role: "owner" | "writer" | "reader" }
+  | { type: "AuthorizedRequest"; policy: PolicyRefAtom; user: DID; endpoint: string; requestDigest: string; codeHash: string }
+  | { type: "PolicyCertified"; policyId: string; enforcer?: Atom }
+  | { type: "NetworkProvenance"; host: string; tls: boolean; tlsCertHash?: string; requestDigest?: string; codeHash?: string }
+  // Extension point: policies and runtimes may introduce additional atom types.
+  | { type: string; [key: string]: unknown };
 
 // Runtime environment types
 type RuntimeEnvironment =
@@ -96,7 +125,7 @@ For most atoms, ordering is **flat**: `User(Alice)` and `User(Bob)` are incompar
 
 ## 4.2 Label Structure
 
-A **label** is an object containing confidentiality clauses (CNF), integrity atoms, and an optional expiration:
+A **label** is an object containing confidentiality clauses (CNF) and integrity atoms. Expiration is represented as confidentiality atoms (`Expires`) rather than a separate field.
 
 ```typescript
 // A clause is a single atom or OR of atoms
@@ -191,7 +220,7 @@ At runtime, these become CNF labels with singleton clauses:
 {
   confidentiality: [
     { type: "User", subject: "did:key:alice" },      // clause 1
-    { type: "Context", name: "Email", subject: "..." } // clause 2
+    { type: "Context", name: "Email", subject: "did:key:alice", hash: "sha256:..." } // clause 2 (policy hash bound at label creation)
   ],
   // Each atom is its own clause (singleton)
 }
@@ -572,13 +601,8 @@ Policy records are themselves labeled with integrity atoms identifying who may d
 Policy principals in labels **must include the content hash**:
 
 ```typescript
-// Policy atom with required hash
-type PolicyAtom = {
-  type: "Policy" | "Context";
-  name: string;
-  subject: DID;
-  hash: string;  // Required: content hash of the policy record
-};
+// Policy principal with required hash (see PolicyRefAtom in Section 4.1.2)
+type PolicyAtom = PolicyRefAtom;
 
 // Example in a label
 {
@@ -659,28 +683,51 @@ Labels with old hashes continue to use the old policy until explicitly migrated.
 
 ### 4.4.5 Exchange Rule Evaluation
 
-Exchange rules **add alternatives** to existing clauses rather than replacing them. This creates the disjunctive structure in CNF labels (see Section 3.1.3).
+Exchange rules typically **add alternatives** to existing clauses rather than replacing them. This creates the disjunctive structure in CNF labels (see Section 3.1.3).
+
+Some policies also use exchange rules to **remove** a confidentiality requirement (e.g., dropping an `Expires(...)` clause on derived, policy-approved metadata). In this spec, that is represented by an exchange rule whose instantiated `postCondition.confidentiality` is empty when applied to the target clause.
 
 ```typescript
 function applyExchangeRule(
   label: Label,
-  clauseIndex: number,
+  targetClauseIndex: number,
+  targetAlternativeIndex: number,
   rule: ExchangeRule,
   bindings: Bindings
 ): Label {
-  const clause = label.confidentiality[clauseIndex];
+  const clause = label.confidentiality[targetClauseIndex];
   const alternatives = Array.isArray(clause) ? clause : [clause];
 
-  // Add the postcondition atom as a new alternative
-  const newAlternative = instantiate(rule.postCondition.confidentiality, bindings);
+  const newConfidentiality = instantiate(rule.postCondition.confidentiality, bindings);
+  const newIntegrity = instantiate(rule.postCondition.integrity, bindings);
+
+  // Empty confidentiality postcondition means: drop the matched alternative.
+  if (newConfidentiality.length === 0) {
+    const remainingAlternatives = alternatives.filter((_, i) => i !== targetAlternativeIndex);
+    return {
+      ...label,
+      confidentiality: remainingAlternatives.length === 0
+        ? [
+            ...label.confidentiality.slice(0, targetClauseIndex),
+            ...label.confidentiality.slice(targetClauseIndex + 1)
+          ]
+        : [
+            ...label.confidentiality.slice(0, targetClauseIndex),
+            (remainingAlternatives.length === 1 ? remainingAlternatives[0] : remainingAlternatives),
+            ...label.confidentiality.slice(targetClauseIndex + 1)
+          ],
+      integrity: [...label.integrity, ...newIntegrity]
+    };
+  }
 
   return {
     ...label,
     confidentiality: [
-      ...label.confidentiality.slice(0, clauseIndex),
-      [...alternatives, ...newAlternative],  // Add alternatives, don't replace
-      ...label.confidentiality.slice(clauseIndex + 1)
-    ]
+      ...label.confidentiality.slice(0, targetClauseIndex),
+      [...alternatives, ...newConfidentiality],  // Add alternatives, don't replace
+      ...label.confidentiality.slice(targetClauseIndex + 1)
+    ],
+    integrity: [...label.integrity, ...newIntegrity]
   };
 }
 ```
@@ -694,32 +741,32 @@ function evaluateExchangeRules(
 ): Label {
   let result = label;
 
-  // For each clause in the CNF label
-  for (let i = 0; i < result.confidentiality.length; i++) {
-    const clause = result.confidentiality[i];
-    const atoms = Array.isArray(clause) ? clause : [clause];
+  // Policy principals present in the label determine which rule sets are in scope.
+  // Rules are matched against the FULL label, but applied to the clause containing
+  // the rule's target confidentiality match (typically the first preCondition.confidentiality pattern).
+  const policiesInScope = collectPolicyPrincipals(result.confidentiality)
+    .map(lookupPolicy)
+    .filter(Boolean) as PolicyRecord[];
 
-    // For each atom in the clause, check if exchange rules apply
-    for (const atom of atoms) {
-      if (atom.type === "Context" || atom.type === "Policy") {
-        const policy = lookupPolicy(atom);
-        if (!policy) continue;
-
-        // Check each exchange rule
-        for (const rule of policy.exchangeRules) {
-          const bindings = matchRule(rule.preCondition, result, availableIntegrity);
-          if (bindings) {
-            // Rule matches - add alternative to this clause
-            result = applyExchangeRule(result, i, rule, bindings);
-          }
-        }
-      }
+  for (const policy of policiesInScope) {
+    for (const rule of policy.exchangeRules) {
+      const match = matchRuleWithTargetClause(rule.preCondition, result, availableIntegrity);
+      if (!match) continue;
+      result = applyExchangeRule(
+        result,
+        match.targetClauseIndex,
+        match.targetAlternativeIndex,
+        rule,
+        match.bindings
+      );
     }
   }
 
   return result;
 }
 ```
+
+Implementations SHOULD evaluate exchange rules to a **fixpoint** (repeat until no additional alternatives/removals apply). Since rule application is monotone (it does not require retracting integrity evidence), fixpoint evaluation terminates.
 
 **Multiple rules can fire on the same clause**, creating multiple alternatives:
 

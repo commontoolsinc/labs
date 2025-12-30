@@ -2,6 +2,8 @@
 
 Events and intents achieve single-use semantics through cell ID derivation using `refer({ causal: {...} })`. Event transformations chain together while preserving consumption guarantees.
 
+**Trust boundary note**: The `refer()`-based ID derivations and `atomicClaimCell(...)` operations described in this section are performed by trusted runtime components. Untrusted pattern code should not be able to call `refer()` or observe stable cell/document IDs directly (see Section 11.1.7.9).
+
 ## 6.1 Causal ID Derivation with `refer()`
 
 The system uses `refer()` from `merkle-reference` to derive content-addressed IDs from causal structures. This provides:
@@ -103,9 +105,9 @@ This can be used as integrity evidence in downstream flows:
 
 ---
 
-## 6.2 Intent Events from UI Gestures
+## 6.3 Intent Events from UI Gestures
 
-### 6.2.1 UI Event to Intent Event
+### 6.3.1 UI Event to Intent Event
 
 When a user gesture occurs on the VDOM:
 
@@ -152,7 +154,7 @@ interface IntentEvent<T> {
 }
 ```
 
-### 6.2.2 Intent ID Derivation
+### 6.3.2 Intent ID Derivation
 
 The intent ID is derived from the source gesture, ensuring:
 - Same gesture can only produce one intent per condition
@@ -175,9 +177,9 @@ function deriveIntentId(
 
 ---
 
-## 6.3 Intent Refinement Chain
+## 6.4 Intent Refinement Chain
 
-### 6.3.1 Refinement as Event Transformation
+### 6.4.1 Refinement as Event Transformation
 
 Intent refinement transforms a high-level intent into a more specific one:
 
@@ -194,7 +196,7 @@ Each refinement step:
 2. Produces a new intent with derived ID
 3. Records the transformation as integrity
 
-### 6.3.2 Refinement Cell Derivation
+### 6.4.2 Refinement Cell Derivation
 
 ```typescript
 import { refer } from "@commontools/memory";
@@ -257,7 +259,7 @@ async function refineIntent<S, T>(
 }
 ```
 
-### 6.3.2.1 Refiner Trust and Scoped Endorsement
+### 6.4.2.1 Refiner Trust and Scoped Endorsement
 
 Refiners are **trusted components** that transform high-level intents into specific, consumable intents. Because they can influence what operations are authorized, they require explicit trust.
 
@@ -342,7 +344,7 @@ async function refineIntentWithTrustCheck<S, T>(
 
 **Open problem (Section 10)**: Full semantic verification that a refiner's output correctly represents the user's intent remains an open problem. Scoped trust mitigates but doesn't eliminate the risk of buggy refiners.
 
-### 6.3.3 IntentOnce Structure
+### 6.4.3 IntentOnce Structure
 
 The final consumable intent:
 
@@ -374,7 +376,7 @@ interface IntentOnce<T> {
 }
 ```
 
-### 6.3.4 Intent Duration Classes
+### 6.4.4 Intent Duration Classes
 
 Intents fall into two duration classes with different security properties:
 
@@ -467,9 +469,9 @@ async function cancelLongIntent(
 
 ---
 
-## 6.4 Intent Consumption at Commit Points
+## 6.5 Intent Consumption at Commit Points
 
-### 6.4.1 Consumption Cell Derivation
+### 6.5.1 Consumption Cell Derivation
 
 When an IntentOnce is used at a commit point:
 
@@ -514,137 +516,59 @@ async function consumeIntent<T>(
 }
 ```
 
-### 6.4.2 Linearizable Consumption
+### 6.5.2 Commit-Coupled Consumption
 
-Intent consumption must be **linearizable**. The key insight: **consume first, then act**. Because external effects cannot be rolled back, we commit the consumption before attempting the action. If the action fails, privileged runtime code issues a retry intent.
+For external side effects, the system cannot make the effect part of an internal transaction. CFC therefore couples consumption to a **policy-defined commit condition** (see Section 7.5):
 
-The consumption flow:
+1. Attempt the side effect using bindings from `IntentOnce` (audience, endpoint, payload digest, idempotency key).
+2. If the effect is considered **committed**, atomically claim the consumed cell (`intentConsumed`).
+3. If the consumed cell was already claimed, treat the result as **deduplicated success** (the system recorded that the intent was already committed).
+4. On non-commit outcomes (network error, non-2xx, schema invalid, timeout), do **not** consume; retries remain possible until `exp` and `maxAttempts`.
 
-1. **Consume intent**: Atomically mark the intent as consumed and commit
-2. **Attempt effect**: Make the network call or perform the action
-3. **On success**: Done—intent was already consumed
-4. **On failure**: Privileged code issues a retry intent (a new consumable)
+This is the “no-consume-on-failure” model (Section 7.5.1) and matches the Gmail forward example (Section 1.4.6).
+
+### 6.5.3 Bounded Retries via Attempt Cells
+
+To bound retries across concurrent consumers and provide auditability, commit points SHOULD track attempts explicitly using derived cell IDs.
 
 ```typescript
-async function linearizableConsume<T>(
+import { refer } from "@commontools/memory";
+
+function attemptCellId(intentOnceId: Reference, attemptNumber: number): Reference {
+  return refer({ intentAttempt: { intentOnceId, attemptNumber } });
+}
+```
+
+Before sending attempt `n`, the commit point claims `attemptCellId(intent.id, n)`. This provides:
+- a hard bound of `maxAttempts` attempts (at most one claim per attempt number),
+- a durable record of when each attempt occurred and by which trusted sink code,
+- and a simple concurrency story (multiple workers can race safely).
+
+### 6.5.4 Retry Loop (Recommended Pattern)
+
+```typescript
+async function commitWithRetries<T>(
   intent: IntentOnce<T>,
-  action: () => Promise<ActionResult>
-): Promise<ConsumeResult<T>> {
-  // Step 1: Consume the intent FIRST (atomic, committed before action)
-  const consumeResult = await atomicClaimCell(consumedCellId(intent.id), {
-    consumedAt: Date.now(),
-    status: "consumed"
-  });
+  commitActionForAttempt: (attemptNumber: number) => Promise<CommitResult>
+): Promise<CommitResult> {
+  for (let attempt = 1; attempt <= intent.maxAttempts; attempt++) {
+    if (Date.now() > intent.exp) return { success: false, error: "intent_expired" };
 
-  if (!consumeResult) {
-    return { success: false, error: "already_consumed" };
-  }
-
-  // Step 2: Now perform the external effect
-  // The intent is already consumed—no race condition
-  const actionResult = await action();
-
-  if (actionResult.success) {
-    // Record success (non-critical, for observability)
-    await updateCell(consumedCellId(intent.id), {
-      status: "completed",
-      result: actionResult
+    const claimedAttempt = await atomicClaimCell(attemptCellId(intent.id, attempt), {
+      attemptedAt: Date.now(),
+      attemptNumber: attempt
     });
-    return { success: true, result: actionResult };
+    if (!claimedAttempt) continue;
+
+    const result = await consumeIntent(intent, () => commitActionForAttempt(attempt));
+    if (result.success) return result;
   }
 
-  // Step 3: Action failed—issue retry intent if allowed
-  if (intent.retriesRemaining > 0) {
-    // Privileged runtime code mints a new consumable for retry
-    const retryIntent = await mintRetryIntent(intent, actionResult.error);
-    return { success: false, retryIntent };
-  }
-
-  // No retries left
-  await updateCell(consumedCellId(intent.id), {
-    status: "failed",
-    error: actionResult.error
-  });
-  return { success: false, error: actionResult.error };
+  return { success: false, error: "max_attempts_exceeded" };
 }
 ```
 
-**Why consume-first is correct**: External actions cannot participate in transactions—they're outside the system. By consuming first:
-- The intent is definitively used (no double-spend)
-- If the action fails, a new retry intent provides authorization to try again
-- The retry intent is a fresh consumable with its own single-use semantics
-
-### 6.4.3 Retry Intent Tokens
-
-When an external effect fails, privileged runtime code issues a **retry intent**—a tightly-scoped token that authorizes retry attempts for the same operation. The original intent is already consumed; the retry intent is a new consumable.
-
-```typescript
-interface RetryIntent<T> {
-  id: Reference;  // refer({ retryIntent: { sourceIntentId, attemptNumber } })
-
-  // Bound to the same operation as source
-  sourceIntentId: Reference;
-  operation: string;
-  audience: string;
-  parameters: T;
-  payloadDigest: Reference;
-  idempotencyKey: string;  // Same as original - external idempotency
-
-  // Retry-specific constraints
-  attemptNumber: number;
-  maxAttempts: number;     // Remaining attempts
-  retryDeadline: number;   // Tighter than original expiration
-
-  // Provenance
-  failureReason: string;
-  issuedAt: number;
-
-  // Only privileged runtime code may mint these
-  integrity: [
-    { type: "MintedByRuntime", runtimeHash: string },
-    { type: "RetryOf", sourceIntentId: Reference }
-  ];
-}
-```
-
-**Key constraints**:
-
-1. **Privileged minting**: Only the trusted runtime (not pattern code) may issue retry intents
-2. **Same operation**: Retry intents are bound to the exact same operation, audience, and idempotency key
-3. **Tighter scope**: Retry deadline is shorter than original expiration
-4. **Traceable**: Full provenance chain from original intent through retries
-5. **Bounded**: Each retry decrements `maxAttempts`; no infinite retries
-
-### 6.4.4 Retry Execution
-
-```typescript
-async function executeWithRetry<T>(
-  intent: IntentOnce<T>,
-  action: () => Promise<ActionResult>
-): Promise<FinalResult<T>> {
-  let currentIntent: IntentOnce<T> | RetryIntent<T> = intent;
-
-  while (true) {
-    const result = await linearizableConsume(currentIntent, action);
-
-    if (result.success) {
-      return { success: true, result: result.result };
-    }
-
-    if (result.retryIntent) {
-      // Got a retry token - continue
-      currentIntent = result.retryIntent;
-      await backoff(result.retryIntent.attemptNumber);
-      continue;
-    }
-
-    // No retry available - final failure
-    return { success: false, error: result.error };
-  }
-}
-```
-
-### 6.4.5 Idempotency Key Flow
+### 6.5.5 Idempotency Key Flow
 
 The idempotency key ensures external services handle retries correctly:
 
@@ -660,9 +584,9 @@ External service deduplicates by key
 
 ---
 
-## 6.5 Event Transformation Chains
+## 6.6 Event Transformation Chains
 
-### 6.5.1 Transformation as Derived Events
+### 6.6.1 Transformation as Derived Events
 
 Any event can be transformed into a new event, creating a provenance chain:
 
@@ -677,7 +601,7 @@ interface DerivedEvent<T> extends Event<T> {
 }
 ```
 
-### 6.5.2 Fork Prevention
+### 6.6.2 Fork Prevention
 
 A source event can only be transformed once per transformer:
 
@@ -701,7 +625,7 @@ This prevents:
 - Processing the same event twice with the same transformer
 - Forking an event into multiple outputs from the same logic
 
-### 6.5.3 Multiple Transformers
+### 6.6.3 Multiple Transformers
 
 Different transformers CAN process the same event:
 
@@ -717,7 +641,7 @@ Each transformation claims a different cell:
 
 This is intentional - an email can both trigger a calendar event AND a notification.
 
-### 6.5.4 Chained Transformations
+### 6.6.4 Chained Transformations
 
 Transformations can chain:
 
@@ -738,9 +662,9 @@ Each step claims its own cell, ensuring:
 
 ---
 
-## 6.6 Integrity Through the Chain
+## 6.7 Integrity Through the Chain
 
-### 6.6.1 Integrity Accumulation
+### 6.7.1 Integrity Accumulation
 
 As events transform, integrity atoms accumulate:
 
@@ -763,7 +687,7 @@ function accumulateIntegrity(
 }
 ```
 
-### 6.6.2 Final Intent Integrity
+### 6.7.2 Final Intent Integrity
 
 An IntentOnce carries the full chain:
 
@@ -786,7 +710,7 @@ An IntentOnce carries the full chain:
 }
 ```
 
-### 6.6.3 Verification at Commit
+### 6.7.3 Verification at Commit
 
 The commit point verifies the integrity chain:
 
@@ -813,13 +737,14 @@ function verifyIntentIntegrity(intent: IntentOnce<any>): boolean {
 
 ---
 
-## 6.7 Cell ID Summary
+## 6.8 Cell ID Summary
 
 | Purpose | Reference Structure |
 |---------|---------------------|
 | Event processed | `refer({ eventProcessed: { eventId } })` |
 | Event transformed | `refer({ eventTransformed: { eventId, transformerHash } })` |
 | Intent refined | `refer({ intentRefined: { intentId, refinerHash } })` |
+| Intent attempt | `refer({ intentAttempt: { intentOnceId, attemptNumber } })` |
 | Intent consumed | `refer({ intentConsumed: { intentOnceId } })` |
 
 All single-use semantics are enforced by atomic claim of the derived cell. The `refer()` function from `@commontools/memory` produces content-addressed references from structured data.
