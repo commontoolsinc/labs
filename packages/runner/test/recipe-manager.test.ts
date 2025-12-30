@@ -109,3 +109,121 @@ describe("RecipeManager program persistence", () => {
     expect(meta.program?.main).toEqual("/main.ts");
   });
 });
+
+describe("RecipeManager.compileOrGetRecipe", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  const simpleProgram: RuntimeProgram = {
+    main: "/main.ts",
+    files: [
+      {
+        name: "/main.ts",
+        contents: [
+          "import { recipe } from 'commontools';",
+          "export default recipe<{ x: number }>('Cached', ({ x }) => ({ doubled: x }));",
+        ].join("\n"),
+      },
+    ],
+  };
+
+  const differentProgram: RuntimeProgram = {
+    main: "/main.ts",
+    files: [
+      {
+        name: "/main.ts",
+        contents: [
+          "import { recipe } from 'commontools';",
+          "export default recipe<{ y: number }>('Different', ({ y }) => ({ tripled: y }));",
+        ].join("\n"),
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("compiles and returns a recipe on first call", async () => {
+    const recipe = await runtime.recipeManager.compileOrGetRecipe(
+      simpleProgram,
+    );
+    expect(recipe).toBeDefined();
+    expect(recipe.program).toBeDefined();
+    expect(recipe.program?.main).toEqual("/main.ts");
+  });
+
+  it("returns cached recipe on second call (same instance)", async () => {
+    const first = await runtime.recipeManager.compileOrGetRecipe(simpleProgram);
+    const second = await runtime.recipeManager.compileOrGetRecipe(
+      simpleProgram,
+    );
+
+    // Should be the exact same object instance (cache hit)
+    expect(second).toBe(first);
+  });
+
+  it("compiles different recipes for different programs", async () => {
+    const first = await runtime.recipeManager.compileOrGetRecipe(simpleProgram);
+    const second = await runtime.recipeManager.compileOrGetRecipe(
+      differentProgram,
+    );
+
+    // Should be different recipe instances
+    expect(second).not.toBe(first);
+    expect(first.program?.files[0].contents).toContain("doubled");
+    expect(second.program?.files[0].contents).toContain("tripled");
+  });
+
+  it("single-flight: concurrent calls share one compilation", async () => {
+    // Start multiple compilations concurrently
+    const [first, second, third] = await Promise.all([
+      runtime.recipeManager.compileOrGetRecipe(simpleProgram),
+      runtime.recipeManager.compileOrGetRecipe(simpleProgram),
+      runtime.recipeManager.compileOrGetRecipe(simpleProgram),
+    ]);
+
+    // All should return the same instance
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+  });
+
+  it("works with string input (single file)", async () => {
+    const source = [
+      "import { recipe } from 'commontools';",
+      "export default recipe<{ n: number }>('FromString', ({ n }) => ({ result: n }));",
+    ].join("\n");
+
+    const recipe = await runtime.recipeManager.compileOrGetRecipe(source);
+    expect(recipe).toBeDefined();
+    expect(recipe.program?.main).toEqual("/main.tsx");
+  });
+
+  it("recipe is cached and returns same instance on subsequent calls", async () => {
+    const recipe = await runtime.recipeManager.compileOrGetRecipe(
+      simpleProgram,
+    );
+
+    // The recipe should be cached - calling again returns same instance
+    const recipe2 = await runtime.recipeManager.compileOrGetRecipe(
+      simpleProgram,
+    );
+    expect(recipe2).toBe(recipe);
+
+    // And the recipe should have its program attached
+    expect(recipe.program).toBeDefined();
+    expect(recipe.program?.main).toEqual("/main.ts");
+  });
+});
