@@ -193,6 +193,11 @@ export class Scheduler {
   // we assume it might write there again. This prevents missed dependencies when an
   // action's write behavior varies between runs.
   private mightWrite = new WeakMap<Action, IMemorySpaceAddress[]>();
+  // Index: entity -> actions that write to it (for fast dependency lookup)
+  // Updated when mightWrite changes
+  private writersByEntity = new Map<SpaceAndURI, Set<Action>>();
+  // Reverse index: action -> entities it writes to (for cleanup)
+  private actionWriteEntities = new WeakMap<Action, Set<SpaceAndURI>>();
   // Track actions scheduled for first time (bypass filter)
   private scheduledFirstTime = new Set<Action>();
   // Filter stats for diagnostics
@@ -528,6 +533,19 @@ export class Scheduler {
     this.computations.delete(action);
     // Clean up dirty tracking
     this.dirty.delete(action);
+    // Clean up writersByEntity index
+    const writeEntities = this.actionWriteEntities.get(action);
+    if (writeEntities) {
+      for (const entity of writeEntities) {
+        const writers = this.writersByEntity.get(entity);
+        writers?.delete(action);
+        if (writers && writers.size === 0) {
+          this.writersByEntity.delete(entity);
+        }
+      }
+      // Clear actionWriteEntities so resubscribe will re-register the action
+      this.actionWriteEntities.delete(action);
+    }
     // NOTE: We intentionally keep parent-child relationships intact.
     // They're needed for cycle detection (identifying obsolete children
     // when parent is re-running). They'll be cleaned up when parent is
@@ -850,14 +868,34 @@ export class Scheduler {
     // Initialize/update mightWrite with declared writes
     // This ensures dependency chain can be built even before action runs
     const existingMightWrite = this.mightWrite.get(action) ?? [];
-    this.mightWrite.set(
-      action,
-      sortAndCompactPaths([
-        ...existingMightWrite,
-        ...writes,
-        ...(log.potentialWrites ?? []),
-      ]),
-    );
+    const newMightWrite = sortAndCompactPaths([
+      ...existingMightWrite,
+      ...writes,
+      ...(log.potentialWrites ?? []),
+    ]);
+    this.mightWrite.set(action, newMightWrite);
+
+    // Update writersByEntity index for fast dependency lookup
+    // Collect new entities from writes
+    const newEntities = new Set<SpaceAndURI>();
+    for (const write of newMightWrite) {
+      const entity: SpaceAndURI = `${write.space}/${write.id}`;
+      newEntities.add(entity);
+    }
+
+    // Add action to writersByEntity for each entity
+    const existingEntities = this.actionWriteEntities.get(action);
+    for (const entity of newEntities) {
+      // Skip if already registered
+      if (existingEntities?.has(entity)) continue;
+      let writers = this.writersByEntity.get(entity);
+      if (!writers) {
+        writers = new Set();
+        this.writersByEntity.set(entity, writers);
+      }
+      writers.add(action);
+    }
+    this.actionWriteEntities.set(action, newEntities);
 
     return reads;
   }
@@ -882,31 +920,49 @@ export class Scheduler {
     const reads = log.reads;
     const newDependencies = new Set<Action>();
 
-    // For each read of the new action, find other actions that write to it
+    // Group reads by entity for efficient lookup
+    const readsByEntity = new Map<SpaceAndURI, IMemorySpaceAddress[]>();
     for (const read of reads) {
-      // Check all registered actions for ones that write to this read
-      for (const otherAction of [...this.computations, ...this.effects]) {
-        if (otherAction === action) continue;
+      const entity: SpaceAndURI = `${read.space}/${read.id}`;
+      let entityReads = readsByEntity.get(entity);
+      if (!entityReads) {
+        entityReads = [];
+        readsByEntity.set(entity, entityReads);
+      }
+      entityReads.push(read);
+    }
 
-        // Use mightWrite (accumulates all paths action has ever written)
-        // This ensures dependency chain is built even if first run writes undefined
+    // For each entity we read from, find actions that write to it
+    for (const [entity, entityReads] of readsByEntity) {
+      const writers = this.writersByEntity.get(entity);
+      if (!writers) continue;
+
+      for (const otherAction of writers) {
+        if (otherAction === action) continue;
+        // Skip if we already found this dependency
+        if (newDependencies.has(otherAction)) continue;
+
+        // Get paths this action writes to
         const otherWrites = this.mightWrite.get(otherAction) ?? [];
 
-        // Check if otherAction writes to this entity we're reading
-        for (const write of otherWrites) {
-          if (
-            read.space === write.space &&
-            read.id === write.id &&
-            arraysOverlap(write.path, read.path)
-          ) {
-            // otherAction writes → this action reads, so this action depends on otherAction
-            let deps = this.dependents.get(otherAction);
-            if (!deps) {
-              deps = new Set();
-              this.dependents.set(otherAction, deps);
+        // Check if any write path overlaps with any read path
+        outer: for (const read of entityReads) {
+          for (const write of otherWrites) {
+            if (
+              read.space === write.space &&
+              read.id === write.id &&
+              arraysOverlap(write.path, read.path)
+            ) {
+              // otherAction writes → this action reads, so this action depends on otherAction
+              let deps = this.dependents.get(otherAction);
+              if (!deps) {
+                deps = new Set();
+                this.dependents.set(otherAction, deps);
+              }
+              deps.add(action);
+              newDependencies.add(otherAction);
+              break outer; // Found a match, no need to check more paths
             }
-            deps.add(action);
-            newDependencies.add(otherAction);
           }
         }
       }
