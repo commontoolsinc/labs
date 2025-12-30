@@ -1221,7 +1221,7 @@ const emptyState = (
 
 // Legend (static, only shown when count > 0)
 const legendContent = (
-  <ct-hstack style="gap: 12px; font-size: 11px; color: #9ca3af; padding-top: 8px; flex-wrap: wrap;">
+  <ct-hstack gap="3" wrap style="font-size: 11px; color: #9ca3af; padding-top: 8px;">
     <span>💜 Flexible (if convenient)</span>
     <span>💙 Prefer (unless inconvenient)</span>
     <span>🧡 Strict (strong preference)</span>
@@ -1422,11 +1422,11 @@ export const DietaryRestrictionsModule = recipe<
       if (!list || list.length === 0) return emptyState;
 
       return (
-        <ct-vstack style="gap: 8px;">
+        <ct-vstack gap="2">
           <span style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
             Your Restrictions
           </span>
-          <ct-hstack style="gap: 8px; flex-wrap: wrap;">
+          <ct-hstack gap="2" wrap>
             {list.map((entry: RestrictionEntry, index: number) => {
               const style = LEVEL_CONFIG[entry.level] || LEVEL_CONFIG.prefer;
               const isGroupEntry = isGroup(entry.name);
@@ -1438,7 +1438,7 @@ export const DietaryRestrictionsModule = recipe<
               return (
                 <span
                   key={index}
-                  style={`display: inline-flex; align-items: center; gap: 6px; background: ${style.bg}; color: ${style.color}; border: 1px solid ${style.border}; border-radius: 20px; padding: 6px 12px; font-size: 14px;`}
+                  style={`display: inline-flex; align-items: center; gap: 6px; background: ${style.bg}; color: ${style.color}; border: 1px solid ${style.border}; border-radius: 20px; padding: 6px 12px; font-size: 14px; flex-shrink: 0; white-space: nowrap;`}
                 >
                   <button
                     type="button"
@@ -1451,7 +1451,7 @@ export const DietaryRestrictionsModule = recipe<
                   >
                     {style.icon}
                   </button>
-                  <ct-vstack style="gap: 0;">
+                  <span style="display: flex; flex-direction: column;">
                     <span style="font-weight: 500;">
                       {entry.name}
                       {isGroupEntry && (
@@ -1463,7 +1463,7 @@ export const DietaryRestrictionsModule = recipe<
                     <span style="font-size: 10px; opacity: 0.8;">
                       {contextLabel}
                     </span>
-                  </ct-vstack>
+                  </span>
                   <button
                     type="button"
                     onClick={removeRestriction({
@@ -1495,11 +1495,11 @@ export const DietaryRestrictionsModule = recipe<
       if (!implied || implied.length === 0) return null;
 
       return (
-        <ct-vstack style="gap: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb;">
+        <ct-vstack gap="2" style="padding-top: 8px; border-top: 1px solid #e5e7eb;">
           <span style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
             What This Means (Avoid These)
           </span>
-          <ct-hstack style="gap: 4px; flex-wrap: wrap;">
+          <ct-hstack gap="1" wrap>
             {implied.map(
               (
                 item: {
@@ -1534,9 +1534,9 @@ export const DietaryRestrictionsModule = recipe<
   return {
     [NAME]: computed(() => `🍽️ Dietary: ${displayText}`),
     [UI]: (
-      <ct-vstack style="gap: 16px;">
+      <ct-vstack gap="4">
         {/* Input row */}
-        <ct-hstack style="gap: 8px; align-items: center;">
+        <ct-hstack gap="2" align="center">
           <ct-autocomplete
             items={getAutocompleteItems()}
             placeholder="Search allergies, diets, intolerances..."
