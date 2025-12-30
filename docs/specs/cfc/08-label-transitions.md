@@ -1333,55 +1333,79 @@ Previous sections describe label transitions for **computed values** (inputs →
 
 ### 8.15.1 Handler-Declared Write Capability
 
-Each handler declares which fields it writes to. The handler's identity (code hash) IS its integrity—no separate declaration needed:
+Each handler declares which fields it writes to. The handler's identity (code hash) IS its integrity—no separate declaration needed.
 
-```typescript
-// increment only knows about itself
-const increment = handler({
-  name: "increment",
-  type: {
-    count: { type: "number", default: 0, writes: true }
-  },
-  update: ({ self }) => { self.count = self.count + 1; }
-});
+**Handler schema** (each handler only knows about itself):
 
-// decrement only knows about itself
-const decrement = handler({
-  name: "decrement",
-  type: {
-    count: { type: "number", default: 0, writes: true }
-  },
-  update: ({ self }) => { self.count = self.count - 1; }
-});
-
-// reset only knows about itself
-const reset = handler({
-  name: "reset",
-  type: {
-    count: { type: "number", default: 0, writes: true }
-  },
-  update: ({ self }) => { self.count = 0; }
-});
+```json
+{
+  "$id": "IncrementHandler",
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "number",
+      "default": 0,
+      "ifc": { "writes": true }
+    }
+  }
+}
 ```
 
-The `writes: true` annotation means "I write to this field." The handler's integrity is implicit—it's the handler's own identity.
+```json
+{
+  "$id": "DecrementHandler",
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "number",
+      "default": 0,
+      "ifc": { "writes": true }
+    }
+  }
+}
+```
+
+```json
+{
+  "$id": "ResetHandler",
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "number",
+      "default": 0,
+      "ifc": { "writes": true }
+    }
+  }
+}
+```
+
+The `"ifc": { "writes": true }` annotation means "I write to this field." The handler's integrity is implicit—it's the handler's own identity (code hash).
 
 ### 8.15.2 Schema Composes via Union
 
-The pattern schema composes handler identities via **union**:
+The pattern schema composes handler identities via **union**. When handlers declare `"writes": true` on a field, the pattern's composed schema includes all their identities:
 
-```typescript
-// Pattern combines handlers
-pattern({
-  handlers: [increment, decrement, reset],
-  // Field integrity is automatically the union of handlers that write to it
-});
-
-// Inferred schema:
-// count.integrity = increment | decrement | reset
+```json
+{
+  "$id": "CounterPattern",
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "number",
+      "default": 0,
+      "ifc": {
+        "integrity": [
+          { "type": "Handler", "id": "IncrementHandler" },
+          { "type": "Handler", "id": "DecrementHandler" },
+          { "type": "Handler", "id": "ResetHandler" }
+        ]
+      }
+    }
+  }
+}
 ```
 
-The field's integrity `[increment | decrement | reset]` means:
+The field's integrity `[IncrementHandler | DecrementHandler | ResetHandler]` means:
 - Any of these handlers can write to this field
 - The field's integrity is the disjunction of handler identities
 - Handlers don't need to know about each other
@@ -1392,17 +1416,12 @@ Field integrity is a property of the schema, not the value. It doesn't change pe
 
 | Event | Value | Integrity |
 |-------|-------|-----------|
-| Creation (from default) | `0` | `[increment \| decrement \| reset]` |
-| After increment | `1` | `[increment \| decrement \| reset]` |
-| After decrement | `0` | `[increment \| decrement \| reset]` |
-| After reset | `0` | `[increment \| decrement \| reset]` |
+| Creation (from default) | `0` | `[Increment \| Decrement \| Reset]` |
+| After increment | `1` | `[Increment \| Decrement \| Reset]` |
+| After decrement | `0` | `[Increment \| Decrement \| Reset]` |
+| After reset | `0` | `[Increment \| Decrement \| Reset]` |
 
-After any sequence of operations:
-```
-increment(e1) → increment(e2) → decrement(e3) → increment(e4)
-```
-
-The integrity remains `[increment | decrement | reset]`. We don't track which specific handler last wrote—any of them COULD have produced the current value.
+After any sequence of operations, the integrity remains the same. We don't track which specific handler last wrote—any of them COULD have produced the current value.
 
 **Provenance tracking** (the actual sequence of operations) is an audit log concern, not a label concern.
 
@@ -1410,16 +1429,14 @@ The integrity remains `[increment | decrement | reset]`. We don't track which sp
 
 Each handler endorses defaults at its own integrity level (its identity):
 
-```typescript
-// increment can produce default 0 with integrity [increment]
-// decrement can produce default 0 with integrity [decrement]
-// reset can produce default 0 with integrity [reset]
-```
+- `IncrementHandler` can produce default `0` with integrity `[IncrementHandler]`
+- `DecrementHandler` can produce default `0` with integrity `[DecrementHandler]`
+- `ResetHandler` can produce default `0` with integrity `[ResetHandler]`
 
 When the pattern composes them:
-- Field has integrity `[increment | decrement | reset]`
+- Field has integrity `[IncrementHandler | DecrementHandler | ResetHandler]`
 - A default with ANY of these integrities satisfies the union
-- So the default (0) is validly endorsed
+- So the default (`0`) is validly endorsed
 
 This solves the bootstrapping problem: the default is endorsed by any handler that could produce it, and the union accepts any of them.
 
@@ -1432,20 +1449,32 @@ Two distinct input constraints:
 | **Write capability** | "I write to this field" | Handler modifying a field |
 | **Minimum integrity** | "Input must have at least this integrity" | Handler requiring trusted input |
 
-```typescript
-// Write capability: handler declares it writes (integrity = handler identity)
-const increment = handler({
-  type: {
-    count: { writes: true }  // I write to this
-  }
-});
+**Write capability** (handler declares it writes):
 
-// Minimum integrity: handler requires trusted input
-const sendEmail = handler({
-  type: {
-    recipient: { minIntegrity: "UserVerified" }  // Must be verified
+```json
+{
+  "$id": "IncrementHandler",
+  "properties": {
+    "count": {
+      "type": "number",
+      "ifc": { "writes": true }
+    }
   }
-});
+}
+```
+
+**Minimum integrity** (handler requires trusted input):
+
+```json
+{
+  "$id": "SendEmailHandler",
+  "properties": {
+    "recipient": {
+      "type": "string",
+      "ifc": { "minIntegrity": [{ "type": "UserVerified" }] }
+    }
+  }
+}
 ```
 
 A handler that reads AND writes the same field (like `increment` reading then incrementing `count`):
@@ -1471,73 +1500,111 @@ function authorizeWrite(
 
 ### 8.15.7 Worked Example: Counter Pattern
 
-**Handler definitions** (each independent):
+**Handler schemas** (each independent):
 
-```typescript
-const increment = handler({
-  name: "increment",
-  type: { count: { type: "number", default: 0, writes: true } },
-  on: { tag: "increment" },
-  update: ({ self }) => { self.count++; }
-});
-
-const decrement = handler({
-  name: "decrement",
-  type: { count: { type: "number", default: 0, writes: true } },
-  on: { tag: "decrement" },
-  update: ({ self }) => { self.count--; }
-});
+```json
+{
+  "$id": "IncrementHandler",
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "number",
+      "default": 0,
+      "ifc": { "writes": true }
+    }
+  }
+}
 ```
 
-**Pattern composition**:
+```json
+{
+  "$id": "DecrementHandler",
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "number",
+      "default": 0,
+      "ifc": { "writes": true }
+    }
+  }
+}
+```
 
-```typescript
-const counterPattern = pattern({
-  name: "Counter",
-  handlers: [increment, decrement],
-  // Schema inferred: count.integrity = increment | decrement
-});
+**Composed pattern schema** (inferred from handlers):
+
+```json
+{
+  "$id": "CounterPattern",
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "number",
+      "default": 0,
+      "ifc": {
+        "integrity": [
+          { "type": "Handler", "id": "IncrementHandler" },
+          { "type": "Handler", "id": "DecrementHandler" }
+        ]
+      }
+    }
+  }
+}
 ```
 
 **Lifecycle**:
 
-1. **Creation**: `count` exists with value `0`, integrity `[increment | decrement]`
+1. **Creation**: `count` exists with value `0`, integrity `[Increment | Decrement]`
 
-2. **Increment**: Handler identity in union ✓ → write authorized
+2. **Increment**: `IncrementHandler` identity in union ✓ → write authorized
 
 3. **Malicious write**: External code identity not in union → rejected
 
-4. **Decrement**: Handler identity in union ✓ → write authorized
+4. **Decrement**: `DecrementHandler` identity in union ✓ → write authorized
 
 ### 8.15.8 Cross-Pattern Reuse
 
 Because handler integrity is just their identity, they can be reused across patterns:
 
-```typescript
-// Another pattern can use the same increment handler
-const boundedCounter = pattern({
-  name: "BoundedCounter",
-  handlers: [increment, decrement, clamp],  // reuse increment/decrement
-  // count.integrity = increment | decrement | clamp
-});
+```json
+{
+  "$id": "BoundedCounterPattern",
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "number",
+      "default": 0,
+      "ifc": {
+        "integrity": [
+          { "type": "Handler", "id": "IncrementHandler" },
+          { "type": "Handler", "id": "DecrementHandler" },
+          { "type": "Handler", "id": "ClampHandler" }
+        ]
+      }
+    }
+  }
+}
 ```
 
-The `increment` handler doesn't know about `clamp`—its identity is simply included in the union. The pattern composes them.
+The `IncrementHandler` doesn't know about `ClampHandler`—its identity is simply included in the union. The pattern composes them.
 
 ### 8.15.9 Event Integrity Requirements
 
 Handlers can require integrity on their triggering events:
 
-```typescript
-const increment = handler({
-  name: "increment",
-  type: { count: { writes: true } },
-  on: { tag: "increment" },
-  ifc: {
-    requiredEventIntegrity: [{ type: "UserIntent", action: "increment" }]
+```json
+{
+  "$id": "IncrementHandler",
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "number",
+      "ifc": { "writes": true }
+    }
   },
-  update: ({ self }) => { self.count++; }
-});
+  "ifc": {
+    "requiredEventIntegrity": [{ "type": "UserIntent", "action": "increment" }]
+  }
+}
 ```
 
 This creates a two-layer check:
@@ -1557,17 +1624,21 @@ Modification preserves the field's identity and uses handler identity for author
 
 When a handler modifies multiple fields, its identity must be in each field's integrity union:
 
-```typescript
-const increment = handler({
-  type: {
-    count: { writes: true },
-    lastModified: { writes: true }
-  },
-  update: ({ self }) => {
-    self.count++;
-    self.lastModified = Date.now();
+```json
+{
+  "$id": "IncrementHandler",
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "number",
+      "ifc": { "writes": true }
+    },
+    "lastModified": {
+      "type": "number",
+      "ifc": { "writes": true }
+    }
   }
-});
+}
 ```
 
 The handler declares it writes to both fields; its identity is included in both fields' integrity unions.
