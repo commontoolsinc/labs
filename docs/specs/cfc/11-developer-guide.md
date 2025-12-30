@@ -11,9 +11,8 @@ This subsection specifies how CFC labels integrate with TypeScript types via the
 #### 11.1.1.1 Inference by Default
 
 Most labels should be inferred automatically:
-- Confidentiality: Inherited from input types and space membership
+- Confidentiality: Inherited from input types and space membership (includes `Expires` atoms for temporal constraints)
 - Integrity: Derived from data provenance and handler identity
-- Expiration: Inherited via minimum rule
 
 Explicit annotation is the exception, not the rule.
 
@@ -112,15 +111,15 @@ interface HealthRecord {
   /** @sensitive */
   diagnosis: string;  // Adds: Resource("medical")
 
-  /** @ifc { expiration: { ttl: 3600 } } */
-  vitals: VitalSigns; // 1-hour TTL
+  /** @ifc { confidentiality: [{ type: "TTL", seconds: 3600 }] } */
+  vitals: VitalSigns; // 1-hour TTL (converted to Expires atom at runtime)
 }
 ```
 
 Reserved annotations:
 - `@sensitive` - Adds high-confidentiality resource class
 - `@public` - Removes confidentiality (must be justified)
-- `@ifc {...}` - Full label specification
+- `@ifc {...}` - Full label specification (TTL atoms converted to Expires at creation time)
 - `@integrity(name)` - Adds named integrity requirement
 
 ---
@@ -401,14 +400,14 @@ interface MedicalRecord {
   /** @sensitive @ifc { integrity: ["AuthoredBy(healthcare-provider)"] } */
   diagnosis: string;
 
-  /** @ifc { expiration: { ttl: 86400 } } */
-  prescription: Prescription;
+  /** @ifc { confidentiality: [{ type: "TTL", seconds: 86400 }] } */
+  prescription: Prescription;  // 24-hour TTL
 }
 
 export default pattern<{ record: MedicalRecord }, DisplayRecord>({
   view: ({ record }) => {
     // Diagnosis confidentiality automatically includes Resource("sensitive")
-    // Prescription expires after 24 hours
+    // Prescription has Expires atom (24 hours from creation)
     return formatForDisplay(record);
   }
 });

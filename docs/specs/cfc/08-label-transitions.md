@@ -955,13 +955,14 @@ Stores (persistent cells) have labels that must be **monotonically non-decreasin
 
 ### 8.12.1 The Constraint
 
-A store's label may become **stricter** (more clauses, shorter expiration) but never **looser**:
+A store's label may become **stricter** (more clauses, earlier `Expires` atoms) but never **looser**:
 
 ```typescript
 function canUpdateStoreLabel(current: Label, proposed: Label): boolean {
   // Confidentiality (CNF): can only add clauses or remove alternatives
   // More clauses = more restrictive (more requirements)
   // Fewer alternatives per clause = more restrictive (fewer ways to satisfy)
+  // Note: Expires atoms are confidentiality clauses; adding Expires(earlier) is allowed
   if (!isMoreRestrictiveCNF(current.confidentiality, proposed.confidentiality)) {
     return false;
   }
@@ -969,13 +970,6 @@ function canUpdateStoreLabel(current: Label, proposed: Label): boolean {
   // Integrity: can only remove atoms (weaker claims OK)
   if (!isSubset(proposed.integrity, current.integrity)) {
     return false;
-  }
-
-  // Expiration: can only decrease (earlier deadline)
-  if (proposed.expiration !== undefined && current.expiration !== undefined) {
-    if (proposed.expiration > current.expiration) {
-      return false;  // Can't extend expiration without policy authorization
-    }
   }
 
   return true;

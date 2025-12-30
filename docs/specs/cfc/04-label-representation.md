@@ -104,13 +104,11 @@ type Clause = Atom | Atom[];
 
 interface Label {
   // Confidentiality: CNF (AND of clauses, each clause is atom or OR of atoms)
+  // Includes temporal constraints as Expires atoms
   confidentiality: Clause[];
 
   // Integrity: simple conjunction (set of atoms)
   integrity: Atom[];
-
-  // Expiration: when this value and its derivatives must be deleted
-  expiration?: number;  // Unix timestamp, undefined = no expiration
 }
 ```
 
@@ -119,11 +117,16 @@ interface Label {
 - A clause with multiple atoms (array) represents alternatives (OR)
 - All clauses must be satisfied (AND)
 - Exchange rules add alternatives to existing clauses
+- `Expires(t)` atoms encode temporal constraints; access fails if `t < now`
 
 ```typescript
 // Simple label (all singleton clauses)
 { confidentiality: [User(Alice), GoogleAuth], integrity: [...] }
 // Meaning: Alice ∧ GoogleAuth
+
+// With expiration
+{ confidentiality: [User(Alice), GoogleAuth, Expires(1735689600)], integrity: [...] }
+// Meaning: Alice ∧ GoogleAuth ∧ NotExpired
 
 // After exchange rule adds alternative
 { confidentiality: [User(Alice), [GoogleAuth, UserResource(Alice)]], integrity: [...] }
@@ -138,18 +141,18 @@ The `ifc` field in JSON Schema holds labels. In schema definitions, confidential
 interface JSONSchemaIFC {
   // Confidentiality clauses for this schema path
   // In schemas, typically simple atoms (disjunctions added at runtime)
+  // May include Expires atoms for temporal constraints
   confidentiality?: Atom[];
 
   // Integrity atoms for this schema path
   integrity?: Atom[];
 
-  // Expiration for this schema path
-  expiration?: number | "inherit" | { ttl: number };
-
   // Shorthand for simple classification (backward compatibility)
   classification?: string[];  // Maps to Resource atoms
 }
 ```
+
+**Expiration in schemas**: Use `{ type: "Expires", timestamp: number }` or `{ type: "TTL", seconds: number }` atoms. TTL atoms are converted to absolute `Expires` atoms at label creation time.
 
 **Example:**
 
@@ -324,47 +327,27 @@ function verifySchemaEvolution(
 
 Expiration ensures that data and all its derivatives are deleted after a deadline.
 
-**Combination rule**: When data is combined, the output inherits the earliest expiration:
+**Combination rule**: When data is combined, all `Expires` atoms from inputs are included in the output's confidentiality. Since all clauses must be satisfied, the earliest expiration effectively constrains access.
+
+**TTL extension**: A policy may allow components to replace or remove `Expires` atoms when certain integrity is present. This is a form of exchange rule:
 
 ```typescript
-function combineExpiration(expirations: (number | undefined)[]): number | undefined {
-  const defined = expirations.filter(e => e !== undefined) as number[];
-  if (defined.length === 0) return undefined;
-  return Math.min(...defined);
-}
-```
-
-**TTL extension**: A policy may allow components to extend TTL when certain integrity is present. This is a form of declassification:
-
-```typescript
-interface TTLExtensionRule {
-  // Required integrity to extend TTL
-  requiredIntegrity: AtomPattern[];
-
-  // New expiration (absolute or relative)
-  newExpiration: number | { ttl: number } | "none";
+// TTL extension is an exchange rule on Expires atoms
+{
+  preCondition: { confidentiality: [{ type: "Expires", timestamp: { var: "$t" } }] },
+  guard: { integrity: [{ type: "DetectedBy", detector: "song-fingerprint-v1" }] },
+  postCondition: { confidentiality: [] }  // Remove expiration
 }
 ```
 
 Which components can extend TTL? The data's label specifies a conceptual principal (e.g., `SongDetector`) authorized to extend TTL. The user then delegates trust to that principal via a verifier they trust, who certifies specific code hashes as valid implementations. This follows the same trust model as other privileged operations.
 
-**Example**: Raw audio has a 1-hour TTL. A song detection component (certified by a trusted verifier) can extend TTL on detected song metadata:
-
-```json
-{
-  "name": "SongDetectionTTLExtension",
-  "requiredIntegrity": [
-    { "type": "DetectedBy", "detector": "song-fingerprint-v1" }
-  ],
-  "newExpiration": "none"
-}
-```
+**Example**: Raw audio has `Expires(now + 1h)` in its confidentiality. A song detection component (certified by a trusted verifier) can remove or extend the expiration on detected song metadata via an exchange rule.
 
 **Runtime enforcement**: The runtime must:
-1. Track expiration on all stored values
-2. Refuse to read expired values
-3. Periodically garbage collect expired data
-4. Propagate expiration through computations
+1. Check `Expires` atoms at access time (fail if `t < now`)
+2. Periodically garbage collect data with expired `Expires` atoms
+3. Propagate `Expires` atoms through computations via standard label join
 
 ---
 

@@ -131,17 +131,13 @@ interface Label {
 
   // Simple conjunction
   integrity: Atom[];
-
-  // Earliest expiration from any input
-  expiration?: number;
 }
 
 // Join operation
 function joinLabels(L1: Label, L2: Label): Label {
   return {
     confidentiality: [...L1.confidentiality, ...L2.confidentiality],
-    integrity: intersect(L1.integrity, L2.integrity),
-    expiration: minExpiration(L1.expiration, L2.expiration)
+    integrity: intersect(L1.integrity, L2.integrity)
   };
 }
 ```
@@ -155,8 +151,11 @@ Confidentiality atoms may represent:
 - **Principals**: `User(Alice)`, `Sender(Bob)`
 - **Resource classes**: `EmailSecret(Alice, participants)`
 - **Policy principals**: atoms whose semantics are defined by a policy record
+- **Temporal constraints**: `Expires(timestamp)` - data becomes inaccessible after this time
 
 Policies are treated as principals to allow them to propagate naturally through the lattice. They are interpreted only at trusted boundary points.
+
+**Expiration as confidentiality**: Time-based access restrictions are expressed as `Expires(t)` atoms in the confidentiality label. When data is combined, expiration atoms concatenate like other clauses—the result expires at the earliest time (most restrictive). At access check time, if any `Expires(t)` atom has `t < now`, the clause cannot be satisfied.
 
 Example:
 
