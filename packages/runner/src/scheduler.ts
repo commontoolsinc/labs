@@ -1205,6 +1205,7 @@ export class Scheduler {
       type: "scheduler.mode.change",
       pullMode: true,
     });
+    this.queueExecution();
   }
 
   /**
@@ -1218,6 +1219,7 @@ export class Scheduler {
       type: "scheduler.mode.change",
       pullMode: false,
     });
+    this.queueExecution();
   }
 
   /**
