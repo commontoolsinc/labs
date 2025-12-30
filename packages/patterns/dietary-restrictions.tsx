@@ -93,10 +93,10 @@ interface LevelConfig {
 
 const LEVEL_CONFIG: Record<RestrictionLevel, LevelConfig> = {
   flexible: {
-    bg: "#f3e8ff",
-    color: "#7c3aed",
-    border: "#c4b5fd",
-    icon: "💜",
+    bg: "#fef9c3", // yellow-100
+    color: "#a16207", // yellow-700
+    border: "#fde047", // yellow-300
+    icon: "•", // yellow dot
     labels: {
       allergy: "Mild Sensitivity",
       intolerance: "Slight Intolerance",
@@ -105,10 +105,10 @@ const LEVEL_CONFIG: Record<RestrictionLevel, LevelConfig> = {
     },
   },
   prefer: {
-    bg: "#dbeafe",
-    color: "#1d4ed8",
-    border: "#93c5fd",
-    icon: "💙",
+    bg: "#ffedd5", // orange-100
+    color: "#c2410c", // orange-700
+    border: "#fdba74", // orange-300
+    icon: "•", // orange dot
     labels: {
       allergy: "Sensitivity",
       intolerance: "Intolerance",
@@ -117,10 +117,10 @@ const LEVEL_CONFIG: Record<RestrictionLevel, LevelConfig> = {
     },
   },
   strict: {
-    bg: "#ffedd5",
-    color: "#c2410c",
-    border: "#fdba74",
-    icon: "🧡",
+    bg: "#fee2e2", // red-100
+    color: "#b91c1c", // red-700
+    border: "#fca5a5", // red-300
+    icon: "•", // red dot
     labels: {
       allergy: "Allergy",
       intolerance: "Strong Intolerance",
@@ -129,10 +129,10 @@ const LEVEL_CONFIG: Record<RestrictionLevel, LevelConfig> = {
     },
   },
   absolute: {
-    bg: "#fee2e2",
-    color: "#b91c1c",
-    border: "#fca5a5",
-    icon: "❤️",
+    bg: "#1f2937", // gray-800
+    color: "#ffffff", // white
+    border: "#374151", // gray-700
+    icon: "•", // black/white dot
     labels: {
       allergy: "Severe Allergy",
       intolerance: "Severe Intolerance",
@@ -1051,10 +1051,6 @@ function getGroup(name: string | unknown): RestrictionGroupInfo | undefined {
   return RESTRICTION_GROUPS[name.toLowerCase()];
 }
 
-function getGroupMembers(name: string): string[] {
-  return getGroup(name)?.members || [];
-}
-
 function getCategory(name: string): RestrictionCategory {
   return getGroup(name)?.category || "allergy";
 }
@@ -1217,16 +1213,6 @@ const emptyState = (
       Search for allergies, diets (vegetarian, keto), or intolerances
     </span>
   </ct-vstack>
-);
-
-// Legend (static, only shown when count > 0)
-const legendContent = (
-  <ct-hstack style="gap: 12px; font-size: 11px; color: #9ca3af; padding-top: 8px; flex-wrap: wrap;">
-    <span>💜 Flexible (if convenient)</span>
-    <span>💙 Prefer (unless inconvenient)</span>
-    <span>🧡 Strict (strong preference)</span>
-    <span>❤️ Absolute (no exceptions)</span>
-  </ct-hstack>
 );
 
 // ===== Handlers =====
@@ -1422,23 +1408,19 @@ export const DietaryRestrictionsModule = recipe<
       if (!list || list.length === 0) return emptyState;
 
       return (
-        <ct-vstack style="gap: 8px;">
+        <ct-vstack gap="2">
           <span style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
             Your Restrictions
           </span>
-          <ct-hstack style="gap: 8px; flex-wrap: wrap;">
+          <ct-hstack gap="2" wrap>
             {list.map((entry: RestrictionEntry, index: number) => {
               const style = LEVEL_CONFIG[entry.level] || LEVEL_CONFIG.prefer;
-              const isGroupEntry = isGroup(entry.name);
-              const memberCount = isGroupEntry
-                ? getGroupMembers(entry.name).length
-                : 0;
               const contextLabel = getContextualLabel(entry.name, entry.level);
 
               return (
                 <span
                   key={index}
-                  style={`display: inline-flex; align-items: center; gap: 6px; background: ${style.bg}; color: ${style.color}; border: 1px solid ${style.border}; border-radius: 20px; padding: 6px 12px; font-size: 14px;`}
+                  style={`display: inline-flex; align-items: center; gap: 6px; background: ${style.bg}; color: ${style.color}; border: 1px solid ${style.border}; border-radius: 20px; padding: 6px 12px; font-size: 14px; flex-shrink: 0; white-space: nowrap;`}
                 >
                   <button
                     type="button"
@@ -1446,24 +1428,17 @@ export const DietaryRestrictionsModule = recipe<
                       restrictions: restrictionsCell,
                       index,
                     })}
-                    title="Click to change level: 💜→💙→🧡→❤️"
+                    title="Click to change severity level"
                     style="background: none; border: none; cursor: pointer; padding: 0; font-size: 16px; line-height: 1;"
                   >
                     {style.icon}
                   </button>
-                  <ct-vstack style="gap: 0;">
-                    <span style="font-weight: 500;">
-                      {entry.name}
-                      {isGroupEntry && (
-                        <span style="opacity: 0.7; margin-left: 4px;">
-                          ({memberCount})
-                        </span>
-                      )}
-                    </span>
+                  <span style="display: flex; flex-direction: column;">
+                    <span style="font-weight: 500;">{entry.name}</span>
                     <span style="font-size: 10px; opacity: 0.8;">
                       {contextLabel}
                     </span>
-                  </ct-vstack>
+                  </span>
                   <button
                     type="button"
                     onClick={removeRestriction({
@@ -1495,11 +1470,14 @@ export const DietaryRestrictionsModule = recipe<
       if (!implied || implied.length === 0) return null;
 
       return (
-        <ct-vstack style="gap: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb;">
+        <ct-vstack
+          gap="2"
+          style="padding-top: 8px; border-top: 1px solid #e5e7eb;"
+        >
           <span style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
             What This Means (Avoid These)
           </span>
-          <ct-hstack style="gap: 4px; flex-wrap: wrap;">
+          <ct-hstack gap="1" wrap>
             {implied.map(
               (
                 item: {
@@ -1527,16 +1505,12 @@ export const DietaryRestrictionsModule = recipe<
     },
   );
 
-  const showLegend = lift((list: RestrictionEntry[]) => {
-    return list && list.length > 0 ? legendContent : null;
-  });
-
   return {
     [NAME]: computed(() => `🍽️ Dietary: ${displayText}`),
     [UI]: (
-      <ct-vstack style="gap: 16px;">
+      <ct-vstack gap="4">
         {/* Input row */}
-        <ct-hstack style="gap: 8px; align-items: center;">
+        <ct-hstack gap="2" align="center">
           <ct-autocomplete
             items={getAutocompleteItems()}
             placeholder="Search allergies, diets, intolerances..."
@@ -1548,12 +1522,12 @@ export const DietaryRestrictionsModule = recipe<
           <ct-select
             $value={selectedLevel}
             items={[
-              { value: "flexible", label: "💜 Flexible" },
-              { value: "prefer", label: "💙 Prefer" },
-              { value: "strict", label: "🧡 Strict" },
-              { value: "absolute", label: "❤️ Absolute" },
+              { value: "flexible", label: "Flexible" },
+              { value: "prefer", label: "Prefer" },
+              { value: "strict", label: "Strict" },
+              { value: "absolute", label: "Absolute" },
             ]}
-            style="width: 140px;"
+            style="width: 120px;"
           />
         </ct-hstack>
 
@@ -1562,9 +1536,6 @@ export const DietaryRestrictionsModule = recipe<
 
         {/* Implied items - lift for display only */}
         {impliedUI(impliedItems)}
-
-        {/* Legend - lift conditional */}
-        {showLegend(restrictions)}
       </ct-vstack>
     ),
     restrictions,
