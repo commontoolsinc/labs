@@ -60,14 +60,16 @@ export class XBodyView extends BaseView {
   private hasSidebarContent = false;
 
   private _charms = new Task(this, {
-    task: async ([rt]) => {
+    task: async ([rt, _spaceRootPattern]) => {
       if (!rt) return undefined;
+      // Include spaceRootPattern in args so we re-fetch when it changes.
+      // This ensures newly created default patterns appear in the list.
 
       const manager = rt.cc().manager();
       await manager.synced();
       return rt.cc().getAllCharms();
     },
-    args: () => [this.rt],
+    args: () => [this.rt, this.spaceRootPattern],
   });
 
   override render() {
