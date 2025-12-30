@@ -1099,6 +1099,10 @@ export class Scheduler {
         `${w.space}/${w.id}/${w.path.join("/")}`
       );
 
+      // Get timing controls
+      const debounceMs = this.actionDebounce.get(action);
+      const throttleMs = this.actionThrottle.get(action);
+
       nodes.push({
         id,
         type: this.effects.has(action) ? "effect" : "computation",
@@ -1112,6 +1116,8 @@ export class Scheduler {
         }).module?.implementation?.preview,
         reads,
         writes,
+        debounceMs: debounceMs && debounceMs > 0 ? debounceMs : undefined,
+        throttleMs: throttleMs && throttleMs > 0 ? throttleMs : undefined,
       });
     }
 

@@ -23,6 +23,8 @@ interface LayoutNode {
   preview?: string; // Function body preview for hover tooltip
   reads?: string[]; // Diagnostic: cell paths this action reads
   writes?: string[]; // Diagnostic: cell paths this action writes
+  debounceMs?: number; // Current debounce delay in ms
+  throttleMs?: number; // Current throttle period in ms
 }
 
 interface LayoutEdge {
@@ -571,6 +573,27 @@ export class XSchedulerGraph extends LitElement {
       background: #374151;
       color: #9ca3af;
       font-style: italic;
+    }
+
+    /* Timing control badges */
+    .timing-badge {
+      display: inline-block;
+      padding: 0.0625rem 0.25rem;
+      border-radius: 0.1875rem;
+      font-size: 0.5625rem;
+      font-weight: 500;
+      margin-left: 0.375rem;
+      vertical-align: middle;
+    }
+
+    .timing-badge.debounce {
+      background: #7c3aed;
+      color: #ddd6fe;
+    }
+
+    .timing-badge.throttle {
+      background: #0891b2;
+      color: #cffafe;
     }
 
     /* Table wrapper for detail pane layout */
@@ -1124,6 +1147,8 @@ export class XSchedulerGraph extends LitElement {
           preview: originalNode?.preview,
           reads: originalNode?.reads,
           writes: originalNode?.writes,
+          debounceMs: originalNode?.debounceMs,
+          throttleMs: originalNode?.throttleMs,
         });
       }
     }
@@ -2418,6 +2443,8 @@ export class XSchedulerGraph extends LitElement {
         lastTimestamp: n.stats?.lastRunTimestamp ?? 0,
         reads: n.reads,
         writes: n.writes,
+        debounceMs: n.debounceMs,
+        throttleMs: n.throttleMs,
       }));
 
     // Build parent-child hierarchy with aggregated stats
@@ -2639,6 +2666,12 @@ export class XSchedulerGraph extends LitElement {
                 <span class="child-indent">└─</span>
               `
               : ""} ${n.label}
+            ${n.debounceMs
+              ? html`<span class="timing-badge debounce" title="Debounced: waits ${n.debounceMs}ms before running">D:${n.debounceMs}ms</span>`
+              : ""}
+            ${n.throttleMs
+              ? html`<span class="timing-badge throttle" title="Throttled: runs at most once every ${n.throttleMs}ms">T:${n.throttleMs}ms</span>`
+              : ""}
           </td>
           <td class="col-number">
             ${renderStatWithDelta(n.runCount, baseline?.runCount)}
@@ -2694,6 +2727,12 @@ export class XSchedulerGraph extends LitElement {
               ? html`
                 <span class="child-count">(${n.children.length})</span>
               `
+              : ""}
+            ${n.debounceMs
+              ? html`<span class="timing-badge debounce" title="Debounced: waits ${n.debounceMs}ms before running">D:${n.debounceMs}ms</span>`
+              : ""}
+            ${n.throttleMs
+              ? html`<span class="timing-badge throttle" title="Throttled: runs at most once every ${n.throttleMs}ms">T:${n.throttleMs}ms</span>`
               : ""}
           </td>
           <td class="col-number">

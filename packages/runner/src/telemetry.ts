@@ -26,6 +26,9 @@ export interface SchedulerGraphNode {
   // Diagnostic info: what cells this action reads and writes
   reads?: string[]; // space/entity paths this action reads
   writes?: string[]; // space/entity paths this action writes (mightWrite)
+  // Timing controls
+  debounceMs?: number; // Current debounce delay in ms (if set)
+  throttleMs?: number; // Current throttle period in ms (if set)
 }
 
 export interface SchedulerGraphEdge {
