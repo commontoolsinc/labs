@@ -1051,10 +1051,6 @@ function getGroup(name: string | unknown): RestrictionGroupInfo | undefined {
   return RESTRICTION_GROUPS[name.toLowerCase()];
 }
 
-function getGroupMembers(name: string): string[] {
-  return getGroup(name)?.members || [];
-}
-
 function getCategory(name: string): RestrictionCategory {
   return getGroup(name)?.category || "allergy";
 }
