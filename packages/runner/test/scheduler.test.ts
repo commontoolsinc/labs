@@ -5482,21 +5482,15 @@ describe("pull mode array reactivity", () => {
   });
 
   it("should notify sink on computed result when source array grows (no explicit pull)", async () => {
-    // BUG REPRO: This test demonstrates the pull mode bug where sinks aren't
-    // notified when source arrays change.
-    //
     // This tests the renderer pattern: sink observes computed result,
     // and should be notified when source array (which feeds the computation)
-    // has elements added. This is the pattern broken in the Notes UI.
+    // has elements added. This is the pattern used in the Notes UI.
     //
     // Expected behavior:
     // 1. Source array changes (push)
-    // 2. Computation that reads source should be marked dirty
-    // 3. Sink (effect) on computation output should be pulled
-    // 4. Computation runs, sink is notified with new value
-    //
-    // Actual behavior: Sink is NOT notified because the scheduler doesn't
-    // propagate dirty state through computations to effects.
+    // 2. Computation that reads source is marked dirty
+    // 3. scheduleAffectedEffects finds sink as a dependent and schedules it
+    // 4. Computation runs, then sink is notified with new value
 
     const sourceArray = runtime.getCell<string[]>(
       space,
@@ -5548,10 +5542,11 @@ describe("pull mode array reactivity", () => {
     expect(sinkValues.length).toBeGreaterThanOrEqual(1);
     expect(sinkValues[sinkValues.length - 1]).toEqual(["A", "B"]);
 
-    // Push to source array
-    sourceArray.withTx(tx).push("c");
-    await tx.commit();
-    tx = runtime.edit();
+    // Push to source array - use a FRESH transaction to avoid consistency issues
+    // (the previous tx was used by the sink which read computedCell)
+    const pushTx = runtime.edit();
+    sourceArray.withTx(pushTx).push("c");
+    await pushTx.commit();
 
     // The sink SHOULD be notified with the updated computed value
     // Without explicit pull - just let the scheduler run
@@ -5559,7 +5554,6 @@ describe("pull mode array reactivity", () => {
     await runtime.scheduler.idle();
 
     // Verify sink was notified with updated value
-    // BUG: If this fails, the sink isn't being notified when source array grows
     expect(sinkValues.length).toBeGreaterThanOrEqual(2);
     expect(sinkValues[sinkValues.length - 1]).toEqual(["A", "B", "C"]);
 

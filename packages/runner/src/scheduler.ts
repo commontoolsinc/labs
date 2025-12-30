@@ -388,8 +388,37 @@ export class Scheduler {
     // This ensures writes are tracked right away for reverse dependency graph.
     // The callback will still be called in execute() to potentially discover more reads.
     if (immediateLog) {
-      this.setDependencies(action, immediateLog);
+      const reads = this.setDependencies(action, immediateLog);
       this.updateDependents(action, immediateLog);
+
+      // Register triggers so we get notified of storage changes
+      // This is the same logic as in resubscribe()
+      const pathsByEntity = addressesToPathByEntity(reads);
+      const entities = new Set<SpaceAndURI>();
+
+      for (const [spaceAndURI, paths] of pathsByEntity) {
+        entities.add(spaceAndURI);
+        if (!this.triggers.has(spaceAndURI)) {
+          this.triggers.set(spaceAndURI, new Map());
+        }
+        const pathsWithValues = paths.map((path) =>
+          [
+            "value",
+            ...path,
+          ] as readonly MemoryAddressPathComponent[]
+        );
+        this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
+      }
+
+      // Only set up cancel function if we registered triggers
+      // (don't overwrite existing cancel from resubscribe if reads was empty)
+      if (entities.size > 0) {
+        this.cancels.set(action, () => {
+          for (const spaceAndURI of entities) {
+            this.triggers.get(spaceAndURI)?.delete(action);
+          }
+        });
+      }
     } else {
       // Mark action for dependency collection before first run
       this.pendingDependencyCollection.add(action);
