@@ -155,10 +155,15 @@ class KahnTopologicalSort {
 // These preferences are likely per user/space combination.
 export class ContextualFlowControl {
   private reachable: Map<string, Set<string>>;
+  // Pre-computed sorted nodes for efficient lub lookup (reversed topological order)
+  private sortedNodesReversed: [string, string[]][];
   constructor(
     private lattice: Map<string, string[]> = classificationLattice,
   ) {
     this.reachable = ContextualFlowControl.reachableNodes(lattice);
+    // Pre-compute sorted nodes in reversed order for lub computation
+    this.sortedNodesReversed = ContextualFlowControl.sortedGraphNodes(lattice)
+      .reverse();
   }
 
   /**
@@ -254,7 +259,17 @@ export class ContextualFlowControl {
   }
 
   public lub(joined: Set<string>): string {
-    return ContextualFlowControl.findLub(this.lattice, joined);
+    // Fast path: single classification is its own LUB
+    if (joined.size === 1) {
+      return joined.values().next().value!;
+    }
+    // Use pre-computed reachable sets and sorted order
+    for (const [from, _tos] of this.sortedNodesReversed) {
+      if (this.reachable.get(from)!.isSupersetOf(joined)) {
+        return from;
+      }
+    }
+    throw Error("Improper lattice");
   }
 
   // Return a copy of the schema with the least upper bound classifcation.
