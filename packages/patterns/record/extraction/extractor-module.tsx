@@ -467,6 +467,7 @@ const startExtraction = handler<
       Default<"select" | "extracting" | "preview", "select">
     >;
     notesContentSnapshotCell: Cell<Default<string, "">>;
+    ocrResultsValue: Record<number, string>;
   }
 >(
   (
@@ -477,6 +478,7 @@ const startExtraction = handler<
       extractionPromptCell,
       extractPhaseCell,
       notesContentSnapshotCell,
+      ocrResultsValue,
     },
   ) => {
     // Use .get() to read Cell values inside handler
@@ -500,8 +502,13 @@ const startExtraction = handler<
             notesContent = source.content;
           }
         }
+      } else if (source.type === "photo") {
+        // Include OCR text for photos
+        const ocrText = ocrResultsValue[source.index];
+        if (ocrText && ocrText.trim()) {
+          parts.push(`--- ${source.label} (OCR) ---\n${ocrText}`);
+        }
       }
-      // Note: Photo OCR would need pre-computed results stored in state
     }
 
     const combinedContent = parts.join("\n\n");
@@ -1097,16 +1104,6 @@ ${extractedSummary.join("\n")}`;
     const hasTrashItems = computed(() => trashCount > 0);
 
     // Preview phase computed values
-    const showPreviewContent = computed(() => {
-      const phase = extractPhase.get();
-      const count = Number(selectedCount) || 0;
-      return phase === "preview" && count > 0;
-    });
-    const showNotesCleanupSection = computed(() => {
-      const rawEnabled = cleanupNotesEnabled.get();
-      const enabled = typeof rawEnabled === "boolean" ? rawEnabled : true;
-      return enabled && Boolean(hasNotesChanges);
-    });
     const hasNotesSnapshot = computed(() => {
       const rawSnapshot = notesContentSnapshot.get();
       const snapshot = typeof rawSnapshot === "string" ? rawSnapshot : "";
@@ -1324,6 +1321,7 @@ ${extractedSummary.join("\n")}`;
                         extractionPromptCell: extractionPrompt,
                         extractPhaseCell: extractPhase,
                         notesContentSnapshotCell: notesContentSnapshot,
+                        ocrResultsValue: ocrResults,
                       })}
                       style={{
                         padding: "8px 16px",
