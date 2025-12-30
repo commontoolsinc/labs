@@ -1413,7 +1413,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                               minHeight: isExpanded ? "0" : "auto",
                             }}
                           >
-                            {(entry.charm as any)["embeddedUI"]}
+                            {(entry.charm as any)["embeddedUI"] || (entry.charm as any)[UI]}
                           </div>,
                           null,
                         )}
@@ -1688,7 +1688,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 minHeight: isExpanded ? "0" : "auto",
                               }}
                             >
-                              {(entry.charm as any)["embeddedUI"]}
+                              {(entry.charm as any)["embeddedUI"] || (entry.charm as any)[UI]}
                             </div>,
                             null,
                           )}
@@ -1956,7 +1956,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                             minHeight: isExpanded ? "0" : "auto",
                           }}
                         >
-                          {(entry.charm as any)["embeddedUI"]}
+                          {(entry.charm as any)["embeddedUI"] || (entry.charm as any)[UI]}
                         </div>,
                         null,
                       )}

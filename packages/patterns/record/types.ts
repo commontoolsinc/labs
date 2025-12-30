@@ -1,5 +1,5 @@
 // types.ts - Shared types for the record pattern system
-
+import { UI } from 'commontools'
 import type { JSONSchema } from "./extraction/schema-utils-pure.ts";
 
 // ===== Sub-Charm Architecture Types =====
@@ -30,7 +30,7 @@ export interface SubCharmEntry {
   type: string; // Module type identifier (e.g., "birthday", "email")
   pinned: boolean; // Pin state owned by Record (not the sub-charm)
   collapsed?: boolean; // Collapse state - when true, only header is shown (default: false/expanded)
-  charm: { embeddedUI: unknown } | unknown; // Reference to the actual sub-charm pattern instance
+  charm: { embeddedUI?: unknown, [UI]: unknown } | unknown; // Reference to the actual sub-charm pattern instance
   schema?: JSONSchema; // Schema captured at creation time for dynamic discovery
   note?: string; // User annotation about this module (visible to LLM reads, not extraction)
 }
