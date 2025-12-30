@@ -58,6 +58,7 @@ import {
   markReadAsPotentialWrite,
 } from "./scheduler.ts";
 import { FunctionCache } from "./function-cache.ts";
+import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
 
@@ -1355,7 +1356,7 @@ export class Runner {
       tx,
     );
 
-    const action = module.implementation(
+    const builtinResult: RawBuiltinReturnType = module.implementation(
       inputsCell,
       (tx: IExtendedStorageTransaction, result: any) => {
         sendValueToBinding(
@@ -1371,6 +1372,17 @@ export class Runner {
       this.runtime,
     );
 
+    // Handle both legacy (just Action) and new (RawBuiltinResult) return formats
+    const action = isRawBuiltinResult(builtinResult)
+      ? builtinResult.action
+      : builtinResult;
+    const builtinIsEffect = isRawBuiltinResult(builtinResult)
+      ? builtinResult.isEffect
+      : undefined;
+    const builtinPopulateDependencies = isRawBuiltinResult(builtinResult)
+      ? builtinResult.populateDependencies
+      : undefined;
+
     // Name the raw action for debugging - use implementation name or fallback to "raw"
     const impl = module.implementation as (...args: unknown[]) => Action;
     const rawName = `raw:${impl.name || "anonymous"}`;
@@ -1380,17 +1392,28 @@ export class Runner {
     });
     (action as Action & { src?: string }).src = rawName;
 
-    // Create populateDependencies callback to discover what cells the action reads
-    // and writes. Both are needed for pull-based scheduling:
-    // - reads: to know when to re-run the action (input dependencies)
-    // - writes: so collectDirtyDependencies() can find this computation when
-    //   an effect needs its outputs
+    // Create populateDependencies callback.
+    // If builtin provides custom reads, use that; otherwise read all inputs.
+    // Always register output writes so collectDirtyDependencies() can find this
+    // computation when an effect needs its outputs.
     const populateDependencies = (depTx: IExtendedStorageTransaction) => {
-      // Capture read dependencies
-      for (const input of inputCells) {
-        this.runtime.getCellFromLink(input, undefined, depTx)?.get();
+      // Capture read dependencies - use custom if provided, otherwise read all inputs
+      if (builtinPopulateDependencies) {
+        if (typeof builtinPopulateDependencies === "function") {
+          builtinPopulateDependencies(depTx);
+        } else {
+          // It's a ReactivityLog - reads are already captured, nothing to do
+          for (const read of builtinPopulateDependencies.reads) {
+            depTx.readOrThrow(read);
+          }
+        }
+      } else {
+        // Default: read all inputs
+        for (const input of inputCells) {
+          this.runtime.getCellFromLink(input, undefined, depTx)?.get();
+        }
       }
-      // Capture write dependencies by marking outputs as potential writes
+      // Always capture write dependencies by marking outputs as potential writes
       for (const output of outputCells) {
         // Reading with markReadAsPotentialWrite registers this as a write dependency
         this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
@@ -1399,9 +1422,12 @@ export class Runner {
       }
     };
 
+    // isEffect can come from module options or from the builtin result
+    const isEffect = module.isEffect ?? builtinIsEffect;
+
     addCancel(
       this.runtime.scheduler.subscribe(action, populateDependencies, {
-        isEffect: module.isEffect,
+        isEffect,
       }),
     );
   }

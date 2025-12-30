@@ -54,7 +54,7 @@ export function registerBuiltins(runtime: Runtime) {
   );
   moduleRegistry.addModuleByRef(
     "navigateTo",
-    raw(navigateTo, { isEffect: true }),
+    raw(navigateTo),
   );
   moduleRegistry.addModuleByRef("wish", raw(wish));
 }

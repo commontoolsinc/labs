@@ -1418,6 +1418,72 @@ describe("Recipe Runner", () => {
     expect(charm.key("text").get()).toEqual("b");
   });
 
+  it("ifElse selects the correct branch based on condition", async () => {
+    // This test verifies that ifElse correctly selects between branches
+    // Note: Both branches may run initially as they both depend on the condition input,
+    // but only the selected branch's value is used in the result.
+
+    const ifElseRecipe = recipe<
+      { condition: boolean; trueValue: string; falseValue: string }
+    >(
+      "ifElse selection test",
+      ({ condition, trueValue, falseValue }) => {
+        // Use separate inputs for each branch to make dependencies clearer
+        return {
+          condition,
+          trueValue,
+          falseValue,
+          text: ifElse(condition, trueValue, falseValue),
+        };
+      },
+    );
+
+    const charmCell = runtime.getCell<
+      {
+        condition: boolean;
+        trueValue: string;
+        falseValue: string;
+        text: string;
+      }
+    >(
+      space,
+      "ifElse selection test",
+      ifElseRecipe.resultSchema,
+      tx,
+    );
+
+    // Start with condition = true
+    const charm = runtime.run(
+      tx,
+      ifElseRecipe,
+      { condition: true, trueValue: "A", falseValue: "B" },
+      charmCell,
+    );
+
+    tx.commit();
+    await charm.pull();
+
+    // With condition=true, ifElse should select trueValue
+    expect(charm.key("text").get()).toEqual("A");
+
+    // Now switch condition to false
+    tx = runtime.edit();
+    charm.withTx(tx).key("condition").set(false);
+    tx.commit();
+    await charm.pull();
+
+    // With condition=false, ifElse should select falseValue
+    expect(charm.key("text").get()).toEqual("B");
+
+    // Change the falseValue and verify it updates
+    tx = runtime.edit();
+    charm.withTx(tx).key("falseValue").set("C");
+    tx.commit();
+    await charm.pull();
+
+    expect(charm.key("text").get()).toEqual("C");
+  });
+
   it("should allow Cell<Array>.push of newly created charms", async () => {
     const InnerSchema = {
       type: "object",
