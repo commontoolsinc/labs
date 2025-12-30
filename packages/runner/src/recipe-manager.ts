@@ -297,6 +297,62 @@ export class RecipeManager {
     return recipe;
   }
 
+  /**
+   * Compile a recipe from source, or return a cached/in-flight result.
+   * Provides single-flight deduplication based on program content.
+   *
+   * @param input - Source code string or RuntimeProgram to compile
+   * @returns The compiled recipe (from cache, in-flight compilation, or new)
+   */
+  async compileOrGetRecipe(input: string | RuntimeProgram): Promise<Recipe> {
+    // Normalize to RuntimeProgram
+    let program: RuntimeProgram;
+    if (typeof input === "string") {
+      program = {
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents: input }],
+      };
+    } else {
+      program = input;
+    }
+
+    // Compute deterministic recipeId (matches registerRecipe's ID generation)
+    const recipeId = createRef({ src: program }, "recipe source").toString();
+
+    // Check cache
+    const existing = this.recipeIdMap.get(recipeId);
+    if (existing) {
+      this.touchRecipe(recipeId);
+      return existing;
+    }
+
+    // Check in-flight compilation (single-flight deduplication)
+    const inProgress = this.inProgressCompilations.get(recipeId);
+    if (inProgress) {
+      return inProgress;
+    }
+
+    // Compile with single-flight pattern
+    const compilationPromise = this.compileRecipe(program)
+      .then((recipe) => {
+        // Register directly with pre-computed recipeId to avoid double-hashing
+        // (registerRecipe would recompute the same hash from program)
+        recipe = this.findOriginalRecipe(recipe);
+        this.recipeToIdMap.set(recipe, recipeId);
+        if (!this.recipeIdMap.has(recipeId)) {
+          this.recipeIdMap.set(recipeId, recipe);
+          this.evictIfNeeded();
+        }
+        return recipe;
+      })
+      .finally(() => {
+        this.inProgressCompilations.delete(recipeId);
+      });
+
+    this.inProgressCompilations.set(recipeId, compilationPromise);
+    return compilationPromise;
+  }
+
   // we need to ensure we only compile once otherwise we get ~12 +/- 4
   // compiles of each recipe
   private async compileRecipeOnce(

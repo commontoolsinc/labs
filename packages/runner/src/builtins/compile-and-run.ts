@@ -191,7 +191,7 @@ export function compileAndRun(
     // Capture requestId for this compilation run
     const thisRequestId = requestId;
 
-    const compilePromise = runtime.harness.run(program)
+    const compilePromise = runtime.recipeManager.compileOrGetRecipe(program)
       .catch(
         (err) => {
           // Only process this error if the request hasn't been superseded
