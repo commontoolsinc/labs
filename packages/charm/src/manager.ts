@@ -219,6 +219,18 @@ export class CharmManager {
   }
 
   /**
+   * Clears the defaultPattern link from the space cell.
+   * Used when the default pattern is being deleted.
+   */
+  async unlinkDefaultPattern(): Promise<void> {
+    await this.runtime.editWithRetry((tx) => {
+      const spaceCellWithTx = this.spaceCell.withTx(tx);
+      spaceCellWithTx.key("defaultPattern").set(undefined);
+    });
+    await this.runtime.idle();
+  }
+
+  /**
    * Get the default pattern cell from the space cell.
    * @returns The default pattern cell, or undefined if not set
    */
@@ -843,6 +855,15 @@ export class CharmManager {
     ]);
 
     await this.unpin(charm);
+
+    // Check if this is the default pattern and clear the link
+    const defaultPattern = await this.getDefaultPattern();
+    if (
+      defaultPattern &&
+      charm.resolveAsCell().equals(defaultPattern.resolveAsCell())
+    ) {
+      await this.unlinkDefaultPattern();
+    }
 
     const { ok } = await this.runtime.editWithRetry((tx) => {
       const charms = this.charms.withTx(tx);
