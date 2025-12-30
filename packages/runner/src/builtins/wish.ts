@@ -599,13 +599,16 @@ export function wish(
               [UI]: cellLinkUI(resolvedCell),
             });
           } else {
-            // If it's multiple result, launch the wish pattern, which will
-            // immediately return the first candidate as result
+            // If it's multiple results, launch the wish pattern for the user
+            // to pick from. Navigation goes to the picker charm.
             const wishResultCell = await launchWishPattern({
               ...targetValue as WishParams,
               candidates: resultCells,
             }, tx);
-            sendResult(tx, wishResultCell);
+            sendResult(tx, {
+              result: wishResultCell,
+              [UI]: wishResultCell.get()[UI],
+            });
           }
         } catch (e) {
           const errorMsg = e instanceof WishError ? e.message : String(e);
