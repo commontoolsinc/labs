@@ -1077,6 +1077,65 @@ ${extractedSummary.join("\n")}`;
       ).length;
     });
 
+    // Phase-related computed values (defined at statement level for stable node identity)
+    const isPreviewPhase = computed(() => currentPhase === "preview");
+    const isSelectPhase = computed(() => currentPhase === "select");
+    const isExtractingPhase = computed(() => currentPhase === "extracting");
+    const isErrorPhase = computed(() => currentPhase === "error");
+    const isNoResultsPhase = computed(() => currentPhase === "no-results");
+    const hasNoSources = computed(() => extractableSources.length === 0);
+    const isSingleSource = computed(() => selectedSourceCount === 1);
+    const extractButtonDisabled = computed(() => !hasSelectedSources || ocrPending);
+    const extractButtonBackground = computed(() =>
+      hasSelectedSources && !ocrPending ? "#f59e0b" : "#d1d5db"
+    );
+    const extractButtonCursor = computed(() =>
+      hasSelectedSources && !ocrPending ? "pointer" : "not-allowed"
+    );
+    const isCleanedNotesEmpty = computed(() => cleanedNotesContent === "");
+    const hasMultipleChanges = computed(() => totalChangesCount !== 1);
+    const hasTrashItems = computed(() => trashCount > 0);
+
+    // Preview phase computed values
+    const showPreviewContent = computed(() => {
+      const phase = extractPhase.get();
+      const count = Number(selectedCount) || 0;
+      return phase === "preview" && count > 0;
+    });
+    const showNotesCleanupSection = computed(() => {
+      const rawEnabled = cleanupNotesEnabled.get();
+      const enabled = typeof rawEnabled === "boolean" ? rawEnabled : true;
+      return enabled && Boolean(hasNotesChanges);
+    });
+    const hasNotesSnapshot = computed(() => {
+      const rawSnapshot = notesContentSnapshot.get();
+      const snapshot = typeof rawSnapshot === "string" ? rawSnapshot : "";
+      return snapshot.trim().length > 0;
+    });
+    const showCleanupPreview = computed(() => {
+      const rawEnabled = cleanupNotesEnabled.get();
+      const enabled = typeof rawEnabled === "boolean" ? rawEnabled : true;
+      return enabled && hasNotesChanges;
+    });
+    const cleanupDisabled = computed(() => {
+      const rawEnabled = cleanupNotesEnabled.get();
+      const enabled = typeof rawEnabled === "boolean" ? rawEnabled : true;
+      return !enabled;
+    });
+    const hasTrashableSources = computed(() =>
+      extractableSources.filter((s: ExtractableSource) => s.type !== "notes").length > 0
+    );
+    const cleanupFailed = computed(() => {
+      const status = cleanupApplyStatus.get();
+      return status === "failed";
+    });
+    const applyButtonBackground = computed(() =>
+      cleanupPending ? "#d1d5db" : "#059669"
+    );
+    const applyButtonCursor = computed(() =>
+      cleanupPending ? "not-allowed" : "pointer"
+    );
+
     return {
       [NAME]: "AI Extract",
       [UI]: (
@@ -1097,11 +1156,7 @@ ${extractedSummary.join("\n")}`;
             }}
           >
             <span style={{ color: "#92400e", fontWeight: "500" }}>
-              {ifElse(
-                computed(() => currentPhase === "preview"),
-                "Review Changes",
-                "AI Extract",
-              )}
+              {ifElse(isPreviewPhase, "Review Changes", "AI Extract")}
             </span>
             <button
               type="button"
@@ -1122,12 +1177,12 @@ ${extractedSummary.join("\n")}`;
 
           {/* Select Sources Phase */}
           {ifElse(
-            computed(() => currentPhase === "select"),
+            isSelectPhase,
             <div
               style={{ display: "flex", flexDirection: "column", gap: "12px" }}
             >
               {ifElse(
-                computed(() => extractableSources.length === 0),
+                hasNoSources,
                 <div
                   style={{
                     padding: "16px",
@@ -1262,9 +1317,7 @@ ${extractedSummary.join("\n")}`;
                   >
                     <button
                       type="button"
-                      disabled={computed(() =>
-                        !hasSelectedSources || ocrPending
-                      )}
+                      disabled={extractButtonDisabled}
                       onClick={startExtraction({
                         sourceSelectionsCell: sourceSelections,
                         parentSubCharmsCell: parentSubCharms,
@@ -1274,28 +1327,17 @@ ${extractedSummary.join("\n")}`;
                       })}
                       style={{
                         padding: "8px 16px",
-                        background: computed(() =>
-                          hasSelectedSources && !ocrPending
-                            ? "#f59e0b"
-                            : "#d1d5db"
-                        ),
+                        background: extractButtonBackground,
                         color: "white",
                         border: "none",
                         borderRadius: "6px",
-                        cursor: computed(() => hasSelectedSources && !ocrPending
-                          ? "pointer"
-                          : "not-allowed"
-                        ),
+                        cursor: extractButtonCursor,
                         fontSize: "14px",
                         fontWeight: "500",
                       }}
                     >
                       Extract from {selectedSourceCount} source
-                      {ifElse(
-                        computed(() => selectedSourceCount !== 1),
-                        "s",
-                        "",
-                      )}
+                      {ifElse(isSingleSource, "", "s")}
                     </button>
                   </div>
                 </div>,
@@ -1306,7 +1348,7 @@ ${extractedSummary.join("\n")}`;
 
           {/* Extracting state */}
           {ifElse(
-            computed(() => currentPhase === "extracting"),
+            isExtractingPhase,
             <div
               style={{
                 display: "flex",
@@ -1324,7 +1366,7 @@ ${extractedSummary.join("\n")}`;
 
           {/* Error state */}
           {ifElse(
-            computed(() => currentPhase === "error"),
+            isErrorPhase,
             <div
               style={{ display: "flex", flexDirection: "column", gap: "12px" }}
             >
@@ -1363,7 +1405,7 @@ ${extractedSummary.join("\n")}`;
 
           {/* No results state */}
           {ifElse(
-            computed(() => currentPhase === "no-results"),
+            isNoResultsPhase,
             <div
               style={{ display: "flex", flexDirection: "column", gap: "12px" }}
             >
@@ -1402,7 +1444,7 @@ ${extractedSummary.join("\n")}`;
 
           {/* Preview state - diff view */}
           {ifElse(
-            computed(() => currentPhase === "preview"),
+            isPreviewPhase,
             <div
               style={{ display: "flex", flexDirection: "column", gap: "16px" }}
             >
@@ -1438,13 +1480,7 @@ ${extractedSummary.join("\n")}`;
 
               {/* Notes cleanup section */}
               {ifElse(
-                computed(() => {
-                  const rawSnapshot = notesContentSnapshot.get();
-                  const snapshot = typeof rawSnapshot === "string"
-                    ? rawSnapshot
-                    : "";
-                  return snapshot.trim().length > 0;
-                }),
+                hasNotesSnapshot,
                 <div
                   style={{
                     background: "white",
@@ -1534,13 +1570,7 @@ ${extractedSummary.join("\n")}`;
 
                       {/* Before/After preview when cleanup enabled */}
                       {ifElse(
-                        computed(() => {
-                          const rawEnabled = cleanupNotesEnabled.get();
-                          const enabled = typeof rawEnabled === "boolean"
-                            ? rawEnabled
-                            : true;
-                          return enabled && hasNotesChanges;
-                        }),
+                        showCleanupPreview,
                         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                           <div
                             style={{
@@ -1609,7 +1639,7 @@ ${extractedSummary.join("\n")}`;
                                 }}
                               >
                                 {ifElse(
-                                  computed(() => cleanedNotesContent === ""),
+                                  isCleanedNotesEmpty,
                                   <span style={{ fontStyle: "italic", color: "#9ca3af" }}>
                                     (empty)
                                   </span>,
@@ -1627,13 +1657,7 @@ ${extractedSummary.join("\n")}`;
                           }}
                         >
                           {ifElse(
-                            computed(() => {
-                              const rawEnabled = cleanupNotesEnabled.get();
-                              const enabled = typeof rawEnabled === "boolean"
-                                ? rawEnabled
-                                : true;
-                              return !enabled;
-                            }),
+                            cleanupDisabled,
                             "Cleanup disabled - Notes will remain unchanged",
                             "No changes needed to Notes content",
                           )}
@@ -1647,11 +1671,7 @@ ${extractedSummary.join("\n")}`;
 
               {/* Trash imported sources section (Photos, Text Imports only - not Notes) */}
               {ifElse(
-                computed(() =>
-                  extractableSources.filter((s: ExtractableSource) =>
-                    s.type !== "notes"
-                  ).length > 0
-                ),
+                hasTrashableSources,
                 <div
                   style={{
                     background: "white",
@@ -1714,10 +1734,7 @@ ${extractedSummary.join("\n")}`;
 
               {/* Cleanup failure warning */}
               {ifElse(
-                computed(() => {
-                  const status = cleanupApplyStatus.get();
-                  return status === "failed";
-                }),
+                cleanupFailed,
                 <div
                   style={{
                     padding: "12px",
@@ -1804,15 +1821,11 @@ ${extractedSummary.join("\n")}`;
                   })}
                   style={{
                     padding: "8px 16px",
-                    background: computed(() =>
-                      cleanupPending ? "#d1d5db" : "#059669"
-                    ),
+                    background: applyButtonBackground,
                     color: "white",
                     border: "none",
                     borderRadius: "6px",
-                    cursor: computed(() =>
-                      cleanupPending ? "not-allowed" : "pointer"
-                    ),
+                    cursor: applyButtonCursor,
                     fontSize: "14px",
                     fontWeight: "500",
                   }}
@@ -1822,12 +1835,12 @@ ${extractedSummary.join("\n")}`;
                     "Preparing cleanup...",
                     <>
                       Apply {totalChangesCount} Change{ifElse(
-                        computed(() => totalChangesCount !== 1),
+                        hasMultipleChanges,
                         "s",
                         "",
                       )}
                       {ifElse(
-                        computed(() => trashCount > 0),
+                        hasTrashItems,
                         <span>& Trash {trashCount}</span>,
                         "",
                       )}
