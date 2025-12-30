@@ -74,6 +74,14 @@ export class DebuggerController implements ReactiveController {
   private graphUpdateVersion = 0;
   private isProcessingTelemetry = false; // Guard against re-entrant updates
 
+  // Baseline stats for scheduler graph delta calculations
+  // Persists across tab switches (stored here instead of in SchedulerGraphView component)
+  private schedulerBaselineStats = new Map<
+    string,
+    { runCount: number; totalTime: number }
+  >();
+  private schedulerBaselineVersion = 0;
+
   constructor(host: ReactiveControllerHost & HTMLElement) {
     this.host = host;
     this.host.addController(this);
@@ -360,6 +368,43 @@ export class DebuggerController implements ReactiveController {
     this.historicalEdges.clear();
     this.graphUpdateVersion++;
     this.host.requestUpdate();
+  }
+
+  /**
+   * Get the scheduler baseline stats for delta calculations
+   */
+  getSchedulerBaselineStats(): Map<
+    string,
+    { runCount: number; totalTime: number }
+  > {
+    return this.schedulerBaselineStats;
+  }
+
+  /**
+   * Set new scheduler baseline stats
+   */
+  setSchedulerBaselineStats(
+    stats: Map<string, { runCount: number; totalTime: number }>,
+  ): void {
+    this.schedulerBaselineStats = stats;
+    this.schedulerBaselineVersion++;
+    this.host.requestUpdate();
+  }
+
+  /**
+   * Clear the scheduler baseline stats
+   */
+  clearSchedulerBaselineStats(): void {
+    this.schedulerBaselineStats.clear();
+    this.schedulerBaselineVersion++;
+    this.host.requestUpdate();
+  }
+
+  /**
+   * Get the scheduler baseline version for change detection
+   */
+  getSchedulerBaselineVersion(): number {
+    return this.schedulerBaselineVersion;
   }
 
   /**

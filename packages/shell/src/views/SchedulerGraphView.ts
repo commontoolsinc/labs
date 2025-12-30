@@ -944,13 +944,6 @@ export class XSchedulerGraph extends LitElement {
   @state()
   private tableExpandedParents = new Set<string>();
 
-  // Baseline stats for delta calculation (stores stats at time of baseline reset)
-  @state()
-  private baselineStats = new Map<
-    string,
-    { runCount: number; totalTime: number }
-  >();
-
   // When true, sort table by delta values instead of lifetime totals
   @state()
   private sortByDelta = false;
@@ -960,6 +953,19 @@ export class XSchedulerGraph extends LitElement {
 
   private lastGraphVersion = -1;
   private hasInitialZoom = false;
+
+  /**
+   * Get baseline stats from the controller (persists across tab switches)
+   */
+  private get baselineStats(): Map<
+    string,
+    { runCount: number; totalTime: number }
+  > {
+    return (
+      this.debuggerController?.getSchedulerBaselineStats() ??
+      new Map<string, { runCount: number; totalTime: number }>()
+    );
+  }
 
   // Minimum effective node size before we boost triggered nodes
   private static readonly READABLE_THRESHOLD = 50;
@@ -1319,7 +1325,8 @@ export class XSchedulerGraph extends LitElement {
         });
       }
     }
-    this.baselineStats = newBaseline;
+    // Store in controller so it persists across tab switches
+    this.debuggerController?.setSchedulerBaselineStats(newBaseline);
   }
 
   private handleModeToggle(pullMode: boolean): void {
@@ -1579,7 +1586,17 @@ export class XSchedulerGraph extends LitElement {
     const historicalCount = this.layoutEdges.filter((e) => e.isHistorical)
       .length;
 
-    // Calculate totals since baseline
+    // Calculate lifetime totals (all runs since app start)
+    let totalRuns = 0;
+    let totalTime = 0;
+    for (const node of this.layoutNodes.values()) {
+      if (node.stats) {
+        totalRuns += node.stats.runCount;
+        totalTime += node.stats.totalTime;
+      }
+    }
+
+    // Calculate delta since baseline (if baseline exists)
     const hasBaseline = this.baselineStats.size > 0;
     let totalRunsSinceBaseline = 0;
     let totalTimeSinceBaseline = 0;
@@ -1699,14 +1716,24 @@ export class XSchedulerGraph extends LitElement {
             ? html`
               <span>Historical: <span class="stat-value">${historicalCount}</span></span>
             `
-            : ""} ${hasBaseline
+            : ""}
+          <span>Total: <span class="stat-value">${totalRuns} runs</span> <span class="stat-value">${formatTime(
+            totalTime,
+          )}</span></span>
+          ${hasBaseline
             ? html`
               <span class="baseline-stats">
-                Since baseline:
-                <span class="stat-value delta positive">${totalRunsSinceBaseline} runs</span>
-                <span class="stat-value delta positive">${formatTime(
-                  totalTimeSinceBaseline,
-                )}</span>
+                Δ:
+                <span class="stat-value delta ${totalRunsSinceBaseline > 0
+                  ? "positive"
+                  : ""}">${totalRunsSinceBaseline > 0
+                    ? "+"
+                    : ""}${totalRunsSinceBaseline} runs</span>
+                <span class="stat-value delta ${totalTimeSinceBaseline > 0
+                  ? "positive"
+                  : ""}">${totalTimeSinceBaseline > 0
+                    ? "+"
+                    : ""}${formatTime(totalTimeSinceBaseline)}</span>
               </span>
             `
             : ""}
