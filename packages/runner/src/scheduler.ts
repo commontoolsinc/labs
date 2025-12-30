@@ -538,6 +538,52 @@ export class Scheduler {
         this.triggers.get(spaceAndURI)?.delete(action);
       }
     });
+
+    // In pull mode: When an effect resubscribes, check if any non-throttled dirty
+    // computations write to what it reads. If so, mark the effect dirty so it can
+    // pull those computations and see fresh data.
+    // Skip throttled computations - they'll trigger via storage changes when unthrottled.
+    // Use isEffectAction instead of effects because unsubscribe() clears effects before run()
+    const actionIsEffect = this.isEffectAction.get(action);
+    if (actionIsEffect && this.dirty.size > 0) {
+      const effectReads = log.reads ?? [];
+      let shouldMarkDirty = false;
+
+      // Use writersByEntity index for efficient lookup
+      for (const read of effectReads) {
+        const entity = `${read.space}/${read.id}` as SpaceAndURI;
+        const writers = this.writersByEntity.get(entity);
+        if (!writers) continue;
+
+        for (const writer of writers) {
+          if (writer === action) continue;
+          if (!this.dirty.has(writer)) continue;
+          if (this.effects.has(writer)) continue; // Only check computations
+          if (this.isThrottled(writer)) continue; // Skip throttled - they trigger via storage
+
+          // Check path overlap
+          const writerWrites = this.mightWrite.get(writer) ?? [];
+          for (const write of writerWrites) {
+            if (
+              write.space === read.space &&
+              write.id === read.id &&
+              arraysOverlap(write.path, read.path)
+            ) {
+              shouldMarkDirty = true;
+              break;
+            }
+          }
+          if (shouldMarkDirty) break;
+        }
+        if (shouldMarkDirty) break;
+      }
+
+      if (shouldMarkDirty && !this.dirty.has(action)) {
+        this.dirty.add(action);
+        this.pending.add(action);
+        this.queueExecution();
+      }
+    }
   }
 
   unsubscribe(action: Action): void {

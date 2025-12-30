@@ -9,6 +9,7 @@ import {
   ignoreReadForScheduling,
   txToReactivityLog,
 } from "../src/scheduler.ts";
+import { type JSONSchema } from "../src/builder/types.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { Entity } from "@commontools/memory/interface";
@@ -5558,5 +5559,543 @@ describe("pull mode array reactivity", () => {
     expect(sinkValues[sinkValues.length - 1]).toEqual(["A", "B", "C"]);
 
     cancel();
+  });
+
+  it("should notify renderer when allCharms array is pushed (Notes UI simulation)", async () => {
+    // This simulates the actual Notes UI flow:
+    // - Space has allCharms Cell (array of charms)
+    // - visibleCharms computation filters allCharms
+    // - Renderer effect observes visibleCharms and renders the list
+    // - User creates a new note which pushes to allCharms
+    // - Renderer should be notified and re-render with new note
+
+    // Define schemas for realistic data
+    const charmSchema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        isHidden: { type: "boolean" },
+      },
+      required: ["name"],
+    } as const satisfies JSONSchema;
+
+    const allCharmsSchema = {
+      type: "array",
+      items: charmSchema,
+    } as const satisfies JSONSchema;
+
+    const spaceSchema = {
+      type: "object",
+      properties: {
+        // Not using asCell: true here - we want inline array data for simplicity
+        allCharms: allCharmsSchema,
+      },
+    } as const satisfies JSONSchema;
+
+    // Create space cell with allCharms
+    const spaceCell = runtime.getCell(space, "notes-ui-space", spaceSchema, tx);
+    spaceCell.set({
+      allCharms: [
+        { name: "Existing Note 1", isHidden: false },
+        { name: "Hidden Note", isHidden: true },
+      ],
+    });
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Get the allCharms subcell
+    const allCharmsCell = spaceCell.key("allCharms");
+
+    // Create visibleCharms cell for computed output
+    const visibleCharmsCell = runtime.getCell(
+      space,
+      "visible-charms",
+      { type: "array", items: charmSchema },
+      tx,
+    );
+    visibleCharmsCell.set([]);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Track renderer notifications
+    const renderedValues: { name: string }[][] = [];
+
+    // Create computation: visibleCharms = allCharms.filter(c => !c.isHidden)
+    const computeVisibleCharms: Action = function computeVisibleCharms(
+      actionTx,
+    ) {
+      const charms = allCharmsCell.withTx(actionTx).get() ?? [];
+      // Now charms should be an array since we don't have asCell: true
+      const visible = charms.filter((c) => !c.isHidden);
+      visibleCharmsCell.withTx(actionTx).send(visible);
+    };
+
+    // Subscribe computation with schema-aware reads/writes
+    runtime.scheduler.subscribe(
+      computeVisibleCharms,
+      {
+        reads: [allCharmsCell.getAsNormalizedFullLink()],
+        writes: [visibleCharmsCell.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    // Create renderer effect (sink on visibleCharms)
+    const cancelRenderer = visibleCharmsCell.withTx(tx).sink((value) => {
+      if (value !== undefined) {
+        renderedValues.push([...value]);
+      }
+    });
+
+    // Initial pull to trigger computation and renderer
+    await visibleCharmsCell.withTx(tx).pull();
+
+    // Verify initial render shows only visible charms
+    expect(renderedValues.length).toBeGreaterThanOrEqual(1);
+    expect(renderedValues[renderedValues.length - 1]).toEqual([
+      { name: "Existing Note 1", isHidden: false },
+    ]);
+
+    // Simulate creating a new note and pushing to allCharms
+    // (This is what happens when user creates a note in notebook.tsx)
+    const createNoteTx = runtime.edit();
+    allCharmsCell.withTx(createNoteTx).push({
+      name: "New Note",
+      isHidden: false,
+    });
+    await createNoteTx.commit();
+
+    // Let the scheduler process the change
+    await runtime.scheduler.idle();
+
+    // Renderer should have been notified with updated visible charms
+    expect(renderedValues.length).toBeGreaterThanOrEqual(2);
+    expect(renderedValues[renderedValues.length - 1]).toEqual([
+      { name: "Existing Note 1", isHidden: false },
+      { name: "New Note", isHidden: false },
+    ]);
+
+    cancelRenderer();
+    runtime.scheduler.unsubscribe(computeVisibleCharms);
+  });
+
+  it("should handle nested cell updates in allCharms pattern", async () => {
+    // More complex test: allCharms contains cell references (like real usage)
+    // When a new charm is pushed, the renderer should see it
+
+    const spaceSchema = {
+      type: "object",
+      properties: {
+        allCharms: {
+          type: "array",
+          items: { type: "object" },
+          // Not using asCell: true - testing inline array data
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    // Create space with allCharms - start with 1 item like the first test
+    const spaceCell = runtime.getCell(
+      space,
+      "nested-allcharms-space",
+      spaceSchema,
+      tx,
+    );
+    spaceCell.set({ allCharms: [{ name: "Initial Charm" }] });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const allCharmsCell = spaceCell.key("allCharms");
+
+    // Track what the "renderer" sees
+    const renderedCharmCount: number[] = [];
+
+    // Create a simple computation that counts charms
+    const countCell = runtime.getCell(
+      space,
+      "charm-count",
+      { type: "number" },
+      tx,
+    );
+    countCell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const countCharms: Action = function countCharms(actionTx) {
+      const charms = allCharmsCell.withTx(actionTx).get() ?? [];
+      countCell.withTx(actionTx).send(charms.length);
+    };
+
+    runtime.scheduler.subscribe(
+      countCharms,
+      {
+        reads: [allCharmsCell.getAsNormalizedFullLink()],
+        writes: [countCell.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    // Renderer effect
+    const cancelRenderer = countCell.withTx(tx).sink((value) => {
+      if (value !== undefined) {
+        renderedCharmCount.push(value);
+      }
+    });
+
+    // Initial pull - we start with 1 item
+    await countCell.withTx(tx).pull();
+    expect(renderedCharmCount[renderedCharmCount.length - 1]).toBe(1);
+
+    // Push first new charm (total should be 2)
+    const tx1 = runtime.edit();
+    allCharmsCell.withTx(tx1).push({ name: "Charm 1" });
+    await tx1.commit();
+
+    await runtime.scheduler.idle();
+    expect(renderedCharmCount[renderedCharmCount.length - 1]).toBe(2);
+
+    // Push second charm (total should be 3)
+    const tx2 = runtime.edit();
+    allCharmsCell.withTx(tx2).push({ name: "Charm 2" });
+    await tx2.commit();
+
+    await runtime.scheduler.idle();
+    expect(renderedCharmCount[renderedCharmCount.length - 1]).toBe(3);
+
+    // Push third charm (total should be 4)
+    const tx3 = runtime.edit();
+    allCharmsCell.withTx(tx3).push({ name: "Charm 3" });
+    await tx3.commit();
+
+    await runtime.scheduler.idle();
+    expect(renderedCharmCount[renderedCharmCount.length - 1]).toBe(4);
+
+    cancelRenderer();
+    runtime.scheduler.unsubscribe(countCharms);
+  });
+
+  it("should see updated data after unsubscribe/resubscribe (navigation flow)", async () => {
+    // This simulates the ACTUAL bug flow:
+    // 1. Default app is mounted (sink subscribed)
+    // 2. Navigate to note editor (sink unsubscribed)
+    // 3. Create note (push while unsubscribed)
+    // 4. Navigate back (sink re-subscribed)
+    // 5. Should see new data
+
+    const arraySchema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { name: { type: "string" } },
+        required: ["name"],
+      },
+    } as const satisfies JSONSchema;
+
+    // Create allCharms array with initial data
+    const allCharmsCell = runtime.getCell(
+      space,
+      "nav-flow-allcharms",
+      arraySchema,
+      tx,
+    );
+    allCharmsCell.set([{ name: "Initial Note" }]);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Create computed cell (visibleCharms)
+    const visibleCharmsCell = runtime.getCell(
+      space,
+      "nav-flow-visible",
+      arraySchema,
+      tx,
+    );
+    visibleCharmsCell.set([]);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Track what renderer sees
+    const renderedValues: { name: string }[][] = [];
+
+    // Computation: copy allCharms to visibleCharms
+    const computeVisible: Action = function computeVisible(actionTx) {
+      const charms = allCharmsCell.withTx(actionTx).get() ?? [];
+      visibleCharmsCell.withTx(actionTx).send([...charms]);
+    };
+
+    runtime.scheduler.subscribe(
+      computeVisible,
+      {
+        reads: [allCharmsCell.getAsNormalizedFullLink()],
+        writes: [visibleCharmsCell.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    // STEP 1: Mount default app (subscribe renderer)
+    let cancelRenderer = visibleCharmsCell.withTx(tx).sink((value) => {
+      if (value !== undefined) {
+        renderedValues.push([...value]);
+      }
+    });
+
+    // Initial pull to see data
+    await visibleCharmsCell.withTx(tx).pull();
+    await runtime.scheduler.idle();
+
+    expect(renderedValues[renderedValues.length - 1]).toEqual([
+      { name: "Initial Note" },
+    ]);
+
+    // STEP 2: Navigate away (unmount default app, unsubscribe renderer)
+    cancelRenderer();
+
+    // STEP 3: Create note while on another page (push while unsubscribed)
+    const createTx = runtime.edit();
+    allCharmsCell.withTx(createTx).push({ name: "New Note" });
+    await createTx.commit();
+
+    // STEP 4: Navigate back (remount default app, resubscribe renderer)
+    const tx2 = runtime.edit();
+    cancelRenderer = visibleCharmsCell.withTx(tx2).sink((value) => {
+      if (value !== undefined) {
+        renderedValues.push([...value]);
+      }
+    });
+
+    // Pull to get fresh data
+    await visibleCharmsCell.withTx(tx2).pull();
+    await runtime.scheduler.idle();
+
+    // STEP 5: Should see both notes
+    expect(renderedValues[renderedValues.length - 1]).toEqual([
+      { name: "Initial Note" },
+      { name: "New Note" },
+    ]);
+
+    cancelRenderer();
+    runtime.scheduler.unsubscribe(computeVisible);
+  });
+
+  it("should see updated data when computation is also unsubscribed (full navigation)", async () => {
+    // Even more realistic: when navigating away, the WHOLE charm (including
+    // its computation) might get stopped, not just the renderer sink.
+    // This is what runner.stop() does.
+
+    const arraySchema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { name: { type: "string" } },
+        required: ["name"],
+      },
+    } as const satisfies JSONSchema;
+
+    // Create allCharms array with initial data
+    const allCharmsCell = runtime.getCell(
+      space,
+      "full-nav-allcharms",
+      arraySchema,
+      tx,
+    );
+    allCharmsCell.set([{ name: "Initial Note" }]);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Create computed cell (visibleCharms)
+    const visibleCharmsCell = runtime.getCell(
+      space,
+      "full-nav-visible",
+      arraySchema,
+      tx,
+    );
+    visibleCharmsCell.set([]);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Track what renderer sees
+    const renderedValues: { name: string }[][] = [];
+
+    // Computation: copy allCharms to visibleCharms
+    const computeVisible: Action = function computeVisible(actionTx) {
+      const charms = allCharmsCell.withTx(actionTx).get() ?? [];
+      visibleCharmsCell.withTx(actionTx).send([...charms]);
+    };
+
+    // STEP 1: Mount default app charm
+    let cancelComputation = runtime.scheduler.subscribe(
+      computeVisible,
+      {
+        reads: [allCharmsCell.getAsNormalizedFullLink()],
+        writes: [visibleCharmsCell.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    let cancelRenderer = visibleCharmsCell.withTx(tx).sink((value) => {
+      if (value !== undefined) {
+        renderedValues.push([...value]);
+      }
+    });
+
+    await visibleCharmsCell.withTx(tx).pull();
+    await runtime.scheduler.idle();
+
+    expect(renderedValues[renderedValues.length - 1]).toEqual([
+      { name: "Initial Note" },
+    ]);
+
+    // STEP 2: Navigate away - unsubscribe BOTH renderer AND computation
+    cancelRenderer();
+    cancelComputation();
+
+    // STEP 3: Create note while on another page
+    const createTx = runtime.edit();
+    allCharmsCell.withTx(createTx).push({ name: "New Note" });
+    await createTx.commit();
+
+    // STEP 4: Navigate back - resubscribe BOTH computation AND renderer
+    cancelComputation = runtime.scheduler.subscribe(
+      computeVisible,
+      {
+        reads: [allCharmsCell.getAsNormalizedFullLink()],
+        writes: [visibleCharmsCell.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    const tx2 = runtime.edit();
+    cancelRenderer = visibleCharmsCell.withTx(tx2).sink((value) => {
+      if (value !== undefined) {
+        renderedValues.push([...value]);
+      }
+    });
+
+    // Pull to get fresh data
+    await visibleCharmsCell.withTx(tx2).pull();
+    await runtime.scheduler.idle();
+
+    // Should see both notes
+    expect(renderedValues[renderedValues.length - 1]).toEqual([
+      { name: "Initial Note" },
+      { name: "New Note" },
+    ]);
+
+    cancelRenderer();
+    cancelComputation();
+  });
+
+  it("should see fresh data when a NEW computation is created (pattern remount)", async () => {
+    // This simulates what happens when a pattern remounts:
+    // - The computed value output cell is REUSED (same cause = same cell)
+    // - But a NEW computation action is created each time
+    // - The sink reads from the output cell which has CACHED old value
+    // - The new computation should run and update the value
+
+    const arraySchema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { name: { type: "string" } },
+        required: ["name"],
+      },
+    } as const satisfies JSONSchema;
+
+    // Create allCharms array with initial data
+    const allCharmsCell = runtime.getCell(
+      space,
+      "pattern-remount-allcharms",
+      arraySchema,
+      tx,
+    );
+    allCharmsCell.set([{ name: "Initial Note" }]);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // IMPORTANT: The computed output cell is created with a FIXED cause
+    // so it will be the SAME cell when the pattern remounts
+    const visibleCharmsCell = runtime.getCell(
+      space,
+      "pattern-remount-visible-FIXED-CAUSE", // This cause stays same across remounts
+      arraySchema,
+      tx,
+    );
+    visibleCharmsCell.set([]);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Track what renderer sees
+    const renderedValues: { name: string }[][] = [];
+
+    // FIRST MOUNT: Create computation #1
+    const computeVisible1: Action = function computeVisible1(actionTx) {
+      const charms = allCharmsCell.withTx(actionTx).get() ?? [];
+      visibleCharmsCell.withTx(actionTx).send([...charms]);
+    };
+
+    let cancelComputation = runtime.scheduler.subscribe(
+      computeVisible1,
+      {
+        reads: [allCharmsCell.getAsNormalizedFullLink()],
+        writes: [visibleCharmsCell.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    let cancelRenderer = visibleCharmsCell.withTx(tx).sink((value) => {
+      if (value !== undefined) {
+        renderedValues.push([...value]);
+      }
+    });
+
+    await visibleCharmsCell.withTx(tx).pull();
+    await runtime.scheduler.idle();
+
+    expect(renderedValues[renderedValues.length - 1]).toEqual([
+      { name: "Initial Note" },
+    ]);
+
+    // UNMOUNT: Stop pattern
+    cancelRenderer();
+    cancelComputation();
+
+    // PUSH while unmounted
+    const createTx = runtime.edit();
+    allCharmsCell.withTx(createTx).push({ name: "New Note" });
+    await createTx.commit();
+
+    // REMOUNT: Create computation #2 (NEW action, but SAME output cell)
+    const computeVisible2: Action = function computeVisible2(actionTx) {
+      const charms = allCharmsCell.withTx(actionTx).get() ?? [];
+      visibleCharmsCell.withTx(actionTx).send([...charms]);
+    };
+
+    cancelComputation = runtime.scheduler.subscribe(
+      computeVisible2,
+      {
+        reads: [allCharmsCell.getAsNormalizedFullLink()],
+        writes: [visibleCharmsCell.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    const tx2 = runtime.edit();
+    cancelRenderer = visibleCharmsCell.withTx(tx2).sink((value) => {
+      if (value !== undefined) {
+        renderedValues.push([...value]);
+      }
+    });
+
+    // DON'T call pull() - just let the scheduler work naturally like the UI does
+    runtime.scheduler.queueExecution();
+    await runtime.scheduler.idle();
+
+    // Should eventually see both notes
+    expect(renderedValues[renderedValues.length - 1]).toEqual([
+      { name: "Initial Note" },
+      { name: "New Note" },
+    ]);
+
+    cancelRenderer();
+    cancelComputation();
   });
 });
