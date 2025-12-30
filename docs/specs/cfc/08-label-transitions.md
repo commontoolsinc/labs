@@ -747,6 +747,12 @@ interface IFCInputAnnotations {
   // Maximum confidentiality allowed for this input
   maxConfidentiality?: AtomPattern[];
 }
+
+// Field-level integrity (on stored fields)
+interface IFCFieldAnnotations {
+  // Field's integrity level; also gates who may write (Section 8.15)
+  integrity?: AtomPattern[];
+}
 ```
 
 ---
@@ -1316,4 +1322,212 @@ Each processing step should have isolated failure domains:
 - Subtask outputs can be validated before integration
 
 **Open design question**: How to make adding integrity practical without requiring validation at every step. Current mechanisms (scoped intents, integrity guards) provide building blocks, but the ergonomics need further design work.
+
+---
+
+## 8.15 Modification Integrity
+
+Previous sections describe label transitions for **computed values** (inputs → transformation → output). This section addresses **modifications**—updating stored data in place rather than computing new values.
+
+### 8.15.1 Field Integrity as Write Gate
+
+Schemas declare **integrity** directly on fields. This integrity serves two purposes:
+
+1. **What the data has**: The field's integrity level
+2. **Who may write**: Only handlers with matching integrity
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "number",
+      "default": 0,
+      "ifc": {
+        "integrity": [
+          { "type": "Handler", "name": "increment" },
+          { "type": "Handler", "name": "decrement" }
+        ]
+      }
+    }
+  }
+}
+```
+
+This declares: "The `count` field has integrity `[increment ∨ decrement]`, and only those handlers may modify it."
+
+### 8.15.2 Integrity is Stable
+
+Field integrity is a property of the schema, not the value. It doesn't change per write:
+
+| Event | Value | Integrity |
+|-------|-------|-----------|
+| Creation (from default) | `0` | `[increment, decrement]` |
+| After increment | `1` | `[increment, decrement]` |
+| After decrement | `0` | `[increment, decrement]` |
+
+The handler's integrity is a *precondition* for writing. After any authorized write, the field still has its schema-declared integrity.
+
+**Provenance tracking** (which specific handler wrote this particular value) is an audit log concern, not a label concern.
+
+### 8.15.3 Schema Defaults as Bootstrap
+
+Data can exist from schema without initialization code:
+
+```typescript
+// Schema defines: count: { type: number, default: 0, integrity: [...] }
+// When a pattern instance is created:
+// 1. Field "count" exists with value 0
+// 2. Field has its declared integrity immediately
+// 3. No initialization handler needed
+```
+
+This solves the bootstrapping problem: the schema is trusted infrastructure, and defaults inherit the field's declared integrity.
+
+### 8.15.4 The Protection/Endorsement Asymmetry
+
+A fundamental asymmetry:
+
+> **You can PROTECT data with integrity requirements you don't have.**
+> **You cannot WRITE data without having the required integrity.**
+
+**Protection**: Deploying a schema that declares `integrity: [TrustedHandler]` doesn't require you to BE TrustedHandler. You're installing a lock, not claiming to be the key.
+
+**Writing**: To modify a field, your handler must satisfy the declared integrity. You can't write without having the required integrity.
+
+### 8.15.5 Write Authorization
+
+When a handler attempts to modify a field:
+
+```typescript
+function authorizeWrite(
+  handler: Handler,
+  field: FieldSchema
+): boolean {
+  const required = field.ifc?.integrity ?? [];
+  const handlerIntegrity = getHandlerIntegrity(handler);
+
+  // Handler must satisfy at least one of the declared integrity atoms
+  return required.some(atom => satisfies(handlerIntegrity, atom));
+}
+```
+
+### 8.15.6 Worked Example: Counter Pattern
+
+**Schema**:
+
+```json
+{
+  "$id": "CounterPattern",
+  "type": "object",
+  "properties": {
+    "result": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "number",
+          "default": 0,
+          "ifc": {
+            "integrity": [
+              { "type": "Handler", "name": "increment" },
+              { "type": "Handler", "name": "decrement" }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+**Handlers**:
+
+```typescript
+const increment = handler({
+  name: "increment",
+  on: { type: "event", select: { tag: "increment" } },
+  update: ({ self }) => {
+    self.count = self.count + 1;
+  }
+});
+
+const decrement = handler({
+  name: "decrement",
+  on: { type: "event", select: { tag: "decrement" } },
+  update: ({ self }) => {
+    self.count = self.count - 1;
+  }
+});
+```
+
+**Lifecycle**:
+
+1. **Creation**: `count` exists with value `0`, integrity `[increment, decrement]`
+
+2. **Increment**: Handler `increment` writes → authorized ✓ → value becomes `1`, integrity unchanged
+
+3. **Malicious write**: External code tries `self.count = 999` → unauthorized ✗ → rejected
+
+4. **Decrement**: Handler `decrement` writes → authorized ✓ → value becomes `0`, integrity unchanged
+
+### 8.15.7 Handler Identity
+
+Handlers are identified by name within the pattern:
+
+```json
+{
+  "integrity": [{ "type": "Handler", "name": "increment" }]
+}
+```
+
+At runtime, this resolves to the handler named "increment" in this pattern. Benefits:
+
+1. **Readability**: Schema is human-understandable
+2. **Co-evolution**: Handler code can change; name stays stable
+3. **Pattern scope**: Only handlers within this pattern qualify
+
+### 8.15.8 Event Integrity Requirements
+
+Handlers can require integrity on their triggering events:
+
+```typescript
+const increment = handler({
+  name: "increment",
+  on: { type: "event", select: { tag: "increment" } },
+  ifc: {
+    requiredEventIntegrity: [{ type: "UserIntent", action: "increment" }]
+  },
+  update: ({ self }) => { self.count++; }
+});
+```
+
+This creates a two-layer check:
+1. **Event integrity**: Is this event trustworthy enough to trigger the handler?
+2. **Field integrity**: Is this handler authorized to modify the target field?
+
+### 8.15.9 Modification vs Replacement
+
+| Operation | Example | Integrity model |
+|-----------|---------|-----------------|
+| **Modification** | `self.count++` | Handler must satisfy field's declared integrity |
+| **Replacement** | `return { count: 5 }` | Standard transformation rules (Section 8.7) |
+
+Modification preserves the field's identity and uses schema-declared integrity. Replacement creates a new value with transformation-derived integrity.
+
+### 8.15.10 Compound Modifications
+
+When a handler modifies multiple fields, it must be authorized for each:
+
+```json
+{
+  "count": {
+    "ifc": { "integrity": [{ "type": "Handler", "name": "increment" }] }
+  },
+  "lastModified": {
+    "ifc": { "integrity": [{ "type": "Handler", "name": "increment" }] }
+  }
+}
+```
+
+The `increment` handler can modify both because it's listed in both fields' integrity.
 
