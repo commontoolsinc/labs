@@ -68,28 +68,46 @@ export const PhotoModule = recipe<PhotoModuleInput, PhotoModuleOutput>(
   ({ image: inputImage, label }) => {
     // We use an array internally for ct-image-input compatibility
     // but the module only supports a single image
-    // Initialize from input image if provided (for import/restore)
-    const images = Cell.of<ImageData[]>(inputImage ? [inputImage] : []);
+    // NOTE: Cell.of must use empty array to avoid TypeScript OOM (CT-1148)
+    // Using input params in Cell.of() causes deep type inference explosion
+    const images = Cell.of<ImageData[]>([]);
 
     // Sync image Cell with images array (first element)
-    const syncedImage = lift(({ arr }: { arr: ImageData[] }) => {
-      return arr && arr.length > 0 ? arr[0] : null;
-    })({ arr: images });
+    // Also handles initialization from inputImage for import/restore
+    const syncedImage = lift(
+      ({ input, arr }: { input: ImageData | null; arr: ImageData[] }) => {
+        // If we have stored images, use the first one
+        if (arr && arr.length > 0) return arr[0];
+        // Otherwise, use the input image (for initialization)
+        return input;
+      },
+    )({ input: inputImage, arr: images });
 
     // Check if we have a photo - use lift for reactive boolean
-    const hasPhoto = lift(({ arr }: { arr: ImageData[] }) => {
-      return arr && arr.length > 0;
-    })({ arr: images });
+    // Checks both stored images and input image
+    const hasPhoto = lift(
+      ({ input, arr }: { input: ImageData | null; arr: ImageData[] }) => {
+        return (arr && arr.length > 0) || !!input;
+      },
+    )({ input: inputImage, arr: images });
 
     // Display text for NAME
     const displayText = lift(
-      ({ arr, photoLabel }: { arr: ImageData[]; photoLabel: string }) => {
-        const hasImage = arr && arr.length > 0;
+      ({
+        input,
+        arr,
+        photoLabel,
+      }: {
+        input: ImageData | null;
+        arr: ImageData[];
+        photoLabel: string;
+      }) => {
+        const hasImage = (arr && arr.length > 0) || !!input;
         if (photoLabel && hasImage) return photoLabel;
         if (hasImage) return "Photo uploaded";
         return "No photo";
       },
-    )({ arr: images, photoLabel: label });
+    )({ input: inputImage, arr: images, photoLabel: label });
 
     // Get the image URL reactively
     const imageUrl = lift(({ img }: { img: ImageData | null }) => {
