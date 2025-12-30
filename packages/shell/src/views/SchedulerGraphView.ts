@@ -802,6 +802,97 @@ export class XSchedulerGraph extends LitElement {
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+
+    /* Delta styles for baseline comparison */
+    .delta {
+      font-size: 0.625rem;
+      margin-left: 0.25rem;
+    }
+
+    .delta.positive {
+      color: #f59e0b;
+    }
+
+    .delta.zero {
+      color: #64748b;
+    }
+
+    .stat-with-delta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+    }
+
+    .stat-with-delta .stat-main {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stat-with-delta .stat-delta {
+      font-size: 0.625rem;
+      color: #64748b;
+    }
+
+    .stat-with-delta .stat-delta.positive {
+      color: #f59e0b;
+    }
+
+    .detail-stat-delta {
+      font-size: 0.625rem;
+      color: #64748b;
+      margin-top: 0.125rem;
+    }
+
+    .detail-stat-delta.positive {
+      color: #f59e0b;
+    }
+
+    .baseline-stats {
+      border-left: 1px solid #475569;
+      padding-left: 1rem;
+      margin-left: 0.5rem;
+    }
+
+    .baseline-stats .stat-value {
+      margin-left: 0.5rem;
+    }
+
+    .delta-sort-toggle {
+      display: inline-flex;
+      gap: 0;
+      margin-left: 0.5rem;
+      vertical-align: middle;
+    }
+
+    .delta-sort-toggle button {
+      background: #334155;
+      border: 1px solid #475569;
+      color: #94a3b8;
+      font-size: 0.5625rem;
+      font-weight: 500;
+      padding: 0.125rem 0.375rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .delta-sort-toggle button:first-child {
+      border-radius: 0.25rem 0 0 0.25rem;
+    }
+
+    .delta-sort-toggle button:last-child {
+      border-radius: 0 0.25rem 0.25rem 0;
+      border-left: none;
+    }
+
+    .delta-sort-toggle button:hover {
+      background: #475569;
+      color: white;
+    }
+
+    .delta-sort-toggle button.active {
+      background: #3b82f6;
+      border-color: #3b82f6;
+      color: white;
+    }
   `;
 
   @property({ attribute: false })
@@ -852,6 +943,17 @@ export class XSchedulerGraph extends LitElement {
 
   @state()
   private tableExpandedParents = new Set<string>();
+
+  // Baseline stats for delta calculation (stores stats at time of baseline reset)
+  @state()
+  private baselineStats = new Map<
+    string,
+    { runCount: number; totalTime: number }
+  >();
+
+  // When true, sort table by delta values instead of lifetime totals
+  @state()
+  private sortByDelta = false;
 
   @query(".graph-container")
   private graphContainer?: HTMLElement;
@@ -1198,9 +1300,26 @@ export class XSchedulerGraph extends LitElement {
     return inferredParents;
   }
 
-  private handleRefresh(): void {
+  private handleSnapshot(): void {
     this.debuggerController?.requestGraphSnapshot();
     this.requestUpdate();
+  }
+
+  private handleResetBaseline(): void {
+    // Capture current stats as the baseline
+    const newBaseline = new Map<
+      string,
+      { runCount: number; totalTime: number }
+    >();
+    for (const node of this.layoutNodes.values()) {
+      if (node.stats) {
+        newBaseline.set(node.id, {
+          runCount: node.stats.runCount,
+          totalTime: node.stats.totalTime,
+        });
+      }
+    }
+    this.baselineStats = newBaseline;
   }
 
   private handleModeToggle(pullMode: boolean): void {
@@ -1460,6 +1579,30 @@ export class XSchedulerGraph extends LitElement {
     const historicalCount = this.layoutEdges.filter((e) => e.isHistorical)
       .length;
 
+    // Calculate totals since baseline
+    const hasBaseline = this.baselineStats.size > 0;
+    let totalRunsSinceBaseline = 0;
+    let totalTimeSinceBaseline = 0;
+
+    if (hasBaseline) {
+      for (const node of this.layoutNodes.values()) {
+        if (node.stats) {
+          const baseline = this.baselineStats.get(node.id);
+          totalRunsSinceBaseline += node.stats.runCount -
+            (baseline?.runCount ?? 0);
+          totalTimeSinceBaseline += node.stats.totalTime -
+            (baseline?.totalTime ?? 0);
+        }
+      }
+    }
+
+    const formatTime = (ms: number) => {
+      if (ms === 0) return "-";
+      if (ms < 1) return `${(ms * 1000).toFixed(0)}µs`;
+      if (ms < 1000) return `${ms.toFixed(1)}ms`;
+      return `${(ms / 1000).toFixed(2)}s`;
+    };
+
     return html`
       <div class="toolbar">
         <div class="view-toggle">
@@ -1503,50 +1646,51 @@ export class XSchedulerGraph extends LitElement {
         <button
           type="button"
           class="action-button"
-          @click="${this.handleRefresh}"
-          title="Refresh graph"
+          @click="${this.handleResetBaseline}"
+          title="Reset baseline to current stats (for delta tracking)"
         >
-          Refresh
+          Reset Baseline
         </button>
 
         <button
           type="button"
           class="action-button"
-          @click="${() => {
-            this.debuggerController?.clearHistoricalEdges();
-            this.requestUpdate();
-          }}"
-          title="Clear historical edges"
+          @click="${this.handleSnapshot}"
+          title="Capture current scheduler state"
         >
-          Clear History
+          Snapshot
         </button>
 
-        <div class="zoom-controls">
-          <button
-            type="button"
-            class="zoom-button"
-            @click="${this.handleZoomOut}"
-            title="Zoom out"
-          >
-            -
-          </button>
-          <button
-            type="button"
-            class="zoom-level"
-            @click="${this.handleZoomReset}"
-            title="Reset zoom"
-          >
-            ${Math.round(this.zoomLevel * 100)}%
-          </button>
-          <button
-            type="button"
-            class="zoom-button"
-            @click="${this.handleZoomIn}"
-            title="Zoom in"
-          >
-            +
-          </button>
-        </div>
+        ${this.viewMode === "graph"
+          ? html`
+            <div class="zoom-controls">
+              <button
+                type="button"
+                class="zoom-button"
+                @click="${this.handleZoomOut}"
+                title="Zoom out"
+              >
+                -
+              </button>
+              <button
+                type="button"
+                class="zoom-level"
+                @click="${this.handleZoomReset}"
+                title="Reset zoom"
+              >
+                ${Math.round(this.zoomLevel * 100)}%
+              </button>
+              <button
+                type="button"
+                class="zoom-button"
+                @click="${this.handleZoomIn}"
+                title="Zoom in"
+              >
+                +
+              </button>
+            </div>
+          `
+          : ""}
 
         <div class="stats">
           <span>Nodes: <span class="stat-value">${nodeCount}</span></span>
@@ -1554,6 +1698,16 @@ export class XSchedulerGraph extends LitElement {
           ${historicalCount > 0
             ? html`
               <span>Historical: <span class="stat-value">${historicalCount}</span></span>
+            `
+            : ""} ${hasBaseline
+            ? html`
+              <span class="baseline-stats">
+                Since baseline:
+                <span class="stat-value delta positive">${totalRunsSinceBaseline} runs</span>
+                <span class="stat-value delta positive">${formatTime(
+                  totalTimeSinceBaseline,
+                )}</span>
+              </span>
             `
             : ""}
         </div>
@@ -1821,7 +1975,7 @@ export class XSchedulerGraph extends LitElement {
           <button
             type="button"
             class="action-button"
-            @click="${this.handleRefresh}"
+            @click="${this.handleSnapshot}"
           >
             Load Graph
           </button>
@@ -1916,8 +2070,47 @@ export class XSchedulerGraph extends LitElement {
       return `${(ms / 1000).toFixed(2)}s`;
     };
 
+    const formatDelta = (delta: number, isTime: boolean = false): string => {
+      if (delta === 0) return "";
+      const sign = delta > 0 ? "+" : "";
+      if (isTime) {
+        if (Math.abs(delta) < 1) return `${sign}${(delta * 1000).toFixed(0)}µs`;
+        if (Math.abs(delta) < 1000) return `${sign}${delta.toFixed(1)}ms`;
+        return `${sign}${(delta / 1000).toFixed(2)}s`;
+      }
+      return `${sign}${delta}`;
+    };
+
     if (this.selectedNode) {
       const node = this.selectedNode;
+      const baseline = this.baselineStats.get(node.id);
+      const hasBaseline = this.baselineStats.size > 0;
+
+      const renderStatWithDelta = (
+        label: string,
+        value: number,
+        baselineValue: number | undefined,
+        isTime: boolean = false,
+      ) => {
+        const delta = value - (baselineValue ?? 0);
+        const deltaStr = formatDelta(delta, isTime);
+        return html`
+          <div class="detail-stat">
+            <div class="detail-stat-label">${label}</div>
+            <div class="detail-stat-value">
+              ${isTime ? formatTime(value) : value}
+            </div>
+            ${hasBaseline && deltaStr
+              ? html`
+                <div class="detail-stat-delta ${delta > 0 ? "positive" : ""}">
+                  ${deltaStr}
+                </div>
+              `
+              : ""}
+          </div>
+        `;
+      };
+
       return html`
         <div class="detail-pane">
           <div class="detail-pane-header">
@@ -1943,16 +2136,16 @@ export class XSchedulerGraph extends LitElement {
               <div class="detail-section">
                 <div class="detail-section-title">Stats</div>
                 <div class="detail-stats">
-                  <div class="detail-stat">
-                    <div class="detail-stat-label">Runs</div>
-                    <div class="detail-stat-value">${node.stats.runCount}</div>
-                  </div>
-                  <div class="detail-stat">
-                    <div class="detail-stat-label">Total</div>
-                    <div class="detail-stat-value">
-                      ${formatTime(node.stats.totalTime)}
-                    </div>
-                  </div>
+                  ${renderStatWithDelta(
+                    "Runs",
+                    node.stats.runCount,
+                    baseline?.runCount,
+                  )} ${renderStatWithDelta(
+                    "Total",
+                    node.stats.totalTime,
+                    baseline?.totalTime,
+                    true,
+                  )}
                   <div class="detail-stat">
                     <div class="detail-stat-label">Average</div>
                     <div class="detail-stat-value">
@@ -2206,11 +2399,25 @@ export class XSchedulerGraph extends LitElement {
       children: NodeWithStats[];
       aggregatedTotalTime: number;
       aggregatedRunCount: number;
+      // Delta values (since baseline)
+      deltaRunCount: number;
+      deltaTotalTime: number;
+      aggregatedDeltaRunCount: number;
+      aggregatedDeltaTotalTime: number;
       isParent: boolean;
     }
 
     const nodeById = new Map(allNodesWithStats.map((n) => [n.id, n]));
     const childrenByParent = new Map<string, NodeWithStats[]>();
+
+    // Helper to get delta for a node
+    const getNodeDelta = (id: string, runCount: number, totalTime: number) => {
+      const baseline = this.baselineStats.get(id);
+      return {
+        deltaRunCount: runCount - (baseline?.runCount ?? 0),
+        deltaTotalTime: totalTime - (baseline?.totalTime ?? 0),
+      };
+    };
 
     // Group children by parent
     for (const node of allNodesWithStats) {
@@ -2239,25 +2446,47 @@ export class XSchedulerGraph extends LitElement {
       const aggregatedRunCount = node.runCount +
         children.reduce((sum, c) => sum + c.runCount, 0);
 
+      // Calculate deltas
+      const nodeDelta = getNodeDelta(node.id, node.runCount, node.totalTime);
+      const childrenDeltaRunCount = children.reduce((sum, c) => {
+        const d = getNodeDelta(c.id, c.runCount, c.totalTime);
+        return sum + d.deltaRunCount;
+      }, 0);
+      const childrenDeltaTotalTime = children.reduce((sum, c) => {
+        const d = getNodeDelta(c.id, c.runCount, c.totalTime);
+        return sum + d.deltaTotalTime;
+      }, 0);
+
       groupedNodes.push({
         ...node,
         children,
         aggregatedTotalTime,
         aggregatedRunCount,
+        deltaRunCount: nodeDelta.deltaRunCount,
+        deltaTotalTime: nodeDelta.deltaTotalTime,
+        aggregatedDeltaRunCount: nodeDelta.deltaRunCount +
+          childrenDeltaRunCount,
+        aggregatedDeltaTotalTime: nodeDelta.deltaTotalTime +
+          childrenDeltaTotalTime,
         isParent: children.length > 0,
       });
     }
 
-    // Sort based on current column
+    // Sort based on current column (and whether we're sorting by delta)
+    const useDelta = this.sortByDelta && this.baselineStats.size > 0;
     const sortNodes = (nodes: GroupedNode[]) => {
       nodes.sort((a, b) => {
         let cmp = 0;
         switch (this.tableSortColumn) {
           case "totalTime":
-            cmp = b.aggregatedTotalTime - a.aggregatedTotalTime;
+            cmp = useDelta
+              ? b.aggregatedDeltaTotalTime - a.aggregatedDeltaTotalTime
+              : b.aggregatedTotalTime - a.aggregatedTotalTime;
             break;
           case "runCount":
-            cmp = b.aggregatedRunCount - a.aggregatedRunCount;
+            cmp = useDelta
+              ? b.aggregatedDeltaRunCount - a.aggregatedDeltaRunCount
+              : b.aggregatedRunCount - a.aggregatedRunCount;
             break;
           case "avgTime":
             cmp = b.avgTime - a.avgTime;
@@ -2295,6 +2524,53 @@ export class XSchedulerGraph extends LitElement {
       return `${(ms / 1000).toFixed(2)}s`;
     };
 
+    const hasBaseline = this.baselineStats.size > 0;
+
+    const getBaseline = (id: string) => this.baselineStats.get(id);
+
+    const getDelta = (
+      current: number,
+      baseline: number | undefined,
+    ): number => {
+      return current - (baseline ?? 0);
+    };
+
+    const formatDelta = (delta: number, isTime: boolean = false): string => {
+      if (delta === 0) return "";
+      const sign = delta > 0 ? "+" : "";
+      if (isTime) {
+        if (Math.abs(delta) < 1) return `${sign}${(delta * 1000).toFixed(0)}µs`;
+        if (Math.abs(delta) < 1000) return `${sign}${delta.toFixed(1)}ms`;
+        return `${sign}${(delta / 1000).toFixed(2)}s`;
+      }
+      return `${sign}${delta}`;
+    };
+
+    const renderStatWithDelta = (
+      value: number,
+      baselineValue: number | undefined,
+      isTime: boolean = false,
+    ) => {
+      const delta = getDelta(value, baselineValue);
+      const formatted = isTime ? formatTime(value) : String(value);
+      if (!hasBaseline) {
+        return formatted;
+      }
+      const deltaStr = formatDelta(delta, isTime);
+      return html`
+        <div class="stat-with-delta">
+          <span class="stat-main">${formatted}</span>
+          ${deltaStr
+            ? html`
+              <span class="stat-delta ${delta > 0 ? "positive" : ""}">
+                ${deltaStr}
+              </span>
+            `
+            : ""}
+        </div>
+      `;
+    };
+
     const toggleExpand = (id: string, e: Event) => {
       e.stopPropagation();
       if (this.tableExpandedParents.has(id)) {
@@ -2320,6 +2596,7 @@ export class XSchedulerGraph extends LitElement {
       _parentNode?: GroupedNode,
     ) => {
       const isSelected = this.selectedNode?.id === n.id;
+      const baseline = getBaseline(n.id);
       return html`
         <tr
           class="${isChild ? "child-row" : ""} ${isSelected ? "selected" : ""}"
@@ -2336,8 +2613,12 @@ export class XSchedulerGraph extends LitElement {
               `
               : ""} ${n.label}
           </td>
-          <td class="col-number">${n.runCount}</td>
-          <td class="col-number">${formatTime(n.totalTime)}</td>
+          <td class="col-number">
+            ${renderStatWithDelta(n.runCount, baseline?.runCount)}
+          </td>
+          <td class="col-number">
+            ${renderStatWithDelta(n.totalTime, baseline?.totalTime, true)}
+          </td>
           <td class="col-number">${formatTime(n.avgTime)}</td>
           <td class="col-number">${formatTime(n.lastTime)}</td>
         </tr>
@@ -2348,6 +2629,19 @@ export class XSchedulerGraph extends LitElement {
       const isExpanded = this.tableExpandedParents.has(n.id);
       const isSelected = this.selectedNode?.id === n.id;
       const rows: TemplateResult[] = [];
+
+      // Get baseline for this node and calculate aggregated baseline
+      const baseline = getBaseline(n.id);
+      const aggregatedBaselineRunCount = (baseline?.runCount ?? 0) +
+        n.children.reduce(
+          (sum, c) => sum + (getBaseline(c.id)?.runCount ?? 0),
+          0,
+        );
+      const aggregatedBaselineTotalTime = (baseline?.totalTime ?? 0) +
+        n.children.reduce(
+          (sum, c) => sum + (getBaseline(c.id)?.totalTime ?? 0),
+          0,
+        );
 
       // Parent row with aggregated stats
       rows.push(html`
@@ -2378,18 +2672,27 @@ export class XSchedulerGraph extends LitElement {
           <td class="col-number">
             ${n.isParent && !isExpanded
               ? html`
-                <span class="aggregated">${n.aggregatedRunCount}</span>
+                <span class="aggregated">
+                  ${renderStatWithDelta(
+                    n.aggregatedRunCount,
+                    hasBaseline ? aggregatedBaselineRunCount : undefined,
+                  )}
+                </span>
               `
-              : n.runCount}
+              : renderStatWithDelta(n.runCount, baseline?.runCount)}
           </td>
           <td class="col-number">
             ${n.isParent && !isExpanded
               ? html`
-                <span class="aggregated">${formatTime(
-                  n.aggregatedTotalTime,
-                )}</span>
+                <span class="aggregated">
+                  ${renderStatWithDelta(
+                    n.aggregatedTotalTime,
+                    hasBaseline ? aggregatedBaselineTotalTime : undefined,
+                    true,
+                  )}
+                </span>
               `
-              : formatTime(n.totalTime)}
+              : renderStatWithDelta(n.totalTime, baseline?.totalTime, true)}
           </td>
           <td class="col-number">${formatTime(n.avgTime)}</td>
           <td class="col-number">${formatTime(n.lastTime)}</td>
@@ -2398,15 +2701,21 @@ export class XSchedulerGraph extends LitElement {
 
       // Child rows (if expanded)
       if (isExpanded && n.children.length > 0) {
-        // Sort children too
+        // Sort children too (using delta if enabled)
         const sortedChildren = [...n.children].sort((a, b) => {
           let cmp = 0;
+          const aDelta = getNodeDelta(a.id, a.runCount, a.totalTime);
+          const bDelta = getNodeDelta(b.id, b.runCount, b.totalTime);
           switch (this.tableSortColumn) {
             case "totalTime":
-              cmp = b.totalTime - a.totalTime;
+              cmp = useDelta
+                ? bDelta.deltaTotalTime - aDelta.deltaTotalTime
+                : b.totalTime - a.totalTime;
               break;
             case "runCount":
-              cmp = b.runCount - a.runCount;
+              cmp = useDelta
+                ? bDelta.deltaRunCount - aDelta.deltaRunCount
+                : b.runCount - a.runCount;
               break;
             case "avgTime":
               cmp = b.avgTime - a.avgTime;
@@ -2447,7 +2756,34 @@ export class XSchedulerGraph extends LitElement {
                     : ""}"
                   @click="${() => handleSort("totalTime")}"
                 >
-                  Total ${sortIndicator("totalTime")}
+                  Total ${sortIndicator("totalTime")} ${hasBaseline
+                    ? html`
+                      <span class="delta-sort-toggle">
+                        <button
+                          type="button"
+                          class="${!this.sortByDelta ? "active" : ""}"
+                          @click="${(e: Event) => {
+                            e.stopPropagation();
+                            this.sortByDelta = false;
+                          }}"
+                          title="Sort by lifetime totals"
+                        >
+                          All
+                        </button>
+                        <button
+                          type="button"
+                          class="${this.sortByDelta ? "active" : ""}"
+                          @click="${(e: Event) => {
+                            e.stopPropagation();
+                            this.sortByDelta = true;
+                          }}"
+                          title="Sort by delta since baseline"
+                        >
+                          Δ
+                        </button>
+                      </span>
+                    `
+                    : ""}
                 </th>
                 <th
                   class="col-number ${this.tableSortColumn === "avgTime"
