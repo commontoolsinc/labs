@@ -30,6 +30,9 @@ const diffLogger = getLogger("normalizeAndDiff", {
   level: "debug",
 });
 
+// Sentinel value to distinguish "no precomputed value" from "precomputed value is undefined"
+const NO_PRECOMPUTED = Symbol("no-precomputed");
+
 /**
  * Traverses newValue and updates `current` and any relevant linked documents.
  *
@@ -103,6 +106,7 @@ export function normalizeAndDiff(
   context?: unknown,
   options?: IReadOptions,
   seen: Map<any, NormalizedFullLink> = new Map(),
+  precomputedCurrent: unknown = NO_PRECOMPUTED,
 ): ChangeSet {
   const changes: ChangeSet = [];
 
@@ -248,8 +252,10 @@ export function normalizeAndDiff(
     return [];
   }
 
-  // Get current value to compare against
-  let currentValue = tx.readValueOrThrow(link, options);
+  // Get current value to compare against (use precomputed if available)
+  let currentValue = precomputedCurrent === NO_PRECOMPUTED
+    ? tx.readValueOrThrow(link, options)
+    : precomputedCurrent;
 
   // A new alias can overwrite a previous alias. No-op if the same.
   if (isWriteRedirectLink(newValue)) {
@@ -435,6 +441,9 @@ export function normalizeAndDiff(
     // Have to set this before recursing!
     seen.set(newValue, link);
 
+    // Get current array for precomputing child values (if it was an array)
+    const currentArray = Array.isArray(currentValue) ? currentValue : undefined;
+
     for (let i = 0; i < newValue.length; i++) {
       const childSchema = runtime.cfc.getSchemaAtPath(
         link.schema,
@@ -454,6 +463,7 @@ export function normalizeAndDiff(
         context,
         options,
         seen,
+        currentArray?.[i],
       );
       changes.push(...nestedChanges);
     }
@@ -502,6 +512,9 @@ export function normalizeAndDiff(
     // Have to set this before recursing!
     seen.set(newValue, link);
 
+    // At this point currentValue is guaranteed to be a record
+    const currentRecord = currentValue as Record<string, unknown>;
+
     for (const key in newValue) {
       diffLogger.debug("diff", () => {
         const childPath = [...link.path, key].join(".");
@@ -521,12 +534,13 @@ export function normalizeAndDiff(
         context,
         options,
         seen,
+        currentRecord[key],
       );
       changes.push(...nestedChanges);
     }
 
     // Handle removed keys
-    for (const key in currentValue) {
+    for (const key in currentRecord) {
       if (!(key in newValue)) {
         changes.push({
           location: { ...link, path: [...link.path, key] },
