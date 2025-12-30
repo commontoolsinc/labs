@@ -201,7 +201,7 @@ Integrity facts are minted only by trusted code and are non-malleable.
 
 **Policy certification integrity**: A special class of integrity atom attests that data was produced under a specific policy regime being enforced. For example, `PolicyCertified(ApprovedModels)` indicates the output was computed while a policy restricting ML model usage was in effect. See Section 5.5 for details.
 
-**Field integrity**: Schemas can declare integrity directly on stored fields. This integrity serves dual purposes: it's what the data has, and it gates who may write. Handlers must satisfy a field's declared integrity to modify it. See Section 8.15 for the full model.
+**Modification integrity**: Handlers declare which fields they write to; the handler's identity (code hash) IS its integrity. Each handler is independent and only knows about itself. The pattern schema composes handler identities via union; the field's integrity is the disjunction of all handlers that write to it. See Section 8.15 for the full model.
 
 ---
 
