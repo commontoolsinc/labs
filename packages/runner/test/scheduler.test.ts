@@ -5316,3 +5316,253 @@ describe("handler dependency pulling", () => {
     );
   });
 });
+
+describe("pull mode array reactivity", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    runtime.scheduler.enablePullMode();
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should trigger sink when array element is pushed", async () => {
+    // Create a cell with an array
+    const arrayCell = runtime.getCell<string[]>(
+      space,
+      "array-push-test",
+      undefined,
+      tx,
+    );
+    arrayCell.set(["a", "b"]);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Track sink calls
+    const sinkValues: string[][] = [];
+    const cancel = arrayCell.withTx(tx).sink((value) => {
+      sinkValues.push([...value]);
+    });
+
+    // Wait for initial sink call
+    await runtime.scheduler.idle();
+    expect(sinkValues.length).toBe(1);
+    expect(sinkValues[0]).toEqual(["a", "b"]);
+
+    // Push a new element using the current transaction
+    arrayCell.withTx(tx).push("c");
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Wait for scheduler to process
+    await runtime.scheduler.idle();
+
+    // Verify sink was called with updated array
+    expect(sinkValues.length).toBe(2);
+    expect(sinkValues[1]).toEqual(["a", "b", "c"]);
+
+    cancel();
+  });
+
+  it("should trigger sink when array length changes via set", async () => {
+    // Create a cell with an array
+    const arrayCell = runtime.getCell<number[]>(
+      space,
+      "array-length-test",
+      undefined,
+      tx,
+    );
+    arrayCell.set([1, 2, 3]);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Track sink calls
+    const sinkLengths: number[] = [];
+    const cancel = arrayCell.withTx(tx).sink((value) => {
+      sinkLengths.push(value.length);
+    });
+
+    // Wait for initial sink call
+    await runtime.scheduler.idle();
+    expect(sinkLengths).toEqual([3]);
+
+    // Set a new array with different length using the current transaction
+    arrayCell.withTx(tx).set([1, 2, 3, 4, 5]);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Wait for scheduler to process
+    await runtime.scheduler.idle();
+
+    // Verify sink was called with new length
+    expect(sinkLengths).toEqual([3, 5]);
+
+    cancel();
+  });
+
+  it("should trigger computation when array source changes via push", async () => {
+    // This tests: when a source array has an element pushed, a computation
+    // that reads it should be marked dirty and re-run on pull.
+    // This simulates: visibleCharms = computed(() => allCharms.filter(...))
+
+    const sourceArray = runtime.getCell<{ name: string; hidden: boolean }[]>(
+      space,
+      "source-array-map-test",
+      undefined,
+      tx,
+    );
+    sourceArray.set([
+      { name: "item1", hidden: false },
+      { name: "item2", hidden: true },
+    ]);
+
+    const filteredCell = runtime.getCell<string[]>(
+      space,
+      "filtered-array-map-test",
+      undefined,
+      tx,
+    );
+    filteredCell.set([]);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Track how many times the computation runs
+    let computationRunCount = 0;
+
+    // Create a computation that filters the source
+    const filterAction: Action = (actionTx) => {
+      computationRunCount++;
+      const source = sourceArray.withTx(actionTx).get();
+      const filtered = source
+        .filter((item) => !item.hidden)
+        .map((item) => item.name);
+      filteredCell.withTx(actionTx).send(filtered);
+    };
+
+    runtime.scheduler.subscribe(
+      filterAction,
+      {
+        reads: [sourceArray.getAsNormalizedFullLink()],
+        writes: [filteredCell.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    // Pull to trigger initial computation
+    await filteredCell.withTx(tx).pull();
+    await runtime.scheduler.idle();
+    expect(computationRunCount).toBe(1);
+    expect(filteredCell.withTx(tx).get()).toEqual(["item1"]);
+
+    // Now push a new item to the source array
+    sourceArray.withTx(tx).push({ name: "item3", hidden: false });
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Pull again - the computation SHOULD run because its input changed
+    await filteredCell.withTx(tx).pull();
+    await runtime.scheduler.idle();
+
+    // BUG: If computationRunCount is still 1, the computation didn't re-run
+    // when the source array changed via push
+    expect(computationRunCount).toBe(2);
+    expect(filteredCell.withTx(tx).get()).toEqual(["item1", "item3"]);
+  });
+
+  it("should notify sink on computed result when source array grows (no explicit pull)", async () => {
+    // BUG REPRO: This test demonstrates the pull mode bug where sinks aren't
+    // notified when source arrays change.
+    //
+    // This tests the renderer pattern: sink observes computed result,
+    // and should be notified when source array (which feeds the computation)
+    // has elements added. This is the pattern broken in the Notes UI.
+    //
+    // Expected behavior:
+    // 1. Source array changes (push)
+    // 2. Computation that reads source should be marked dirty
+    // 3. Sink (effect) on computation output should be pulled
+    // 4. Computation runs, sink is notified with new value
+    //
+    // Actual behavior: Sink is NOT notified because the scheduler doesn't
+    // propagate dirty state through computations to effects.
+
+    const sourceArray = runtime.getCell<string[]>(
+      space,
+      "renderer-source-array",
+      undefined,
+      tx,
+    );
+    sourceArray.set(["a", "b"]);
+
+    const computedCell = runtime.getCell<string[]>(
+      space,
+      "renderer-computed",
+      undefined,
+      tx,
+    );
+    computedCell.set([]);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Track sink notifications
+    const sinkValues: string[][] = [];
+
+    // Create a computation that transforms the source
+    const transformAction: Action = (actionTx) => {
+      const source = sourceArray.withTx(actionTx).get();
+      const transformed = source.map((s) => s.toUpperCase());
+      computedCell.withTx(actionTx).send(transformed);
+    };
+
+    runtime.scheduler.subscribe(
+      transformAction,
+      {
+        reads: [sourceArray.getAsNormalizedFullLink()],
+        writes: [computedCell.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    // Set up sink on computed result (simulating renderer effect)
+    const cancel = computedCell.withTx(tx).sink((value) => {
+      if (value !== undefined) {
+        sinkValues.push([...value]);
+      }
+    });
+
+    // Pull to trigger initial computation
+    await computedCell.withTx(tx).pull();
+    await runtime.scheduler.idle();
+    expect(sinkValues.length).toBeGreaterThanOrEqual(1);
+    expect(sinkValues[sinkValues.length - 1]).toEqual(["A", "B"]);
+
+    // Push to source array
+    sourceArray.withTx(tx).push("c");
+    await tx.commit();
+    tx = runtime.edit();
+
+    // The sink SHOULD be notified with the updated computed value
+    // Without explicit pull - just let the scheduler run
+    runtime.scheduler.queueExecution();
+    await runtime.scheduler.idle();
+
+    // Verify sink was notified with updated value
+    // BUG: If this fails, the sink isn't being notified when source array grows
+    expect(sinkValues.length).toBeGreaterThanOrEqual(2);
+    expect(sinkValues[sinkValues.length - 1]).toEqual(["A", "B", "C"]);
+
+    cancel();
+  });
+});
