@@ -42,6 +42,10 @@ export interface GenerationContext {
   typeRegistry?: WeakMap<ts.Node, ts.Type>;
   /** Widen literal types to base types during schema generation */
   widenLiterals?: boolean;
+  /** Schema hints for overriding default behavior (keyed by TypeNode) */
+  schemaHints?: WeakMap<ts.Node, { items?: unknown }>;
+  /** Override for array items schema, propagated from wrapper types */
+  arrayItemsOverride?: unknown;
 }
 
 /**
@@ -71,6 +75,7 @@ export interface SchemaGenerator {
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
     options?: { widenLiterals?: boolean },
+    schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
   ): SchemaDefinition;
 
   /**
@@ -80,10 +85,12 @@ export interface SchemaGenerator {
    * @param typeNode - Synthetic TypeNode to analyze
    * @param checker - TypeScript type checker
    * @param typeRegistry - Optional WeakMap of Node → Type for registered synthetic nodes
+   * @param schemaHints - Optional WeakMap of Node → hints for overriding default behavior
    */
   generateSchemaFromSyntheticTypeNode(
     typeNode: ts.TypeNode,
     checker: ts.TypeChecker,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
+    schemaHints?: WeakMap<ts.Node, { items?: unknown }>,
   ): SchemaDefinition;
 }
