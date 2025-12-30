@@ -304,7 +304,7 @@ export class RecipeManager {
    * @param input - Source code string or RuntimeProgram to compile
    * @returns The compiled recipe (from cache, in-flight compilation, or new)
    */
-  async compileOrGetRecipe(input: string | RuntimeProgram): Promise<Recipe> {
+  compileOrGetRecipe(input: string | RuntimeProgram): Promise<Recipe> {
     // Normalize to RuntimeProgram
     let program: RuntimeProgram;
     if (typeof input === "string") {
@@ -323,7 +323,7 @@ export class RecipeManager {
     const existing = this.recipeIdMap.get(recipeId);
     if (existing) {
       this.touchRecipe(recipeId);
-      return existing;
+      return Promise.resolve(existing);
     }
 
     // Check in-flight compilation (single-flight deduplication)
