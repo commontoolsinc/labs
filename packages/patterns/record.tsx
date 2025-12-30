@@ -1413,10 +1413,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                               minHeight: isExpanded ? "0" : "auto",
                             }}
                           >
-                            <ct-render
-                              $cell={entry.charm}
-                              variant="embedded"
-                            />
+                            {(entry.charm as any)["embeddedUI"]}
                           </div>,
                           null,
                         )}
@@ -1691,10 +1688,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 minHeight: isExpanded ? "0" : "auto",
                               }}
                             >
-                              <ct-render
-                                $cell={entry.charm}
-                                variant="embedded"
-                              />
+                              {(entry.charm as any)["embeddedUI"]}
                             </div>,
                             null,
                           )}
@@ -1962,10 +1956,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                             minHeight: isExpanded ? "0" : "auto",
                           }}
                         >
-                          <ct-render
-                            $cell={entry.charm}
-                            variant="embedded"
-                          />
+                          {(entry.charm as any)["embeddedUI"]}
                         </div>,
                         null,
                       )}
