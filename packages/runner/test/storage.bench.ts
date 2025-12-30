@@ -615,11 +615,10 @@ Deno.bench(
 
     // 10 entities, 10 writes each
     for (let i = 0; i < 100; i++) {
-      const entityId = `test:ten-entities-${i % 10}`;
       tx.write(
         {
           space,
-          id: entityId,
+          id: `test:ten-entities-${i % 10}`,
           type: "application/json",
           path: [],
         },
