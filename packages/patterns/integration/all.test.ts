@@ -22,6 +22,9 @@ describe("Compile all recipes", () => {
     if (skippedPatterns.includes(name)) continue;
 
     it(`Executes: ${name}`, async () => {
+      // Heap monitoring for bisection experiments (CT-1148)
+      const heapBefore = Deno.memoryUsage().heapUsed;
+
       // Create a fresh CharmsController per test to prevent memory accumulation
       // The RecipeManager caches compiled recipes indefinitely, so we need a
       // fresh Runtime (via CharmsController) each time to avoid OOM in CI
@@ -43,6 +46,12 @@ describe("Compile all recipes", () => {
       } finally {
         // Dispose the entire controller to free all memory including recipe cache
         await cc.dispose();
+
+        // Log heap usage for analysis
+        const heapAfter = Deno.memoryUsage().heapUsed;
+        const deltaMB = Math.round((heapAfter - heapBefore) / 1024 / 1024);
+        const totalMB = Math.round(heapAfter / 1024 / 1024);
+        console.log(`[HEAP] ${name}: delta=${deltaMB}MB, total=${totalMB}MB`);
       }
     });
   }
