@@ -545,3 +545,317 @@ Deno.bench(
     }
   },
 );
+
+// ============================================================================
+// Entity creation breakdown - isolate what makes first write slow
+// ============================================================================
+
+Deno.bench(
+  "Entity creation breakdown - first write only (100x new entities)",
+  { group: "entity-breakdown" },
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Each iteration writes to a NEW entity (forces entity creation)
+    for (let i = 0; i < 100; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:first-write-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        { value: i },
+      );
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
+
+Deno.bench(
+  "Entity creation breakdown - 100 writes to 1 entity",
+  { group: "entity-breakdown" },
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    // First write creates the entity
+    tx.write(
+      {
+        space,
+        id: "test:single-entity",
+        type: "application/json",
+        path: [],
+      },
+      { value: 0 },
+    );
+
+    // Subsequent writes reuse the working copy
+    for (let i = 1; i < 100; i++) {
+      tx.write(
+        {
+          space,
+          id: "test:single-entity",
+          type: "application/json",
+          path: [],
+        },
+        { value: i },
+      );
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
+
+Deno.bench(
+  "Entity creation breakdown - 100 writes to 10 entities (10 each)",
+  { group: "entity-breakdown" },
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    // 10 entities, 10 writes each
+    for (let i = 0; i < 100; i++) {
+      const entityId = `test:ten-entities-${i % 10}`;
+      tx.write(
+        {
+          space,
+          id: entityId,
+          type: "application/json",
+          path: [],
+        },
+        { value: i },
+      );
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
+
+Deno.bench(
+  "Entity creation breakdown - nested path after entity exists (100x)",
+  { group: "entity-breakdown" },
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Create 100 entities first
+    for (let i = 0; i < 100; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:nested-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        { data: { nested: { value: 0 } } },
+      );
+    }
+
+    // Now write to nested paths (entity already exists, has working copy)
+    for (let i = 0; i < 100; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:nested-${i}`,
+          type: "application/json",
+          path: ["data", "nested", "value"],
+        },
+        i,
+      );
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
+
+// ============================================================================
+// Microbenchmarks to isolate entity creation overhead sources
+// ============================================================================
+
+Deno.bench(
+  "Overhead - Map get/set (1000x)",
+  { group: "entity-overhead" },
+  () => {
+    const map = new Map<string, object>();
+    for (let i = 0; i < 1000; i++) {
+      const key = `test:entity-${i}/application/json`;
+      if (!map.get(key)) {
+        map.set(key, { value: i });
+      }
+    }
+  },
+);
+
+Deno.bench(
+  "Overhead - Map get only, cache hit (1000x)",
+  { group: "entity-overhead" },
+  () => {
+    const map = new Map<string, object>();
+    map.set("test:entity/application/json", { value: 0 });
+    for (let i = 0; i < 1000; i++) {
+      map.get("test:entity/application/json");
+    }
+  },
+);
+
+Deno.bench(
+  "Overhead - template literal key creation (1000x)",
+  { group: "entity-overhead" },
+  () => {
+    for (let i = 0; i < 1000; i++) {
+      const id = `test:entity-${i}`;
+      const type = "application/json";
+      const _key = `${id}/${type}`;
+    }
+  },
+);
+
+Deno.bench(
+  "Overhead - JSON.stringify empty array (1000x)",
+  { group: "entity-overhead" },
+  () => {
+    const path: string[] = [];
+    for (let i = 0; i < 1000; i++) {
+      JSON.stringify(path);
+    }
+  },
+);
+
+Deno.bench(
+  "Overhead - object spread (1000x)",
+  { group: "entity-overhead" },
+  () => {
+    const base = { id: "test:entity", type: "application/json" };
+    for (let i = 0; i < 1000; i++) {
+      const _copy = { ...base, path: [] };
+    }
+  },
+);
+
+Deno.bench(
+  "Overhead - nested object creation (1000x)",
+  { group: "entity-overhead" },
+  () => {
+    for (let i = 0; i < 1000; i++) {
+      const _obj = {
+        address: { id: `test:entity-${i}`, type: "application/json", path: [] },
+        value: { data: i },
+      };
+    }
+  },
+);
+
+Deno.bench(
+  "Overhead - new Map creation (1000x)",
+  { group: "entity-overhead" },
+  () => {
+    for (let i = 0; i < 1000; i++) {
+      const _map = new Map<string, unknown>();
+    }
+  },
+);
+
+// ============================================================================
+// Isolate write vs commit overhead
+// ============================================================================
+
+Deno.bench(
+  "Write vs Commit - 100 new entities, measure writes only",
+  { group: "write-vs-commit" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+
+    b.start();
+    for (let i = 0; i < 100; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:wvc-new-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        { value: i },
+      );
+    }
+    b.end();
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
+
+Deno.bench(
+  "Write vs Commit - 100 writes to 1 entity, measure writes only",
+  { group: "write-vs-commit" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+
+    b.start();
+    for (let i = 0; i < 100; i++) {
+      tx.write(
+        {
+          space,
+          id: "test:wvc-same",
+          type: "application/json",
+          path: [],
+        },
+        { value: i },
+      );
+    }
+    b.end();
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
+
+Deno.bench(
+  "Write vs Commit - 100 new entities, measure commit only",
+  { group: "write-vs-commit" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+
+    for (let i = 0; i < 100; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:wvc-commit-new-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        { value: i },
+      );
+    }
+
+    b.start();
+    await tx.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+Deno.bench(
+  "Write vs Commit - 100 writes to 1 entity, measure commit only",
+  { group: "write-vs-commit" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+
+    for (let i = 0; i < 100; i++) {
+      tx.write(
+        {
+          space,
+          id: "test:wvc-commit-same",
+          type: "application/json",
+          path: [],
+        },
+        { value: i },
+      );
+    }
+
+    b.start();
+    await tx.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
