@@ -860,4 +860,3 @@ Deno.bench(
     await cleanup(runtime, storageManager, tx);
   },
 );
-
