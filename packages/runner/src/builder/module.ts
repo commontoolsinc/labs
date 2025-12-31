@@ -26,6 +26,25 @@ import { generateHandlerSchema } from "../schema.ts";
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,
 ): ModuleFactory<T, R> {
+  // Attach source location and preview to function implementations for debugging
+  if (typeof moduleSpec.implementation === "function") {
+    const location = getExternalSourceLocation();
+    if (location) {
+      Object.defineProperty(moduleSpec.implementation, "name", {
+        value: location,
+        configurable: true,
+      });
+      // Also set .src as backup (name can be finicky)
+      (moduleSpec.implementation as { src?: string }).src = location;
+    }
+    // Store function body preview for hover tooltips
+    const fnStr = moduleSpec.implementation.toString();
+    (moduleSpec.implementation as { preview?: string }).preview = fnStr.slice(
+      0,
+      200,
+    );
+  }
+
   const module: Module & toJSON = {
     ...moduleSpec,
     toJSON: () => moduleToJSON(module),
@@ -45,6 +64,64 @@ export function createNodeFactory<T = any, R = any>(
 
     return outputs;
   }, module);
+}
+
+/** Extract file path and location from a stack frame line
+ * Handles formats like:
+ *   "    at functionName (file:///path/to/file.ts:42:15)"
+ *   "    at file:///path/to/file.ts:42:15"
+ *   "    at functionName (http://localhost:8000/scripts/index.js:250239:17)"
+ *   "    at Object.eval [as factory] (somehash.js:52:52)"
+ * @internal Exported for testing
+ */
+export function parseStackFrame(
+  line: string,
+): { file: string; line: number; col: number } | null {
+  // Try to match file path inside parentheses first (most common format)
+  // Handles: "at functionName (file:///path:42:15)" or "(http://url:42:15)"
+  let match = line.match(/\((.+):(\d+):(\d+)\)\s*$/);
+
+  // If no match, try to match after "at " without parentheses
+  // Handles: "at file:///path:42:15" or "at http://url:42:15"
+  if (!match) {
+    match = line.match(/at\s+(.+):(\d+):(\d+)\s*$/);
+  }
+
+  if (!match) return null;
+  const [, filePath, lineNum, col] = match;
+  return {
+    file: filePath.replace(/^file:\/\//, ""),
+    line: parseInt(lineNum, 10),
+    col: parseInt(col, 10),
+  };
+}
+
+/** Extract the first source location from a stack trace that isn't from this file */
+function getExternalSourceLocation(): string | null {
+  const stack = new Error().stack;
+  if (!stack) return null;
+
+  const lines = stack.split("\n");
+
+  // Find this file from the first real stack frame
+  let thisFile: string | null = null;
+  for (const line of lines) {
+    const frame = parseStackFrame(line);
+    if (frame) {
+      thisFile = frame.file;
+      break;
+    }
+  }
+  if (!thisFile) return null;
+
+  // Find first frame not from this file
+  for (const line of lines) {
+    const frame = parseStackFrame(line);
+    if (frame && frame.file !== thisFile) {
+      return `${frame.file}:${frame.line}:${frame.col}`;
+    }
+  }
+  return null;
 }
 
 /** Declare a module
@@ -116,6 +193,22 @@ function handlerInternal<E, T>(
           "help: enable CTS with /// <cts-enable /> for automatic schema inference, or provide explicit schemas",
       );
     }
+  }
+
+  // Attach source location and preview to handler function for debugging
+  if (typeof handler === "function") {
+    const location = getExternalSourceLocation();
+    if (location) {
+      Object.defineProperty(handler, "name", {
+        value: location,
+        configurable: true,
+      });
+      // Also set .src as backup (name can be finicky)
+      (handler as { src?: string }).src = location;
+    }
+    // Store function body preview for hover tooltips
+    const fnStr = handler.toString();
+    (handler as { preview?: string }).preview = fnStr.slice(0, 200);
   }
 
   const schema = generateHandlerSchema(

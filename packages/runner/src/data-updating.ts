@@ -24,6 +24,7 @@ import {
 } from "./storage/interface.ts";
 import { type Runtime } from "./runtime.ts";
 import { toURI } from "./uri-utils.ts";
+import { markReadAsPotentialWrite } from "./scheduler.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,
@@ -56,13 +57,17 @@ export function diffAndUpdate(
   context?: unknown,
   options?: IReadOptions,
 ): boolean {
+  const readOptions: IReadOptions = {
+    ...options,
+    meta: { ...options?.meta, ...markReadAsPotentialWrite },
+  };
   const changes = normalizeAndDiff(
     runtime,
     tx,
     link,
     newValue,
     context,
-    options,
+    readOptions,
   );
   diffLogger.debug(
     "diff",

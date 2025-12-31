@@ -125,6 +125,9 @@ export {
   RuntimeTelemetryEvent,
   type RuntimeTelemetryMarker,
   type RuntimeTelemetryMarkerResult,
+  type SchedulerGraphEdge,
+  type SchedulerGraphNode,
+  type SchedulerGraphSnapshot,
 } from "./telemetry.ts";
 
 // Utility functions (split from utils.ts)
