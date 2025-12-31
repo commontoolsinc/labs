@@ -103,6 +103,7 @@
     "npm:domhandler@*": "5.0.3",
     "npm:esbuild@~0.25.5": "0.25.12",
     "npm:gcp-metadata@6.1.0": "6.1.0",
+    "npm:hash-wasm@^4.11.0": "4.12.0",
     "npm:hono-pino@0.7": "0.7.2_hono@4.10.5_pino@9.14.0",
     "npm:hono@^4.7.0": "4.10.5",
     "npm:htmlparser2@*": "10.0.0",
@@ -1402,6 +1403,9 @@
       "dependencies": [
         "has-symbols"
       ]
+    },
+    "hash-wasm@4.12.0": {
+      "integrity": "sha512-+/2B2rYLb48I/evdOIhP+K/DD2ca2fgBjp6O+GBEnCDk2e4rpeXIK8GvIyRPjTezgmWn9gmKwkQjjx6BtqDHVQ=="
     },
     "hasown@2.0.2": {
       "integrity": "sha512-0hJU9SCPvmMzIBdZFqNPXWa6dqh7WdH0cII9y+CyS8rG3nL48Bclra9HmKhVVUHyPWNH5Y7xDwAB7bfgSjkUMQ==",
