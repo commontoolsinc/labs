@@ -245,7 +245,15 @@ export function buildExtractionSchema(): {
   type: "object";
   properties: Record<string, unknown>;
 } {
-  const properties: Record<string, unknown> = {};
+  const properties: Record<string, unknown> = {
+    // Record's own title field - for extracting names/titles
+    // Use "name" as field since LLMs naturally extract person names to "name"
+    name: {
+      type: "string",
+      description:
+        "The primary name for this record - person's full name, recipe name, place name, project name, etc. This becomes the record's title.",
+    },
+  };
   for (const def of Object.values(SUB_CHARM_REGISTRY)) {
     if (def.schema) {
       Object.assign(properties, def.schema);

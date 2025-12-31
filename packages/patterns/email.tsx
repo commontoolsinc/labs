@@ -17,15 +17,18 @@ export const MODULE_METADATA: ModuleMetadata = {
   label: "Email",
   icon: "\u{1F4E7}", // 📧 envelope emoji
   allowMultiple: true, // Show "add another" button for multiple emails
+  // Schema field names MUST match module input property names for extraction to work
   schema: {
-    email: { type: "string", format: "email", description: "Email address" },
-    emailLabel: {
+    address: { type: "string", format: "email", description: "Email address" },
+    label: {
       type: "string",
       enum: STANDARD_LABELS,
       description: "Email label (Personal, Work, etc.)",
     },
   },
-  fieldMapping: ["email", "emailAddress"],
+  // fieldMapping maps LLM extraction field names to this module type
+  // First entry should be primary (matches schema), rest are aliases
+  fieldMapping: ["address", "email", "emailAddress"],
 };
 
 // ===== Types =====

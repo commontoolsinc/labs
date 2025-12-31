@@ -126,6 +126,24 @@ CRITICAL: Output ONLY the cleaned text. No explanations, no markdown formatting,
 
 // ===== Helper Functions =====
 
+// Anthropic Vision API limit is approximately 5MB for base64 images
+// Base64 encoding increases size by ~33%, so limit raw data size
+const MAX_IMAGE_SIZE_BYTES = 3_500_000; // ~3.5MB to be safe with base64 overhead
+
+/**
+ * Check if a base64 data URL is within size limits for vision API
+ */
+function isImageWithinSizeLimit(dataUrl: string): boolean {
+  if (!dataUrl) return false;
+  // Data URL format: data:image/...;base64,<data>
+  const base64Index = dataUrl.indexOf(",");
+  if (base64Index === -1) return true; // Not a data URL, assume it's a regular URL
+  const base64Data = dataUrl.slice(base64Index + 1);
+  // Base64 is ~4/3 of original size, so multiply by 0.75 to get approximate raw size
+  const approximateSize = base64Data.length * 0.75;
+  return approximateSize <= MAX_IMAGE_SIZE_BYTES;
+}
+
 /**
  * Get current value from an existing module for diff display
  */
@@ -515,9 +533,9 @@ const startExtraction = handler<
 
     if (combinedContent.trim()) {
       // Snapshot Notes content for cleanup comparison
-      notesContentSnapshotCell.set(notesContent as any);
-      extractionPromptCell.set(combinedContent as any);
-      extractPhaseCell.set("extracting" as any);
+      notesContentSnapshotCell.set(notesContent);
+      extractionPromptCell.set(combinedContent);
+      extractPhaseCell.set("extracting");
     }
   },
 );
@@ -564,7 +582,7 @@ const applySelected = handler<
       console.debug("[Extract] Apply already in progress, ignoring");
       return;
     }
-    applyInProgressCell.set(true as any);
+    applyInProgressCell.set(true);
 
     try {
       // Read Cells inside handler, filter out malformed entries
@@ -642,9 +660,11 @@ const applySelected = handler<
 
             try {
               // Only write if validation passed
-              (parentSubCharmsCell as any).key(existingIndex).key("charm").key(
-                field.fieldName,
-              ).set(field.extractedValue);
+              // Cast needed: Cell.key() navigation loses type info for dynamic nested paths
+              (parentSubCharmsCell as Cell<SubCharmEntry[]>).key(existingIndex)
+                .key("charm").key(
+                  field.fieldName,
+                ).set(field.extractedValue);
               anySuccess = true;
             } catch (e) {
               console.warn(
@@ -730,9 +750,13 @@ const applySelected = handler<
               editContent?: { send?: (data: unknown) => void };
             };
             if (notesCharm?.editContent?.send) {
-              notesCharm.editContent.send({ detail: { value: cleanedNotesValue } });
+              notesCharm.editContent.send({
+                detail: { value: cleanedNotesValue },
+              });
               cleanupSucceeded = true;
-              console.debug("[Extract] Applied Notes cleanup via editContent stream");
+              console.debug(
+                "[Extract] Applied Notes cleanup via editContent stream",
+              );
             }
           } catch (e) {
             console.warn("[Extract] editContent.send failed:", e);
@@ -741,9 +765,11 @@ const applySelected = handler<
           // Approach 2: Fallback to Cell key navigation
           if (!cleanupSucceeded) {
             try {
-              (parentSubCharmsCell as any).key(notesIndex).key("charm").key(
-                "content",
-              ).set(cleanedNotesValue);
+              // Cast needed: Cell.key() navigation loses type info for dynamic nested paths
+              (parentSubCharmsCell as Cell<SubCharmEntry[]>).key(notesIndex)
+                .key("charm").key(
+                  "content",
+                ).set(cleanedNotesValue);
               cleanupSucceeded = true;
               console.debug(
                 "[Extract] Applied Notes cleanup via Cell key navigation (UI may need refresh)",
@@ -753,20 +779,18 @@ const applySelected = handler<
             }
           }
 
-          cleanupApplyStatusCell.set(
-            cleanupSucceeded ? ("success" as any) : ("failed" as any),
-          );
+          cleanupApplyStatusCell.set(cleanupSucceeded ? "success" : "failed");
           if (!cleanupSucceeded) {
             console.warn(
               "[Extract] All Notes cleanup approaches failed",
             );
           }
         } else {
-          cleanupApplyStatusCell.set("failed" as any);
+          cleanupApplyStatusCell.set("failed");
           console.warn("[Extract] Notes entry not found for cleanup");
         }
       } else {
-        cleanupApplyStatusCell.set("skipped" as any);
+        cleanupApplyStatusCell.set("skipped");
       }
 
       // Collect indices to trash (sources + self, excluding Notes)
@@ -805,7 +829,7 @@ const applySelected = handler<
       const final = [...remaining, ...newEntries];
       parentSubCharmsCell.set(final);
     } finally {
-      applyInProgressCell.set(false as any);
+      applyInProgressCell.set(false);
     }
   },
 );
@@ -877,62 +901,71 @@ export const ExtractorModule = recipe<
       );
     });
 
-    // Build OCR prompt for the first selected photo
-    // For simplicity, we handle one photo at a time
-    const ocrPrompt = computed(() => {
-      const photos = photoSources;
-      if (!photos || photos.length === 0) return undefined;
+    // Build OCR calls for all selected photos using map pattern
+    // Each photo gets its own generateText call (framework caches per-item)
+    const ocrCalls = photoSources.map((photo: ExtractableSource) => {
+      // Build prompt for this photo
+      const prompt = computed(() => {
+        if (!photo?.imageData) return undefined;
 
-      // Get the first selected photo
-      const photo = photos[0];
-      if (!photo?.imageData) return undefined;
+        const imageUrl = photo.imageData.data || photo.imageData.url;
+        if (!imageUrl) return undefined;
 
-      const imageUrl = photo.imageData.data || photo.imageData.url;
-      if (!imageUrl) return undefined;
+        // Skip OCR for oversized images (Anthropic vision API limit ~5MB)
+        if (!isImageWithinSizeLimit(imageUrl)) {
+          return undefined;
+        }
 
-      return [
-        { type: "image" as const, image: imageUrl },
-        {
-          type: "text" as const,
-          text: "Extract all text from this image exactly as written.",
-        },
-      ];
+        return [
+          { type: "image" as const, image: imageUrl },
+          {
+            type: "text" as const,
+            text: "Extract all text from this image exactly as written.",
+          },
+        ];
+      });
+
+      return {
+        index: photo.index,
+        ocr: generateText({
+          system: OCR_SYSTEM_PROMPT,
+          prompt,
+          model: "anthropic:claude-sonnet-4-5",
+        }),
+      };
     });
 
-    // Single OCR call for the first photo
-    const ocr = generateText({
-      system: OCR_SYSTEM_PROMPT,
-      prompt: ocrPrompt,
-      model: "anthropic:claude-sonnet-4-5",
-    });
-
-    // Check if OCR is pending
+    // Check if any OCR is pending
     const ocrPending = computed(() => {
-      const photos = photoSources;
-      if (!photos || photos.length === 0) return false;
-      return Boolean(ocr.pending);
+      const calls = ocrCalls;
+      if (!calls || calls.length === 0) return false;
+      return calls.some(
+        (call: { index: number; ocr: { pending: boolean } }) => call.ocr.pending,
+      );
     });
 
     // Get OCR results as a map (index -> text)
     const ocrResults = computed((): Record<number, string> => {
-      const photos = photoSources;
+      const calls = ocrCalls;
       const results: Record<number, string> = {};
-      if (!photos || photos.length === 0) return results;
+      if (!calls || calls.length === 0) return results;
 
-      // For the first photo, use the OCR result
-      if (photos[0] && ocr.result) {
-        results[photos[0].index] = ocr.result as string;
+      for (const call of calls) {
+        if (call.ocr.result) {
+          results[call.index] = call.ocr.result as string;
+        }
       }
       return results;
     });
 
     // Reactive extraction - only runs when extractionPrompt is set
+    // Note: generateObject accepts Opaque<> which allows Cell-wrapped values
     const extraction = generateObject({
       system: EXTRACTION_SYSTEM_PROMPT,
       prompt: extractionPrompt,
-      schema: extractSchema as any,
+      schema: extractSchema,
       model: "anthropic:claude-haiku-4-5",
-    } as any);
+    });
 
     // Build preview from extraction result
     const preview = computed((): ExtractionPreview | null => {
@@ -1092,7 +1125,9 @@ ${extractedSummary.join("\n")}`;
     const isNoResultsPhase = computed(() => currentPhase === "no-results");
     const hasNoSources = computed(() => extractableSources.length === 0);
     const isSingleSource = computed(() => selectedSourceCount === 1);
-    const extractButtonDisabled = computed(() => !hasSelectedSources || ocrPending);
+    const extractButtonDisabled = computed(() =>
+      !hasSelectedSources || ocrPending
+    );
     const extractButtonBackground = computed(() =>
       hasSelectedSources && !ocrPending ? "#f59e0b" : "#d1d5db"
     );
@@ -1120,7 +1155,8 @@ ${extractedSummary.join("\n")}`;
       return !enabled;
     });
     const hasTrashableSources = computed(() =>
-      extractableSources.filter((s: ExtractableSource) => s.type !== "notes").length > 0
+      extractableSources.filter((s: ExtractableSource) => s.type !== "notes")
+        .length > 0
     );
     const cleanupFailed = computed(() => {
       const status = cleanupApplyStatus.get();
@@ -1522,7 +1558,7 @@ ${extractedSummary.join("\n")}`;
                           const current = typeof rawCurrent === "boolean"
                             ? rawCurrent
                             : true;
-                          cleanupNotesEnabled.set(!current as any);
+                          cleanupNotesEnabled.set(!current);
                         }}
                       />
                       Enable cleanup
@@ -1569,7 +1605,13 @@ ${extractedSummary.join("\n")}`;
                       {/* Before/After preview when cleanup enabled */}
                       {ifElse(
                         showCleanupPreview,
-                        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "8px",
+                          }}
+                        >
                           <div
                             style={{
                               fontSize: "12px",
@@ -1638,7 +1680,12 @@ ${extractedSummary.join("\n")}`;
                               >
                                 {ifElse(
                                   isCleanedNotesEmpty,
-                                  <span style={{ fontStyle: "italic", color: "#9ca3af" }}>
+                                  <span
+                                    style={{
+                                      fontStyle: "italic",
+                                      color: "#9ca3af",
+                                    }}
+                                  >
                                     (empty)
                                   </span>,
                                   cleanedNotesContent,
@@ -1698,7 +1745,9 @@ ${extractedSummary.join("\n")}`;
                     Select imported files to move to trash:
                   </div>
                   {extractableSources
-                    .filter((source: ExtractableSource) => source.type !== "notes")
+                    .filter((source: ExtractableSource) =>
+                      source.type !== "notes"
+                    )
                     .map((source: ExtractableSource) => (
                       <div
                         key={source.index + 1000}
@@ -1747,9 +1796,9 @@ ${extractedSummary.join("\n")}`;
                     Warning: Notes cleanup failed
                   </div>
                   <div style={{ fontSize: "12px", color: "#dc2626" }}>
-                    The extracted fields were applied successfully, but the Notes
-                    module could not be cleaned up. The original content remains
-                    unchanged. Check the console for details.
+                    The extracted fields were applied successfully, but the
+                    Notes module could not be cleaned up. The original content
+                    remains unchanged. Check the console for details.
                   </div>
                 </div>,
                 null,
@@ -1807,7 +1856,9 @@ ${extractedSummary.join("\n")}`;
                     trashSelectionsCell: trashSelections,
                     cleanupEnabledValue: (() => {
                       const rawEnabled = cleanupNotesEnabled.get();
-                      return typeof rawEnabled === "boolean" ? rawEnabled : true;
+                      return typeof rawEnabled === "boolean"
+                        ? rawEnabled
+                        : true;
                     })(),
                     cleanedNotesValue: (() => {
                       // Dereference the computed value

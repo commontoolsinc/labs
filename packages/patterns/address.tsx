@@ -22,7 +22,7 @@ export const MODULE_METADATA: ModuleMetadata = {
     city: { type: "string", description: "City" },
     state: { type: "string", description: "State/Province" },
     zip: { type: "string", description: "ZIP/Postal code" },
-    addressLabel: {
+    label: {
       type: "string",
       enum: STANDARD_LABELS,
       description: "Address label (Home, Work, etc.)",
