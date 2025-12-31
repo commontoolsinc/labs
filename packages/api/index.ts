@@ -1305,12 +1305,29 @@ export type WishTag = `/${string}` | `#${string}`;
 
 export type DID = `did:${string}:${string}`;
 
+/**
+ * Scope for wish() search operations.
+ * - `spaces`: Search allCharms in the specified spaces + subtree
+ *   - `"~"` = home space (user identity DID)
+ *   - `"."` = current space
+ *   - DID = specific space
+ * - `cells`: Traverse the specified cells directly
+ */
+export type WishScope =
+  | { spaces: (DID | "~" | ".")[] }
+  | { cells: OpaqueRef<unknown>[] };
+
 export type WishParams = {
   query: WishTag | string;
   path?: string[];
   context?: Record<string, any>;
   schema?: JSONSchema;
-  scope?: (DID | "~" | ".")[];
+  /** Search scope. undefined = search favorites (default/backward-compatible) */
+  scope?: WishScope;
+  /** Max traversal depth. Default: 0 if scope undefined, 10 if scope provided */
+  maxDepth?: number;
+  /** Max results to return. Default: 1. Use 0 for unlimited. */
+  limit?: number;
 };
 
 export type WishState<T> = {
