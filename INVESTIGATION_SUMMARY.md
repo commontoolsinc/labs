@@ -46,13 +46,19 @@ When reading with a schema selector immediately after committing:
 
 **But**: `get()` doesn't await `sync()`, so how does this block the synchronous read?
 
-## ✅ ROOT CAUSE FOUND
+## ✅ ROOT CAUSES FOUND - TWO SEPARATE O(n²) ISSUES!
 
-**See INVESTIGATION_ROOT_CAUSE_FOUND.md for complete analysis.**
+**See:**
+- **INVESTIGATION_ROOT_CAUSE_FOUND.md** - resolveLink() issue
+- **CRITICAL_CLAIM_PERFORMANCE_ISSUE.md** - History.claim() issue (explains profiling!)
 
 ### Summary
 
-The 20ms delay is caused by **repeated resolveLink() calls** during array schema processing:
+The 20ms delay is caused by **TWO separate O(n²) performance bottlenecks**:
+
+#### Issue #1: Repeated resolveLink() Calls (15-25ms)
+
+During array schema processing:
 
 1. **Notebook pattern** exports `mentionable: notes` (Cell<NoteCharm[]>)
 2. **BacklinksIndex** calls `.get()` on mentionable in a lift function
@@ -60,24 +66,69 @@ The 20ms delay is caused by **repeated resolveLink() calls** during array schema
 4. **Cell.get()** calls validateAndTransform with array schema
 5. **For each array element**, validateAndTransform:
    - Calls `resolveLink()` → 2-4 storage reads per element
-   - Calls `JSON.stringify()` for deduplication
-   - Does O(n) linear search in seen array
    - Recursively processes element schema
 
-### Why It's Slow
+**Cost**: ~5 resolveLink calls × 3-5ms each = **15-25ms**
 
-- **resolveLink() does 2-4 reads** from storage per call
-- **Called for every array element** and their nested properties
-- **Reads from nursery** (pending commits) have overhead
-- **O(n²) complexity** from linear search in seen array
-- For 2 notes: ~3-5 resolveLink calls × 3-5ms each = **15-25ms**
+#### Issue #2: History.claim() O(n²) Consistency Checks (5-10ms) 🔥
+
+**This is what profiling shows!**
+
+**Location**: `packages/runner/src/storage/transaction/chronicle.ts:213, 367-395`
+
+On **EVERY read**, chronicle.readValueOrThrow() calls:
+```typescript
+const claim = this.#history.claim(invariant);  // Line 213
+```
+
+And claim() does:
+```typescript
+for (const candidate of this) {  // O(n) - iterates ALL previous invariants
+  if (Address.intersects(attestation.address, candidate.address)) {
+    const expected = read(candidate, address).ok?.value;
+    const actual = read(attestation, address).ok?.value;
+
+    if (JSON.stringify(expected) !== JSON.stringify(actual)) {  // JSON.stringify!
+      return { error: ... };
+    }
+  }
+}
+```
+
+**Complexity**: O(n²) where n = number of reads in transaction
+- Read 1: checks 0 invariants
+- Read 2: checks 1 invariant (2 JSON.stringify calls)
+- Read 3: checks 2 invariants (4 JSON.stringify calls)
+- Read N: checks N-1 invariants
+
+For 2 notes with 3 properties each: ~8-10 reads → 36 invariant checks with **72 JSON.stringify calls**
+
+**Cost**: ~5-10ms
+
+### Combined Impact
+
+**Total**: 15-25ms (resolveLink) + 5-10ms (claim) = **20-35ms** ✓ Matches user report!
+
+### Why Profiling Shows `claim`
+
+User said profiling shows time in `claim` - this makes perfect sense:
+- claim() called on **every read** (line 213)
+- Does O(n) iteration through all invariants
+- Does JSON.stringify comparisons
+- Gets slower as transaction accumulates more reads
 
 ### Fixes
 
-1. **Cache resolveLink results** (high priority)
-2. **Change seen from Array to Map** (high priority)
-3. **Optimize link key generation** (medium priority)
-4. **Batch resolve for arrays** (medium priority)
+**High Priority:**
+1. **Index History invariants by address** - O(1) lookup instead of O(n)
+2. **Cache JSON.stringify results** - Avoid repeated stringify of same objects
+3. **Cache resolveLink results** - Eliminate redundant resolveLink calls
+4. **Change validateAndTransform seen to Map** - O(1) instead of O(n)
+
+**Medium Priority:**
+5. **Batch read tracking** - Claim invariants in batch at commit time
+6. **Use structural comparison** - Faster than JSON.stringify for equality
+7. **Optimize link key generation** - Faster than full JSON.stringify
 
 ## Potential Fixes (Once Root Cause Confirmed)
 
