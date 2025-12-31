@@ -2,15 +2,19 @@
 
 ## Executive Summary
 
-Two O(n²) bottlenecks cause 20-35ms delays when reading mentionable arrays:
-1. **History.claim()** - O(n²) invariant checks with JSON.stringify (5-10ms)
-2. **Repeated resolveLink() calls** - 2-4 storage reads per array element (15-25ms)
+History.claim() causes O(n²) performance degradation when reading data:
+- On **every read**, claim() iterates through all previous read invariants
+- For each intersecting address, calls read() twice + JSON.stringify() twice
+- Result: O(n²) complexity that becomes catastrophic with large transactions
 
-This plan implements optimizations to reduce delay significantly, with primary focus on the version-based fast path for claim().
+**Profiling confirms**: Time is spent in `claim` during .get() operations.
+
+This plan implements a **version-based fast path** for optimistic concurrency control.
 
 **Expected Impact:**
-- 2 notes: 20-35ms → 15-25ms (25-40% improvement)
-- 100 notes: 8+ seconds → <500ms (95%+ improvement)
+- Small transactions (2-10 reads): Save 5-10ms in commit time
+- Large transactions (100+ reads): Save 5-10 **seconds** in commit time
+- Common case (no concurrent modifications): >95% of transactions use fast path
 
 ---
 
@@ -267,101 +271,15 @@ Chronicle.commit(): 7.10ms (slow path, 8 invariants, version 5→6)
 
 ---
 
-## Phase 2: Change validateAndTransform seen to Map
+## Phase 2: Testing & Verification
 
-### Background
-
-The `seen` array in validateAndTransform uses Array.find() for cycle detection, which is O(n) per lookup. As more cells are processed, lookups get slower. With Map, lookups are O(1).
-
-### 2.1 Update Function Signature
-
-**File**: `packages/runner/src/schema.ts`
-
-**Location**: Line 329
-
-**Change:**
-```typescript
-// OLD:
-export function validateAndTransform(
-  runtime: Runtime,
-  tx: IExtendedStorageTransaction | undefined,
-  link: NormalizedFullLink,
-  synced: boolean = false,
-  seen: Array<[string, any]> = [],
-): any {
-
-// NEW:
-export function validateAndTransform(
-  runtime: Runtime,
-  tx: IExtendedStorageTransaction | undefined,
-  link: NormalizedFullLink,
-  synced: boolean = false,
-  seen: Map<string, any> = new Map(),
-): any {
-```
-
-### 2.2 Update seen Lookups
-
-**File**: `packages/runner/src/schema.ts`
-
-**Location**: Lines 379-383
-
-**Change:**
-```typescript
-// OLD:
-const seenKey = JSON.stringify(link);
-const seenEntry = seen.find((entry) => entry[0] === seenKey);
-if (seenEntry) {
-  return seenEntry[1];
-}
-
-// NEW:
-const seenKey = JSON.stringify(link);
-if (seen.has(seenKey)) {
-  return seen.get(seenKey);
-}
-```
-
-### 2.3 Update seen Insertions
-
-**File**: `packages/runner/src/schema.ts`
-
-**Locations**: Search for all `seen.push(` calls and replace with `seen.set(`
-
-**Pattern to find:**
-```typescript
-seen.push([seenKey, result]);
-```
-
-**Replace with:**
-```typescript
-seen.set(seenKey, result);
-```
-
-**Expected locations** (approximate line numbers):
-- Line 480
-- Line 746
-- Line 750
-
-**Verification**: After changes, search the file for `seen.push` - there should be 0 results.
-
-### 2.4 Update Recursive Calls
-
-All recursive `validateAndTransform()` calls already pass `seen` parameter, so no changes needed - Map will propagate automatically.
-
----
-
-## Phase 3: Testing & Verification
-
-### 3.1 Create Performance Benchmark
+### 2.1 Create Performance Benchmark
 
 **File**: `packages/runner/test/claim-optimization.bench.ts`
 
-**Purpose**: Measure actual performance improvements
+**Purpose**: Measure commit time improvements using Deno's built-in benchmark API
 
 ```typescript
-import { describe, it } from "@std/testing/bdd";
-import { assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -390,210 +308,150 @@ const notebookSchema: JSONSchema = {
   },
 };
 
-describe("claim() optimization benchmarks", () => {
-  it("should use fast path when no concurrent modifications", async () => {
-    const storageManager = StorageManager.emulate({ as: signer });
-    const runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
-
-    // Transaction 1: Write data
-    const tx1 = runtime.edit();
-
-    const note1 = runtime.getCell(space, "note-1", noteSchema, tx1);
-    note1.set({ title: "Note 1", content: "Content 1", noteId: "1" });
-
-    const note2 = runtime.getCell(space, "note-2", noteSchema, tx1);
-    note2.set({ title: "Note 2", content: "Content 2", noteId: "2" });
-
-    const notebook = runtime.getCell(space, "notebook", notebookSchema, tx1);
-    notebook.set({ title: "My Notebook", notes: [note1, note2] });
-
-    await tx1.commit();
-
-    // Transaction 2: Read immediately after (no conflicts)
-    const tx2 = runtime.edit();
-    const notebookCell = runtime.getCell(space, "notebook", notebookSchema, tx2);
-
-    const readStart = performance.now();
-    const value = notebookCell.get();
-    const readTime = performance.now() - readStart;
-
-    const commitStart = performance.now();
-    await tx2.commit();
-    const commitTime = performance.now() - commitStart;
-
-    console.log(`\n=== Benchmark Results ===`);
-    console.log(`Read time: ${readTime.toFixed(2)}ms`);
-    console.log(`Commit time: ${commitTime.toFixed(2)}ms`);
-    console.log(`Total: ${(readTime + commitTime).toFixed(2)}ms`);
-    console.log(`Expected: commit <1ms (fast path), total <20ms`);
-
-    assertEquals(value.notes.length, 2);
-
-    await runtime.dispose();
-    await storageManager.close();
+// Benchmark: Commit with 2 notes (fast path expected)
+Deno.bench("commit - 2 notes - fast path", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
   });
 
-  it("should detect and handle concurrent modifications", async () => {
-    const storageManager = StorageManager.emulate({ as: signer });
-    const runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
+  // Write data
+  const tx1 = runtime.edit();
+  const note1 = runtime.getCell(space, "note-1", noteSchema, tx1);
+  note1.set({ title: "Note 1", content: "Content 1", noteId: "1" });
+  const note2 = runtime.getCell(space, "note-2", noteSchema, tx1);
+  note2.set({ title: "Note 2", content: "Content 2", noteId: "2" });
+  const notebook = runtime.getCell(space, "notebook", notebookSchema, tx1);
+  notebook.set({ title: "My Notebook", notes: [note1, note2] });
+  await tx1.commit();
 
-    // Transaction 1: Write initial data
-    const tx1 = runtime.edit();
-    const note = runtime.getCell(space, "conflict-note", noteSchema, tx1);
-    note.set({ title: "Original", content: "Original", noteId: "c1" });
-    await tx1.commit();
+  // Read and commit (measured operation)
+  const tx2 = runtime.edit();
+  const notebookCell = runtime.getCell(space, "notebook", notebookSchema, tx2);
+  notebookCell.get(); // Trigger reads
+  await tx2.commit(); // This is what we're measuring
 
-    // Transaction 2: Start, read
-    const tx2 = runtime.edit();
-    const note2 = runtime.getCell(space, "conflict-note", noteSchema, tx2);
-    const value2 = note2.get();
-    assertEquals(value2.title, "Original");
+  await runtime.dispose();
+  await storageManager.close();
+});
 
-    // Transaction 3: Concurrent modification
-    const tx3 = runtime.edit();
-    const note3 = runtime.getCell(space, "conflict-note", noteSchema, tx3);
-    note3.set({ title: "Modified", content: "Modified", noteId: "c1" });
-    await tx3.commit();
-
-    // Transaction 2: Try to commit (should detect conflict via slow path)
-    const commitStart = performance.now();
-    const result = await tx2.commit();
-    const commitTime = performance.now() - commitStart;
-
-    console.log(`\n=== Conflict Detection ===`);
-    console.log(`Commit time: ${commitTime.toFixed(2)}ms (slow path)`);
-    console.log(`Result:`, "error" in result ? "Conflict detected ✓" : "No conflict");
-
-    // Should fail with conflict
-    assertEquals("error" in result, true);
-
-    await runtime.dispose();
-    await storageManager.close();
+// Benchmark: Commit with 10 notes
+Deno.bench("commit - 10 notes - fast path", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
   });
 
-  it("should measure scaling with array size", async () => {
-    const storageManager = StorageManager.emulate({ as: signer });
-    const runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
+  const tx1 = runtime.edit();
+  const notes = [];
+  for (let i = 0; i < 10; i++) {
+    const note = runtime.getCell(space, `note-${i}`, noteSchema, tx1);
+    note.set({ title: `Note ${i}`, content: `Content ${i}`, noteId: `${i}` });
+    notes.push(note);
+  }
+  const notebook = runtime.getCell(space, "notebook-10", notebookSchema, tx1);
+  notebook.set({ title: "Notebook 10", notes });
+  await tx1.commit();
 
-    const sizes = [2, 5, 10, 20, 50, 100];
+  const tx2 = runtime.edit();
+  const notebookCell = runtime.getCell(space, "notebook-10", notebookSchema, tx2);
+  notebookCell.get();
+  await tx2.commit();
 
-    console.log(`\n=== Array Size Scaling ===`);
-    console.log(`Size | Read | Commit | Total`);
-    console.log(`-----|------|--------|------`);
+  await runtime.dispose();
+  await storageManager.close();
+});
 
-    for (const size of sizes) {
-      const tx1 = runtime.edit();
-
-      const notes = [];
-      for (let i = 0; i < size; i++) {
-        const note = runtime.getCell(
-          space,
-          `scale-note-${size}-${i}`,
-          noteSchema,
-          tx1
-        );
-        note.set({
-          title: `Note ${i}`,
-          content: `Content ${i}`,
-          noteId: `${i}`
-        });
-        notes.push(note);
-      }
-
-      const notebook = runtime.getCell(
-        space,
-        `scale-notebook-${size}`,
-        notebookSchema,
-        tx1
-      );
-      notebook.set({ title: `Notebook ${size}`, notes });
-
-      await tx1.commit();
-
-      const tx2 = runtime.edit();
-      const notebookCell = runtime.getCell(
-        space,
-        `scale-notebook-${size}`,
-        notebookSchema,
-        tx2
-      );
-
-      const readStart = performance.now();
-      notebookCell.get();
-      const readTime = performance.now() - readStart;
-
-      const commitStart = performance.now();
-      await tx2.commit();
-      const commitTime = performance.now() - commitStart;
-
-      const total = readTime + commitTime;
-
-      console.log(
-        `${size.toString().padStart(4)} | ` +
-        `${readTime.toFixed(1).padStart(4)}ms | ` +
-        `${commitTime.toFixed(1).padStart(6)}ms | ` +
-        `${total.toFixed(1).padStart(4)}ms`
-      );
-    }
-
-    console.log(`\nExpected: Commit time should stay <1ms for all sizes (fast path)`);
-    console.log(`Read time will increase with size (resolveLink overhead)`);
-
-    await runtime.dispose();
-    await storageManager.close();
+// Benchmark: Commit with 50 notes
+Deno.bench("commit - 50 notes - fast path", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
   });
+
+  const tx1 = runtime.edit();
+  const notes = [];
+  for (let i = 0; i < 50; i++) {
+    const note = runtime.getCell(space, `note-${i}`, noteSchema, tx1);
+    note.set({ title: `Note ${i}`, content: `Content ${i}`, noteId: `${i}` });
+    notes.push(note);
+  }
+  const notebook = runtime.getCell(space, "notebook-50", notebookSchema, tx1);
+  notebook.set({ title: "Notebook 50", notes });
+  await tx1.commit();
+
+  const tx2 = runtime.edit();
+  const notebookCell = runtime.getCell(space, "notebook-50", notebookSchema, tx2);
+  notebookCell.get();
+  await tx2.commit();
+
+  await runtime.dispose();
+  await storageManager.close();
+});
+
+// Benchmark: Commit with 100 notes
+Deno.bench("commit - 100 notes - fast path", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+
+  const tx1 = runtime.edit();
+  const notes = [];
+  for (let i = 0; i < 100; i++) {
+    const note = runtime.getCell(space, `note-${i}`, noteSchema, tx1);
+    note.set({ title: `Note ${i}`, content: `Content ${i}`, noteId: `${i}` });
+    notes.push(note);
+  }
+  const notebook = runtime.getCell(space, "notebook-100", notebookSchema, tx1);
+  notebook.set({ title: "Notebook 100", notes });
+  await tx1.commit();
+
+  const tx2 = runtime.edit();
+  const notebookCell = runtime.getCell(space, "notebook-100", notebookSchema, tx2);
+  notebookCell.get();
+  await tx2.commit();
+
+  await runtime.dispose();
+  await storageManager.close();
 });
 ```
 
-### 3.2 Run Benchmark
+### 2.2 Run Benchmark
 
 ```bash
 cd packages/runner
-deno test --allow-all test/claim-optimization.bench.ts
+deno bench --allow-all test/claim-optimization.bench.ts
 ```
 
 **Expected output:**
 
 ```
-=== Benchmark Results ===
-Read time: 15.20ms
-Commit time: 0.60ms
-Total: 15.80ms
-Expected: commit <1ms (fast path), total <20ms
-
-=== Conflict Detection ===
-Commit time: 7.10ms (slow path)
-Result: Conflict detected ✓
-
-=== Array Size Scaling ===
-Size | Read | Commit | Total
------|------|--------|------
-   2 | 15.2ms |   0.6ms | 15.8ms
-   5 | 28.4ms |   0.7ms | 29.1ms
-  10 | 45.2ms |   0.8ms | 46.0ms
-  20 | 82.3ms |   0.9ms | 83.2ms
-  50 |210.5ms |   1.1ms |211.6ms
- 100 |420.8ms |   1.3ms |422.1ms
-
-Expected: Commit time should stay <1ms for all sizes (fast path)
-Read time will increase with size (resolveLink overhead)
+benchmark                           time (avg)        iter/s             (min … max)       p75       p99      p995
+---------------------------------------------------------------- -----------------------------
+commit - 2 notes - fast path        15.2 ms/iter          65.8   (14.8 ms … 16.1 ms)   15.5 ms   16.1 ms   16.1 ms
+commit - 10 notes - fast path       46.3 ms/iter          21.6   (44.9 ms … 48.2 ms)   47.1 ms   48.2 ms   48.2 ms
+commit - 50 notes - fast path      215.4 ms/iter           4.6  (211.2 ms … 220.8 ms)  218.3 ms  220.8 ms  220.8 ms
+commit - 100 notes - fast path     425.7 ms/iter           2.3  (418.3 ms … 435.2 ms)  430.1 ms  435.2 ms  435.2 ms
 ```
 
-**Before optimization (for comparison):**
+**Before optimization (expected):**
 ```
- 100 |420.8ms |8000ms |8420ms  ← claim() O(n²) disaster!
+commit - 100 notes - fast path    8500 ms/iter           0.1    ← claim() O(n²) disaster!
 ```
 
-### 3.3 Verify Existing Tests Pass
+**After optimization (expected):**
+```
+commit - 100 notes - fast path     425 ms/iter           2.3    ← ~20x faster!
+```
+
+The commit time should stay roughly constant regardless of array size (fast path), while read time increases linearly due to resolveLink overhead (not addressed in this optimization).
+
+### 2.3 Verify Existing Tests Pass
 
 ```bash
 cd packages/runner
@@ -607,7 +465,7 @@ All existing tests must pass. Pay special attention to:
 
 If any fail, it indicates the optimization broke something.
 
-### 3.4 Test Edge Cases
+### 2.4 Test Edge Cases
 
 Create additional tests for:
 
@@ -644,9 +502,9 @@ await tx.commit(); // Should use fast path
 
 ---
 
-## Phase 4: Cleanup and Documentation
+## Phase 3: Cleanup and Documentation
 
-### 4.1 Remove Instrumentation
+### 3.1 Remove Instrumentation
 
 After verification in production, remove console.log statements from commit().
 
@@ -660,7 +518,7 @@ Remove:
 
 Keep only the core optimization logic.
 
-### 4.2 Add Code Comments
+### 3.2 Add Code Comments
 
 **File**: `packages/runner/src/storage/transaction/chronicle.ts`
 
@@ -685,7 +543,7 @@ Add documentation explaining the optimization:
 commit(): Result<ITransaction, IStorageTransactionInconsistent> {
 ```
 
-### 4.3 Update CHANGELOG
+### 3.3 Update CHANGELOG
 
 **File**: `packages/runner/CHANGELOG.md`
 
@@ -699,8 +557,6 @@ Add entry:
   concurrency control. Reduces commit time from O(n²) to O(n) in common
   case (no concurrent modifications). Typical improvement: 5-10ms for
   small transactions, 5-10 seconds for large transactions (100+ reads).
-- Changed validateAndTransform seen array to Map for O(1) lookups
-  instead of O(n).
 ```
 
 ---
@@ -866,17 +722,13 @@ Process multiple cells in single storage operation.
 | `chronicle.ts` | ~55 | Add #startVersion to Chronicle |
 | `chronicle.ts` | ~60 | Capture version in constructor |
 | `chronicle.ts` | ~237-297 | Implement fast/slow paths in commit() |
-| `schema.ts` | ~329 | Change seen to Map in signature |
-| `schema.ts` | ~379 | Update seen lookup to use Map |
-| `schema.ts` | Multiple | Change seen.push to seen.set |
 
 ---
 
 ## Timeline Estimate
 
 - Phase 1 (Version fast path): 2-3 hours
-- Phase 2 (Map optimization): 1 hour
-- Phase 3 (Testing): 2-3 hours
-- Phase 4 (Cleanup): 1 hour
+- Phase 2 (Testing): 2-3 hours
+- Phase 3 (Cleanup): 1 hour
 
-**Total**: 6-8 hours development + testing time
+**Total**: 5-7 hours development + testing time
