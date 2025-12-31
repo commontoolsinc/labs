@@ -534,7 +534,7 @@ export class Runtime {
     return this.runner.runSynced(resultCell, recipe, inputs);
   }
 
-  start<T = any>(resultCell: Cell<T>): void {
+  start<T = any>(resultCell: Cell<T>): Promise<boolean> {
     return this.runner.start(resultCell);
   }
 

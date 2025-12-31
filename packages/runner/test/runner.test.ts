@@ -1170,4 +1170,152 @@ describe("runner utils", () => {
       });
     });
   });
+
+  describe("start() lazy sync behavior", () => {
+    it("start() returns Promise<boolean> that resolves to true", async () => {
+      const recipe: Recipe = {
+        argumentSchema: {
+          type: "object",
+          properties: { input: { type: "number" } },
+        },
+        resultSchema: {},
+        result: { output: { $alias: { path: ["internal", "output"] } } },
+        nodes: [
+          {
+            module: {
+              type: "javascript",
+              implementation: (v: { input: number }) => v.input * 2,
+            },
+            inputs: { $alias: { path: ["argument"] } },
+            outputs: { $alias: { path: ["internal", "output"] } },
+          },
+        ],
+      };
+
+      const resultCell = runtime.getCell(space, "start returns promise");
+      runtime.setup(undefined, recipe, { input: 5 }, resultCell);
+      const result = await runtime.start(resultCell);
+      expect(result).toBe(true);
+      await runtime.idle();
+      expect(resultCell.getAsQueryResult()).toEqual({ output: 10 });
+    });
+
+    it("start() returns true immediately if already running", async () => {
+      const recipe: Recipe = {
+        argumentSchema: {
+          type: "object",
+          properties: { input: { type: "number" } },
+        },
+        resultSchema: {},
+        result: { output: { $alias: { path: ["internal", "output"] } } },
+        nodes: [
+          {
+            module: {
+              type: "javascript",
+              implementation: (v: { input: number }) => v.input,
+            },
+            inputs: { $alias: { path: ["argument"] } },
+            outputs: { $alias: { path: ["internal", "output"] } },
+          },
+        ],
+      };
+
+      const resultCell = runtime.getCell(space, "start idempotent");
+      runtime.setup(undefined, recipe, { input: 1 }, resultCell);
+      await runtime.start(resultCell);
+      await runtime.idle();
+
+      // Second call should return true immediately
+      const result = await runtime.start(resultCell);
+      expect(result).toBe(true);
+    });
+
+    it("start() runs synchronously when data is available", async () => {
+      const recipe: Recipe = {
+        argumentSchema: {
+          type: "object",
+          properties: { input: { type: "number" } },
+        },
+        resultSchema: {},
+        result: { output: { $alias: { path: ["internal", "output"] } } },
+        nodes: [
+          {
+            module: {
+              type: "javascript",
+              implementation: (v: { input: number }) => v.input * 3,
+            },
+            inputs: { $alias: { path: ["argument"] } },
+            outputs: { $alias: { path: ["internal", "output"] } },
+          },
+        ],
+      };
+
+      const resultCell = runtime.getCell(space, "start sync behavior");
+      runtime.setup(undefined, recipe, { input: 4 }, resultCell);
+
+      // start() should execute synchronously when data is available
+      // The charm should be registered in cancels map immediately
+      runtime.start(resultCell);
+      // Should be running now (check via runner.cancels having the key)
+      expect(
+        runtime.runner["cancels"].has(runtime.runner["getDocKey"](resultCell)),
+      ).toBe(true);
+
+      await runtime.idle();
+      expect(resultCell.getAsQueryResult()).toEqual({ output: 12 });
+    });
+
+    it("restarts with new recipe when $TYPE changes via setup()", async () => {
+      const recipe1: Recipe = {
+        argumentSchema: {
+          type: "object",
+          properties: { input: { type: "number" } },
+        },
+        resultSchema: {},
+        result: { output: { $alias: { path: ["internal", "output"] } } },
+        nodes: [
+          {
+            module: {
+              type: "javascript",
+              implementation: (v: { input: number }) => v.input * 2,
+            },
+            inputs: { $alias: { path: ["argument"] } },
+            outputs: { $alias: { path: ["internal", "output"] } },
+          },
+        ],
+      };
+
+      const recipe2: Recipe = {
+        argumentSchema: {
+          type: "object",
+          properties: { input: { type: "number" } },
+        },
+        resultSchema: {},
+        result: { output: { $alias: { path: ["internal", "output"] } } },
+        nodes: [
+          {
+            module: {
+              type: "javascript",
+              implementation: (v: { input: number }) => v.input * 10,
+            },
+            inputs: { $alias: { path: ["argument"] } },
+            outputs: { $alias: { path: ["internal", "output"] } },
+          },
+        ],
+      };
+
+      const resultCell = runtime.getCell(space, "recipe change restart");
+
+      // Run with first recipe
+      runtime.run(undefined, recipe1, { input: 5 }, resultCell);
+      await runtime.idle();
+      expect(resultCell.getAsQueryResult()).toEqual({ output: 10 }); // 5 * 2
+
+      // Change recipe via setup (not run or start)
+      // The $TYPE sink should detect the change and restart
+      await runtime.setup(undefined, recipe2, { input: 5 }, resultCell);
+      await runtime.idle();
+      expect(resultCell.getAsQueryResult()).toEqual({ output: 50 }); // 5 * 10
+    });
+  });
 });

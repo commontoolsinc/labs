@@ -110,6 +110,8 @@ export class Runner {
    * Prepare a charm for running by creating/updating its process and result
    * cells, registering the recipe, and applying defaults/arguments.
    * This does not schedule any nodes. Use start() to schedule execution.
+   * If the charm is already running and the recipe changes, it will stop the
+   * charm.
    */
   setup<T, R>(
     tx: IExtendedStorageTransaction | undefined,
@@ -123,11 +125,6 @@ export class Runner {
     argument: T,
     resultCell: Cell<R>,
   ): Promise<Cell<R>>;
-
-  /**
-   * Configure charm without running it. If the charm is already running and the
-   * recipe changes, it will stop the charm.
-   */
   setup<T, R = any>(
     providedTx: IExtendedStorageTransaction | undefined,
     recipeOrModule: Recipe | Module | undefined,
@@ -272,8 +269,8 @@ export class Runner {
         return { resultCell, needsStart: false };
       }
 
-      // Otherwise stop execution of the old recipe.
-      this.stop(resultCell);
+      // Recipe changed - let the $TYPE sink detect the change and handle
+      // stop() + start(). Don't call stop() here as it would cancel the sink.
     }
 
     // Walk the recipe's schema and extract all default values
@@ -360,15 +357,130 @@ export class Runner {
   /**
    * Start scheduling nodes for a previously set up charm.
    * If already started, this is a no-op.
+   *
+   * Returns a Promise that resolves to true on success, or rejects with an error.
+   * Runs synchronously when data is available (important for tests).
    */
-  start<T = any>(resultCell: Cell<T>): void {
+  start<T = any>(resultCell: Cell<T>): Promise<boolean> {
+    const key = this.getDocKey(resultCell);
+    if (this.cancels.has(key)) return Promise.resolve(true); // Already started
+
+    // Sync result cell if empty, then continue
+    if (resultCell.getRaw() === undefined) {
+      return Promise.resolve(resultCell.sync()).then(() =>
+        this.doStart(resultCell)
+      );
+    }
+
+    // Data available - run synchronously
+    return this.doStart(resultCell);
+  }
+
+  private doStart<T = any>(resultCell: Cell<T>): Promise<boolean> {
+    const key = this.getDocKey(resultCell);
+    // Check again after potential sync
+    if (this.cancels.has(key)) return Promise.resolve(true);
+
+    const processCell = resultCell.getSourceCell();
+    if (!processCell) {
+      return Promise.reject(
+        new Error("Cannot start: process cell missing. Did you call setup()?"),
+      );
+    }
+
+    const recipeId = processCell.key(TYPE).getRaw({
+      meta: ignoreReadForScheduling,
+    });
+    if (!recipeId) {
+      return Promise.reject(
+        new Error("Cannot start: recipe id missing in process cell."),
+      );
+    }
+
+    // Try sync lookup first
+    const recipe = this.runtime.recipeManager.recipeById(recipeId);
+    if (!recipe) {
+      // Async load, then finish setup
+      return this.runtime.recipeManager
+        .loadRecipe(recipeId, resultCell.space)
+        .then((loaded) =>
+          this.finishStart(resultCell, processCell, loaded, recipeId)
+        );
+    }
+
+    // Sync path - recipe available
+    return this.finishStart(resultCell, processCell, recipe, recipeId);
+  }
+
+  private finishStart<T = any>(
+    resultCell: Cell<T>,
+    processCell: Cell<any>,
+    recipeOrModule: Recipe | Module,
+    recipeId: string,
+  ): Promise<boolean> {
+    const key = this.getDocKey(resultCell);
+    // Check again after potential async load
+    if (this.cancels.has(key)) return Promise.resolve(true);
+
+    // Resolve module to recipe if needed
+    let recipe: Recipe;
+    if (isModule(recipeOrModule)) {
+      const module = recipeOrModule as Module;
+      recipe = {
+        argumentSchema: module.argumentSchema ?? {},
+        resultSchema: module.resultSchema ?? {},
+        result: { $alias: { path: ["internal"] } },
+        nodes: [
+          {
+            module,
+            inputs: { $alias: { path: ["argument"] } },
+            outputs: { $alias: { path: ["internal"] } },
+          },
+        ],
+      } satisfies Recipe;
+    } else {
+      recipe = recipeOrModule as Recipe;
+    }
+
+    // Create cancel group
+    const [cancel, addCancel] = useCancelGroup();
+    this.cancels.set(key, cancel);
+    this.allCancels.add(cancel);
+
+    // Subscribe to $TYPE to watch for recipe changes
+    const typeCell = processCell.key(TYPE);
+    let currentRecipeId = recipeId;
+    addCancel(
+      typeCell.sink((newRecipeId) => {
+        const newId = newRecipeId as unknown as string | undefined;
+        if (newId && newId !== currentRecipeId) {
+          currentRecipeId = newId;
+          this.stop(resultCell);
+          this.start(resultCell); // Fire-and-forget restart
+        }
+      }),
+    );
+
+    // Instantiate nodes
+    this.discoverAndCacheFunctions(recipe, new Set());
     const tx = this.runtime.edit();
     try {
-      this.startWithTx(tx, resultCell);
+      for (const node of recipe.nodes) {
+        this.instantiateNode(
+          tx,
+          node.module,
+          node.inputs,
+          node.outputs,
+          processCell,
+          addCancel,
+          recipe,
+        );
+      }
     } finally {
-      // No writes expected; commit to release resources.
       tx.commit();
     }
+
+    return Promise.resolve(true);
   }
 
   private startWithTx<T = any>(
@@ -419,6 +531,22 @@ export class Runner {
     const [cancel, addCancel] = useCancelGroup();
     this.cancels.set(key, cancel);
     this.allCancels.add(cancel);
+
+    // Subscribe to $TYPE to watch for recipe changes
+    const recipeId = processCell.withTx(tx).key(TYPE).getRaw({
+      meta: ignoreReadForScheduling,
+    }) as string;
+    let currentRecipeId = recipeId;
+    addCancel(
+      processCell.key(TYPE).sink((newRecipeId) => {
+        const newId = newRecipeId as unknown as string | undefined;
+        if (newId && newId !== currentRecipeId) {
+          currentRecipeId = newId;
+          this.stop(resultCell);
+          this.start(resultCell); // Fire-and-forget restart
+        }
+      }),
+    );
 
     // Re-discover functions to be safe (idempotent)
     this.discoverAndCacheFunctions(recipe, new Set());
