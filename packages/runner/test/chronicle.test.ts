@@ -1167,14 +1167,19 @@ describe("Chronicle", () => {
         claims: [],
       });
 
+      // Second read returns ok - reads the updated replica value
+      // (Inconsistency detection deferred to commit time for performance)
       const secondRead = chronicle.read({
         id: "test:concurrent-update",
         type: "application/json",
         path: [],
       });
+      expect(secondRead.ok?.value).toEqual({ version: 2, status: "inactive" });
 
-      expect(secondRead.error).toBeDefined();
-      expect(secondRead.error?.name).toBe("StorageTransactionInconsistent");
+      // Commit fails because the first read invariant (v1) no longer matches replica (v2)
+      const commitResult = chronicle.commit();
+      expect(commitResult.error).toBeDefined();
+      expect(commitResult.error?.name).toBe("StorageTransactionInconsistent");
     });
   });
 
