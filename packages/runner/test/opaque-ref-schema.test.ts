@@ -332,4 +332,126 @@ describe("OpaqueRef Schema Support", () => {
       expect(alias.rootSchema.type).toBe("object");
     });
   });
+
+  describe("Schema $ref and $defs Resolution", () => {
+    it("should preserve rootSchema with $defs when navigating with key()", () => {
+      // Schema with $defs that needs to be preserved for nested $ref resolution
+      const schema = {
+        $defs: {
+          Address: {
+            type: "object",
+            properties: {
+              street: { type: "string" },
+              city: { type: "string" },
+            },
+          },
+          Person: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              home: { $ref: "#/$defs/Address" },
+            },
+          },
+        },
+        type: "object",
+        properties: {
+          user: { $ref: "#/$defs/Person" },
+        },
+      } as const satisfies JSONSchema;
+
+      // Create a cell with this schema
+      const ref = cell<{
+        user: {
+          name: string;
+          home: {
+            street: string;
+            city: string;
+          };
+        };
+      }>(undefined, schema);
+
+      // Navigate to user
+      const userRef = ref.key("user");
+      const userExport = userRef.export();
+
+      // The rootSchema should be preserved (contains $defs)
+      expect(userExport.rootSchema).toBeDefined();
+      expect((userExport.rootSchema as any).$defs).toBeDefined();
+      expect((userExport.rootSchema as any).$defs.Address).toBeDefined();
+
+      // Navigate further to home (which references Address via $ref)
+      const homeRef = userRef.key("home");
+      const homeExport = homeRef.export();
+
+      // The rootSchema should still be preserved at this level
+      expect(homeExport.rootSchema).toBeDefined();
+      expect((homeExport.rootSchema as any).$defs).toBeDefined();
+      expect((homeExport.rootSchema as any).$defs.Address).toBeDefined();
+
+      // Navigate to street (final property)
+      const streetRef = homeRef.key("street");
+      const streetExport = streetRef.export();
+
+      // Even at the leaf level, rootSchema should be preserved
+      expect(streetExport.rootSchema).toBeDefined();
+      expect((streetExport.rootSchema as any).$defs).toBeDefined();
+
+      // The schema at this level should be the string type
+      expect(streetExport.schema).toEqual({ type: "string" });
+    });
+
+    it("should handle deeply nested $ref chains with key() navigation", () => {
+      // Schema with chained $refs
+      const schema = {
+        $defs: {
+          Inner: {
+            type: "object",
+            properties: {
+              value: { type: "number" },
+            },
+          },
+          Middle: {
+            type: "object",
+            properties: {
+              inner: { $ref: "#/$defs/Inner" },
+            },
+          },
+          Outer: {
+            type: "object",
+            properties: {
+              middle: { $ref: "#/$defs/Middle" },
+            },
+          },
+        },
+        type: "object",
+        properties: {
+          outer: { $ref: "#/$defs/Outer" },
+        },
+      } as const satisfies JSONSchema;
+
+      const ref = cell<{
+        outer: {
+          middle: {
+            inner: {
+              value: number;
+            };
+          };
+        };
+      }>(undefined, schema);
+
+      // Navigate through the chain
+      const valueRef = ref.key("outer").key("middle").key("inner").key("value");
+      const exported = valueRef.export();
+
+      // The rootSchema should be preserved all the way down
+      expect(exported.rootSchema).toBeDefined();
+      expect((exported.rootSchema as any).$defs).toBeDefined();
+      expect((exported.rootSchema as any).$defs.Inner).toBeDefined();
+      expect((exported.rootSchema as any).$defs.Middle).toBeDefined();
+      expect((exported.rootSchema as any).$defs.Outer).toBeDefined();
+
+      // The schema at this level should be the number type
+      expect(exported.schema).toEqual({ type: "number" });
+    });
+  });
 });
