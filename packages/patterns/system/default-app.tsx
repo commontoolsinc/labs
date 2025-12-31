@@ -75,7 +75,9 @@ const dropOntoNotebook = handler<
   const notesList = notesCell.get() ?? [];
 
   // Prevent duplicates using Cell.equals
-  const alreadyExists = notesList.some((n) => Cell.equals(sourceCell, n as any));
+  const alreadyExists = notesList.some((n) =>
+    Cell.equals(sourceCell, n as any)
+  );
   if (alreadyExists) return;
 
   // Hide from Patterns list
@@ -282,13 +284,18 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
                   // Check if charm is a notebook by NAME prefix (isNotebook prop not reliable through proxy)
                   const isNotebook = lift((args: { c: unknown }) => {
                     const name = (args.c as any)?.[NAME];
-                    const result = typeof name === "string" && name.startsWith("📓");
+                    const result = typeof name === "string" &&
+                      name.startsWith("📓");
                     return result;
                   })({ c: charm });
 
                   const dragHandle = (
                     <ct-drag-source $cell={charm} type="note">
-                      <span style={{ cursor: "grab", padding: "4px", opacity: 0.5 }}>⠿</span>
+                      <span
+                        style={{ cursor: "grab", padding: "4px", opacity: 0.5 }}
+                      >
+                        ⠿
+                      </span>
                     </ct-drag-source>
                   );
 
@@ -308,11 +315,13 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
                           isNotebook,
                           <ct-drop-zone
                             accept="note"
-                            onct-drop={dropOntoNotebook({ notebook: charm as any })}
+                            onct-drop={dropOntoNotebook({
+                              notebook: charm as any,
+                            })}
                           >
                             {link}
                           </ct-drop-zone>,
-                          link
+                          link,
                         )}
                       </td>
                       <td>
