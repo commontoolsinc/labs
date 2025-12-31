@@ -31,23 +31,20 @@ async function cleanup(
 
 // Benchmark: Cell creation
 Deno.bench("Cell creation - simple schemaless (100x)", async () => {
-  const { runtime, storageManager, tx } = setup();
+  const { runtime, storageManager } = setup();
 
   for (let i = 0; i < 100; i++) {
-    const cell = runtime.getCell<number>(
-      space,
-      `bench-cell-${i}`,
-      undefined,
-      tx,
-    );
-    cell.set(42);
+    const tx = runtime.edit();
+    const cell = runtime.getCell<number>(space, `bench-cell-${i}`, undefined);
+    cell.withTx(tx).set(42);
+    tx.commit();
   }
 
-  await cleanup(runtime, storageManager, tx);
+  await cleanup(runtime, storageManager);
 });
 
 Deno.bench("Cell creation - with JSON schema (100x)", async () => {
-  const { runtime, storageManager, tx } = setup();
+  const { runtime, storageManager } = setup();
 
   const schema = {
     type: "object",
@@ -59,44 +56,50 @@ Deno.bench("Cell creation - with JSON schema (100x)", async () => {
   } as const satisfies JSONSchema;
 
   for (let i = 0; i < 100; i++) {
-    const cell = runtime.getCell(space, `bench-cell-schema-${i}`, schema, tx);
-    cell.set({ name: "John", age: 30 });
+    const tx = runtime.edit();
+    const cell = runtime.getCell(space, `bench-cell-schema-${i}`, schema);
+    cell.withTx(tx).set({ name: "John", age: 30 });
+    tx.commit();
   }
 
-  await cleanup(runtime, storageManager, tx);
+  await cleanup(runtime, storageManager);
 });
 
 Deno.bench("Cell creation - immutable (100x)", async () => {
-  const { runtime, storageManager, tx } = setup();
+  const { runtime, storageManager } = setup();
 
   for (let i = 0; i < 100; i++) {
+    const tx = runtime.edit();
     runtime.getImmutableCell(
       space,
       { value: 42 + i },
       { type: "object", properties: { value: { type: "number" } } },
       tx,
     );
+    tx.commit();
   }
 
-  await cleanup(runtime, storageManager, tx);
+  await cleanup(runtime, storageManager);
 });
 
 // Schema-based cell creation benchmarks
 Deno.bench("Cell creation - simple with schema (100x)", async () => {
-  const { runtime, storageManager, tx } = setup();
+  const { runtime, storageManager } = setup();
 
   const schema = { type: "number" } as const satisfies JSONSchema;
 
   for (let i = 0; i < 100; i++) {
-    const cell = runtime.getCell(space, `bench-cell-schema-${i}`, schema, tx);
-    cell.set(42);
+    const tx = runtime.edit();
+    const cell = runtime.getCell(space, `bench-cell-schema-${i}`, schema);
+    cell.withTx(tx).set(42);
+    tx.commit();
   }
 
-  await cleanup(runtime, storageManager, tx);
+  await cleanup(runtime, storageManager);
 });
 
 Deno.bench("Cell creation - object with nested schema (100x)", async () => {
-  const { runtime, storageManager, tx } = setup();
+  const { runtime, storageManager } = setup();
 
   const schema = {
     type: "object",
@@ -120,8 +123,9 @@ Deno.bench("Cell creation - object with nested schema (100x)", async () => {
   } as const satisfies JSONSchema;
 
   for (let i = 0; i < 100; i++) {
-    const cell = runtime.getCell(space, `bench-nested-schema-${i}`, schema, tx);
-    cell.set({
+    const tx = runtime.edit();
+    const cell = runtime.getCell(space, `bench-nested-schema-${i}`, schema);
+    cell.withTx(tx).set({
       user: {
         name: "John Doe",
         age: 30,
@@ -129,13 +133,14 @@ Deno.bench("Cell creation - object with nested schema (100x)", async () => {
       },
       tags: ["developer", "typescript"],
     });
+    tx.commit();
   }
 
-  await cleanup(runtime, storageManager, tx);
+  await cleanup(runtime, storageManager);
 });
 
 Deno.bench("Cell creation - array with schema (100x)", async () => {
-  const { runtime, storageManager, tx } = setup();
+  const { runtime, storageManager } = setup();
 
   const schema = {
     type: "array",
@@ -150,14 +155,16 @@ Deno.bench("Cell creation - array with schema (100x)", async () => {
   } as const satisfies JSONSchema;
 
   for (let i = 0; i < 100; i++) {
-    const cell = runtime.getCell(space, `bench-array-schema-${i}`, schema, tx);
-    cell.set([
+    const tx = runtime.edit();
+    const cell = runtime.getCell(space, `bench-array-schema-${i}`, schema);
+    cell.withTx(tx).set([
       { id: 1, name: "Item 1" },
       { id: 2, name: "Item 2" },
     ]);
+    tx.commit();
   }
 
-  await cleanup(runtime, storageManager, tx);
+  await cleanup(runtime, storageManager);
 });
 
 // Benchmark: Cell get operations
