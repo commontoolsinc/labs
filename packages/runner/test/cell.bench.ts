@@ -784,10 +784,12 @@ Deno.bench("Cell getAsLink - with options (1000x)", async () => {
 
 // Benchmark: Subscription operations
 Deno.bench("Cell sink - subscription execution (1000x)", async () => {
-  const { runtime, storageManager, tx } = setup();
+  const { runtime, storageManager } = setup();
 
+  let tx = runtime.edit();
   const cell = runtime.getCell<number>(space, "bench-sink", undefined, tx);
   cell.set(0);
+  tx.commit();
 
   let callCount = 0;
 
@@ -798,7 +800,9 @@ Deno.bench("Cell sink - subscription execution (1000x)", async () => {
 
   // Measure sink execution with value changes
   for (let i = 0; i < 1000; i++) {
-    cell.set(i + 1); // Set different value each time
+    tx = runtime.edit();
+    cell.withTx(tx).set(i + 1); // Set different value each time
+    tx.commit();
     await runtime.idle(); // Wait for sink to execute
   }
 
@@ -816,7 +820,7 @@ Deno.bench("Cell sink - subscription execution (1000x)", async () => {
 Deno.bench(
   "Cell sink - subscription execution with schema (1000x)",
   async () => {
-    const { runtime, storageManager, tx } = setup();
+    const { runtime, storageManager } = setup();
 
     const schema = {
       type: "object",
@@ -827,8 +831,10 @@ Deno.bench(
       required: ["count", "timestamp"],
     } as const satisfies JSONSchema;
 
+    let tx = runtime.edit();
     const cell = runtime.getCell(space, "bench-sink-schema", schema, tx);
     cell.set({ count: 0, timestamp: Date.now() });
+    tx.commit();
 
     let callCount = 0;
 
@@ -839,7 +845,9 @@ Deno.bench(
 
     // Measure sink execution with value changes
     for (let i = 0; i < 1000; i++) {
-      cell.set({ count: i + 1, timestamp: Date.now() + i });
+      tx = runtime.edit();
+      cell.withTx(tx).set({ count: i + 1, timestamp: Date.now() + i });
+      tx.commit();
       await runtime.idle(); // Wait for sink to execute
     }
 
