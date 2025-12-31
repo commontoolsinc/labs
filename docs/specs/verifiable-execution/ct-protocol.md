@@ -121,7 +121,7 @@ Each receipt also serves as a **computation envelope**:
 
 - commits to code and inputs
 - commits to output state
-- commits to CFC label inputs/outputs and a policy identifier
+- commits to CFC label commitments (schema-derived, path-granular) and a policy identifier
 
 By treating receipts as the unit of history, the CT Protocol makes the past
 inspectable. One can trace not just the current state of a system, but the
@@ -255,7 +255,7 @@ const COMMIT_LOG_TYPE = "application/commit+json";
 interface CommitData {
   since: number; // Lamport clock / sequence number
   transaction: Transaction; // The complete transaction that was applied
-  labels?: FactSelection; // Optional classification labels for access control
+  labels?: FactSelection; // Optional label facts used for redaction/access control
 }
 
 // A commit is stored as a Fact
@@ -278,7 +278,7 @@ const commit = {
   is: {
     since: nextSequenceNumber,
     transaction: transaction, // Full transaction including all changes
-    labels: extractedLabels, // Optional
+    labels: extractedLabels, // Optional label facts for redaction/access control
   },
   cause: previousCommitReference, // Or unclaimed for first commit
 };
@@ -768,6 +768,10 @@ type QueryResult = {
 
 All results represent a consistent snapshot at a specific `since` value.
 
+**CFC note:** When CFC/IFC is enabled, implementations MAY redact classified
+values (including at path granularity, as defined by schemas) by omitting `is`
+fields and/or returning a filtered value.
+
 ### 6.3 `/memory/subscribe`
 
 Receive push-based updates when facts change.
@@ -806,6 +810,9 @@ type SubscriptionUpdate = {
 - Enables reactive applications and real-time replication
 - Subscription includes producing commit for provenance
 
+**CFC note:** Subscription payloads MUST respect the subscriber's CFC/IFC
+context (e.g., via redaction of classified values as defined by schemas).
+
 ---
 
 ## 7. Receipt Object (Future Enhancement)
@@ -828,15 +835,15 @@ interface UnsignedReceipt {
   // Inputs (new)
   inputCommitments: Hash[]; // H(salt || canonical(input))
   inputRefs?: Reference<Fact>[]; // Optional provenance references
-  inputLabelCommitments: Hash[]; // H("CT/CFCLabel" || canonicalLabel)
+  inputLabelCommitments: Hash[]; // H("CT/CFCLabelMap" || canonical(labelMap))
 
   // CFC policy (new)
-  cfcPolicyCID: Reference<CFCPolicy>; // Policy identifier
+  cfcPolicyCID: Reference<CFCPolicy>; // Content-addressed policy identifier
 
   // Result
   is?: JSONValue;
   stateHash: Hash; // Hash of resulting state
-  outputLabelCommitment: Hash; // H("CT/CFCLabel" || canonicalLabel)
+  outputLabelCommitment: Hash; // H("CT/CFCLabelMap" || canonical(labelMap))
 
   // Optional: computation evidence commitments
   cfcResultHash?: Hash; // H("CT/CFCResult" || canonicalResult)
@@ -1040,6 +1047,8 @@ The current implementation has a foundation:
 
 ```typescript
 type Labels = {
+  // Coarse/legacy label summary. Full IFC labels are schema-driven and may
+  // vary by JSON path (via `ifc` annotations in schemas).
   classification?: string[];
 };
 ```
@@ -1310,7 +1319,7 @@ or Unclaimed (genesis).
 | Replay of revoked authority     | Authorization evaluated at commit time | ACL evolution + log ordering       |
 | Delegation forgery              | Only owners may modify delegation      | Signed delegation facts            |
 | Domain hijack escalates         | Domains have no authorization power    | Space DID–rooted ACL               |
-| Hidden data flow violation      | CFC labels committed in receipts       | Label commitments + policy CID     |
+| Hidden data flow violation      | CFC label maps committed in receipts   | Label commitments + policy CID     |
 | False policy compliance claim   | Enforcement evidence is explicit       | TEE attestation + `cfcResultHash`  |
 | Tampering with history          | Content-addressed facts and log        | Hash chaining + signatures         |
 
@@ -1334,5 +1343,5 @@ or Unclaimed (genesis).
 | Address tracking      | `IMemoryAddress` (`{id, type, path}`)            | runner  |
 | Read/Write tracking   | `Activity` type in `ITransactionJournal`         | runner  |
 | Transaction           | `IStorageTransaction` with `Journal`/`Chronicle` | runner  |
-| Labels                | `Labels` type with `classification`              | runner  |
+| Labels                | `Labels` type with `classification` (coarse)     | runner  |
 | Genesis cause         | `refer({the, of})` - hash of unclaimed state     | memory  |
