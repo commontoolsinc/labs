@@ -1012,6 +1012,14 @@ const Notebook = pattern<Input, Output>(
       notebookList: notebooks,
     });
 
+    // Use lift() for proper reactive tracking of notebook list lengths
+    const hasParentNotebooks = lift((args: { list: unknown[] }) =>
+      args.list.length > 0
+    )({ list: parentNotebooks });
+    const hasSiblingNotebooks = lift((args: { list: unknown[] }) =>
+      args.list.length > 0
+    )({ list: siblingNotebooks });
+
     // Check if "All Notes" charm exists in the space
     const allNotesCharm = computed(() =>
       allCharms.find((charm: any) => {
@@ -1157,7 +1165,7 @@ const Notebook = pattern<Input, Output>(
                 <div
                   style={{
                     display: computed(() =>
-                      parentNotebooks.length > 0 ? "flex" : "none"
+                      hasParentNotebooks ? "flex" : "none"
                     ),
                     alignItems: "center",
                     gap: "4px",
@@ -1180,7 +1188,7 @@ const Notebook = pattern<Input, Output>(
                 <div
                   style={{
                     display: computed(() =>
-                      parentNotebooks.length > 0 ? "none" : "block"
+                      hasParentNotebooks ? "none" : "block"
                     ),
                   }}
                 />
@@ -1390,8 +1398,7 @@ const Notebook = pattern<Input, Output>(
                       {/* Checkbox column (32px + 4px padding) */}
                       <div style={{ width: "32px", padding: "0 4px" }}>
                         <ct-checkbox
-                          checked={computed(() =>
-                            notes.length > 0 &&
+                          checked={computed(() => notes.length > 0 &&
                             selectedNoteIndices.get().length === notes.length
                           )}
                           onct-change={computed(() =>
@@ -1483,7 +1490,7 @@ const Notebook = pattern<Input, Output>(
                 gap="2"
                 style={{
                   display: computed(() =>
-                    siblingNotebooks.length > 0 ? "flex" : "none"
+                    hasSiblingNotebooks ? "flex" : "none"
                   ),
                   marginTop: "16px",
                   paddingTop: "16px",
