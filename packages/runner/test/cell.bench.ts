@@ -500,6 +500,7 @@ Deno.bench("Cell key - array access with schema (100x)", async () => {
       value: i,
     })),
   });
+  await tx.commit();
 
   // Measure array key access
   for (let i = 0; i < 100; i++) {
@@ -522,6 +523,7 @@ Deno.bench("Cell asSchema - schema transformation (100x)", async () => {
     id: 1,
     metadata: { createdAt: "2025-01-06", type: "user" },
   });
+  await tx.commit();
 
   const schema = {
     type: "object",
@@ -546,6 +548,7 @@ Deno.bench("Cell withTx - transaction switching (100x)", async () => {
 
   const cell = runtime.getCell<number>(space, "bench-withTx", undefined, tx);
   cell.set(42);
+  await tx.commit();
 
   const tx2 = runtime.edit();
 
@@ -576,6 +579,7 @@ Deno.bench(
       age: 42,
       nested: { value: 123 },
     });
+    await tx.commit();
 
     // Measure proxy creation and access
     for (let i = 0; i < 100; i++) {
@@ -636,6 +640,7 @@ Deno.bench("Cell get - complex object with asCell schema (100x)", async () => {
     age: 42,
     nested: { value: 123 },
   });
+  await tx.commit();
 
   // Measure get with schema that creates cell references
   for (let i = 0; i < 100; i++) {
@@ -679,6 +684,7 @@ Deno.bench("Cell array - proxy map operation schemaless (100x)", async () => {
     tx,
   );
   cell.set({ items: Array.from({ length: 100 }, (_, i) => i) });
+  await tx.commit();
 
   const proxy = cell.getAsQueryResult();
 
@@ -733,6 +739,7 @@ Deno.bench("Cell array - map operation with schema (100x)", async () => {
 
   const cell = runtime.getCell(space, "bench-array-get-schema", schema, tx);
   cell.set({ items: Array.from({ length: 100 }, (_, i) => i) });
+  await tx.commit();
 
   // Measure get operation with schema validation
   for (let i = 0; i < 100; i++) {
@@ -754,6 +761,7 @@ Deno.bench("Cell getAsLink - link generation schemaless (100x)", async () => {
     tx,
   );
   cell.set({ value: 42 });
+  await tx.commit();
 
   // Measure link generation
   for (let i = 0; i < 100; i++) {
@@ -781,6 +789,7 @@ Deno.bench("Cell getAsLink - with options (100x)", async () => {
     tx,
   );
   cell2.set({ other: "test" });
+  await tx.commit();
 
   // Measure link generation with options
   for (let i = 0; i < 100; i++) {
@@ -913,6 +922,7 @@ Deno.bench("Cell complex - schema with asCell references (100x)", async () => {
       notifications: true,
     },
   });
+  await tx.commit();
 
   // Measure access with asCell references
   for (let i = 0; i < 100; i++) {
@@ -956,6 +966,7 @@ Deno.bench("Cell complex - nested cell references (100x)", async () => {
     ref1: inner1,
     ref2: inner2,
   });
+  await tx.commit();
 
   // Measure nested reference access
   for (let i = 0; i < 100; i++) {
@@ -1044,6 +1055,7 @@ Deno.bench("Cell large - array with 1000 items (100x get)", async () => {
 
   // Measure set operation with large data
   cell.set({ items });
+  await tx.commit();
 
   // Measure get operation with large data
   for (let i = 0; i < 100; i++) {
@@ -1071,6 +1083,7 @@ Deno.bench("Cell large - deeply nested object (100x navigation)", async () => {
 
   const deepData = createNested(10); // 10 levels deep
   cell.set(deepData);
+  await tx.commit();
 
   // Measure deep navigation
   for (let i = 0; i < 100; i++) {
@@ -1097,6 +1110,7 @@ Deno.bench("Cell concurrent - multiple cells (100x)", async () => {
 
   // Initialize cells
   cells.forEach((cell, i) => cell.set(i));
+  await tx.commit();
 
   // Measure concurrent access
   for (let i = 0; i < 100; i++) {
@@ -1121,6 +1135,7 @@ Deno.bench("Cell equals - comparison operations (100x)", async () => {
 
   cell1.set(42);
   cell2.set(42);
+  await tx.commit();
 
   // Measure equals operations
   for (let i = 0; i < 100; i++) {
