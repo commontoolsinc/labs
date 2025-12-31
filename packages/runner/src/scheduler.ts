@@ -416,9 +416,8 @@ export class Scheduler {
       this.updateDependents(action, immediateLog);
       const { entities } = this.addTriggerPaths(action, reads);
 
-      // Only set up cancel function if we registered triggers
-      // (don't overwrite existing cancel from resubscribe if reads was empty)
-      this.setCancelForEntities(action, entities, { skipIfEmpty: true });
+      // Register the cancel function for the latest trigger set.
+      this.setCancelForEntities(action, entities);
     } else {
       // Mark action for dependency collection before first run
       this.pendingDependencyCollection.add(action);
@@ -944,6 +943,7 @@ export class Scheduler {
     entities: Set<SpaceAndURI>;
     pathsWithValuesByEntity: Map<SpaceAndURI, SortedAndCompactPaths>;
   } {
+    this.clearActionTriggers(action);
     const pathsByEntity = addressesToPathByEntity(reads);
     const entities = new Set<SpaceAndURI>();
     const pathsWithValuesByEntity = new Map<
@@ -969,15 +969,18 @@ export class Scheduler {
     return { entities, pathsWithValuesByEntity };
   }
 
+  private clearActionTriggers(action: Action): void {
+    const cancel = this.cancels.get(action);
+    if (!cancel) return;
+
+    cancel();
+    this.cancels.delete(action);
+  }
+
   private setCancelForEntities(
     action: Action,
     entities: Set<SpaceAndURI>,
-    options: {
-      skipIfEmpty?: boolean;
-    } = {},
   ): void {
-    if (options.skipIfEmpty && entities.size === 0) return;
-
     const actionId = this.getActionId(action);
     this.cancels.set(action, () => {
       logger.debug("schedule-unsubscribe", () => [
@@ -997,7 +1000,6 @@ export class Scheduler {
       errorLogLabel: string;
       errorMessage: (action: Action, error: unknown) => string;
       updateDependents?: boolean;
-      setCancel?: "always" | "ifNonEmpty";
       useRawReadsForTriggers?: boolean;
     },
   ): { log: ReactivityLog; entities: Set<SpaceAndURI> } {
@@ -1019,8 +1021,7 @@ export class Scheduler {
 
     const readsForTriggers = options.useRawReadsForTriggers ? log.reads : reads;
     const { entities } = this.addTriggerPaths(action, readsForTriggers);
-    const skipIfEmpty = options.setCancel === "ifNonEmpty";
-    this.setCancelForEntities(action, entities, { skipIfEmpty });
+    this.setCancelForEntities(action, entities);
 
     return { log, entities };
   }
