@@ -149,7 +149,7 @@ This safe default prevents accidental leakage of error details that might reveal
 
 For errors to be useful (displayed to users, logged, used in retry logic), policies define **error exchange rules** that declassify structured error components.
 
-**Variable binding**: The `$user` variable in error exchange rules binds to the user attempting to access the error. The rule only fires when there's a user context—which is precisely when declassification is useful (someone needs to see the error). If there's no user context, the rule doesn't apply and the error retains full input confidentiality.
+**Variable binding**: The `$actingUser` variable in error exchange rules binds to the user attempting to access the error. The rule only fires when there's a user context—which is precisely when declassification is useful (someone needs to see the error). If there's no user context, the rule doesn't apply and the error retains full input confidentiality.
 
 ```typescript
 interface ErrorExchangeRule {
@@ -189,21 +189,21 @@ interface ErrorExchangeRule {
   "name": "GmailErrorDeclassification",
   "preCondition": {
     "isError": true,
-    "policyPrincipal": { "type": "Policy", "name": "GoogleAuth" }
+    "policyPrincipal": { "type": "Policy", "name": "GoogleAuth", "subject": { "var": "$actingUser" } }
   },
   "declassification": {
     "sanitizedFields": [
       {
         "path": "/error/code",
-        "maxConfidentiality": [{ "type": "User", "subject": { "var": "$user" } }]
+        "maxConfidentiality": [{ "type": "User", "subject": { "var": "$actingUser" } }]
       },
       {
         "path": "/error/status",
-        "maxConfidentiality": [{ "type": "User", "subject": { "var": "$user" } }]
+        "maxConfidentiality": [{ "type": "User", "subject": { "var": "$actingUser" } }]
       },
       {
         "path": "/error/message",
-        "maxConfidentiality": [{ "type": "User", "subject": { "var": "$user" } }],
+        "maxConfidentiality": [{ "type": "User", "subject": { "var": "$actingUser" } }],
         "sanitizer": "error-message-sanitizer-v1"
       }
     ],

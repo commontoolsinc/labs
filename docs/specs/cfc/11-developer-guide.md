@@ -119,7 +119,7 @@ interface HealthRecord {
 Reserved annotations:
 - `@sensitive` - Adds high-confidentiality resource class
 - `@public` - Removes confidentiality (must be justified)
-- `@ifc {...}` - Full label specification (TTL atoms converted to Expires at creation time)
+- `@ifc {...}` - Full IFC annotation (includes `writeAuthorizedBy` for store-field updates; TTL atoms converted to Expires at creation time)
 - `@integrity(name)` - Adds named integrity requirement
 
 ---

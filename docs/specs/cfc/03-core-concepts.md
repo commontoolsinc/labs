@@ -23,11 +23,11 @@ type ConfidentialityLabel = Clause[];
 
 ```typescript
 // Simple conjunctive label
-[User(Alice), GoogleAuth, Ctx.Email]
+[User(Alice), GoogleAuth(Alice), Ctx.Email(Alice)]
 // Meaning: Alice ∧ GoogleAuth ∧ Email
 
 // With disjunction (after exchange rule adds alternative)
-[User(Alice), [GoogleAuth, UserResource(Alice)], Ctx.Email]
+[User(Alice), [GoogleAuth(Alice), UserResource(Alice)], Ctx.Email(Alice)]
 // Meaning: Alice ∧ (GoogleAuth ∨ UserResource) ∧ Email
 ```
 
@@ -50,10 +50,10 @@ function joinConfidentiality(L1: Clause[], L2: Clause[]): Clause[] {
 **Example:**
 
 ```
-L1 = [User(Alice), GoogleAuth]
-L2 = [User(Bob), Ctx.Email]
+L1 = [User(Alice), GoogleAuth(Alice)]
+L2 = [User(Bob), Ctx.Email(Bob)]
 
-L1 ⊔ L2 = [User(Alice), GoogleAuth, User(Bob), Ctx.Email]
+L1 ⊔ L2 = [User(Alice), GoogleAuth(Alice), User(Bob), Ctx.Email(Bob)]
 // Must satisfy ALL four clauses
 ```
 
@@ -65,18 +65,18 @@ When an exchange rule fires, it adds an alternative to an existing clause rather
 
 ```typescript
 // Before exchange rule
-[User(Alice), GoogleAuth]
+[User(Alice), GoogleAuth(Alice)]
 
 // After "GoogleAuth can convert to UserResource" fires
-[User(Alice), [GoogleAuth, UserResource(Alice)]]
-// Now EITHER GoogleAuth OR UserResource satisfies that clause
+[User(Alice), [GoogleAuth(Alice), UserResource(Alice)]]
+// Now EITHER GoogleAuth(Alice) OR UserResource(Alice) satisfies that clause
 ```
 
 Multiple rules can fire on the same clause:
 
 ```typescript
 // Two rules applicable
-[User(Alice), [GoogleAuth, UserResource(Alice), DisplayableToUser(Alice)]]
+[User(Alice), [GoogleAuth(Alice), UserResource(Alice), DisplayableToUser(Alice)]]
 // Any of the three alternatives satisfies the clause
 ```
 
@@ -94,6 +94,8 @@ function canAccess(principal: Principal, label: Clause[]): boolean {
   });
 }
 ```
+
+See Section 4.4.5 for a concrete definition of `Principal` and `principal.satisfies(...)` (including special handling for `Expires`).
 
 ### 3.1.5 Dead Alternatives
 
@@ -371,7 +373,7 @@ This system supports minting high-integrity user intent events from UI interacti
 - A VDOM tree is a pure description of rendered UI.
 - Text, attributes, and bound values may reference data `v` that carries confidentiality/integrity labels.
 - The runtime maintains a **render snapshot**:
-  - `VDOM_snapshot_digest = H(c14n(VDOM_tree + bound_value_digests + label_summaries))`.
+  - `snapshotDigest = H(c14n(VDOM_tree + bound_value_digests + label_summaries))`.
 
 Label summaries are policy-defined projections sufficient for later justification (e.g., include confidentiality atoms and selected integrity atoms, but not raw secret values).
 
@@ -381,7 +383,7 @@ Note: Snapshot digests alone could theoretically fingerprint displayed content, 
 
 A low-level gesture event is produced by the platform (pointer/keyboard). The trusted UI runtime upgrades this to a high-integrity **UIEvent** only when it can bind the gesture to a concrete rendered element in the current snapshot.
 
-- `UIEvent{ kind, target_node_id, snapshot_digest, time, nonce, ui_runtime_hash }`
+- `UIEvent{ kind, targetNodeId, snapshotDigest, time, nonce, uiRuntimeHash }`
 
 The UI runtime hash (or other trust anchor) is included to justify that the mapping from gesture to VDOM node was performed correctly.
 
@@ -402,8 +404,8 @@ If satisfied, it emits a high-integrity **IntentEvent**:
 Where:
 
 - `action` is a stable identifier such as `ForwardClicked`.
-- `parameters` include references/digests such as `email_id`, `recipient_set`, and other UI state.
-- `evidence` includes `snapshot_digest`, `target_node_id`, and label summaries of the values the user was shown and acted upon.
+- `parameters` include references/digests such as `emailId`, `recipientSet`, and other UI state.
+- `evidence` includes `snapshotDigest`, `targetNodeId`, and label summaries of the values the user was shown and acted upon.
 
 Conditions are treated as part of the trusted runtime/policy layer (they may be data-driven rather than general code).
 
@@ -413,7 +415,7 @@ The runtime provides a standard library of declarative conditions with uniform e
 
 Each condition MUST:
 
-- bind to a specific `snapshot_digest` and `target_node_id`,
+- bind to a specific `snapshotDigest` and `targetNodeId`,
 - extract only the minimum necessary parameters from labeled bindings,
 - include label summaries for each referenced binding,
 - produce parameters in canonical form (see canonicalization rules),
@@ -428,14 +430,14 @@ Recognizes a click on a VDOM node annotated with `props.action = <ActionName>`.
 
 Inputs:
 - `UIEvent(kind="click")`
-- snapshot node metadata for `target_node_id`
+- snapshot node metadata for `targetNodeId`
 
 Checks:
 - node exists in snapshot
 - node has `props.action` and `enabled == true`
 
 Emits:
-- `IntentEvent{ action=<ActionName>, parameters={}, evidence={snapshot_digest, target_node_id}, exp, nonce }`
+- `IntentEvent{ action=<ActionName>, parameters={}, evidence={snapshotDigest, targetNodeId}, exp, nonce }`
 
 Use for simple actions that do not depend on other UI state.
 
@@ -445,14 +447,14 @@ Recognizes a click action and additionally captures a set of named bindings from
 
 Inputs:
 - `UIEvent(kind="click")`
-- `binding_spec = { name -> node_id + extractor }` (policy-defined)
+- `bindingSpec = { name -> nodeId + extractor }` (policy-defined)
 
 Checks:
 - all referenced nodes exist in snapshot
 - extractors are permitted for those node types
 
 Emits:
-- `IntentEvent{ action, parameters={ name -> canonical_value }, evidence={snapshot_digest, target_node_id, binding_value_digests, binding_label_summaries}, exp, nonce }`
+- `IntentEvent{ action, parameters={ name -> canonical_value }, evidence={snapshotDigest, targetNodeId, bindingValueDigests, bindingLabelSummaries}, exp, nonce }`
 
 Use for actions such as `ForwardClicked` where parameters come from rendered state.
 
@@ -462,7 +464,7 @@ Recognizes a submit gesture (button click or enter key) for a form scope.
 
 Inputs:
 - `UIEvent(kind in {"click","enter"})`
-- `form_scope_id`
+- `formScopeId`
 
 Checks:
 - target is within form scope
@@ -471,7 +473,7 @@ Checks:
 Emits:
 - `IntentEvent{ action="FormSubmit", parameters={fields...}, evidence={...}, exp, nonce }`
 
-Fields captured are declared by a `form_field_spec` and must be canonicalized.
+Fields captured are declared by a `formFieldSpec` and must be canonicalized.
 
 #### 3.8.4.4 `Cond.SelectionConfirm`
 
@@ -479,13 +481,13 @@ Recognizes confirmation of a selection (e.g., selecting an email/thread and clic
 
 Inputs:
 - `UIEvent(kind="click")`
-- `selection_binding` (e.g., selected ids)
+- `selectionBinding` (e.g., selected ids)
 
 Checks:
 - selection binding exists and is non-empty
 
 Emits:
-- `IntentEvent{ action, parameters={selection_set}, evidence={...}, exp, nonce }`
+- `IntentEvent{ action, parameters={selectionSet}, evidence={...}, exp, nonce }`
 
 #### 3.8.4.5 `Cond.ToggleState`
 
@@ -493,13 +495,13 @@ Recognizes a toggle interaction and emits a persistent-state intent event.
 
 Inputs:
 - `UIEvent(kind="click")`
-- `toggle_node_id`
+- `toggleNodeId`
 
 Checks:
 - node exists and is enabled
 
 Emits:
-- `IntentEvent{ action="ToggleState", parameters={toggle_id, new_state}, evidence={...}, exp, nonce }`
+- `IntentEvent{ action="ToggleState", parameters={toggleId, newState}, evidence={...}, exp, nonce }`
 
 Intended for generating events that may drive policy-state transitions when separately authorized.
 
@@ -520,9 +522,9 @@ The UI-backed integrity story relies on:
 
 Intent parameters that influence declassification decisions must meet policy-defined integrity requirements. This ensures that low-integrity (attacker-influenced) inputs cannot manipulate *what* gets declassified or *where* it flows.
 
-1. **Scope parameters** (e.g., `email_id`, `selection_set`) identify *what* data is released. These must have high integrity—typically derived from trusted sources or user-controlled state created under high PC integrity. A low-integrity scope parameter would allow an attacker to influence which secrets are released.
+1. **Scope parameters** (e.g., `emailId`, `selectionSet`) identify *what* data is released. These must have high integrity—typically derived from trusted sources or user-controlled state created under high PC integrity. A low-integrity scope parameter would allow an attacker to influence which secrets are released.
 
-2. **Destination parameters** (e.g., `recipient_set`, `audience`) identify *where* data flows. Policies may:
+2. **Destination parameters** (e.g., `recipientSet`, `audience`) identify *where* data flows. Policies may:
    - require high-integrity destinations (e.g., verified audience bindings via `AudienceRepresents`), or
    - accept user-provided destinations but treat the release as user-attributable (endorsed by user intent rather than system policy).
 
@@ -640,7 +642,7 @@ interface MultiPartyConsentIntent {
 Consent uses the same UI event mechanism as other intents (Section 3.8):
 
 1. **UI Display**: The participant views a consent UI showing what data will be shared, with whom, for what purpose, and what constraints apply
-2. **UI Event**: The participant clicks "Allow" or equivalent, generating a `UIEvent` with `snapshot_digest` binding to the displayed consent details
+2. **UI Event**: The participant clicks "Allow" or equivalent, generating a `UIEvent` with `snapshotDigest` binding to the displayed consent details
 3. **Intent Minting**: A semantic condition (e.g., `Cond.ConsentGrant`) upgrades the event to a `MultiPartyConsentIntent`
 
 **Trust requirements**: For the consent to be valid, a verifier trusted by the participant must have:

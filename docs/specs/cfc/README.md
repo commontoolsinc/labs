@@ -51,6 +51,10 @@ This specification describes a complete **Contextual Flow Control (CFC)** system
 
 12. [Summary and Design Rationale](./12-summary.md) - Design benefits, trade-offs, future work
 
+### Appendix
+
+13. [Atom Registry](./13-atom-registry.md) - Common atom types, fields, and conventions
+
 ## Companion Documents
 
 - [CFC Essay](./cfc-essay.md) - Accessible narrative explanation (stashed)

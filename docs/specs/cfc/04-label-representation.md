@@ -113,6 +113,14 @@ type CapabilityResource =
 
 Two atoms are **equal** if they have the same type and all parameters match.
 
+Implementations SHOULD compare atoms by canonical structural equality (deterministic field ordering, no ignored fields). For example:
+
+```typescript
+function atomEquals(a: Atom, b: Atom): boolean {
+  return canonicalizeAtom(a) === canonicalizeAtom(b);
+}
+```
+
 Two atoms are **comparable** in the lattice if:
 - They have the same type, OR
 - One is a policy principal that explicitly declares ordering with another
@@ -150,16 +158,16 @@ interface Label {
 
 ```typescript
 // Simple label (all singleton clauses)
-{ confidentiality: [User(Alice), GoogleAuth], integrity: [...] }
-// Meaning: Alice ∧ GoogleAuth
+{ confidentiality: [User(Alice), GoogleAuth(Alice)], integrity: [...] }
+// Meaning: Alice ∧ GoogleAuth(Alice)
 
 // With expiration
-{ confidentiality: [User(Alice), GoogleAuth, Expires(1735689600)], integrity: [...] }
-// Meaning: Alice ∧ GoogleAuth ∧ NotExpired
+{ confidentiality: [User(Alice), GoogleAuth(Alice), Expires(1735689600)], integrity: [...] }
+// Meaning: Alice ∧ GoogleAuth(Alice) ∧ NotExpired
 
 // After exchange rule adds alternative
-{ confidentiality: [User(Alice), [GoogleAuth, UserResource(Alice)]], integrity: [...] }
-// Meaning: Alice ∧ (GoogleAuth ∨ UserResource)
+{ confidentiality: [User(Alice), [GoogleAuth(Alice), UserResource(Alice)]], integrity: [...] }
+// Meaning: Alice ∧ (GoogleAuth(Alice) ∨ UserResource)
 ```
 
 ### 4.2.1 Label in JSON Schema
@@ -175,6 +183,9 @@ interface JSONSchemaIFC {
 
   // Integrity atoms for this schema path
   integrity?: Atom[];
+
+  // Store-field write authorization (used only for in-place modifications; see Section 8.15)
+  writeAuthorizedBy?: Atom[];
 
   // Shorthand for simple classification (backward compatibility)
   classification?: string[];  // Maps to Resource atoms
@@ -354,29 +365,31 @@ function verifySchemaEvolution(
 
 ### 4.2.3 Expiration (TTL) Semantics
 
-Expiration ensures that data and all its derivatives are deleted after a deadline.
+Expiration ensures that a value becomes unreadable after a deadline, and implementations SHOULD delete expired values (and any derivatives that still carry the same `Expires(...)` constraint).
 
 **Combination rule**: When data is combined, all `Expires` atoms from inputs are included in the output's confidentiality. Since all clauses must be satisfied, the earliest expiration effectively constrains access.
 
-**TTL extension**: A policy may allow components to replace or remove `Expires` atoms when certain integrity is present. This is a form of exchange rule:
+**Retention relaxation (dropping inherited expiration)**: Policies MAY allow specific derived outputs to drop an inherited `Expires(...)` clause when integrity proves the output is safe to retain longer. This is modeled as an exchange rule whose confidentiality postcondition is empty for the matched `Expires(...)` clause:
 
 ```typescript
-// TTL extension is an exchange rule on Expires atoms
+// Drop an inherited Expires(...) constraint on a derived value under guard.
 {
-  preCondition: { confidentiality: [{ type: "Expires", timestamp: { var: "$t" } }] },
-  guard: { integrity: [{ type: "DetectedBy", detector: "song-fingerprint-v1" }] },
-  postCondition: { confidentiality: [] }  // Remove expiration
+  preCondition: {
+    confidentiality: [{ type: "Expires", timestamp: { var: "$t" } }],
+    integrity: [{ type: "DetectedBy", detector: "song-fingerprint-v1" }]
+  },
+  postCondition: { confidentiality: [], integrity: [] }  // Remove the matched Expires clause
 }
 ```
 
-Which components can extend TTL? The data's label specifies a conceptual principal (e.g., `SongDetector`) authorized to extend TTL. The user then delegates trust to that principal via a verifier they trust, who certifies specific code hashes as valid implementations. This follows the same trust model as other privileged operations.
+Which components can relax retention? The data's label specifies a conceptual principal (e.g., `SongDetector`) authorized to drop expiration for particular derived values. The user then delegates trust to that principal via a verifier they trust, who certifies specific code hashes as valid implementations. This follows the same trust model as other privileged operations.
 
-**Example**: Raw audio has `Expires(now + 1h)` in its confidentiality. A song detection component (certified by a trusted verifier) can remove or extend the expiration on detected song metadata via an exchange rule.
+**Example**: Raw audio may have `Expires(now + 1h)` in its confidentiality. A song detection component (certified by a trusted verifier) can drop the inherited expiration on derived song metadata via an exchange rule. Longer retention is typically expressed by the output schema itself carrying a `TTL(...)`/`Expires(...)` label, which becomes effective once the inherited input `Expires(...)` clause is dropped.
 
 **Runtime enforcement**: The runtime must:
-1. Check `Expires` atoms at access time (fail if `t < now`)
-2. Periodically garbage collect data with expired `Expires` atoms
-3. Propagate `Expires` atoms through computations via standard label join
+1. Treat `Expires(t)` as satisfiable only if `now ≤ t`
+2. Periodically garbage collect values that are no longer satisfiable due to `Expires(...)`
+3. Propagate `Expires` atoms through computations via standard label join until an explicit exchange rule drops them
 
 ---
 
@@ -462,6 +475,14 @@ interface AtomVariable {
     [key: string]: unknown;
   };
 }
+
+// A binding environment produced by rule matching.
+// Variables may bind to atoms (e.g., a Space atom), DIDs, strings, numbers, etc.
+type Bindings = Record<string, unknown>;
+
+// Variables may also appear *inside* atom parameters using `{ var: string }` placeholders,
+// which are substituted during instantiation. Example:
+// `{ "type": "User", "subject": { "var": "P" } }` means `subject = bindings["P"]`.
 ```
 
 **Example: Space reader exchange rule**
@@ -688,6 +709,33 @@ Exchange rules typically **add alternatives** to existing clauses rather than re
 Some policies also use exchange rules to **remove** a confidentiality requirement (e.g., dropping an `Expires(...)` clause on derived, policy-approved metadata). In this spec, that is represented by an exchange rule whose instantiated `postCondition.confidentiality` is empty when applied to the target clause.
 
 ```typescript
+function substituteVars(value: unknown, bindings: Bindings): unknown {
+  if (Array.isArray(value)) return value.map(v => substituteVars(v, bindings));
+  if (value && typeof value === "object") {
+    // Placeholder form: { var: "X" }
+    if ("var" in value && Object.keys(value).length === 1) {
+      return bindings[(value as any).var as string];
+    }
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = substituteVars(v, bindings);
+    return out;
+  }
+  return value;
+}
+
+function instantiate(patterns: AtomPattern[], bindings: Bindings): Atom[] {
+  // Replace `{ var: "X" }` placeholders with `bindings["X"]` recursively.
+  // Postconditions MUST NOT contain AtomVariable entries.
+  return patterns.map(p => {
+    if (p && typeof p === "object" && "var" in p && "type" in p) {
+      throw new Error("AtomVariable not allowed in postCondition");
+    }
+    return substituteVars(p, bindings) as Atom;
+  });
+}
+```
+
+```typescript
 function applyExchangeRule(
   label: Label,
   targetClauseIndex: number,
@@ -700,6 +748,7 @@ function applyExchangeRule(
 
   const newConfidentiality = instantiate(rule.postCondition.confidentiality, bindings);
   const newIntegrity = instantiate(rule.postCondition.integrity, bindings);
+  const addedIntegrity = newIntegrity.filter(a => !label.integrity.some(b => atomEquals(a, b)));
 
   // Empty confidentiality postcondition means: drop the matched alternative.
   if (newConfidentiality.length === 0) {
@@ -716,18 +765,21 @@ function applyExchangeRule(
             (remainingAlternatives.length === 1 ? remainingAlternatives[0] : remainingAlternatives),
             ...label.confidentiality.slice(targetClauseIndex + 1)
           ],
-      integrity: [...label.integrity, ...newIntegrity]
+      integrity: [...label.integrity, ...addedIntegrity]
     };
   }
+
+  const addedConfidentiality = newConfidentiality.filter(a => !alternatives.some(b => atomEquals(a, b)));
+  if (addedConfidentiality.length === 0 && addedIntegrity.length === 0) return label;
 
   return {
     ...label,
     confidentiality: [
       ...label.confidentiality.slice(0, targetClauseIndex),
-      [...alternatives, ...newConfidentiality],  // Add alternatives, don't replace
+      [...alternatives, ...addedConfidentiality],  // Add alternatives, don't replace
       ...label.confidentiality.slice(targetClauseIndex + 1)
     ],
-    integrity: [...label.integrity, ...newIntegrity]
+    integrity: [...label.integrity, ...addedIntegrity]
   };
 }
 ```
@@ -737,7 +789,7 @@ At a trusted boundary (e.g., before display, before network egress), the system 
 ```typescript
 function evaluateExchangeRules(
   label: Label,
-  availableIntegrity: Atom[]
+  boundaryIntegrity: Atom[]
 ): Label {
   let result = label;
 
@@ -748,17 +800,29 @@ function evaluateExchangeRules(
     .map(lookupPolicy)
     .filter(Boolean) as PolicyRecord[];
 
-  for (const policy of policiesInScope) {
-    for (const rule of policy.exchangeRules) {
-      const match = matchRuleWithTargetClause(rule.preCondition, result, availableIntegrity);
-      if (!match) continue;
-      result = applyExchangeRule(
-        result,
-        match.targetClauseIndex,
-        match.targetAlternativeIndex,
-        rule,
-        match.bindings
-      );
+  // Evaluate to a fixpoint: keep applying rules until no additional alternatives/removals apply.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const integrityInScope = [...result.integrity, ...boundaryIntegrity];
+
+    for (const policy of policiesInScope) {
+      for (const rule of policy.exchangeRules) {
+        const matches = matchRuleWithTargetClause(rule.preCondition, result, integrityInScope);
+        for (const match of matches) {
+          const next = applyExchangeRule(
+            result,
+            match.targetClauseIndex,
+            match.targetAlternativeIndex,
+            rule,
+            match.bindings
+          );
+          if (next !== result) {
+            result = next;
+            changed = true;
+          }
+        }
+      }
     }
   }
 
@@ -766,14 +830,23 @@ function evaluateExchangeRules(
 }
 ```
 
-Implementations SHOULD evaluate exchange rules to a **fixpoint** (repeat until no additional alternatives/removals apply). Since rule application is monotone (it does not require retracting integrity evidence), fixpoint evaluation terminates.
+Helper function semantics referenced above (informative):
+
+- `collectPolicyPrincipals(confidentiality)` returns the **unique** set of policy principals (`PolicyRefAtom` with `type: "Policy" | "Context"`) that appear anywhere in the label's confidentiality clauses/alternatives.
+- `matchRuleWithTargetClause(preCondition, label, availableIntegrity)` returns **all** matches of an exchange rule's precondition:
+  - The first `preCondition.confidentiality` pattern is the **target pattern** and determines `(targetClauseIndex, targetAlternativeIndex)` (the clause/alternative that will be rewritten).
+  - The remaining confidentiality patterns must also match somewhere in `label.confidentiality`.
+  - All integrity patterns must match against `availableIntegrity` (which, in `evaluateExchangeRules`, already includes `label.integrity` plus boundary-minted facts).
+  - Each successful unification yields one binding environment `bindings`, producing one rule application (and therefore one disjunctive alternative path).
+
+Implementations SHOULD evaluate exchange rules to a **fixpoint** (repeat until no additional alternatives/removals apply). Since each application either adds a previously absent alternative or removes a previously present alternative/clause (and implementations de-duplicate), fixpoint evaluation terminates.
 
 **Multiple rules can fire on the same clause**, creating multiple alternatives:
 
 ```typescript
-// Before: [User(Alice), GoogleAuth]
-// After two rules fire on GoogleAuth clause:
-// [User(Alice), [GoogleAuth, UserResource(Alice), DisplayableToUser(Alice)]]
+// Before: [User(Alice), GoogleAuth(Alice)]
+// After two rules fire on GoogleAuth(Alice) clause:
+// [User(Alice), [GoogleAuth(Alice), UserResource(Alice), DisplayableToUser(Alice)]]
 ```
 
 **Access check** after exchange rules: a principal can access if they satisfy at least one alternative in every clause:
@@ -784,6 +857,28 @@ function canAccess(principal: Principal, label: Label): boolean {
     const alternatives = Array.isArray(clause) ? clause : [clause];
     return alternatives.some(atom => principal.satisfies(atom));
   });
+}
+```
+
+`Principal` in this access check is an **access context** (what principals/capabilities are present, plus the current time). A minimal model:
+
+```typescript
+type Principal = {
+  now: number;
+  principals: Atom[];  // e.g., [{ type: "User", subject: actingUser }]
+  satisfies: (atom: Atom) => boolean;
+};
+
+function makePrincipal(now: number, principals: Atom[]): Principal {
+  return {
+    now,
+    principals,
+    satisfies(atom: Atom): boolean {
+      if (atom.type === "Expires") return now <= atom.timestamp;
+      if (atom.type === "TTL") return false; // TTL is schema-time only
+      return principals.some(p => atomEquals(p, atom));
+    }
+  };
 }
 ```
 
