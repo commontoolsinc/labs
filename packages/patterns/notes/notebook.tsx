@@ -4,7 +4,6 @@ import {
   computed,
   type Default,
   handler,
-  ifElse,
   lift,
   NAME,
   navigateTo,
@@ -162,7 +161,7 @@ const removeFromNotebook = handler<
 });
 
 // Handler for dropping a charm onto this notebook
-const handleCharmDrop = handler<
+const _handleCharmDrop = handler<
   { detail: { sourceCell: Cell<unknown> } },
   { notes: Cell<NoteCharm[]> }
 >((event, { notes }) => {
@@ -768,7 +767,7 @@ const handleTitleKeydown = handler<
 });
 
 // Handler to toggle preview expansion for a note
-const togglePreviewExpansion = handler<
+const _togglePreviewExpansion = handler<
   Record<string, never>,
   { index: number; expandedPreviews: Cell<number[]> }
 >((_, { index, expandedPreviews }) => {
@@ -927,7 +926,7 @@ const Notebook = pattern<Input, Output>(
     const isEditingTitle = Cell.of<boolean>(false);
 
     // State for expanded note previews (tracks which note indices have full content shown)
-    const expandedPreviews = Cell.of<number[]>([]);
+    const _expandedPreviews = Cell.of<number[]>([]);
 
     // Filter to find all notebooks (using 📓 prefix in NAME)
     const notebooks = computed(() =>
