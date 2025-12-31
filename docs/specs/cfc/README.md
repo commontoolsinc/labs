@@ -54,6 +54,7 @@ This specification describes a complete **Contextual Flow Control (CFC)** system
 ### Appendix
 
 13. [Atom Registry](./13-atom-registry.md) - Common atom types, fields, and conventions
+14. [Glossary](./14-glossary.md) - Quick definitions of recurring terms
 
 ## Companion Documents
 

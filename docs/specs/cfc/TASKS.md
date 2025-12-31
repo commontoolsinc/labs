@@ -5,10 +5,10 @@ This file tracks the doc work needed to make `docs/specs/cfc/*.md` internally co
 ## 1) Editorial + Cross-Reference Hygiene
 
 - [x] Fix broken section references:
-  - [x] Replace `Section 2.8.6/2.8.7` with `Section 3.8.6/3.8.7` in `10-safety-invariants.md`.
+  - [x] Replace the incorrect `2.8.6/2.8.7` reference with `Section 3.8.6/3.8.7` in `10-safety-invariants.md`.
   - [x] Add missing `Section 5.6` (provenance integrity) in `05-policy-architecture.md` and ensure references resolve.
 - [x] Fix duplicate section numbering in `06-events-and-intents.md` and update any references.
-- [ ] Run an additional cross-file scan for `Section X.Y` references and correct any remaining mismatches.
+- [x] Run an additional cross-file scan for `Section X.Y` references and correct any remaining mismatches.
 
 ## 2) Commit / Consumption Semantics (Single Canonical Model)
 
@@ -44,4 +44,4 @@ This file tracks the doc work needed to make `docs/specs/cfc/*.md` internally co
 ## 7) Remaining / Nice-to-Have
 
 - [x] Add a short “Notation & conventions” section (hash notation, `H(...)` vs `refer(...)`, schema-time vs label-time).
-- [ ] Finish naming consistency passes across remaining chapters (e.g., camelCase field names in UI/intent examples).
+- [x] Finish naming consistency passes across remaining chapters (e.g., camelCase field names in UI/intent examples).

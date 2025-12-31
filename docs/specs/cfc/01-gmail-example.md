@@ -127,7 +127,7 @@ The UI is rendered from a labeled VDOM. The following is an illustrative shape (
 
 The trusted UI runtime computes:
 
-- `snapshotDigest = H(c14n(VDOM_tree + bound_value_digests + label_summaries))`.
+- `snapshotDigest = H(c14n(vdomTree + boundValueDigests + labelSummaries))`.
 
 Label summaries may include confidentiality atoms and selected integrity atoms but not raw secret content.
 

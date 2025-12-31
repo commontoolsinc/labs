@@ -373,7 +373,7 @@ This system supports minting high-integrity user intent events from UI interacti
 - A VDOM tree is a pure description of rendered UI.
 - Text, attributes, and bound values may reference data `v` that carries confidentiality/integrity labels.
 - The runtime maintains a **render snapshot**:
-  - `snapshotDigest = H(c14n(VDOM_tree + bound_value_digests + label_summaries))`.
+  - `snapshotDigest = H(c14n(vdomTree + boundValueDigests + labelSummaries))`.
 
 Label summaries are policy-defined projections sufficient for later justification (e.g., include confidentiality atoms and selected integrity atoms, but not raw secret values).
 
@@ -454,7 +454,7 @@ Checks:
 - extractors are permitted for those node types
 
 Emits:
-- `IntentEvent{ action, parameters={ name -> canonical_value }, evidence={snapshotDigest, targetNodeId, bindingValueDigests, bindingLabelSummaries}, exp, nonce }`
+- `IntentEvent{ action, parameters={ name -> canonicalValue }, evidence={snapshotDigest, targetNodeId, bindingValueDigests, bindingLabelSummaries}, exp, nonce }`
 
 Use for actions such as `ForwardClicked` where parameters come from rendered state.
 

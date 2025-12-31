@@ -119,6 +119,19 @@ Implementations SHOULD compare atoms by canonical structural equality (determini
 function atomEquals(a: Atom, b: Atom): boolean {
   return canonicalizeAtom(a) === canonicalizeAtom(b);
 }
+
+function canonicalizeAtom(atom: Atom): string {
+  // Canonical JSON encoding of the atom, including all fields.
+  // Implementations SHOULD use a standardized canonical JSON scheme (e.g., RFC 8785 / JCS).
+  // Type-specific set-valued fields MUST be normalized (e.g., sorted arrays) before hashing.
+  return c14nJson(atom);
+}
+
+function c14nJson(value: unknown): string {
+  // Deterministic JSON serialization (no whitespace, sorted keys, stable number formatting).
+  // A conforming implementation may use RFC 8785 (JCS).
+  return "…";
+}
 ```
 
 Two atoms are **comparable** in the lattice if:

@@ -937,6 +937,9 @@ function instantiateTemplates(
 Extract data flow declarations from input/output schemas:
 
 ```typescript
+// IFC annotations embedded in JSON Schema nodes (see Section 8.8).
+type IFCAnnotations = IFCTransitionAnnotations & IFCInputAnnotations & IFCHandlerTypeAnnotations;
+
 interface FlowGraph {
   nodes: FlowNode[];
   edges: FlowEdge[];
