@@ -1095,63 +1095,75 @@ export class XDebuggerView extends LitElement {
     // Special handling for different event types
     if (type === "scheduler.run" || type === "scheduler.invocation") {
       const eventData = rest as Record<string, unknown>;
-      if (eventData.action || eventData.handler) {
-        const fn = eventData.action || eventData.handler;
+      const actionId = typeof eventData.actionId === "string"
+        ? eventData.actionId
+        : undefined;
+      const handlerId = typeof eventData.handlerId === "string"
+        ? eventData.handlerId
+        : undefined;
+      const info = isRecord(eventData.actionInfo)
+        ? eventData.actionInfo
+        : isRecord(eventData.handlerInfo)
+        ? eventData.handlerInfo
+        : undefined;
 
-        // Check if it's an annotated action/handler with metadata
-        if (isRecord(fn) && isRecord(fn.recipe)) {
+      const idLabel = actionId ? "action" : "handler";
+      const idValue = actionId ?? handlerId;
+
+      if (idValue) {
+        details.push(html`
+          <div class="event-detail">
+            <span class="event-detail-label">${idLabel}:</span>
+            <span class="event-detail-value">${idValue}</span>
+          </div>
+        `);
+      }
+
+      if (info) {
+        if (typeof info.recipeName === "string") {
           details.push(html`
             <div class="event-detail">
               <span class="event-detail-label">pattern:</span>
-              <span class="event-detail-value">${"name" in fn.recipe
-                ? fn.recipe.name
-                : "unknown"}</span>
-            </div>
-          `);
-          if (isRecord(fn.module) && fn.module?.name) {
-            details.push(html`
-              <div class="event-detail">
-                <span class="event-detail-label">module:</span>
-                <span class="event-detail-value">${fn.module.name}</span>
-              </div>
-            `);
-          }
-          if (Array.isArray(fn.reads) && fn.reads?.length > 0) {
-            details.push(html`
-              <div class="event-detail">
-                <span class="event-detail-label">reads:</span>
-                <span class="event-detail-value">${fn.reads
-                  .length} dependencies</span>
-              </div>
-            `);
-          }
-          if (Array.isArray(fn.writes) && fn.writes?.length > 0) {
-            details.push(html`
-              <div class="event-detail">
-                <span class="event-detail-label">writes:</span>
-                <span class="event-detail-value">${fn.writes
-                  .length} outputs</span>
-              </div>
-            `);
-          }
-        } else if (typeof fn === "function") {
-          details.push(html`
-            <div class="event-detail">
-              <span class="event-detail-label">function:</span>
-              <span class="event-detail-value">${fn.name || "anonymous"}</span>
+              <span class="event-detail-value">${info.recipeName}</span>
             </div>
           `);
         }
+        if (typeof info.moduleName === "string") {
+          details.push(html`
+            <div class="event-detail">
+              <span class="event-detail-label">module:</span>
+              <span class="event-detail-value">${info.moduleName}</span>
+            </div>
+          `);
+        }
+        if (Array.isArray(info.reads) && info.reads.length > 0) {
+          details.push(html`
+            <div class="event-detail">
+              <span class="event-detail-label">reads:</span>
+              <span class="event-detail-value">${info.reads
+                .length} dependencies</span>
+            </div>
+          `);
+        }
+        if (Array.isArray(info.writes) && info.writes.length > 0) {
+          details.push(html`
+            <div class="event-detail">
+              <span class="event-detail-label">writes:</span>
+              <span class="event-detail-value">${info.writes
+                .length} outputs</span>
+            </div>
+          `);
+        }
+      }
 
-        if (eventData.error) {
-          details.push(html`
-            <div class="event-detail">
-              <span class="event-detail-label">error:</span>
-              <span class="event-detail-value" style="color: #ef4444;">${eventData
-                .error}</span>
-            </div>
-          `);
-        }
+      if (eventData.error) {
+        details.push(html`
+          <div class="event-detail">
+            <span class="event-detail-label">error:</span>
+            <span class="event-detail-value" style="color: #ef4444;">${eventData
+              .error}</span>
+          </div>
+        `);
       }
     } else if (type === "cell.update") {
       const change = (rest as Record<string, unknown>).change;

@@ -1,4 +1,5 @@
 import { getLogger } from "@commontools/utils/logger";
+import { isRecord } from "@commontools/utils/types";
 import type { MemorySpace, URI } from "@commontools/memory/interface";
 import { getTopFrame } from "./builder/recipe.ts";
 import { type Frame, type Module, type Recipe, TYPE } from "./builder/types.ts";
@@ -35,6 +36,7 @@ import {
 } from "./reactive-dependencies.ts";
 import { ensureCharmRunning } from "./ensure-charm-running.ts";
 import type {
+  SchedulerActionInfo,
   SchedulerGraphEdge,
   SchedulerGraphNode,
   SchedulerGraphSnapshot,
@@ -168,6 +170,8 @@ export class Scheduler {
   // Compute time tracking for cycle-aware scheduling
   // Keyed by action ID (source location) to persist stats across action recreation
   private actionStats = new Map<string, ActionStats>();
+  private anonymousActionIds = new WeakMap<Action | EventHandler, string>();
+  private anonymousActionCounter = 0;
   // Cycle detection during dependency collection
   private collectStack = new Set<Action>();
 
@@ -273,12 +277,57 @@ export class Scheduler {
 
   /**
    * Gets a stable identifier for an action based on its source location.
-   * Prefers .src (set as backup) over .name, falls back to "anonymous".
+   * Prefers .src (set as backup) over .name, falls back to a generated ID.
    * This ID is used for stats tracking to persist across action recreation.
    */
-  private getActionId(action: Action): string {
-    return (action as Action & { src?: string }).src || action.name ||
-      "anonymous";
+  private getActionId(action: Action | EventHandler): string {
+    const namedAction = action as Action & { src?: string };
+    if (namedAction.src) return namedAction.src;
+    if (action.name && action.name !== "anonymous") return action.name;
+
+    const existingId = this.anonymousActionIds.get(action);
+    if (existingId) return existingId;
+
+    const generatedId = `anon-${++this.anonymousActionCounter}`;
+    this.anonymousActionIds.set(action, generatedId);
+    return generatedId;
+  }
+
+  private formatTelemetryLink(link: NormalizedFullLink): string {
+    const path = link.path.length ? `/${link.path.join("/")}` : "";
+    return `${link.space}/${link.id}${path}`;
+  }
+
+  private getActionTelemetryInfo(
+    action: Action | EventHandler,
+  ): SchedulerActionInfo | undefined {
+    const annotated = action as Partial<TelemetryAnnotations>;
+
+    const recipeName = this.getOptionalName(annotated.recipe);
+    const moduleName = this.getOptionalName(annotated.module);
+    const reads = Array.isArray(annotated.reads)
+      ? annotated.reads.map((link) => this.formatTelemetryLink(link))
+      : undefined;
+    const writes = Array.isArray(annotated.writes)
+      ? annotated.writes.map((link) => this.formatTelemetryLink(link))
+      : undefined;
+
+    if (!recipeName && !moduleName && !reads?.length && !writes?.length) {
+      return undefined;
+    }
+
+    return {
+      recipeName,
+      moduleName,
+      reads: reads?.length ? reads : undefined,
+      writes: writes?.length ? writes : undefined,
+    };
+  }
+
+  private getOptionalName(value: unknown): string | undefined {
+    if (!isRecord(value)) return undefined;
+    const name = value.name;
+    return typeof name === "string" ? name : undefined;
   }
 
   private updateActionType(
@@ -595,11 +644,12 @@ export class Scheduler {
   }
 
   async run(action: Action): Promise<any> {
+    const actionId = this.getActionId(action);
     this.runtime.telemetry.submit({
       type: "scheduler.run",
-      action,
+      actionId,
+      actionInfo: this.getActionTelemetryInfo(action),
     });
-    const actionId = this.getActionId(action);
 
     logger.debug("schedule-run-start", () => [
       `[RUN] Starting action: ${actionId}`,
@@ -1800,9 +1850,11 @@ export class Scheduler {
     if (queuedEvent) {
       const { action, handler, event: eventValue, retriesLeft, onCommit } =
         queuedEvent;
+      const handlerId = this.getActionId(handler);
       this.runtime.telemetry.submit({
         type: "scheduler.invocation",
-        handler: action,
+        handlerId,
+        handlerInfo: this.getActionTelemetryInfo(handler),
       });
       // In pull mode, ensure handler dependencies are computed before running
       let shouldSkipEvent = false;

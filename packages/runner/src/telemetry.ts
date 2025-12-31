@@ -3,19 +3,13 @@
 // contexts to visualize or log events inside the runtime.
 
 import { IMemoryChange } from "./storage/interface.ts";
-import {
-  Action,
-  ActionStats,
-  AnnotatedAction,
-  AnnotatedEventHandler,
-  EventHandler,
-} from "./scheduler.ts";
+import type { ActionStats } from "./scheduler.ts";
 import { StorageTelemetry } from "./storage/telemetry.ts";
 import type * as Inspector from "./storage/inspector.ts";
 
 // Types for scheduler graph visualization
 export interface SchedulerGraphNode {
-  id: string; // action.name (includes code location), or "input:space/entity" for inputs
+  id: string; // actionId or "input:space/entity" for inputs
   type: "effect" | "computation" | "input" | "inactive"; // inactive = has stats but no longer registered
   stats?: ActionStats;
   isDirty: boolean;
@@ -32,8 +26,8 @@ export interface SchedulerGraphNode {
 }
 
 export interface SchedulerGraphEdge {
-  from: string; // action.name of source
-  to: string; // action.name of target
+  from: string; // actionId of source
+  to: string; // actionId of target
   cells: string[]; // Cell IDs creating this dependency
   edgeType?: "data" | "parent"; // data = dependency, parent = parent-child relationship
 }
@@ -45,10 +39,18 @@ export interface SchedulerGraphSnapshot {
   timestamp: number;
 }
 
+export interface SchedulerActionInfo {
+  recipeName?: string;
+  moduleName?: string;
+  reads?: string[];
+  writes?: string[];
+}
+
 // Types of markers that can be submitted by the runtime.
 export type RuntimeTelemetryMarker = {
   type: "scheduler.run";
-  action: Action | AnnotatedAction;
+  actionId: string;
+  actionInfo?: SchedulerActionInfo;
   error?: string;
 } | {
   type: "cell.update";
@@ -56,7 +58,8 @@ export type RuntimeTelemetryMarker = {
   error?: string;
 } | {
   type: "scheduler.invocation";
-  handler: EventHandler | AnnotatedEventHandler;
+  handlerId: string;
+  handlerInfo?: SchedulerActionInfo;
   error?: string;
 } | {
   type: "storage.push.start";
