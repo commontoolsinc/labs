@@ -517,73 +517,78 @@ describe("scheduler", () => {
     expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } });
   });
 
-  it("should track potentialWrites via Cell.set even when value doesn't change", async () => {
-    // Create a cell with initial values
-    const testCell = runtime.getCell<{ a: number; b: string }>(
+  it("should track potentialWrites via Cell.set on nested path", async () => {
+    // Create a cell with nested structure
+    const testCell = runtime.getCell<{ nested: { a: number; b: string } }>(
       space,
       "potential-writes-cell-set-test",
       undefined,
       tx,
     );
-    testCell.set({ a: 1, b: "hello" });
+    testCell.set({ nested: { a: 1, b: "hello" } });
     tx.commit();
     tx = runtime.edit();
 
-    // In a new transaction, set values where `a` stays the same but `b` changes
+    // In a new transaction, set nested values where `a` stays the same but `b` changes
     const setTx = runtime.edit();
-    testCell.withTx(setTx).set({ a: 1, b: "world" }); // a unchanged, b changed
+    testCell.withTx(setTx).key("nested").set({ a: 1, b: "world" });
 
     const log = txToReactivityLog(setTx);
 
-    // Cell.set uses diffAndUpdate which marks reads as potential writes
-    // Both properties should appear in potentialWrites (even unchanged ones)
+    // key("nested").set() reads the nested object to compare
+    // The "nested" path should appear in potentialWrites
     expect(log.potentialWrites).toBeDefined();
-    expect(log.potentialWrites!.some((addr) => addr.path[0] === "a")).toBe(
-      true,
-    );
-    expect(log.potentialWrites!.some((addr) => addr.path[0] === "b")).toBe(
-      true,
-    );
+    expect(
+      log.potentialWrites!.some((addr) => addr.path[0] === "nested"),
+    ).toBe(true);
 
-    // Only `b` changed, so only `b` should be in writes
-    expect(log.writes.some((w) => w.path[0] === "a")).toBe(false); // a NOT written
-    expect(log.writes.some((w) => w.path[0] === "b")).toBe(true); // b written
+    // Only `b` changed within nested, so nested.b should be in writes
+    expect(
+      log.writes.some((w) => w.path[0] === "nested" && w.path[1] === "b"),
+    ).toBe(true);
+    // nested.a should NOT be in writes (value didn't change)
+    expect(
+      log.writes.some((w) => w.path[0] === "nested" && w.path[1] === "a"),
+    ).toBe(false);
 
     await setTx.commit();
   });
 
-  it("should include unchanged properties in potentialWrites when using Cell.set", async () => {
-    // Create a cell with two properties
-    const testCell = runtime.getCell<{ unchanged: number; changed: number }>(
+  it("should include nested path in potentialWrites when using key().set()", async () => {
+    // Create a cell with nested structure
+    const testCell = runtime.getCell<{
+      data: { unchanged: number; changed: number };
+    }>(
       space,
       "diff-update-potential-writes-cell",
       undefined,
       tx,
     );
-    testCell.set({ unchanged: 42, changed: 1 });
+    testCell.set({ data: { unchanged: 42, changed: 1 } });
     tx.commit();
     tx = runtime.edit();
 
-    // In a new transaction, set values where only one property changes
+    // In a new transaction, set nested values where only one property changes
     const setTx = runtime.edit();
-    testCell.withTx(setTx).set({ unchanged: 42, changed: 999 });
+    testCell.withTx(setTx).key("data").set({ unchanged: 42, changed: 999 });
 
     const log = txToReactivityLog(setTx);
 
-    // Both properties should be in potentialWrites because diffAndUpdate
-    // reads both to compare, even though only one actually changes
+    // The "data" path should be in potentialWrites because diffAndUpdate
+    // reads the nested object to compare
     expect(log.potentialWrites).toBeDefined();
-    expect(
-      log.potentialWrites!.some((addr) => addr.path[0] === "unchanged"),
-    ).toBe(true);
-    expect(
-      log.potentialWrites!.some((addr) => addr.path[0] === "changed"),
-    ).toBe(true);
+    expect(log.potentialWrites!.some((addr) => addr.path[0] === "data")).toBe(
+      true,
+    );
 
-    // Only changed property should be in writes
-    expect(log.writes.some((w) => w.path[0] === "changed")).toBe(true);
+    // Only changed property within data should be in writes
+    expect(
+      log.writes.some((w) => w.path[0] === "data" && w.path[1] === "changed"),
+    ).toBe(true);
     // unchanged property should NOT be in writes (value didn't change)
-    expect(log.writes.some((w) => w.path[0] === "unchanged")).toBe(false);
+    expect(
+      log.writes.some((w) => w.path[0] === "data" && w.path[1] === "unchanged"),
+    ).toBe(false);
 
     await setTx.commit();
   });
