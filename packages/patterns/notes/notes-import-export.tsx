@@ -1969,9 +1969,11 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
     });
   });
 
-  // noteCount derived from notes array for reactive UI display
-  const noteCount = computed(() => notes.length);
-  const notebookCount = computed(() => notebooks.length);
+  // noteCount derived from notes array - use lift() for proper reactive tracking
+  const noteCount = lift((args: { n: NoteCharm[] }) => args.n.length)({ n: notes });
+  const notebookCount = lift((args: { n: NotebookCharm[] }) => args.n.length)({
+    n: notebooks,
+  });
 
   // exportedMarkdown is computed on-demand when Export All modal opens (lazy for performance)
   const exportedMarkdown = Cell.of<string>("");
