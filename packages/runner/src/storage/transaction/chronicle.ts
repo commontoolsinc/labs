@@ -201,19 +201,16 @@ export class Chronicle {
     const { error, ok: invariant } = read(loaded, address);
     if (error) {
       // If the read failed because of path errors, this is still effectively a
-      // read, so let's log it for validation
+      // read, so let's log it for validation at commit
       if (
         error.name === "NotFoundError" || error.name === "TypeMismatchError"
       ) {
-        this.#history.claim(loaded);
+        this.#history.put(loaded);
       }
       return { error };
     } else {
-      // Capture the original replica read in history (for validation)
-      const claim = this.#history.claim(invariant);
-      if (claim.error) {
-        return claim;
-      }
+      // Capture the original replica read in history (for validation at commit)
+      this.#history.put(invariant);
 
       // Apply any overlapping writes from novelty and return merged result
       const changes = this.#novelty.select(address);
@@ -424,7 +421,12 @@ class History {
   }
 
   put(attestation: IAttestation) {
-    this.#model.set(Address.toString(attestation.address), attestation);
+    const key = Address.toString(attestation.address);
+    // Only store the first read - subsequent reads at the same address are ignored
+    // This ensures commit-time validation uses the original snapshot
+    if (!this.#model.has(key)) {
+      this.#model.set(key, attestation);
+    }
   }
   delete(attestation: IAttestation) {
     this.#model.delete(Address.toString(attestation.address));

@@ -1299,3 +1299,104 @@ Deno.bench(
     await cleanup(runtime, storageManager, tx);
   },
 );
+
+// Benchmark: Notebook/Notes pattern - tests History.claim() optimization impact
+// These benchmarks measure repeated .get() calls on a notebook with linked notes
+// The claim optimization removes O(n²) overhead during reads
+
+const noteSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    content: { type: "string" },
+    noteId: { type: "string" },
+  },
+};
+
+const notebookSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    notes: {
+      type: "array",
+      items: noteSchema,
+    },
+    mentionable: {
+      type: "array",
+      items: noteSchema,
+    },
+  },
+};
+
+async function benchmarkNotebookReads(noteCount: number, readCount: number) {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+
+  // Write data in tx1
+  const tx1 = runtime.edit();
+  const notes = [];
+  for (let i = 0; i < noteCount; i++) {
+    const note = runtime.getCell(space, `note-${i}`, noteSchema, tx1);
+    note.set({
+      title: `Note ${i}`,
+      content: `Content for note ${i} - some additional text to make it realistic`,
+      noteId: `note-${i}`,
+    });
+    notes.push(note);
+  }
+
+  const notebook = runtime.getCell(space, "notebook", notebookSchema, tx1);
+  notebook.set({
+    title: `Notebook with ${noteCount} notes`,
+    notes,
+    mentionable: notes,
+  });
+
+  await tx1.commit();
+
+  // Read in tx2 - this is what we're benchmarking
+  const tx2 = runtime.edit();
+  const notebookCell = runtime.getCell(space, "notebook", notebookSchema, tx2);
+
+  // Measure repeated .get() calls - this is where O(n²) claim overhead shows up
+  for (let i = 0; i < readCount; i++) {
+    const value = notebookCell.get();
+    // Access the data to ensure full traversal
+    value.title;
+    value.notes;
+    value.mentionable;
+  }
+
+  await tx2.commit();
+  await runtime.dispose();
+  await storageManager.close();
+}
+
+// 10 notes
+Deno.bench("Notebook read - 10 notes, 0 reads (setup only)", async () => {
+  await benchmarkNotebookReads(10, 0);
+});
+
+Deno.bench("Notebook read - 10 notes, 100 reads", async () => {
+  await benchmarkNotebookReads(10, 100);
+});
+
+Deno.bench("Notebook read - 10 notes, 1000 reads", async () => {
+  await benchmarkNotebookReads(10, 1000);
+});
+
+// 100 notes
+Deno.bench("Notebook read - 100 notes, 0 reads (setup only)", async () => {
+  await benchmarkNotebookReads(100, 0);
+});
+
+Deno.bench("Notebook read - 100 notes, 100 reads", async () => {
+  await benchmarkNotebookReads(100, 100);
+});
+
+Deno.bench("Notebook read - 100 notes, 1000 reads", async () => {
+  await benchmarkNotebookReads(100, 1000);
+});
