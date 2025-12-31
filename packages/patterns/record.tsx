@@ -199,21 +199,6 @@ const initializeRecord = lift(
   },
 );
 
-// Helper to get module display info (icon + label) from type and optional charm label
-const getModuleDisplay = lift(
-  // deno-lint-ignore no-explicit-any
-  ({ type, charm }: { type: string; charm?: any }) => {
-    const def = getDefinition(type);
-    // Use charm's label if available (for email/phone/address modules)
-    // Property access is reactive - framework handles Cell unwrapping
-    const charmLabel = charm?.label;
-    return {
-      icon: def?.icon || "📋",
-      label: charmLabel || def?.label || type,
-    };
-  },
-);
-
 // Helper to check if a module has settings UI
 const moduleHasSettings = lift(
   // deno-lint-ignore no-explicit-any
@@ -889,68 +874,76 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // Entry with index for rendering - preserves charm references (no spreading!)
     // isExpanded is pre-computed to avoid closure issues inside .map() callbacks
+    // displayInfo is pre-computed to avoid calling getModuleDisplay inside .map() JSX
     type EntryWithIndex = {
       entry: SubCharmEntry;
       index: number;
       isExpanded: boolean;
+      displayInfo: { icon: string; label: string };
     };
 
     // Pre-compute entries with their indices AND expanded state for stable reference during render
     // IMPORTANT: We do NOT spread entry properties - that breaks charm rendering
     // IMPORTANT: isExpanded must be computed here, not inside .map() - closures over cells in .map() don't work correctly
-    const entriesWithIndex = lift(
+    // IMPORTANT: displayInfo must be computed here to avoid calling lift inside .map() JSX
+    const {
+      pinnedEntries,
+      unpinnedEntries,
+      allEntries,
+      pinnedCount,
+      hasUnpinned,
+      hasExpandedModule,
+    } = lift(
       (
         { sc, expandedIdx }: {
           sc: SubCharmEntry[];
           expandedIdx: number | undefined;
         },
       ) => {
-        const entries = sc || [];
-        return entries.map((entry, index) => ({
-          entry,
-          index,
-          isExpanded: expandedIdx === index,
-        }));
+        const entries = (sc || []).map((entry, index) => {
+          // Compute displayInfo inline (same logic as getModuleDisplay)
+          const def = getDefinition(entry.type);
+          // deno-lint-ignore no-explicit-any
+          const charmLabel = (entry.charm as any)?.label;
+          const displayInfo = {
+            icon: def?.icon || "📋",
+            label: charmLabel || def?.label || entry.type,
+          };
+          return {
+            entry,
+            index,
+            isExpanded: expandedIdx === index,
+            displayInfo,
+          };
+        });
+        const pinned = entries.filter((item) => item.entry?.pinned);
+        const unpinned = entries.filter((item) => !item.entry?.pinned);
+        return {
+          pinnedEntries: pinned,
+          unpinnedEntries: unpinned,
+          allEntries: entries,
+          pinnedCount: pinned.length,
+          hasUnpinned: unpinned.length > 0,
+          hasExpandedModule: expandedIdx !== undefined,
+        };
       },
     )({ sc: subCharms, expandedIdx: expandedIndex });
-
-    // Split sub-charms by pin status
-    const pinnedEntries = lift(({ arr }: { arr: EntryWithIndex[] }) =>
-      (arr || []).filter((item) => item.entry?.pinned)
-    )({ arr: entriesWithIndex });
-
-    const unpinnedEntries = lift(({ arr }: { arr: EntryWithIndex[] }) =>
-      (arr || []).filter((item) => !item.entry?.pinned)
-    )({ arr: entriesWithIndex });
-
-    // All subcharms (for grid layout when no split needed)
-    const allEntries = lift(({ arr }: { arr: EntryWithIndex[] }) => arr || [])({
-      arr: entriesWithIndex,
-    });
-
-    // Check layout mode based on pinned count
-    const pinnedCount = lift(({ arr }: { arr: SubCharmEntry[] }) =>
-      (arr || []).length
-    )({ arr: pinnedEntries });
-
-    const hasUnpinned = lift(({ arr }: { arr: SubCharmEntry[] }) =>
-      (arr || []).length > 0
-    )({ arr: unpinnedEntries });
-
-    // Check if any module is expanded (for backdrop visibility)
-    const hasExpandedModule = lift(({ idx }: { idx: number | undefined }) =>
-      idx !== undefined
-    )({ idx: expandedIndex });
 
     // Check if there are any module types available to add
     // (always true unless registry is empty - multiple of same type allowed)
     const hasTypesToAdd = getAddableTypes().length > 0;
 
+    // Extract just the module types - only recomputes when types change
+    const moduleTypes = lift((
+      { sc }: { sc: SubCharmEntry[] },
+    ) => [...new Set((sc || []).map((e) => e?.type).filter(Boolean))])({
+      sc: subCharms,
+    });
+
     // Build dropdown items from registry, separating new types from existing ones
-    const addSelectItems = lift(({ sc }: { sc: SubCharmEntry[] }) => {
-      const existingTypes = new Set(
-        (sc || []).map((e) => e?.type).filter(Boolean),
-      );
+    // Now only recomputes when moduleTypes changes (not every subCharms change)
+    const addSelectItems = lift(({ types }: { types: string[] }) => {
+      const existingTypes = new Set(types);
       const allTypes = getAddableTypes();
 
       const newTypes = allTypes.filter((def) => !existingTypes.has(def.type));
@@ -976,7 +969,7 @@ const Record = pattern<RecordInput, RecordOutput>(
       }
 
       return items;
-    })({ sc: subCharms });
+    })({ types: moduleTypes });
 
     // Infer record type from modules (data-up philosophy)
     const inferredType = lift(({ sc }: { sc: SubCharmEntry[] }) => {
@@ -1050,6 +1043,28 @@ const Record = pattern<RecordInput, RecordOutput>(
     )({ name: displayName, nicknames: nicknamesList });
 
     // ===== Trash Section Computed Values =====
+
+    // Pre-compute trashed entries with displayInfo to avoid calling getModuleDisplay in .map() JSX
+    type TrashedEntryWithDisplay = {
+      entry: TrashedSubCharmEntry;
+      trashIndex: number;
+      displayInfo: { icon: string; label: string };
+    };
+    const trashedEntriesWithDisplay = lift(
+      ({ t }: { t: TrashedSubCharmEntry[] }) => {
+        return (t || []).map((entry, trashIndex) => {
+          // Compute displayInfo inline (same logic as getModuleDisplay)
+          const def = getDefinition(entry.type);
+          // deno-lint-ignore no-explicit-any
+          const charmLabel = (entry.charm as any)?.label;
+          const displayInfo = {
+            icon: def?.icon || "📋",
+            label: charmLabel || def?.label || entry.type,
+          };
+          return { entry, trashIndex, displayInfo };
+        });
+      },
+    )({ t: trashedSubCharms });
 
     // Compute trash count directly
     const trashCount = lift(({ t }: { t: TrashedSubCharmEntry[] }) =>
@@ -1161,285 +1176,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                     gap: "12px",
                   }}
                 >
-                  {pinnedEntries.map(({ entry, index, isExpanded }) => {
-                    const displayInfo = getModuleDisplay({
-                      type: entry.type,
-                      charm: entry.charm,
-                    });
-                    return (
-                      <div
-                        style={isExpanded
-                          ? {
-                            position: "fixed",
-                            top: "50%",
-                            left: "50%",
-                            transform: "translate(-50%, -50%)",
-                            zIndex: "1001",
-                            width: "95%",
-                            maxWidth: "1200px",
-                            height: "90%",
-                            maxHeight: "800px",
-                            background: "white",
-                            borderRadius: "12px",
-                            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
-                            overflow: "hidden",
-                            display: "flex",
-                            flexDirection: "column",
-                          }
-                          : {
-                            background: "white",
-                            borderRadius: "8px",
-                            border: "1px solid #e5e7eb",
-                            overflow: "hidden",
-                          }}
-                      >
-                        <div
-                          style={computed(() => ({
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            padding: "8px 12px",
-                            borderBottom: entry.collapsed
-                              ? "none"
-                              : "1px solid #f3f4f6",
-                            background: "#fafafa",
-                          }))}
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "8px",
-                              flex: "1",
-                            }}
-                          >
-                            <button
-                              type="button"
-                              onClick={toggleCollapsed({ subCharms, index })}
-                              aria-expanded={computed(() =>
-                                entry.collapsed ? "false" : "true"
-                              )}
-                              aria-label="Toggle module"
-                              style={{
-                                background: "none",
-                                border: "none",
-                                cursor: "pointer",
-                                padding: "4px",
-                                display: "flex",
-                                alignItems: "center",
-                              }}
-                            >
-                              <span
-                                style={computed(() => ({
-                                  transform: entry.collapsed
-                                    ? "rotate(0deg)"
-                                    : "rotate(90deg)",
-                                  transition: "transform 0.2s",
-                                  fontSize: "10px",
-                                  color: "#9ca3af",
-                                }))}
-                              >
-                                ▶
-                              </span>
-                            </button>
-                            <span
-                              style={{
-                                fontSize: "14px",
-                                fontWeight: "500",
-                              }}
-                            >
-                              {displayInfo.icon} {displayInfo.label}
-                            </span>
-                          </div>
-                          {ifElse(
-                            computed(() => !entry.collapsed),
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: "8px",
-                                alignItems: "center",
-                                flexShrink: 0,
-                              }}
-                            >
-                              {ifElse(
-                                getDefinition(entry.type)?.allowMultiple,
-                                <button
-                                  type="button"
-                                  onClick={createSibling({ subCharms, index })}
-                                  style={{
-                                    background: "transparent",
-                                    border: "1px solid #e5e7eb",
-                                    borderRadius: "4px",
-                                    cursor: "pointer",
-                                    padding: "4px 8px",
-                                    fontSize: "12px",
-                                    color: "#6b7280",
-                                  }}
-                                  title="Add another"
-                                >
-                                  +
-                                </button>,
-                                null,
-                              )}
-                              {/* Hide note/settings/pin/remove buttons when maximized - only show close button */}
-                              {!isExpanded && (
-                                <button
-                                  type="button"
-                                  onClick={openNoteEditor({
-                                    subCharms,
-                                    editingNoteIndex,
-                                    editingNoteText,
-                                    index,
-                                  })}
-                                  style={computed(() => ({
-                                    background: "transparent",
-                                    border: "1px solid #e5e7eb",
-                                    borderRadius: "4px",
-                                    cursor: "pointer",
-                                    padding: "4px 8px",
-                                    fontSize: "12px",
-                                    color: "#6b7280",
-                                    fontWeight: entry?.note ? "700" : "400",
-                                  }))}
-                                  title={computed(() =>
-                                    entry?.note || "Add note..."
-                                  )}
-                                >
-                                  📝
-                                </button>
-                              )}
-                              {/* Settings gear - only show if module has settingsUI */}
-                              {!isExpanded &&
-                                ifElse(
-                                  moduleHasSettings({ charm: entry.charm }),
-                                  <button
-                                    type="button"
-                                    onClick={openSettings({
-                                      settingsModuleIndex,
-                                      index,
-                                    })}
-                                    style={{
-                                      background: "transparent",
-                                      border: "1px solid #e5e7eb",
-                                      borderRadius: "4px",
-                                      cursor: "pointer",
-                                      padding: "4px 8px",
-                                      fontSize: "12px",
-                                      color: "#6b7280",
-                                    }}
-                                    title="Settings"
-                                  >
-                                    ⚙️
-                                  </button>,
-                                  null,
-                                )}
-                              {!isExpanded && (
-                                <button
-                                  type="button"
-                                  onClick={togglePin({ subCharms, index })}
-                                  style={{
-                                    background: "#e0f2fe",
-                                    border: "1px solid #7dd3fc",
-                                    borderRadius: "4px",
-                                    cursor: "pointer",
-                                    padding: "4px 8px",
-                                    fontSize: "12px",
-                                    color: "#0369a1",
-                                  }}
-                                  title="Unpin"
-                                >
-                                  📌
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={toggleExpanded({
-                                  expandedIndex,
-                                  index,
-                                })}
-                                style={{
-                                  background: isExpanded
-                                    ? "#3b82f6"
-                                    : "transparent",
-                                  border: isExpanded
-                                    ? "1px solid #3b82f6"
-                                    : "1px solid #e5e7eb",
-                                  borderRadius: "4px",
-                                  cursor: "pointer",
-                                  padding: "4px 8px",
-                                  fontSize: "12px",
-                                  color: isExpanded ? "white" : "#6b7280",
-                                }}
-                                title={isExpanded ? "Close" : "Maximize"}
-                              >
-                                {isExpanded ? "✕" : "⛶"}
-                              </button>
-                              {!isExpanded && (
-                                <button
-                                  type="button"
-                                  onClick={trashSubCharm({
-                                    subCharms,
-                                    trashedSubCharms,
-                                    expandedIndex,
-                                    settingsModuleIndex,
-                                    index,
-                                  })}
-                                  style={{
-                                    background: "transparent",
-                                    border: "1px solid #e5e7eb",
-                                    borderRadius: "4px",
-                                    cursor: "pointer",
-                                    padding: "4px 8px",
-                                    fontSize: "12px",
-                                    color: "#6b7280",
-                                  }}
-                                  title="Remove"
-                                >
-                                  ✕
-                                </button>
-                              )}
-                            </div>,
-                            null,
-                          )}
-                        </div>
-                        {ifElse(
-                          computed(() => !entry.collapsed),
-                          <div
-                            style={{
-                              padding: isExpanded ? "16px" : "12px",
-                              // When expanded, fill the fixed container
-                              flex: isExpanded ? "1" : "none",
-                              overflow: isExpanded ? "auto" : "hidden",
-                              minHeight: isExpanded ? "0" : "auto",
-                            }}
-                          >
-                            <ct-render
-                              $cell={entry.charm}
-                              variant="embedded"
-                            />
-                          </div>,
-                          null,
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                {/* Right: Unpinned items in rail (1/3 width) */}
-                {ifElse(
-                  hasUnpinned,
-                  <div
-                    style={{
-                      flex: 1,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "12px",
-                    }}
-                  >
-                    {unpinnedEntries.map(({ entry, index, isExpanded }) => {
-                      const displayInfo = getModuleDisplay({
-                        type: entry.type,
-                        charm: entry.charm,
-                      });
+                  {pinnedEntries.map(
+                    ({ entry, index, isExpanded, displayInfo }) => {
                       return (
                         <div
                           style={isExpanded
@@ -1616,15 +1354,15 @@ const Record = pattern<RecordInput, RecordOutput>(
                                     type="button"
                                     onClick={togglePin({ subCharms, index })}
                                     style={{
-                                      background: "transparent",
-                                      border: "1px solid #e5e7eb",
+                                      background: "#e0f2fe",
+                                      border: "1px solid #7dd3fc",
                                       borderRadius: "4px",
                                       cursor: "pointer",
                                       padding: "4px 8px",
                                       fontSize: "12px",
-                                      color: "#6b7280",
+                                      color: "#0369a1",
                                     }}
-                                    title="Pin"
+                                    title="Unpin"
                                   >
                                     📌
                                   </button>
@@ -1700,7 +1438,287 @@ const Record = pattern<RecordInput, RecordOutput>(
                           )}
                         </div>
                       );
-                    })}
+                    },
+                  )}
+                </div>
+                {/* Right: Unpinned items in rail (1/3 width) */}
+                {ifElse(
+                  hasUnpinned,
+                  <div
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "12px",
+                    }}
+                  >
+                    {unpinnedEntries.map(
+                      ({ entry, index, isExpanded, displayInfo }) => {
+                        return (
+                          <div
+                            style={isExpanded
+                              ? {
+                                position: "fixed",
+                                top: "50%",
+                                left: "50%",
+                                transform: "translate(-50%, -50%)",
+                                zIndex: "1001",
+                                width: "95%",
+                                maxWidth: "1200px",
+                                height: "90%",
+                                maxHeight: "800px",
+                                background: "white",
+                                borderRadius: "12px",
+                                boxShadow:
+                                  "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+                                overflow: "hidden",
+                                display: "flex",
+                                flexDirection: "column",
+                              }
+                              : {
+                                background: "white",
+                                borderRadius: "8px",
+                                border: "1px solid #e5e7eb",
+                                overflow: "hidden",
+                              }}
+                          >
+                            <div
+                              style={computed(() => ({
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                padding: "8px 12px",
+                                borderBottom: entry.collapsed
+                                  ? "none"
+                                  : "1px solid #f3f4f6",
+                                background: "#fafafa",
+                              }))}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                  flex: "1",
+                                }}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={toggleCollapsed({
+                                    subCharms,
+                                    index,
+                                  })}
+                                  aria-expanded={computed(() =>
+                                    entry.collapsed ? "false" : "true"
+                                  )}
+                                  aria-label="Toggle module"
+                                  style={{
+                                    background: "none",
+                                    border: "none",
+                                    cursor: "pointer",
+                                    padding: "4px",
+                                    display: "flex",
+                                    alignItems: "center",
+                                  }}
+                                >
+                                  <span
+                                    style={computed(() => ({
+                                      transform: entry.collapsed
+                                        ? "rotate(0deg)"
+                                        : "rotate(90deg)",
+                                      transition: "transform 0.2s",
+                                      fontSize: "10px",
+                                      color: "#9ca3af",
+                                    }))}
+                                  >
+                                    ▶
+                                  </span>
+                                </button>
+                                <span
+                                  style={{
+                                    fontSize: "14px",
+                                    fontWeight: "500",
+                                  }}
+                                >
+                                  {displayInfo.icon} {displayInfo.label}
+                                </span>
+                              </div>
+                              {ifElse(
+                                computed(() => !entry.collapsed),
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    gap: "8px",
+                                    alignItems: "center",
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {ifElse(
+                                    getDefinition(entry.type)?.allowMultiple,
+                                    <button
+                                      type="button"
+                                      onClick={createSibling({
+                                        subCharms,
+                                        index,
+                                      })}
+                                      style={{
+                                        background: "transparent",
+                                        border: "1px solid #e5e7eb",
+                                        borderRadius: "4px",
+                                        cursor: "pointer",
+                                        padding: "4px 8px",
+                                        fontSize: "12px",
+                                        color: "#6b7280",
+                                      }}
+                                      title="Add another"
+                                    >
+                                      +
+                                    </button>,
+                                    null,
+                                  )}
+                                  {/* Hide note/settings/pin/remove buttons when maximized - only show close button */}
+                                  {!isExpanded && (
+                                    <button
+                                      type="button"
+                                      onClick={openNoteEditor({
+                                        subCharms,
+                                        editingNoteIndex,
+                                        editingNoteText,
+                                        index,
+                                      })}
+                                      style={computed(() => ({
+                                        background: "transparent",
+                                        border: "1px solid #e5e7eb",
+                                        borderRadius: "4px",
+                                        cursor: "pointer",
+                                        padding: "4px 8px",
+                                        fontSize: "12px",
+                                        color: "#6b7280",
+                                        fontWeight: entry?.note ? "700" : "400",
+                                      }))}
+                                      title={computed(() =>
+                                        entry?.note || "Add note..."
+                                      )}
+                                    >
+                                      📝
+                                    </button>
+                                  )}
+                                  {/* Settings gear - only show if module has settingsUI */}
+                                  {!isExpanded &&
+                                    ifElse(
+                                      moduleHasSettings({ charm: entry.charm }),
+                                      <button
+                                        type="button"
+                                        onClick={openSettings({
+                                          settingsModuleIndex,
+                                          index,
+                                        })}
+                                        style={{
+                                          background: "transparent",
+                                          border: "1px solid #e5e7eb",
+                                          borderRadius: "4px",
+                                          cursor: "pointer",
+                                          padding: "4px 8px",
+                                          fontSize: "12px",
+                                          color: "#6b7280",
+                                        }}
+                                        title="Settings"
+                                      >
+                                        ⚙️
+                                      </button>,
+                                      null,
+                                    )}
+                                  {!isExpanded && (
+                                    <button
+                                      type="button"
+                                      onClick={togglePin({ subCharms, index })}
+                                      style={{
+                                        background: "transparent",
+                                        border: "1px solid #e5e7eb",
+                                        borderRadius: "4px",
+                                        cursor: "pointer",
+                                        padding: "4px 8px",
+                                        fontSize: "12px",
+                                        color: "#6b7280",
+                                      }}
+                                      title="Pin"
+                                    >
+                                      📌
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={toggleExpanded({
+                                      expandedIndex,
+                                      index,
+                                    })}
+                                    style={{
+                                      background: isExpanded
+                                        ? "#3b82f6"
+                                        : "transparent",
+                                      border: isExpanded
+                                        ? "1px solid #3b82f6"
+                                        : "1px solid #e5e7eb",
+                                      borderRadius: "4px",
+                                      cursor: "pointer",
+                                      padding: "4px 8px",
+                                      fontSize: "12px",
+                                      color: isExpanded ? "white" : "#6b7280",
+                                    }}
+                                    title={isExpanded ? "Close" : "Maximize"}
+                                  >
+                                    {isExpanded ? "✕" : "⛶"}
+                                  </button>
+                                  {!isExpanded && (
+                                    <button
+                                      type="button"
+                                      onClick={trashSubCharm({
+                                        subCharms,
+                                        trashedSubCharms,
+                                        expandedIndex,
+                                        settingsModuleIndex,
+                                        index,
+                                      })}
+                                      style={{
+                                        background: "transparent",
+                                        border: "1px solid #e5e7eb",
+                                        borderRadius: "4px",
+                                        cursor: "pointer",
+                                        padding: "4px 8px",
+                                        fontSize: "12px",
+                                        color: "#6b7280",
+                                      }}
+                                      title="Remove"
+                                    >
+                                      ✕
+                                    </button>
+                                  )}
+                                </div>,
+                                null,
+                              )}
+                            </div>
+                            {ifElse(
+                              computed(() => !entry.collapsed),
+                              <div
+                                style={{
+                                  padding: isExpanded ? "16px" : "12px",
+                                  // When expanded, fill the fixed container
+                                  flex: isExpanded ? "1" : "none",
+                                  overflow: isExpanded ? "auto" : "hidden",
+                                  minHeight: isExpanded ? "0" : "auto",
+                                }}
+                              >
+                                <ct-render
+                                  $cell={entry.charm}
+                                  variant="embedded"
+                                />
+                              </div>,
+                              null,
+                            )}
+                          </div>
+                        );
+                      },
+                    )}
                   </div>,
                   null,
                 )}
@@ -1713,11 +1731,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                   gap: "12px",
                 }}
               >
-                {allEntries.map(({ entry, index, isExpanded }) => {
-                  const displayInfo = getModuleDisplay({
-                    type: entry.type,
-                    charm: entry.charm,
-                  });
+                {allEntries.map(({ entry, index, isExpanded, displayInfo }) => {
                   return (
                     <div
                       style={isExpanded
@@ -2017,12 +2031,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                 {ifElse(
                   computed(() => trashExpanded.get()),
                   <div style={{ paddingLeft: "16px", marginTop: "8px" }}>
-                    {trashedSubCharms.map(
-                      (entry, trashIndex) => {
-                        const displayInfo = getModuleDisplay({
-                          type: entry.type,
-                          charm: entry.charm,
-                        });
+                    {trashedEntriesWithDisplay.map(
+                      ({ trashIndex, displayInfo }) => {
                         return (
                           <div
                             style={{
