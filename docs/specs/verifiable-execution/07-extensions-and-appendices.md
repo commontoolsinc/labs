@@ -160,7 +160,7 @@ or Unclaimed (genesis).
 
 **Pattern** A composable, reactive program defining how state evolves.
 
-**Receipt** A signed, content-addressed record with computation metadata.
+**Receipt** A content-addressed record with computation metadata, optionally signed.
 
 **Space** A logical database namespace identified by a DID.
 
@@ -172,7 +172,7 @@ or Unclaimed (genesis).
 
 | Threat                          | Invariant                              | Mechanism                          |
 | ------------------------------- | -------------------------------------- | ---------------------------------- |
-| Server forges authorization     | Authorization derives from space state | Receipt signatures + ACL binding   |
+| Server forges authorization     | Authorization derives from space state | Authenticated invocations/receipts + ACL binding |
 | Server reorders commits         | Log is append-only and checkpointed    | Log inclusion proofs + checkpoints |
 | Signer writes without authority | Fact binds to ACL-at-commit-time       | `cause` chain + log ordering       |
 | Replay of revoked authority     | Authorization evaluated at commit time | ACL evolution + log ordering       |

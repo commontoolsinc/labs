@@ -18,6 +18,8 @@ protocol. The current, authoritative wire shapes are the TypeScript types in
   `"/memory/query/subscribe"` and `"/memory/query/unsubscribe"`.
 - **Schema-aware retrieval:** Implementations also support schema-guided
   selection via `SchemaSelector` and graph queries at `"/memory/graph/query"`.
+- **Classification claims:** Schema/graph queries accept a `classification`
+  claim that gates access to labeled entities in the current implementation.
 
 ### 6.1 `/memory/transact`
 
@@ -46,6 +48,10 @@ type Transaction = {
 **Response (current semantics):** a successful transaction returns the commit
 fact (and may include label facts for redaction/access control). Failures return
 structured errors such as `ConflictError`, `AuthorizationError`, etc.
+
+**Conflict errors:** On CAS conflict, the current implementation returns a
+structured `ConflictError` including the conflicting address and both the
+expected and actual states (see `packages/memory/interface.ts`).
 
 ### 6.2 `/memory/query`
 
@@ -82,8 +88,9 @@ Receive push-based updates for facts matching a selector.
 and either `args.select` (normal selector) or `args.selectSchema` (schema/path
 selector), plus an optional `since` cursor.
 
-**Updates:** The subscription stream delivers updates over time. Each update
-MUST respect the subscriber's authorization and CFC/IFC context (e.g., via
+**Updates:** The subscription stream delivers updates over time (as
+`EnhancedCommit` effects in the current implementation). Each update MUST
+respect the subscriber's authorization and CFC/IFC context (e.g., via
 redaction).
 
 ### 6.4 `/memory/query/unsubscribe`
@@ -97,6 +104,15 @@ Schema-guided graph query supports returning a set of reachable facts based on
 schema traversal rules (see `docs/specs/json_schema.md`). It is the primary
 mechanism for “pulling a document and the cells it links to” without fetching
 the entire reachable graph.
+
+**Classification claim:** The `classification?: string[]` argument is a
+declarative claim used to gate access to labeled entities in the current
+implementation (see `packages/memory/space-schema.ts`).
+
+**Subscribe mode:** When `subscribe: true`, the query registers schema-tracked
+dependencies for incremental updates. Subsequent fact revisions are delivered
+via the commit stream (`"/memory/query/subscribe"`) rather than via a separate
+graph-query push channel.
 
 ---
 

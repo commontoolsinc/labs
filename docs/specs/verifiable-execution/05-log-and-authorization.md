@@ -127,7 +127,7 @@ changes, and no reliance on institutional memory.
 
 To verify a fact `F`:
 
-1. Verify receipt signature
+1. Verify receipt signature (if present)
 2. Verify log inclusion and ordering
 3. Resolve the referenced ACL fact
 4. Verify the ACL fact chain up to genesis

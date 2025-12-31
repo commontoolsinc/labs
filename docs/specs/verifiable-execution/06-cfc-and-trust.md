@@ -43,6 +43,76 @@ In practice, IFC annotations live on JSON Schemas via the `ifc` extension (see
 `docs/specs/json_schema.md`) and are evaluated/propagated by runtime logic (see
 `packages/runner/src/cfc.ts`).
 
+#### 10.3.1 Label Facts (Current)
+
+The current implementation supports a coarse, entity-level label fact:
+
+- `the: "application/label+json"` associated with an entity (`of: URI`)
+- `is: Labels` (today: `classification?: string[]`)
+
+These label facts are used for access control and redaction in schema-guided
+queries (e.g. `"/memory/graph/query"`), and may also be attached to commits as
+supporting metadata for downstream redaction.
+
+#### 10.3.2 Schema-Driven Labels (Path Granularity)
+
+Schemas may include IFC annotations (via the `ifc` extension) at any depth of a
+JSON Schema. This makes labels naturally **path-granular**: different subpaths
+of the same JSON value may carry different labels.
+
+When path-granular labels exist, an entity-level `Labels` value can be treated
+as a coarse summary (e.g., a join/LUB of all subpath labels).
+
+#### 10.3.3 Canonical Label Map (Future)
+
+To support verifiable label reasoning (without requiring disclosure of labeled
+values), receipts may commit to a canonical, path-addressed “label map”.
+
+**Path representation:** Use JSON paths as `string[]` segments:
+
+- Object properties use their property name as a segment
+- Array indices use a base-10 integer segment (e.g. `"0"`, `"1"`)
+- The root path is `[]`
+
+**Canonical representation:**
+
+```typescript
+type JSONPath = readonly string[];
+
+type IFCLabel = {
+  classification?: string[];
+  // Future: confidentiality / integrity components beyond classification
+};
+
+type CFCLabelMapEntry = {
+  path: JSONPath;
+  label: IFCLabel;
+};
+
+type CFCLabelMap = {
+  version: 1;
+  entries: CFCLabelMapEntry[];
+};
+```
+
+**Canonical ordering:** `entries` MUST be sorted lexicographically by `path`
+(segment-by-segment), and MUST NOT contain duplicate paths.
+
+#### 10.3.4 Label Map Commitments (Future)
+
+This spec uses content-addressed hashes (see `CauseString` in
+`packages/memory/interface.ts`) for commitments.
+
+A label map commitment MUST be domain-separated and deterministic. One simple
+construction is:
+
+```typescript
+// Commitment = merkle-reference hash of a domain-separated wrapper object.
+const labelMapCommitment = refer({ "CT/CFCLabelMap": labelMap });
+```
+
+Verifiers can recompute this commitment given the canonical label map object.
+
 ### 10.4 Policy as Content-Addressed Artifact
 
 Policies are themselves content-addressed and referenced by receipts. A
@@ -96,17 +166,17 @@ artifact. Trust profiles provide a vocabulary for precise communication.
 
 ### 12.2 Profile: Existence & Ordering
 
-**Checks:** Receipt signature, log inclusion
+**Checks:** Log inclusion (and receipt signature, if present)
 
-**Guarantees:** The receipt exists and was ordered
+**Guarantees:** The receipt/commit exists and was ordered
 
 **Non-guarantees:** Authorization, correctness, policy compliance
 
 ### 12.3 Profile: Authorized State Update
 
-**Checks:** Signature, log inclusion, ACL verification
+**Checks:** Log inclusion, ACL verification, and authenticated actor identity (e.g. receipt signature)
 
-**Guarantees:** The signer was authorized at commit time
+**Guarantees:** The authenticated actor was authorized at commit time
 
 ### 12.4 Profile: Provenance-Complete Output
 

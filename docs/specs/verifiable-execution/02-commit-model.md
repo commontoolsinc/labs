@@ -146,6 +146,11 @@ type Retract = { is?: undefined }; // Delete
 type Claim = true; // Verify without modifying
 ```
 
+**Conflict semantics:** If any asserted/claimed `cause` does not match the
+replica’s current state for that `(of, the)` pair, the transaction is rejected
+atomically (no partial application). The resulting error SHOULD include both
+the client’s expected state and the replica’s actual state (see 5.9).
+
 **The Claim variant** is key for consistency: it validates that a fact's current
 state matches the specified cause *without modifying it*. This enables
 STM-style (Software Transactional Memory) transactions where you list all facts
@@ -205,7 +210,7 @@ Client A                    Server                    Client B
     │                          │    cause: H1             │
     │                          │<─────────────────────────│
     │                          │    ❌ Rejected           │
-    │                          │    (cause mismatch)      │
+    │                          │    (conflict / cause mismatch)      │
     │                          │─────────────────────────>│
     │                          │                          │
     │                          │    Re-read user:alice    │
@@ -242,7 +247,7 @@ With current CAS semantics, the flow is:
 2. Client computes update locally → nursery
 3. Client sends transaction with cause: H1
 4. If accepted: nursery state moves to heap
-5. If rejected (cause mismatch): discard nursery, re-read, retry
+5. If rejected (conflict): discard nursery, re-read, retry
 ```
 
 **Stacked pending commits** can reference nursery state:
@@ -254,7 +259,7 @@ C1 confirmed → X moves to heap
 C2 depends on C1's success
 ```
 
-If C1 fails (cause mismatch), C2 also fails. The client must re-read and rebuild
+If C1 fails (conflict), C2 also fails. The client must re-read and rebuild
 both transactions.
 
 ### 5.9 Server Processing (Current CAS Model)
@@ -273,11 +278,13 @@ for (const [of, types] of Object.entries(changes)) {
       const current = getCurrentFact(of, the);
       if (hash(current) !== cause) {
         return {
-          error: "cause_mismatch",
-          of,
-          the,
-          expected: cause, // the cause the client asserted was current
-          actual: hash(current), // the replica's current state
+          error: "ConflictError",
+          conflict: {
+            of,
+            the,
+            expected: cause, // the cause the client asserted was current
+            actual: hash(current), // the replica's current state
+          },
         };
       }
     }
@@ -285,6 +292,14 @@ for (const [of, types] of Object.entries(changes)) {
 }
 // All causes match - apply transaction atomically
 ```
+
+**Retry guidance:** On conflict, clients SHOULD re-read the conflicting facts
+and rebuild the transaction using the new causes (and re-issue any dependent
+`Claim`s), then retry.
+
+**Current implementation:** Conflicts are returned as a structured
+`ConflictError` including `expected` and `actual` facts (and may include a
+history) as defined in `packages/memory/interface.ts`.
 
 ---
 
