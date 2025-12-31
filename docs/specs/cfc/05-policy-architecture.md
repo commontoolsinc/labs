@@ -48,8 +48,8 @@ AuthorizedRequest{
   policy = GoogleAuth(Alice),
   user = Alice,
   endpoint = E,
-  request_digest = D,
-  code_hash = h_endorse
+  requestDigest = D,
+  codeHash = h_endorse
 }
 ```
 
@@ -65,7 +65,7 @@ Inputs:
 
 Outputs:
 - response data,
-- `NetworkProvenance{host, tls, code_hash}` integrity fact.
+- `NetworkProvenance{host, tls, codeHash}` integrity fact.
 
 `fetch` itself does not assign final confidentiality labels; it only enforces that an endorsed request is present.
 
@@ -482,18 +482,18 @@ The `fetch` boundary emits a non-malleable integrity fact describing how the res
 NetworkProvenance{
   host,
   tls,
-  tls_cert_hash?,
-  request_digest,
+  tlsCertHash?,
+  requestDigest,
   time,
-  code_hash
+  codeHash
 }
 ```
 
 This fact is minted only by trusted runtime code and binds the response to:
 - the intended destination (`host` / origin),
-- the security of the transport (`tls`, optional `tls_cert_hash`),
-- the endorsed request semantics (`request_digest`),
-- and the runtime implementation (`code_hash`).
+- the security of the transport (`tls`, optional `tlsCertHash`),
+- the endorsed request semantics (`requestDigest`),
+- and the runtime implementation (`codeHash`).
 
 ### 5.6.2 Schema-Validated Parsing (Translator Evidence)
 
@@ -507,9 +507,9 @@ The translator may emit a parsing/translation integrity fact:
 
 ```
 TranslatedBy{
-  endpoint_class,
-  schema_id,
-  translator_hash,
+  endpointClass,
+  schemaId,
+  translatorHash,
   evidence
 }
 ```
@@ -521,7 +521,7 @@ Some external data supports stronger origin claims (e.g., "this email was author
 Example (email):
 
 ```
-AuthoredBy{ message_id, sender=did:mailto:sender@example.com, provider=Gmail, evidence }
+AuthoredBy{ messageId, sender=did:mailto:sender@example.com, provider=Gmail, evidence }
 TrustedProvider(Gmail)  ⊓  AuthoredBy(...)  ⇒  I_sender_authored(did:mailto:sender@...)
 ```
 

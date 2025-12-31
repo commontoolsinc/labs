@@ -73,48 +73,48 @@ The UI is rendered from a labeled VDOM. The following is an illustrative shape (
 
 - `email`: labeled value representing the message being viewed
   - `email.id` (opaque string)
-  - `email.thread_id` (optional)
+  - `email.threadId` (optional)
   - `email.headers.subject`
   - `email.body` (may be more sensitive than metadata)
   - `S_email = { User(Alice), EmailSecret(Alice, participants(email)) }`
-- `recipient_input`: labeled user input value (string)
-  - `S_recipient_input = { User(Alice) }`
+- `recipientInput`: labeled user input value (string)
+  - `S_recipientInput = { User(Alice) }`
 
 **VDOM sketch:**
 
 ```json
 {
   "type": "EmailView",
-  "node_id": "view:email:123",
+  "nodeId": "view:email:123",
   "props": {
-    "email_ref": {"value_digest": "H(email)", "label_summary": "S_email"}
+    "emailRef": {"valueDigest": "H(email)", "labelSummary": "S_email"}
   },
   "children": [
     {
       "type": "EmailHeader",
-      "node_id": "hdr:subject",
+      "nodeId": "hdr:subject",
       "props": {
-        "text_ref": {"value_digest": "H(email.headers.subject)", "label_summary": "S_email"}
+        "textRef": {"valueDigest": "H(email.headers.subject)", "labelSummary": "S_email"}
       }
     },
     {
       "type": "EmailBody",
-      "node_id": "body",
+      "nodeId": "body",
       "props": {
-        "content_ref": {"value_digest": "H(email.body)", "label_summary": "S_email"}
+        "contentRef": {"valueDigest": "H(email.body)", "labelSummary": "S_email"}
       }
     },
     {
       "type": "TextInput",
-      "node_id": "input:recipient",
+      "nodeId": "input:recipient",
       "props": {
-        "value_ref": {"value_digest": "H(recipient_input)", "label_summary": "S_recipient_input"},
+        "valueRef": {"valueDigest": "H(recipientInput)", "labelSummary": "S_recipientInput"},
         "placeholder": "Forward to…"
       }
     },
     {
       "type": "Button",
-      "node_id": "btn:forward",
+      "nodeId": "btn:forward",
       "props": {
         "action": "ForwardClicked",
         "enabled": true
@@ -127,7 +127,7 @@ The UI is rendered from a labeled VDOM. The following is an illustrative shape (
 
 The trusted UI runtime computes:
 
-- `snapshot_digest = H(c14n(VDOM_tree + bound_value_digests + label_summaries))`.
+- `snapshotDigest = H(c14n(VDOM_tree + bound_value_digests + label_summaries))`.
 
 Label summaries may include confidentiality atoms and selected integrity atoms but not raw secret content.
 
@@ -139,33 +139,33 @@ A trusted declarative condition `Cond.ForwardClicked` recognizes the semantic ac
 
 **Inputs:**
 
-- `UIEvent` produced by trusted UI runtime, including `target_node_id` and `snapshot_digest`.
+- `UIEvent` produced by trusted UI runtime, including `targetNodeId` and `snapshotDigest`.
 - current labeled bindings referenced by the snapshot for:
-  - `email.id` (and `thread_id` if present)
-  - `recipient_input`
+  - `email.id` (and `threadId` if present)
+  - `recipientInput`
 - the rendered node metadata for `btn:forward`, including `action="ForwardClicked"`.
 
 **Condition checks:**
 
 1. `UIEvent.kind == "click"`.
-2. `UIEvent.target_node_id == "btn:forward"`.
+2. `UIEvent.targetNodeId == "btn:forward"`.
 3. In the referenced snapshot, the target node has `props.action == "ForwardClicked"` and `enabled == true`.
-4. Extract and normalize recipients from `recipient_input`:
+4. Extract and normalize recipients from `recipientInput`:
    - normalize Unicode, trim whitespace,
    - parse one or more recipients,
    - normalize email addresses (lowercase where appropriate, punycode domain),
    - deduplicate and sort.
 5. Ensure recipients are non-empty and within policy bounds (e.g. max count).
-6. Extract `email_id` (and `thread_id` if present) from the rendered email binding.
+6. Extract `emailId` (and `threadId` if present) from the rendered email binding.
 7. Assemble evidence:
-   - `snapshot_digest`,
-   - `target_node_id`,
-   - value digests for `email_id` and normalized `recipient_set`,
-   - label summaries for the referenced bindings (`S_email`, `S_recipient_input`).
+   - `snapshotDigest`,
+   - `targetNodeId`,
+   - value digests for `emailId` and normalized `recipientSet`,
+   - label summaries for the referenced bindings (`S_email`, `S_recipientInput`).
 
 **Output (high-integrity intent event):**
 
-- `IntentEvent{ action="ForwardClicked", parameters={ email_id, thread_id?, recipient_set }, evidence, exp, nonce }`
+- `IntentEvent{ action="ForwardClicked", parameters={ emailId, threadId?, recipientSet }, evidence, exp, nonce }`
 
 The intent event integrity includes the trusted UI runtime hash and the condition identity.
 
@@ -180,7 +180,7 @@ Notes:
 
 A trusted UI runtime + condition mint a user-event intent:
 
-- `ForwardClicked{ email_id, recipient_set, ui_context, snapshot_digest, nonce_ui, exp_ui }`
+- `ForwardClicked{ emailId, recipientSet, uiContext, snapshotDigest, nonceUi, expUi }`
 
 This intent is not directly consumable by sinks.
 
@@ -188,19 +188,19 @@ This intent is not directly consumable by sinks.
 
 A trusted refinement component `refine_intent_forward` consumes `ForwardClicked` and mints:
 
-- `IntentOnce{ op=Gmail.Forward, subject=Alice, audience=https://gmail.googleapis.com, endpoint=gmail.messages.send, email_id, recipient_set, payload_digest, idempotency_key, exp, max_attempts }`
+- `IntentOnce{ op=Gmail.Forward, subject=Alice, audience=https://gmail.googleapis.com, endpoint=gmail.messages.send, emailId, recipientSet, payloadDigest, idempotencyKey, exp, maxAttempts }`
 
 Binding requirements:
 
-- `email_id` binds the intent to a specific source message.
-- `recipient_set` binds the intent to a specific set of recipients.
+- `emailId` binds the intent to a specific source message.
+- `recipientSet` binds the intent to a specific set of recipients.
 - `audience` and `endpoint` bind the intent to a specific service and operation.
-- `payload_digest = H(c14n(ForwardPlan))` binds the intent to the semantic content of the forward.
-- `idempotency_key` provides stable identity for retries.
+- `payloadDigest = H(c14n(ForwardPlan))` binds the intent to the semantic content of the forward.
+- `idempotencyKey` provides stable identity for retries.
 
 The refinement step emits an integrity fact binding source intent to derived intent:
 
-- `IntentRefined{ from=ForwardClicked, to=IntentOnce, code_hash=h_refine, digest=H(...) }`
+- `IntentRefined{ from=ForwardClicked, to=IntentOnce, codeHash=h_refine, digest=H(...) }`
 
 Refinement is consumptive: once an `IntentOnce` is minted, the source `ForwardClicked` is marked spent.
 
@@ -217,18 +217,18 @@ The trusted `endorse_request` step must:
 1. Verify token label contains `GoogleAuth(Alice)`.
 2. Verify endpoint and method match `gmail.messages.send`.
 3. Verify the token appears only in the Authorization header.
-4. Compute `request_digest = H(c14n(RequestSemantics))`.
+4. Compute `requestDigest = H(c14n(RequestSemantics))`.
 5. Verify the request semantics match the `IntentOnce` bindings:
    - `RequestSemantics.audience == IntentOnce.audience`
-   - `RequestSemantics.endpoint_class == IntentOnce.endpoint`
-   - `RequestSemantics.email_id == IntentOnce.email_id` (if represented explicitly)
-   - `RequestSemantics.recipient_set == IntentOnce.recipient_set`
-   - `RequestSemantics.body_digest == IntentOnce.payload_digest` (or a policy-defined equivalence)
-   - `RequestSemantics.idempotency_key == IntentOnce.idempotency_key`
+   - `RequestSemantics.endpointClass == IntentOnce.endpoint`
+   - `RequestSemantics.emailId == IntentOnce.emailId` (if represented explicitly)
+   - `RequestSemantics.recipientSet == IntentOnce.recipientSet`
+   - `RequestSemantics.bodyDigest == IntentOnce.payloadDigest` (or a policy-defined equivalence)
+   - `RequestSemantics.idempotencyKey == IntentOnce.idempotencyKey`
 
 If successful, endorsement emits:
 
-- `AuthorizedRequest{ policy=GoogleAuth(Alice), user=Alice, endpoint=gmail.messages.send, request_digest, code_hash=h_endorse }`
+- `AuthorizedRequest{ policy=GoogleAuth(Alice), user=Alice, endpoint=gmail.messages.send, requestDigest, codeHash=h_endorse }`
 
 ### 1.4.6 Fetch as commit point with retries
 
@@ -244,7 +244,7 @@ Commit success criteria for `gmail.messages.send` are policy-defined; minimally:
 - response schema validation (e.g., contains `id`),
 - and (if available) confirmation consistent with the idempotency key.
 
-On failure (network error, non-2xx, schema invalid), the intent remains unconsumed, allowing retry up to `max_attempts` before `exp`.
+On failure (network error, non-2xx, schema invalid), the intent remains unconsumed, allowing retry up to `maxAttempts` before `exp`.
 
 ### 1.4.7 Result labeling
 
@@ -280,7 +280,7 @@ This principal can appear in integrity labels and facts.
 
 When an email `m` is fetched from Gmail and parsed by trusted components, the runtime may mint a provenance integrity fact of the form:
 
-- `AuthoredBy{ message_id, sender=did:mailto:sender@example.com, context=Ctx.Email(Alice), provider=Gmail, evidence }`
+- `AuthoredBy{ messageId, sender=did:mailto:sender@example.com, context=Ctx.Email(Alice), provider=Gmail, evidence }`
 
 Where `evidence` binds:
 

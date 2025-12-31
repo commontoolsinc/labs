@@ -33,7 +33,7 @@ The system supports trusted refinement of intents into more precise, consumable 
 
 Example:
 
-- `ForwardClicked{ email_id, recipient, ui_context }`
+- `ForwardClicked{ emailId, recipientSet, uiContext }`
 
 2) **Consumable sink intent** (`IntentOnce`):
 
@@ -42,7 +42,7 @@ Example:
 
 Example:
 
-- `IntentOnce{ op=Gmail.Forward, audience=gmail.googleapis.com, payload_digest, exp, nonce }`
+- `IntentOnce{ op=Gmail.Forward, audience=gmail.googleapis.com, payloadDigest, exp, nonce }`
 
 ### 7.2.2 Refinement Rule
 
@@ -93,21 +93,21 @@ Fields (canonical form):
 
 - `type = "ForwardPlan"`
 - `account = Alice` (stable user identifier)
-- `source_email_id` (opaque string)
-- `source_thread_id` (optional)
-- `recipient_set`:
+- `sourceEmailId` (opaque string)
+- `sourceThreadId` (optional)
+- `recipientSet`:
   - `to`: sorted list
   - `cc`: sorted list
   - `bcc`: sorted list
-- `include_policy`:
+- `includePolicy`:
   - whether body is included
   - whether attachments are included
   - which MIME parts are included if selective
-- `subject_policy`:
+- `subjectPolicy`:
   - e.g., prefix rules such as `"Fwd: "`
-- `user_note_digest`:
+- `userNoteDigest`:
   - `H(c14n(UserNote))` or empty
-- `rendering_version`:
+- `renderingVersion`:
   - identifies the formatting rules used to construct the RFC 2822 message
 
 Normalization rules:
@@ -115,11 +115,11 @@ Normalization rules:
 - Email addresses are lowercased where appropriate and normalized (punycode for domains).
 - Recipient lists are deduplicated and sorted.
 - Optional fields must be explicitly absent vs empty.
-- `rendering_version` must be included to prevent semantic drift across code updates.
+- `renderingVersion` must be included to prevent semantic drift across code updates.
 
 The intent binding uses:
 
-- `payload_digest = H(c14n(ForwardPlan))`.
+- `payloadDigest = H(c14n(ForwardPlan))`.
 
 ### 7.3.3 RequestSemantics Canonicalization
 
@@ -131,16 +131,16 @@ Fields (canonical form):
 - `method` (uppercase)
 - `origin` (scheme + host + port)
 - `path` (normalized)
-- `endpoint_class` (policy-defined stable name)
-- `query_params`:
+- `endpointClass` (policy-defined stable name)
+- `queryParams`:
   - only include parameters declared "data-bearing" by policy
   - canonicalized as sorted key/value lists
 - `headers`:
   - include only headers declared data-bearing by policy
   - explicitly exclude authority-only headers (e.g., Authorization) when policy permits
-- `body_digest`:
+- `bodyDigest`:
   - digest of canonical request body semantics
-- `idempotency_key`:
+- `idempotencyKey`:
   - if used, included here and in the digest
 
 Notes:
@@ -150,33 +150,33 @@ Notes:
 
 ### 7.3.4 AuthorizedRequest Digest
 
-`AuthorizedRequest.request_digest = H(c14n(RequestSemantics))`.
+`AuthorizedRequest.requestDigest = H(c14n(RequestSemantics))`.
 
 Endorsement binds:
 
 - `policy principal` (e.g., `GoogleAuth(Alice)`)
 - `user`
-- `endpoint_class`
-- `request_digest`
-- `code_hash`
+- `endpointClass`
+- `requestDigest`
+- `codeHash`
 
 The endorsement must also check compatibility with a supplied `IntentOnce`:
 
-- `IntentOnce.payload_digest == RequestSemantics.body_digest` (or equals a body-derived digest)
-- `IntentOnce.recipient_set == RequestSemantics.recipient_set` (if represented)
-- `IntentOnce.idempotency_key == RequestSemantics.idempotency_key`
+- `IntentOnce.payloadDigest == RequestSemantics.bodyDigest` (or equals a body-derived digest)
+- `IntentOnce.recipientSet == RequestSemantics.recipientSet` (if represented)
+- `IntentOnce.idempotencyKey == RequestSemantics.idempotencyKey`
 
 ### 7.3.5 IntentOnce Canonicalization
 
 `IntentOnce` is canonicalized similarly, including:
 
 - `type = "IntentOnce"`
-- `op`, `subject`, `audience`, `endpoint_class`
-- `scope` (e.g., `email_id`)
-- `recipient_set`
-- `payload_digest`
-- `idempotency_key`
-- `exp`, `max_attempts`
+- `op`, `subject`, `audience`, `endpointClass`
+- `scope` (e.g., `emailId`)
+- `recipientSet`
+- `payloadDigest`
+- `idempotencyKey`
+- `exp`, `maxAttempts`
 
 `IntentOnce.digest = H(c14n(IntentOnce))` may be used for auditing and internal indexing.
 
@@ -188,11 +188,11 @@ CFC supports deriving new facts from high-integrity sources and using those fact
 
 A trusted extractor may produce an integrity fact asserting that a derived value was correctly extracted from a trusted source:
 
-- `ExtractedAttribute{ kind, value_digest, source_message_id, source_sender, extractor_hash, evidence }`
+- `ExtractedAttribute{ kind, valueDigest, sourceMessageId, sourceSender, extractorHash, evidence }`
 
 Example:
 
-- `ExtractedAttribute{ kind="HotelMembershipNumber", value_digest=H(number), source_message_id=m, source_sender=did:mailto:hotel@example.com, extractor_hash=h_extract, evidence=... }`
+- `ExtractedAttribute{ kind="HotelMembershipNumber", valueDigest=H(number), sourceMessageId=m, sourceSender=did:mailto:hotel@example.com, extractorHash=h_extract, evidence=... }`
 
 This fact should be guarded by:
 
@@ -212,7 +212,7 @@ Optionally, a context-specific atom may be added (e.g., `HotelMembershipSecret(A
 Policies may define a declassification path allowing release of a derived value to the original sender, under integrity guard:
 
 - Preconditions:
-  - `ExtractedAttribute{ kind=HotelMembershipNumber, source_sender=S }`
+  - `ExtractedAttribute{ kind=HotelMembershipNumber, sourceSender=S }`
   - and/or `AuthoredBy{ sender=S }`
 - Guard:
   - user intent (event-scoped) to transmit the number to the sender principal,
@@ -394,14 +394,14 @@ Implementations SHOULD try methods in this order:
 
 From Section 5.6, the runtime has minted:
 
-- `AuthoredBy{ message_id=m, sender=did:mailto:hotel@example.com, provider=Gmail, ... }`
+- `AuthoredBy{ messageId=m, sender=did:mailto:hotel@example.com, provider=Gmail, ... }`
 - and (when trusted): `I_sender_authored(did:mailto:hotel@example.com)`.
 
 **Step B — Extraction integrity**
 
 A trusted extractor produces:
 
-- `ExtractedAttribute{ kind="HotelMembershipNumber", value_digest=H(num), source_message_id=m, source_sender=did:mailto:hotel@example.com, extractor_hash=h_extract, ... }`
+- `ExtractedAttribute{ kind="HotelMembershipNumber", valueDigest=H(num), sourceMessageId=m, sourceSender=did:mailto:hotel@example.com, extractorHash=h_extract, ... }`
 
 Policy assumes `h_extract` is trusted for this extraction kind.
 
@@ -417,13 +417,13 @@ Note: **No `AudienceRepresents` binding is created yet.** The data is labeled wi
 
 A UI condition emits an intent event:
 
-- `IntentEvent{ action="SendMembershipNumber", parameters={ value_digest=H(num), targetPrincipal=did:mailto:hotel@example.com }, evidence=..., exp, nonce }`
+- `IntentEvent{ action="SendMembershipNumber", parameters={ valueDigest=H(num), targetPrincipal=did:mailto:hotel@example.com }, evidence=..., exp, nonce }`
 
 Note: Intent references the **principal**, not a specific URL. The user is authorizing "send to hotel", not "send to api.hotel.example.com".
 
 A refinement step mints:
 
-- `IntentOnce{ op=Hotel.SendMembershipNumber, targetPrincipal=did:mailto:hotel@example.com, payload_digest=H(c14n({num})), idempotency_key, exp, max_attempts }`
+- `IntentOnce{ op=Hotel.SendMembershipNumber, targetPrincipal=did:mailto:hotel@example.com, payloadDigest=H(c14n({num})), idempotencyKey, exp, maxAttempts }`
 
 **Step E — Late-bound audience verification at commit**
 
@@ -469,11 +469,11 @@ External side effects are commonly subject to partial failure (timeouts, lost re
 
 ### 7.4.1 Idempotency-Keyed Commit
 
-A derived `IntentOnce` may include an `idempotency_key` (nonce) that is carried into the request in a policy-approved field. The key is bound into:
+A derived `IntentOnce` may include an `idempotencyKey` (nonce) that is carried into the request in a policy-approved field. The key is bound into:
 
-- `IntentOnce.idempotency_key`
-- `RequestSemantics.idempotency_key`
-- `AuthorizedRequest.request_digest`
+- `IntentOnce.idempotencyKey`
+- `RequestSemantics.idempotencyKey`
+- `AuthorizedRequest.requestDigest`
 
 The sink treats multiple attempts with the same key as the same logical action.
 
@@ -496,7 +496,7 @@ Where servers do not provide explicit idempotency semantics, policies must be co
 To prevent replay or brute-force retry abuse:
 
 - `IntentOnce.exp` bounds time,
-- `IntentOnce.max_attempts` bounds retries,
+- `IntentOnce.maxAttempts` bounds retries,
 - and refined intents should be audience- and payload-bound.
 
 ---
