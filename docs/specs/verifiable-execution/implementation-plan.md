@@ -1,6 +1,7 @@
 # CT Protocol Implementation Plan
 
 This document tracks implementation status of the CT Protocol specification.
+See `docs/specs/verifiable-execution/README.md` for the spec index.
 
 ## Status Legend
 
