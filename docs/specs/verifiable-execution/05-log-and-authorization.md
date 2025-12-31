@@ -39,7 +39,7 @@ CREATE TABLE fact (
   this    TEXT NOT NULL PRIMARY KEY,  -- Merkle reference for {the, of, is, cause}
   the     TEXT NOT NULL,              -- Media type
   of      TEXT NOT NULL,              -- Entity URI
-  'is'    TEXT NOT NULL,              -- Reference to datum (or "undefined")
+  "is"    TEXT NOT NULL,              -- Reference to datum (or "undefined")
   cause   TEXT,                       -- Reference to prior fact (or unclaimed reference for genesis)
   since   INTEGER NOT NULL            -- Lamport clock
 );
