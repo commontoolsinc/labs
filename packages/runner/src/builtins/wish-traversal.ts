@@ -89,11 +89,19 @@ export function schemaMatchesTag(
 
 /**
  * Get the schema for a cell, if available.
+ * Uses asSchemaFromLinks to properly resolve the schema through links.
  */
 function getCellSchema(cell: Cell<unknown>): JSONSchema | undefined {
   try {
-    const link = cell.getAsNormalizedFullLink();
-    return link.schema;
+    // First try to get schema directly from the cell
+    const directSchema = cell.schema;
+    if (directSchema !== undefined) {
+      return directSchema;
+    }
+
+    // Fall back to resolving through links (like favorites search does)
+    const { schema } = cell.asSchemaFromLinks().getAsNormalizedFullLink();
+    return schema;
   } catch {
     return undefined;
   }
@@ -144,14 +152,16 @@ export function* traverseForTag(
   depth: number = 0,
   seen: Set<URI> = new Set(),
 ): Generator<TraversalMatch> {
-  // Cycle detection: check if we've visited this cell before
-  let sourceURI: URI | undefined;
+  // Cycle detection: check if we've visited this cell+path combination before
+  // We use sourceURI + path because child cells from .key() share the same sourceURI
   try {
-    sourceURI = cell.sourceURI;
-    if (seen.has(sourceURI)) {
+    const sourceURI = cell.sourceURI;
+    // Create unique key combining sourceURI and path
+    const cellId = `${sourceURI}:${currentPath.join("/")}`;
+    if (seen.has(cellId as URI)) {
       return;
     }
-    seen.add(sourceURI);
+    seen.add(cellId as URI);
   } catch {
     // Cell may not have a valid sourceURI yet
   }
