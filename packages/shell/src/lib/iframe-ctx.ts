@@ -136,6 +136,7 @@ export const setupIframe = (runtime: Runtime) =>
       const cancel = runtime.scheduler.subscribe(
         action,
         { reads, writes: [] },
+        true,
       );
       return { action, cancel };
     },

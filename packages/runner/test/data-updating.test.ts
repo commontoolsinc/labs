@@ -1220,20 +1220,6 @@ describe("data-updating", () => {
         .toBe("New Item");
     });
   });
-
-  describe("getRaw followed by setRaw works", () => {
-    it("should work", () => {
-      const cell = runtime.getCell<{ value: number }>(
-        space,
-        "getRaw followed by setRaw works",
-      );
-      cell.withTx(tx).setRaw({ value: 42 });
-      const raw = cell.withTx(tx).getRaw();
-      expect(raw?.value).toBe(42);
-      cell.withTx(tx).setRaw(raw);
-      expect(cell.withTx(tx).get().value).toBe(42);
-    });
-  });
 });
 
 /**

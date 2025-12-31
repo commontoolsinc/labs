@@ -88,8 +88,6 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   const result = runtime.run(tx, patternFactory, argument, resultCell);
   tx.commit();
 
-  // Sink to keep the result reactive
-  result.sink(() => {});
   await runtime.idle();
 
   let stepIndex = 0;
@@ -117,8 +115,7 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
         (cell, segment) => cell.key(segment),
         result,
       );
-      // Use pull() in pull mode to ensure all dependencies are computed
-      const actual = await targetCell.pull();
+      const actual = targetCell.get();
       expect(actual, `${name}:${stepIndex}:${assertion.path}`)
         .toEqual(assertion.value);
     }

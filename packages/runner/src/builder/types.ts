@@ -158,8 +158,6 @@ declare module "@commontools/api" {
     wrapper?: "handler";
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;
-    /** If true, this module is an effect (side-effectful) rather than a computation */
-    isEffect?: boolean;
   }
 }
 

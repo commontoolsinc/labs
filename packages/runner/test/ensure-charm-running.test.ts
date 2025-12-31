@@ -213,7 +213,7 @@ describe("ensureCharmRunning", () => {
     expect(result).toBe(true);
 
     // Wait for the charm to run
-    await resultCell.pull();
+    await runtime.idle();
 
     expect(recipeRan).toBe(true);
   });
@@ -275,7 +275,7 @@ describe("ensureCharmRunning", () => {
     );
     expect(result1).toBe(true);
 
-    await resultCell.pull();
+    await runtime.idle();
 
     // Second call should also return true - ensureCharmRunning doesn't track
     // previous calls because runtime.runSynced() is idempotent for already-running charms
@@ -346,7 +346,7 @@ describe("ensureCharmRunning", () => {
     );
     expect(result1).toBe(true);
 
-    await resultCell.pull();
+    await runtime.idle();
     expect(startCount).toBe(1);
 
     // Stop the charm
@@ -359,7 +359,7 @@ describe("ensureCharmRunning", () => {
     );
     expect(result2).toBe(true);
 
-    await resultCell.pull();
+    await runtime.idle();
 
     // The charm's lift should have run twice now (once for each start)
     expect(startCount).toBe(2);
@@ -514,7 +514,9 @@ describe("queueEvent with auto-start", () => {
     runtime.scheduler.queueEvent(eventsLink, { type: "click" });
 
     // Wait for processing
-    await resultCell.pull();
+    await runtime.idle();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await runtime.idle();
 
     // The charm should have been started (lift ran)
     expect(liftRunCount).toBe(1);
@@ -664,7 +666,7 @@ describe("queueEvent with auto-start", () => {
     runtime.scheduler.queueEvent(eventsLink, { type: "click", x: 10 });
 
     // Wait for processing
-    await resultCell.pull();
+    await runtime.idle();
     await new Promise((resolve) => setTimeout(resolve, 100));
     await runtime.idle();
 

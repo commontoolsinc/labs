@@ -3,54 +3,19 @@
 // contexts to visualize or log events inside the runtime.
 
 import { IMemoryChange } from "./storage/interface.ts";
-import type { ActionStats } from "./scheduler.ts";
+import {
+  Action,
+  AnnotatedAction,
+  AnnotatedEventHandler,
+  EventHandler,
+} from "./scheduler.ts";
 import { StorageTelemetry } from "./storage/telemetry.ts";
 import type * as Inspector from "./storage/inspector.ts";
-
-// Types for scheduler graph visualization
-export interface SchedulerGraphNode {
-  id: string; // actionId or "input:space/entity" for inputs
-  type: "effect" | "computation" | "input" | "inactive"; // inactive = has stats but no longer registered
-  stats?: ActionStats;
-  isDirty: boolean;
-  isPending: boolean;
-  parentId?: string; // ID of parent action if this was created during parent's execution
-  childCount?: number; // Number of child actions created during this action's execution
-  preview?: string; // First ~200 chars of function body for hover tooltips
-  // Diagnostic info: what cells this action reads and writes
-  reads?: string[]; // space/entity paths this action reads
-  writes?: string[]; // space/entity paths this action writes (mightWrite)
-  // Timing controls
-  debounceMs?: number; // Current debounce delay in ms (if set)
-  throttleMs?: number; // Current throttle period in ms (if set)
-}
-
-export interface SchedulerGraphEdge {
-  from: string; // actionId of source
-  to: string; // actionId of target
-  cells: string[]; // Cell IDs creating this dependency
-  edgeType?: "data" | "parent"; // data = dependency, parent = parent-child relationship
-}
-
-export interface SchedulerGraphSnapshot {
-  nodes: SchedulerGraphNode[];
-  edges: SchedulerGraphEdge[];
-  pullMode: boolean;
-  timestamp: number;
-}
-
-export interface SchedulerActionInfo {
-  recipeName?: string;
-  moduleName?: string;
-  reads?: string[];
-  writes?: string[];
-}
 
 // Types of markers that can be submitted by the runtime.
 export type RuntimeTelemetryMarker = {
   type: "scheduler.run";
-  actionId: string;
-  actionInfo?: SchedulerActionInfo;
+  action: Action | AnnotatedAction;
   error?: string;
 } | {
   type: "cell.update";
@@ -58,8 +23,7 @@ export type RuntimeTelemetryMarker = {
   error?: string;
 } | {
   type: "scheduler.invocation";
-  handlerId: string;
-  handlerInfo?: SchedulerActionInfo;
+  handler: EventHandler | AnnotatedEventHandler;
   error?: string;
 } | {
   type: "storage.push.start";
@@ -100,21 +64,6 @@ export type RuntimeTelemetryMarker = {
   type: "storage.subscription.remove";
   id: string;
   error?: string;
-} | {
-  type: "scheduler.graph.snapshot";
-  graph: SchedulerGraphSnapshot;
-} | {
-  type: "scheduler.mode.change";
-  pullMode: boolean;
-} | {
-  type: "scheduler.subscribe";
-  actionId: string;
-  isEffect: boolean;
-} | {
-  type: "scheduler.dependencies.update";
-  actionId: string;
-  reads: string[]; // cell paths this action reads
-  writes: string[]; // cell paths this action writes
 };
 
 export type RuntimeTelemetryMarkerResult = RuntimeTelemetryMarker & {

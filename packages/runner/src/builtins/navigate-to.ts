@@ -1,6 +1,5 @@
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
-import { type RawBuiltinResult } from "../module.ts";
 import { type Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
@@ -11,12 +10,12 @@ export function navigateTo(
   cause: Cell<any>[],
   parentCell: Cell<any>,
   runtime: Runtime,
-): RawBuiltinResult {
+): Action {
   let isInitialized = false;
   let navigated = false;
   let resultCell: Cell<boolean>;
 
-  const action: Action = async (tx: IExtendedStorageTransaction) => {
+  return async (tx: IExtendedStorageTransaction) => {
     // The main reason we might be called again after navigating is that the
     // transaction to update the result cell failed, so we'll just set it again.
     if (navigated) {
@@ -66,10 +65,5 @@ export function navigateTo(
       navigated = true;
       resultCell.set(true);
     }
-  };
-
-  return {
-    action,
-    isEffect: true,
   };
 }

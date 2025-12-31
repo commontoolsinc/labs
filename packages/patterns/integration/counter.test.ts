@@ -16,7 +16,6 @@ describe("counter direct operations test", () => {
   let identity: Identity;
   let cc: CharmsController;
   let charm: CharmController;
-  let charmSinkCancel: (() => void) | undefined;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -34,15 +33,9 @@ describe("counter direct operations test", () => {
       program, // We operate on the charm in this thread
       { start: true },
     );
-
-    // In pull mode, create a sink to keep the charm reactive when inputs change.
-    // Without this, setting values won't trigger recipe re-computation.
-    const resultCell = cc.manager().getResult(charm.getCell());
-    charmSinkCancel = resultCell.sink(() => {});
   });
 
   afterAll(async () => {
-    charmSinkCancel?.();
     if (cc) await cc.dispose();
   });
 
