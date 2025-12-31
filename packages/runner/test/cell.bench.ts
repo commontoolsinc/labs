@@ -1122,3 +1122,119 @@ Deno.bench("Cell equals - comparison operations (1000x)", async () => {
 
   await cleanup(runtime, storageManager, tx);
 });
+
+// Benchmark: Complex linked document graph (MentionableCharm pattern)
+// This tests .get() performance on a medium-complexity object spread across many documents
+Deno.bench(
+  "Cell complex - MentionableCharm graph (10 top-level, 20 linked each, 100x get)",
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Schema for MentionableCharm with self-referential mentioned/backlinks
+    const MentionableCharmSchema = {
+      $defs: {
+        MentionableCharm: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            isHidden: { type: "boolean" },
+            mentioned: {
+              type: "array",
+              items: { $ref: "#/$defs/MentionableCharm" },
+            },
+            backlinks: {
+              type: "array",
+              items: { $ref: "#/$defs/MentionableCharm" },
+            },
+          },
+        },
+      },
+      type: "array",
+      items: { $ref: "#/$defs/MentionableCharm" },
+    } as const satisfies JSONSchema;
+
+    // Create 30 "leaf" charms that will be referenced (no further links)
+    const leafCharms: ReturnType<typeof runtime.getCell>[] = [];
+    for (let i = 0; i < 30; i++) {
+      const leafCell = runtime.getCell(
+        space,
+        `bench-leaf-charm-${i}`,
+        {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            isHidden: { type: "boolean" },
+            mentioned: { type: "array", items: {} },
+            backlinks: { type: "array", items: {} },
+          },
+        } as const satisfies JSONSchema,
+        tx,
+      );
+      leafCell.set({
+        name: `Leaf Charm ${i}`,
+        isHidden: i % 3 === 0,
+        mentioned: [],
+        backlinks: [],
+      });
+      leafCharms.push(leafCell);
+    }
+
+    // Create 10 top-level charms, each linking to ~20 leaf charms
+    const topLevelCharms: ReturnType<typeof runtime.getCell>[] = [];
+    for (let i = 0; i < 10; i++) {
+      const topCell = runtime.getCell(
+        space,
+        `bench-top-charm-${i}`,
+        {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            isHidden: { type: "boolean" },
+            mentioned: { type: "array", items: {} },
+            backlinks: { type: "array", items: {} },
+          },
+        } as const satisfies JSONSchema,
+        tx,
+      );
+
+      // Each top-level charm mentions 10 leaves and has 10 backlinks
+      const mentionedSlice = leafCharms.slice(i * 2, i * 2 + 10);
+      const backlinksSlice = leafCharms.slice(
+        (i * 2 + 10) % 30,
+        ((i * 2 + 10) % 30) + 10,
+      );
+
+      topCell.set({
+        name: `Top Charm ${i}`,
+        isHidden: false,
+        mentioned: mentionedSlice,
+        backlinks: backlinksSlice,
+      });
+      topLevelCharms.push(topCell);
+    }
+
+    // Create the main array cell containing all top-level charms
+    const mainCell = runtime.getCell(
+      space,
+      "bench-mentionable-charms",
+      MentionableCharmSchema,
+      tx,
+    );
+    mainCell.set(topLevelCharms);
+
+    await tx.commit();
+
+    // Measure .get() on the full graph 100x
+    for (let i = 0; i < 100; i++) {
+      const result = mainCell.get();
+      // Access some nested data to ensure full traversal
+      for (const charm of result) {
+        charm.name;
+        charm.mentioned;
+        charm.backlinks;
+      }
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
