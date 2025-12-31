@@ -46,33 +46,38 @@ When reading with a schema selector immediately after committing:
 
 **But**: `get()` doesn't await `sync()`, so how does this block the synchronous read?
 
-## Current Status: NEEDS MORE INFO
+## ✅ ROOT CAUSE FOUND
 
-The investigation has identified several potential issues but none fully explain:
-- Why 20ms with just 2 entries
-- How async network waits block synchronous `get()` calls
-- What specifically about "mentionables schemas" is slow
+**See INVESTIGATION_ROOT_CAUSE_FOUND.md for complete analysis.**
 
-## Questions for User
+### Summary
 
-1. **How are you calling get()?**
-   - Just `cell.get()`?
-   - Or `await cell.sync()` then `cell.get()`?
-   - Or something else?
+The 20ms delay is caused by **repeated resolveLink() calls** during array schema processing:
 
-2. **Have you profiled with timestamps?**
-   - Can you add `console.time()` around the specific `get()` call?
-   - Can you confirm it's the get() itself, not something before/after?
+1. **Notebook pattern** exports `mentionable: notes` (Cell<NoteCharm[]>)
+2. **BacklinksIndex** calls `.get()` on mentionable in a lift function
+3. **Runner** executes JavaScript nodes by calling `.get()` on inputs
+4. **Cell.get()** calls validateAndTransform with array schema
+5. **For each array element**, validateAndTransform:
+   - Calls `resolveLink()` → 2-4 storage reads per element
+   - Calls `JSON.stringify()` for deduplication
+   - Does O(n) linear search in seen array
+   - Recursively processes element schema
 
-3. **What is "mentionables schema"?**
-   - Is it a complex schema with many properties?
-   - Does it use `asCell` or other special annotations?
-   - Can you share the schema?
+### Why It's Slow
 
-4. **When exactly is it slow?**
-   - Only when commit is still in flight to server?
-   - Or even after server responds?
-   - What if you add a 100ms delay between commit and read?
+- **resolveLink() does 2-4 reads** from storage per call
+- **Called for every array element** and their nested properties
+- **Reads from nursery** (pending commits) have overhead
+- **O(n²) complexity** from linear search in seen array
+- For 2 notes: ~3-5 resolveLink calls × 3-5ms each = **15-25ms**
+
+### Fixes
+
+1. **Cache resolveLink results** (high priority)
+2. **Change seen from Array to Map** (high priority)
+3. **Optimize link key generation** (medium priority)
+4. **Batch resolve for arrays** (medium priority)
 
 ## Potential Fixes (Once Root Cause Confirmed)
 
