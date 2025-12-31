@@ -74,7 +74,9 @@ describe("Computed closures over map items", () => {
       // Test strict equality - this works without triggering the error
       const strictResult = "test-id" === idProxy;
       console.log(`\n"test-id" === proxy.id: ${strictResult}`);
-      console.log(`Key insight: strict equality is FALSE even though values match`);
+      console.log(
+        `Key insight: strict equality is FALSE even though values match`,
+      );
 
       // Test if get() returns correct value and comparison works
       if (proxyIdHasGet) {
@@ -151,7 +153,8 @@ describe("Computed closures over map items", () => {
       console.log(`\nDoes proxy.items[0].id have .get()? ${hasGet}`);
 
       if (hasGet) {
-        const itemIdValue = (firstItemId as unknown as { get: () => string }).get();
+        const itemIdValue = (firstItemId as unknown as { get: () => string })
+          .get();
         console.log(`proxy.items[0].id.get() = "${itemIdValue}"`);
         const fixedComparison = selectedValue === itemIdValue;
         console.log(
