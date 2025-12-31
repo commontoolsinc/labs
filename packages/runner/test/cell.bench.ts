@@ -1342,7 +1342,8 @@ async function benchmarkNotebookReads(noteCount: number, readCount: number) {
     const note = runtime.getCell(space, `note-${i}`, noteSchema, tx1);
     note.set({
       title: `Note ${i}`,
-      content: `Content for note ${i} - some additional text to make it realistic`,
+      content:
+        `Content for note ${i} - some additional text to make it realistic`,
       noteId: `note-${i}`,
     });
     notes.push(note);
