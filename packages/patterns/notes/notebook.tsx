@@ -892,8 +892,12 @@ const Notebook = pattern<Input, Output>(
     const menuOpen = Cell.of(false);
 
     // Use lift() for proper reactive tracking of notes.length
-    const noteCount = lift((args: { n: NoteCharm[] }) => args.n.length)({ n: notes });
-    const hasNotes = lift((args: { n: NoteCharm[] }) => args.n.length > 0)({ n: notes });
+    const noteCount = lift((args: { n: NoteCharm[] }) => args.n.length)({
+      n: notes,
+    });
+    const hasNotes = lift((args: { n: NoteCharm[] }) => args.n.length > 0)({
+      n: notes,
+    });
 
     // Selection state for multi-select
     const selectedNoteIndices = Cell.of<number[]>([]);

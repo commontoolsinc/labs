@@ -1970,7 +1970,9 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
   });
 
   // noteCount derived from notes array - use lift() for proper reactive tracking
-  const noteCount = lift((args: { n: NoteCharm[] }) => args.n.length)({ n: notes });
+  const noteCount = lift((args: { n: NoteCharm[] }) => args.n.length)({
+    n: notes,
+  });
   const notebookCount = lift((args: { n: NotebookCharm[] }) => args.n.length)({
     n: notebooks,
   });
