@@ -22,9 +22,9 @@ function setup() {
 async function cleanup(
   runtime: Runtime,
   storageManager: ReturnType<typeof StorageManager.emulate>,
-  tx: IExtendedStorageTransaction,
+  tx?: IExtendedStorageTransaction,
 ) {
-  await tx.commit();
+  await tx?.commit();
   await runtime.dispose();
   await storageManager.close();
 }
@@ -288,77 +288,92 @@ Deno.bench("Cell get - complex object with schema (100x)", async () => {
 
 // Benchmark: Cell set operations
 Deno.bench("Cell set - simple value schemaless (100x)", async () => {
-  const { runtime, storageManager, tx } = setup();
+  const { runtime, storageManager } = setup();
 
-  const cell = runtime.getCell<number>(space, "bench-set", undefined, tx);
+  const cell = runtime.getCell<number>(space, "bench-set", undefined);
 
   // Measure set operation
   for (let i = 0; i < 100; i++) {
-    cell.set(i);
+    const tx = runtime.edit();
+    cell.withTx(tx).set(i);
+    tx.commit();
   }
 
-  await cleanup(runtime, storageManager, tx);
+  await cleanup(runtime, storageManager);
 });
 
 Deno.bench("Cell send - simple value schemaless (100x)", async () => {
-  const { runtime, storageManager, tx } = setup();
+  const { runtime, storageManager } = setup();
 
-  const cell = runtime.getCell<number>(space, "bench-send", undefined, tx);
-  cell.set(0);
+  const cell = runtime.getCell<number>(space, "bench-send", undefined);
+
+  // Initialize with a committed value first
+  const initTx = runtime.edit();
+  cell.withTx(initTx).set(0);
+  initTx.commit();
 
   // Measure send operation
   for (let i = 0; i < 100; i++) {
-    cell.send(i);
+    const tx = runtime.edit();
+    cell.withTx(tx).send(i);
+    tx.commit();
   }
 
-  await cleanup(runtime, storageManager, tx);
+  await cleanup(runtime, storageManager);
 });
 
 Deno.bench(
   "Cell update - partial object update schemaless (100x)",
   async () => {
-    const { runtime, storageManager, tx } = setup();
+    const { runtime, storageManager } = setup();
 
     const cell = runtime.getCell<{
       name: string;
       age: number;
       tags: string[];
-    }>(space, "bench-update", undefined, tx);
+    }>(space, "bench-update", undefined);
 
-    cell.set({ name: "test", age: 42, tags: ["a", "b"] });
+    // Initialize with a committed value first
+    const initTx = runtime.edit();
+    cell.withTx(initTx).set({ name: "test", age: 42, tags: ["a", "b"] });
+    initTx.commit();
 
     // Measure update operation
     for (let i = 0; i < 100; i++) {
-      cell.update({ age: i });
+      const tx = runtime.edit();
+      cell.withTx(tx).update({ age: i });
+      tx.commit();
     }
 
-    await cleanup(runtime, storageManager, tx);
+    await cleanup(runtime, storageManager);
   },
 );
 
 // Schema-based set operations
 Deno.bench("Cell set - simple value with schema (100x)", async () => {
-  const { runtime, storageManager, tx } = setup();
+  const { runtime, storageManager } = setup();
 
   const schema = {
     type: "number",
     minimum: 0,
     maximum: 1000,
   } as const satisfies JSONSchema;
-  const cell = runtime.getCell(space, "bench-set-schema", schema, tx);
+  const cell = runtime.getCell(space, "bench-set-schema", schema);
 
   // Measure set operation
   for (let i = 0; i < 100; i++) {
-    cell.set(i);
+    const tx = runtime.edit();
+    cell.withTx(tx).set(i);
+    tx.commit();
   }
 
-  await cleanup(runtime, storageManager, tx);
+  await cleanup(runtime, storageManager);
 });
 
 Deno.bench(
   "Cell update - partial object update with schema (100x)",
   async () => {
-    const { runtime, storageManager, tx } = setup();
+    const { runtime, storageManager } = setup();
 
     const schema = {
       type: "object",
@@ -373,16 +388,21 @@ Deno.bench(
       required: ["name", "age", "tags"],
     } as const satisfies JSONSchema;
 
-    const cell = runtime.getCell(space, "bench-update-schema", schema, tx);
+    const cell = runtime.getCell(space, "bench-update-schema", schema);
 
-    cell.set({ name: "test", age: 42, tags: ["a", "b"] });
+    // Initialize with a committed value first
+    const initTx = runtime.edit();
+    cell.withTx(initTx).set({ name: "test", age: 42, tags: ["a", "b"] });
+    initTx.commit();
 
     // Measure update operation
     for (let i = 0; i < 100; i++) {
-      cell.update({ age: i });
+      const tx = runtime.edit();
+      cell.withTx(tx).update({ age: i });
+      tx.commit();
     }
 
-    await cleanup(runtime, storageManager, tx);
+    await cleanup(runtime, storageManager);
   },
 );
 
@@ -593,23 +613,28 @@ Deno.bench(
 );
 
 Deno.bench("Cell proxy - property writes schemaless (100x)", async () => {
-  const { runtime, storageManager, tx } = setup();
+  const { runtime, storageManager } = setup();
 
   const cell = runtime.getCell<{
     x: number;
     y: number;
-  }>(space, "bench-proxy-write", undefined, tx);
+  }>(space, "bench-proxy-write", undefined);
 
-  cell.set({ x: 1, y: 2 });
-  const proxy = cell.getAsQueryResult();
+  // Initialize with a committed value first
+  const initTx = runtime.edit();
+  cell.withTx(initTx).set({ x: 1, y: 2 });
+  initTx.commit();
 
   // Measure proxy writes
   for (let i = 0; i < 100; i++) {
+    const tx = runtime.edit();
+    const proxy = cell.withTx(tx).getAsQueryResult();
     proxy.x = i;
     proxy.y = i * 2;
+    tx.commit();
   }
 
-  await cleanup(runtime, storageManager, tx);
+  await cleanup(runtime, storageManager);
 });
 
 // Schema-based get operations for complex objects
@@ -655,23 +680,27 @@ Deno.bench("Cell get - complex object with asCell schema (100x)", async () => {
 
 // Benchmark: Array operations
 Deno.bench("Cell push - array append schemaless (100x)", async () => {
-  const { runtime, storageManager, tx } = setup();
+  const { runtime, storageManager } = setup();
 
   const cell = runtime.getCell<{ items: number[] }>(
     space,
     "bench-push",
     undefined,
-    tx,
   );
-  cell.set({ items: [] });
-  const arrayCell = cell.key("items");
+
+  // Initialize with a committed value first
+  const initTx = runtime.edit();
+  cell.withTx(initTx).set({ items: [] });
+  initTx.commit();
 
   // Measure push operations
   for (let i = 0; i < 100; i++) {
-    arrayCell.push(i);
+    const tx = runtime.edit();
+    cell.withTx(tx).key("items").push(i);
+    tx.commit();
   }
 
-  await cleanup(runtime, storageManager, tx);
+  await cleanup(runtime, storageManager);
 });
 
 Deno.bench("Cell array - proxy map operation schemaless (100x)", async () => {
@@ -698,7 +727,7 @@ Deno.bench("Cell array - proxy map operation schemaless (100x)", async () => {
 
 // Schema-based array operations
 Deno.bench("Cell push - array append with schema (100x)", async () => {
-  const { runtime, storageManager, tx } = setup();
+  const { runtime, storageManager } = setup();
 
   const schema = {
     type: "object",
@@ -711,16 +740,21 @@ Deno.bench("Cell push - array append with schema (100x)", async () => {
     required: ["items"],
   } as const satisfies JSONSchema;
 
-  const cell = runtime.getCell(space, "bench-push-schema", schema, tx);
-  cell.set({ items: [] });
-  const arrayCell = cell.key("items");
+  const cell = runtime.getCell(space, "bench-push-schema", schema);
+
+  // Initialize with a committed value first
+  const initTx = runtime.edit();
+  cell.withTx(initTx).set({ items: [] });
+  initTx.commit();
 
   // Measure push operations
   for (let i = 0; i < 100; i++) {
-    arrayCell.push(i);
+    const tx = runtime.edit();
+    cell.withTx(tx).key("items").push(i);
+    tx.commit();
   }
 
-  await cleanup(runtime, storageManager, tx);
+  await cleanup(runtime, storageManager);
 });
 
 Deno.bench("Cell array - map operation with schema (100x)", async () => {
@@ -980,7 +1014,7 @@ Deno.bench("Cell complex - nested cell references (100x)", async () => {
 
 // Benchmark: Schema validation
 Deno.bench("Cell schema - complex validation (100x)", async () => {
-  const { runtime, storageManager, tx } = setup();
+  const { runtime, storageManager } = setup();
 
   const complexSchema = {
     type: "object",
@@ -1009,16 +1043,12 @@ Deno.bench("Cell schema - complex validation (100x)", async () => {
     required: ["id", "user", "tags"],
   } as const satisfies JSONSchema;
 
-  const cell = runtime.getCell(
-    space,
-    "bench-schema-complex",
-    complexSchema,
-    tx,
-  );
+  const cell = runtime.getCell(space, "bench-schema-complex", complexSchema);
 
   // Measure complex object set with schema validation
   for (let i = 0; i < 100; i++) {
-    cell.set({
+    const tx = runtime.edit();
+    cell.withTx(tx).set({
       id: `user-${i}`,
       user: {
         name: `User ${i}`,
@@ -1031,9 +1061,10 @@ Deno.bench("Cell schema - complex validation (100x)", async () => {
         updated: "2025-01-22",
       },
     });
+    tx.commit();
   }
 
-  await cleanup(runtime, storageManager, tx);
+  await cleanup(runtime, storageManager);
 });
 
 // Benchmark: Large data structures
