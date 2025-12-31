@@ -1528,9 +1528,6 @@ function subscribeToReferencedDocs<T>(
   // Use resubscribe because we've already run it once above
   runtime.scheduler.resubscribe(action, log, { isEffect: true });
 
-  // Make sure scheduler runs, since resubscribe doesn't trigger a run
-  runtime.scheduler.queueExecution();
-
   return () => {
     runtime.scheduler.unsubscribe(action);
     if (isCancel(cleanup)) cleanup();

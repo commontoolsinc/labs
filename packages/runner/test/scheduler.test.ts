@@ -1585,6 +1585,8 @@ describe("effect/computation tracking", () => {
   });
 
   it("should track dependents for reverse dependency graph", async () => {
+    runtime.scheduler.enablePullMode();
+
     const source = runtime.getCell<number>(
       space,
       "dependents-source",
@@ -3045,6 +3047,8 @@ describe("debounce and throttling", () => {
   });
 
   it("should coalesce rapid triggers into single execution", async () => {
+    runtime.scheduler.enablePullMode();
+
     const cell = runtime.getCell<number>(
       space,
       "debounce-coalesce",

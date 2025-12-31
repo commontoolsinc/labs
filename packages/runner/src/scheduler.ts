@@ -353,6 +353,9 @@ export class Scheduler {
     } else {
       this.computations.add(action);
       this.effects.delete(action);
+      if (!this.pullMode) {
+        this.queueExecution();
+      }
     }
 
     // Track parent-child relationship if action is created during another action's execution
@@ -465,7 +468,7 @@ export class Scheduler {
     const reads = this.setDependencies(action, log);
 
     // Update reverse dependency graph
-    this.updateDependents(action, log);
+    if (this.pullMode) this.updateDependents(action, log);
 
     // Track action type for pull-based scheduling
     // Once an action is marked as an effect, it stays an effect
@@ -545,37 +548,45 @@ export class Scheduler {
     // Skip throttled computations - they'll trigger via storage changes when unthrottled.
     // Use isEffectAction instead of effects because unsubscribe() clears effects before run()
     const actionIsEffect = this.isEffectAction.get(action);
-    if (actionIsEffect && this.dirty.size > 0) {
+    if (this.pullMode && actionIsEffect && this.dirty.size > 0) {
       const effectReads = log.reads ?? [];
       let shouldMarkDirty = false;
 
+      // If there are pending computations whose dependencies haven't been collected yet,
+      // we can't know what they write. Be conservative and assume they might affect this effect.
+      if (this.pendingDependencyCollection.size > 0) {
+        shouldMarkDirty = true;
+      }
+
       // Use writersByEntity index for efficient lookup
-      for (const read of effectReads) {
-        const entity = `${read.space}/${read.id}` as SpaceAndURI;
-        const writers = this.writersByEntity.get(entity);
-        if (!writers) continue;
+      if (!shouldMarkDirty) {
+        for (const read of effectReads) {
+          const entity = `${read.space}/${read.id}` as SpaceAndURI;
+          const writers = this.writersByEntity.get(entity);
+          if (!writers) continue;
 
-        for (const writer of writers) {
-          if (writer === action) continue;
-          if (!this.dirty.has(writer)) continue;
-          if (this.effects.has(writer)) continue; // Only check computations
-          if (this.isThrottled(writer)) continue; // Skip throttled - they trigger via storage
+          for (const writer of writers) {
+            if (writer === action) continue;
+            if (!this.dirty.has(writer)) continue;
+            if (this.effects.has(writer)) continue; // Only check computations
+            if (this.isThrottled(writer)) continue; // Skip throttled - they trigger via storage
 
-          // Check path overlap
-          const writerWrites = this.mightWrite.get(writer) ?? [];
-          for (const write of writerWrites) {
-            if (
-              write.space === read.space &&
-              write.id === read.id &&
-              arraysOverlap(write.path, read.path)
-            ) {
-              shouldMarkDirty = true;
-              break;
+            // Check path overlap
+            const writerWrites = this.mightWrite.get(writer) ?? [];
+            for (const write of writerWrites) {
+              if (
+                write.space === read.space &&
+                write.id === read.id &&
+                arraysOverlap(write.path, read.path)
+              ) {
+                shouldMarkDirty = true;
+                break;
+              }
             }
+            if (shouldMarkDirty) break;
           }
           if (shouldMarkDirty) break;
         }
-        if (shouldMarkDirty) break;
       }
 
       if (shouldMarkDirty && !this.dirty.has(action)) {
