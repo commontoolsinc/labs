@@ -281,6 +281,53 @@ export class Scheduler {
       "anonymous";
   }
 
+  private updateActionType(
+    action: Action,
+    isEffect: boolean | undefined,
+    options: { queueExecution?: boolean } = {},
+  ): boolean {
+    if (isEffect) {
+      this.isEffectAction.set(action, true);
+    }
+
+    const actionIsEffect = this.isEffectAction.get(action) ?? false;
+
+    if (actionIsEffect) {
+      this.effects.add(action);
+      this.computations.delete(action);
+      if (options.queueExecution) {
+        this.queueExecution();
+      }
+    } else {
+      this.computations.add(action);
+      this.effects.delete(action);
+      if (options.queueExecution && !this.pullMode) {
+        this.queueExecution();
+      }
+    }
+
+    return actionIsEffect;
+  }
+
+  private registerParentChild(
+    action: Action,
+    options: { allowExisting?: boolean } = {},
+  ): void {
+    const { allowExisting = true } = options;
+    if (!this.executingAction || this.executingAction === action) return;
+    if (!allowExisting && this.actionParent.has(action)) return;
+
+    const parent = this.executingAction;
+    this.actionParent.set(action, parent);
+
+    let children = this.actionChildren.get(parent);
+    if (!children) {
+      children = new Set();
+      this.actionChildren.set(parent, children);
+    }
+    children.add(action);
+  }
+
   /**
    * Subscribes an action to run when its dependencies change.
    *
@@ -339,45 +386,19 @@ export class Scheduler {
       this.setThrottle(action, throttle);
     }
 
-    // Track action type for pull-based scheduling
-    // Once an action is marked as an effect, it stays an effect (persists across re-subscriptions)
-    if (isEffect) {
-      this.isEffectAction.set(action, true);
-    }
-
-    // Use the persistent effect status for tracking
-    if (this.isEffectAction.get(action)) {
-      this.effects.add(action);
-      this.computations.delete(action);
-      this.queueExecution(); // Always trigger execution when scheduling an effect
-    } else {
-      this.computations.add(action);
-      this.effects.delete(action);
-      if (!this.pullMode) {
-        this.queueExecution();
-      }
-    }
+    const actionIsEffect = this.updateActionType(action, isEffect, {
+      queueExecution: true,
+    });
 
     // Track parent-child relationship if action is created during another action's execution
-    if (this.executingAction && this.executingAction !== action) {
-      const parent = this.executingAction;
-      this.actionParent.set(action, parent);
-
-      // Add to parent's children set
-      let children = this.actionChildren.get(parent);
-      if (!children) {
-        children = new Set();
-        this.actionChildren.set(parent, children);
-      }
-      children.add(action);
-    }
+    this.registerParentChild(action);
 
     logger.debug(
       "schedule",
       () => [
         "Subscribing to action:",
         action,
-        isEffect ? "effect" : "computation",
+        actionIsEffect ? "effect" : "computation",
       ],
     );
 
@@ -393,35 +414,11 @@ export class Scheduler {
     if (immediateLog) {
       const reads = this.setDependencies(action, immediateLog);
       this.updateDependents(action, immediateLog);
-
-      // Register triggers so we get notified of storage changes
-      // This is the same logic as in resubscribe()
-      const pathsByEntity = addressesToPathByEntity(reads);
-      const entities = new Set<SpaceAndURI>();
-
-      for (const [spaceAndURI, paths] of pathsByEntity) {
-        entities.add(spaceAndURI);
-        if (!this.triggers.has(spaceAndURI)) {
-          this.triggers.set(spaceAndURI, new Map());
-        }
-        const pathsWithValues = paths.map((path) =>
-          [
-            "value",
-            ...path,
-          ] as readonly MemoryAddressPathComponent[]
-        );
-        this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
-      }
+      const { entities } = this.addTriggerPaths(action, reads);
 
       // Only set up cancel function if we registered triggers
       // (don't overwrite existing cancel from resubscribe if reads was empty)
-      if (entities.size > 0) {
-        this.cancels.set(action, () => {
-          for (const spaceAndURI of entities) {
-            this.triggers.get(spaceAndURI)?.delete(action);
-          }
-        });
-      }
+      this.setCancelForEntities(action, entities, { skipIfEmpty: true });
     } else {
       // Mark action for dependency collection before first run
       this.pendingDependencyCollection.add(action);
@@ -434,12 +431,11 @@ export class Scheduler {
     this.scheduledFirstTime.add(action);
 
     // Emit telemetry for new subscription
-    const actionId = (action as Action & { src?: string }).src || action.name ||
-      "anonymous";
+    const actionId = this.getActionId(action);
     this.runtime.telemetry.submit({
       type: "scheduler.subscribe",
       actionId,
-      isEffect: this.isEffectAction.get(action) ?? false,
+      isEffect: actionIsEffect,
     });
 
     return () => this.unsubscribe(action);
@@ -472,82 +468,38 @@ export class Scheduler {
 
     // Track action type for pull-based scheduling
     // Once an action is marked as an effect, it stays an effect
-    if (isEffect) {
-      this.isEffectAction.set(action, true);
-    }
-
-    // Use the persistent effect status for tracking
-    if (this.isEffectAction.get(action)) {
-      this.effects.add(action);
-      this.computations.delete(action);
-    } else {
-      this.computations.add(action);
-      this.effects.delete(action);
-    }
+    const actionIsEffect = this.updateActionType(action, isEffect);
+    const actionId = this.getActionId(action);
 
     // Track parent-child relationship if action is created during another action's execution
     // Only set if not already set (resubscribe can be called multiple times)
-    if (
-      this.executingAction && this.executingAction !== action &&
-      !this.actionParent.has(action)
-    ) {
-      const parent = this.executingAction;
-      this.actionParent.set(action, parent);
+    this.registerParentChild(action, { allowExisting: false });
 
-      // Add to parent's children set
-      let children = this.actionChildren.get(parent);
-      if (!children) {
-        children = new Set();
-        this.actionChildren.set(parent, children);
-      }
-      children.add(action);
-    }
-
-    const pathsByEntity = addressesToPathByEntity(reads);
+    const { entities, pathsWithValuesByEntity } = this.addTriggerPaths(
+      action,
+      reads,
+    );
 
     logger.debug("schedule-resubscribe", () => [
-      `Action: ${action.name || "anonymous"}`,
-      `Entities: ${pathsByEntity.size}`,
+      `Action: ${actionId}`,
+      `Entities: ${pathsWithValuesByEntity.size}`,
       `Reads: ${reads.length}`,
     ]);
 
-    const entities = new Set<SpaceAndURI>();
-
-    for (const [spaceAndURI, paths] of pathsByEntity) {
-      entities.add(spaceAndURI);
-      if (!this.triggers.has(spaceAndURI)) {
-        this.triggers.set(spaceAndURI, new Map());
-      }
-      const pathsWithValues = paths.map((path) =>
-        [
-          "value",
-          ...path,
-        ] as readonly MemoryAddressPathComponent[]
-      );
-      this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
-
+    for (const [spaceAndURI, pathsWithValues] of pathsWithValuesByEntity) {
       logger.debug("schedule-resubscribe-path", () => [
         `Registered action for ${spaceAndURI}`,
         `Paths: ${pathsWithValues.map((p) => p.join("/")).join(", ")}`,
       ]);
     }
 
-    this.cancels.set(action, () => {
-      logger.debug("schedule-unsubscribe", () => [
-        `Action: ${action.name || "anonymous"}`,
-        `Entities: ${entities.size}`,
-      ]);
-      for (const spaceAndURI of entities) {
-        this.triggers.get(spaceAndURI)?.delete(action);
-      }
-    });
+    this.setCancelForEntities(action, entities);
 
     // In pull mode: When an effect resubscribes, check if any non-throttled dirty
     // computations write to what it reads. If so, mark the effect dirty so it can
     // pull those computations and see fresh data.
     // Skip throttled computations - they'll trigger via storage changes when unthrottled.
     // Use isEffectAction instead of effects because unsubscribe() clears effects before run()
-    const actionIsEffect = this.isEffectAction.get(action);
     if (this.pullMode && actionIsEffect && this.dirty.size > 0) {
       const effectReads = log.reads ?? [];
       let shouldMarkDirty = false;
@@ -648,9 +600,10 @@ export class Scheduler {
       type: "scheduler.run",
       action,
     });
+    const actionId = this.getActionId(action);
 
     logger.debug("schedule-run-start", () => [
-      `[RUN] Starting action: ${action.name || "anonymous"}`,
+      `[RUN] Starting action: ${actionId}`,
       `Pull mode: ${this.pullMode}`,
     ]);
 
@@ -669,7 +622,7 @@ export class Scheduler {
         try {
           if (error) {
             logger.error("schedule-error", () => [
-              `[RUN] Action failed: ${action.name || "anonymous"}`,
+              `[RUN] Action failed: ${actionId}`,
               `Error: ${error}`,
             ]);
             this.handleError(error as Error, action);
@@ -713,7 +666,7 @@ export class Scheduler {
           const log = txToReactivityLog(tx);
 
           logger.debug("schedule-run-complete", () => [
-            `[RUN] Action completed: ${action.name || "anonymous"}`,
+            `[RUN] Action completed: ${actionId}`,
             `Reads: ${log.reads.length}`,
             `Writes: ${log.writes.length}`,
             `Elapsed: ${elapsed.toFixed(2)}ms`,
@@ -735,9 +688,7 @@ export class Scheduler {
               const duration = ((performance.now() - actionStartTime) / 1000)
                 .toFixed(3);
               return [
-                `Action ${
-                  action.name || "anonymous"
-                } completed in ${duration}s`,
+                `Action ${actionId} completed in ${duration}s`,
               ];
             });
             finalizeAction();
@@ -904,7 +855,7 @@ export class Scheduler {
               for (const action of triggeredActions) {
                 logger.debug("schedule-trigger", () => [
                   `Action for ${spaceAndURI}/${change.address.path.join("/")}`,
-                  `Action name: ${action.name || "anonymous"}`,
+                  `Action: ${this.getActionId(action)}`,
                   `Mode: ${this.pullMode ? "pull" : "push"}`,
                   `Type: ${
                     this.effects.has(action) ? "effect" : "computation"
@@ -986,6 +937,94 @@ export class Scheduler {
     return reads;
   }
 
+  private addTriggerPaths(
+    action: Action,
+    reads: IMemorySpaceAddress[],
+  ): {
+    entities: Set<SpaceAndURI>;
+    pathsWithValuesByEntity: Map<SpaceAndURI, SortedAndCompactPaths>;
+  } {
+    const pathsByEntity = addressesToPathByEntity(reads);
+    const entities = new Set<SpaceAndURI>();
+    const pathsWithValuesByEntity = new Map<
+      SpaceAndURI,
+      SortedAndCompactPaths
+    >();
+
+    for (const [spaceAndURI, paths] of pathsByEntity) {
+      entities.add(spaceAndURI);
+      if (!this.triggers.has(spaceAndURI)) {
+        this.triggers.set(spaceAndURI, new Map());
+      }
+      const pathsWithValues = paths.map((path) =>
+        [
+          "value",
+          ...path,
+        ] as readonly MemoryAddressPathComponent[]
+      );
+      this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
+      pathsWithValuesByEntity.set(spaceAndURI, pathsWithValues);
+    }
+
+    return { entities, pathsWithValuesByEntity };
+  }
+
+  private setCancelForEntities(
+    action: Action,
+    entities: Set<SpaceAndURI>,
+    options: {
+      skipIfEmpty?: boolean;
+    } = {},
+  ): void {
+    if (options.skipIfEmpty && entities.size === 0) return;
+
+    const actionId = this.getActionId(action);
+    this.cancels.set(action, () => {
+      logger.debug("schedule-unsubscribe", () => [
+        `Action: ${actionId}`,
+        `Entities: ${entities.size}`,
+      ]);
+      for (const spaceAndURI of entities) {
+        this.triggers.get(spaceAndURI)?.delete(action);
+      }
+    });
+  }
+
+  private collectDependenciesForAction(
+    action: Action,
+    populateDependencies: PopulateDependencies,
+    options: {
+      errorLogLabel: string;
+      errorMessage: (action: Action, error: unknown) => string;
+      updateDependents?: boolean;
+      setCancel?: "always" | "ifNonEmpty";
+      useRawReadsForTriggers?: boolean;
+    },
+  ): { log: ReactivityLog; entities: Set<SpaceAndURI> } {
+    const depTx = this.runtime.edit();
+    try {
+      populateDependencies(depTx);
+    } catch (error) {
+      logger.debug(options.errorLogLabel, () => [
+        options.errorMessage(action, error),
+      ]);
+    }
+    const log = txToReactivityLog(depTx);
+    depTx.abort();
+
+    const reads = this.setDependencies(action, log);
+    if (options.updateDependents ?? true) {
+      this.updateDependents(action, log);
+    }
+
+    const readsForTriggers = options.useRawReadsForTriggers ? log.reads : reads;
+    const { entities } = this.addTriggerPaths(action, readsForTriggers);
+    const skipIfEmpty = options.setCancel === "ifNonEmpty";
+    this.setCancelForEntities(action, entities, { skipIfEmpty });
+
+    return { log, entities };
+  }
+
   /**
    * Updates the reverse dependency graph (dependents map).
    * For each action that writes to paths this action reads, add this action as a dependent.
@@ -1059,8 +1098,7 @@ export class Scheduler {
     }
 
     // Emit telemetry for dependency updates
-    const actionId = (action as Action & { src?: string }).src || action.name ||
-      "anonymous";
+    const actionId = this.getActionId(action);
     this.runtime.telemetry.submit({
       type: "scheduler.dependencies.update",
       actionId,
@@ -1083,7 +1121,7 @@ export class Scheduler {
 
   /**
    * Returns a snapshot of the current dependency graph for visualization.
-   * Uses action.src or action.name as the identifier (includes code location).
+   * Uses getActionId for the identifier (includes code location).
    */
   getGraphSnapshot(): SchedulerGraphSnapshot {
     const nodes: SchedulerGraphNode[] = [];
@@ -1561,7 +1599,7 @@ export class Scheduler {
 
     logger.debug("schedule-debounce", () => [
       `[DEBOUNCE] Action ${
-        action.name || "anonymous"
+        this.getActionId(action)
       } debounced for ${debounceMs}ms`,
     ]);
   }
@@ -1587,8 +1625,9 @@ export class Scheduler {
     // Check if action is slow enough to warrant debouncing
     if (stats.averageTime >= AUTO_DEBOUNCE_THRESHOLD_MS) {
       this.actionDebounce.set(action, AUTO_DEBOUNCE_DELAY_MS);
+      const actionId = this.getActionId(action);
       logger.debug("schedule-debounce", () => [
-        `[AUTO-DEBOUNCE] Action ${action.name || "anonymous"} ` +
+        `[AUTO-DEBOUNCE] Action ${actionId} ` +
         `auto-debounced (avg ${
           stats.averageTime.toFixed(1)
         }ms >= ${AUTO_DEBOUNCE_THRESHOLD_MS}ms)`,
@@ -1706,61 +1745,25 @@ export class Scheduler {
       const populateDependencies = this.populateDependenciesCallbacks.get(
         action,
       );
-      if (populateDependencies) {
-        // Create a transaction to capture reads
-        const depTx = this.runtime.edit();
-        try {
-          populateDependencies(depTx);
-        } catch (error) {
-          // If populateDependencies fails, log and continue
-          // The action will still run and discover its real dependencies
-          logger.debug("schedule-dep-error", () => [
+      if (!populateDependencies) continue;
+
+      const { log, entities } = this.collectDependenciesForAction(
+        action,
+        populateDependencies,
+        {
+          errorLogLabel: "schedule-dep-error",
+          errorMessage: (target, error) =>
             `Error populating dependencies for ${
-              action.name || "anonymous"
+              this.getActionId(target)
             }: ${error}`,
-          ]);
-        }
-        const log = txToReactivityLog(depTx);
-        // Abort the transaction - we only wanted to capture reads
-        depTx.abort();
+        },
+      );
 
-        // Set up dependencies and update reverse dependency graph
-        const reads = this.setDependencies(action, log);
-        this.updateDependents(action, log);
-
-        // Set up triggers so this action gets notified when its dependencies change
-        // This is the same logic as in resubscribe() - we need triggers for storage
-        // notifications to mark this action as dirty when inputs change.
-        const pathsByEntity = addressesToPathByEntity(reads);
-        const entities = new Set<SpaceAndURI>();
-
-        for (const [spaceAndURI, paths] of pathsByEntity) {
-          entities.add(spaceAndURI);
-          if (!this.triggers.has(spaceAndURI)) {
-            this.triggers.set(spaceAndURI, new Map());
-          }
-          const pathsWithValues = paths.map((path) =>
-            [
-              "value",
-              ...path,
-            ] as readonly MemoryAddressPathComponent[]
-          );
-          this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
-        }
-
-        // Set up cancel function to clean up triggers
-        this.cancels.set(action, () => {
-          for (const spaceAndURI of entities) {
-            this.triggers.get(spaceAndURI)?.delete(action);
-          }
-        });
-
-        logger.debug("schedule-dep-collect", () => [
-          `Collected dependencies for ${
-            action.name || "anonymous"
-          }: ${log.reads.length} reads, ${log.writes.length} writes, ${entities.size} entities`,
-        ]);
-      }
+      logger.debug("schedule-dep-collect", () => [
+        `Collected dependencies for ${
+          this.getActionId(action)
+        }: ${log.reads.length} reads, ${log.writes.length} writes, ${entities.size} entities`,
+      ]);
     }
 
     // Now mark downstream nodes as dirty if we introduced new dependencies for them
@@ -1885,6 +1888,7 @@ export class Scheduler {
           }
         };
         const tx = this.runtime.edit();
+        const actionId = this.getActionId(action);
 
         try {
           const actionStartTime = performance.now();
@@ -1897,9 +1901,7 @@ export class Scheduler {
             }
             logger.debug("action-timing", () => {
               return [
-                `Action ${action.name || "anonymous"} completed in ${
-                  duration.toFixed(3)
-                }s`,
+                `Action ${actionId} completed in ${duration.toFixed(3)}s`,
               ];
             });
             finalize();
@@ -1919,51 +1921,19 @@ export class Scheduler {
         const populateDependencies = this.populateDependenciesCallbacks.get(
           action,
         );
-        if (populateDependencies) {
-          const depTx = this.runtime.edit();
-          try {
-            populateDependencies(depTx);
-          } catch (error) {
-            logger.debug("schedule-dep-error-post-event", () => [
-              `Error populating dependencies for ${
-                action.name || "anonymous"
-              }: ${error}`,
-            ]);
-          }
-          const log = txToReactivityLog(depTx);
-          depTx.abort();
+        if (!populateDependencies) continue;
 
-          const reads = this.setDependencies(action, log);
-          this.updateDependents(action, log);
+        this.collectDependenciesForAction(action, populateDependencies, {
+          errorLogLabel: "schedule-dep-error-post-event",
+          errorMessage: (target, error) =>
+            `Error populating dependencies for ${
+              this.getActionId(target)
+            }: ${error}`,
+        });
 
-          // Set up triggers
-          const pathsByEntity = addressesToPathByEntity(reads);
-          const entities = new Set<SpaceAndURI>();
-
-          for (const [spaceAndURI, paths] of pathsByEntity) {
-            entities.add(spaceAndURI);
-            if (!this.triggers.has(spaceAndURI)) {
-              this.triggers.set(spaceAndURI, new Map());
-            }
-            const pathsWithValues = paths.map((path) =>
-              [
-                "value",
-                ...path,
-              ] as readonly MemoryAddressPathComponent[]
-            );
-            this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
-          }
-
-          this.cancels.set(action, () => {
-            for (const spaceAndURI of entities) {
-              this.triggers.get(spaceAndURI)?.delete(action);
-            }
-          });
-
-          logger.debug("schedule-dep-collect-post-event", () => [
-            `Collected dependencies for ${action.name || "anonymous"}`,
-          ]);
-        }
+        logger.debug("schedule-dep-collect-post-event", () => [
+          `Collected dependencies for ${this.getActionId(action)}`,
+        ]);
       }
       this.pendingDependencyCollection.clear();
     }
@@ -2011,47 +1981,14 @@ export class Scheduler {
           const populateDependencies = this.populateDependenciesCallbacks.get(
             action,
           );
-          if (populateDependencies) {
-            const depTx = this.runtime.edit();
-            try {
-              populateDependencies(depTx);
-            } catch (error) {
-              logger.debug("schedule-dep-error-pre-run", () => [
-                `Error collecting deps for ${action.name}: ${error}`,
-              ]);
-            }
-            const log = txToReactivityLog(depTx);
-            depTx.abort();
+          if (!populateDependencies) continue;
 
-            // Set up dependencies and mightWrite
-            this.setDependencies(action, log);
-            this.updateDependents(action, log);
-
-            // Set up triggers for reactivity
-            const reads = log.reads;
-            const pathsByEntity = addressesToPathByEntity(reads);
-            const entities = new Set<SpaceAndURI>();
-
-            for (const [spaceAndURI, paths] of pathsByEntity) {
-              entities.add(spaceAndURI);
-              if (!this.triggers.has(spaceAndURI)) {
-                this.triggers.set(spaceAndURI, new Map());
-              }
-              const pathsWithValues = paths.map((path) =>
-                [
-                  "value",
-                  ...path,
-                ] as readonly MemoryAddressPathComponent[]
-              );
-              this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
-            }
-
-            this.cancels.set(action, () => {
-              for (const spaceAndURI of entities) {
-                this.triggers.get(spaceAndURI)?.delete(action);
-              }
-            });
-          }
+          this.collectDependenciesForAction(action, populateDependencies, {
+            errorLogLabel: "schedule-dep-error-pre-run",
+            errorMessage: (target, error) =>
+              `Error collecting deps for ${this.getActionId(target)}: ${error}`,
+            useRawReadsForTriggers: true,
+          });
         }
         this.pendingDependencyCollection.clear();
       }
@@ -2146,7 +2083,7 @@ export class Scheduler {
               // Effect was re-dirtied during this tick → cycle detected
               logger.debug("schedule-cycle", () => [
                 `[CYCLE] Effect ${
-                  fn.name || "anonymous"
+                  this.getActionId(fn)
                 } re-dirtied, skipping (cycle detected)`,
               ]);
               // Skip this effect - it will run on a future tick after cycle settles
@@ -2167,7 +2104,7 @@ export class Scheduler {
         // They'll be pulled next time an effect needs them (if throttle expired)
         if (this.isThrottled(fn)) {
           logger.debug("schedule-throttle", () => [
-            `[THROTTLE] Skipping throttled action: ${fn.name || "anonymous"}`,
+            `[THROTTLE] Skipping throttled action: ${this.getActionId(fn)}`,
           ]);
           this.filterStats.filtered++;
           // Don't clear from pending or dirty - action stays in its current state
@@ -2192,7 +2129,7 @@ export class Scheduler {
           this.handleError(
             new Error(
               `Too many iterations: ${this.loopCounter.get(fn)} ${
-                fn.name ?? ""
+                this.getActionId(fn)
               }`,
             ),
             fn,
@@ -2222,7 +2159,7 @@ export class Scheduler {
         ) {
           logger.debug("schedule-cycle", () => [
             `[CYCLE-BREAK] Clearing cyclic computation: ${
-              comp.name || "anonymous"
+              this.getActionId(comp)
             }`,
           ]);
           this.clearDirty(comp);
@@ -2235,7 +2172,7 @@ export class Scheduler {
       for (const effect of this.effects) {
         if (this.dirty.has(effect) && !this.isThrottled(effect)) {
           logger.debug("schedule-cycle", () => [
-            `[CYCLE-BREAK] Running dirty effect: ${effect.name || "anonymous"}`,
+            `[CYCLE-BREAK] Running dirty effect: ${this.getActionId(effect)}`,
           ]);
           this.clearDirty(effect);
           this.pending.delete(effect);
@@ -2259,7 +2196,7 @@ export class Scheduler {
           if (adaptiveDelay > currentDebounce) {
             this.actionDebounce.set(action, adaptiveDelay);
             logger.debug("schedule-cycle-debounce", () => [
-              `[CYCLE-DEBOUNCE] Action ${action.name || "anonymous"} ` +
+              `[CYCLE-DEBOUNCE] Action ${this.getActionId(action)} ` +
               `ran ${runs}x in ${executeElapsed.toFixed(1)}ms, ` +
               `setting debounce to ${adaptiveDelay}ms`,
             ]);
