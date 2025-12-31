@@ -84,15 +84,17 @@ describe("fetch-data mutex mechanism", () => {
     }, resultCell);
     tx.commit();
 
+    await runtime.idle();
+
     // Give promises time to resolve
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    // Pull the result to trigger computation
-    await result.pull();
+    // Wait for async work triggered by promises
+    await runtime.idle();
 
     // Wait even more to ensure all transactions are committed
     await new Promise((resolve) => setTimeout(resolve, 200));
-    await result.pull();
+    await runtime.idle();
 
     const rawData = result.get() as {
       pending: any;
@@ -127,16 +129,13 @@ describe("fetch-data mutex mechanism", () => {
     runtime.run(tx, testRecipe, { url: "/api/concurrent" }, resultCell2);
     tx.commit();
 
-    // Pull first to trigger computation (starts the fetch)
-    await resultCell1.pull();
-    await resultCell2.pull();
-
     // Wait for async promises to resolve
     await new Promise((resolve) => setTimeout(resolve, 200));
+    await runtime.idle();
 
-    // Pull again to get final results
-    const data1 = (await resultCell1.pull()) as { result?: unknown };
-    const data2 = (await resultCell2.pull()) as { result?: unknown };
+    // Both should complete successfully
+    const data1 = resultCell1.get() as { result?: unknown };
+    const data2 = resultCell2.get() as { result?: unknown };
 
     expect(data1.result).toBeDefined();
     expect(data2.result).toBeDefined();
@@ -167,12 +166,9 @@ describe("fetch-data mutex mechanism", () => {
     tx.commit();
     tx = runtime.edit();
 
-    // Pull first to trigger computation (starts the fetch)
-    await resultCell.pull();
-
     // Wait for async work
     await new Promise((resolve) => setTimeout(resolve, 200));
-    await resultCell.pull();
+    await runtime.idle();
 
     const firstCallCount =
       fetchCalls.filter((c) => c.url.includes("/api/first")).length;
@@ -183,12 +179,9 @@ describe("fetch-data mutex mechanism", () => {
     tx.commit();
     tx = runtime.edit();
 
-    // Pull first to trigger computation with new URL
-    await resultCell.pull();
-
     // Wait for async work
     await new Promise((resolve) => setTimeout(resolve, 200));
-    await resultCell.pull();
+    await runtime.idle();
 
     // Should have made a new fetch with the new URL
     const secondCallCount =
@@ -209,12 +202,9 @@ describe("fetch-data mutex mechanism", () => {
     runtime.run(tx, jsonRecipe, { url: "/api/mode" }, resultCell1);
     tx.commit();
 
-    // Pull first to trigger computation
-    await resultCell1.pull();
-
     // Wait for async work
     await new Promise((resolve) => setTimeout(resolve, 200));
-    await resultCell1.pull();
+    await runtime.idle();
 
     const jsonCallCount = fetchCalls.length;
     expect(jsonCallCount).toBeGreaterThan(0);
@@ -230,12 +220,9 @@ describe("fetch-data mutex mechanism", () => {
     runtime.run(tx, textRecipe, { url: "/api/mode" }, resultCell2);
     tx.commit();
 
-    // Pull first to trigger computation
-    await resultCell2.pull();
-
     // Wait for async work
     await new Promise((resolve) => setTimeout(resolve, 200));
-    await resultCell2.pull();
+    await runtime.idle();
 
     // Should have made additional fetch calls for the different mode
     expect(fetchCalls.length).toBeGreaterThan(jsonCallCount);
@@ -279,16 +266,14 @@ describe("fetch-data mutex mechanism", () => {
     );
     tx.commit();
 
-    // Pull first to trigger computation (starts the fetch)
-    await result.pull();
-
     // Wait a bit for request to start
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     // Wait for completion
     await new Promise((resolve) => setTimeout(resolve, 200));
+    await runtime.idle();
 
-    const finalData = (await result.pull()) as {
+    const finalData = result.get() as {
       pending?: boolean;
       result?: unknown;
     };
@@ -323,13 +308,11 @@ describe("fetch-data mutex mechanism", () => {
     );
     tx.commit();
 
-    // Pull first to trigger computation (starts the fetch)
-    await result.pull();
-
     // Wait for async work
     await new Promise((resolve) => setTimeout(resolve, 200));
+    await runtime.idle();
 
-    const data = (await result.pull()) as {
+    const data = result.get() as {
       error?: unknown;
       result?: unknown;
       pending?: boolean;
@@ -366,8 +349,9 @@ describe("fetch-data mutex mechanism", () => {
 
     // Wait for async work
     await new Promise((resolve) => setTimeout(resolve, 200));
+    await runtime.idle();
 
-    const data = (await resultCell.pull()) as {
+    const data = resultCell.get() as {
       error?: unknown;
       result?: unknown;
       pending?: boolean;

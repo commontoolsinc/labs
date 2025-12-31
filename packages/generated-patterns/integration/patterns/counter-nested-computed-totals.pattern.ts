@@ -1,5 +1,14 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, recipe, str } from "commontools";
+import {
+  type Cell,
+  cell,
+  Default,
+  handler,
+  lift,
+  recipe,
+  str,
+  toSchema,
+} from "commontools";
 
 interface SubtotalGroupSeed {
   label?: string;
@@ -69,7 +78,8 @@ const appendValueToList = handler(
       return;
     }
     const amount = sanitizeNumber(rawValue);
-    context.values.push(amount);
+    const current = sanitizeValues(context.values.get());
+    context.values.set([...current, amount]);
   },
 );
 
@@ -124,23 +134,22 @@ const subtotalGroup = recipe<SubtotalGroupArgs>(
   },
 );
 
-const instantiateGroups = lift<
-  { groups: Cell<SubtotalGroupSeed[]> },
-  SubtotalGroupArgs[]
->(
+const instantiateGroups = lift(
+  toSchema<{ groups: Cell<SubtotalGroupSeed[]> }>(),
+  toSchema<unknown>(),
   ({ groups }) => {
     const raw = groups.get();
     const list = Array.isArray(raw) ? raw : [];
-    const children = [];
+    const children: ReturnType<typeof subtotalGroup>[] = [];
     for (let index = 0; index < list.length; index++) {
-      const groupCell = groups.key(index);
-      const labelCell = groupCell.key("label");
-      const valuesCell = groupCell.key("values");
+      const groupCell = groups.key(index) as Cell<SubtotalGroupSeed>;
+      const labelCell = groupCell.key("label") as Cell<string>;
+      const valuesCell = groupCell.key("values") as Cell<number[]>;
       const child = subtotalGroup({
-        label: labelCell,
-        values: valuesCell,
-        index,
-      }).for(index);
+        label: labelCell as unknown as Default<string, "">,
+        values: valuesCell as unknown as Default<number[], []>,
+        index: cell(index) as unknown as Default<number, 0>,
+      });
       children.push(child);
     }
     return children;
@@ -245,12 +254,12 @@ export const counterWithNestedComputedTotals = recipe<
       return Array.isArray(entries) ? entries.length : 0;
     })(groups);
 
-    const totalItems = lift((entries: { itemCount: number }[]) => {
+    const totalItems = lift((entries: unknown) => {
       if (!Array.isArray(entries)) {
         return 0;
       }
       return entries.reduce((sum, entry) => {
-        const count = entry.itemCount;
+        const count = (entry as { itemCount?: unknown }).itemCount;
         return typeof count === "number" ? sum + count : sum;
       }, 0);
     })(groups);

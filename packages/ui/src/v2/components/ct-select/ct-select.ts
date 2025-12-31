@@ -356,7 +356,7 @@ export class CTSelect extends BaseElement {
 
     private _buildKeyMap() {
       this._keyMap.clear();
-      this.items?.forEach((item, index) => {
+      this.items.forEach((item, index) => {
         this._keyMap.set(this._makeKey(item, index), item);
       });
     }

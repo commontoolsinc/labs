@@ -409,7 +409,7 @@ export const load = (
     return cached;
   }
 
-  logger.debug("storage-datauri-parse", () => ["Parsing data URI"]);
+  logger.debug("storage", () => ["load: parsing"]);
 
   let result: Result<
     IAttestation,

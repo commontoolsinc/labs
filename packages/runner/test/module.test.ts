@@ -10,13 +10,7 @@ import {
   type Module,
   type OpaqueRef,
 } from "../src/builder/types.ts";
-import {
-  action,
-  derive,
-  handler,
-  lift,
-  parseStackFrame,
-} from "../src/builder/module.ts";
+import { action, handler, lift } from "../src/builder/module.ts";
 import { opaqueRef } from "../src/builder/opaque-ref.ts";
 import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -259,115 +253,6 @@ describe("module", () => {
           void data;
         });
       }).toThrow("action() must be used with CTS enabled");
-    });
-  });
-
-  describe("source location tracking", () => {
-    it("attaches source location to function implementation via .name", () => {
-      const fn = (x: number) => x * 2;
-      lift(fn);
-
-      // The implementation's .name should now be the source location
-      expect(fn.name).toMatch(/module\.test\.ts:\d+:\d+$/);
-    });
-
-    it("attaches source location to handler implementations", () => {
-      const fn = (event: MouseEvent, props: { x: number }) => {
-        props.x = event.clientX;
-      };
-      handler(fn, { proxy: true });
-
-      expect(fn.name).toMatch(/module\.test\.ts:\d+:\d+$/);
-    });
-
-    it("attaches source location through derive", () => {
-      const fn = (x: number) => x * 2;
-      derive(opaqueRef(5), fn);
-
-      // derive calls lift internally, should still track the original function
-      expect(fn.name).toMatch(/module\.test\.ts:\d+:\d+$/);
-    });
-  });
-
-  describe("parseStackFrame", () => {
-    it("parses Deno file:// stack frames with function name", () => {
-      const line =
-        "    at functionName (file:///Users/test/project/src/file.ts:42:15)";
-      const result = parseStackFrame(line);
-      expect(result).toEqual({
-        file: "/Users/test/project/src/file.ts",
-        line: 42,
-        col: 15,
-      });
-    });
-
-    it("parses Deno file:// stack frames without function name", () => {
-      const line = "    at file:///Users/test/project/src/file.ts:42:15";
-      const result = parseStackFrame(line);
-      expect(result).toEqual({
-        file: "/Users/test/project/src/file.ts",
-        line: 42,
-        col: 15,
-      });
-    });
-
-    it("parses absolute path stack frames", () => {
-      const line = "    at functionName (/path/to/file.ts:100:5)";
-      const result = parseStackFrame(line);
-      expect(result).toEqual({
-        file: "/path/to/file.ts",
-        line: 100,
-        col: 5,
-      });
-    });
-
-    it("parses browser http:// stack frames", () => {
-      const line =
-        "    at getExternalSourceLocation (http://localhost:8000/scripts/index.js:250239:17)";
-      const result = parseStackFrame(line);
-      expect(result).toEqual({
-        file: "http://localhost:8000/scripts/index.js",
-        line: 250239,
-        col: 17,
-      });
-    });
-
-    it("parses browser https:// stack frames", () => {
-      const line =
-        "    at functionName (https://example.com/scripts/bundle.js:100:20)";
-      const result = parseStackFrame(line);
-      expect(result).toEqual({
-        file: "https://example.com/scripts/bundle.js",
-        line: 100,
-        col: 20,
-      });
-    });
-
-    it("parses browser stack frames with [as name] syntax", () => {
-      const line =
-        "    at Object.eval [as factory] (ba4jcbcoh3wqzgaq3x6v36c625ycvssvqewtr563cg2osp66t4jzls7cb.js:52:52)";
-      const result = parseStackFrame(line);
-      expect(result).toEqual({
-        file: "ba4jcbcoh3wqzgaq3x6v36c625ycvssvqewtr563cg2osp66t4jzls7cb.js",
-        line: 52,
-        col: 52,
-      });
-    });
-
-    it("parses relative path stack frames", () => {
-      const line = "    at eval (somefile.js:10:5)";
-      const result = parseStackFrame(line);
-      expect(result).toEqual({
-        file: "somefile.js",
-        line: 10,
-        col: 5,
-      });
-    });
-
-    it("returns null for invalid stack frames", () => {
-      expect(parseStackFrame("Error")).toBeNull();
-      expect(parseStackFrame("    at <anonymous>")).toBeNull();
-      expect(parseStackFrame("")).toBeNull();
     });
   });
 });

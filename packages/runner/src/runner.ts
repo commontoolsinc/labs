@@ -53,12 +53,8 @@ import type {
   MemorySpace,
   URI,
 } from "./storage/interface.ts";
-import {
-  ignoreReadForScheduling,
-  markReadAsPotentialWrite,
-} from "./scheduler.ts";
+import { ignoreReadForScheduling } from "./scheduler.ts";
 import { FunctionCache } from "./function-cache.ts";
-import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
 
@@ -945,9 +941,6 @@ export class Runner {
       fn = module.implementation as (inputs: any) => any;
     }
 
-    // Prefer .src (backup) over .name since name can be finicky
-    const name = (fn as { src?: string; name?: string }).src || fn.name;
-
     if (module.wrapper && module.wrapper in moduleWrappers) {
       fn = moduleWrappers[module.wrapper](fn);
     }
@@ -974,30 +967,19 @@ export class Runner {
     }
 
     if (streamLink) {
-      // Helper to merge event into inputs
-      const mergeEventIntoInputs = (event: any) => {
-        const eventInputs = { ...(inputs as Record<string, any>) };
-        for (const key in eventInputs) {
-          if (isWriteRedirectLink(eventInputs[key])) {
-            const eventLink = parseLink(eventInputs[key], processCell);
-            if (areNormalizedLinksSame(eventLink, streamLink)) {
-              eventInputs[key] = event;
-            }
-          }
-        }
-        return eventInputs;
-      };
-
       // Register as event handler for the stream
       const handler = (tx: IExtendedStorageTransaction, event: any) => {
         // TODO(seefeld): Scheduler has to create the transaction instead
         if (event.preventDefault) event.preventDefault();
-        const eventInputs = mergeEventIntoInputs(event);
+        const eventInputs = { ...(inputs as Record<string, any>) };
         const cause = { ...(inputs as Record<string, any>) };
-        for (const key in cause) {
-          if (isWriteRedirectLink(cause[key])) {
-            const eventLink = parseLink(cause[key], processCell);
+        for (const key in eventInputs) {
+          if (isWriteRedirectLink(eventInputs[key])) {
+            // Use format-agnostic comparison for links
+            const eventLink = parseLink(eventInputs[key], processCell);
+
             if (areNormalizedLinksSame(eventLink, streamLink)) {
+              eventInputs[key] = event;
               cause[key] = crypto.randomUUID();
             }
           }
@@ -1052,39 +1034,7 @@ export class Runner {
                   tx,
                 ),
               );
-
-              const rawResult = tx.readValueOrThrow(
-                resultCell.getAsNormalizedFullLink(),
-                { meta: ignoreReadForScheduling },
-              );
-
-              const resultRedirects = findAllWriteRedirectCells(
-                rawResult,
-                processCell,
-              );
-
-              // Create effect that re-runs when inputs change
-              // (nothing else would read from it, otherwise)
-              const readResultAction: Action = (tx) =>
-                resultRedirects.forEach((link) => tx.readValueOrThrow(link));
-              if (name) {
-                Object.defineProperty(readResultAction, "name", {
-                  value: `readResult:${name}`,
-                  configurable: true,
-                });
-                // Also set .src as backup (name can be finicky)
-                (readResultAction as Action & { src?: string }).src =
-                  `readResult:${name}`;
-              }
-              const cancel = this.runtime.scheduler.subscribe(
-                readResultAction,
-                readResultAction,
-                { isEffect: true },
-              );
-              addCancel(() => {
-                cancel();
-                this.stop(resultCell);
-              });
+              addCancel(() => this.stop(resultCell));
             }
             return result;
           };
@@ -1102,44 +1052,14 @@ export class Runner {
         }
       };
 
-      if (name) {
-        Object.defineProperty(handler, "name", {
-          value: `handler:${name}`,
-          configurable: true,
-        });
-      }
       const wrappedHandler = Object.assign(handler, {
         reads,
         writes,
         module,
         recipe,
       });
-
-      // Create callback to populate dependencies for pull mode scheduling.
-      // This reads all cells the handler will access (from the argument schema and event).
-      const populateDependencies = module.argumentSchema
-        ? (depTx: IExtendedStorageTransaction, event: any) => {
-          // Merge event into inputs the same way the handler does
-          const eventInputs = mergeEventIntoInputs(event);
-          const inputsCell = this.runtime.getImmutableCell(
-            processCell.space,
-            eventInputs,
-            undefined,
-            depTx,
-          );
-          // Use traverseCells to read into all nested Cell objects (including event)
-          inputsCell.asSchema(module.argumentSchema!).get({
-            traverseCells: true,
-          });
-        }
-        : undefined;
-
       addCancel(
-        this.runtime.scheduler.addEventHandler(
-          wrappedHandler,
-          streamLink,
-          populateDependencies,
-        ),
+        this.runtime.scheduler.addEventHandler(wrappedHandler, streamLink),
       );
     } else {
       if (isRecord(inputs) && "$event" in inputs) {
@@ -1255,56 +1175,18 @@ export class Runner {
         }
       };
 
-      if (name) {
-        Object.defineProperty(action, "name", {
-          value: `action:${name}`,
-          configurable: true,
-        });
-        // Also set .src as backup (name can be finicky)
-        (action as Action & { src?: string }).src = `action:${name}`;
-      }
       const wrappedAction = Object.assign(action, {
         reads,
         writes,
         module,
         recipe,
       });
-
-      // Create populateDependencies callback to discover what cells the action reads
-      // and writes. Both are needed for pull-based scheduling:
-      // - reads: to know when to re-run the action (input dependencies)
-      // - writes: so collectDirtyDependencies() can find this computation when
-      //   an effect needs its outputs
-      const populateDependencies = (depTx: IExtendedStorageTransaction) => {
-        // Capture read dependencies - use the pre-computed reads list
-        // Note: We DON'T run fn(depTx) here because that would execute
-        // user code with side effects during dependency discovery
-        if (module.argumentSchema !== undefined) {
-          const inputsCell = this.runtime.getImmutableCell(
-            processCell.space,
-            inputs,
-            undefined,
-            depTx,
-          );
-          inputsCell.asSchema(module.argumentSchema!).get({
-            traverseCells: true,
-          });
-        } else {
-          for (const read of reads) {
-            this.runtime.getCellFromLink(read, undefined, depTx)?.get();
-          }
-        }
-        // Capture write dependencies by marking outputs as potential writes
-        for (const output of writes) {
-          // Reading with markReadAsPotentialWrite registers this as a write dependency
-          this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
-            meta: markReadAsPotentialWrite,
-          });
-        }
-      };
-
       addCancel(
-        this.runtime.scheduler.subscribe(wrappedAction, populateDependencies),
+        this.runtime.scheduler.subscribe(
+          wrappedAction,
+          { reads, writes },
+          true,
+        ),
       );
     }
   }
@@ -1341,9 +1223,6 @@ export class Runner {
       mappedInputBindings,
       processCell,
     );
-    // outputCells tracks what cells this action writes to. This is needed for
-    // pull-based scheduling so collectDirtyDependencies() can find computations
-    // that write to cells being read by effects.
     const outputCells = findAllWriteRedirectCells(
       mappedOutputBindings,
       processCell,
@@ -1356,7 +1235,7 @@ export class Runner {
       tx,
     );
 
-    const builtinResult: RawBuiltinReturnType = module.implementation(
+    const action = module.implementation(
       inputsCell,
       (tx: IExtendedStorageTransaction, result: any) => {
         sendValueToBinding(
@@ -1372,63 +1251,12 @@ export class Runner {
       this.runtime,
     );
 
-    // Handle both legacy (just Action) and new (RawBuiltinResult) return formats
-    const action = isRawBuiltinResult(builtinResult)
-      ? builtinResult.action
-      : builtinResult;
-    const builtinIsEffect = isRawBuiltinResult(builtinResult)
-      ? builtinResult.isEffect
-      : undefined;
-    const builtinPopulateDependencies = isRawBuiltinResult(builtinResult)
-      ? builtinResult.populateDependencies
-      : undefined;
-
-    // Name the raw action for debugging - use implementation name or fallback to "raw"
-    const impl = module.implementation as (...args: unknown[]) => Action;
-    const rawName = `raw:${impl.name || "anonymous"}`;
-    Object.defineProperty(action, "name", {
-      value: rawName,
-      configurable: true,
-    });
-    (action as Action & { src?: string }).src = rawName;
-
-    // Create populateDependencies callback.
-    // If builtin provides custom reads, use that; otherwise read all inputs.
-    // Always register output writes so collectDirtyDependencies() can find this
-    // computation when an effect needs its outputs.
-    const populateDependencies = (depTx: IExtendedStorageTransaction) => {
-      // Capture read dependencies - use custom if provided, otherwise read all inputs
-      if (builtinPopulateDependencies) {
-        if (typeof builtinPopulateDependencies === "function") {
-          builtinPopulateDependencies(depTx);
-        } else {
-          // It's a ReactivityLog - reads are already captured, nothing to do
-          for (const read of builtinPopulateDependencies.reads) {
-            depTx.readOrThrow(read);
-          }
-        }
-      } else {
-        // Default: read all inputs
-        for (const input of inputCells) {
-          this.runtime.getCellFromLink(input, undefined, depTx)?.get();
-        }
-      }
-      // Always capture write dependencies by marking outputs as potential writes
-      for (const output of outputCells) {
-        // Reading with markReadAsPotentialWrite registers this as a write dependency
-        this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
-          meta: markReadAsPotentialWrite,
-        });
-      }
-    };
-
-    // isEffect can come from module options or from the builtin result
-    const isEffect = module.isEffect ?? builtinIsEffect;
-
     addCancel(
-      this.runtime.scheduler.subscribe(action, populateDependencies, {
-        isEffect,
-      }),
+      this.runtime.scheduler.subscribe(
+        action,
+        { reads: inputCells, writes: outputCells },
+        true,
+      ),
     );
   }
 

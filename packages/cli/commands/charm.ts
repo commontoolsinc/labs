@@ -143,8 +143,8 @@ export const charm = new Command()
     const manager = await loadManager(charmConfig);
     const charms = new CharmsController(manager);
     // Start in this transient runtime, wait, then stop and exit
-    const charm = await charms.get(charmConfig.charm, true);
-    await charm.getCell().pull();
+    await charms.start(charmConfig.charm);
+    await manager.runtime.idle();
     await manager.synced();
     await charms.stop(charmConfig.charm);
     render(`Stepped charm ${charmConfig.charm}`);

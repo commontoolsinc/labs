@@ -36,8 +36,7 @@ export function sendValueToBinding<T>(
   binding: unknown,
   value: unknown,
 ): void {
-  // Handle both legacy $alias format and new sigil link format
-  if (isWriteRedirectLink(binding)) {
+  if (isLegacyAlias(binding)) {
     const ref = resolveLink(
       cell.runtime,
       tx,

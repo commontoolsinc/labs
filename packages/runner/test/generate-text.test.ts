@@ -10,7 +10,6 @@ import {
 import type { BuiltInLLMMessage } from "@commontools/api";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
-import { type Cell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -248,26 +247,31 @@ describe("generateText", () => {
 
 // Helper to wait for pending to become false
 function waitForPendingToBecomeFalse(
-  cell: Cell<unknown>,
+  cell: any,
   timeoutMs = 1000,
 ): Promise<void> {
+  const pendingCell = cell.key("pending");
+  if (pendingCell.get() === false) return Promise.resolve();
+
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      cancel?.();
       reject(new Error("Timeout waiting for pending to become false"));
     }, timeoutMs);
 
-    // Use sink to subscribe as an effect - this triggers the computation chain
-    const cancel = cell.asSchema({
-      type: "object",
-      properties: { pending: { type: "boolean" } },
-      default: {},
-    }).sink((value) => {
-      if (value.pending === false) {
-        clearTimeout(timeout);
-        cancel?.();
-        resolve();
-      }
-    });
+    // Actually, let's switch to polling as it's more robust for this black-box testing
+    clearTimeout(timeout);
+    resolve(pollForPendingFalse(cell, timeoutMs));
   });
+}
+
+async function pollForPendingFalse(
+  cell: any,
+  timeoutMs: number,
+): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (cell.key("pending").get() === false) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error("Timeout waiting for pending to become false");
 }

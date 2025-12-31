@@ -74,10 +74,10 @@ describe("wish built-in", () => {
     );
     const result = runtime.run(tx, wishRecipe, {}, resultCell);
     await tx.commit();
+    await runtime.idle();
     tx = runtime.edit();
 
-    // Pull to trigger computation
-    await result.pull();
+    await runtime.idle();
 
     const actualCell = result.key("allCharms");
     const rawValue = actualCell.getRaw() as
@@ -131,10 +131,10 @@ describe("wish built-in", () => {
     );
     const result = runtime.run(tx, wishRecipe, {}, resultCell);
     await tx.commit();
+    await runtime.idle();
     tx = runtime.edit();
 
-    // Pull to trigger computation
-    await result.pull();
+    await runtime.idle();
 
     expect(result.key("semanticAllCharms").get()).toEqual(charmsData);
     expect(result.key("semanticFirstTitle").get()).toEqual("Alpha");
@@ -174,10 +174,10 @@ describe("wish built-in", () => {
     );
     const result = runtime.run(tx, wishRecipe, {}, resultCell);
     await tx.commit();
+    await runtime.idle();
     tx = runtime.edit();
 
-    // Pull to trigger computation
-    await result.pull();
+    await runtime.idle();
 
     expect(result.key("defaultTitle").get()).toEqual("Default App");
     expect(result.key("defaultGreeting").get()).toEqual("hello");
@@ -217,9 +217,10 @@ describe("wish built-in", () => {
     );
     const result = runtime.run(tx, wishRecipe, {}, resultCell);
     await tx.commit();
+    await runtime.idle();
     tx = runtime.edit();
 
-    await result.pull();
+    await runtime.idle();
 
     expect(result.key("mentionable").get()).toEqual([
       { name: "Alpha" },
@@ -260,9 +261,10 @@ describe("wish built-in", () => {
     );
     const result = runtime.run(tx, wishRecipe, {}, resultCell);
     await tx.commit();
+    await runtime.idle();
     tx = runtime.edit();
 
-    await result.pull();
+    await runtime.idle();
 
     expect(result.key("recent").get()).toEqual(recentData);
     expect(result.key("recentFirst").get()).toEqual("Charm A");
@@ -282,9 +284,10 @@ describe("wish built-in", () => {
     const before = Date.now();
     const result = runtime.run(tx, wishRecipe, {}, resultCell);
     await tx.commit();
+    await runtime.idle();
     tx = runtime.edit();
 
-    await result.pull();
+    await runtime.idle();
 
     const after = Date.now();
     const nowValue = result.key("nowValue").get();
@@ -319,7 +322,7 @@ describe("wish built-in", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    await result.pull();
+    await runtime.idle();
 
     const readTx = runtime.readTx();
     const spaceResultCell = result.withTx(readTx).key("spaceResult");
@@ -358,7 +361,7 @@ describe("wish built-in", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    await result.pull();
+    await runtime.idle();
 
     const readTx = runtime.readTx();
 
@@ -385,7 +388,7 @@ describe("wish built-in", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    await result.pull();
+    await runtime.idle();
 
     const missingResult = result.key("missing").get();
     // Unknown wish targets now return an error object for better UX
@@ -427,9 +430,10 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
+      await runtime.idle();
       tx = runtime.edit();
 
-      await result.pull();
+      await runtime.idle();
 
       expect(result.key("allCharms").get()?.result).toEqual(charmsData);
     });
@@ -474,9 +478,10 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
+      await runtime.idle();
       tx = runtime.edit();
 
-      await result.pull();
+      await runtime.idle();
 
       expect(result.key("firstTitle").get()?.result).toEqual("First Title");
     });
@@ -505,9 +510,10 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
+      await runtime.idle();
       tx = runtime.edit();
 
-      await result.pull();
+      await runtime.idle();
 
       expect(result.key("spaceResult").get()?.result).toEqual(spaceData);
     });
@@ -541,9 +547,10 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
+      await runtime.idle();
       tx = runtime.edit();
 
-      await result.pull();
+      await runtime.idle();
 
       expect(result.key("configLink").get()?.result).toEqual({
         setting: "value",
@@ -567,9 +574,10 @@ describe("wish built-in", () => {
       const before = Date.now();
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
+      await runtime.idle();
       tx = runtime.edit();
 
-      await result.pull();
+      await runtime.idle();
 
       const after = Date.now();
       const nowValue = result.key("nowValue").get()?.result;
@@ -594,9 +602,10 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
+      await runtime.idle();
       tx = runtime.edit();
 
-      await result.pull();
+      await runtime.idle();
 
       const missingResult = result.key("missing").get();
       // Unknown tags now search favorites, returning "No favorite found" error
@@ -619,9 +628,10 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
+      await runtime.idle();
       tx = runtime.edit();
 
-      await result.pull();
+      await runtime.idle();
 
       const missingResult = result.key("missing").get();
       expect(missingResult?.error).toMatch(/no query/);
@@ -651,9 +661,10 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
+      await runtime.idle();
       tx = runtime.edit();
 
-      await result.pull();
+      await runtime.idle();
 
       const wishResult = result.key("spaceResult").get() as Record<
         string | symbol,
@@ -691,9 +702,10 @@ describe("wish built-in", () => {
         );
         const result = runtime.run(tx, wishRecipe, {}, resultCell);
         await tx.commit();
+        await runtime.idle();
         tx = runtime.edit();
 
-        await result.pull();
+        await runtime.idle();
 
         const wishResult = result.key("missing").get() as Record<
           string | symbol,
@@ -766,9 +778,10 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, loadedRecipe, {}, resultCell);
       await tx.commit();
+      await runtime.idle();
       tx = runtime.edit();
 
-      await result.pull();
+      await runtime.idle();
 
       // The wish should resolve to the space cell data, wrapped in { result: ... }
       expect(result.key("spaceResult").get()?.result).toEqual(spaceData);
@@ -818,9 +831,10 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, loadedRecipe, {}, resultCell);
       await tx.commit();
+      await runtime.idle();
       tx = runtime.edit();
 
-      await result.pull();
+      await runtime.idle();
 
       expect(result.key("deepValue").get()?.result).toEqual("found it");
     });
@@ -891,9 +905,8 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
+      await runtime.idle();
       tx = runtime.edit();
-
-      await result.pull();
 
       // Verify: Favorites resolved from home space, not pattern space
       const favorites = result.key("favorites").get()?.result;
@@ -950,9 +963,8 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
+      await runtime.idle();
       tx = runtime.edit();
-
-      await result.pull();
 
       // Verify: Gets pattern space's #default, not home space's
       const defaultData = result.key("defaultData").get()?.result;
@@ -1009,9 +1021,8 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
+      await runtime.idle();
       tx = runtime.edit();
-
-      await result.pull();
 
       // Verify: Each resolves to correct space
       const favorites = result.key("favorites").get()?.result;
@@ -1065,9 +1076,8 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
+      await runtime.idle();
       tx = runtime.edit();
-
-      await result.pull();
 
       // Verify: Searches home space favorites, finds correct cell
       const taggedItem = result.key("taggedItem").get()?.result;
@@ -1122,9 +1132,8 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishingRecipe, {}, resultCell);
       await tx.commit();
+      await runtime.idle();
       tx = runtime.edit();
-
-      await result.pull();
 
       // Verify: Wish triggered charm to start and returns running charm data
       const charmData = result.key("charmData").get()?.result;

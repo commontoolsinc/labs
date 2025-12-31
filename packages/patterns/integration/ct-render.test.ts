@@ -15,7 +15,6 @@ describe("ct-render integration test", () => {
   let identity: Identity;
   let cc: CharmsController;
   let charm: CharmController;
-  let charmSinkCancel: (() => void) | undefined;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -36,14 +35,9 @@ describe("ct-render integration test", () => {
       // We operate on the charm in this thread
       { start: true },
     );
-
-    // In pull mode, create a sink to keep the charm reactive when inputs change.
-    const resultCell = cc.manager().getResult(charm.getCell());
-    charmSinkCancel = resultCell.sink(() => {});
   });
 
   afterAll(async () => {
-    charmSinkCancel?.();
     if (cc) await cc.dispose();
   });
 

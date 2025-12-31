@@ -80,45 +80,6 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { getLogger } from "@commontools/utils/logger";
-
-const logger = getLogger("cell");
-
-/**
- * Deeply traverse a value to access all properties.
- * This is used by pull() to ensure all nested values are read,
- * which registers them as dependencies for pull-based scheduling.
- * Works with query result proxies which trigger reads on property access.
- */
-function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
-  if (value === null || value === undefined) return;
-  if (typeof value !== "object") return;
-
-  // Avoid infinite loops with circular references
-  if (seen.has(value)) return;
-  seen.add(value);
-
-  try {
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        deepTraverse(item, seen);
-      }
-    } else {
-      for (const key in value) {
-        if (Object.prototype.hasOwnProperty.call(value, key)) {
-          try {
-            deepTraverse((value as Record<string, unknown>)[key], seen);
-          } catch {
-            // Ignore errors from accessing individual properties (e.g., link cycles)
-          }
-        }
-      }
-    }
-  } catch {
-    // Ignore errors from traversal (e.g., link cycles)
-    // We've already registered the dependencies we can access
-  }
-}
 
 // Shared map factory instance for all cells
 let mapFactory: NodeFactory<any, any> | undefined;
@@ -168,7 +129,6 @@ declare module "@commontools/api" {
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
     sink(callback: (value: Readonly<T>) => Cancel | undefined | void): Cancel;
     sync(): Promise<Cell<T>> | Cell<T>;
-    pull(): Promise<Readonly<T>>;
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
@@ -273,7 +233,6 @@ const cellMethods = new Set<keyof ICell<unknown>>([
   "withTx",
   "sink",
   "sync",
-  "pull",
   "getAsQueryResult",
   "getAsNormalizedFullLink",
   "getAsLink",
@@ -564,26 +523,9 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     return isStreamValue(value);
   }
 
-  get(options?: { traverseCells?: boolean }): Readonly<T> {
+  get(): Readonly<T> {
     if (!this.synced) this.sync(); // No await, just kicking this off
-    const begin = performance.now();
-    const value = validateAndTransform(
-      this.runtime,
-      this.tx,
-      this.link,
-      this.synced,
-      [],
-      options,
-    );
-    const elapsed = performance.now() - begin;
-    if (elapsed > 10) {
-      logger.warn(
-        `get >${Math.floor(elapsed - (elapsed % 10))}ms`,
-        `get() took ${Math.floor(elapsed)}ms`,
-        this.link,
-      );
-    }
-    return value;
+    return validateAndTransform(this.runtime, this.tx, this.link, this.synced);
   }
 
   /**
@@ -609,76 +551,6 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       this.link,
       this.synced,
     );
-  }
-
-  /**
-   * Pull the cell's value, ensuring all dependencies are computed first.
-   *
-   * In pull-based scheduling mode, computations don't run automatically when
-   * their inputs change - they only run when pulled by an effect. This method
-   * registers a temporary effect that reads the cell's value, triggering the
-   * scheduler to compute all transitive dependencies first.
-   *
-   * In push-based mode (the default), this is equivalent to `await idle()`
-   * followed by `get()`, but ensures consistent behavior across both modes.
-   *
-   * Use this in tests or when you need to ensure a computed value is up-to-date
-   * before reading it:
-   *
-   * ```ts
-   * // Instead of:
-   * await runtime.scheduler.idle();
-   * const value = cell.get();
-   *
-   * // Use:
-   * const value = await cell.pull();
-   * ```
-   *
-   * @returns A promise that resolves to the cell's current value after all
-   *          dependencies have been computed.
-   */
-  pull(): Promise<Readonly<T>> {
-    if (!this.synced) this.sync(); // No await, just kicking this off
-
-    // Check if we need to traverse the result to register all dependencies.
-    // This is needed when there's no schema or when the schema is TrueSchema ("any"),
-    // because without schema constraints we need to read all nested values.
-    const schema = this._link.schema;
-    const needsTraversal = schema === undefined ||
-      ContextualFlowControl.isTrueSchema(schema);
-
-    return new Promise((resolve) => {
-      let result: Readonly<T>;
-
-      const action: Action = (tx) => {
-        // Read the value inside the effect - this ensures dependencies are pulled
-        result = validateAndTransform(this.runtime, tx, this.link, this.synced);
-
-        // If no schema or TrueSchema, traverse the result to register all
-        // nested values as read dependencies.
-        if (needsTraversal && result !== undefined && result !== null) {
-          deepTraverse(result);
-        }
-      };
-      // Name the action for debugging
-      Object.defineProperty(action, "name", {
-        value: `pull:${this.sourceURI}`,
-        configurable: true,
-      });
-      // Also set .src as backup (name can be finicky)
-      (action as Action & { src?: string }).src = `pull:${this.sourceURI}`;
-
-      // Subscribe as an effect so it runs in the next cycle.
-      const cancel = this.runtime.scheduler.subscribe(action, action, {
-        isEffect: true,
-      });
-
-      // Wait for the scheduler to process all pending work, then resolve
-      this.runtime.scheduler.idle().then(() => {
-        cancel?.();
-        resolve(result);
-      });
-    });
   }
 
   set(
@@ -1320,7 +1192,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
         : this._initialValue,
       name: this._causeContainer.cause as string | undefined,
       external: this._link.id
-        ? this.getAsWriteRedirectLink({
+        ? this.getAsLink({
           baseSpace: this._frame.space,
           includeSchema: true,
         })
@@ -1505,13 +1377,6 @@ function subscribeToReferencedDocs<T>(
     // on changes already.
     extraTx.commit();
   };
-  // Name the action for debugging
-  const sinkName = `sink:${link.space}/${link.id}/${link.path.join("/")}`;
-  Object.defineProperty(action, "name", {
-    value: sinkName,
-    configurable: true,
-  });
-  (action as Action & { src?: string }).src = sinkName;
 
   // Call action once immediately, which also defines what docs need to be
   // subscribed to.
@@ -1524,12 +1389,10 @@ function subscribeToReferencedDocs<T>(
   // changed. But ideally we enforce read-only as well.
   tx.commit();
 
-  // Mark as effect since sink() is a side-effectful consumer (FRP effect/sink)
-  // Use resubscribe because we've already run it once above
-  runtime.scheduler.resubscribe(action, log, { isEffect: true });
+  const cancel = runtime.scheduler.subscribe(action, log);
 
   return () => {
-    runtime.scheduler.unsubscribe(action);
+    cancel();
     if (isCancel(cleanup)) cleanup();
   };
 }

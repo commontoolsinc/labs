@@ -326,18 +326,12 @@ function annotateWithBackToCellSymbols(
   return value;
 }
 
-export interface ValidateAndTransformOptions {
-  /** When true, also read into each Cell created for asCell fields to capture dependencies */
-  traverseCells?: boolean;
-}
-
 export function validateAndTransform(
   runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   synced: boolean = false,
   seen: Array<[string, any]> = [],
-  options?: ValidateAndTransformOptions,
 ): any {
   // If the transaction is no longer open, just treat it as no transaction, i.e.
   // create temporary transactions to read. The main reason we use transactions
@@ -445,7 +439,7 @@ export function validateAndTransform(
           // the end of the path.
           newSchema = cfc.getSchemaAtPath(resolvedSchema, []);
         }
-        const cell = createCell(
+        return createCell(
           runtime,
           {
             ...parsedLink,
@@ -455,19 +449,9 @@ export function validateAndTransform(
           },
           getTransactionForChildCells(tx),
         );
-        // If traverseCells, read into the cell to capture dependencies
-        if (options?.traverseCells) {
-          cell.withTx(tx).get({ traverseCells: true });
-        }
-        return cell;
       }
     }
-    const cell = createCell(runtime, link, getTransactionForChildCells(tx));
-    // If traverseCells, read into the cell to capture dependencies
-    if (options?.traverseCells) {
-      cell.withTx(tx).get({ traverseCells: true });
-    }
-    return cell;
+    return createCell(runtime, link, getTransactionForChildCells(tx));
   }
 
   // If there is no schema, return as raw data via query result proxy
@@ -503,7 +487,7 @@ export function validateAndTransform(
     isObject(resolvedSchema) &&
     (Array.isArray(resolvedSchema.anyOf) || Array.isArray(resolvedSchema.oneOf))
   ) {
-    const schemaOptions = ((resolvedSchema.anyOf ?? resolvedSchema.oneOf)!)
+    const options = ((resolvedSchema.anyOf ?? resolvedSchema.oneOf)!)
       .map((option) => {
         const resolved = resolveSchema(option, rootSchema);
         // Copy `asCell` and `asStream` over, necessary for $ref case.
@@ -519,7 +503,7 @@ export function validateAndTransform(
       .filter((option) => option !== undefined);
 
     // TODO(@ubik2): We should support boolean and empty entries in the anyOf
-    const objOptions: JSONSchemaObj[] = schemaOptions.filter(isObject);
+    const objOptions: JSONSchemaObj[] = options.filter(isObject);
     if (Array.isArray(value)) {
       const arrayOptions = objOptions.filter((option) =>
         option.type === "array"
@@ -532,7 +516,6 @@ export function validateAndTransform(
           { ...link, schema: arrayOptions[0] },
           synced,
           seen,
-          options,
         );
       }
 
@@ -556,7 +539,6 @@ export function validateAndTransform(
         { ...link, schema: { type: "array", items: { anyOf: merged } } },
         synced,
         seen,
-        options,
       );
     } else if (isObject(value)) {
       let objectCandidates = objOptions.filter((option) =>
@@ -595,7 +577,6 @@ export function validateAndTransform(
               { ...link, schema: option },
               synced,
               candidateSeen,
-              options,
             ),
           };
         });
@@ -640,7 +621,6 @@ export function validateAndTransform(
               { ...link, schema: option },
               synced,
               candidateSeen,
-              options,
             ),
           };
         });
@@ -658,7 +638,6 @@ export function validateAndTransform(
           { ...link, schema: anyTypeOption },
           synced,
           seen,
-          options,
         );
       } else {
         return annotateWithBackToCellSymbols(
@@ -703,7 +682,6 @@ export function validateAndTransform(
             { ...link, path: [...link.path, key], schema: childSchema },
             synced,
             seen,
-            options,
           );
         } else if (isObject(childSchema) && childSchema.default !== undefined) {
           // Process default value for missing properties that have defaults
@@ -745,7 +723,6 @@ export function validateAndTransform(
             { ...link, path: [...link.path, key], schema: childSchema },
             synced,
             seen,
-            options,
           );
         }
       }
@@ -853,7 +830,6 @@ export function validateAndTransform(
         elementLink,
         synced,
         seen,
-        options,
       );
     }
     return annotateWithBackToCellSymbols(result, runtime, link, tx);
