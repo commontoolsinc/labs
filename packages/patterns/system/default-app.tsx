@@ -3,6 +3,8 @@ import {
   Cell,
   computed,
   handler,
+  ifElse,
+  lift,
   NAME,
   navigateTo,
   pattern,
@@ -61,6 +63,28 @@ const removeCharm = handler<
     console.log("charmListCopy after", charmListCopy.length);
     state.allCharms.set(charmListCopy);
   }
+});
+
+// Handler for dropping a note onto a notebook row
+const dropOntoNotebook = handler<
+  { detail: { sourceCell: Cell<unknown> } },
+  { notebook: Cell<{ notes?: unknown[] }> }
+>((event, { notebook }) => {
+  const sourceCell = event.detail.sourceCell;
+  const notesCell = notebook.key("notes");
+  const notesList = notesCell.get() ?? [];
+
+  // Prevent duplicates using Cell.equals
+  const alreadyExists = notesList.some((n) =>
+    Cell.equals(sourceCell, n as any)
+  );
+  if (alreadyExists) return;
+
+  // Hide from Patterns list
+  sourceCell.key("isHidden").set(true);
+
+  // Add to notebook - push cell reference, not value, to maintain charm identity
+  notesCell.push(sourceCell);
 });
 
 const toggleFab = handler<any, { fabExpanded: Cell<boolean> }>(
@@ -164,7 +188,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
 
         <ct-toolbar slot="header" sticky>
           <div slot="start">
-            <h2 style={{ margin: 0, fontSize: "20px" }}>Pages</h2>
+            <h2 style={{ margin: 0, fontSize: "20px" }}>Patterns</h2>
           </div>
           <div slot="end">
             <ct-button
@@ -256,24 +280,62 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
 
             <ct-table full-width hover>
               <tbody>
-                {visibleCharms.map((charm) => (
-                  <tr>
-                    <td>
-                      <ct-cell-context $cell={charm}>
-                        <ct-cell-link $cell={charm} />
-                      </ct-cell-context>
-                    </td>
-                    <td>
-                      <ct-button
-                        size="sm"
-                        variant="ghost"
-                        onClick={removeCharm({ charm, allCharms })}
+                {visibleCharms.map((charm) => {
+                  // Check if charm is a notebook by NAME prefix (isNotebook prop not reliable through proxy)
+                  const isNotebook = lift((args: { c: unknown }) => {
+                    const name = (args.c as any)?.[NAME];
+                    const result = typeof name === "string" &&
+                      name.startsWith("📓");
+                    return result;
+                  })({ c: charm });
+
+                  const dragHandle = (
+                    <ct-drag-source $cell={charm} type="note">
+                      <span
+                        style={{ cursor: "grab", padding: "4px", opacity: 0.5 }}
                       >
-                        🗑️
-                      </ct-button>
-                    </td>
-                  </tr>
-                ))}
+                        ⠿
+                      </span>
+                    </ct-drag-source>
+                  );
+
+                  const link = (
+                    <ct-cell-context $cell={charm}>
+                      <ct-cell-link $cell={charm} />
+                    </ct-cell-context>
+                  );
+
+                  return (
+                    <tr>
+                      <td style={{ width: "24px", padding: "0 4px" }}>
+                        {dragHandle}
+                      </td>
+                      <td>
+                        {ifElse(
+                          isNotebook,
+                          <ct-drop-zone
+                            accept="note"
+                            onct-drop={dropOntoNotebook({
+                              notebook: charm as any,
+                            })}
+                          >
+                            {link}
+                          </ct-drop-zone>,
+                          link,
+                        )}
+                      </td>
+                      <td>
+                        <ct-button
+                          size="sm"
+                          variant="ghost"
+                          onClick={removeCharm({ charm, allCharms })}
+                        >
+                          🗑️
+                        </ct-button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </ct-table>
           </ct-vstack>
