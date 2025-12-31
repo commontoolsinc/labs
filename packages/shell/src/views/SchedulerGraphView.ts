@@ -1,4 +1,4 @@
-// Workaround: deno fmt crashes on `svg` tagged templates with multiline interpolations
+// Note: deno fmt can crash on deeply nested ternaries in html/svg templates - see renderBaselineStats
 import { css, html, LitElement, svg as svgTag, TemplateResult } from "lit";
 import { property, query, state } from "lit/decorators.js";
 import dagre from "dagre";
@@ -986,7 +986,7 @@ export class XSchedulerGraph extends LitElement {
   > {
     return (
       this.debuggerController?.getSchedulerBaselineStats() ??
-      new Map<string, { runCount: number; totalTime: number }>()
+        new Map<string, { runCount: number; totalTime: number }>()
     );
   }
 
@@ -1742,28 +1742,45 @@ export class XSchedulerGraph extends LitElement {
               <span>Historical: <span class="stat-value">${historicalCount}</span></span>
             `
             : ""}
-          <span>Total: <span class="stat-value">${totalRuns} runs</span> <span class="stat-value">${formatTime(
-            totalTime,
-          )}</span></span>
+          <span>Total: <span class="stat-value">${totalRuns} runs</span>
+            <span class="stat-value">${formatTime(totalTime)}</span></span>
           ${hasBaseline
-            ? html`
-              <span class="baseline-stats">
-                Δ:
-                <span class="stat-value delta ${totalRunsSinceBaseline > 0
-                  ? "positive"
-                  : ""}">${totalRunsSinceBaseline > 0
-                    ? "+"
-                    : ""}${totalRunsSinceBaseline} runs</span>
-                <span class="stat-value delta ${totalTimeSinceBaseline > 0
-                  ? "positive"
-                  : ""}">${totalTimeSinceBaseline > 0
-                    ? "+"
-                    : ""}${formatTime(totalTimeSinceBaseline)}</span>
-              </span>
-            `
+            ? this.renderBaselineStats(
+              totalRunsSinceBaseline,
+              totalTimeSinceBaseline,
+              formatTime,
+            )
             : ""}
         </div>
       </div>
+    `;
+  }
+
+  /**
+   * Render baseline stats separately to avoid deno fmt crash.
+   * The crash occurs with deeply nested ternaries in class attributes
+   * combined with multiline function calls in adjacent template expressions.
+   */
+  private renderBaselineStats(
+    runsDelta: number,
+    timeDelta: number,
+    formatTime: (ms: number) => string,
+  ): TemplateResult {
+    const runsClass = runsDelta > 0
+      ? "stat-value delta positive"
+      : "stat-value delta";
+    const timeClass = timeDelta > 0
+      ? "stat-value delta positive"
+      : "stat-value delta";
+    const runsPrefix = runsDelta > 0 ? "+" : "";
+    const timePrefix = timeDelta > 0 ? "+" : "";
+
+    return html`
+      <span class="baseline-stats">
+        Δ:
+        <span class="${runsClass}">${runsPrefix}${runsDelta} runs</span>
+        <span class="${timeClass}">${timePrefix}${formatTime(timeDelta)}</span>
+      </span>
     `;
   }
 
@@ -2665,12 +2682,20 @@ export class XSchedulerGraph extends LitElement {
               ? html`
                 <span class="child-indent">└─</span>
               `
-              : ""} ${n.label}
-            ${n.debounceMs
-              ? html`<span class="timing-badge debounce" title="Debounced: waits ${n.debounceMs}ms before running">D:${n.debounceMs}ms</span>`
-              : ""}
-            ${n.throttleMs
-              ? html`<span class="timing-badge throttle" title="Throttled: runs at most once every ${n.throttleMs}ms">T:${n.throttleMs}ms</span>`
+              : ""} ${n.label} ${n.debounceMs
+              ? html`
+                <span
+                  class="timing-badge debounce"
+                  title="Debounced: waits ${n.debounceMs}ms before running"
+                >D:${n.debounceMs}ms</span>
+              `
+              : ""} ${n.throttleMs
+              ? html`
+                <span
+                  class="timing-badge throttle"
+                  title="Throttled: runs at most once every ${n.throttleMs}ms"
+                >T:${n.throttleMs}ms</span>
+              `
               : ""}
           </td>
           <td class="col-number">
@@ -2727,12 +2752,20 @@ export class XSchedulerGraph extends LitElement {
               ? html`
                 <span class="child-count">(${n.children.length})</span>
               `
-              : ""}
-            ${n.debounceMs
-              ? html`<span class="timing-badge debounce" title="Debounced: waits ${n.debounceMs}ms before running">D:${n.debounceMs}ms</span>`
-              : ""}
-            ${n.throttleMs
-              ? html`<span class="timing-badge throttle" title="Throttled: runs at most once every ${n.throttleMs}ms">T:${n.throttleMs}ms</span>`
+              : ""} ${n.debounceMs
+              ? html`
+                <span
+                  class="timing-badge debounce"
+                  title="Debounced: waits ${n.debounceMs}ms before running"
+                >D:${n.debounceMs}ms</span>
+              `
+              : ""} ${n.throttleMs
+              ? html`
+                <span
+                  class="timing-badge throttle"
+                  title="Throttled: runs at most once every ${n.throttleMs}ms"
+                >T:${n.throttleMs}ms</span>
+              `
               : ""}
           </td>
           <td class="col-number">
