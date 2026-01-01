@@ -72,7 +72,9 @@ const showNewNoteModal = handler<void, { showNewNotePrompt: Cell<boolean> }>(
 const showNewNotebookModal = handler<
   void,
   { showNewNestedNotebookPrompt: Cell<boolean> }
->((_, { showNewNestedNotebookPrompt }) => showNewNestedNotebookPrompt.set(true));
+>((_, { showNewNestedNotebookPrompt }) =>
+  showNewNestedNotebookPrompt.set(true)
+);
 
 // Handler to create note and navigate to it (unless "Create Another" was used)
 const createNoteAndOpen = handler<
@@ -1234,7 +1236,10 @@ const Notebook = pattern<Input, Output>(
                   {/* Header - also a drop zone for receiving items from "Other notebooks" */}
                   <ct-drop-zone
                     accept="sibling"
-                    onct-drop={handleDropOntoCurrentNotebook({ notes, notebooks })}
+                    onct-drop={handleDropOntoCurrentNotebook({
+                      notes,
+                      notebooks,
+                    })}
                     style={{ width: "100%" }}
                   >
                     <div
@@ -1270,69 +1275,69 @@ const Notebook = pattern<Input, Output>(
                           📓 {title} ({noteCount})
                         </span>
                       </div>
-                    <div
-                      style={{
-                        display: computed(() =>
-                          isEditingTitle.get() ? "flex" : "none"
-                        ),
-                        flex: 1,
-                        marginRight: "12px",
-                      }}
-                    >
-                      <ct-input
-                        $value={title}
-                        placeholder="Notebook name..."
-                        style={{ flex: 1 }}
-                        onct-blur={stopEditingTitle({ isEditingTitle })}
-                        onct-keydown={handleTitleKeydown({ isEditingTitle })}
-                      />
-                    </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                      }}
-                    >
-                      <ct-button
-                        size="sm"
-                        variant="ghost"
-                        title="New Note"
-                        onClick={showNewNoteModal({ showNewNotePrompt })}
+                      <div
                         style={{
-                          padding: "6px 12px",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "4px",
+                          display: computed(() =>
+                            isEditingTitle.get() ? "flex" : "none"
+                          ),
+                          flex: 1,
+                          marginRight: "12px",
                         }}
                       >
-                        <span style={{ fontSize: "14px" }}>📝</span>
-                        <span style={{ fontSize: "13px", fontWeight: "500" }}>
-                          New
-                        </span>
-                      </ct-button>
-                      <ct-button
-                        size="sm"
-                        variant="ghost"
-                        title="New Notebook"
-                        onClick={showNewNotebookModal({
-                          showNewNestedNotebookPrompt,
-                        })}
+                        <ct-input
+                          $value={title}
+                          placeholder="Notebook name..."
+                          style={{ flex: 1 }}
+                          onct-blur={stopEditingTitle({ isEditingTitle })}
+                          onct-keydown={handleTitleKeydown({ isEditingTitle })}
+                        />
+                      </div>
+                      <div
                         style={{
-                          padding: "6px 12px",
                           display: "flex",
                           alignItems: "center",
-                          gap: "4px",
+                          gap: "8px",
                         }}
                       >
-                        <span style={{ fontSize: "14px" }}>📓</span>
-                        <span style={{ fontSize: "13px", fontWeight: "500" }}>
-                          New
-                        </span>
-                      </ct-button>
+                        <ct-button
+                          size="sm"
+                          variant="ghost"
+                          title="New Note"
+                          onClick={showNewNoteModal({ showNewNotePrompt })}
+                          style={{
+                            padding: "6px 12px",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                        >
+                          <span style={{ fontSize: "14px" }}>📝</span>
+                          <span style={{ fontSize: "13px", fontWeight: "500" }}>
+                            New
+                          </span>
+                        </ct-button>
+                        <ct-button
+                          size="sm"
+                          variant="ghost"
+                          title="New Notebook"
+                          onClick={showNewNotebookModal({
+                            showNewNestedNotebookPrompt,
+                          })}
+                          style={{
+                            padding: "6px 12px",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                        >
+                          <span style={{ fontSize: "14px" }}>📓</span>
+                          <span style={{ fontSize: "13px", fontWeight: "500" }}>
+                            New
+                          </span>
+                        </ct-button>
+                      </div>
                     </div>
-                  </div>
-                </ct-drop-zone>
+                  </ct-drop-zone>
 
                   <ct-vstack
                     gap="0"
@@ -1809,7 +1814,6 @@ const Notebook = pattern<Input, Output>(
               </ct-button>
             ))}
           </ct-hstack>
-
         </ct-screen>
       ),
       title,
