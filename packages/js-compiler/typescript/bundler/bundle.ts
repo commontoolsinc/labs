@@ -1,3 +1,10 @@
+/**
+ * AMD bundle generation.
+ *
+ * CACHE_VERSION: Changes to bundle output format affect compiled output.
+ * Bump CACHE_VERSION in packages/runner/src/harness/compilation-cache.ts
+ * when modifying this file.
+ */
 import { SourceMap } from "../../interface.ts";
 import { getAMDLoader } from "./amd-loader.ts";
 import { encode } from "@commontools/utils/encoding";

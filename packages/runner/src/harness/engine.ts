@@ -19,9 +19,12 @@ import { UnsafeEvalIsolate, UnsafeEvalRuntime } from "./eval-runtime.ts";
 import { CommonToolsTransformerPipeline } from "@commontools/ts-transformers";
 import * as RuntimeModules from "./runtime-modules.ts";
 import { Runtime } from "../runtime.ts";
-import { refer } from "@commontools/memory/reference";
 import { StaticCache } from "@commontools/static";
 import { pretransformProgram } from "./pretransform.ts";
+import { CompilationCache, computeCacheKey } from "./compilation-cache.ts";
+import { getLogger } from "@commontools/utils/logger";
+
+const logger = getLogger("engine", { enabled: false, level: "info" });
 
 const RUNTIME_ENGINE_CONSOLE_HOOK = "RUNTIME_ENGINE_CONSOLE_HOOK";
 const INJECTED_SCRIPT =
@@ -89,6 +92,7 @@ interface Internals {
 export class Engine extends EventTarget implements Harness {
   private internals: Internals | undefined;
   private ctRuntime: Runtime;
+  private compilationCache: CompilationCache | undefined;
 
   constructor(ctRuntime: Runtime) {
     super();
@@ -96,6 +100,10 @@ export class Engine extends EventTarget implements Harness {
     // We install our console shim globally so that it can be referenced
     // by the eval script scope.
     globalThis[RUNTIME_ENGINE_CONSOLE_HOOK] = new Console(this);
+    // Initialize compilation cache if IndexedDB is available
+    if (CompilationCache.isAvailable()) {
+      this.compilationCache = new CompilationCache();
+    }
   }
 
   async initialize() {
@@ -144,7 +152,9 @@ export class Engine extends EventTarget implements Harness {
   ): Promise<
     { main?: Exports; exportMap?: Record<string, Exports>; output: JsScript }
   > {
-    const id = options.identifier ?? computeId(program);
+    const processStart = performance.now();
+    const id = options.identifier ?? computeCacheKey(program);
+    const truncatedId = id.substring(0, 16);
     const filename = options.filename ?? `${id}.js`;
     const mappedProgram = pretransformProgram(program, id);
     const resolver = new EngineProgramResolver(
@@ -155,16 +165,41 @@ export class Engine extends EventTarget implements Harness {
     const { compiler, isolate, runtimeExports, exportsCallback } = await this
       .getInternals();
     const resolvedProgram = await this.resolve(resolver);
-    const output = await compiler.compile(resolvedProgram, {
-      filename,
-      noCheck: options.noCheck,
-      injectedScript: INJECTED_SCRIPT,
-      runtimeModules: Engine.runtimeModuleNames(),
-      bundleExportAll: true,
-      getTransformedProgram: options.getTransformedProgram,
-      beforeTransformers: (program) =>
-        new CommonToolsTransformerPipeline().toFactories(program),
-    });
+
+    // Check compilation cache first (unless noCache option is set)
+    let output: JsScript;
+    const cacheStart = performance.now();
+    const cachedOutput = options.noCache
+      ? undefined
+      : await this.compilationCache?.get(resolvedProgram);
+
+    if (cachedOutput) {
+      output = cachedOutput;
+      const cacheHitTime = performance.now() - cacheStart;
+      logger.info("cache-hit", () => [
+        `Cache hit for ${truncatedId}... in ${cacheHitTime.toFixed(2)}ms`,
+      ]);
+    } else {
+      // Compile and cache the result
+      const compileStart = performance.now();
+      output = await compiler.compile(resolvedProgram, {
+        filename,
+        noCheck: options.noCheck,
+        injectedScript: INJECTED_SCRIPT,
+        runtimeModules: Engine.runtimeModuleNames(),
+        bundleExportAll: true,
+        getTransformedProgram: options.getTransformedProgram,
+        beforeTransformers: (program) =>
+          new CommonToolsTransformerPipeline().toFactories(program),
+      });
+      const compileTime = performance.now() - compileStart;
+      logger.info("cache-miss", () => [
+        `Cache miss for ${truncatedId}..., compiled in ${compileTime.toFixed(2)}ms`,
+      ]);
+
+      // Cache the compiled output (fire-and-forget)
+      this.compilationCache?.set(resolvedProgram, output).catch(() => {});
+    }
 
     if (!options.noRun) {
       const result = isolate.execute(output).invoke(runtimeExports)
@@ -197,9 +232,17 @@ export class Engine extends EventTarget implements Harness {
         }
         exportsCallback(exportsByValue);
 
+        const totalTime = performance.now() - processStart;
+        logger.info("process-complete", () => [
+          `Process ${truncatedId}... completed in ${totalTime.toFixed(2)}ms`,
+        ]);
         return { output, main, exportMap };
       }
     }
+    const totalTime = performance.now() - processStart;
+    logger.info("process-complete", () => [
+      `Process ${truncatedId}... completed in ${totalTime.toFixed(2)}ms`,
+    ]);
     return { output };
   }
 
@@ -261,12 +304,4 @@ export class Engine extends EventTarget implements Harness {
       this.internals = undefined;
     }
   }
-}
-
-function computeId(program: Program): string {
-  const source = [
-    program.main,
-    ...program.files.filter(({ name }) => !name.endsWith(".d.ts")),
-  ];
-  return refer(source).toString();
 }
