@@ -50,6 +50,10 @@ interface Output {
 const NOTE_START_MARKER = "<!-- COMMON_NOTE_START";
 const NOTE_END_MARKER = "<!-- COMMON_NOTE_END -->";
 
+// HTML comment markers for notebook blocks (for hierarchical export/import)
+const NOTEBOOK_START_MARKER = "<!-- COMMON_NOTEBOOK_START";
+const NOTEBOOK_END_MARKER = "<!-- COMMON_NOTEBOOK_END -->";
+
 // Helper to resolve proxy value to primitive string (for export function)
 function resolveValue(value: unknown): string {
   try {
@@ -57,6 +61,31 @@ function resolveValue(value: unknown): string {
   } catch {
     return String(value ?? "");
   }
+}
+
+// Helper to resolve proxy value to boolean (for isHidden export)
+// Tries multiple approaches since OpaqueRef serialization can be tricky
+function resolveBooleanValue(value: unknown, parentObj?: unknown): boolean {
+  // First try: serialize the property directly
+  try {
+    const resolved = JSON.parse(JSON.stringify(value));
+    if (resolved === true || resolved === "true") return true;
+  } catch {
+    // ignore
+  }
+
+  // Second try: if we have the parent object, serialize it and extract the property
+  if (parentObj) {
+    try {
+      const serialized = JSON.parse(JSON.stringify(parentObj));
+      if (serialized?.isHidden === true) return true;
+    } catch {
+      // ignore
+    }
+  }
+
+  // Fallback: check string representation
+  return String(value) === "true";
 }
 
 // Helper to get notebook names that contain a note (by noteId)
@@ -93,44 +122,126 @@ function stripMentionIds(content: string): string {
   return content.replace(/\[\[([^\]]*?)\s*\([^)]+\)\]\]/g, "[[$1]]");
 }
 
+// Helper to check if a charm is a notebook (by NAME prefix)
+function isNotebookCharm(charm: unknown): boolean {
+  const name = (charm as any)?.[NAME];
+  return typeof name === "string" && name.startsWith("📓");
+}
+
+// Helper to get clean notebook title (strip emoji and count)
+function getCleanNotebookTitle(notebook: unknown): string {
+  const rawName = (notebook as any)?.[NAME] ?? (notebook as any)?.title ?? "";
+  return rawName.replace(/^📓\s*/, "").replace(/\s*\(\d+\)$/, "");
+}
+
+// Helper to get noteIds and child notebook titles from a notebook's contents
+function getNotebookContents(
+  notebook: NotebookCharm,
+): { noteIds: string[]; childNotebookTitles: string[] } {
+  const notes = (notebook as any)?.notes ?? [];
+  const noteIds: string[] = [];
+  const childNotebookTitles: string[] = [];
+
+  for (const item of notes) {
+    if (isNotebookCharm(item)) {
+      // It's a nested notebook
+      const title = getCleanNotebookTitle(item);
+      if (title) childNotebookTitles.push(title);
+    } else {
+      // It's a note - get its noteId
+      const noteId = resolveValue((item as any)?.noteId);
+      if (noteId) noteIds.push(noteId);
+    }
+  }
+
+  return { noteIds, childNotebookTitles };
+}
+
 // Plain function version for imperative use in handlers (lift() doesn't work in handlers)
+// Now includes hierarchical notebook export (v2 format)
+// allCharmsRaw is the raw allCharms array for looking up isHidden values
 function filterAndFormatNotesPlain(
   charms: NoteCharm[],
   notebooks: NotebookCharm[],
-): { markdown: string; count: number } {
+  allCharmsRaw?: unknown[],
+): { markdown: string; count: number; notebookCount: number } {
   // Filter to only note charms (have title and content properties)
   const notes = charms.filter(
     (charm) => charm?.title !== undefined && charm?.content !== undefined,
   );
 
-  if (notes.length === 0) {
-    return { markdown: "No notes found in this space.", count: 0 };
-  }
-
-  // Format each note with HTML comment block markers (including noteId and notebooks)
-  const formatted = notes.map((note) => {
+  // Format each note with HTML comment block markers (including noteId, notebooks, and isHidden)
+  const formattedNotes = notes.map((note) => {
     const title = resolveValue(note?.title) || "Untitled Note";
     const rawContent = resolveValue(note?.content) || "";
     // Strip mention IDs for portable export
     const content = stripMentionIds(rawContent);
     const noteId = resolveValue(note?.noteId) || "";
     const notebookNames = getNotebookNamesForNote(note, notebooks);
+    // Resolve Cell/OpaqueRef to get actual boolean value (pass parent for fallback serialization)
+    const isHidden = resolveBooleanValue((note as any)?.isHidden, note);
 
     // Escape quotes in title for the attribute
     const escapedTitle = title.replace(/"/g, "&quot;");
     const notebooksStr = notebookNames.join(", ");
 
-    return `${NOTE_START_MARKER} title="${escapedTitle}" noteId="${noteId}" notebooks="${notebooksStr}" -->\n\n${content}\n\n${NOTE_END_MARKER}`;
+    return `${NOTE_START_MARKER} title="${escapedTitle}" noteId="${noteId}" notebooks="${notebooksStr}" isHidden="${isHidden}" -->\n\n${content}\n\n${NOTE_END_MARKER}`;
   });
 
-  // Add timestamp header (ignored by import regex which only looks for COMMON_NOTE_START)
+  // Format each notebook with hierarchy info
+  const formattedNotebooks = notebooks.map((notebook) => {
+    const title = getCleanNotebookTitle(notebook);
+    const escapedTitle = title.replace(/"/g, "&quot;");
+
+    // Look up isHidden from allCharmsRaw by matching NAME (more reliable than direct property access)
+    let isHidden = false;
+    if (allCharmsRaw) {
+      const notebookName = (notebook as any)?.[NAME];
+      for (const charm of allCharmsRaw) {
+        const charmName = (charm as any)?.[NAME];
+        if (charmName === notebookName) {
+          // Found the matching charm - try to get isHidden
+          isHidden = resolveBooleanValue((charm as any)?.isHidden, charm);
+          break;
+        }
+      }
+    } else {
+      // Fallback to direct property access
+      isHidden = resolveBooleanValue((notebook as any)?.isHidden, notebook);
+    }
+
+    const { noteIds, childNotebookTitles } = getNotebookContents(notebook);
+
+    // Escape commas in child notebook titles and join
+    const noteIdsStr = noteIds.join(",");
+    const childNotebooksStr = childNotebookTitles
+      .map((t) => t.replace(/,/g, "&#44;"))
+      .join(",");
+
+    return `${NOTEBOOK_START_MARKER} title="${escapedTitle}" isHidden="${isHidden}" noteIds="${noteIdsStr}" childNotebooks="${childNotebooksStr}" -->\n${NOTEBOOK_END_MARKER}`;
+  });
+
+  // Add timestamp header with format version
   const timestamp = new Date().toISOString();
   const header =
-    `<!-- Common Tools Export - ${timestamp} -->\n<!-- Notes: ${notes.length} -->\n\n`;
+    `<!-- Common Tools Export - ${timestamp} -->\n<!-- Format: v2 (hierarchical) -->\n<!-- Notes: ${notes.length}, Notebooks: ${notebooks.length} -->\n\n`;
+
+  // Combine notes and notebooks sections
+  const notesSection = formattedNotes.length > 0
+    ? `<!-- === NOTES === -->\n\n${formattedNotes.join("\n\n")}`
+    : "";
+  const notebooksSection = formattedNotebooks.length > 0
+    ? `\n\n<!-- === NOTEBOOKS === -->\n\n${formattedNotebooks.join("\n\n")}`
+    : "";
+
+  const markdown = notes.length === 0 && notebooks.length === 0
+    ? "No notes or notebooks found in this space."
+    : header + notesSection + notebooksSection;
 
   return {
-    markdown: header + formatted.join("\n\n"),
+    markdown,
     count: notes.length,
+    notebookCount: notebooks.length,
   };
 }
 
@@ -177,22 +288,35 @@ const _filterAndFormatNotes = lift(
   },
 );
 
+// Parsed note data type (v2 with isHidden)
+type ParsedNote = {
+  title: string;
+  content: string;
+  noteId?: string;
+  notebooks?: string[];
+  isHidden?: boolean;
+};
+
+// Parsed notebook data type (v2 hierarchical)
+type ParsedNotebook = {
+  title: string;
+  isHidden: boolean;
+  noteIds: string[];
+  childNotebookTitles: string[];
+};
+
 // Parse markdown with HTML comment blocks into individual notes (plain function for use in handlers)
-function parseMarkdownToNotesPlain(
-  markdown: string,
-): Array<
-  { title: string; content: string; noteId?: string; notebooks?: string[] }
-> {
+// Supports v1 format (no isHidden) and v2 format (with isHidden)
+function parseMarkdownToNotesPlain(markdown: string): ParsedNote[] {
   if (!markdown || markdown.trim() === "") return [];
 
-  const notes: Array<
-    { title: string; content: string; noteId?: string; notebooks?: string[] }
-  > = [];
+  const notes: ParsedNote[] = [];
 
-  // Regex to match COMMON_NOTE blocks with title, optional noteId and notebooks attributes
-  // Supports both old format (title only) and new format (with noteId and notebooks)
+  // Regex to match COMMON_NOTE blocks with all attributes (v1 and v2 compatible)
+  // v1: title, noteId, notebooks
+  // v2: title, noteId, notebooks, isHidden
   const noteBlockRegex =
-    /<!-- COMMON_NOTE_START title="([^"]*)"(?:\s+noteId="([^"]*)")?(?:\s+notebooks="([^"]*)")? -->([\s\S]*?)<!-- COMMON_NOTE_END -->/g;
+    /<!-- COMMON_NOTE_START title="([^"]*)"(?:\s+noteId="([^"]*)")?(?:\s+notebooks="([^"]*)")?(?:\s+isHidden="([^"]*)")? -->([\s\S]*?)<!-- COMMON_NOTE_END -->/g;
 
   let match;
   while ((match = noteBlockRegex.exec(markdown)) !== null) {
@@ -200,17 +324,58 @@ function parseMarkdownToNotesPlain(
     const title = match[1].replace(/&quot;/g, '"') || "Imported Note";
     const noteId = match[2] || undefined;
     const notebooksStr = match[3] || "";
-    const content = match[4].trim();
+    const isHiddenStr = match[4] || "";
+    const content = match[5].trim();
 
     // Parse notebooks string into array (comma-separated)
     const notebooks = notebooksStr
       ? notebooksStr.split(",").map((s) => s.trim()).filter(Boolean)
       : undefined;
 
-    notes.push({ title, content, noteId, notebooks });
+    // Parse isHidden (default to undefined if not specified for v1 compatibility)
+    const isHidden = isHiddenStr === "true"
+      ? true
+      : isHiddenStr === "false"
+      ? false
+      : undefined;
+
+    notes.push({ title, content, noteId, notebooks, isHidden });
   }
 
   return notes;
+}
+
+// Parse markdown with HTML comment blocks into notebook structures (v2 format)
+function parseMarkdownToNotebooksPlain(markdown: string): ParsedNotebook[] {
+  if (!markdown || markdown.trim() === "") return [];
+
+  const notebooks: ParsedNotebook[] = [];
+
+  // Regex to match COMMON_NOTEBOOK blocks
+  const notebookBlockRegex =
+    /<!-- COMMON_NOTEBOOK_START title="([^"]*)" isHidden="([^"]*)" noteIds="([^"]*)" childNotebooks="([^"]*)" -->/g;
+
+  let match;
+  while ((match = notebookBlockRegex.exec(markdown)) !== null) {
+    // Unescape HTML entities in title
+    const title = match[1].replace(/&quot;/g, '"') || "Imported Notebook";
+    const isHidden = match[2] === "true";
+    const noteIdsStr = match[3] || "";
+    const childNotebooksStr = match[4] || "";
+
+    // Parse noteIds (comma-separated, no spaces)
+    const noteIds = noteIdsStr ? noteIdsStr.split(",").filter(Boolean) : [];
+
+    // Parse child notebook titles (comma-separated, unescape &#44; → ,)
+    const childNotebookTitles = childNotebooksStr
+      ? childNotebooksStr.split(",").map((t) => t.replace(/&#44;/g, ","))
+        .filter(Boolean)
+      : [];
+
+    notebooks.push({ title, isHidden, noteIds, childNotebookTitles });
+  }
+
+  return notebooks;
 }
 
 // Type for tracking detected duplicates during import
@@ -227,20 +392,64 @@ type NotebookDuplicate = {
   noteIndex: number; // Index in the notes array
 };
 
+// Topological sort for notebooks: returns titles in order (leaves first, parents last)
+// Returns indices in topological order (leaves first, parents last)
+// Handles duplicate titles by using indices instead of titles
+function topologicalSortNotebooks(notebooks: ParsedNotebook[]): number[] {
+  // Build map of title -> indices (handles duplicates)
+  const titleToIndices = new Map<string, number[]>();
+  notebooks.forEach((nb, idx) => {
+    const indices = titleToIndices.get(nb.title) ?? [];
+    indices.push(idx);
+    titleToIndices.set(nb.title, indices);
+  });
+
+  const visited = new Set<number>();
+  const result: number[] = [];
+
+  function visit(idx: number) {
+    if (visited.has(idx)) return;
+    visited.add(idx);
+
+    const nb = notebooks[idx];
+    if (nb) {
+      // Visit children first (leaves before parents)
+      for (const childTitle of nb.childNotebookTitles) {
+        // Find child indices - for duplicates, visit all matching
+        const childIndices = titleToIndices.get(childTitle) ?? [];
+        for (const childIdx of childIndices) {
+          visit(childIdx);
+        }
+      }
+    }
+    result.push(idx);
+  }
+
+  // Visit all notebooks by index
+  for (let i = 0; i < notebooks.length; i++) {
+    visit(i);
+  }
+
+  return result;
+}
+
 // Helper to perform the actual import (used by both direct import and after duplicate confirmation)
-// Uses two-pass approach to preserve mention links:
-// 1. Create all notes first (with unlinked mentions like [[Name]])
-// 2. Build title→ID map from newly created notes
-// 3. Inject IDs into content based on title matching ([[Name]] → [[Name (id)]])
+// Supports v1 format (notes with notebooks attr) and v2 format (hierarchical notebooks)
+// Uses multi-pass approach:
+// 1. Parse notes and notebooks from markdown
+// 2. Create all notes first (with isHidden preserved)
+// 3. Create notebooks in topological order (leaves first, then parents)
+// 4. Link notes to notebooks using noteIds
+// 5. Link child notebooks to parent notebooks
+// 6. Inject entity IDs into mention links
 function performImport(
-  parsed: Array<
-    { title: string; content: string; noteId?: string; notebooks?: string[] }
-  >,
+  parsed: ParsedNote[],
   allCharms: Cell<NoteCharm[]>,
   notebooks: Cell<NotebookCharm[]>,
   skipTitles: Set<string>, // Titles to skip (duplicates user chose not to import)
   _importStatus?: Cell<string>, // Unused - kept for API compatibility
   onComplete?: () => void, // Callback when import is done
+  rawMarkdown?: string, // Original markdown for v2 notebook parsing
 ) {
   const notebooksList = notebooks.get();
 
@@ -252,63 +461,95 @@ function performImport(
     if (cleanName) existingNames.add(cleanName);
   });
 
-  // Collect unique notebook names from import data
-  const notebooksNeeded = new Set<string>();
-  for (const noteData of parsed) {
-    if (!skipTitles.has(noteData.title)) {
-      noteData.notebooks?.forEach((name) => notebooksNeeded.add(name));
+  // Parse v2 notebook blocks if markdown provided
+  const parsedNotebooks = rawMarkdown
+    ? parseMarkdownToNotebooksPlain(rawMarkdown)
+    : [];
+
+  // Build noteId → notebook titles map from v2 format
+  const noteIdToNotebookTitles = new Map<string, string[]>();
+  for (const nb of parsedNotebooks) {
+    for (const noteId of nb.noteIds) {
+      if (!noteIdToNotebookTitles.has(noteId)) {
+        noteIdToNotebookTitles.set(noteId, []);
+      }
+      noteIdToNotebookTitles.get(noteId)!.push(nb.title);
     }
   }
 
+  // Collect unique notebook names needed (from v1 notes attr OR v2 notebook blocks)
+  const notebooksNeeded = new Set<string>();
+  for (const noteData of parsed) {
+    if (!skipTitles.has(noteData.title)) {
+      // v1 format: notebook names in note's notebooks attribute
+      noteData.notebooks?.forEach((name) => notebooksNeeded.add(name));
+      // v2 format: notebook names from noteId mapping
+      if (noteData.noteId) {
+        const nbTitles = noteIdToNotebookTitles.get(noteData.noteId);
+        nbTitles?.forEach((name) => notebooksNeeded.add(name));
+      }
+    }
+  }
+  // Also add any notebooks from v2 that have no notes (empty notebooks or parent-only)
+  for (const nb of parsedNotebooks) {
+    notebooksNeeded.add(nb.title);
+  }
+
   // === PHASE 1: Create all notes (batch - don't push yet) ===
-  // Create content as mutable Cells so we can update them after getting entity IDs
   const createdNotes: Array<{
     title: string;
+    noteId: string;
     index: number;
     contentCell: Cell<string>;
     originalContent: string;
   }> = [];
-  const notesByNotebook = new Map<string, any[]>();
+  // Map noteId → created note charm for linking
+  const noteIdToCharm = new Map<string, unknown>();
+  // Map notebook name → notes to add (from v1 format or v2 noteId mapping)
+  const notesByNotebook = new Map<string, unknown[]>();
 
-  // Track starting index for calculating positions
   const startingIndex = allCharms.get().length;
   let currentIndex = startingIndex;
-
-  // Collect all new items to batch-push at the end
   const newItems: NoteCharm[] = [];
 
   parsed.forEach((noteData) => {
-    // Skip if user chose to skip this duplicate
     if (skipTitles.has(noteData.title)) return;
 
-    // If note belongs to notebooks, set isHidden so it doesn't appear in default-app
-    const belongsToNotebook = noteData.notebooks &&
-      noteData.notebooks.length > 0;
-
-    // Create a Cell for content that we can update later
     const contentCell = Cell.of(noteData.content);
-
-    // Use the imported noteId if provided, otherwise generate a new one
     const noteIdToUse = noteData.noteId || generateId();
+
+    // Determine isHidden:
+    // - v2 format: use explicit isHidden from parsed data
+    // - v1 format: hidden if belongs to any notebook
+    // - fallback: hidden if has notebook membership (v1 or v2 inferred)
+    const belongsToNotebook = (noteData.notebooks &&
+      noteData.notebooks.length > 0) ||
+      noteIdToNotebookTitles.has(noteIdToUse);
+    const isHidden = noteData.isHidden !== undefined
+      ? noteData.isHidden
+      : belongsToNotebook;
 
     const note = Note({
       title: noteData.title,
-      content: contentCell, // Pass the Cell, not the string
+      content: contentCell,
       noteId: noteIdToUse,
-      isHidden: belongsToNotebook ? true : false,
+      isHidden,
     });
-    // Collect for batch push (don't push individually)
+
     newItems.push(note as unknown as NoteCharm);
+    noteIdToCharm.set(noteIdToUse, note);
     createdNotes.push({
       title: noteData.title,
+      noteId: noteIdToUse,
       index: currentIndex,
-      contentCell, // Keep reference to the Cell we created
+      contentCell,
       originalContent: noteData.content,
     });
     currentIndex++;
 
-    if (belongsToNotebook) {
-      for (const notebookName of noteData.notebooks!) {
+    // Track which notebooks this note belongs to (v1 format)
+    if (noteData.notebooks) {
+      for (const notebookName of noteData.notebooks) {
         if (!notesByNotebook.has(notebookName)) {
           notesByNotebook.set(notebookName, []);
         }
@@ -317,31 +558,132 @@ function performImport(
     }
   });
 
-  // === PHASE 2: Create notebooks (batch - don't push yet) ===
-  for (const nbName of notebooksNeeded) {
-    let actualName = nbName;
-    if (existingNames.has(nbName)) {
-      actualName = `${nbName} (Imported)`;
+  // For v2 format, also populate notesByNotebook from noteId mapping
+  for (const nb of parsedNotebooks) {
+    if (!notesByNotebook.has(nb.title)) {
+      notesByNotebook.set(nb.title, []);
+    }
+    for (const noteId of nb.noteIds) {
+      const charm = noteIdToCharm.get(noteId);
+      if (charm) {
+        const existing = notesByNotebook.get(nb.title)!;
+        // Avoid duplicates (in case v1 and v2 overlap)
+        if (!existing.includes(charm)) {
+          existing.push(charm);
+        }
+      }
+    }
+  }
+
+  // === PHASE 2: Create notebooks in topological order ===
+  // For v2 format, we have hierarchy info. For v1, just create flat notebooks.
+  // Track created notebooks by INDEX (not title) to handle duplicates
+  const createdNotebookByIndex = new Map<number, unknown>();
+  // Track which titles have been used (for deduplication)
+  const usedTitles = new Set<string>(existingNames);
+  // Track notebooks separately so we can reorder them to match original export order
+  const createdNotebooks: Array<{
+    originalIndex: number;
+    notebook: unknown;
+  }> = [];
+
+  // Helper to generate unique title
+  const getUniqueTitle = (baseTitle: string): string => {
+    if (!usedTitles.has(baseTitle)) {
+      usedTitles.add(baseTitle);
+      return baseTitle;
+    }
+    let counter = 2;
+    while (usedTitles.has(`${baseTitle} (${counter})`)) {
+      counter++;
+    }
+    const uniqueTitle = `${baseTitle} (${counter})`;
+    usedTitles.add(uniqueTitle);
+    return uniqueTitle;
+  };
+
+  if (parsedNotebooks.length > 0) {
+    // v2 format: create in topological order (leaves first, for dependency resolution)
+    // Returns INDICES, not titles, to handle duplicates
+    const sortedIndices = topologicalSortNotebooks(parsedNotebooks);
+
+    // Build map of original title -> child indices (for looking up children)
+    const titleToChildIndices = new Map<string, number[]>();
+    parsedNotebooks.forEach((nb, idx) => {
+      // This notebook is a child of any parent that lists it in childNotebookTitles
+      // We track by the notebook's own title for lookup
+      const indices = titleToChildIndices.get(nb.title) ?? [];
+      indices.push(idx);
+      titleToChildIndices.set(nb.title, indices);
+    });
+
+    for (const idx of sortedIndices) {
+      const nbData = parsedNotebooks[idx];
+      if (!nbData) continue;
+
+      // Generate unique title (handles duplicates)
+      const actualName = getUniqueTitle(nbData.title);
+
+      // Collect notes for this notebook (by original title)
+      const notesForNotebook = notesByNotebook.get(nbData.title) ?? [];
+
+      // Collect child notebooks by looking up their indices
+      const childNotebooks: unknown[] = [];
+      for (const childTitle of nbData.childNotebookTitles) {
+        const childIndices = titleToChildIndices.get(childTitle) ?? [];
+        for (const childIdx of childIndices) {
+          const childCharm = createdNotebookByIndex.get(childIdx);
+          if (childCharm) {
+            childNotebooks.push(childCharm);
+          }
+        }
+      }
+
+      // Combine notes and child notebooks
+      const allContents = [
+        ...notesForNotebook,
+        ...childNotebooks,
+      ] as unknown as NoteCharm[];
+
+      const newNb = Notebook({
+        title: actualName,
+        notes: allContents,
+        isHidden: nbData.isHidden ?? false,
+      });
+
+      // Track by index for child lookup
+      createdNotebookByIndex.set(idx, newNb);
+      // Track for later reordering
+      createdNotebooks.push({ originalIndex: idx, notebook: newNb });
     }
 
-    const notesForNotebook = notesByNotebook.get(nbName) ?? [];
-    const newNb = Notebook({
-      title: actualName,
-      notes: notesForNotebook as unknown as NoteCharm[],
-    });
-    // Collect for batch push (don't push individually)
-    newItems.push(newNb as unknown as NoteCharm);
+    // Sort notebooks back to original export order and add to newItems
+    createdNotebooks.sort((a, b) => a.originalIndex - b.originalIndex);
+    for (const { notebook } of createdNotebooks) {
+      newItems.push(notebook as unknown as NoteCharm);
+    }
+  } else {
+    // v1 format: create flat notebooks (no hierarchy info)
+    for (const nbName of notebooksNeeded) {
+      // Use getUniqueTitle for consistency (handles duplicates)
+      const actualName = getUniqueTitle(nbName);
+
+      const notesForNotebook = notesByNotebook.get(nbName) ?? [];
+      const newNb = Notebook({
+        title: actualName,
+        notes: notesForNotebook as unknown as NoteCharm[],
+      });
+
+      newItems.push(newNb as unknown as NoteCharm);
+    }
   }
 
   // === BATCH PUSH: Single set() instead of N push() calls ===
-  // This reduces O(N) filter recomputations from N times to 1 time
   if (newItems.length > 0) {
     allCharms.set([...allCharms.get(), ...newItems]);
   }
-  // Note: onComplete is called synchronously at the end of this function
 
   // === PHASE 3: Build title→ID map and link mentions ===
-  // Use allCharms.key(index).resolveAsCell() to get the actual charm Cell
   const titleToId = new Map<string, string>();
   for (const { title, index } of createdNotes) {
     try {
@@ -364,25 +706,21 @@ function performImport(
       const content = originalContent ?? "";
       if (!content) continue;
 
-      // Find all [[Name]] patterns (without IDs) and inject matching IDs
       const updatedContent = content.replace(
         /\[\[([^\]]+)\]\]/g,
         (match: string, name: string) => {
-          // Skip if already has an ID: [[Name (id)]]
           if (name.includes("(") && name.endsWith(")")) return match;
 
-          // Look up by title (case-insensitive), stripping emoji prefixes like 📝 📓
           const cleanName = name.trim().replace(/^(📝|📓)\s*/, "")
             .toLowerCase();
           const id = titleToId.get(cleanName);
           if (id) {
             return `[[${name.trim()} (${id})]]`;
           }
-          return match; // Keep as-is if no match found
+          return match;
         },
       );
 
-      // Update the content Cell we created and passed to Note
       if (updatedContent !== content) {
         contentCell.set(updatedContent);
       }
@@ -391,7 +729,6 @@ function performImport(
     }
   }
 
-  // Call completion callback synchronously
   onComplete?.();
 }
 
@@ -425,8 +762,16 @@ const handleImportFileUpload = handler<
   const binaryString = atob(base64Part);
   const bytes = Uint8Array.from(binaryString, (char) => char.charCodeAt(0));
   const content = new TextDecoder().decode(bytes);
-  const parsed = parseMarkdownToNotesPlain(content);
-  if (parsed.length === 0) return;
+
+  // Parse both notes AND notebooks from the file
+  const parsedNotes = parseMarkdownToNotesPlain(content);
+  const parsedNotebooks = parseMarkdownToNotebooksPlain(content);
+
+  // If neither notes nor notebooks found, the file isn't in the expected format
+  if (parsedNotes.length === 0 && parsedNotebooks.length === 0) {
+    console.warn("Import: No notes or notebooks found in file");
+    return;
+  }
 
   // Get existing notes for duplicate detection
   const existingNotes = state.notes.get();
@@ -436,9 +781,9 @@ const handleImportFileUpload = handler<
     if (title) existingByTitle.set(title, note);
   });
 
-  // Detect duplicates
+  // Detect duplicates (only for notes)
   const duplicates: DetectedDuplicate[] = [];
-  for (const noteData of parsed) {
+  for (const noteData of parsedNotes) {
     const existing = existingByTitle.get(noteData.title);
     if (existing) {
       duplicates.push({
@@ -448,6 +793,22 @@ const handleImportFileUpload = handler<
       });
     }
   }
+
+  // Build progress message
+  const itemCounts: string[] = [];
+  if (parsedNotes.length > 0) {
+    itemCounts.push(
+      `${parsedNotes.length} note${parsedNotes.length !== 1 ? "s" : ""}`,
+    );
+  }
+  if (parsedNotebooks.length > 0) {
+    itemCounts.push(
+      `${parsedNotebooks.length} notebook${
+        parsedNotebooks.length !== 1 ? "s" : ""
+      }`,
+    );
+  }
+  const importSummary = itemCounts.join(" and ");
 
   if (duplicates.length > 0) {
     // Store pending import and show duplicate modal
@@ -461,15 +822,23 @@ const handleImportFileUpload = handler<
     state.showImportModal.set(false);
     state.showPasteSection?.set(true); // Reset for next time
     state.importComplete.set(false);
-    state.importProgressMessage.set(`Importing ${parsed.length} notes...`);
+    state.importProgressMessage.set(`Importing ${importSummary}...`);
     // NOW show the modal (after state is set)
     state.showImportProgressModal.set(true);
 
-    // Run import synchronously
-    performImport(parsed, state.allCharms, state.notebooks, new Set());
+    // Run import synchronously (pass raw content for v2 notebook parsing)
+    performImport(
+      parsedNotes,
+      state.allCharms,
+      state.notebooks,
+      new Set(),
+      undefined,
+      undefined,
+      content,
+    );
 
     // Mark import as complete
-    state.importProgressMessage.set(`Imported ${parsed.length} notes!`);
+    state.importProgressMessage.set(`Imported ${importSummary}!`);
     state.importComplete.set(true);
   }
 });
@@ -509,9 +878,13 @@ const analyzeImport = handler<
     showPasteSection,
   } = state;
   const markdown = importMarkdown.get();
-  const parsed = parseMarkdownToNotesPlain(markdown);
 
-  if (parsed.length === 0) return;
+  // Parse both notes AND notebooks from the pasted content
+  const parsedNotes = parseMarkdownToNotesPlain(markdown);
+  const parsedNotebooks = parseMarkdownToNotebooksPlain(markdown);
+
+  // If neither notes nor notebooks found, the content isn't in the expected format
+  if (parsedNotes.length === 0 && parsedNotebooks.length === 0) return;
 
   // Get existing notes for duplicate detection
   const existingNotes = notes.get();
@@ -521,9 +894,9 @@ const analyzeImport = handler<
     if (title) existingByTitle.set(title, note);
   });
 
-  // Detect duplicates (same title exists in space)
+  // Detect duplicates (same title exists in space) - only for notes
   const duplicates: DetectedDuplicate[] = [];
-  for (const noteData of parsed) {
+  for (const noteData of parsedNotes) {
     const existing = existingByTitle.get(noteData.title);
     if (existing) {
       duplicates.push({
@@ -533,6 +906,22 @@ const analyzeImport = handler<
       });
     }
   }
+
+  // Build progress message
+  const itemCounts: string[] = [];
+  if (parsedNotes.length > 0) {
+    itemCounts.push(
+      `${parsedNotes.length} note${parsedNotes.length !== 1 ? "s" : ""}`,
+    );
+  }
+  if (parsedNotebooks.length > 0) {
+    itemCounts.push(
+      `${parsedNotebooks.length} notebook${
+        parsedNotebooks.length !== 1 ? "s" : ""
+      }`,
+    );
+  }
+  const importSummary = itemCounts.join(" and ");
 
   if (duplicates.length > 0) {
     // Store pending import and show modal
@@ -550,15 +939,23 @@ const analyzeImport = handler<
 
     // Set all state BEFORE showing modal to avoid default state flicker
     importComplete?.set(false);
-    importProgressMessage?.set(`Importing ${parsed.length} notes...`);
+    importProgressMessage?.set(`Importing ${importSummary}...`);
     // NOW show the modal
     showImportProgressModal?.set(true);
 
-    // Run import synchronously
-    performImport(parsed, allCharms, notebooks, new Set());
+    // Run import synchronously (pass raw markdown for v2 notebook parsing)
+    performImport(
+      parsedNotes,
+      allCharms,
+      notebooks,
+      new Set(),
+      undefined,
+      undefined,
+      markdown,
+    );
 
     // Mark import as complete
-    importProgressMessage?.set(`Imported ${parsed.length} notes!`);
+    importProgressMessage?.set(`Imported ${importSummary}!`);
     importComplete?.set(true);
   }
 });
@@ -599,8 +996,16 @@ const importSkipDuplicates = handler<
   // NOW show the modal
   state.showImportProgressModal?.set(true);
 
-  // Run import synchronously
-  performImport(parsed, state.allCharms, state.notebooks, skipTitles);
+  // Run import synchronously (pass raw markdown for v2 notebook parsing)
+  performImport(
+    parsed,
+    state.allCharms,
+    state.notebooks,
+    skipTitles,
+    undefined,
+    undefined,
+    markdown,
+  );
 
   // Mark import as complete
   state.importProgressMessage?.set(`Imported ${importCount} notes!`);
@@ -638,8 +1043,16 @@ const importAllAsCopies = handler<
   // NOW show the modal
   state.showImportProgressModal?.set(true);
 
-  // Run import synchronously
-  performImport(parsed, state.allCharms, state.notebooks, new Set());
+  // Run import synchronously (pass raw markdown for v2 notebook parsing)
+  performImport(
+    parsed,
+    state.allCharms,
+    state.notebooks,
+    new Set(),
+    undefined,
+    undefined,
+    markdown,
+  );
 
   // Mark import as complete
   state.importProgressMessage?.set(`Imported ${parsed.length} notes!`);
@@ -683,7 +1096,16 @@ const _importNotes = handler<
 
   if (parsed.length === 0) return;
 
-  performImport(parsed, allCharms, notebooks, new Set(), importStatus);
+  // Pass raw markdown for v2 notebook parsing
+  performImport(
+    parsed,
+    allCharms,
+    notebooks,
+    new Set(),
+    importStatus,
+    undefined,
+    markdown,
+  );
   importMarkdown.set("");
 });
 
@@ -715,6 +1137,38 @@ const toggleAllNotesVisibility = handler<
   notesList.forEach((_n: any, idx: number) => {
     const noteCell = notes.key(idx);
     const isHiddenCell = (noteCell as any).key("isHidden");
+    isHiddenCell.set(newHiddenState);
+  });
+});
+
+// Handler to toggle notebook visibility in default-app listing
+const toggleNotebookVisibility = handler<
+  Record<string, never>,
+  { notebook: Cell<NotebookCharm> }
+>((_, { notebook }) => {
+  const isHiddenCell = notebook.key("isHidden");
+  const current = isHiddenCell.get() ?? false;
+  isHiddenCell.set(!current);
+});
+
+// Handler to toggle all notebooks' visibility at once
+// If any are visible, hide all; if all hidden, show all
+const toggleAllNotebooksVisibility = handler<
+  Record<string, never>,
+  { notebooks: Cell<NotebookCharm[]> }
+>((_, { notebooks }) => {
+  const notebooksList = notebooks.get();
+  if (notebooksList.length === 0) return;
+
+  // Check if any notebooks are currently visible (not hidden)
+  const anyVisible = notebooksList.some((nb: any) => !nb?.isHidden);
+  // If any visible, hide all; otherwise show all
+  const newHiddenState = anyVisible;
+
+  // Update each notebook's isHidden state
+  notebooksList.forEach((_nb: any, idx: number) => {
+    const notebookCell = notebooks.key(idx);
+    const isHiddenCell = (notebookCell as any).key("isHidden");
     isHiddenCell.set(newHiddenState);
   });
 });
@@ -1741,9 +2195,12 @@ const openExportAllModal = handler<
 >((_, { showExportAllModal, allCharms, notebooks, exportedMarkdown }) => {
   // Compute export ONLY when modal opens (lazy evaluation)
   // Use plain function version (lift() doesn't work in handlers)
+  // Pass allCharms as third param for reliable isHidden lookup
+  const allCharmsArray = [...allCharms.get()];
   const result = filterAndFormatNotesPlain(
-    [...allCharms.get()],
+    allCharmsArray,
     [...notebooks.get()],
+    allCharmsArray,
   );
   exportedMarkdown.set(result.markdown);
   showExportAllModal.set(true);
@@ -1969,13 +2426,96 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
     });
   });
 
-  // noteCount derived from notes array - use lift() for proper reactive tracking
+  // Compute parent notebook memberships for each notebook
+  // A notebook's "memberships" are notebooks that contain it in their notes or childNotebooks arrays
+  const notebookMemberships = computed(() => {
+    const result: Record<
+      string,
+      Array<{ name: string; notebook: NotebookCharm }>
+    > = {};
+    for (const nb of notebooks) {
+      const rawName = (nb as any)?.[NAME] ?? (nb as any)?.title ?? "Untitled";
+      const cleanName = rawName
+        .replace(/^📓\s*/, "")
+        .replace(/\s*\(\d+\)$/, "");
+
+      // Check notes array for nested notebooks (notebooks dropped into other notebooks)
+      const nbNotes = (nb as any)?.notes ?? [];
+      for (const item of nbNotes) {
+        // Check if item is a notebook (has isNotebook property or NAME starts with 📓)
+        const itemName = (item as any)?.[NAME] ?? (item as any)?.title ?? "";
+        const isChildNotebook = (item as any)?.isNotebook ||
+          (typeof itemName === "string" && itemName.startsWith("📓"));
+        if (isChildNotebook && itemName) {
+          if (!result[itemName]) result[itemName] = [];
+          // Avoid duplicate entries
+          const alreadyAdded = result[itemName].some(
+            (m) => m.name === cleanName,
+          );
+          if (!alreadyAdded) {
+            result[itemName].push({ name: cleanName, notebook: nb });
+          }
+        }
+      }
+
+      // Also check childNotebooks array (v2 hierarchical format)
+      const childNotebooks = (nb as any)?.childNotebooks ?? [];
+      for (const child of childNotebooks) {
+        const childName = (child as any)?.[NAME] ?? (child as any)?.title ?? "";
+        if (childName) {
+          if (!result[childName]) result[childName] = [];
+          // Avoid duplicate entries
+          const alreadyAdded = result[childName].some(
+            (m) => m.name === cleanName,
+          );
+          if (!alreadyAdded) {
+            result[childName].push({ name: cleanName, notebook: nb });
+          }
+        }
+      }
+    }
+    return result;
+  });
+
+  // Combine notebooks with their membership data at pattern level
+  type NotebookWithMemberships = {
+    notebook: NotebookCharm;
+    memberships: Array<{ name: string; notebook: NotebookCharm }>;
+  };
+  const notebooksWithMemberships = computed((): NotebookWithMemberships[] => {
+    // Read notebookMemberships directly - don't use JSON.parse/stringify which loses Cell references
+    // Simply reading the computed value establishes the dependency
+    const membershipMap = notebookMemberships as unknown as Record<
+      string,
+      Array<{ name: string; notebook: NotebookCharm }>
+    >;
+    return notebooks.map((notebook: NotebookCharm) => {
+      const notebookName = (notebook as any)?.[NAME] ??
+        (notebook as any)?.title ?? "";
+      const memberships = notebookName
+        ? (membershipMap[notebookName] ?? [])
+        : [];
+      return { notebook, memberships };
+    });
+  });
+
+  // noteCount derived from notes array for reactive UI display
+  // Use lift() for proper reactive tracking (computed() doesn't track array.length correctly)
   const noteCount = lift((args: { n: NoteCharm[] }) => args.n.length)({
     n: notes,
   });
   const notebookCount = lift((args: { n: NotebookCharm[] }) => args.n.length)({
     n: notebooks,
   });
+
+  // Boolean display helpers using lift() - needed because computed(() => array.length > 0)
+  // doesn't properly track dependencies on computed arrays
+  const notesDisplayStyle = lift((args: { n: NoteCharm[] }) =>
+    args.n.length > 0 ? "flex" : "none"
+  )({ n: notes });
+  const notebooksDisplayStyle = lift((args: { n: NotebookCharm[] }) =>
+    args.n.length > 0 ? "flex" : "none"
+  )({ n: notebooks });
 
   // exportedMarkdown is computed on-demand when Export All modal opens (lazy for performance)
   const exportedMarkdown = Cell.of<string>("");
@@ -2069,7 +2609,7 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                 {/* Table Header - only show when there are notes */}
                 <div
                   style={{
-                    display: computed(() => notes.length > 0 ? "flex" : "none"),
+                    display: notesDisplayStyle,
                     width: "100%",
                     padding: "12px",
                     background: "var(--ct-color-bg-secondary, #f5f5f7)",
@@ -2156,7 +2696,7 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                           alignItems: "center",
                         }}
                       >
-                        <ct-cell-context $cell={note}>
+                        <ct-cell-context $cell={note} inline>
                           <ct-cell-link $cell={note} />
                         </ct-cell-context>
                       </div>
@@ -2213,7 +2753,9 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                         }}
                       >
                         <ct-switch
-                          checked={computed(() => !(note.isHidden ?? false))}
+                          checked={lift((args: { n: unknown }) =>
+                            !((args.n as any)?.isHidden ?? false)
+                          )({ n: note })}
                           onct-change={toggleNoteVisibility({ note })}
                         />
                       </div>
@@ -2312,7 +2854,7 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                   <span
                     style={{ margin: 0, fontSize: "15px", fontWeight: "600" }}
                   >
-                    Notebooks ({notebookCount})
+                    All Notebooks ({notebookCount})
                   </span>
                   <ct-button
                     size="sm"
@@ -2335,52 +2877,68 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                   </ct-button>
                 </div>
 
-                {!!notebooks.length && (
-                  <ct-vstack gap="0">
-                    {/* Table Header */}
-                    <ct-hstack
-                      padding="3"
-                      style={{
-                        background: "var(--ct-color-bg-secondary, #f5f5f7)",
-                        borderRadius: "8px",
-                        alignItems: "center",
-                        fontSize: "13px",
-                        fontWeight: "500",
-                        color: "var(--ct-color-text-secondary, #6e6e73)",
-                        marginBottom: "4px",
-                      }}
-                    >
-                      <div style={{ width: "32px", flexShrink: 0 }}>
-                        <ct-checkbox
-                          checked={computed(() =>
-                            notebooks.length > 0 &&
-                            selectedNotebookIndices.get().length ===
-                              notebooks.length
-                          )}
-                          onct-change={computed(() =>
-                            selectedNotebookIndices.get().length ===
-                                notebooks.length
-                              ? deselectAllNotebooks({
-                                selectedNotebookIndices,
-                              })
-                              : selectAllNotebooks({
-                                notebooks,
-                                selectedNotebookIndices,
-                              })
-                          )}
-                        />
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>Notebooks</div>
-                    </ct-hstack>
+                {/* Table Header - only show when there are notebooks */}
+                <div
+                  style={{
+                    display: notebooksDisplayStyle,
+                    width: "100%",
+                    padding: "12px",
+                    background: "var(--ct-color-bg-secondary, #f5f5f7)",
+                    borderRadius: "8px",
+                    alignItems: "center",
+                    fontSize: "13px",
+                    fontWeight: "500",
+                    color: "var(--ct-color-text-secondary, #6e6e73)",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <div style={{ width: "32px", flexShrink: 0 }}>
+                    <ct-checkbox
+                      checked={computed(() =>
+                        notebooks.length > 0 &&
+                        selectedNotebookIndices.get().length ===
+                          notebooks.length
+                      )}
+                      onct-change={computed(() =>
+                        selectedNotebookIndices.get().length ===
+                            notebooks.length
+                          ? deselectAllNotebooks({
+                            selectedNotebookIndices,
+                          })
+                          : selectAllNotebooks({
+                            notebooks,
+                            selectedNotebookIndices,
+                          })
+                      )}
+                    />
+                  </div>
+                  <div style={{ flex: "0 1 auto" }}>Notebooks</div>
+                  <div style={{ flex: "1 1 auto", minWidth: 0 }} />
+                  <div
+                    onClick={toggleAllNotebooksVisibility({ notebooks })}
+                    style={{
+                      width: "70px",
+                      flexShrink: 0,
+                      textAlign: "center",
+                      cursor: "pointer",
+                      userSelect: "none",
+                    }}
+                    title="Click to toggle all"
+                  >
+                    Show/Hide
+                  </div>
+                </div>
 
-                    {/* Notebooks List */}
-                    {notebooks.map((notebook, index) => (
+                {/* Notebooks List - using notebooksWithMemberships for reactive pill updates */}
+                <ct-vstack gap="0">
+                  {notebooksWithMemberships.map(
+                    ({ notebook, memberships }, index) => (
                       <ct-hstack
                         padding="3"
                         style={{
-                          alignItems: "center",
                           borderBottom:
                             "1px solid var(--ct-color-border, #e5e5e7)",
+                          alignItems: "center",
                           background: computed(() =>
                             selectedNotebookIndices.get().includes(index)
                               ? "var(--ct-color-bg-secondary, #f5f5f7)"
@@ -2411,21 +2969,95 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                         </div>
                         <div
                           style={{
-                            flex: 1,
-                            minWidth: 0,
+                            flex: "0 1 auto",
                             overflow: "hidden",
                             display: "flex",
                             alignItems: "center",
                           }}
                         >
-                          <ct-cell-context $cell={notebook}>
+                          <ct-cell-context $cell={notebook} inline>
                             <ct-cell-link $cell={notebook} />
                           </ct-cell-context>
                         </div>
+                        <div
+                          style={{
+                            flex: "1 1 auto",
+                            display: "flex",
+                            alignItems: "center",
+                            marginLeft: "12px",
+                            marginRight: "12px",
+                          }}
+                        >
+                          <ct-hstack
+                            gap="2"
+                            style={{
+                              flexWrap: "wrap",
+                              alignItems: "center",
+                              marginTop: "2px",
+                            }}
+                          >
+                            {/* Parent notebook memberships pills */}
+                            {memberships.map((item) => (
+                              <span
+                                onClick={goToNotebook({
+                                  notebook: item.notebook,
+                                })}
+                                title={item.name}
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "2px 8px",
+                                  background:
+                                    "var(--ct-color-bg-tertiary, #e5e5e7)",
+                                  borderRadius: "10px",
+                                  cursor: "pointer",
+                                  maxWidth: "80px",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                  display: "inline-block",
+                                }}
+                              >
+                                {item.name}
+                              </span>
+                            ))}
+                          </ct-hstack>
+                        </div>
+                        <div
+                          style={{
+                            width: "70px",
+                            flexShrink: 0,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <ct-switch
+                            checked={lift(
+                              (args: {
+                                charms: unknown[];
+                                nb: unknown;
+                              }) => {
+                                // Find the notebook in allCharms by NAME and read its isHidden
+                                const nbName = (args.nb as any)?.[NAME] ?? "";
+                                const found = args.charms.find((c: any) => {
+                                  const name = c?.[NAME];
+                                  return name === nbName;
+                                });
+                                return !((found as any)?.isHidden ?? false);
+                              },
+                            )({
+                              charms: allCharms,
+                              nb: notebook,
+                            })}
+                            onct-change={toggleNotebookVisibility({
+                              notebook,
+                            })}
+                          />
+                        </div>
                       </ct-hstack>
-                    ))}
-                  </ct-vstack>
-                )}
+                    ),
+                  )}
+                </ct-vstack>
 
                 {/* Action Bar - Use CSS display to keep DOM alive (preserves handler streams) */}
                 <ct-hstack
