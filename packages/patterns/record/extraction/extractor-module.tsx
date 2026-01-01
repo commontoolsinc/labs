@@ -1123,7 +1123,12 @@ ${extractedSummary.join("\n")}`;
     const isExtractingPhase = computed(() => currentPhase === "extracting");
     const isErrorPhase = computed(() => currentPhase === "error");
     const isNoResultsPhase = computed(() => currentPhase === "no-results");
-    const hasNoSources = computed(() => extractableSources.length === 0);
+    // Flatten this computed to directly access parentSubCharms rather than chaining through extractableSources
+    // Chained computed access (computed -> computed) doesn't properly establish reactive dependencies
+    const hasNoSources = computed(() => {
+      const subCharms = parentSubCharms.get() || [];
+      return scanExtractableSources(subCharms).length === 0;
+    });
     const isSingleSource = computed(() => selectedSourceCount === 1);
     const extractButtonDisabled = computed(() =>
       !hasSelectedSources || ocrPending
