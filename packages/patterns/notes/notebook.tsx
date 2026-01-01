@@ -68,6 +68,12 @@ const showNewNoteModal = handler<void, { showNewNotePrompt: Cell<boolean> }>(
   (_, { showNewNotePrompt }) => showNewNotePrompt.set(true),
 );
 
+// Handler to show the new notebook modal (from header button)
+const showNewNotebookModal = handler<
+  void,
+  { showNewNestedNotebookPrompt: Cell<boolean> }
+>((_, { showNewNestedNotebookPrompt }) => showNewNestedNotebookPrompt.set(true));
+
 // Handler to create note and navigate to it (unless "Create Another" was used)
 const createNoteAndOpen = handler<
   void,
@@ -191,6 +197,7 @@ const handleDropOntoOtherNotebook = handler<
   }
 >((event, { targetNotebook, currentNotes }) => {
   const sourceCell = event.detail.sourceCell;
+  console.log("Drop handler triggered, sourceCell:", sourceCell);
 
   // Check if target is actually a notebook using the isNotebook marker
   const isNotebook = targetNotebook.key("isNotebook").get();
@@ -214,7 +221,7 @@ const handleDropOntoOtherNotebook = handler<
     return;
   }
 
-  // Remove from current notebook first
+  // Try to remove from current notebook (only works if item is in currentNotes)
   const currentList = currentNotes.get();
   const removeIndex = currentList.findIndex((n: any) =>
     Cell.equals(sourceCell, n)
@@ -223,11 +230,100 @@ const handleDropOntoOtherNotebook = handler<
     const copy = [...currentList];
     copy.splice(removeIndex, 1);
     currentNotes.set(copy);
+    console.log("Removed from current notebook");
+  } else {
+    console.log("Item not in current notebook (possibly a sibling)");
   }
+
+  // Hide the dropped item from the default-app charm list
+  sourceCell.key("isHidden").set(true);
 
   // Add to target notebook - push cell reference to maintain charm identity
   targetNotesCell.push(sourceCell);
-  console.log("Drop complete - item moved to notebook");
+  console.log("Drop complete - item added to target notebook and hidden");
+});
+
+// Handler for dropping items onto the current notebook's card
+// This MOVES the dropped notebook - removes from all other notebooks, adds here
+const handleDropOntoCurrentNotebook = handler<
+  { detail: { sourceCell: Cell<unknown> } },
+  { notes: Cell<NoteCharm[]>; notebooks: Cell<NotebookCharm[]> }
+>((event, { notes, notebooks }) => {
+  const sourceCell = event.detail.sourceCell;
+  const sourceTitle = (sourceCell as any).key("title").get();
+
+  const notesList = notes.get();
+
+  // Prevent duplicates
+  const alreadyExists = notesList.some((n) =>
+    Cell.equals(sourceCell, n as any)
+  );
+  if (alreadyExists) return;
+
+  // Remove from ALL other notebooks' notes arrays (move semantics)
+  const notebooksList = notebooks.get();
+  for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
+    const nbCell = notebooks.key(nbIdx);
+    const nbNotesCell = nbCell.key("notes");
+    const nbNotes = (nbNotesCell.get() as unknown[]) ?? [];
+
+    // Find and remove by title or Cell.equals
+    const filtered = nbNotes.filter((n: any) => {
+      if (n?.title === sourceTitle) return false;
+      if (Cell.equals(sourceCell, n as any)) return false;
+      return true;
+    });
+    if (filtered.length !== nbNotes.length) {
+      nbNotesCell.set(filtered as NoteCharm[]);
+    }
+  }
+
+  // Hide from default-app charm list
+  sourceCell.key("isHidden").set(true);
+
+  // Add to this notebook
+  notes.push(sourceCell as any);
+});
+
+// Handler for dropping any item onto a notebook - moves from current notebook to target
+const handleDropOntoNotebook = handler<
+  { detail: { sourceCell: Cell<unknown> } },
+  {
+    targetNotebook: Cell<{ notes?: unknown[]; isNotebook?: boolean }>;
+    currentNotes: Cell<NoteCharm[]>;
+  }
+>((event, { targetNotebook, currentNotes }) => {
+  const sourceCell = event.detail.sourceCell;
+
+  // Check if target is actually a notebook
+  const isTargetNotebook = targetNotebook.key("isNotebook").get();
+  if (!isTargetNotebook) return;
+
+  const targetNotesCell = targetNotebook.key("notes");
+  const targetNotesList = (targetNotesCell.get() as unknown[]) ?? [];
+
+  // Prevent duplicates in target
+  const alreadyInTarget = targetNotesList.some((n) =>
+    Cell.equals(sourceCell, n as any)
+  );
+  if (alreadyInTarget) return;
+
+  // Remove from current notebook if present
+  const currentList = currentNotes.get();
+  const indexInCurrent = currentList.findIndex((n: any) =>
+    Cell.equals(sourceCell, n)
+  );
+  if (indexInCurrent !== -1) {
+    const copy = [...currentList];
+    copy.splice(indexInCurrent, 1);
+    currentNotes.set(copy);
+  }
+
+  // Hide from default-app charm list
+  sourceCell.key("isHidden").set(true);
+
+  // Add to target notebook
+  targetNotesCell.push(sourceCell);
 });
 
 // Toggle dropdown menu
@@ -378,6 +474,20 @@ const menuAllNotebooks = handler<
   // Can't create NotesImportExport here due to circular imports
   // User should create it from default-app first
 });
+
+// Simple button handler: Go to All Notes (no menu state)
+const goToAllNotes = handler<void, { allCharms: Cell<NoteCharm[]> }>(
+  (_, { allCharms }) => {
+    const charms = allCharms.get();
+    const existing = charms.find((charm: any) => {
+      const name = charm?.[NAME];
+      return typeof name === "string" && name.startsWith("All Notes");
+    });
+    if (existing) {
+      return navigateTo(existing);
+    }
+  },
+);
 
 // Handler for clicking on a backlink
 const handleBacklinkClick = handler<void, { charm: Cell<MentionableCharm> }>(
@@ -922,6 +1032,7 @@ const Notebook = pattern<Input, Output>(
     // State for "New Nested Notebook" prompt modal (from dropdown menu)
     const showNewNestedNotebookPrompt = Cell.of<boolean>(false);
     const newNestedNotebookTitle = Cell.of<string>("");
+
     const usedCreateAnotherNotebook = Cell.of<boolean>(false); // Track if "Create Another" was used
 
     // Backlinks - populated by backlinks-index.tsx
@@ -1055,95 +1166,6 @@ const Notebook = pattern<Input, Output>(
       isHidden,
       [UI]: (
         <ct-screen>
-          {/* Backdrop to close menu when clicking outside */}
-          <div
-            onClick={closeMenu({ menuOpen })}
-            style={{
-              display: computed(() => (menuOpen.get() ? "block" : "none")),
-              position: "fixed",
-              inset: "0",
-              zIndex: "999",
-            }}
-          />
-
-          {/* Dropdown Menu - fixed position so it floats over content */}
-          <ct-vstack
-            gap="0"
-            style={{
-              display: computed(() => (menuOpen.get() ? "flex" : "none")),
-              position: "fixed",
-              top: "112px",
-              right: "16px",
-              background: "var(--ct-color-bg, white)",
-              border: "1px solid var(--ct-color-border, #e5e5e7)",
-              borderRadius: "12px",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-              minWidth: "180px",
-              zIndex: "1000",
-              padding: "4px",
-            }}
-          >
-            <ct-button
-              variant="ghost"
-              onClick={menuNewNote({ menuOpen, notes, allCharms })}
-              style={{ justifyContent: "flex-start" }}
-            >
-              {"\u00A0\u00A0"}📝 New Note
-            </ct-button>
-            <ct-button
-              variant="ghost"
-              onClick={menuNewNotebook({
-                menuOpen,
-                showNewNestedNotebookPrompt,
-              })}
-              style={{ justifyContent: "flex-start" }}
-            >
-              {"\u00A0\u00A0"}📓 New Notebook
-            </ct-button>
-
-            {/* Divider */}
-            <div
-              style={{
-                height: "1px",
-                background: "var(--ct-color-border, #e5e5e7)",
-                margin: "4px 8px",
-              }}
-            />
-
-            {/* List of notebooks */}
-            {notebooks.map((notebook) => (
-              <ct-button
-                variant="ghost"
-                onClick={menuGoToNotebook({ menuOpen, notebook })}
-                style={{ justifyContent: "flex-start" }}
-              >
-                {"\u00A0\u00A0"}
-                {notebook?.[NAME] ?? "Untitled"}
-              </ct-button>
-            ))}
-
-            {/* Divider + All Notes - only show if All Notes charm exists */}
-            <div
-              style={{
-                display: computed(() => allNotesCharm ? "block" : "none"),
-                height: "1px",
-                background: "var(--ct-color-border, #e5e5e7)",
-                margin: "4px 8px",
-              }}
-            />
-
-            <ct-button
-              variant="ghost"
-              onClick={menuAllNotebooks({ menuOpen, allCharms })}
-              style={{
-                display: computed(() => allNotesCharm ? "flex" : "none"),
-                justifyContent: "flex-start",
-              }}
-            >
-              {"\u00A0\u00A0"}📁 All Notes
-            </ct-button>
-          </ct-vstack>
-
           <div
             style={{
               flex: 1,
@@ -1173,8 +1195,8 @@ const Notebook = pattern<Input, Output>(
                 >
                   <span>⬆️</span>
                   <ct-drop-zone
-                    accept="note"
-                    onct-drop={handleDropOntoOtherNotebook({
+                    accept="note,notebook"
+                    onct-drop={handleDropOntoNotebook({
                       targetNotebook: parentNotebooks[0] as any,
                       currentNotes: notes,
                     })}
@@ -1195,50 +1217,59 @@ const Notebook = pattern<Input, Output>(
 
                 <ct-button
                   variant="ghost"
-                  onClick={toggleMenu({ menuOpen })}
+                  onClick={goToAllNotes({ allCharms })}
                   style={{
                     padding: "8px 16px",
                     fontSize: "16px",
                     borderRadius: "8px",
+                    display: computed(() => allNotesCharm ? "flex" : "none"),
                   }}
                 >
-                  Notebooks {"\u25BE"}
+                  📁 All Notes
                 </ct-button>
               </div>
 
               <ct-card>
                 <ct-vstack gap="4">
-                  {/* Header */}
-                  <div
-                    style={{
-                      display: "flex",
-                      width: "100%",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                    }}
+                  {/* Header - also a drop zone for receiving items from "Other notebooks" */}
+                  <ct-drop-zone
+                    accept="sibling"
+                    onct-drop={handleDropOntoCurrentNotebook({ notes, notebooks })}
+                    style={{ width: "100%" }}
                   >
-                    {/* Editable Title */}
                     <div
                       style={{
-                        display: computed(() =>
-                          isEditingTitle.get() ? "none" : "flex"
-                        ),
+                        display: "flex",
+                        width: "100%",
                         alignItems: "center",
-                        gap: "8px",
-                        cursor: "pointer",
+                        justifyContent: "space-between",
+                        padding: "8px",
+                        borderRadius: "8px",
+                        background: "var(--ct-color-bg-primary, #fff)",
                       }}
-                      onClick={startEditingTitle({ isEditingTitle })}
                     >
-                      <span
+                      {/* Editable Title */}
+                      <div
                         style={{
-                          margin: 0,
-                          fontSize: "15px",
-                          fontWeight: "600",
+                          display: computed(() =>
+                            isEditingTitle.get() ? "none" : "flex"
+                          ),
+                          alignItems: "center",
+                          gap: "8px",
+                          cursor: "pointer",
                         }}
+                        onClick={startEditingTitle({ isEditingTitle })}
                       >
-                        📓 {title} ({noteCount})
-                      </span>
-                    </div>
+                        <span
+                          style={{
+                            margin: 0,
+                            fontSize: "15px",
+                            fontWeight: "600",
+                          }}
+                        >
+                          📓 {title} ({noteCount})
+                        </span>
+                      </div>
                     <div
                       style={{
                         display: computed(() =>
@@ -1256,24 +1287,52 @@ const Notebook = pattern<Input, Output>(
                         onct-keydown={handleTitleKeydown({ isEditingTitle })}
                       />
                     </div>
-                    <ct-button
-                      size="sm"
-                      variant="ghost"
-                      title="New Note"
-                      onClick={showNewNoteModal({ showNewNotePrompt })}
+                    <div
                       style={{
-                        padding: "6px 12px",
                         display: "flex",
                         alignItems: "center",
-                        gap: "4px",
+                        gap: "8px",
                       }}
                     >
-                      <span style={{ fontSize: "14px" }}>📝</span>
-                      <span style={{ fontSize: "13px", fontWeight: "500" }}>
-                        New
-                      </span>
-                    </ct-button>
+                      <ct-button
+                        size="sm"
+                        variant="ghost"
+                        title="New Note"
+                        onClick={showNewNoteModal({ showNewNotePrompt })}
+                        style={{
+                          padding: "6px 12px",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                      >
+                        <span style={{ fontSize: "14px" }}>📝</span>
+                        <span style={{ fontSize: "13px", fontWeight: "500" }}>
+                          New
+                        </span>
+                      </ct-button>
+                      <ct-button
+                        size="sm"
+                        variant="ghost"
+                        title="New Notebook"
+                        onClick={showNewNotebookModal({
+                          showNewNestedNotebookPrompt,
+                        })}
+                        style={{
+                          padding: "6px 12px",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                      >
+                        <span style={{ fontSize: "14px" }}>📓</span>
+                        <span style={{ fontSize: "13px", fontWeight: "500" }}>
+                          New
+                        </span>
+                      </ct-button>
+                    </div>
                   </div>
+                </ct-drop-zone>
 
                   <ct-vstack
                     gap="0"
@@ -1352,8 +1411,8 @@ const Notebook = pattern<Input, Output>(
                               <td style={{ verticalAlign: "middle" }}>
                                 {/* Wrap all items in drop zone - handler checks if target is a notebook */}
                                 <ct-drop-zone
-                                  accept="note"
-                                  onct-drop={handleDropOntoOtherNotebook({
+                                  accept="note,notebook"
+                                  onct-drop={handleDropOntoNotebook({
                                     targetNotebook: note as any,
                                     currentNotes: notes,
                                   })}
@@ -1508,17 +1567,35 @@ const Notebook = pattern<Input, Output>(
                 </span>
                 <ct-vstack gap="1">
                   {siblingNotebooks.map((notebook) => (
-                    <ct-drop-zone
-                      accept="note"
-                      onct-drop={handleDropOntoOtherNotebook({
-                        targetNotebook: notebook as any,
-                        currentNotes: notes,
-                      })}
+                    <ct-hstack
+                      gap="1"
+                      style={{ alignItems: "center" }}
                     >
-                      <ct-cell-context $cell={notebook}>
-                        <ct-cell-link $cell={notebook} />
-                      </ct-cell-context>
-                    </ct-drop-zone>
+                      {/* Sibling notebooks use "sibling" type - can only drop on main card */}
+                      <ct-drag-source $cell={notebook} type="sibling">
+                        <span
+                          style={{
+                            cursor: "grab",
+                            padding: "4px",
+                            opacity: 0.5,
+                          }}
+                        >
+                          ⠿
+                        </span>
+                      </ct-drag-source>
+                      {/* Drop zone receives items from notes list above */}
+                      <ct-drop-zone
+                        accept="note,notebook"
+                        onct-drop={handleDropOntoNotebook({
+                          targetNotebook: notebook as any,
+                          currentNotes: notes,
+                        })}
+                      >
+                        <ct-cell-context $cell={notebook}>
+                          <ct-cell-link $cell={notebook} />
+                        </ct-cell-context>
+                      </ct-drop-zone>
+                    </ct-hstack>
                   ))}
                 </ct-vstack>
               </ct-vstack>
@@ -1732,6 +1809,7 @@ const Notebook = pattern<Input, Output>(
               </ct-button>
             ))}
           </ct-hstack>
+
         </ct-screen>
       ),
       title,
