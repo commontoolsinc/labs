@@ -948,11 +948,15 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       : undefined;
 
     // Create a child link with extended path
+    // When we have a childSchema, we need to preserve the rootSchema that contains $defs
+    // for resolving $ref references. If rootSchema wasn't set, fall back to the parent schema.
     const childLink: NormalizedLink = {
       ...this._link,
       path: [...this._link.path, valueKey.toString()] as string[],
       schema: childSchema,
-      rootSchema: childSchema ? this._link.rootSchema : undefined,
+      rootSchema: childSchema
+        ? (this._link.rootSchema ?? this._link.schema)
+        : undefined,
     };
 
     return new CellImpl(

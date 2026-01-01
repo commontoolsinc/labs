@@ -106,7 +106,7 @@ function processItem(item: AutocompleteItem): ProcessedItem {
  * @attr {boolean} multiple - Enable multi-select mode (default: false)
  * @attr {boolean} disabled - Whether the component is disabled
  *
- * @prop {AutocompleteItem[]} items - Items to choose from
+ * @prop {AutocompleteItem[]|Cell<AutocompleteItem[]>} items - Items to choose from (supports Cell binding for reactive updates)
  * @prop {Cell<string>|Cell<string[]>|string|string[]} value - Selected value(s) - supports Cell binding
  *
  * @fires ct-change - Fired when value changes: { value, oldValue }
@@ -332,7 +332,7 @@ export class CTAutocomplete extends BaseElement {
     };
 
     // Public properties
-    declare items: AutocompleteItem[];
+    declare items: AutocompleteItem[] | Cell<AutocompleteItem[]>;
     declare value:
       | Cell<string>
       | Cell<string[]>
@@ -353,6 +353,14 @@ export class CTAutocomplete extends BaseElement {
         this.emit("ct-change", { value: newValue, oldValue });
       },
     });
+
+    // Cell controller for items binding - allows reactive items from lift()
+    private _itemsCellController = createCellController<AutocompleteItem[]>(
+      this,
+      {
+        timing: { strategy: "immediate" },
+      },
+    );
 
     // Internal state
     @state()
@@ -447,9 +455,12 @@ export class CTAutocomplete extends BaseElement {
       this._input = this.shadowRoot?.querySelector("input") || null;
       this._dropdown = this.shadowRoot?.querySelector(".dropdown") || null;
 
-      // Initialize cell controller binding
+      // Initialize cell controller bindings
       this._cellController.bind(
         this.value as Cell<string | string[]> | string | string[],
+      );
+      this._itemsCellController.bind(
+        this.items as Cell<AutocompleteItem[]> | AutocompleteItem[],
       );
 
       applyThemeToElement(this, this.theme ?? defaultTheme);
@@ -465,10 +476,17 @@ export class CTAutocomplete extends BaseElement {
         );
       }
 
-      // Rebuild search index when items change
+      // If the items property changed (e.g., switched to a different cell or array)
       if (changedProperties.has("items")) {
-        this._processedItems = (this.items || []).map(processItem);
+        this._itemsCellController.bind(
+          this.items as Cell<AutocompleteItem[]> | AutocompleteItem[],
+        );
       }
+
+      // Rebuild search index when items change (using resolved value from cell controller)
+      // Always rebuild since the cell controller may have received an update
+      const resolvedItems = this._itemsCellController.getValue() || [];
+      this._processedItems = resolvedItems.map(processItem);
 
       // Recompute filtered items only when dependencies change
       this._updateFilteredItemsCache();
@@ -563,8 +581,8 @@ export class CTAutocomplete extends BaseElement {
       const queryLower = this._query.toLowerCase();
       const queryTrimmed = this._query.trim();
 
-      const matchesExistingItem = (this.items || []).some(
-        (item) =>
+      const matchesExistingItem = this._resolvedItems.some(
+        (item: AutocompleteItem) =>
           item.value.toLowerCase() === queryLower ||
           (item.label || "").toLowerCase() === queryLower,
       );
@@ -600,9 +618,14 @@ export class CTAutocomplete extends BaseElement {
       return this._cellController.getValue();
     }
 
+    // Helper to get resolved items (either from Cell or direct array)
+    private get _resolvedItems(): readonly AutocompleteItem[] {
+      return this._itemsCellController.getValue() || [];
+    }
+
     // Helper to get display label for a value
     private _getLabelForValue(value: string): string {
-      const item = (this.items || []).find((i) => i.value === value);
+      const item = this._resolvedItems.find((i) => i.value === value);
       return item?.label || value;
     }
 
