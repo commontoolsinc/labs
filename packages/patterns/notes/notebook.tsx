@@ -189,62 +189,6 @@ const _handleCharmDrop = handler<
   notes.push(sourceCell as unknown as NoteCharm);
 });
 
-// Handler for dropping a charm onto another notebook (from within notebook view)
-// Only accepts drops onto notebooks (items with isNotebook: true)
-const handleDropOntoOtherNotebook = handler<
-  { detail: { sourceCell: Cell<unknown> } },
-  {
-    targetNotebook: Cell<{ notes?: unknown[]; isNotebook?: boolean }>;
-    currentNotes: Cell<NoteCharm[]>;
-  }
->((event, { targetNotebook, currentNotes }) => {
-  const sourceCell = event.detail.sourceCell;
-  console.log("Drop handler triggered, sourceCell:", sourceCell);
-
-  // Check if target is actually a notebook using the isNotebook marker
-  const isNotebook = targetNotebook.key("isNotebook").get();
-  console.log("Drop handler - isNotebook:", isNotebook);
-
-  if (!isNotebook) {
-    console.log("Drop rejected - target is not a notebook");
-    return;
-  }
-  console.log("Drop accepted onto notebook");
-
-  const targetNotesCell = targetNotebook.key("notes");
-  const targetNotesList = (targetNotesCell.get() as unknown[]) ?? [];
-
-  // Prevent duplicates
-  const alreadyExists = targetNotesList.some((n) =>
-    Cell.equals(sourceCell, n as any)
-  );
-  if (alreadyExists) {
-    console.log("Drop rejected - already exists in target");
-    return;
-  }
-
-  // Try to remove from current notebook (only works if item is in currentNotes)
-  const currentList = currentNotes.get();
-  const removeIndex = currentList.findIndex((n: any) =>
-    Cell.equals(sourceCell, n)
-  );
-  if (removeIndex !== -1) {
-    const copy = [...currentList];
-    copy.splice(removeIndex, 1);
-    currentNotes.set(copy);
-    console.log("Removed from current notebook");
-  } else {
-    console.log("Item not in current notebook (possibly a sibling)");
-  }
-
-  // Hide the dropped item from the default-app charm list
-  sourceCell.key("isHidden").set(true);
-
-  // Add to target notebook - push cell reference to maintain charm identity
-  targetNotesCell.push(sourceCell);
-  console.log("Drop complete - item added to target notebook and hidden");
-});
-
 // Handler for dropping items onto the current notebook's card
 // This MOVES the dropped notebook - removes from all other notebooks, adds here
 const handleDropOntoCurrentNotebook = handler<
@@ -328,45 +272,6 @@ const handleDropOntoNotebook = handler<
   targetNotesCell.push(sourceCell);
 });
 
-// Toggle dropdown menu
-const toggleMenu = handler<void, { menuOpen: Cell<boolean> }>(
-  (_, { menuOpen }) => menuOpen.set(!menuOpen.get()),
-);
-
-// Close dropdown menu
-const closeMenu = handler<void, { menuOpen: Cell<boolean> }>(
-  (_, { menuOpen }) => menuOpen.set(false),
-);
-
-// Menu: New Note (adds to this notebook)
-const menuNewNote = handler<
-  void,
-  {
-    menuOpen: Cell<boolean>;
-    notes: Cell<NoteCharm[]>;
-    allCharms: Cell<NoteCharm[]>;
-  }
->((_, { menuOpen, notes, allCharms }) => {
-  menuOpen.set(false);
-  const newNote = Note({
-    title: "New Note",
-    content: "",
-    isHidden: true,
-    noteId: generateId(),
-  });
-  allCharms.push(newNote as unknown as NoteCharm);
-  notes.push(newNote as unknown as NoteCharm);
-});
-
-// Menu: New Notebook - shows modal instead of creating directly
-const menuNewNotebook = handler<
-  void,
-  { menuOpen: Cell<boolean>; showNewNestedNotebookPrompt: Cell<boolean> }
->((_, { menuOpen, showNewNestedNotebookPrompt }) => {
-  menuOpen.set(false);
-  showNewNestedNotebookPrompt.set(true);
-});
-
 // Create nested notebook and navigate to it (unless "Create Another" was used)
 const createNestedNotebookAndOpen = handler<
   void,
@@ -448,33 +353,6 @@ const cancelNewNestedNotebookPrompt = handler<
   showNewNestedNotebookPrompt.set(false);
   newNestedNotebookTitle.set("");
   usedCreateAnotherNotebook.set(false);
-});
-
-// Menu: Navigate to a notebook
-const menuGoToNotebook = handler<
-  void,
-  { menuOpen: Cell<boolean>; notebook: Cell<MinimalCharm> }
->((_, { menuOpen, notebook }) => {
-  menuOpen.set(false);
-  return navigateTo(notebook);
-});
-
-// Menu: All Notes (find existing only - can't create due to circular imports)
-const menuAllNotebooks = handler<
-  void,
-  { menuOpen: Cell<boolean>; allCharms: Cell<NoteCharm[]> }
->((_, { menuOpen, allCharms }) => {
-  menuOpen.set(false);
-  const charms = allCharms.get();
-  const existing = charms.find((charm: any) => {
-    const name = charm?.[NAME];
-    return typeof name === "string" && name.startsWith("All Notes");
-  });
-  if (existing) {
-    return navigateTo(existing);
-  }
-  // Can't create NotesImportExport here due to circular imports
-  // User should create it from default-app first
 });
 
 // Simple button handler: Go to All Notes (no menu state)
@@ -999,9 +877,6 @@ const handleCreateNotebook = handler<
 const Notebook = pattern<Input, Output>(
   ({ title, notes, isNotebook, isHidden }) => {
     const { allCharms } = wish<{ allCharms: NoteCharm[] }>("/");
-
-    // Dropdown menu state
-    const menuOpen = Cell.of(false);
 
     // Use lift() for proper reactive tracking of notes.length
     const noteCount = lift((args: { n: NoteCharm[] }) => args.n.length)({
