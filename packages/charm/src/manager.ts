@@ -338,76 +338,37 @@ export class CharmManager {
     runIt: boolean = false,
     asSchema?: JSONSchema,
   ): Promise<Cell<T>> {
-    // Load the charm from storage.
-    let charm: Cell<unknown>;
-
-    if (isCell(id)) charm = id;
-    else charm = this.runtime.getCellFromEntityId(this.space, { "/": id });
-
-    await charm.sync();
-
-    const recipeId = getRecipeIdFromCharm(charm);
-    if (!recipeId) throw new Error("recipeId is required");
-
-    // Make sure we have the recipe so we can run it!
-    let recipe: Recipe | Module | undefined;
-    try {
-      recipe = await this.runtime.recipeManager.loadRecipe(
-        recipeId,
-        this.space,
-      );
-    } catch (e) {
-      console.warn("loadRecipe: error", e);
-      console.warn("recipeId", recipeId);
-      console.warn("recipe", recipe);
-      console.warn("charm", charm.get());
-      console.warn(
-        `Not a charm (check toolshed?): ${JSON.stringify(getEntityId(charm))}`,
-      );
-      throw e;
-    }
-
-    const resultSchema = this.#getResultSchema(charm, recipe);
+    // Get the charm cell
+    const charm: Cell<unknown> = isCell(id)
+      ? id
+      : this.runtime.getCellFromEntityId(this.space, { "/": id });
 
     if (runIt) {
-      // Make sure the charm is running. This is re-entrant and has no effect if
-      // the charm is already running.
-      if (!recipe) {
-        throw new Error(`Recipe not found for charm ${getEntityId(charm)}`);
-      }
-      const newCharm = await this.runtime.runSynced(charm, recipe);
-      return newCharm.asSchema(asSchema ?? resultSchema);
+      // start() handles sync, recipe loading, and running
+      // It's idempotent - no effect if already running
+      await this.runtime.start(charm);
     } else {
-      return charm.asSchema<T>(asSchema ?? resultSchema);
+      // Just sync the cell if not running
+      await charm.sync();
     }
-  }
 
-  #getResultSchema(
-    charm: Cell<unknown>,
-    recipe: Recipe,
-  ): JSONSchema | undefined {
-    if (
-      isRecord(recipe.resultSchema) &&
-      Object.keys(recipe.resultSchema).length > 0
-    ) return recipe.resultSchema;
+    // If caller provided a schema, use it
+    if (asSchema) {
+      return charm.asSchema<T>(asSchema);
+    }
 
-    // Ignore default cell schema to get to other values
-    const resultValue = charm.asSchema().get();
-    if (isObject(resultValue)) {
-      const keys = Object.keys(resultValue).filter((key) =>
-        !key.startsWith("$")
-      );
-
-      // Only generate a schema for charms that have more than $ props
-      if (keys.length > 0) {
-        return {
-          type: "object",
-          properties: Object.fromEntries(keys.map((key) => [key, true])),
-        };
+    // Otherwise, get result cell with schema from processCell.resultRef
+    // The resultRef was created with includeSchema: true during setup
+    const processCell = charm.getSourceCell();
+    if (processCell) {
+      const resultWithSchema = processCell.key("resultRef").resolveAsCell();
+      if (resultWithSchema) {
+        return resultWithSchema as Cell<T>;
       }
     }
 
-    return undefined;
+    // Fallback: return charm without schema
+    return charm as Cell<T>;
   }
 
   getLineage(charm: Cell<unknown>) {
@@ -838,13 +799,16 @@ export class CharmManager {
   getResult<T = unknown>(
     charm: Cell<T>,
   ): Cell<T> {
-    const source = charm.getSourceCell(processSchema);
-    const recipeId = source?.get()?.[TYPE]!;
-    if (!recipeId) throw new Error("charm missing recipe ID");
-    const recipe = this.runtime.recipeManager.recipeById(recipeId);
-    if (!recipe) throw new Error(`Recipe ${recipeId} not loaded`);
-    const resultSchema = this.#getResultSchema(charm, recipe);
-    return charm.asSchema<T>(resultSchema);
+    // Get result cell with schema from processCell.resultRef
+    const processCell = charm.getSourceCell();
+    if (processCell) {
+      const resultWithSchema = processCell.key("resultRef").resolveAsCell();
+      if (resultWithSchema) {
+        return resultWithSchema as Cell<T>;
+      }
+    }
+    // Fallback: return charm without schema
+    return charm;
   }
 
   // note: removing a charm doesn't clean up the charm's cells
