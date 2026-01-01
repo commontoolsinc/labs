@@ -1,5 +1,6 @@
 import { getLogger } from "@commontools/utils/logger";
 import type {
+  ChangeGroup,
   CommitError,
   IAttestation,
   IMemorySpaceAddress,
@@ -67,6 +68,8 @@ export type State =
  * for reads and writes across memory spaces.
  */
 class StorageTransaction implements IStorageTransaction {
+  changeGroup?: ChangeGroup;
+
   static mutate(transaction: StorageTransaction, state: State) {
     transaction.#state = state;
   }

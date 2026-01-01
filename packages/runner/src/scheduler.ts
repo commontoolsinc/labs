@@ -20,6 +20,7 @@ import {
   type NormalizedFullLink,
 } from "./link-utils.ts";
 import type {
+  ChangeGroup,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   IStorageSubscription,
@@ -155,6 +156,7 @@ export class Scheduler {
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel>();
   private triggers = new Map<SpaceAndURI, Map<Action, SortedAndCompactPaths>>();
+  private actionChangeGroups = new WeakMap<Action, ChangeGroup>();
   private retries = new WeakMap<Action, number>();
 
   // Effect/computation tracking for pull-based scheduling
@@ -358,6 +360,22 @@ export class Scheduler {
     return actionIsEffect;
   }
 
+  private updateChangeGroup(
+    action: Action,
+    options: { changeGroup?: ChangeGroup },
+  ): void {
+    if (
+      !Object.prototype.hasOwnProperty.call(options, "changeGroup")
+    ) {
+      return;
+    }
+    if (options.changeGroup === undefined) {
+      this.actionChangeGroups.delete(action);
+    } else {
+      this.actionChangeGroups.set(action, options.changeGroup);
+    }
+  }
+
   private registerParentChild(
     action: Action,
     options: { allowExisting?: boolean } = {},
@@ -399,6 +417,7 @@ export class Scheduler {
       debounce?: number;
       noDebounce?: boolean;
       throttle?: number;
+      changeGroup?: ChangeGroup;
     } = {},
   ): Cancel {
     // Handle backwards-compatible ReactivityLog argument
@@ -422,6 +441,8 @@ export class Scheduler {
       noDebounce,
       throttle,
     } = options;
+
+    this.updateChangeGroup(action, options);
 
     // Apply debounce settings if provided
     if (debounce !== undefined) {
@@ -505,9 +526,11 @@ export class Scheduler {
   resubscribe(
     action: Action,
     log: ReactivityLog,
-    options: { isEffect?: boolean } = {},
+    options: { isEffect?: boolean; changeGroup?: ChangeGroup } = {},
   ): void {
     const { isEffect } = options;
+
+    this.updateChangeGroup(action, options);
 
     const reads = this.setDependencies(action, log);
 
@@ -601,6 +624,7 @@ export class Scheduler {
     this.cancels.get(action)?.();
     this.cancels.delete(action);
     this.dependencies.delete(action);
+    this.actionChangeGroups.delete(action);
     this.pending.delete(action);
     const dependencies = this.reverseDependencies.get(action);
     if (dependencies) {
@@ -861,6 +885,12 @@ export class Scheduler {
         ]);
 
         if ("changes" in notification) {
+          const sourceChangeGroup = notification.type === "commit"
+            ? notification.source?.changeGroup
+            : undefined;
+          const hasSourceChangeGroup = notification.type === "commit" &&
+            sourceChangeGroup !== undefined;
+
           let changeIndex = 0;
           for (const change of notification.changes) {
             changeIndex++;
@@ -902,6 +932,19 @@ export class Scheduler {
               ]);
 
               for (const action of triggeredActions) {
+                const actionChangeGroup = this.actionChangeGroups.get(action);
+                if (
+                  hasSourceChangeGroup &&
+                  actionChangeGroup !== undefined &&
+                  Object.is(actionChangeGroup, sourceChangeGroup)
+                ) {
+                  logger.debug("schedule-change-skip-group", () => [
+                    `Change #${changeIndex} skipped action change group`,
+                    `Action: ${this.getActionId(action)}`,
+                  ]);
+                  continue;
+                }
+
                 logger.debug("schedule-trigger", () => [
                   `Action for ${spaceAndURI}/${change.address.path.join("/")}`,
                   `Action: ${this.getActionId(action)}`,

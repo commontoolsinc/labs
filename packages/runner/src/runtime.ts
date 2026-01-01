@@ -16,6 +16,7 @@ import type {
 import { ContextualFlowControl } from "./cfc.ts";
 import { RecipeEnvironment, setRecipeEnvironment } from "./builder/env.ts";
 import type {
+  ChangeGroup,
   CommitError,
   DID,
   IExtendedStorageTransaction,
@@ -275,8 +276,14 @@ export class Runtime {
    * locally replicated memory spaces. Transaction allows reading from many
    * multiple spaces but writing only to one space.
    */
-  edit(): IExtendedStorageTransaction {
-    return new ExtendedStorageTransaction(this.storageManager.edit());
+  edit(
+    options: { changeGroup?: ChangeGroup } = {},
+  ): IExtendedStorageTransaction {
+    const tx = this.storageManager.edit();
+    if (options.changeGroup !== undefined) {
+      tx.changeGroup = options.changeGroup;
+    }
+    return new ExtendedStorageTransaction(tx);
   }
 
   /**
