@@ -381,20 +381,26 @@ export class Runner {
     // Check again after potential sync
     if (this.cancels.has(key)) return Promise.resolve(true);
 
-    const processCell = resultCell.getSourceCell();
-    if (!processCell) {
-      return Promise.reject(
-        new Error("Cannot start: process cell missing. Did you call setup()?"),
-      );
+    // Subpath cells (created via .key()) have nothing to start - the parent
+    // charm is responsible for running. Just return success.
+    const link = resultCell.getAsNormalizedFullLink();
+    if (link.path.length > 0) {
+      return Promise.resolve(true);
     }
 
+    // No process cell means this is just data, not a charm. Nothing to start.
+    const processCell = resultCell.getSourceCell();
+    if (!processCell) {
+      return Promise.resolve(true);
+    }
+
+    // No recipe ID means the process cell exists but has no recipe to run.
+    // This could be a detached cell or partially constructed charm.
     const recipeId = processCell.key(TYPE).getRaw({
       meta: ignoreReadForScheduling,
     });
     if (!recipeId) {
-      return Promise.reject(
-        new Error("Cannot start: recipe id missing in process cell."),
-      );
+      return Promise.resolve(true);
     }
 
     // Try sync lookup first

@@ -2,7 +2,6 @@ import { css, html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { render } from "@commontools/html";
 import type { Cell } from "@commontools/runner";
-import { getRecipeIdFromCharm } from "@commontools/charm";
 import { type VNode } from "@commontools/runner";
 import "../ct-loader/ct-loader.ts";
 
@@ -218,34 +217,6 @@ export class CTRender extends BaseElement {
     });
   }
 
-  private async _loadAndRenderRecipe(
-    recipeId: string,
-    retry: boolean = true,
-  ) {
-    try {
-      this._log("loading recipe:", recipeId);
-
-      // Load and run the recipe
-      const recipe = await this.cell.runtime.recipeManager.loadRecipe(
-        recipeId,
-        this.cell.space,
-      );
-      await this.cell.runtime.runSynced(this.cell, recipe);
-
-      await this._renderUiFromCell(this.cell);
-    } catch (error) {
-      if (retry) {
-        console.warn("Failed to load recipe, retrying...");
-        // First failure, sync and retry once
-        await this.cell.sync();
-        await this._loadAndRenderRecipe(recipeId, false);
-      } else {
-        // Second failure, give up
-        throw error;
-      }
-    }
-  }
-
   private async _renderUiFromCell(cell: Cell<unknown>) {
     if (!this._renderContainer) {
       throw new Error("Render container not found");
@@ -360,18 +331,11 @@ export class CTRender extends BaseElement {
       // Clean up any previous render
       this._cleanupPreviousRender();
 
-      if (isSubPath) {
-        this._log("cell is a subpath, rendering directly");
-        await this._renderUiFromCell(this.cell);
-      } else {
-        const recipeId = getRecipeIdFromCharm(this.cell);
-        if (recipeId) {
-          await this._loadAndRenderRecipe(recipeId);
-        } else {
-          this._log("no recipe id found, rendering cell directly");
-          await this._renderUiFromCell(this.cell);
-        }
-      }
+      // start() handles all cases: syncs if needed, loads recipe, runs nodes.
+      // For subpaths or cells without recipes, it's a no-op.
+      await this.cell.runtime.start(this.cell);
+
+      await this._renderUiFromCell(this.cell);
 
       // Mark as rendered and trigger re-render to hide spinner
       this._hasRendered = true;
