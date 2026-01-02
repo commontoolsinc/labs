@@ -1579,13 +1579,26 @@ const deleteSelectedNotes = handler<
   const allCharmsList = allCharms.get();
   const notebooksList = notebooks.get();
 
-  // Collect noteIds to delete
+  // Collect noteIds and titles to delete (titles for notebooks which don't have noteId)
   const noteIdsToDelete: string[] = [];
+  const titlesToDelete: string[] = [];
   for (const idx of selected) {
-    const note = notesList[idx];
-    const noteId = (note as any)?.noteId;
-    if (noteId) noteIdsToDelete.push(noteId);
+    const item = notesList[idx];
+    const noteId = (item as any)?.noteId;
+    const title = (item as any)?.title;
+    if (noteId) {
+      noteIdsToDelete.push(noteId);
+    } else if (title) {
+      titlesToDelete.push(title);
+    }
   }
+
+  // Helper to check if item should be deleted
+  const shouldDelete = (n: any) => {
+    if (n?.noteId && noteIdsToDelete.includes(n.noteId)) return true;
+    if (n?.title && titlesToDelete.includes(n.title)) return true;
+    return false;
+  };
 
   // Remove from all notebooks first
   for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
@@ -1593,19 +1606,14 @@ const deleteSelectedNotes = handler<
     const nbNotesCell = nbCell.key("notes");
     const nbNotes = nbNotesCell.get() ?? [];
 
-    const filtered = nbNotes.filter((n: any) =>
-      !noteIdsToDelete.includes(n?.noteId)
-    );
+    const filtered = nbNotes.filter((n: any) => !shouldDelete(n));
     if (filtered.length !== nbNotes.length) {
       nbNotesCell.set(filtered);
     }
   }
 
   // Remove from allCharms (permanent delete)
-  const filteredCharms = allCharmsList.filter((charm: any) => {
-    const noteId = charm?.noteId;
-    return !noteId || !noteIdsToDelete.includes(noteId);
-  });
+  const filteredCharms = allCharmsList.filter((charm: any) => !shouldDelete(charm));
   allCharms.set(filteredCharms);
 
   selectedIndices.set([]);
@@ -1655,33 +1663,52 @@ const moveToNotebook = handler<
   const targetNotebookCell = notebooks.key(nbIndex);
   const targetNotebookNotes = targetNotebookCell.key("notes");
 
+  // Collect items, noteIds and titles for removal
+  const selectedNoteIds: string[] = [];
+  const selectedTitles: string[] = []; // For notebooks (no noteId)
+  const itemsToMove: NoteCharm[] = [];
+
   for (const idx of selected) {
-    const note = notesList[idx];
-    if (!note) continue;
+    const item = notesList[idx];
+    if (!item) continue;
 
-    const noteId = (note as any)?.noteId;
-
-    // Remove from all current notebooks (by noteId)
+    const noteId = (item as any)?.noteId;
+    const title = (item as any)?.title;
     if (noteId) {
-      for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
-        const nbCell = notebooks.key(nbIdx);
-        const nbNotesCell = nbCell.key("notes");
-        const nbNotes = nbNotesCell.get() ?? [];
-
-        // Find and remove this note by noteId
-        const noteIndex = nbNotes.findIndex((n: any) => n?.noteId === noteId);
-        if (noteIndex >= 0) {
-          const updated = [...nbNotes];
-          updated.splice(noteIndex, 1);
-          nbNotesCell.set(updated);
-        }
-      }
+      selectedNoteIds.push(noteId);
+    } else if (title) {
+      selectedTitles.push(title);
     }
+    itemsToMove.push(item);
 
-    // Add to target notebook
-    (targetNotebookNotes as Cell<NoteCharm[] | undefined>).push(note);
     // Hide from main listing
     notes.key(idx).key("isHidden").set(true);
+  }
+
+  // Helper to check if item should be removed
+  const shouldRemove = (n: any) => {
+    if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
+    if (n?.title && selectedTitles.includes(n.title)) return true;
+    return false;
+  };
+
+  // Remove from all notebooks (except target)
+  for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
+    if (nbIdx === nbIndex) continue; // Don't remove from target
+
+    const nbCell = notebooks.key(nbIdx);
+    const nbNotesCell = nbCell.key("notes");
+    const nbNotes = nbNotesCell.get() ?? [];
+
+    const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
+    if (filtered.length !== nbNotes.length) {
+      nbNotesCell.set(filtered);
+    }
+  }
+
+  // Add all items to target notebook
+  for (const item of itemsToMove) {
+    (targetNotebookNotes as Cell<NoteCharm[] | undefined>).push(item);
   }
 
   selectedIndices.set([]);
@@ -2119,25 +2146,38 @@ const createNotebookFromPrompt = handler<
   const name = newNotebookName.get().trim() || "New Notebook";
   const action = pendingNotebookAction.get();
 
-  // Gather selected notes and noteIds
+  // Gather selected items and track by noteId (notes) or title (notebooks)
   const selected = selectedIndices.get();
-  const selectedNotes: NoteCharm[] = [];
+  const selectedItems: NoteCharm[] = [];
   const selectedNoteIds: string[] = [];
+  const selectedTitles: string[] = []; // For notebooks (no noteId)
 
   for (const idx of selected) {
-    const note = notes.key(idx).get();
-    if (note) {
-      selectedNotes.push(note);
-      const noteId = (note as any)?.noteId;
-      if (noteId) selectedNoteIds.push(noteId);
+    const item = notes.key(idx).get();
+    if (item) {
+      selectedItems.push(item);
+      const noteId = (item as any)?.noteId;
+      const title = (item as any)?.title;
+      if (noteId) {
+        selectedNoteIds.push(noteId);
+      } else if (title) {
+        selectedTitles.push(title);
+      }
     }
   }
 
-  // Create notebook with notes directly (simpler approach)
-  const newNotebook = Notebook({ title: name, notes: selectedNotes });
+  // Helper to check if item should be removed
+  const shouldRemove = (n: any) => {
+    if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
+    if (n?.title && selectedTitles.includes(n.title)) return true;
+    return false;
+  };
+
+  // Create notebook with items directly (simpler approach)
+  const newNotebook = Notebook({ title: name, notes: selectedItems });
   allCharms.push(newNotebook as unknown as NoteCharm);
 
-  // Mark selected notes as hidden
+  // Mark selected items as hidden
   for (const idx of selected) {
     notes.key(idx).key("isHidden").set(true);
   }
@@ -2149,9 +2189,7 @@ const createNotebookFromPrompt = handler<
       const nbCell = notebooks.key(nbIdx);
       const nbNotesCell = nbCell.key("notes");
       const nbNotes = nbNotesCell.get() ?? [];
-      const filtered = nbNotes.filter((n: any) =>
-        !selectedNoteIds.includes(n?.noteId)
-      );
+      const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
       if (filtered.length !== nbNotes.length) {
         nbNotesCell.set(filtered);
       }

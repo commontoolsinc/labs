@@ -169,46 +169,37 @@ const closeMenu = handler<void, { menuOpen: Cell<boolean> }>(
   (_, { menuOpen }) => menuOpen.set(false),
 );
 
-// Toggle sidebar menu (hamburger)
-const toggleSidebar = handler<void, { sidebarOpen: Cell<boolean> }>(
-  (_, { sidebarOpen }) => sidebarOpen.set(!sidebarOpen.get()),
-);
 
-// Close sidebar menu
-const closeSidebar = handler<void, { sidebarOpen: Cell<boolean> }>(
-  (_, { sidebarOpen }) => sidebarOpen.set(false),
-);
-
-// Navigate to a note from sidebar (closing sidebar via flattened sidebarItems)
-const sidebarGoToNote = handler<
+// Create new note (adds to parent notebook if present)
+const createNewNote = handler<
   void,
-  { note: Cell<NoteCharm>; sidebarOpen: Cell<boolean> }
->((_, { note, sidebarOpen }) => {
-  sidebarOpen.set(false);
-  return navigateTo(note);
-});
+  {
+    allCharms: Cell<MinimalCharm[]>;
+    parentNotebook: Cell<NotebookCharm | null>;
+  }
+>((_, { allCharms, parentNotebook }) => {
+  const notebook = parentNotebook?.get?.();
 
-// Navigate to a notebook from sidebar (currently unused - kept for future use)
-const _sidebarGoToNotebook = handler<
-  void,
-  { notebook: Cell<NotebookCharm>; sidebarOpen: Cell<boolean> }
->((_, { notebook, sidebarOpen }) => {
-  sidebarOpen.set(false);
-  return navigateTo(notebook);
-});
-
-// Menu: New Note
-const menuNewNote = handler<
-  void,
-  { menuOpen: Cell<boolean>; allCharms: Cell<MinimalCharm[]> }
->((_, { menuOpen, allCharms }) => {
-  menuOpen.set(false);
   const note = Note({
     title: "New Note",
     content: "",
     noteId: generateId(),
+    isHidden: !!notebook, // Hide from default-app if in a notebook
   });
   allCharms.push(note as unknown as MinimalCharm);
+
+  // Add to parent notebook using Cell.key() pattern
+  if (notebook) {
+    const charmsList = allCharms.get();
+    const nbName = (notebook as any)?.[NAME];
+    const nbIndex = charmsList.findIndex((c: any) => (c as any)?.[NAME] === nbName);
+    if (nbIndex >= 0) {
+      const notebookCell = allCharms.key(nbIndex);
+      const notesCell = notebookCell.key("notes") as Cell<NoteCharm[]>;
+      notesCell.push(note as unknown as NoteCharm);
+    }
+  }
+
   return navigateTo(note);
 });
 
@@ -220,6 +211,11 @@ const menuGoToNotebook = handler<
   menuOpen.set(false);
   return navigateTo(notebook);
 });
+
+// Navigate to parent notebook
+const goToParent = handler<void, { parent: Cell<NotebookCharm> }>(
+  (_, { parent }) => navigateTo(parent),
+);
 
 // Menu: All Notes (find existing only - can't create due to circular imports)
 const menuAllNotebooks = handler<
@@ -239,15 +235,6 @@ const menuAllNotebooks = handler<
   // User should create it from default-app first
 });
 
-// Menu: Navigate to a recent note
-const menuGoToRecentNote = handler<
-  void,
-  { menuOpen: Cell<boolean>; note: Cell<NoteCharm> }
->((_, { menuOpen, note }) => {
-  menuOpen.set(false);
-  return navigateTo(note);
-});
-
 const Note = pattern<Input, Output>(
   ({ title, content, isHidden, noteId, linkPattern }) => {
     const { allCharms } = wish<{ allCharms: MinimalCharm[] }>("/");
@@ -259,9 +246,6 @@ const Note = pattern<Input, Output>(
 
     // Dropdown menu state
     const menuOpen = Cell.of(false);
-
-    // Sidebar menu state (hamburger)
-    const sidebarOpen = Cell.of(false);
 
     // State for inline title editing
     const isEditingTitle = Cell.of<boolean>(false);
@@ -282,38 +266,16 @@ const Note = pattern<Input, Output>(
       })
     );
 
-    // Filter recent charms for notes only (📝 prefix), excluding current note
-    const recentNotes = computed(() => {
-      let myId = "";
-      try {
-        myId = JSON.parse(JSON.stringify(noteId)) as string;
-      } catch { /* ignore */ }
-
-      return (recentCharms ?? []).filter((charm: any) => {
-        const name = charm?.[NAME];
-        if (typeof name !== "string" || !name.startsWith("📝")) return false;
-        // Exclude current note
-        return charm?.noteId !== myId;
-      }).slice(0, 5) as NoteCharm[]; // Limit to 5 recent
-    });
-
     // Compute which notebooks contain this note by noteId
     const containingNotebookNames = computed(() => {
-      // Get our noteId as a resolved string (proxies don't auto-resolve for own inputs)
-      let myId: string;
-      try {
-        myId = JSON.parse(JSON.stringify(noteId)) as string;
-      } catch {
-        myId = "";
-      }
-      if (!myId) return [] as string[];
-
+      const myId = noteId; // CTS handles Cell unwrapping
+      if (!myId) return []; // Can't match if we have no noteId
       const result: string[] = [];
       for (const nb of notebooks) {
         const nbNotes = (nb as any)?.notes ?? [];
         const nbName = (nb as any)?.[NAME] ?? "";
         for (const n of nbNotes) {
-          if (n?.noteId === myId) {
+          if (n?.noteId && n.noteId === myId) {
             result.push(nbName);
             break;
           }
@@ -322,44 +284,31 @@ const Note = pattern<Input, Output>(
       return result;
     });
 
-    // Compute the actual notebooks (with notes) that contain this note
-    // Use .filter() to preserve proxy chain (manual push loses it)
+    // Compute actual notebook references that contain this note
     const containingNotebooks = computed(() => {
-      let myId: string;
-      try {
-        myId = JSON.parse(JSON.stringify(noteId)) as string;
-      } catch {
-        myId = "";
-      }
-      if (!myId) return [] as NotebookCharm[];
-
+      const myId = noteId; // CTS handles Cell unwrapping
+      if (!myId) return []; // Can't match if we have no noteId
       return notebooks.filter((nb) => {
         const nbNotes = (nb as any)?.notes ?? [];
-        return nbNotes.some((n: any) => n?.noteId === myId);
+        return nbNotes.some((n: any) => n?.noteId && n.noteId === myId);
       });
     });
 
-    // Flattened sidebar items: notebooks and their notes in single array
-    // Enables single-level map to pass sidebarOpen to handlers
-    const sidebarItems = computed(() => {
-      let myId = "";
-      try {
-        myId = JSON.parse(JSON.stringify(noteId)) as string;
-      } catch { /* ignore parse errors */ }
+    // Find parent notebook: prioritize most recently visited, fall back to first
+    const parentNotebook = computed(() => {
+      if (containingNotebooks.length === 0) return null;
 
-      const items: Array<{
-        note: NoteCharm;
-        current: number; // 1 = yes, 0 = no
-      }> = [];
-      for (const notebook of containingNotebooks) {
-        for (const note of (notebook.notes ?? []) as NoteCharm[]) {
-          items.push({
-            note,
-            current: note?.noteId === myId ? 1 : 0,
-          });
+      // Find most recent notebook that contains this note
+      for (const recent of (recentCharms ?? [])) {
+        const name = (recent as any)?.[NAME];
+        if (typeof name === "string" && name.startsWith("📓")) {
+          if (containingNotebooks.some((nb: any) => nb?.[NAME] === name)) {
+            return recent;
+          }
         }
       }
-      return items;
+      // Fall back to first containing notebook
+      return containingNotebooks[0];
     });
 
     // populated in backlinks-index.tsx
@@ -407,109 +356,22 @@ const Note = pattern<Input, Output>(
               gap="3"
               style={{ alignItems: "center" }}
             >
-              {/* Hamburger menu button - only show if note is in at least one notebook */}
-              <div
+              {/* Parent notebook button */}
+              <ct-button
+                variant="ghost"
+                onClick={goToParent({ parent: parentNotebook })}
                 style={{
-                  display: computed(() =>
-                    containingNotebooks.length > 0 ? "flex" : "none"
-                  ),
+                  display: computed(() => (parentNotebook ? "flex" : "none")),
+                  alignItems: "center",
+                  padding: "6px 8px",
+                  fontSize: "16px",
                 }}
+                title={computed(() =>
+                  `Go to ${parentNotebook?.[NAME] ?? "notebook"}`
+                )}
               >
-                <ct-button
-                  variant="ghost"
-                  onClick={toggleSidebar({ sidebarOpen })}
-                  style={{
-                    padding: "6px 8px",
-                    minWidth: "32px",
-                    borderRadius: "6px",
-                  }}
-                  title="Show notebook notes"
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "3px",
-                      width: "18px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        height: "2px",
-                        background: "currentColor",
-                        borderRadius: "1px",
-                      }}
-                    />
-                    <div
-                      style={{
-                        height: "2px",
-                        background: "currentColor",
-                        borderRadius: "1px",
-                      }}
-                    />
-                    <div
-                      style={{
-                        height: "2px",
-                        background: "currentColor",
-                        borderRadius: "1px",
-                      }}
-                    />
-                  </div>
-                </ct-button>
-              </div>
-
-              {/* Sidebar backdrop */}
-              <div
-                onClick={closeSidebar({ sidebarOpen })}
-                style={{
-                  display: computed(
-                    () => (sidebarOpen.get() ? "block" : "none"),
-                  ),
-                  position: "fixed",
-                  inset: "0",
-                  background: "rgba(0,0,0,0.3)",
-                  zIndex: "998",
-                }}
-              />
-
-              {/* Sidebar dropdown with notes grouped by notebook */}
-              <ct-vstack
-                gap="0"
-                style={{
-                  display: computed(
-                    () => (sidebarOpen.get() ? "flex" : "none"),
-                  ),
-                  position: "fixed",
-                  top: "60px",
-                  left: "16px",
-                  background: "var(--ct-color-bg, white)",
-                  border: "1px solid var(--ct-color-border, #e5e5e7)",
-                  borderRadius: "12px",
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-                  minWidth: "220px",
-                  maxWidth: "300px",
-                  maxHeight: "70vh",
-                  overflow: "auto",
-                  zIndex: "1000",
-                  padding: "8px 0",
-                }}
-              >
-                {sidebarItems.map((item) => (
-                  <ct-button
-                    variant="ghost"
-                    onClick={sidebarGoToNote({ note: item.note, sidebarOpen })}
-                    style={{
-                      justifyContent: "flex-start",
-                      padding: "2px 16px",
-                      fontSize: "13px",
-                      opacity: item.current === 1 ? 0.5 : 1,
-                    }}
-                  >
-                    {item.current === 1 ? "✓ " : "   "}
-                    {item.note?.[NAME] ?? "Untitled"}
-                  </ct-button>
-                ))}
-              </ct-vstack>
+                ⬆️
+              </ct-button>
 
               {/* Editable Title - click to edit */}
               <div
@@ -547,12 +409,30 @@ const Note = pattern<Input, Output>(
                   onct-keydown={handleTitleKeydown({ isEditingTitle })}
                 />
               </div>
+
+              {/* New Note button */}
+              <ct-button
+                variant="ghost"
+                onClick={createNewNote({ allCharms, parentNotebook })}
+                style={{
+                  alignItems: "center",
+                  padding: "6px 12px",
+                  fontSize: "14px",
+                  borderRadius: "8px",
+                  gap: "4px",
+                }}
+                title="Create new note"
+              >
+                📝 New
+              </ct-button>
+
               <ct-button
                 variant="ghost"
                 onClick={toggleMenu({ menuOpen })}
                 style={{
+                  alignItems: "center",
                   padding: "8px 16px",
-                  fontSize: "16px",
+                  fontSize: "14px",
                   borderRadius: "8px",
                 }}
               >
@@ -587,59 +467,6 @@ const Note = pattern<Input, Output>(
                   padding: "4px",
                 }}
               >
-                <ct-button
-                  variant="ghost"
-                  onClick={menuNewNote({ menuOpen, allCharms })}
-                  style={{ justifyContent: "flex-start" }}
-                >
-                  {"\u00A0\u00A0"}📝 New Note
-                </ct-button>
-
-                {/* Recent Notes section - only show if there are recent notes */}
-                <div
-                  style={{
-                    display: computed(() =>
-                      recentNotes.length > 0 ? "block" : "none"
-                    ),
-                    height: "1px",
-                    background: "var(--ct-color-border, #e5e5e7)",
-                    margin: "4px 8px",
-                  }}
-                />
-                <div
-                  style={{
-                    display: computed(() =>
-                      recentNotes.length > 0 ? "block" : "none"
-                    ),
-                    padding: "4px 12px 2px",
-                    fontSize: "11px",
-                    color: "var(--ct-color-text-secondary, #666)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.5px",
-                  }}
-                >
-                  Recent
-                </div>
-                {recentNotes.map((note) => (
-                  <ct-button
-                    variant="ghost"
-                    onClick={menuGoToRecentNote({ menuOpen, note })}
-                    style={{ justifyContent: "flex-start", fontSize: "13px" }}
-                  >
-                    {"\u00A0\u00A0"}
-                    {note[NAME]}
-                  </ct-button>
-                ))}
-
-                {/* Divider */}
-                <div
-                  style={{
-                    height: "1px",
-                    background: "var(--ct-color-border, #e5e5e7)",
-                    margin: "4px 8px",
-                  }}
-                />
-
                 {/* List of notebooks with ✓ for membership */}
                 {notebooks.map((notebook) => (
                   <ct-button
@@ -648,7 +475,7 @@ const Note = pattern<Input, Output>(
                     style={{ justifyContent: "flex-start" }}
                   >
                     {"\u00A0\u00A0"}
-                    {notebook[NAME]}
+                    {notebook?.[NAME] ?? "Untitled"}
                     {computed(() => {
                       const nbName = (notebook as any)?.[NAME] ?? "";
                       return containingNotebookNames.includes(nbName)

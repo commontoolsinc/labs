@@ -191,54 +191,122 @@ const _handleCharmDrop = handler<
 
 // Handler for dropping items onto the current notebook's card
 // This MOVES the dropped notebook - removes from all other notebooks, adds here
+// Supports multi-item drag: if dragged item is in selection, moves ALL selected items
 const handleDropOntoCurrentNotebook = handler<
   { detail: { sourceCell: Cell<unknown> } },
-  { notes: Cell<NoteCharm[]>; notebooks: Cell<NotebookCharm[]> }
->((event, { notes, notebooks }) => {
-  const sourceCell = event.detail.sourceCell;
-  const sourceTitle = (sourceCell as any).key("title").get();
-
-  const notesList = notes.get();
-
-  // Prevent duplicates
-  const alreadyExists = notesList.some((n) =>
-    Cell.equals(sourceCell, n as any)
-  );
-  if (alreadyExists) return;
-
-  // Remove from ALL other notebooks' notes arrays (move semantics)
-  const notebooksList = notebooks.get();
-  for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
-    const nbCell = notebooks.key(nbIdx);
-    const nbNotesCell = nbCell.key("notes");
-    const nbNotes = (nbNotesCell.get() as unknown[]) ?? [];
-
-    // Find and remove by title or Cell.equals
-    const filtered = nbNotes.filter((n: any) => {
-      if (n?.title === sourceTitle) return false;
-      if (Cell.equals(sourceCell, n as any)) return false;
-      return true;
-    });
-    if (filtered.length !== nbNotes.length) {
-      nbNotesCell.set(filtered as NoteCharm[]);
-    }
+  {
+    notes: Cell<NoteCharm[]>;
+    notebooks: Cell<NotebookCharm[]>;
+    selectedNoteIndices: Cell<number[]>;
   }
+>((event, { notes, notebooks, selectedNoteIndices }) => {
+  const sourceCell = event.detail.sourceCell;
+  const notesList = notes.get();
+  const selected = selectedNoteIndices.get();
 
-  // Hide from default-app charm list
-  sourceCell.key("isHidden").set(true);
+  // Check if dragged item is in the selection (from a sibling notebook drag)
+  // For sibling notebooks, we check if the dragged cell matches any selected item
+  const draggedIndex = notesList.findIndex((n: any) =>
+    Cell.equals(sourceCell, n)
+  );
+  const isDraggedInSelection = draggedIndex >= 0 && selected.includes(draggedIndex);
 
-  // Add to this notebook
-  notes.push(sourceCell as any);
+  if (isDraggedInSelection && selected.length > 1) {
+    // Multi-item move: gather all selected items
+    const itemsToMove = selected.map((idx) => notesList[idx]).filter(Boolean);
+
+    // Track by noteId and title (like moveSelectedToNotebook)
+    const selectedNoteIds: string[] = [];
+    const selectedTitles: string[] = [];
+    for (const item of itemsToMove) {
+      const noteId = (item as any)?.noteId;
+      const title = (item as any)?.title;
+      if (noteId) {
+        selectedNoteIds.push(noteId);
+      } else if (title) {
+        selectedTitles.push(title);
+      }
+    }
+
+    const shouldRemove = (n: any) => {
+      if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
+      if (n?.title && selectedTitles.includes(n.title)) return true;
+      return false;
+    };
+
+    // Remove from ALL other notebooks' notes arrays (move semantics)
+    const notebooksList = notebooks.get();
+    for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
+      const nbCell = notebooks.key(nbIdx);
+      const nbNotesCell = nbCell.key("notes");
+      const nbNotes = (nbNotesCell.get() as unknown[]) ?? [];
+
+      const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
+      if (filtered.length !== nbNotes.length) {
+        nbNotesCell.set(filtered as NoteCharm[]);
+      }
+    }
+
+    // Add all to this notebook (deduplicated)
+    for (const item of itemsToMove) {
+      const alreadyExists = notesList.some((n) =>
+        Cell.equals(item as any, n as any)
+      );
+      if (!alreadyExists) {
+        notes.push(item as any);
+        (item as any).key?.("isHidden")?.set?.(true);
+      }
+    }
+
+    // Clear selection
+    selectedNoteIndices.set([]);
+  } else {
+    // Single-item move (existing logic)
+    const sourceTitle = (sourceCell as any).key("title").get();
+
+    // Prevent duplicates
+    const alreadyExists = notesList.some((n) =>
+      Cell.equals(sourceCell, n as any)
+    );
+    if (alreadyExists) return;
+
+    // Remove from ALL other notebooks' notes arrays (move semantics)
+    const notebooksList = notebooks.get();
+    for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
+      const nbCell = notebooks.key(nbIdx);
+      const nbNotesCell = nbCell.key("notes");
+      const nbNotes = (nbNotesCell.get() as unknown[]) ?? [];
+
+      // Find and remove by title or Cell.equals
+      const filtered = nbNotes.filter((n: any) => {
+        if (n?.title === sourceTitle) return false;
+        if (Cell.equals(sourceCell, n as any)) return false;
+        return true;
+      });
+      if (filtered.length !== nbNotes.length) {
+        nbNotesCell.set(filtered as NoteCharm[]);
+      }
+    }
+
+    // Hide from default-app charm list
+    sourceCell.key("isHidden").set(true);
+
+    // Add to this notebook
+    notes.push(sourceCell as any);
+  }
 });
 
 // Handler for dropping any item onto a notebook - moves from current notebook to target
+// Supports multi-item drag: if dragged item is in selection, moves ALL selected items
 const handleDropOntoNotebook = handler<
   { detail: { sourceCell: Cell<unknown> } },
   {
     targetNotebook: Cell<{ notes?: unknown[]; isNotebook?: boolean }>;
     currentNotes: Cell<NoteCharm[]>;
+    selectedNoteIndices: Cell<number[]>;
+    notebooks: Cell<NotebookCharm[]>;
   }
->((event, { targetNotebook, currentNotes }) => {
+>((event, { targetNotebook, currentNotes, selectedNoteIndices, notebooks }) => {
   const sourceCell = event.detail.sourceCell;
 
   // Check if target is actually a notebook
@@ -247,29 +315,97 @@ const handleDropOntoNotebook = handler<
 
   const targetNotesCell = targetNotebook.key("notes");
   const targetNotesList = (targetNotesCell.get() as unknown[]) ?? [];
-
-  // Prevent duplicates in target
-  const alreadyInTarget = targetNotesList.some((n) =>
-    Cell.equals(sourceCell, n as any)
-  );
-  if (alreadyInTarget) return;
-
-  // Remove from current notebook if present
   const currentList = currentNotes.get();
-  const indexInCurrent = currentList.findIndex((n: any) =>
+  const selected = selectedNoteIndices.get();
+
+  // Check if dragged item is in the selection
+  const draggedIndex = currentList.findIndex((n: any) =>
     Cell.equals(sourceCell, n)
   );
-  if (indexInCurrent !== -1) {
-    const copy = [...currentList];
-    copy.splice(indexInCurrent, 1);
-    currentNotes.set(copy);
+  const isDraggedInSelection = draggedIndex >= 0 && selected.includes(draggedIndex);
+
+  if (isDraggedInSelection && selected.length > 1) {
+    // Multi-item move: gather all selected items
+    const itemsToMove = selected.map((idx) => currentList[idx]).filter(Boolean);
+
+    // Track by noteId and title (like moveSelectedToNotebook)
+    const selectedNoteIds: string[] = [];
+    const selectedTitles: string[] = [];
+    for (const item of itemsToMove) {
+      const noteId = (item as any)?.noteId;
+      const title = (item as any)?.title;
+      if (noteId) {
+        selectedNoteIds.push(noteId);
+      } else if (title) {
+        selectedTitles.push(title);
+      }
+    }
+
+    const shouldRemove = (n: any) => {
+      if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
+      if (n?.title && selectedTitles.includes(n.title)) return true;
+      return false;
+    };
+
+    // Add all to target (deduplicated)
+    for (const item of itemsToMove) {
+      const alreadyInTarget = targetNotesList.some((n) =>
+        Cell.equals(item as any, n as any)
+      );
+      if (!alreadyInTarget) {
+        targetNotesCell.push(item);
+        (item as any).key?.("isHidden")?.set?.(true);
+      }
+    }
+
+    // Remove from all notebooks EXCEPT the target (move semantics)
+    const notebooksList = notebooks.get();
+    const targetTitle = targetNotebook.key("title").get();
+    for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
+      const nbCell = notebooks.key(nbIdx);
+      // Skip the target notebook - we just added items there
+      const nbTitle = nbCell.key("title").get();
+      if (nbTitle === targetTitle) continue;
+
+      const nbNotesCell = nbCell.key("notes");
+      const nbNotes = nbNotesCell.get() ?? [];
+
+      const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
+      if (filtered.length !== nbNotes.length) {
+        nbNotesCell.set(filtered);
+      }
+    }
+
+    // Remove from current notebook (which is different from target)
+    const filtered = currentList.filter((n: any) => !shouldRemove(n));
+    currentNotes.set(filtered);
+
+    // Clear selection
+    selectedNoteIndices.set([]);
+  } else {
+    // Single-item move (existing logic)
+    // Prevent duplicates in target
+    const alreadyInTarget = targetNotesList.some((n) =>
+      Cell.equals(sourceCell, n as any)
+    );
+    if (alreadyInTarget) return;
+
+    // Remove from current notebook if present
+    const indexInCurrent = currentList.findIndex((n: any) =>
+      Cell.equals(sourceCell, n)
+    );
+    if (indexInCurrent !== -1) {
+      const copy = [...currentList];
+      copy.splice(indexInCurrent, 1);
+      currentNotes.set(copy);
+    }
+
+    // Hide from default-app charm list
+    sourceCell.key("isHidden").set(true);
+
+    // Add to target notebook
+    targetNotesCell.push(sourceCell);
   }
-
-  // Hide from default-app charm list
-  sourceCell.key("isHidden").set(true);
-
-  // Add to target notebook
-  targetNotesCell.push(sourceCell);
 });
 
 // Create nested notebook and navigate to it (unless "Create Another" was used)
@@ -374,6 +510,11 @@ const handleBacklinkClick = handler<void, { charm: Cell<MentionableCharm> }>(
   (_, { charm }) => navigateTo(charm),
 );
 
+// Handler to navigate to parent notebook
+const goToParent = handler<void, { parent: Cell<NotebookCharm> }>(
+  (_, { parent }) => navigateTo(parent),
+);
+
 // Handler to select all notes in this notebook
 const selectAllNotes = handler<
   Record<string, never>,
@@ -441,13 +582,27 @@ const deleteSelectedNotes = handler<
   const allCharmsList = allCharms.get();
   const notebooksList = notebooks.get();
 
-  // Collect noteIds to delete
+  // Collect noteIds and titles to delete (titles for notebooks which don't have noteId)
   const noteIdsToDelete: string[] = [];
+  const titlesToDelete: string[] = [];
   for (const idx of selected) {
-    const note = notesList[idx];
-    const noteId = (note as any)?.noteId;
-    if (noteId) noteIdsToDelete.push(noteId);
+    const item = notesList[idx];
+    const noteId = (item as any)?.noteId;
+    const title = (item as any)?.title;
+    if (noteId) {
+      noteIdsToDelete.push(noteId);
+    } else if (title) {
+      // Notebooks don't have noteId, use title instead
+      titlesToDelete.push(title);
+    }
   }
+
+  // Helper to check if item should be deleted
+  const shouldDelete = (n: any) => {
+    if (n?.noteId && noteIdsToDelete.includes(n.noteId)) return true;
+    if (n?.title && titlesToDelete.includes(n.title)) return true;
+    return false;
+  };
 
   // Remove from all notebooks first (including this one)
   for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
@@ -455,25 +610,18 @@ const deleteSelectedNotes = handler<
     const nbNotesCell = nbCell.key("notes");
     const nbNotes = nbNotesCell.get() ?? [];
 
-    const filtered = nbNotes.filter((n: any) =>
-      !noteIdsToDelete.includes(n?.noteId)
-    );
+    const filtered = nbNotes.filter((n: any) => !shouldDelete(n));
     if (filtered.length !== nbNotes.length) {
       nbNotesCell.set(filtered);
     }
   }
 
   // Also remove from this notebook's notes array
-  const filteredNotes = notesList.filter((n: any) =>
-    !noteIdsToDelete.includes(n?.noteId)
-  );
+  const filteredNotes = notesList.filter((n: any) => !shouldDelete(n));
   notes.set(filteredNotes);
 
   // Remove from allCharms (permanent delete)
-  const filteredCharms = allCharmsList.filter((charm: any) => {
-    const noteId = charm?.noteId;
-    return !noteId || !noteIdsToDelete.includes(noteId);
-  });
+  const filteredCharms = allCharmsList.filter((charm: any) => !shouldDelete(charm));
   allCharms.set(filteredCharms);
 
   selectedNoteIndices.set([]);
@@ -578,15 +726,29 @@ const moveSelectedToNotebook = handler<
   const targetNotebookCell = notebooks.key(nbIndex);
   const targetNotebookNotes = targetNotebookCell.key("notes");
 
-  // Collect notes and IDs first, then batch push (reduces N reactive cycles to 1)
+  // Collect notes/notebooks and IDs/titles for removal
   const selectedNoteIds: string[] = [];
+  const selectedTitles: string[] = []; // For notebooks (no noteId)
   const notesToMove: NoteCharm[] = [];
   for (const idx of selected) {
-    const note = notesList[idx];
-    const noteId = (note as any)?.noteId;
-    if (noteId) selectedNoteIds.push(noteId);
-    if (note) notesToMove.push(note);
+    const item = notesList[idx];
+    const noteId = (item as any)?.noteId;
+    const title = (item as any)?.title;
+    if (noteId) {
+      selectedNoteIds.push(noteId);
+    } else if (title) {
+      selectedTitles.push(title);
+    }
+    if (item) notesToMove.push(item);
   }
+
+  // Helper to check if item should be removed
+  const shouldRemove = (n: any) => {
+    if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
+    if (n?.title && selectedTitles.includes(n.title)) return true;
+    return false;
+  };
+
   // Add to target notebook in one operation
   (targetNotebookNotes as Cell<NoteCharm[] | undefined>).push(...notesToMove);
 
@@ -599,18 +761,14 @@ const moveSelectedToNotebook = handler<
     const nbNotesCell = nbCell.key("notes");
     const nbNotes = nbNotesCell.get() ?? [];
 
-    const filtered = nbNotes.filter((n: any) =>
-      !selectedNoteIds.includes(n?.noteId)
-    );
+    const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
     if (filtered.length !== nbNotes.length) {
       nbNotesCell.set(filtered);
     }
   }
 
   // Remove from this notebook
-  const filtered = notesList.filter((n: any) =>
-    !selectedNoteIds.includes(n?.noteId)
-  );
+  const filtered = notesList.filter((n: any) => !shouldRemove(n));
   notes.set(filtered);
 
   selectedNoteIndices.set([]);
@@ -643,29 +801,40 @@ const createNotebookFromPrompt = handler<
   const name = newNotebookName.get().trim() || "New Notebook";
   const action = pendingNotebookAction.get();
 
-  // Gather selected notes first
+  // Gather selected items and track by noteId (notes) or title (notebooks)
   const selected = selectedNoteIndices.get();
   const notesList = notes.get();
-  const selectedNotes: NoteCharm[] = [];
+  const selectedItems: NoteCharm[] = [];
   const selectedNoteIds: string[] = [];
+  const selectedTitles: string[] = []; // For notebooks (no noteId)
 
   for (const idx of selected) {
-    const note = notesList[idx];
-    if (note) {
-      selectedNotes.push(note);
-      const noteId = (note as any)?.noteId;
-      if (noteId) selectedNoteIds.push(noteId);
+    const item = notesList[idx];
+    if (item) {
+      selectedItems.push(item);
+      const noteId = (item as any)?.noteId;
+      const title = (item as any)?.title;
+      if (noteId) {
+        selectedNoteIds.push(noteId);
+      } else if (title) {
+        selectedTitles.push(title);
+      }
     }
   }
 
-  // Create the notebook with notes already included
-  const newNotebook = Notebook({ title: name, notes: selectedNotes });
+  // Helper to check if item should be removed
+  const shouldRemove = (n: any) => {
+    if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
+    if (n?.title && selectedTitles.includes(n.title)) return true;
+    return false;
+  };
+
+  // Create the notebook with items already included (hidden from default-app)
+  const newNotebook = Notebook({ title: name, notes: selectedItems, isHidden: true });
   allCharms.push(newNotebook as unknown as MinimalCharm);
-  // Also add as nested notebook in current notebook
-  notes.push(newNotebook as unknown as NoteCharm);
 
   if (action === "move") {
-    // For move: remove from existing notebooks and this notebook
+    // For move: remove selected items from existing notebooks and this notebook
     const notebooksList = notebooks.get();
 
     // Remove from all existing notebooks
@@ -673,19 +842,18 @@ const createNotebookFromPrompt = handler<
       const nbCell = notebooks.key(nbIdx);
       const nbNotesCell = nbCell.key("notes");
       const nbNotes = nbNotesCell.get() ?? [];
-      const filtered = nbNotes.filter((n: any) =>
-        !selectedNoteIds.includes(n?.noteId)
-      );
+      const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
       if (filtered.length !== nbNotes.length) {
         nbNotesCell.set(filtered);
       }
     }
 
-    // Remove from this notebook
-    const filtered = notesList.filter((n: any) =>
-      !selectedNoteIds.includes(n?.noteId)
-    );
-    notes.set(filtered);
+    // Remove selected items from this notebook, then add new notebook
+    const filtered = notesList.filter((n: any) => !shouldRemove(n));
+    notes.set([...filtered, newNotebook as unknown as NoteCharm]);
+  } else {
+    // For add: just add the new notebook as sibling
+    notes.push(newNotebook as unknown as NoteCharm);
   }
   // For add: notes are already in the new notebook, no removal needed
 
@@ -1070,12 +1238,20 @@ const Notebook = pattern<Input, Output>(
                     gap: "4px",
                   }}
                 >
-                  <span>⬆️</span>
+                  <ct-button
+                    variant="ghost"
+                    onClick={goToParent({ parent: parentNotebooks[0] })}
+                    style={{ padding: "4px", fontSize: "16px", minWidth: "auto" }}
+                  >
+                    ⬆️
+                  </ct-button>
                   <ct-drop-zone
                     accept="note,notebook"
                     onct-drop={handleDropOntoNotebook({
                       targetNotebook: parentNotebooks[0] as any,
                       currentNotes: notes,
+                      selectedNoteIndices,
+                      notebooks,
                     })}
                   >
                     <ct-cell-context $cell={parentNotebooks[0]}>
@@ -1114,6 +1290,7 @@ const Notebook = pattern<Input, Output>(
                     onct-drop={handleDropOntoCurrentNotebook({
                       notes,
                       notebooks,
+                      selectedNoteIndices,
                     })}
                     style={{ width: "100%" }}
                   >
@@ -1295,6 +1472,8 @@ const Notebook = pattern<Input, Output>(
                                   onct-drop={handleDropOntoNotebook({
                                     targetNotebook: note as any,
                                     currentNotes: notes,
+                                    selectedNoteIndices,
+                                    notebooks,
                                   })}
                                 >
                                   {link}
@@ -1469,6 +1648,8 @@ const Notebook = pattern<Input, Output>(
                         onct-drop={handleDropOntoNotebook({
                           targetNotebook: notebook as any,
                           currentNotes: notes,
+                          selectedNoteIndices,
+                          notebooks,
                         })}
                       >
                         <ct-cell-context $cell={notebook}>
