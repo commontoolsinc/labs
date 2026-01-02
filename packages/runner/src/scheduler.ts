@@ -187,6 +187,8 @@ export class Scheduler {
     Action,
     ReturnType<typeof setTimeout>
   >();
+  // Track all active debounce timers for cleanup during dispose
+  private activeDebounceTimers = new Set<ReturnType<typeof setTimeout>>();
   private actionDebounce = new WeakMap<Action, number>();
   // Actions that opt out of auto-debounce (inverted: true means NO auto-debounce)
   private noDebounce = new WeakMap<Action, boolean>();
@@ -1742,6 +1744,7 @@ export class Scheduler {
     if (timer) {
       clearTimeout(timer);
       this.debounceTimers.delete(action);
+      this.activeDebounceTimers.delete(timer);
     }
   }
 
@@ -1766,11 +1769,13 @@ export class Scheduler {
     // Set new timer
     const timer = setTimeout(() => {
       this.debounceTimers.delete(action);
+      this.activeDebounceTimers.delete(timer);
       this.pending.add(action);
       this.queueExecution();
     }, debounceMs);
 
     this.debounceTimers.set(action, timer);
+    this.activeDebounceTimers.add(timer);
 
     logger.debug("schedule-debounce", () => [
       `[DEBOUNCE] Action ${
@@ -2410,6 +2415,18 @@ export class Scheduler {
       // Keep scheduled = true since we're queuing another execution
       queueTask(() => this.execute());
     }
+  }
+
+  /**
+   * Clean up all pending timers and resources.
+   * Should be called when the scheduler is being torn down.
+   */
+  dispose(): void {
+    // Clear all active debounce timers
+    for (const timer of this.activeDebounceTimers) {
+      clearTimeout(timer);
+    }
+    this.activeDebounceTimers.clear();
   }
 }
 

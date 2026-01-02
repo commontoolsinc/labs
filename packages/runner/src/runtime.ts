@@ -254,6 +254,9 @@ export class Runtime {
     // Wait for any pending operations
     await this.scheduler.idle();
 
+    // Clean up scheduler timers
+    this.scheduler.dispose();
+
     // Pop the default frame
     if (this.defaultFrame) {
       popFrame(this.defaultFrame);
