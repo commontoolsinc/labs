@@ -355,9 +355,11 @@ export class CTPromptInput extends BaseElement {
           getContent: () => this.value,
         });
 
+        private _changeGroup = crypto.randomUUID();
         // Model cell controller for binding
         private _modelController = createCellController<string>(this, {
           timing: { strategy: "immediate" },
+          changeGroup: this._changeGroup,
         });
 
         // Overlay management for mentions dropdown (rendered in body)

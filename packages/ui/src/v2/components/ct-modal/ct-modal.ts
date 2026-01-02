@@ -108,9 +108,12 @@ export class CTModal extends BaseElement {
   /** Previously focused element for restoration */
   private _previousActiveElement: HTMLElement | null = null;
 
+  private _changeGroup = crypto.randomUUID();
+
   /** Boolean cell controller for open state */
   private _openCellController = createBooleanCellController(this, {
     timing: { strategy: "immediate" },
+    changeGroup: this._changeGroup,
   });
 
   /** Track if modal was open in previous render */

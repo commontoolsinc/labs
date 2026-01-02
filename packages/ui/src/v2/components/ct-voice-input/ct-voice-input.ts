@@ -270,10 +270,12 @@ export class CTVoiceInput extends BaseElement {
   @property({ attribute: false })
   declare theme?: CTTheme;
 
+  private _changeGroup = crypto.randomUUID();
   private _cellController = createCellController<TranscriptionData | null>(
     this,
     {
       timing: { strategy: "immediate" },
+      changeGroup: this._changeGroup,
       onChange: (newValue) => {
         this.emit("ct-change", { transcription: newValue });
       },

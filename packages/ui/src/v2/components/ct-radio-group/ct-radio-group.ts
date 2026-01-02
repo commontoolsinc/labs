@@ -95,8 +95,10 @@ export class CTRadioGroup extends BaseElement {
   static override styles = unsafeCSS(radioGroupStyles);
 
   /* ---------- Cell controller for value binding ---------- */
+  private _changeGroup = crypto.randomUUID();
   private _cellController = createCellController<unknown>(this, {
     timing: { strategy: "immediate" }, // Radio changes should be immediate
+    changeGroup: this._changeGroup,
     onChange: (newValue, oldValue) => {
       // Sync selection to DOM (for slotted radios)
       this.updateRadioSelection();
