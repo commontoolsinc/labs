@@ -10,7 +10,9 @@
     "integration": "LOG_LEVEL=warn deno test -A ./integration/*.test.ts",
     "test": "deno test test/*.test.ts"
   },
-  "exports": "./src/index.ts",
+  "exports": {
+    "./shared": "./shared/mod.ts"
+  },
   "imports": {
     "@lit/context": "npm:@lit/context@^1.1.5",
     "@lit/task": "npm:@lit/task@^1.0.2"

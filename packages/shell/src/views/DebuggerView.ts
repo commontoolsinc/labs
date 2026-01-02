@@ -1,7 +1,7 @@
 import { css, html, LitElement, TemplateResult } from "lit";
 import { property, state } from "lit/decorators.js";
 import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts";
-import type { RuntimeTelemetryMarkerResult } from "@commontools/runner";
+import type { RuntimeTelemetryMarkerResult } from "@commontools/runtime-client";
 import { isRecord } from "@commontools/utils/types";
 import type { DebuggerController } from "../lib/debugger-controller.ts";
 import "./SchedulerGraphView.ts"; // Register x-scheduler-graph component

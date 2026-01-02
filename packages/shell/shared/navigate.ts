@@ -82,8 +82,9 @@ export class Navigation {
   };
 
   private onNavigate = (e: Event) => {
-    const command = (e as NavigationEvent).command;
+    let command = (e as NavigationEvent).command;
     logger.log("Navigate", command);
+    command = mapNavigationView(this.#app, command);
     this.push(command);
     this.apply(command);
   };
@@ -109,4 +110,29 @@ export class Navigation {
     logger.log("Apply", command);
     this.#app.setView(command);
   }
+}
+
+// Navigation events from the DOM use cell references which contain
+// a space DID, but no reference to space name. Map these navigation
+// events to use a space name if it's the same as the active runtime
+// to preserve space name in navigation/URL bar.
+function mapNavigationView(
+  app: App,
+  view: NavigationCommand,
+): NavigationCommand {
+  const currentView = app.state().view;
+  const currentSpaceName = "spaceName" in currentView
+    ? currentView.spaceName
+    : undefined;
+  const currentSpaceDID = app.element().getRuntimeSpaceDID();
+  if (
+    "spaceDid" in view && view.spaceDid && currentSpaceName &&
+    view.spaceDid === currentSpaceDID
+  ) {
+    return {
+      ...("charmId" in view ? { charmId: view.charmId } : undefined),
+      spaceName: currentSpaceName,
+    };
+  }
+  return view;
 }

@@ -7,14 +7,15 @@ import {
   RuntimeProgram,
   type Stream,
   UI,
+  VNode,
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { charmId, CharmManager, extractUserCode } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
 import { join } from "@std/path";
-import { isVNode, type VNode } from "@commontools/html";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { setLLMUrl } from "@commontools/llm";
+import { isObject } from "@commontools/utils/types";
 
 export interface EntryConfig {
   mainPath: string;
@@ -450,7 +451,7 @@ export function formatViewTree(view: unknown): string {
     last: boolean,
   ): string => {
     const branch = last ? "└─ " : "├─ ";
-    if (!isVNode(node)) {
+    if (!isVNodeLike(node)) {
       return `${prefix}${branch}${String(node)}`;
     }
 
@@ -562,4 +563,14 @@ export async function removeCharm(
   if (!removed) {
     throw new Error(`Charm "${config.charm}" not found`);
   }
+}
+
+function isVNodeLike(value: unknown): value is VNode {
+  const visited = new Set<object>();
+  while (isObject(value) && UI in value) {
+    if (visited.has(value)) return false; // Cycle detected
+    visited.add(value);
+    value = value[UI];
+  }
+  return (value as VNode)?.type === "vnode";
 }

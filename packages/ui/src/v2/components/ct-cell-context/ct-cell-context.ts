@@ -1,23 +1,23 @@
 import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import type { Cell } from "@commontools/runner";
+import type { CellHandle } from "@commontools/runtime-client";
 
 /**
- * CTCellContext - Wraps page regions and associates them with a Cell
+ * CTCellHandleContext - Wraps page regions and associates them with a CellHandle
  *
  * Provides a debugging toolbar that appears when holding Alt and hovering.
  * The toolbar allows inspecting cell values and addresses.
  *
  * @element ct-cell-context
  *
- * @property {Cell} cell - The Cell reference to associate with this context
+ * @property {CellHandle} cell - The CellHandle reference to associate with this context
  * @property {string} label - Optional label for display in the toolbar
  *
  * @slot - Default slot for wrapped content
  *
  * @example
- * <ct-cell-context .cell=${myCell} label="User Data">
+ * <ct-cell-context .cell=${myCellHandle} label="User Data">
  *   <div>Content here</div>
  * </ct-cell-context>
  */
@@ -114,7 +114,7 @@ export class CTCellContext extends BaseElement {
   ];
 
   @property({ attribute: false })
-  cell?: Cell;
+  cell?: CellHandle;
 
   @property({ type: String })
   label?: string;
@@ -183,7 +183,7 @@ export class CTCellContext extends BaseElement {
       return;
     }
     // Set window.$cell for easy console access (like Chrome's $0 for elements)
-    (globalThis as unknown as { $cell: Cell }).$cell = this.cell;
+    (globalThis as unknown as { $cell: CellHandle }).$cell = this.cell;
     console.log("$cell =", this.cell, "→", this.cell.get());
   }
 
@@ -193,8 +193,8 @@ export class CTCellContext extends BaseElement {
       return;
     }
     console.log(
-      "[ct-cell-context] Cell address:",
-      this.cell.getAsNormalizedFullLink(),
+      "[ct-cell-context] CellHandle address:",
+      this.cell.ref(),
     );
   }
 
@@ -204,7 +204,7 @@ export class CTCellContext extends BaseElement {
       return;
     }
 
-    const identifier = this._getCellIdentifier();
+    const identifier = this._getCellHandleIdentifier();
 
     if (this._isWatching) {
       // Unwatch
@@ -220,10 +220,10 @@ export class CTCellContext extends BaseElement {
     } else {
       // Watch
       this._updateCount = 0;
-      this._watchUnsubscribe = this.cell.sink((value) => {
+      this._watchUnsubscribe = this.cell.subscribe((value) => {
         this._updateCount++;
         console.log(
-          `[ct-cell-context] Cell update #${this._updateCount}:`,
+          `[ct-cell-context] CellHandle update #${this._updateCount}:`,
           value,
         );
       });
@@ -234,13 +234,10 @@ export class CTCellContext extends BaseElement {
     }
   }
 
-  private _getCellIdentifier(): string {
+  private _getCellHandleIdentifier(): string {
     if (!this.cell) return "unknown";
     if (this.label) return this.label;
-    // Create short ID like ct-cell-link does
-    const link = this.cell.getAsNormalizedFullLink();
-    const id = link.id;
-    const shortId = id.split(":").pop()?.slice(-6) ?? "???";
+    const shortId = this.cell.id().slice(-6);
     return `#${shortId}`;
   }
 

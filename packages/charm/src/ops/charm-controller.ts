@@ -61,7 +61,9 @@ class CharmPropIo implements CharmCellIo {
 
   #getTargetCell(): Promise<Cell<unknown>> {
     if (this.#type === "input") {
-      return this.#cc.manager().getArgument(this.#cc.getCell());
+      return Promise.resolve(
+        this.#cc.manager().getArgument(this.#cc.getCell()),
+      );
     } else if (this.#type === "result") {
       return Promise.resolve(this.#cc.manager().getResult(this.#cc.getCell()));
     }

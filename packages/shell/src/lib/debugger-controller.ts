@@ -1,24 +1,15 @@
 import { ReactiveController, ReactiveControllerHost } from "lit";
 import type { RuntimeInternals } from "./runtime.ts";
 import type {
-  Cell,
-  MemorySpace,
-  NormalizedLink,
+  CellHandle,
+  CellRef,
   RuntimeTelemetryMarkerResult,
   SchedulerGraphEdge,
   SchedulerGraphSnapshot,
-} from "@commontools/runner";
+} from "@commontools/runtime-client";
 
 const STORAGE_KEY = "showDebuggerView";
 const MAX_TELEMETRY_EVENTS = 1000; // Limit memory usage
-
-/**
- * A normalized link with both id and space defined (suitable as a memory address)
- */
-type NormalizedFullLink = NormalizedLink & {
-  id: string;
-  space: MemorySpace;
-};
 
 /**
  * Extended graph edge with historical tracking
@@ -42,9 +33,9 @@ export interface GraphWithHistory {
  */
 export interface WatchedCell {
   id: string; // Unique watch entry ID (e.g., "watch-{timestamp}-{random}")
-  cellLink: NormalizedFullLink; // The cell being watched (for display/persistence)
+  cellLink: CellRef; // The cell being watched (for display/persistence)
   label?: string; // User-provided label
-  cell: Cell; // Live cell reference for subscription
+  cell: CellHandle; // Live cell reference for subscription
   cancel?: () => void; // Cleanup from cell.sink()
   lastValue?: unknown; // Most recent value
   lastUpdate?: number; // Timestamp of last update
@@ -349,9 +340,13 @@ export class DebuggerController implements ReactiveController {
     const rt = this.runtime.runtime();
     if (!rt) return;
 
+    // TODO(runtime-worker-refactor)
+    // re-enable
+    /*
     const snapshot = rt.scheduler.getGraphSnapshot();
     this.processGraphSnapshot(snapshot);
     this.host.requestUpdate();
+    */
   }
 
   /**
@@ -436,20 +431,20 @@ export class DebuggerController implements ReactiveController {
    * @param label - Optional label for identifying this watch
    * @returns The watch ID (can be used to unwatch later)
    */
-  watchCell(cell: Cell, label?: string): string {
+  watchCell(cell: CellHandle, label?: string): string {
     // Generate unique watch ID
     const watchId = `watch-${Date.now()}-${
       Math.random().toString(36).slice(2, 8)
     }`;
 
     // Get the cell link for display/persistence
-    const cellLink = cell.getAsNormalizedFullLink();
+    const cellLink = cell.ref();
 
     // Create identifier for logging (use label if provided, otherwise short ID)
     const identifier = label ?? this.getCellShortId(cellLink);
 
     // Subscribe to cell changes
-    const cancel = cell.sink((value) => {
+    const cancel = cell.subscribe((value) => {
       const watch = this.watchedCells.get(watchId);
       if (!watch) return;
 
@@ -543,9 +538,8 @@ export class DebuggerController implements ReactiveController {
   /**
    * Generate a short ID from a cell link for display purposes
    */
-  private getCellShortId(link: NormalizedFullLink): string {
-    const id = link.id;
-    const shortId = id.split(":").pop()?.slice(-6) ?? "???";
+  private getCellShortId(link: CellRef): string {
+    const shortId = link.id.split(":").pop()?.slice(-6) ?? "???";
     return `#${shortId}`;
   }
 
@@ -562,8 +556,8 @@ export class DebuggerController implements ReactiveController {
     const event = e as CustomEvent<{ cell: unknown; label?: string }>;
     const { cell } = event.detail;
     // Find and remove the watch by matching the cell
-    if (cell && typeof (cell as any).getAsNormalizedFullLink === "function") {
-      const link = (cell as any).getAsNormalizedFullLink();
+    if (cell && typeof (cell as any).ref === "function") {
+      const link = (cell as any).ref();
       const watches = this.getWatchedCells();
       const watch = watches.find((w) => w.cellLink.id === link.id);
       if (watch) {

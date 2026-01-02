@@ -1,4 +1,4 @@
-import { App } from "./lib/app/controller.ts";
+import { App } from "../shared/mod.ts";
 
 declare global {
   var app: App;

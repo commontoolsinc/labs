@@ -9,6 +9,7 @@
   },
   "exports": {
     ".": "./mod.ts",
+    "./interface": "./interface.ts",
     "./typescript": "./typescript/mod.ts",
     "./source-map": "./source-map.ts"
   },

@@ -10,7 +10,7 @@ import type {
 } from "./types.ts";
 import { TreeOperations } from "./tree-operations.ts";
 import { getNodeByPath } from "./node-path.ts";
-import { type Cell, Runtime } from "@commontools/runner";
+import { type CellHandle, Runtime } from "@commontools/runtime-client";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
@@ -20,7 +20,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
  */
 export const createMockTreeCellAsync = async (
   tree: Tree,
-): Promise<Cell<Tree>> => {
+): Promise<CellHandle<Tree>> => {
   const signer = await Identity.fromPassphrase("test-outliner-user");
   const space = signer.did();
   const storageManager = StorageManager.emulate({ as: signer });
@@ -31,7 +31,12 @@ export const createMockTreeCellAsync = async (
   });
 
   const tx = runtime.edit();
-  const cell = runtime.getCell<Tree>(space as any, "test-tree", undefined, tx);
+  const cell = runtime.getCellHandle<Tree>(
+    space as any,
+    "test-tree",
+    undefined,
+    tx,
+  );
   cell.set(tree);
   await tx.commit();
   return cell;

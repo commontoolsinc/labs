@@ -1,7 +1,7 @@
 import { css, html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { createCellController } from "../../core/cell-controller.ts";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
 import "../ct-render/ct-render.ts";
 
 /**
@@ -16,8 +16,8 @@ import "../ct-render/ct-render.ts";
  * @attr {boolean} disabled - Whether the picker is disabled
  * @attr {string} min-height - Minimum height for the picker area (default: 200px)
  *
- * @prop {Cell<any[]>} items - Array of Cells with [UI] to render in stack
- * @prop {Cell<number>} selectedIndex - Two-way bound cell for current selection index
+ * @prop {CellHandle<any[]>} items - Array of Cells with [UI] to render in stack
+ * @prop {CellHandle<number>} selectedIndex - Two-way bound cell for current selection index
  *
  * @fires ct-change - Fired when selection changes: { index, value, items }
  * @fires ct-focus - Fired when picker gains focus
@@ -250,18 +250,16 @@ export class CTPicker extends BaseElement {
             disabled: { type: Boolean, reflect: true },
           };
 
-          declare items: Cell<any[]>;
-          declare selectedIndex: Cell<number>;
+          declare items: CellHandle<any[]>;
+          declare selectedIndex: CellHandle<number>;
           declare minHeight: string;
           declare disabled: boolean;
 
           private _touchStartX = 0;
           private _isTouching = false;
 
-          private _changeGroup = crypto.randomUUID();
           private _cellController = createCellController<number>(this, {
             timing: { strategy: "immediate" },
-            changeGroup: this._changeGroup,
             onChange: (newIndex) => {
               this.emit("ct-change", {
                 index: newIndex,
@@ -425,23 +423,25 @@ export class CTPicker extends BaseElement {
           // --- Selection methods ---
 
           private _selectPrevious = (): void => {
-            if (this.disabled || !this.items?.get().length) return;
-            const len = this.items.get().length;
+            const items = this.items.get() ?? [];
+            if (this.disabled || !items.length) return;
+            const len = items.length;
             this._selectIndex(
               this._currentIndex <= 0 ? len - 1 : this._currentIndex - 1,
             );
           };
 
           private _selectNext = (): void => {
-            if (this.disabled || !this.items?.get().length) return;
-            const len = this.items.get().length;
+            const items = this.items.get() ?? [];
+            if (this.disabled || !items.length) return;
+            const len = items.length;
             this._selectIndex(
               this._currentIndex >= len - 1 ? 0 : this._currentIndex + 1,
             );
           };
 
           private _selectIndex(index: number): void {
-            const len = this.items?.get()?.length ?? 0;
+            const len = (this.items.get() ?? []).length;
             if (index < 0 || index >= len || index === this._currentIndex) {
               return;
             }
@@ -453,7 +453,8 @@ export class CTPicker extends BaseElement {
           // --- Keyboard navigation ---
 
           private _handleKeyDown = (event: KeyboardEvent): void => {
-            if (this.disabled || !this.items?.get().length) return;
+            const items = this.items.get() ?? [];
+            if (this.disabled || !items.length) return;
             switch (event.key) {
               case "ArrowLeft":
               case "ArrowUp":
@@ -471,7 +472,7 @@ export class CTPicker extends BaseElement {
                 break;
               case "End":
                 event.preventDefault();
-                this._selectIndex(this.items.get().length - 1);
+                this._selectIndex(items.length - 1);
                 break;
             }
           };
@@ -530,7 +531,8 @@ export class CTPicker extends BaseElement {
           }
 
           getSelectedItem(): any | undefined {
-            return this.items?.get()[this._currentIndex];
+            const items = this.items?.get() ?? [];
+            return items[this._currentIndex];
           }
 
           selectByIndex(index: number): void {

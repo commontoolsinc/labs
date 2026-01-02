@@ -1,8 +1,8 @@
 import { beforeEach, describe, it } from "@std/testing/bdd";
-import { UI, VNode } from "@commontools/runner";
+import { UI, VNode } from "@commontools/runtime-client";
 import { render, renderImpl } from "../src/render.ts";
+import { sanitizeEvent } from "../src/render-utils.ts";
 import * as assert from "./assert.ts";
-import { serializableEvent } from "../src/render.ts";
 import { MockDoc } from "../src/mock-doc.ts";
 import { h } from "../src/h.ts";
 
@@ -35,7 +35,7 @@ describe("render", () => {
     );
 
     const parent = document.getElementById("root")!;
-    render(parent, renderable, renderOptions);
+    render(parent, renderable as unknown as VNode, renderOptions);
 
     assert.equal(
       parent.getElementsByTagName("div")[0]!.getAttribute("id"),
@@ -146,7 +146,7 @@ describe("renderImpl", () => {
   });
 });
 
-describe("serializableEvent", () => {
+describe("sanitizeEvent", () => {
   function isPlainSerializableObject(obj: unknown): boolean {
     if (typeof obj !== "object" || obj === null) return true; // primitives are serializable
     if (Array.isArray(obj)) {
@@ -163,7 +163,7 @@ describe("serializableEvent", () => {
 
   it("serializes a basic Event", () => {
     const event = new Event("test");
-    const result = serializableEvent(event);
+    const result = sanitizeEvent(event);
     assert.matchObject(result, { type: "test" });
     assert.equal(
       isPlainSerializableObject(result),
@@ -188,7 +188,7 @@ describe("serializableEvent", () => {
       metaKey: true,
       shiftKey: false,
     });
-    const result = serializableEvent(event);
+    const result = sanitizeEvent(event);
     assert.matchObject(result, {
       type: "keydown",
       key: "a",
@@ -220,7 +220,7 @@ describe("serializableEvent", () => {
       metaKey: false,
       shiftKey: true,
     });
-    const result = serializableEvent(event);
+    const result = sanitizeEvent(event);
     assert.matchObject(result, {
       type: "click",
       button: 0,
@@ -252,7 +252,7 @@ describe("serializableEvent", () => {
       inputType: "insertText",
     });
     Object.defineProperty(event, "target", { value: input });
-    const result = serializableEvent(event) as object;
+    const result = sanitizeEvent(event) as object;
     assert.matchObject(result, {
       type: "input",
       data: "h",
@@ -279,7 +279,7 @@ describe("serializableEvent", () => {
 
   it("serializes a CustomEvent with detail", () => {
     const event = new CustomEvent("custom", { detail: { foo: [42, 43] } });
-    const result = serializableEvent(event) as object;
+    const result = sanitizeEvent(event) as object;
     assert.matchObject(result, {
       type: "custom",
       detail: { foo: [42, 43] },
@@ -322,7 +322,7 @@ describe("serializableEvent", () => {
     (select as HTMLSelectElement).selectedOptions = [option1, option3];
     const event = new Event("change");
     Object.defineProperty(event, "target", { value: select });
-    const result = serializableEvent(event) as object;
+    const result = sanitizeEvent(event) as object;
     assert.matchObject(result, {
       type: "change",
       target: {
@@ -373,7 +373,7 @@ describe("serializableEvent", () => {
     const event = new Event("change");
 
     Object.defineProperty(event, "target", { value: select });
-    const result = serializableEvent(event) as object;
+    const result = sanitizeEvent(event) as object;
     assert.matchObject(result, {
       type: "change",
       target: {
@@ -407,7 +407,7 @@ describe("serializableEvent", () => {
     div.setAttribute("data-name", "test");
     const event = new Event("click");
     Object.defineProperty(event, "target", { value: div });
-    const result = serializableEvent(event) as object;
+    const result = sanitizeEvent(event) as object;
     assert.matchObject(result, {
       type: "click",
       target: {
@@ -890,7 +890,7 @@ describe("dataset attributes", () => {
 });
 
 describe("cycle detection", () => {
-  it("detects direct [UI] self-reference cycle and skips rendering", () => {
+  it("detects direct [UI] self-reference cycle and renders placeholder", () => {
     const { renderOptions, document } = mock;
     // Create a VNode that references itself via [UI]
     const selfRefNode: VNode = {
@@ -905,12 +905,13 @@ describe("cycle detection", () => {
     const parent = document.getElementById("root")!;
     const cancel = renderImpl(parent, selfRefNode, renderOptions);
 
-    // Cyclic [UI] references are detected by isVNode and nothing is rendered
-    assert.equal(parent.children.length, 0);
+    // Cyclic [UI] references are detected and render a placeholder
+    assert.equal(parent.children.length, 1);
+    assert.equal(parent.children[0].textContent, "🔄");
     cancel();
   });
 
-  it("detects indirect [UI] chain cycle (A -> B -> A) and skips rendering", () => {
+  it("detects indirect [UI] chain cycle (A -> B -> A) and renders placeholder", () => {
     const { renderOptions, document } = mock;
     // Create two VNodes that reference each other via [UI]
     const nodeA: VNode = {
@@ -932,8 +933,9 @@ describe("cycle detection", () => {
     const parent = document.getElementById("root")!;
     const cancel = renderImpl(parent, nodeA, renderOptions);
 
-    // Cyclic [UI] references are detected by isVNode and nothing is rendered
-    assert.equal(parent.children.length, 0);
+    // Cyclic [UI] references are detected and render a placeholder
+    assert.equal(parent.children.length, 1);
+    assert.equal(parent.children[0].textContent, "🔄");
     cancel();
   });
 
