@@ -450,36 +450,66 @@ export class Runner {
       }
     };
 
-    // Watch $TYPE - called synchronously first time
-    const typeCell = processCell.key(TYPE);
-    addCancel(
-      typeCell.sink((typeValue) => {
-        const newRecipeId = typeValue as unknown as string | undefined;
-        if (!newRecipeId) return; // No recipe yet
-        if (newRecipeId === currentRecipeId) return; // Already handled
+    // Get initial recipe ID
+    const initialRecipeId = processCell.key(TYPE).getRaw({
+      meta: ignoreReadForScheduling,
+    }) as string | undefined;
 
-        // Cancel previous nodes on recipe change
-        cancelNodes?.();
-        currentRecipeId = newRecipeId;
+    if (!initialRecipeId) {
+      // No recipe yet - just return, sink will handle when $TYPE is set
+      return Promise.resolve(true);
+    }
 
-        // Try sync lookup first
-        const resolved = this.runtime.recipeManager.recipeById(newRecipeId);
-        if (!resolved) {
-          // Async load
-          this.runtime.recipeManager
-            .loadRecipe(newRecipeId, resultCell.space)
-            .then((loaded) => {
-              // Check if recipe changed while loading
-              if (currentRecipeId !== newRecipeId) return;
-              instantiateRecipe(resolveToRecipe(loaded));
-            });
-          return;
-        }
+    // Helper to set up the $TYPE watcher
+    const setupTypeWatcher = () => {
+      const typeCell = processCell.key(TYPE);
+      addCancel(
+        typeCell.sink((typeValue) => {
+          const newRecipeId = typeValue as unknown as string | undefined;
+          if (!newRecipeId) return;
+          if (newRecipeId === currentRecipeId) return; // No change
 
-        // Sync path
-        instantiateRecipe(resolveToRecipe(resolved));
-      }),
+          // Recipe changed - cancel previous nodes and re-instantiate
+          cancelNodes?.();
+          currentRecipeId = newRecipeId;
+
+          const resolved = this.runtime.recipeManager.recipeById(newRecipeId);
+          if (!resolved) {
+            // Async load
+            this.runtime.recipeManager
+              .loadRecipe(newRecipeId, resultCell.space)
+              .then((loaded) => {
+                if (currentRecipeId !== newRecipeId) return;
+                instantiateRecipe(resolveToRecipe(loaded));
+              });
+            return;
+          }
+
+          instantiateRecipe(resolveToRecipe(resolved));
+        }),
+      );
+    };
+
+    // Try sync lookup first for initial recipe
+    const initialResolved = this.runtime.recipeManager.recipeById(
+      initialRecipeId,
     );
+    if (!initialResolved) {
+      // Async load, then instantiate
+      return this.runtime.recipeManager
+        .loadRecipe(initialRecipeId, resultCell.space)
+        .then((loaded) => {
+          currentRecipeId = initialRecipeId;
+          instantiateRecipe(resolveToRecipe(loaded));
+          setupTypeWatcher();
+          return true;
+        });
+    }
+
+    // Sync path - instantiate immediately
+    currentRecipeId = initialRecipeId;
+    instantiateRecipe(resolveToRecipe(initialResolved));
+    setupTypeWatcher();
 
     return Promise.resolve(true);
   }
