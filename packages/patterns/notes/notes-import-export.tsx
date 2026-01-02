@@ -1613,7 +1613,9 @@ const deleteSelectedNotes = handler<
   }
 
   // Remove from allCharms (permanent delete)
-  const filteredCharms = allCharmsList.filter((charm: any) => !shouldDelete(charm));
+  const filteredCharms = allCharmsList.filter((charm: any) =>
+    !shouldDelete(charm)
+  );
   allCharms.set(filteredCharms);
 
   selectedIndices.set([]);

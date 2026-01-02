@@ -169,7 +169,6 @@ const closeMenu = handler<void, { menuOpen: Cell<boolean> }>(
   (_, { menuOpen }) => menuOpen.set(false),
 );
 
-
 // Create new note (adds to parent notebook if present)
 const createNewNote = handler<
   void,
@@ -192,7 +191,9 @@ const createNewNote = handler<
   if (notebook) {
     const charmsList = allCharms.get();
     const nbName = (notebook as any)?.[NAME];
-    const nbIndex = charmsList.findIndex((c: any) => (c as any)?.[NAME] === nbName);
+    const nbIndex = charmsList.findIndex((c: any) =>
+      (c as any)?.[NAME] === nbName
+    );
     if (nbIndex >= 0) {
       const notebookCell = allCharms.key(nbIndex);
       const notesCell = notebookCell.key("notes") as Cell<NoteCharm[]>;

@@ -209,7 +209,8 @@ const handleDropOntoCurrentNotebook = handler<
   const draggedIndex = notesList.findIndex((n: any) =>
     Cell.equals(sourceCell, n)
   );
-  const isDraggedInSelection = draggedIndex >= 0 && selected.includes(draggedIndex);
+  const isDraggedInSelection = draggedIndex >= 0 &&
+    selected.includes(draggedIndex);
 
   if (isDraggedInSelection && selected.length > 1) {
     // Multi-item move: gather all selected items
@@ -322,7 +323,8 @@ const handleDropOntoNotebook = handler<
   const draggedIndex = currentList.findIndex((n: any) =>
     Cell.equals(sourceCell, n)
   );
-  const isDraggedInSelection = draggedIndex >= 0 && selected.includes(draggedIndex);
+  const isDraggedInSelection = draggedIndex >= 0 &&
+    selected.includes(draggedIndex);
 
   if (isDraggedInSelection && selected.length > 1) {
     // Multi-item move: gather all selected items
@@ -621,7 +623,9 @@ const deleteSelectedNotes = handler<
   notes.set(filteredNotes);
 
   // Remove from allCharms (permanent delete)
-  const filteredCharms = allCharmsList.filter((charm: any) => !shouldDelete(charm));
+  const filteredCharms = allCharmsList.filter((charm: any) =>
+    !shouldDelete(charm)
+  );
   allCharms.set(filteredCharms);
 
   selectedNoteIndices.set([]);
@@ -830,7 +834,11 @@ const createNotebookFromPrompt = handler<
   };
 
   // Create the notebook with items already included (hidden from default-app)
-  const newNotebook = Notebook({ title: name, notes: selectedItems, isHidden: true });
+  const newNotebook = Notebook({
+    title: name,
+    notes: selectedItems,
+    isHidden: true,
+  });
   allCharms.push(newNotebook as unknown as MinimalCharm);
 
   if (action === "move") {
@@ -1241,7 +1249,11 @@ const Notebook = pattern<Input, Output>(
                   <ct-button
                     variant="ghost"
                     onClick={goToParent({ parent: parentNotebooks[0] })}
-                    style={{ padding: "4px", fontSize: "16px", minWidth: "auto" }}
+                    style={{
+                      padding: "4px",
+                      fontSize: "16px",
+                      minWidth: "auto",
+                    }}
                   >
                     ⬆️
                   </ct-button>
