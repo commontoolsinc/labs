@@ -86,6 +86,7 @@ export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
  * to simulate writes.
  */
 export type PopulateDependencies = (tx: IExtendedStorageTransaction) => void;
+type PopulateDependenciesEntry = PopulateDependencies | ReactivityLog;
 
 /**
  * Reactivity log.
@@ -219,7 +220,7 @@ export class Scheduler {
   // Called in execute() to discover what cells the action will read
   private populateDependenciesCallbacks = new WeakMap<
     Action,
-    PopulateDependencies
+    PopulateDependenciesEntry
   >();
   // Actions that need dependency population before first run
   private pendingDependencyCollection = new Set<Action>();
@@ -421,19 +422,15 @@ export class Scheduler {
     } = {},
   ): Cancel {
     // Handle backwards-compatible ReactivityLog argument
-    let populateDependenciesCallback: PopulateDependencies;
+    let populateDependenciesEntry: PopulateDependenciesEntry;
     let immediateLog: ReactivityLog | undefined;
     if (typeof populateDependencies === "function") {
-      populateDependenciesCallback = populateDependencies;
+      populateDependenciesEntry = populateDependencies;
     } else {
       // ReactivityLog provided directly - set up dependencies immediately
       // (for backwards compatibility with code that passes reads/writes)
       immediateLog = populateDependencies;
-      populateDependenciesCallback = (depTx: IExtendedStorageTransaction) => {
-        for (const read of immediateLog!.reads) {
-          depTx.readOrThrow(read);
-        }
-      };
+      populateDependenciesEntry = immediateLog;
     }
     const {
       isEffect = false,
@@ -473,14 +470,10 @@ export class Scheduler {
     );
 
     // Store the populateDependencies callback for use in execute()
-    this.populateDependenciesCallbacks.set(
-      action,
-      populateDependenciesCallback,
-    );
+    this.populateDependenciesCallbacks.set(action, populateDependenciesEntry);
 
     // If a ReactivityLog was provided directly, set up dependencies immediately.
     // This ensures writes are tracked right away for reverse dependency graph.
-    // The callback will still be called in execute() to potentially discover more reads.
     if (immediateLog) {
       const reads = this.setDependencies(action, immediateLog);
       this.updateDependents(action, immediateLog);
@@ -1004,19 +997,32 @@ export class Scheduler {
     ]);
     this.mightWrite.set(action, newMightWrite);
 
+    const addedWrites = newMightWrite.filter((write) =>
+      !existingMightWrite.some((existing) =>
+        existing.space === write.space &&
+        existing.id === write.id &&
+        existing.type === write.type &&
+        existing.path.length <= write.path.length &&
+        arraysOverlap(existing.path, write.path)
+      )
+    );
+
     // Update writersByEntity index for fast dependency lookup
     // Collect new entities from writes
-    const newEntities = new Set<SpaceAndURI>();
+    const existingEntities = this.actionWriteEntities.get(action);
+    const nextEntities = new Set<SpaceAndURI>();
+    const addedEntities = new Set<SpaceAndURI>();
     for (const write of newMightWrite) {
       const entity: SpaceAndURI = `${write.space}/${write.id}`;
-      newEntities.add(entity);
+      nextEntities.add(entity);
+      if (!existingEntities?.has(entity)) {
+        addedEntities.add(entity);
+      }
     }
 
-    // Add action to writersByEntity for each entity
-    const existingEntities = this.actionWriteEntities.get(action);
-    for (const entity of newEntities) {
+    // Add action to writersByEntity for each newly discovered entity
+    for (const entity of addedEntities) {
       // Skip if already registered
-      if (existingEntities?.has(entity)) continue;
       let writers = this.writersByEntity.get(entity);
       if (!writers) {
         writers = new Set();
@@ -1024,7 +1030,12 @@ export class Scheduler {
       }
       writers.add(action);
     }
-    this.actionWriteEntities.set(action, newEntities);
+    this.actionWriteEntities.set(action, nextEntities);
+
+    if (this.pullMode && addedWrites.length > 0) {
+      // Backfill reverse edges when new writers appear after readers are already subscribed.
+      this.backfillDependentsForNewWrites(action, addedWrites);
+    }
 
     return reads;
   }
@@ -1088,7 +1099,7 @@ export class Scheduler {
 
   private collectDependenciesForAction(
     action: Action,
-    populateDependencies: PopulateDependencies,
+    populateDependencies: PopulateDependenciesEntry,
     options: {
       errorLogLabel: string;
       errorMessage: (action: Action, error: unknown) => string;
@@ -1096,16 +1107,21 @@ export class Scheduler {
       useRawReadsForTriggers?: boolean;
     },
   ): { log: ReactivityLog; entities: Set<SpaceAndURI> } {
-    const depTx = this.runtime.edit();
-    try {
-      populateDependencies(depTx);
-    } catch (error) {
-      logger.debug(options.errorLogLabel, () => [
-        options.errorMessage(action, error),
-      ]);
+    let log: ReactivityLog;
+    if (typeof populateDependencies === "function") {
+      const depTx = this.runtime.edit();
+      try {
+        populateDependencies(depTx);
+      } catch (error) {
+        logger.debug(options.errorLogLabel, () => [
+          options.errorMessage(action, error),
+        ]);
+      }
+      log = txToReactivityLog(depTx);
+      depTx.abort();
+    } else {
+      log = populateDependencies;
     }
-    const log = txToReactivityLog(depTx);
-    depTx.abort();
 
     const reads = this.setDependencies(action, log);
     if (options.updateDependents ?? true) {
@@ -1199,6 +1215,60 @@ export class Scheduler {
       reads: log.reads.map((r) => `${r.space}/${r.id}/${r.path.join("/")}`),
       writes: log.writes.map((w) => `${w.space}/${w.id}/${w.path.join("/")}`),
     });
+  }
+
+  private registerDependentEdge(writer: Action, dependent: Action): void {
+    if (writer === dependent) return;
+
+    let dependents = this.dependents.get(writer);
+    if (!dependents) {
+      dependents = new Set();
+      this.dependents.set(writer, dependents);
+    }
+    dependents.add(dependent);
+
+    let reverse = this.reverseDependencies.get(dependent);
+    if (!reverse) {
+      reverse = new Set();
+      this.reverseDependencies.set(dependent, reverse);
+    }
+    reverse.add(writer);
+  }
+
+  private backfillDependentsForNewWrites(
+    writer: Action,
+    writes: IMemorySpaceAddress[],
+  ): void {
+    if (writes.length === 0) return;
+
+    const scanAction = (action: Action) => {
+      if (action === writer) return;
+      const log = this.dependencies.get(action);
+      if (!log?.reads?.length) return;
+      if (!this.readsOverlapWrites(log.reads, writes)) return;
+      this.registerDependentEdge(writer, action);
+    };
+
+    for (const effect of this.effects) scanAction(effect);
+    for (const computation of this.computations) scanAction(computation);
+  }
+
+  private readsOverlapWrites(
+    reads: IMemorySpaceAddress[],
+    writes: IMemorySpaceAddress[],
+  ): boolean {
+    for (const read of reads) {
+      for (const write of writes) {
+        if (
+          read.space === write.space &&
+          read.id === write.id &&
+          arraysOverlap(write.path, read.path)
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   /**
@@ -1928,7 +1998,11 @@ export class Scheduler {
             const writes = this.mightWrite.get(action);
             if (writes) {
               for (const write of writes) {
-                if (write.space === read.space && write.id === read.id) {
+                if (
+                  write.space === read.space &&
+                  write.id === read.id &&
+                  arraysOverlap(write.path, read.path)
+                ) {
                   if (!dirtyDeps.includes(action)) {
                     dirtyDeps.push(action);
                   }
@@ -2292,7 +2366,7 @@ export class Scheduler {
 
     // Apply cycle-aware debounce to actions that ran multiple times this execute()
     const executeElapsed = performance.now() - this.executeStartTime;
-    if (executeElapsed >= CYCLE_DEBOUNCE_THRESHOLD_MS) {
+    if (this.pullMode && executeElapsed >= CYCLE_DEBOUNCE_THRESHOLD_MS) {
       for (const [action, runs] of this.runsThisExecute) {
         if (runs >= CYCLE_DEBOUNCE_MIN_RUNS && !this.noDebounce.get(action)) {
           // This action is cycling - apply adaptive debounce
