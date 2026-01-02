@@ -97,11 +97,16 @@ export class RuntimeInternals extends EventTarget {
    * Get a pattern by ID. Returns immediately with the controller.
    * The `ready` promise resolves when the charm is running, or rejects on error.
    */
-  getPattern(id: string): { controller: CharmController<NameSchema>; ready: Promise<boolean> } {
+  getPattern(
+    id: string,
+  ): { controller: CharmController<NameSchema>; ready: Promise<boolean> } {
     this.#check();
     const runtime = this.runtime();
     const cell = runtime.getCellFromEntityId(this.#space as DID, { "/": id });
-    const controller = new CharmController(this.#cc.manager(), cell.asSchema(nameSchema));
+    const controller = new CharmController(
+      this.#cc.manager(),
+      cell.asSchema(nameSchema),
+    );
 
     // Start the charm - handles sync, recipe loading, and running
     const ready = runtime.start(cell);

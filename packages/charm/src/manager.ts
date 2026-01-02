@@ -20,7 +20,7 @@ import {
 import * as favorites from "./favorites.ts";
 import { ALL_CHARMS_ID } from "../../runner/src/builtins/well-known.ts";
 import { type Session } from "@commontools/identity";
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
 import {
   charmListSchema,
   charmSourceCellSchema,
