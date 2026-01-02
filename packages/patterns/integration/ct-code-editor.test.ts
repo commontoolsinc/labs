@@ -66,6 +66,7 @@ describe("ct-code-editor cursor stability", () => {
       identity,
     });
     await page.waitForSelector("ct-code-editor", { strategy: "pierce" });
+    await new Promise((r) => setTimeout(r, 1000));
   });
 
   it("should sync Cell value to editor", async () => {
@@ -107,7 +108,7 @@ describe("ct-code-editor cursor stability", () => {
     await waitFor(
       async () => {
         const editorContent = await getEditorContent(page);
-        const cellValue = charm.result.get(["content"]);
+        const cellValue = await charm.result.get(["content"]);
         return editorContent === "" && cellValue === "";
       },
       { timeout: 2000, delay: 50 },
@@ -144,7 +145,7 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for debounce to complete and Cell to update
     await waitFor(
       // deno-lint-ignore require-await
-      async () => charm.result.get(["content"]) === textToType,
+      async () => await charm.result.get(["content"]) === textToType,
       { timeout: DEBOUNCE_DELAY + 2000, delay: 50 },
     );
 
@@ -193,7 +194,7 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for debounce to complete (only fires ONCE after last character)
     await waitFor(
       // deno-lint-ignore require-await
-      async () => charm.result.get(["content"]) === fullText,
+      async () => await charm.result.get(["content"]) === fullText,
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
@@ -219,7 +220,7 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for Cell to sync
     await waitFor(
       // deno-lint-ignore require-await
-      async () => charm.result.get(["content"]) === initialText,
+      async () => await charm.result.get(["content"]) === initialText,
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
@@ -244,7 +245,7 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for debounce
     await waitFor(
       // deno-lint-ignore require-await
-      async () => charm.result.get(["content"]) === expectedText,
+      async () => await charm.result.get(["content"]) === expectedText,
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
@@ -303,7 +304,7 @@ describe("ct-code-editor cursor stability", () => {
     await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + DEBOUNCE_BUFFER));
 
     // After debounce, the Cell should still have the external update
-    const cellValue = charm.result.get(["content"]);
+    const cellValue = await charm.result.get(["content"]);
     assertEquals(
       cellValue,
       "External Update",
@@ -383,8 +384,7 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for debounce to fire and Cell to update
     await waitFor(
-      // deno-lint-ignore require-await
-      async () => charm.result.get(["content"]) === text,
+      async () => await charm.result.get(["content"]) === text,
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
@@ -428,8 +428,7 @@ describe("ct-code-editor cursor stability", () => {
     // Type some text
     await typeInEditor(page, "Hello World");
     await waitFor(
-      // deno-lint-ignore require-await
-      async () => charm.result.get(["content"]) === "Hello World",
+      async () => await charm.result.get(["content"]) === "Hello World",
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
@@ -446,8 +445,7 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for debounce
     await waitFor(
-      // deno-lint-ignore require-await
-      async () => charm.result.get(["content"]) === expectedText,
+      async () => await charm.result.get(["content"]) === expectedText,
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
@@ -475,8 +473,7 @@ describe("ct-code-editor cursor stability", () => {
     // Type and wait for sync
     await typeInEditor(page, "Hello World");
     await waitFor(
-      // deno-lint-ignore require-await
-      async () => charm.result.get(["content"]) === "Hello World",
+      async () => await charm.result.get(["content"]) === "Hello World",
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
@@ -519,8 +516,7 @@ describe("ct-code-editor cursor stability", () => {
     // Type and wait for debounce to complete
     await typeInEditor(page, "User typed");
     await waitFor(
-      // deno-lint-ignore require-await
-      async () => charm.result.get(["content"]) === "User typed",
+      async () => await charm.result.get(["content"]) === "User typed",
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
@@ -584,16 +580,14 @@ describe("ct-code-editor cursor stability", () => {
     // Type initial text
     await typeInEditor(page, "Hello");
     await waitFor(
-      // deno-lint-ignore require-await
-      async () => charm.result.get(["content"]) === "Hello",
+      async () => await charm.result.get(["content"]) === "Hello",
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
     // Type more text
     await typeInEditor(page, " World");
     await waitFor(
-      // deno-lint-ignore require-await
-      async () => charm.result.get(["content"]) === "Hello World",
+      async () => await charm.result.get(["content"]) === "Hello World",
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
@@ -626,7 +620,7 @@ describe("ct-code-editor cursor stability", () => {
 
     // Verify editor and Cell are in sync
     const finalContent = await getEditorContent(page);
-    const cellValue = charm.result.get(["content"]);
+    const cellValue = await charm.result.get(["content"]);
     assertEquals(
       finalContent,
       cellValue,
@@ -773,7 +767,7 @@ describe("ct-code-editor cursor stability", () => {
     await waitFor(
       async () => {
         const e = await getEditorContent(page);
-        const c = charm.result.get(["content"]);
+        const c = await charm.result.get(["content"]);
         return e === c;
       },
       { timeout: 2000 },
@@ -828,7 +822,7 @@ describe("ct-code-editor cursor stability", () => {
       `Cursor ${cursor} should be valid for content length ${content.length}`,
     );
 
-    const cellValue = charm.result.get(["content"]) as string;
+    const cellValue = await charm.result.get(["content"]) as string;
     assertEquals(
       content,
       cellValue,
@@ -881,7 +875,7 @@ describe("ct-code-editor cursor stability", () => {
     // Final state should be consistent
     const content = await getEditorContent(page);
     const cursor = await getCursorPosition(page);
-    const cellValue = charm.result.get(["content"]) as string;
+    const cellValue = await charm.result.get(["content"]) as string;
 
     // Cursor must be valid
     assert(
@@ -948,7 +942,7 @@ describe("ct-code-editor cursor stability", () => {
     );
 
     // Editor and Cell should be in sync
-    const cellValue = charm.result.get(["content"]) as string;
+    const cellValue = await charm.result.get(["content"]) as string;
     assertEquals(
       finalContent,
       cellValue,
@@ -1020,8 +1014,7 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for debounce to send to Cell
     await waitFor(
-      // deno-lint-ignore require-await
-      async () => charm.result.get(["content"]) === "Hello   ",
+      async () => await charm.result.get(["content"]) === "Hello   ",
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
@@ -1066,7 +1059,7 @@ describe("ct-code-editor cursor stability", () => {
     await new Promise((r) => setTimeout(r, 200));
 
     // Content should be saved to Cell
-    const cellValue = charm.result.get(["content"]) as string;
+    const cellValue = await charm.result.get(["content"]) as string;
     assertEquals(
       cellValue,
       "Pre-blur content",
@@ -1091,8 +1084,7 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for debounce
     await waitFor(
-      // deno-lint-ignore require-await
-      async () => charm.result.get(["content"]) === specialContent,
+      async () => await charm.result.get(["content"]) === specialContent,
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
@@ -1159,13 +1151,12 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for debounce to complete
     await waitFor(
-      // deno-lint-ignore require-await
-      async () => charm.result.get(["content"]) === "First",
+      async () => await charm.result.get(["content"]) === "First",
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
     // Verify Cell has first content
-    assertEquals(charm.result.get(["content"]) as string, "First");
+    assertEquals(await charm.result.get(["content"]) as string, "First");
 
     // Immediately type more
     await page.keyboard.type("Second");
@@ -1176,7 +1167,7 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for second debounce
     await waitFor(
       // deno-lint-ignore require-await
-      async () => charm.result.get(["content"]) === "FirstSecond",
+      async () => await charm.result.get(["content"]) === "FirstSecond",
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
@@ -1226,7 +1217,7 @@ describe("ct-code-editor cursor stability", () => {
     );
 
     // Cell should have same content
-    const cellValue = charm.result.get(["content"]);
+    const cellValue = await charm.result.get(["content"]);
     assertEquals(cellValue, "AAABBBCCC", "Cell should have all typed content");
   });
 
@@ -1267,8 +1258,7 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for blur's debounce to complete - use longer timeout since blur->commit path may vary
     await waitFor(
-      // deno-lint-ignore require-await
-      async () => charm.result.get(["content"]) === "UserContent",
+      async () => await charm.result.get(["content"]) === "UserContent",
       { timeout: DEBOUNCE_DELAY + 500 },
     );
 
@@ -1382,7 +1372,7 @@ describe("ct-code-editor cursor stability", () => {
     // Wait longer than debounce to ensure no pending write happens
     await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + 200));
 
-    const cellValue = charm.result.get(["content"]);
+    const cellValue = await charm.result.get(["content"]);
     assertEquals(
       cellValue,
       "",

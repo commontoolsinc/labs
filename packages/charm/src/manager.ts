@@ -387,7 +387,7 @@ export class CharmManager {
    * @param charm The charm to check
    * @returns Array of charms that are read from
    */
-  getReadingFrom(charm: Cell<unknown>): Cell<unknown>[] {
+  async getReadingFrom(charm: Cell<unknown>): Promise<Cell<unknown>[]> {
     // Get all charms that might be referenced
     const allCharms = this.getCharms().get();
     const result: Cell<unknown>[] = [];
@@ -400,7 +400,7 @@ export class CharmManager {
 
     try {
       // Get the argument data - this is where references to other charms are stored
-      const argumentCell = this.getArgument(charm);
+      const argumentCell = await this.getArgument(charm);
       if (!argumentCell) return result;
 
       // Get the raw argument value
@@ -580,7 +580,7 @@ export class CharmManager {
    * @param charm The charm to check
    * @returns Array of charms that read from this charm
    */
-  getReadByCharms(charm: Cell<unknown>): Cell<unknown>[] {
+  async getReadByCharms(charm: Cell<unknown>): Promise<Cell<unknown>[]> {
     // Get all charms to check
     const allCharms = this.getCharms().get();
     const result: Cell<unknown>[] = [];
@@ -742,7 +742,7 @@ export class CharmManager {
 
       // Also specifically check the argument data where references are commonly found
       try {
-        const argumentCell = this.getArgument(otherCharm);
+        const argumentCell = await this.getArgument(otherCharm);
         if (argumentCell) {
           const argumentValue = argumentCell.getRaw();
 
@@ -783,16 +783,17 @@ export class CharmManager {
     return cell;
   }
 
-  // Return Cell with argument content of already loaded recipe according
-  // to the schema of the charm.
-  getArgument<T = unknown>(
+  // Return Cell with argument content, loading the recipe if needed.
+  async getArgument<T = unknown>(
     charm: Cell<unknown | T>,
-  ): Cell<T> {
+  ): Promise<Cell<T>> {
     const source = charm.getSourceCell(processSchema);
     const recipeId = source?.get()?.[TYPE]!;
     if (!recipeId) throw new Error("charm missing recipe ID");
-    const recipe = this.runtime.recipeManager.recipeById(recipeId);
-    if (!recipe) throw new Error(`Recipe ${recipeId} not loaded`);
+    const recipe = await this.runtime.recipeManager.loadRecipe(
+      recipeId,
+      this.space,
+    );
     return source.key("argument").asSchema<T>(recipe.argumentSchema);
   }
 
@@ -802,10 +803,7 @@ export class CharmManager {
     // Get result cell with schema from processCell.resultRef
     const processCell = charm.getSourceCell();
     if (processCell) {
-      const resultWithSchema = processCell.key("resultRef").resolveAsCell();
-      if (resultWithSchema) {
-        return resultWithSchema as Cell<T>;
-      }
+      return processCell.key("resultRef").resolveAsCell();
     }
     // Fallback: return charm without schema
     return charm;

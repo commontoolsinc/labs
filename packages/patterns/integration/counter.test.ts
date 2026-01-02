@@ -68,7 +68,7 @@ describe("counter direct operations test", () => {
       return initialText?.trim() === "Counter is the 0th number";
     });
 
-    assertEquals(charm.result.get(["value"]), 0);
+    assertEquals(await charm.result.get(["value"]), 0);
   });
 
   it("should update counter value via direct operation (live)", async () => {
