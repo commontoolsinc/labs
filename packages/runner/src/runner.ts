@@ -561,24 +561,23 @@ export class Runner {
   }
 
   private doStart<T = any>(resultCell: Cell<T>): Promise<boolean> {
-    const key = this.getDocKey(resultCell);
+    // For subpath cells, get the root cell
+    const link = resultCell.getAsNormalizedFullLink();
+    const rootCell = link.path.length > 0
+      ? this.runtime.getCellFromLink({ ...link, path: [] })
+      : resultCell;
+
+    const key = this.getDocKey(rootCell);
     // Check again after potential sync
     if (this.cancels.has(key)) return Promise.resolve(true);
 
-    // Subpath cells (created via .key()) have nothing to start - the parent
-    // charm is responsible for running.
-    const link = resultCell.getAsNormalizedFullLink();
-    if (link.path.length > 0) {
-      return Promise.resolve(false);
-    }
-
     // No process cell means setup() wasn't called or this isn't a charm.
-    const processCell = resultCell.getSourceCell();
+    const processCell = rootCell.getSourceCell();
     if (!processCell) {
       return Promise.reject(new Error("Cannot start: no process cell"));
     }
 
-    return this.startCore(resultCell, processCell, {
+    return this.startCore(rootCell, processCell, {
       allowAsyncLoad: true,
     }) as Promise<boolean>;
   }

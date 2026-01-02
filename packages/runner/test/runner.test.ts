@@ -1265,6 +1265,49 @@ describe("runner utils", () => {
       expect(resultCell.getAsQueryResult()).toEqual({ output: 12 });
     });
 
+    it("start() on subpath cell starts the root cell", async () => {
+      const recipe: Recipe = {
+        argumentSchema: {
+          type: "object",
+          properties: { input: { type: "number" } },
+        },
+        resultSchema: {},
+        result: {
+          nested: {
+            value: { $alias: { path: ["internal", "output"] } },
+          },
+        },
+        nodes: [
+          {
+            module: {
+              type: "javascript",
+              implementation: (v: { input: number }) => v.input * 2,
+            },
+            inputs: { $alias: { path: ["argument"] } },
+            outputs: { $alias: { path: ["internal", "output"] } },
+          },
+        ],
+      };
+
+      const resultCell = runtime.getCell(space, "start subpath cell");
+      runtime.setup(undefined, recipe, { input: 5 }, resultCell);
+
+      // Get a subpath cell
+      const subpathCell = resultCell.key("nested").key("value");
+
+      // Start via the subpath cell - should start the root
+      const result = await runtime.start(subpathCell);
+      expect(result).toBe(true);
+
+      await runtime.idle();
+      expect(resultCell.getAsQueryResult()).toEqual({ nested: { value: 10 } });
+
+      // Verify root cell is running
+      expect(
+        runtime.runner["cancels"].has(runtime.runner["getDocKey"](resultCell)),
+      ).toBe(true);
+    });
+
     it("restarts with new recipe when $TYPE changes via setup()", async () => {
       const recipe1: Recipe = {
         argumentSchema: {
