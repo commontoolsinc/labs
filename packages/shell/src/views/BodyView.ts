@@ -36,6 +36,25 @@ export class XBodyView extends BaseView {
       min-height: 0;
     }
 
+    .pattern-error {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      color: #c00;
+      text-align: center;
+    }
+
+    .pattern-error h2 {
+      margin: 0 0 1rem;
+    }
+
+    .pattern-error p {
+      margin: 0;
+      font-family: monospace;
+    }
+
     v-box {
       flex: 1;
     }
@@ -55,6 +74,9 @@ export class XBodyView extends BaseView {
 
   @property({ type: Boolean })
   showSidebar = false;
+
+  @property({ attribute: false })
+  patternError?: Error;
 
   @state()
   private hasSidebarContent = false;
@@ -98,7 +120,15 @@ export class XBodyView extends BaseView {
       `;
     }
 
-    const mainContent = this.activePattern
+    // Show error if pattern failed to start
+    const mainContent = this.patternError
+      ? html`
+        <div slot="main" class="pattern-error">
+          <h2>Failed to load charm</h2>
+          <p>${this.patternError.message}</p>
+        </div>
+      `
+      : this.activePattern
       ? html`
         <ct-charm slot="main" .charmId="${this.activePattern.id}">
           <ct-render .cell="${this.activePattern.getCell()}"></ct-render>

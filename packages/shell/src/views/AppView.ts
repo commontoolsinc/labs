@@ -58,6 +58,9 @@ export class XAppView extends BaseView {
   @state()
   private hasSidebarContent = false;
 
+  @state()
+  private _patternError?: Error;
+
   private debuggerController = new DebuggerController(this);
   private _keyboard = new KeyboardController(this);
 
@@ -101,18 +104,26 @@ export class XAppView extends BaseView {
     args: () => [this.rt],
   });
 
-  // This fetches the selected pattern, the explicitly chosen pattern
-  // to render via URL e.g. `/space/someCharmId`.
+  // Gets the selected pattern synchronously - no await needed.
+  // The charm starts in the background; errors are captured in _patternError.
   _selectedPattern = new Task(this, {
-    task: async (
+    task: (
       [app, rt],
-    ): Promise<
-      | CharmController<NameSchema>
-      | undefined
-    > => {
+    ): CharmController<NameSchema> | undefined => {
       if (!rt) return;
+      this._patternError = undefined; // Clear previous error
+
       if ("charmId" in app.view && app.view.charmId) {
-        return await rt.getPattern(app.view.charmId);
+        const { controller, ready } = rt.getPattern(app.view.charmId);
+
+        // Handle errors from the start() promise
+        ready.catch((err) => {
+          console.error("[AppView] Failed to start pattern:", err);
+          this._patternError = err;
+          this.requestUpdate();
+        });
+
+        return controller;
       }
     },
     args: () => [this.app, this.rt],
@@ -238,6 +249,7 @@ export class XAppView extends BaseView {
         .rt="${this.rt}"
         .activePattern="${activePattern}"
         .spaceRootPattern="${spaceRootPattern}"
+        .patternError="${this._patternError}"
         .showShellCharmListView="${config.showShellCharmListView ?? false}"
         .showSidebar="${config.showSidebar ?? false}"
       ></x-body-view>
