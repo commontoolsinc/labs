@@ -149,6 +149,26 @@ export async function newCharm(
 
   const program = await getProgramFromFile(manager, entry);
   const charm = await charms.create(program, options);
+
+  // Compute outputs once so metadata like NAME is persisted.
+  if (charm.name() === undefined) {
+    const keepRunning = options?.start ?? true;
+    await charms.start(charm.id);
+    try {
+      await charm.getCell().pull();
+      await manager.synced();
+    } catch (error) {
+      console.warn(
+        `Warning: Could not compute charm outputs: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    } finally {
+      if (!keepRunning) {
+        await charms.stop(charm.id);
+      }
+    }
+  }
   return charm.id;
 }
 
