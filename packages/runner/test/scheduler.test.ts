@@ -1649,6 +1649,83 @@ describe("effect/computation tracking", () => {
     const dependents = runtime.scheduler.getDependents(action1);
     expect(dependents.has(action2)).toBe(true);
   });
+
+  it("should backfill dependents when writer is added after effect subscribes", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const data = runtime.getCell<{ foo: number; bar: number }>(
+      space,
+      "backfill-writer-after-effect",
+      undefined,
+      tx,
+    );
+    data.set({ foo: 1, bar: 2 });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const effect: Action = (actionTx) => {
+      data.withTx(actionTx).key("foo").get();
+    };
+
+    runtime.scheduler.subscribe(effect, effect, { isEffect: true });
+    await runtime.scheduler.idle();
+
+    const computation: Action = (actionTx) => {
+      data.withTx(actionTx).key("foo").set(2);
+    };
+    runtime.scheduler.subscribe(
+      computation,
+      { reads: [], writes: [data.key("foo").getAsNormalizedFullLink()] },
+      {},
+    );
+
+    const dependents = runtime.scheduler.getDependents(computation);
+    expect(dependents.has(effect)).toBe(true);
+  });
+
+  it("should backfill only when new writer paths overlap existing reads", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const data = runtime.getCell<{ foo: number; bar: number }>(
+      space,
+      "backfill-writer-paths",
+      undefined,
+      tx,
+    );
+    data.set({ foo: 1, bar: 2 });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const effect: Action = (actionTx) => {
+      data.withTx(actionTx).key("bar").get();
+    };
+
+    runtime.scheduler.subscribe(effect, effect, { isEffect: true });
+    await runtime.scheduler.idle();
+
+    const computation: Action = (actionTx) => {
+      data.withTx(actionTx).key("foo").set(2);
+    };
+    runtime.scheduler.subscribe(
+      computation,
+      { reads: [], writes: [data.key("foo").getAsNormalizedFullLink()] },
+      {},
+    );
+
+    const initialDependents = runtime.scheduler.getDependents(computation);
+    expect(initialDependents.has(effect)).toBe(false);
+
+    runtime.scheduler.resubscribe(computation, {
+      reads: [],
+      writes: [
+        data.key("foo").getAsNormalizedFullLink(),
+        data.key("bar").getAsNormalizedFullLink(),
+      ],
+    });
+
+    const updatedDependents = runtime.scheduler.getDependents(computation);
+    expect(updatedDependents.has(effect)).toBe(true);
+  });
 });
 
 describe("pull-based scheduling", () => {
@@ -1785,6 +1862,49 @@ describe("pull-based scheduling", () => {
 
     // The computation should NOT have run again (pull mode doesn't schedule computations)
     expect(computationRuns).toBe(1);
+  });
+
+  it("should preserve writes when collecting dependencies from ReactivityLog", async () => {
+    runtime.scheduler.enablePullMode();
+    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+
+    const target = runtime.getCell<number>(
+      space,
+      "reactivity-log-writes-target",
+      undefined,
+      tx,
+    );
+    target.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let writerRuns = 0;
+    const writer: Action = (actionTx) => {
+      writerRuns++;
+      target.withTx(actionTx).send(1);
+    };
+
+    runtime.scheduler.subscribe(
+      writer,
+      {
+        reads: [],
+        writes: [target.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    await runtime.scheduler.idle();
+    expect(writerRuns).toBe(0);
+
+    // Force dependency collection to run against the stored ReactivityLog entry.
+    const schedulerInternal = runtime.scheduler as unknown as {
+      pendingDependencyCollection: Set<Action>;
+    };
+    schedulerInternal.pendingDependencyCollection.add(writer);
+    runtime.scheduler.queueExecution();
+    await runtime.scheduler.idle();
+
+    expect(writerRuns).toBe(0);
   });
 
   it("should schedule effects when affected by dirty computations", async () => {
@@ -4869,6 +4989,94 @@ describe("handler dependency pulling", () => {
 
     // Execution order should be: computed first, then handler
     expect(executionOrder).toEqual(["computed", "handler"]);
+  });
+
+  it("should not pull dirty computations when handler reads a different path", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "handler-path-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+
+    const data = runtime.getCell<{ foo: number; bar: number }>(
+      space,
+      "handler-path-data",
+      undefined,
+      tx,
+    );
+    data.set({ foo: 0, bar: 5 });
+
+    const eventStream = runtime.getCell<number>(
+      space,
+      "handler-path-events",
+      undefined,
+      tx,
+    );
+    eventStream.set(0);
+
+    const result = runtime.getCell<number>(
+      space,
+      "handler-path-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computedRuns = 0;
+    let handlerRuns = 0;
+
+    const computedAction: Action = (actionTx) => {
+      computedRuns++;
+      const val = source.withTx(actionTx).get();
+      data.withTx(actionTx).key("foo").send(val * 2);
+    };
+
+    runtime.scheduler.subscribe(
+      computedAction,
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        writes: [data.key("foo").getAsNormalizedFullLink()],
+      },
+      {},
+    );
+
+    const eventHandler: EventHandler = (handlerTx, event: number) => {
+      handlerRuns++;
+      const barValue = data.withTx(handlerTx).key("bar").get();
+      result.withTx(handlerTx).send(barValue + event);
+    };
+
+    const populateDependencies = (depTx: IExtendedStorageTransaction) => {
+      data.withTx(depTx).key("bar").get();
+    };
+
+    runtime.scheduler.addEventHandler(
+      eventHandler,
+      eventStream.getAsNormalizedFullLink(),
+      populateDependencies,
+    );
+
+    await runtime.scheduler.idle();
+
+    computedRuns = 0;
+    handlerRuns = 0;
+
+    // Mark the computation dirty by changing its source.
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+
+    runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 3);
+    await result.pull();
+
+    expect(handlerRuns).toBe(1);
+    expect(result.get()).toBe(8); // bar (5) + event (3)
+    expect(computedRuns).toBe(0);
   });
 
   it("should handle multiple dirty dependencies before running handler", async () => {
