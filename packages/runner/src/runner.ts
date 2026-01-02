@@ -394,97 +394,92 @@ export class Runner {
       return Promise.resolve(true);
     }
 
-    // No recipe ID means the process cell exists but has no recipe to run.
-    // This could be a detached cell or partially constructed charm.
-    const recipeId = processCell.key(TYPE).getRaw({
-      meta: ignoreReadForScheduling,
-    });
-    if (!recipeId) {
-      return Promise.resolve(true);
-    }
-
-    // Try sync lookup first
-    const recipe = this.runtime.recipeManager.recipeById(recipeId);
-    if (!recipe) {
-      // Async load, then finish setup
-      return this.runtime.recipeManager
-        .loadRecipe(recipeId, resultCell.space)
-        .then((loaded) =>
-          this.finishStart(resultCell, processCell, loaded, recipeId)
-        );
-    }
-
-    // Sync path - recipe available
-    return this.finishStart(resultCell, processCell, recipe, recipeId);
-  }
-
-  private finishStart<T = any>(
-    resultCell: Cell<T>,
-    processCell: Cell<any>,
-    recipeOrModule: Recipe | Module,
-    recipeId: string,
-  ): Promise<boolean> {
-    const key = this.getDocKey(resultCell);
-    // Check again after potential async load
-    if (this.cancels.has(key)) return Promise.resolve(true);
-
-    // Resolve module to recipe if needed
-    let recipe: Recipe;
-    if (isModule(recipeOrModule)) {
-      const module = recipeOrModule as Module;
-      recipe = {
-        argumentSchema: module.argumentSchema ?? {},
-        resultSchema: module.resultSchema ?? {},
-        result: { $alias: { path: ["internal"] } },
-        nodes: [
-          {
-            module,
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal"] } },
-          },
-        ],
-      } satisfies Recipe;
-    } else {
-      recipe = recipeOrModule as Recipe;
-    }
-
-    // Create cancel group
+    // Create cancel group early - before the $TYPE sink
     const [cancel, addCancel] = useCancelGroup();
     this.cancels.set(key, cancel);
     this.allCancels.add(cancel);
 
-    // Subscribe to $TYPE to watch for recipe changes
-    const typeCell = processCell.key(TYPE);
-    let currentRecipeId = recipeId;
-    addCancel(
-      typeCell.sink((newRecipeId) => {
-        const newId = newRecipeId as unknown as string | undefined;
-        if (newId && newId !== currentRecipeId) {
-          currentRecipeId = newId;
-          this.stop(resultCell);
-          this.start(resultCell); // Fire-and-forget restart
+    // Track recipe ID and node cancellation
+    let currentRecipeId: string | undefined;
+    let cancelNodes: Cancel | undefined;
+
+    // Helper to resolve module to recipe
+    const resolveToRecipe = (recipeOrModule: Recipe | Module): Recipe => {
+      if (isModule(recipeOrModule)) {
+        const module = recipeOrModule as Module;
+        return {
+          argumentSchema: module.argumentSchema ?? {},
+          resultSchema: module.resultSchema ?? {},
+          result: { $alias: { path: ["internal"] } },
+          nodes: [
+            {
+              module,
+              inputs: { $alias: { path: ["argument"] } },
+              outputs: { $alias: { path: ["internal"] } },
+            },
+          ],
+        } satisfies Recipe;
+      }
+      return recipeOrModule as Recipe;
+    };
+
+    // Helper to instantiate nodes for a recipe
+    const instantiateRecipe = (recipe: Recipe) => {
+      // Create new cancel group for nodes
+      const [nodeCancel, addNodeCancel] = useCancelGroup();
+      cancelNodes = nodeCancel;
+      addCancel(nodeCancel);
+
+      // Instantiate nodes
+      this.discoverAndCacheFunctions(recipe, new Set());
+      const tx = this.runtime.edit();
+      try {
+        for (const node of recipe.nodes) {
+          this.instantiateNode(
+            tx,
+            node.module,
+            node.inputs,
+            node.outputs,
+            processCell,
+            addNodeCancel,
+            recipe,
+          );
         }
+      } finally {
+        tx.commit();
+      }
+    };
+
+    // Watch $TYPE - called synchronously first time
+    const typeCell = processCell.key(TYPE);
+    addCancel(
+      typeCell.sink((typeValue) => {
+        const newRecipeId = typeValue as unknown as string | undefined;
+        if (!newRecipeId) return; // No recipe yet
+        if (newRecipeId === currentRecipeId) return; // Already handled
+
+        // Cancel previous nodes on recipe change
+        cancelNodes?.();
+        currentRecipeId = newRecipeId;
+
+        // Try sync lookup first
+        const resolved = this.runtime.recipeManager.recipeById(newRecipeId);
+        if (!resolved) {
+          // Async load
+          this.runtime.recipeManager
+            .loadRecipe(newRecipeId, resultCell.space)
+            .then((loaded) => {
+              // Check if recipe changed while loading
+              if (currentRecipeId !== newRecipeId) return;
+              instantiateRecipe(resolveToRecipe(loaded));
+            });
+          return;
+        }
+
+        // Sync path
+        instantiateRecipe(resolveToRecipe(resolved));
       }),
     );
-
-    // Instantiate nodes
-    this.discoverAndCacheFunctions(recipe, new Set());
-    const tx = this.runtime.edit();
-    try {
-      for (const node of recipe.nodes) {
-        this.instantiateNode(
-          tx,
-          node.module,
-          node.inputs,
-          node.outputs,
-          processCell,
-          addCancel,
-          recipe,
-        );
-      }
-    } finally {
-      tx.commit();
-    }
 
     return Promise.resolve(true);
   }
@@ -503,20 +498,20 @@ export class Runner {
       return;
     }
 
-    let recipe: Recipe | undefined = givenRecipe;
-    if (!recipe) {
-      const recipeId = processCell.withTx(tx).key(TYPE).getRaw({
-        meta: ignoreReadForScheduling,
-      });
-      if (!recipeId) {
-        console.warn("Cannot start: recipe id missing in process cell.");
-        return;
-      }
-      const resolved = this.runtime.recipeManager.recipeById(recipeId);
-      if (!resolved) throw new Error(`Unknown recipe: ${recipeId}`);
-      if (isModule(resolved)) {
-        const module = resolved as Module;
-        recipe = {
+    // Create cancel group early - before the $TYPE sink
+    const [cancel, addCancel] = useCancelGroup();
+    this.cancels.set(key, cancel);
+    this.allCancels.add(cancel);
+
+    // Track recipe ID and node cancellation
+    let currentRecipeId: string | undefined;
+    let cancelNodes: Cancel | undefined;
+
+    // Helper to resolve module to recipe
+    const resolveToRecipe = (recipeOrModule: Recipe | Module): Recipe => {
+      if (isModule(recipeOrModule)) {
+        const module = recipeOrModule as Module;
+        return {
           argumentSchema: module.argumentSchema ?? {},
           resultSchema: module.resultSchema ?? {},
           result: { $alias: { path: ["internal"] } },
@@ -528,46 +523,76 @@ export class Runner {
             },
           ],
         } satisfies Recipe;
-      } else {
-        recipe = resolved as Recipe;
       }
+      return recipeOrModule as Recipe;
+    };
+
+    // Helper to instantiate nodes for a recipe
+    const instantiateRecipe = (
+      recipe: Recipe,
+      useTx: IExtendedStorageTransaction,
+      commitTx: boolean,
+    ) => {
+      // Create new cancel group for nodes
+      const [nodeCancel, addNodeCancel] = useCancelGroup();
+      cancelNodes = nodeCancel;
+      addCancel(nodeCancel);
+
+      // Instantiate nodes
+      this.discoverAndCacheFunctions(recipe, new Set());
+      try {
+        for (const node of recipe.nodes) {
+          this.instantiateNode(
+            useTx,
+            node.module,
+            node.inputs,
+            node.outputs,
+            processCell,
+            addNodeCancel,
+            recipe,
+          );
+        }
+      } finally {
+        if (commitTx) useTx.commit();
+      }
+    };
+
+    // Get initial recipe ID and do initial setup
+    const initialRecipeId = processCell.withTx(tx).key(TYPE).getRaw({
+      meta: ignoreReadForScheduling,
+    }) as string | undefined;
+
+    if (initialRecipeId) {
+      currentRecipeId = initialRecipeId;
+      const initialRecipe = givenRecipe ??
+        (() => {
+          const resolved = this.runtime.recipeManager.recipeById(
+            initialRecipeId,
+          );
+          if (!resolved) throw new Error(`Unknown recipe: ${initialRecipeId}`);
+          return resolveToRecipe(resolved);
+        })();
+      instantiateRecipe(initialRecipe, tx, false);
     }
 
-    // Keep track of subscriptions to cancel them later
-    const [cancel, addCancel] = useCancelGroup();
-    this.cancels.set(key, cancel);
-    this.allCancels.add(cancel);
-
-    // Subscribe to $TYPE to watch for recipe changes
-    const recipeId = processCell.withTx(tx).key(TYPE).getRaw({
-      meta: ignoreReadForScheduling,
-    }) as string;
-    let currentRecipeId = recipeId;
+    // Watch $TYPE for future changes
+    const typeCell = processCell.key(TYPE);
     addCancel(
-      processCell.key(TYPE).sink((newRecipeId) => {
-        const newId = newRecipeId as unknown as string | undefined;
-        if (newId && newId !== currentRecipeId) {
-          currentRecipeId = newId;
-          this.stop(resultCell);
-          this.start(resultCell); // Fire-and-forget restart
-        }
+      typeCell.sink((newRecipeId) => {
+        if (!newRecipeId) return; // No recipe yet
+        if (newRecipeId === currentRecipeId) return; // No change
+
+        // Recipe changed - cancel previous nodes and re-instantiate
+        cancelNodes?.();
+        currentRecipeId = newRecipeId;
+
+        const resolved = this.runtime.recipeManager.recipeById(newRecipeId);
+        if (!resolved) throw new Error(`Unknown recipe: ${newRecipeId}`);
+        const recipe = resolveToRecipe(resolved);
+
+        instantiateRecipe(recipe, this.runtime.edit(), true);
       }),
     );
-
-    // Re-discover functions to be safe (idempotent)
-    this.discoverAndCacheFunctions(recipe, new Set());
-
-    for (const node of recipe.nodes) {
-      this.instantiateNode(
-        tx,
-        node.module,
-        node.inputs,
-        node.outputs,
-        processCell,
-        addCancel,
-        recipe,
-      );
-    }
   }
 
   /**
