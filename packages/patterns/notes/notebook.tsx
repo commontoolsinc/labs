@@ -231,7 +231,9 @@ const handleDropOntoCurrentNotebook = handler<
 
     const shouldRemove = (n: any) => {
       if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
-      if (n?.title && selectedTitles.includes(n.title)) return true;
+      if (!n?.noteId && n?.title && selectedTitles.includes(n.title)) {
+        return true;
+      }
       return false;
     };
 
@@ -345,7 +347,9 @@ const handleDropOntoNotebook = handler<
 
     const shouldRemove = (n: any) => {
       if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
-      if (n?.title && selectedTitles.includes(n.title)) return true;
+      if (!n?.noteId && n?.title && selectedTitles.includes(n.title)) {
+        return true;
+      }
       return false;
     };
 
@@ -602,7 +606,7 @@ const deleteSelectedNotes = handler<
   // Helper to check if item should be deleted
   const shouldDelete = (n: any) => {
     if (n?.noteId && noteIdsToDelete.includes(n.noteId)) return true;
-    if (n?.title && titlesToDelete.includes(n.title)) return true;
+    if (!n?.noteId && n?.title && titlesToDelete.includes(n.title)) return true;
     return false;
   };
 
@@ -749,7 +753,7 @@ const moveSelectedToNotebook = handler<
   // Helper to check if item should be removed
   const shouldRemove = (n: any) => {
     if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
-    if (n?.title && selectedTitles.includes(n.title)) return true;
+    if (!n?.noteId && n?.title && selectedTitles.includes(n.title)) return true;
     return false;
   };
 
@@ -829,7 +833,7 @@ const createNotebookFromPrompt = handler<
   // Helper to check if item should be removed
   const shouldRemove = (n: any) => {
     if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
-    if (n?.title && selectedTitles.includes(n.title)) return true;
+    if (!n?.noteId && n?.title && selectedTitles.includes(n.title)) return true;
     return false;
   };
 
