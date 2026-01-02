@@ -427,6 +427,13 @@ export class Runner {
     this.cancels.set(key, cancel);
     this.allCancels.add(cancel);
 
+    // Helper to clean up on error
+    const cleanup = () => {
+      this.cancels.delete(key);
+      this.allCancels.delete(cancel);
+      cancel();
+    };
+
     // Track recipe ID and node cancellation
     let currentRecipeId: string | undefined;
     let cancelNodes: Cancel | undefined;
@@ -484,6 +491,9 @@ export class Runner {
                 .then((loaded) => {
                   if (currentRecipeId !== newRecipeId) return;
                   instantiateRecipe(this.resolveToRecipe(loaded));
+                })
+                .catch((err) => {
+                  console.error(`Failed to load recipe ${newRecipeId}:`, err);
                 });
               return;
             }
@@ -502,9 +512,12 @@ export class Runner {
     }) as string | undefined;
 
     if (!initialRecipeId) {
-      // No recipe yet - set up watcher to handle when $TYPE is set
-      setupTypeWatcher();
-      return allowAsyncLoad ? Promise.resolve(true) : undefined;
+      cleanup();
+      const error = new Error("Cannot start: no recipe ID ($TYPE)");
+      if (allowAsyncLoad) {
+        return Promise.reject(error);
+      }
+      throw error;
     }
 
     // Determine initial recipe
@@ -529,8 +542,13 @@ export class Runner {
             instantiateRecipe(this.resolveToRecipe(loaded));
             setupTypeWatcher();
             return true;
+          })
+          .catch((err) => {
+            cleanup();
+            throw err;
           });
       }
+      cleanup();
       throw new Error(`Unknown recipe: ${initialRecipeId}`);
     }
 
@@ -548,16 +566,16 @@ export class Runner {
     if (this.cancels.has(key)) return Promise.resolve(true);
 
     // Subpath cells (created via .key()) have nothing to start - the parent
-    // charm is responsible for running. Just return success.
+    // charm is responsible for running.
     const link = resultCell.getAsNormalizedFullLink();
     if (link.path.length > 0) {
-      return Promise.resolve(true);
+      return Promise.resolve(false);
     }
 
-    // No process cell means this is just data, not a charm. Nothing to start.
+    // No process cell means setup() wasn't called or this isn't a charm.
     const processCell = resultCell.getSourceCell();
     if (!processCell) {
-      return Promise.resolve(true);
+      return Promise.reject(new Error("Cannot start: no process cell"));
     }
 
     return this.startCore(resultCell, processCell, {
@@ -575,8 +593,7 @@ export class Runner {
 
     const processCell = resultCell.withTx(tx).getSourceCell();
     if (!processCell) {
-      console.warn("Cannot start: process cell missing. Did you call setup()?");
-      return;
+      throw new Error("Cannot start: no process cell");
     }
 
     this.startCore(resultCell, processCell, { tx, givenRecipe });
