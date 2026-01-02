@@ -1,5 +1,5 @@
 import { ReactiveController, ReactiveControllerHost } from "lit";
-import { type Cell, isCell } from "@commontools/runner";
+import { type Cell, type ChangeGroup, isCell } from "@commontools/runner";
 import {
   InputTimingController,
   type InputTimingOptions,
@@ -51,6 +51,11 @@ export interface CellControllerOptions<T> {
    */
   onFocus?: () => void;
   onBlur?: () => void;
+
+  /**
+   * Optional change group identifier for internal Cell edits/sinks
+   */
+  changeGroup?: ChangeGroup;
 }
 
 /**
@@ -123,6 +128,7 @@ export class CellController<T> implements ReactiveController {
       triggerUpdate: options.triggerUpdate ?? true,
       onFocus: options.onFocus || (() => {}),
       onBlur: options.onBlur || (() => {}),
+      changeGroup: options.changeGroup,
     };
 
     // Create timing controller if timing options are provided
@@ -253,9 +259,10 @@ export class CellController<T> implements ReactiveController {
 
   private defaultSetValue(value: Cell<T> | T, newValue: T, _oldValue: T): void {
     if (isCell(value)) {
-      const tx = value.runtime.edit();
+      const tx = this._createEditTx(value);
       value.withTx(tx).set(newValue);
       tx.commit();
+      this._requestUpdateAfterInternalChange();
     } else {
       // For non-Cell values, we can't directly modify them
       // This should be handled by the component's property system
@@ -265,12 +272,33 @@ export class CellController<T> implements ReactiveController {
 
   private _setupCellSubscription(): void {
     if (isCell(this._currentValue)) {
-      this._cellUnsubscribe = this._currentValue.sink(() => {
+      const handler = () => {
         if (this.options.triggerUpdate) {
           this.host.requestUpdate();
         }
-      });
+      };
+      if (this.options.changeGroup !== undefined) {
+        this._cellUnsubscribe = this._currentValue.sink(handler, {
+          changeGroup: this.options.changeGroup,
+        });
+      } else {
+        this._cellUnsubscribe = this._currentValue.sink(handler);
+      }
     }
+  }
+
+  protected _createEditTx(value: Cell<T>) {
+    if (this.options.changeGroup === undefined) {
+      return value.runtime.edit();
+    }
+    return value.runtime.edit({ changeGroup: this.options.changeGroup });
+  }
+
+  protected _requestUpdateAfterInternalChange() {
+    if (this.options.changeGroup === undefined || !this.options.triggerUpdate) {
+      return;
+    }
+    this.host.requestUpdate();
   }
 
   private _cleanupCellSubscription(): void {
@@ -359,9 +387,10 @@ export class ArrayCellController<T> extends CellController<T[]> {
       // Use Cell's native push method for efficient array mutation
       // Must wrap in transaction like other Cell operations
       const cell = this.getCell()!;
-      const tx = cell.runtime.edit();
+      const tx = this._createEditTx(cell);
       cell.withTx(tx).push(item);
       tx.commit();
+      this._requestUpdateAfterInternalChange();
     } else {
       // Fallback for plain arrays
       const currentArray = this.getValue();
@@ -389,10 +418,11 @@ export class ArrayCellController<T> extends CellController<T[]> {
         // Use Cell's native key() method for direct element mutation
         // Must wrap in transaction like other Cell operations
         const cell = this.getCell()!;
-        const tx = cell.runtime.edit();
+        const tx = this._createEditTx(cell);
         const itemCell = cell.key(index);
         itemCell.withTx(tx).set(newItem);
         tx.commit();
+        this._requestUpdateAfterInternalChange();
       } else {
         // Fallback for plain arrays
         const newArray = [...currentArray];

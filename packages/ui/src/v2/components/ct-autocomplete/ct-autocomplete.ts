@@ -347,8 +347,10 @@ export class CTAutocomplete extends BaseElement {
 
     // Cell controller for value binding
     // Note: Don't call requestUpdate() in onChange - cell controller already does it
+    private _changeGroup = crypto.randomUUID();
     private _cellController = createCellController<string | string[]>(this, {
       timing: { strategy: "debounce", delay: 50 },
+      changeGroup: this._changeGroup,
       onChange: (newValue, oldValue) => {
         this.emit("ct-change", { value: newValue, oldValue });
       },

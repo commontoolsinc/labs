@@ -245,7 +245,9 @@ export class CTFileInput extends BaseElement {
   @property({ attribute: false })
   declare theme?: CTTheme;
 
+  protected _changeGroup = crypto.randomUUID();
   protected _cellController = createArrayCellController<FileData>(this, {
+    changeGroup: this._changeGroup,
     onChange: (_newFiles: FileData[], _oldFiles: FileData[]) => {
       this.requestUpdate();
     },

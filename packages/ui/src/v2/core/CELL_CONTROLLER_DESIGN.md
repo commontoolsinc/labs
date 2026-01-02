@@ -67,6 +67,7 @@ interface CellControllerOptions<T> {
   triggerUpdate?: boolean; // Auto-update host
   onFocus?: () => void; // Focus handling
   onBlur?: () => void; // Blur handling
+  changeGroup?: ChangeGroup; // Optional internal update grouping
 }
 ```
 

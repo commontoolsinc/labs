@@ -40,6 +40,8 @@ export type {
   URI,
 };
 
+export type ChangeGroup = unknown;
+
 /**
  * Base interface for storage errors. These are lightweight objects (not Error
  * instances) used in Result types for better performance. Error instances are
@@ -425,6 +427,10 @@ export type StorageTransactionStatus =
  * invariants have being invalidated, or reject and fail commit.
  */
 export interface IStorageTransaction {
+  /**
+   * Optional change group used to associate commits with scheduler actions.
+   */
+  changeGroup?: ChangeGroup;
   /**
    * The transaction journal containing all read and write activities.
    * Provides access to transaction operations and dependency tracking.

@@ -1134,6 +1134,47 @@ describe("asCell", () => {
     expect(values).toEqual([42, 300]); // Got called again
   });
 
+  it("does not trigger sink for changes in the same change group", async () => {
+    const c = runtime.getCell<number>(
+      space,
+      "sink-change-group",
+      undefined,
+      tx,
+    );
+    c.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const changeGroup = {};
+    const values: number[] = [];
+    const cancel = c.sink((value) => {
+      values.push(value);
+    }, { changeGroup });
+
+    await runtime.idle();
+    expect(values).toEqual([0]);
+
+    const sameGroupTx = runtime.edit({ changeGroup });
+    c.withTx(sameGroupTx).set(1);
+    await sameGroupTx.commit();
+    await runtime.idle();
+    expect(values).toEqual([0]);
+
+    const otherGroupTx = runtime.edit({ changeGroup: {} });
+    c.withTx(otherGroupTx).set(2);
+    await otherGroupTx.commit();
+    await runtime.idle();
+    expect(values).toEqual([0, 2]);
+
+    const noGroupTx = runtime.edit();
+    c.withTx(noGroupTx).set(3);
+    await noGroupTx.commit();
+    await runtime.idle();
+    expect(values).toEqual([0, 2, 3]);
+
+    cancel();
+  });
+
   it("should trigger sink when linked cell changes and is read during callback", async () => {
     // This test verifies that cell reads happening DURING the sink callback
     // are properly tracked for reactivity. The fix moves txToReactivityLog()

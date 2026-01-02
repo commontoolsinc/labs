@@ -87,12 +87,14 @@ export class CTTabs extends BaseElement {
   declare value: Cell<string> | string;
   declare orientation: "horizontal" | "vertical";
 
+  private _changeGroup = crypto.randomUUID();
   // Track last known value to detect external cell changes
   private _lastKnownValue: string = "";
 
   /* ---------- Cell controller for value binding ---------- */
   private _cellController = createStringCellController(this, {
     timing: { strategy: "immediate" }, // Tab changes should be immediate
+    changeGroup: this._changeGroup,
     onChange: (newValue: string, oldValue: string) => {
       // Track this internal change so render() doesn't double-update
       this._lastKnownValue = newValue;

@@ -71,6 +71,7 @@ import {
   type NormalizedLink,
 } from "./link-utils.ts";
 import type {
+  ChangeGroup,
   IExtendedStorageTransaction,
   IReadOptions,
 } from "./storage/interface.ts";
@@ -83,6 +84,10 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { getLogger } from "@commontools/utils/logger";
 
 const logger = getLogger("cell");
+
+type SinkOptions = {
+  changeGroup?: ChangeGroup;
+};
 
 /**
  * Deeply traverse a value to access all properties.
@@ -166,7 +171,10 @@ declare module "@commontools/api" {
     ): Cell<T>;
     asSchemaFromLinks<T = unknown>(): Cell<T>;
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
-    sink(callback: (value: Readonly<T>) => Cancel | undefined | void): Cancel;
+    sink(
+      callback: (value: Readonly<T>) => Cancel | undefined | void,
+      options?: SinkOptions,
+    ): Cancel;
     sync(): Promise<Cell<T>> | Cell<T>;
     pull(): Promise<Readonly<T>>;
     getAsQueryResult<Path extends PropertyKey[]>(
@@ -1061,7 +1069,10 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     ) as unknown as Cell<T>;
   }
 
-  sink(callback: (value: Readonly<T>) => Cancel | undefined | void): Cancel {
+  sink(
+    callback: (value: Readonly<T>) => Cancel | undefined | void,
+    options: SinkOptions = {},
+  ): Cancel {
     // Check if this is a stream
     if (this.isStream()) {
       // Stream behavior: add listener
@@ -1075,7 +1086,12 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     } else {
       // Regular cell behavior: subscribe to changes
       if (!this.synced) this.sync(); // No await, just kicking this off
-      return subscribeToReferencedDocs(callback, this.runtime, this.link);
+      return subscribeToReferencedDocs(
+        callback,
+        this.runtime,
+        this.link,
+        options,
+      );
     }
   }
 
@@ -1488,6 +1504,7 @@ function subscribeToReferencedDocs<T>(
   callback: (value: T) => Cancel | undefined | void,
   runtime: Runtime,
   link: NormalizedFullLink,
+  options: SinkOptions = {},
 ): Cancel {
   let cleanup: Cancel | undefined | void;
 
@@ -1530,7 +1547,13 @@ function subscribeToReferencedDocs<T>(
 
   // Mark as effect since sink() is a side-effectful consumer (FRP effect/sink)
   // Use resubscribe because we've already run it once above
-  runtime.scheduler.resubscribe(action, log, { isEffect: true });
+  const resubscribeOptions = {
+    isEffect: true,
+    ...(options.changeGroup !== undefined && {
+      changeGroup: options.changeGroup,
+    }),
+  };
+  runtime.scheduler.resubscribe(action, log, resubscribeOptions);
 
   return () => {
     runtime.scheduler.unsubscribe(action);

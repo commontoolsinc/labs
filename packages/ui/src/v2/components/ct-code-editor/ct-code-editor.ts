@@ -163,6 +163,7 @@ export class CTCodeEditor extends BaseElement {
   private _themeComp = new Compartment();
   private _cleanupFns: Array<() => void> = [];
   private _mentionableUnsub: (() => void) | null = null;
+  private _changeGroup = crypto.randomUUID();
 
   // Transaction annotation to mark Cell-originated updates.
   // This is the idiomatic CodeMirror 6 way to distinguish programmatic
@@ -171,37 +172,19 @@ export class CTCodeEditor extends BaseElement {
   // feedback loop: Cell → Editor → updateListener → setValue → Cell...
   private static _cellSyncAnnotation = Annotation.define<boolean>();
 
-  // Flag indicating user is actively typing. When true, external Cell
-  // updates are DISCARDED (not queued) to preserve user content.
-  // Set to true when user types, cleared when debounce callback executes
-  // or on blur/value property change.
-  //
-  // This implements "USER TYPING WINS" behavior with these semantics:
-  //   - During active typing, ALL external Cell updates are silently discarded
-  //   - After debounce (500ms of no typing), external updates apply normally
-  //   - User's content is ALWAYS preserved during active editing
-  //
-  // LIMITATIONS (intentional tradeoffs for single-user UX):
-  //   - NOT suitable for real-time collaboration (external edits are lost)
-  //   - Two browser tabs editing same Cell: last to stop typing wins
-  //   - No conflict notification or merge UI - updates are silently dropped
-  //   - Backend modifications during typing (e.g., auto-format) are discarded
-  //
-  // For collaborative editing, consider:
-  //   - @codemirror/collab (Operational Transform with central authority)
-  //   - Yjs/Y.Text (CRDT for automatic conflict-free merging)
-  private _isTyping: boolean = false;
-
   private _cellController = createStringCellController(this, {
     timing: {
       strategy: "debounce",
       delay: 500,
     },
+    setValue: (value, newValue) => {
+      if (isCell(value)) {
+        const tx = value.runtime.edit({ changeGroup: this._changeGroup });
+        value.withTx(tx).set(newValue);
+        tx.commit();
+      }
+    },
     onChange: (newValue: string, oldValue: string) => {
-      // Debounce has fired - user's content is now committed to Cell.
-      // Clear typing flag so external updates can apply again.
-      this._isTyping = false;
-
       this.emit("ct-change", {
         value: newValue,
         oldValue,
@@ -655,14 +638,8 @@ export class CTCodeEditor extends BaseElement {
       return;
     }
 
-    // DISCARD external updates while user is actively typing.
-    // This implements "user typing wins" behavior - the user's content
-    // takes priority over any external Cell updates during active typing.
-    // The _isTyping flag is set when user types and cleared when the
-    // debounce callback executes (committing user content to Cell).
-    if (this._isTyping) {
-      return; // Simply discard, don't queue
-    }
+    // External updates override local edits, so drop any pending debounced write.
+    this._cellController.cancel();
 
     // Apply external update to editor, preserving cursor position.
     // Clamp cursor to new document length in case content is shorter.
@@ -706,7 +683,7 @@ export class CTCodeEditor extends BaseElement {
           if (originalTriggerUpdate) {
             this.requestUpdate();
           }
-        });
+        }, { changeGroup: this._changeGroup });
       }
     }
   }
@@ -737,10 +714,6 @@ export class CTCodeEditor extends BaseElement {
   }
 
   private _cleanup(): void {
-    // Reset typing flag to prevent stale state if component is reconnected.
-    // Without this, _isTyping could remain true from a previous session,
-    // causing external Cell updates to be incorrectly discarded.
-    this._isTyping = false;
     this._cleanupCellSyncHandler();
     if (this._mentionableUnsub) {
       this._mentionableUnsub();
@@ -761,8 +734,6 @@ export class CTCodeEditor extends BaseElement {
     if (changedProperties.has("value")) {
       // Cancel pending debounced updates from old Cell to prevent race condition
       this._cellController.cancel();
-      // Reset typing flag so new Cell's content syncs immediately
-      this._isTyping = false;
       // Clean up old Cell subscription and set up new one
       this._cleanupCellSyncHandler();
       this._cellController.bind(this.value);
@@ -942,10 +913,6 @@ export class CTCodeEditor extends BaseElement {
           (tr) => tr.annotation(CTCodeEditor._cellSyncAnnotation),
         );
         if (update.docChanged && !this.readonly && !isCellSync) {
-          // Mark user as actively typing. This flag blocks external Cell
-          // updates until the debounce callback fires, implementing
-          // "user typing wins" behavior.
-          this._isTyping = true;
           const value = update.state.doc.toString();
           this.setValue(value);
           // Keep $mentioned current as user types
@@ -961,7 +928,6 @@ export class CTCodeEditor extends BaseElement {
         },
         blur: () => {
           this._cellController.onBlur();
-          this._isTyping = false; // Reset typing state when leaving editor
           this.emit("ct-blur");
           return false;
         },
