@@ -450,16 +450,6 @@ export class Runner {
       }
     };
 
-    // Get initial recipe ID
-    const initialRecipeId = processCell.key(TYPE).getRaw({
-      meta: ignoreReadForScheduling,
-    }) as string | undefined;
-
-    if (!initialRecipeId) {
-      // No recipe yet - just return, sink will handle when $TYPE is set
-      return Promise.resolve(true);
-    }
-
     // Helper to set up the $TYPE watcher
     const setupTypeWatcher = () => {
       const typeCell = processCell.key(TYPE);
@@ -489,6 +479,17 @@ export class Runner {
         }),
       );
     };
+
+    // Get initial recipe ID
+    const initialRecipeId = processCell.key(TYPE).getRaw({
+      meta: ignoreReadForScheduling,
+    }) as string | undefined;
+
+    if (!initialRecipeId) {
+      // No recipe yet - set up watcher to handle when $TYPE is set
+      setupTypeWatcher();
+      return Promise.resolve(true);
+    }
 
     // Try sync lookup first for initial recipe
     const initialResolved = this.runtime.recipeManager.recipeById(
