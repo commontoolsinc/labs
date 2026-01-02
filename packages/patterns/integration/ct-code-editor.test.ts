@@ -84,6 +84,9 @@ describe("ct-code-editor cursor stability", () => {
       { timeout: 3000, delay: 50 },
     );
 
+    // Short delay
+    await new Promise((r) => setTimeout(r, 300));
+
     // Clear for next test
     await charm.result.set("", ["content"]);
     await waitFor(
