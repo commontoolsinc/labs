@@ -74,7 +74,7 @@ describe("nested counter integration test", () => {
     });
 
     // Verify via direct operations that the nested structure works
-    assertEquals(charm.result.get(["value"]), 0);
+    assertEquals(await charm.result.get(["value"]), 0);
   });
 
   it("should click the increment button and update the counter", async () => {
@@ -86,7 +86,7 @@ describe("nested counter integration test", () => {
 
     // Wait for charm result update
     await waitFor(async () => {
-      return await charm.result.get(["value"]) === 1;
+      return await await charm.result.get(["value"]) === 1;
     });
     await waitForCounter(page, "Counter is the 1st number");
   });
@@ -99,7 +99,7 @@ describe("nested counter integration test", () => {
 
     // Verify we can read the value back via operations
     assertEquals(
-      charm.result.get(["value"]),
+      await charm.result.get(["value"]),
       5,
       "Value should be 5 in backend",
     );

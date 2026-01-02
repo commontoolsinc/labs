@@ -414,13 +414,13 @@ export async function inspectCharm(
   const id = charm.id;
   const name = charm.name();
   const recipeName = (await charm.getRecipeMeta()).recipeName;
-  const source = charm.input.get() as Readonly<unknown>;
-  const result = charm.result.get() as Readonly<unknown>;
-  const readingFrom = charm.readingFrom().map((charm) => ({
+  const source = await charm.input.get() as Readonly<unknown>;
+  const result = await charm.result.get() as Readonly<unknown>;
+  const readingFrom = (await charm.readingFrom()).map((charm) => ({
     id: charm.id,
     name: charm.name(),
   }));
-  const readBy = charm.readBy().map((charm) => ({
+  const readBy = (await charm.readBy()).map((charm) => ({
     id: charm.id,
     name: charm.name(),
   }));
@@ -477,9 +477,9 @@ export async function getCellValue(
   const charms = new CharmsController(manager);
   const charm = await charms.get(config.charm, false);
   if (options?.input) {
-    return charm.input.get(path);
+    return await charm.input.get(path);
   } else {
-    return charm.result.get(path);
+    return await charm.result.get(path);
   }
 }
 

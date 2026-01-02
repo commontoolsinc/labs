@@ -1,4 +1,4 @@
-import { createSession, Identity, isDID } from "@commontools/identity";
+import { createSession, DID, Identity, isDID } from "@commontools/identity";
 import {
   Runtime,
   RuntimeTelemetry,
@@ -38,7 +38,6 @@ export class RuntimeInternals extends EventTarget {
   #space: string; // The MemorySpace DID
   #spaceRootPatternId?: string;
   #isHomeSpace: boolean;
-  #patternCache: PatternCache;
 
   private constructor(
     cc: CharmsController,
@@ -58,7 +57,6 @@ export class RuntimeInternals extends EventTarget {
     this.#telemetry = telemetry;
     this.#telemetry.addEventListener("telemetry", this.#onTelemetry);
     this.#telemetryMarkers = [];
-    this.#patternCache = new PatternCache(this.#cc);
   }
 
   telemetry(): RuntimeTelemetryMarkerResult[] {
@@ -83,27 +81,42 @@ export class RuntimeInternals extends EventTarget {
   async getSpaceRootPattern(): Promise<CharmController<NameSchema>> {
     this.#check();
     if (this.#spaceRootPatternId) {
-      return this.getPattern(this.#spaceRootPatternId);
+      const { controller, ready } = this.getPattern(this.#spaceRootPatternId);
+      await ready; // Wait for it to be running
+      return controller;
     }
     const pattern = await PatternFactory.getOrCreate(
       this.#cc,
       this.#isHomeSpace ? "home" : "space-root",
     );
     this.#spaceRootPatternId = pattern.id;
-    this.#patternCache.add(pattern);
     return pattern;
   }
 
-  async getPattern(id: string): Promise<CharmController<NameSchema>> {
+  /**
+   * Get a pattern by ID. Returns immediately with the controller.
+   * The `ready` promise resolves when the charm is running, or rejects on error.
+   */
+  getPattern(
+    id: string,
+  ): { controller: CharmController<NameSchema>; ready: Promise<boolean> } {
     this.#check();
-    const cached = this.#patternCache.get(id);
-    if (cached) {
-      return cached;
-    }
+    const runtime = this.runtime();
+    const cell = runtime.getCellFromEntityId(this.#space as DID, { "/": id });
+    const controller = new CharmController(
+      this.#cc.manager(),
+      cell.asSchema(nameSchema),
+    );
 
-    const pattern = await this.#cc.get(id, true, nameSchema);
-    this.#patternCache.add(pattern);
-    return pattern;
+    // Start the charm - handles sync, recipe loading, and running
+    const ready = runtime.start(cell);
+
+    // Fire-and-forget: track as recent charm
+    this.#cc.manager().trackRecentCharm(cell).catch((err) => {
+      console.error("[getPattern] Failed to track recent charm:", err);
+    });
+
+    return { controller, ready };
   }
 
   async dispose() {
@@ -309,35 +322,5 @@ export class RuntimeInternals extends EventTarget {
       session.space,
       isHomeSpace,
     );
-  }
-}
-
-// Caches patterns, and updates recent charms data upon access.
-class PatternCache {
-  private cache: Map<string, CharmController<NameSchema>> = new Map();
-  private cc: CharmsController;
-
-  constructor(cc: CharmsController) {
-    this.cc = cc;
-  }
-
-  add(pattern: CharmController<NameSchema>) {
-    this.cache.set(pattern.id, pattern);
-    // Fire-and-forget: trackRecentCharm updates the recent charms list
-    // but is not critical for navigation - let it run in background
-    this.cc.manager().trackRecentCharm(pattern.getCell()).catch((err) => {
-      console.error("[PatternCache] Failed to track recent charm:", err);
-    });
-  }
-
-  get(id: string): CharmController<NameSchema> | undefined {
-    const cached = this.cache.get(id);
-    if (cached) {
-      // Fire-and-forget: trackRecentCharm is not critical for navigation
-      this.cc.manager().trackRecentCharm(cached.getCell()).catch((err) => {
-        console.error("[PatternCache] Failed to track recent charm:", err);
-      });
-      return cached;
-    }
   }
 }

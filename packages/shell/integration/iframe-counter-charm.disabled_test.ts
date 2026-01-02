@@ -63,7 +63,7 @@ async function getCharmResult(page: Page): Promise<{ count: number }> {
   }
 
   // Use the element handle to evaluate in its context
-  return await appView.evaluate((element: XAppView) => {
+  return await appView.evaluate(async (element: XAppView) => {
     // Access the private _patterns property
     const activeCharmTask = element._patterns;
 
@@ -82,7 +82,7 @@ async function getCharmResult(page: Page): Promise<{ count: number }> {
     }
 
     // Get the result from the charm controller
-    const result = charmController.result.get();
+    const result = await charmController.result.get();
 
     return result as { count: number };
   });

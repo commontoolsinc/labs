@@ -75,7 +75,7 @@ describe("ct-render integration test", () => {
     });
 
     // Verify via direct operations that the ct-render structure works
-    const value = charm.result.get(["value"]);
+    const value = await charm.result.get(["value"]);
     assertEquals(value, 0);
   });
 
@@ -87,9 +87,9 @@ describe("ct-render integration test", () => {
     await clickNthButton(page, "[data-ct-button]", 1);
 
     await waitFor(async () => {
-      return await charm.result.get(["value"]) === 1;
+      return await await charm.result.get(["value"]) === 1;
     });
-    assertEquals(charm.result.get(["value"]), 1);
+    assertEquals(await charm.result.get(["value"]), 1);
   });
 
   it("should update counter value via direct operations and verify UI", async () => {
@@ -99,7 +99,7 @@ describe("ct-render integration test", () => {
 
     // Verify we can read the value back via operations
     assertEquals(
-      charm.result.get(["value"]),
+      await charm.result.get(["value"]),
       5,
       "Value should be 5 in backend",
     );

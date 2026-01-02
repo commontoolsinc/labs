@@ -66,7 +66,7 @@ describe("fetch data integration test", () => {
       await waitForTitle("next.js", page);
 
       // Also verify via direct operations
-      const repoUrl = charm.input.get(["repoUrl"]);
+      const repoUrl = await charm.input.get(["repoUrl"]);
       assertEquals(repoUrl, "https://github.com/vercel/next.js");
     },
   });
@@ -98,7 +98,7 @@ describe("fetch data integration test", () => {
       await waitForTitle("labs", page);
 
       // Also verify via direct operations
-      const repoUrl = charm.input.get(["repoUrl"]);
+      const repoUrl = await charm.input.get(["repoUrl"]);
       assertEquals(repoUrl, "https://github.com/commontoolsinc/labs");
     },
   });
