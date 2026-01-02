@@ -101,6 +101,7 @@ export class CTRender extends BaseElement {
   private _cleanup?: () => void;
   private _isRenderInProgress = false;
   private _hasRendered = false;
+  private _startPromise?: Promise<boolean>;
   private _cellValueUnsubscribe?: () => void;
 
   // Debug helpers
@@ -222,12 +223,13 @@ export class CTRender extends BaseElement {
       throw new Error("Render container not found");
     }
 
-    await cell.sync();
-
     // Resolve UI variant with fallback to default [UI]
     let uiCell: Cell<unknown> = cell;
 
     if (this.variant && this.variant !== "default") {
+      // only await when using variants
+      await this._startPromise;
+      await cell.sync();
       const variantKey = VARIANT_TO_KEY[this.variant];
       if (variantKey) {
         const variantCell = cell.key(variantKey);
@@ -245,43 +247,6 @@ export class CTRender extends BaseElement {
     this._cleanup = render(this._renderContainer, uiCell as Cell<VNode>);
   }
 
-  /**
-   * Check if a cell is a subpath (created via .key()) vs a root cell.
-   *
-   * NOTE: This is a STRUCTURAL HEURISTIC, not a principled solution.
-   *
-   * The underlying problem is that Cells don't distinguish between:
-   *   1. "Async-loading undefined" - root cell from fetchAndRunPattern that is
-   *      temporarily undefined because data hasn't loaded yet
-   *   2. "Intentionally undefined" - subpath cell where the pattern explicitly
-   *      sets the property to undefined (e.g., sidebarUI: undefined)
-   *
-   * We use path.length as a proxy: root cells have path=[], subpath cells have
-   * path=["key"]. This works but conflates WHERE the cell points with WHETHER
-   * it's loading, which are independent concepts.
-   *
-   * PRINCIPLED SOLUTION: The codebase already has a pattern for async state:
-   * `{ pending: boolean, result: T, error: unknown }` used by fetchData,
-   * fetchProgram, compileAndRun, generateText, etc.
-   *
-   * A proper fix would:
-   *   1. Have async operations (fetchAndRunPattern) return an AsyncCellRef:
-   *      `{ cell: Cell<T>, pending: Cell<boolean>, error?: Cell<unknown> }`
-   *   2. ct-render accepts either Cell or AsyncCellRef
-   *   3. Check `pending` explicitly instead of inferring from undefined
-   *
-   * Or at the Cell level:
-   *   - Add `cell.isPending()` / `cell.pendingState()` methods
-   *   - Async builtins set pending state on result cells
-   *
-   * This aligns with React Suspense, Vue Suspense, and Svelte await blocks -
-   * all make loading state EXPLICIT rather than inferring from data values.
-   */
-  private _isSubPath(cell: Cell<unknown>): boolean {
-    const link = cell.getAsNormalizedFullLink();
-    return Array.isArray(link?.path) && link.path.length > 0;
-  }
-
   private async _renderCell() {
     this._log("_renderCell called");
 
@@ -297,34 +262,6 @@ export class CTRender extends BaseElement {
       return;
     }
 
-    const isSubPath = this._isSubPath(this.cell);
-
-    // For root charm cells (not subpaths), check if value is defined.
-    // If not, wait for subscription to trigger - this handles async loading
-    // where the Cell exists but the charm data hasn't loaded yet.
-    //
-    // For subpath cells (like .key("fabUI") or .key("sidebarUI")), we should
-    // render immediately even if the value is undefined/null - the pattern
-    // may intentionally set these properties to undefined (e.g., sidebarUI: undefined).
-    //
-    // See _isSubPath() comment for why this is a heuristic, not a principled solution.
-    if (!isSubPath) {
-      let cellValue: unknown;
-      try {
-        cellValue = this.cell.get();
-      } catch {
-        cellValue = undefined;
-      }
-
-      if (cellValue === undefined || cellValue === null) {
-        this._log(
-          "root cell value is undefined/null, waiting for async load",
-        );
-        // Don't set _hasRendered - subscription will trigger render when value becomes available
-        return;
-      }
-    }
-
     // Mark render as in progress
     this._isRenderInProgress = true;
     try {
@@ -332,8 +269,12 @@ export class CTRender extends BaseElement {
       this._cleanupPreviousRender();
 
       // start() handles all cases: syncs if needed, loads recipe, runs nodes.
-      // For subpaths or cells without recipes, it's a no-op.
-      await this.cell.runtime.start(this.cell);
+      this._startPromise = this.cell.runtime.start(this.cell).catch(
+        () => {
+          /* silently ignore errors as this might not have been a proper pattern instance, and that's ok */
+          return true;
+        },
+      );
 
       await this._renderUiFromCell(this.cell);
 
