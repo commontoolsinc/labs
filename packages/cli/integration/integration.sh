@@ -15,7 +15,7 @@ replace () {
 
 if [ -n "$CT_CLI_INTEGRATION_USE_LOCAL" ]; then
  ct() {
-   deno task cli "$@"
+   deno task ct "$@"
  }
 fi
 
