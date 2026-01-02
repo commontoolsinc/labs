@@ -68,18 +68,19 @@ describe("ct-code-editor cursor stability", () => {
     await page.waitForSelector("ct-code-editor", { strategy: "pierce" });
   });
 
-  // Warmup test: ensures Cell<->editor sync is stable before real tests.
-  // The first test after page load can race with subscription setup.
-  it("should sync Cell value to editor (warmup)", async () => {
+  it("should sync Cell value to editor", async () => {
     const page = shell.page();
-    const warmupText = "warmup";
+    const text = "initial";
+
+    // Clear any initial state first and wait for editor to show empty
+    await clearEditor(page);
 
     // Set Cell value
-    await charm.result.set(warmupText, ["content"]);
+    await charm.result.set(text, ["content"]);
 
     // Wait for editor to reflect it
     await waitFor(
-      async () => (await getEditorContent(page)) === warmupText,
+      async () => (await getEditorContent(page)) === text,
       { timeout: 3000, delay: 50 },
     );
 
