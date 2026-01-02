@@ -1368,6 +1368,10 @@ export class XSchedulerGraph extends LitElement {
     }
 
     this.isPullMode = pullMode;
+
+    // Request a new snapshot so the controller caches the updated pullMode value.
+    // Without this, toggling the debugger off/on would reset to the stale mode.
+    this.debuggerController?.requestGraphSnapshot();
   }
 
   private handleEdgeClick(e: MouseEvent, edge: LayoutEdge): void {

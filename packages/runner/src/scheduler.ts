@@ -1425,6 +1425,17 @@ export class Scheduler {
    */
   enablePullMode(): void {
     this.pullMode = true;
+
+    // Rebuild reverse dependency graph (dependents map) from current dependencies.
+    // In push mode, processRun() doesn't update dependents, so the map may be stale.
+    // We need accurate dependents for markDirty() propagation and scheduleAffectedEffects().
+    for (const action of [...this.effects, ...this.computations]) {
+      const log = this.dependencies.get(action);
+      if (log) {
+        this.updateDependents(action, log);
+      }
+    }
+
     this.runtime.telemetry.submit({
       type: "scheduler.mode.change",
       pullMode: true,
