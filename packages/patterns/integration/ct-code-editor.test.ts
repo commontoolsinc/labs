@@ -1401,7 +1401,7 @@ async function resetEditorState(
   await waitFor(
     async () => {
       const editorContent = await getEditorContent(page);
-      const cellValue = charmController.result.get(["content"]);
+      const cellValue = await charmController.result.get(["content"]);
       return editorContent === "" && cellValue === "";
     },
     { timeout: 2000, delay: 50 },
