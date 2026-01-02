@@ -261,7 +261,7 @@ describe("ct-render subpath handling", () => {
 
   it("should verify previewUI exists in the pattern", () => {
     // Verify previewUI exists (a valid subpath property)
-    const previewUI = await charm.result.get(["previewUI"]);
+    const previewUI = charm.result.get(["previewUI"]);
     assertEquals(
       typeof previewUI,
       "object",

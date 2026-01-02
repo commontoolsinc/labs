@@ -144,7 +144,6 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for debounce to complete and Cell to update
     await waitFor(
-      // deno-lint-ignore require-await
       async () => await charm.result.get(["content"]) === textToType,
       { timeout: DEBOUNCE_DELAY + 2000, delay: 50 },
     );
@@ -193,7 +192,6 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for debounce to complete (only fires ONCE after last character)
     await waitFor(
-      // deno-lint-ignore require-await
       async () => await charm.result.get(["content"]) === fullText,
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
@@ -219,7 +217,6 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for Cell to sync
     await waitFor(
-      // deno-lint-ignore require-await
       async () => await charm.result.get(["content"]) === initialText,
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
@@ -244,7 +241,6 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for debounce
     await waitFor(
-      // deno-lint-ignore require-await
       async () => await charm.result.get(["content"]) === expectedText,
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
@@ -1166,7 +1162,6 @@ describe("ct-code-editor cursor stability", () => {
 
     // Wait for second debounce
     await waitFor(
-      // deno-lint-ignore require-await
       async () => await charm.result.get(["content"]) === "FirstSecond",
       { timeout: DEBOUNCE_DELAY + 1000 },
     );
