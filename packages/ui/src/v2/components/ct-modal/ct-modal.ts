@@ -13,7 +13,7 @@
  * @attr {boolean} prevent-scroll - Prevent body scroll when open
  * @attr {string} label - Accessible aria-label
  *
- * @prop {Cell<boolean>|boolean} open - Visibility state (supports both Cell and plain value)
+ * @prop {CellHandle<boolean>|boolean} open - Visibility state (supports both Cell and plain value)
  *
  * @fires ct-modal-open - Modal is opening
  * @fires ct-modal-close - Modal requests close (detail: { reason })
@@ -52,7 +52,6 @@
 import { html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { consume } from "@lit/context";
-import { type Cell } from "@commontools/runner";
 import { BaseElement } from "../../core/base-element.ts";
 import { createBooleanCellController } from "../../core/cell-controller.ts";
 import {
@@ -62,13 +61,14 @@ import {
   type ModalRegistration,
 } from "../modal-context.ts";
 import { modalStyles } from "./styles.ts";
+import { CellHandle } from "@commontools/runtime-client";
 
 export class CTModal extends BaseElement {
   static override styles = [BaseElement.baseStyles, modalStyles];
 
   /** Visibility state - supports both Cell<boolean> and plain boolean */
   @property({ attribute: false })
-  declare open: Cell<boolean> | boolean;
+  declare open: CellHandle<boolean> | boolean;
 
   /** Allow dismiss via backdrop click, Escape key, and X button */
   @property({ type: Boolean, reflect: true })
@@ -108,12 +108,9 @@ export class CTModal extends BaseElement {
   /** Previously focused element for restoration */
   private _previousActiveElement: HTMLElement | null = null;
 
-  private _changeGroup = crypto.randomUUID();
-
   /** Boolean cell controller for open state */
   private _openCellController = createBooleanCellController(this, {
     timing: { strategy: "immediate" },
-    changeGroup: this._changeGroup,
   });
 
   /** Track if modal was open in previous render */
@@ -138,7 +135,7 @@ export class CTModal extends BaseElement {
    * Set the open state (write to Cell if bound)
    */
   private _setOpenValue(value: boolean): void {
-    if (this._openCellController.isCell()) {
+    if (this._openCellController.hasCell()) {
       this._openCellController.setValue(value);
     }
     // For plain boolean, we just emit the event - parent handles state

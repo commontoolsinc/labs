@@ -543,7 +543,8 @@ export class Runtime {
 
   async healthCheck(): Promise<boolean> {
     try {
-      const res = await fetch(new URL("/_health", this.apiUrl));
+      const url = new URL("/_health", this.apiUrl);
+      const res = await fetch(url);
       return res.ok;
     } catch (_) {
       return false;

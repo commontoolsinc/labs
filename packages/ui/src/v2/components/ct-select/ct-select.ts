@@ -9,7 +9,7 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import { areLinksSame, type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 
 /**
@@ -25,7 +25,7 @@ import { createCellController } from "../../core/cell-controller.ts";
  * @attr {string}  placeholder – Placeholder text rendered as a disabled option
  *
  * @prop {Array<SelectItem>} items – Data used to generate options
- * @prop {Cell<unknown>|Cell<unknown[]>|unknown|unknown[]} value – Selected value(s) - supports both Cell and plain values
+ * @prop {CellHandle<unknown>|CellHandle<unknown[]>|unknown|unknown[]} value – Selected value(s) - supports both Cell and plain values
  *
  * @fires ct-change – detail: { value, oldValue, items }
  * @fires change – detail: { value, oldValue, items }
@@ -120,7 +120,6 @@ export class CTSelect extends BaseElement {
     ];
 
     /* ---------- Refs & helpers ---------- */
-    private _changeGroup = crypto.randomUUID();
     private _select!: HTMLSelectElement;
     /** Mapping from stringified option key -> SelectItem */
     private _keyMap = new Map<string, SelectItem>();
@@ -128,7 +127,6 @@ export class CTSelect extends BaseElement {
     /* ---------- Cell controller for value binding ---------- */
     private _cellController = createCellController<unknown | unknown[]>(this, {
       timing: { strategy: "immediate" }, // Select changes should be immediate
-      changeGroup: this._changeGroup,
       onChange: (newValue, oldValue) => {
         // Sync cell value changes to DOM
         this.applyValueToDom();
@@ -168,8 +166,12 @@ export class CTSelect extends BaseElement {
     declare size: number;
     declare name: string;
     declare placeholder: string;
-    declare items: SelectItem[];
-    declare value: Cell<unknown> | Cell<unknown[]> | unknown | unknown[];
+    declare items: SelectItem[] | undefined;
+    declare value:
+      | CellHandle<unknown>
+      | CellHandle<unknown[]>
+      | unknown
+      | unknown[];
 
     constructor() {
       super();
@@ -399,3 +401,9 @@ export class CTSelect extends BaseElement {
   }
 
   globalThis.customElements.define("ct-select", CTSelect);
+
+  // @TODO(runtime-worker-refactor)
+  // needs typed, not sure what these are
+  function areLinksSame(_a: any, _b: any): boolean {
+    return false;
+  }

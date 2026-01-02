@@ -2,7 +2,7 @@ import { css, html, type TemplateResult } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import type { ButtonSize, ButtonVariant } from "../ct-button/ct-button.ts";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
 import { createArrayCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
 import {
@@ -235,7 +235,7 @@ export class CTFileInput extends BaseElement {
   maxSizeBytes?: number;
 
   @property({ type: Array })
-  files: Cell<FileData[]> | FileData[] = [];
+  files: CellHandle<FileData[]> | FileData[] = [];
 
   @property({ type: Boolean })
   protected loading = false;
@@ -245,9 +245,7 @@ export class CTFileInput extends BaseElement {
   @property({ attribute: false })
   declare theme?: CTTheme;
 
-  protected _changeGroup = crypto.randomUUID();
   protected _cellController = createArrayCellController<FileData>(this, {
-    changeGroup: this._changeGroup,
     onChange: (_newFiles: FileData[], _oldFiles: FileData[]) => {
       this.requestUpdate();
     },

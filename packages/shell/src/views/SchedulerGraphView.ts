@@ -3,7 +3,7 @@ import { css, html, LitElement, svg as svgTag, TemplateResult } from "lit";
 import { property, query, state } from "lit/decorators.js";
 import dagre from "dagre";
 import type { DebuggerController } from "../lib/debugger-controller.ts";
-import type { SchedulerGraphNode } from "@commontools/runner";
+import type { SchedulerGraphNode } from "@commontools/runtime-client";
 
 interface LayoutNode {
   id: string;
@@ -1361,11 +1361,14 @@ export class XSchedulerGraph extends LitElement {
     const rt = runtime.runtime();
     if (!rt) return;
 
+    // TODO(runtime-worker-refactor)
+    /*
     if (pullMode) {
       rt.scheduler.enablePullMode();
     } else {
       rt.scheduler.disablePullMode();
     }
+    */
 
     this.isPullMode = pullMode;
 

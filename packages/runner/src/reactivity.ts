@@ -1,17 +1,5 @@
 import { Cancel, isCancel, noOp } from "./cancel.ts";
-import type { ChangeGroup } from "./storage/interface.ts";
-
-export type SinkableCell<T = unknown> = {
-  sink: (
-    callback: (value: T) => Cancel | undefined | void,
-    options?: { changeGroup?: ChangeGroup },
-  ) => Cancel;
-};
-
-export function isSinkableCell(value: unknown): value is SinkableCell {
-  return typeof value === "object" && !!value && "sink" in value &&
-    typeof value.sink === "function";
-}
+import { Cell, isCell } from "./cell.ts";
 
 /**
  * Effect that runs a callback when the value changes. The callback is also
@@ -23,10 +11,10 @@ export function isSinkableCell(value: unknown): value is SinkableCell {
  * @returns {function} - A function to cancel the effect.
  */
 export const effect = <T>(
-  value: SinkableCell<T> | T,
+  value: Cell<T> | T,
   callback: (value: T) => Cancel | undefined | void,
 ): Cancel => {
-  if (isSinkableCell(value)) {
+  if (isCell(value)) {
     return value.sink(callback);
   } else {
     const cancel = callback(value as T);
