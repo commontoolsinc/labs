@@ -494,7 +494,11 @@ export class Runner {
                   instantiateRecipe(this.resolveToRecipe(loaded));
                 })
                 .catch((err) => {
-                  logger.error("recipe-load-error", `Failed to load recipe ${newRecipeId}`, err);
+                  logger.error(
+                    "recipe-load-error",
+                    `Failed to load recipe ${newRecipeId}`,
+                    err,
+                  );
                 });
               return;
             }
