@@ -573,23 +573,32 @@ export class Runner {
       : resultCell;
 
     const key = this.getDocKey(rootCell);
-    // Check again after potential sync
+    // Check if already started
     if (this.cancels.has(key)) return Promise.resolve(true);
 
-    // No process cell means setup() wasn't called or this isn't a charm.
-    // We need to check after ensuring data is synced.
-    const processCell = rootCell.getSourceCell();
-    if (!processCell) {
-      // Data might not be synced yet - sync and retry
-      if (rootCell.getRaw() === undefined) {
-        return Promise.resolve(rootCell.sync()).then(() => this.doStart(resultCell));
-      }
-      return Promise.reject(new Error("Cannot start: no process cell"));
+    // Try to get process cell synchronously first (when data is already local)
+    let processCell = rootCell.getSourceCell();
+    if (processCell) {
+      return this.startCore(rootCell, processCell, {
+        allowAsyncLoad: true,
+      }) as Promise<boolean>;
     }
 
-    return this.startCore(rootCell, processCell, {
-      allowAsyncLoad: true,
-    }) as Promise<boolean>;
+    // Process cell not available locally - sync and retry.
+    // getSourceCell() kicks off a sync but doesn't await it.
+    return Promise.resolve(rootCell.sync()).then(() => {
+      // Check again after sync in case another start happened
+      if (this.cancels.has(key)) return true;
+
+      processCell = rootCell.getSourceCell();
+      if (!processCell) {
+        throw new Error("Cannot start: no process cell");
+      }
+
+      return this.startCore(rootCell, processCell, {
+        allowAsyncLoad: true,
+      }) as Promise<boolean>;
+    });
   }
 
   private startWithTx<T = any>(
