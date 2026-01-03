@@ -577,8 +577,13 @@ export class Runner {
     if (this.cancels.has(key)) return Promise.resolve(true);
 
     // No process cell means setup() wasn't called or this isn't a charm.
+    // We need to check after ensuring data is synced.
     const processCell = rootCell.getSourceCell();
     if (!processCell) {
+      // Data might not be synced yet - sync and retry
+      if (rootCell.getRaw() === undefined) {
+        return Promise.resolve(rootCell.sync()).then(() => this.doStart(resultCell));
+      }
       return Promise.reject(new Error("Cannot start: no process cell"));
     }
 
