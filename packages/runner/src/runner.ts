@@ -35,6 +35,7 @@ import {
 import { resolveLink } from "./link-resolution.ts";
 import {
   areNormalizedLinksSame,
+  type CellLink,
   createSigilLinkFromParsedLink,
   isCellLink,
   isSigilLink,
@@ -61,6 +62,7 @@ import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
+import { isLink } from "@commontools/runner";
 
 const logger = getLogger("runner");
 
@@ -361,19 +363,11 @@ export class Runner {
    * Returns a Promise that resolves to true on success, or rejects with an error.
    * Runs synchronously when data is available (important for tests).
    */
-  start<T = any>(resultCell: Cell<T>): Promise<boolean> {
-    const key = this.getDocKey(resultCell);
-    if (this.cancels.has(key)) return Promise.resolve(true); // Already started
-
-    // Sync result cell if empty, then continue
-    if (resultCell.getRaw() === undefined) {
-      return Promise.resolve(resultCell.sync()).then(() =>
-        this.doStart(resultCell)
-      );
-    }
-
-    // Data available - run synchronously
-    return this.doStart(resultCell);
+  start<T = any>(
+    resultCell: Cell<T>,
+    seenCells: Set<Cell> = new Set(),
+  ): Promise<boolean> {
+    return this.doStart(resultCell, seenCells);
   }
 
   /** Convert a module to recipe format */
@@ -471,10 +465,9 @@ export class Runner {
 
     // Helper to set up the $TYPE watcher
     const setupTypeWatcher = () => {
-      const typeCell = processCell.key(TYPE);
+      const typeCell = processCell.key(TYPE).asSchema({ type: "string" });
       addCancel(
-        typeCell.sink((typeValue) => {
-          const newRecipeId = typeValue as unknown as string | undefined;
+        typeCell.sink((newRecipeId) => {
           if (!newRecipeId) return;
           if (newRecipeId === currentRecipeId) return; // No change
 
@@ -484,28 +477,24 @@ export class Runner {
 
           const resolved = this.runtime.recipeManager.recipeById(newRecipeId);
           if (!resolved) {
-            if (allowAsyncLoad) {
-              // Async load for recipe change after initial start.
-              // Errors are logged here since there's no caller to propagate to.
-              this.runtime.recipeManager
-                .loadRecipe(newRecipeId, resultCell.space)
-                .then((loaded) => {
-                  if (currentRecipeId !== newRecipeId) return;
-                  instantiateRecipe(this.resolveToRecipe(loaded));
-                })
-                .catch((err) => {
-                  logger.error(
-                    "recipe-load-error",
-                    `Failed to load recipe ${newRecipeId}`,
-                    err,
-                  );
-                });
-              return;
-            }
-            throw new Error(`Unknown recipe: ${newRecipeId}`);
+            // Async load for recipe change after initial start.
+            // Errors are logged here since there's no caller to propagate to.
+            this.runtime.recipeManager
+              .loadRecipe(newRecipeId, resultCell.space)
+              .then((loaded) => {
+                if (currentRecipeId !== newRecipeId) return;
+                instantiateRecipe(loaded);
+              })
+              .catch((err) => {
+                logger.error(
+                  "recipe-load-error",
+                  `Failed to load recipe ${newRecipeId}`,
+                  err,
+                );
+              });
+          } else {
+            instantiateRecipe(resolved);
           }
-
-          instantiateRecipe(this.resolveToRecipe(resolved));
         }),
       );
     };
@@ -528,6 +517,17 @@ export class Runner {
     // Determine initial recipe
     if (givenRecipe) {
       currentRecipeId = initialRecipeId;
+      if (
+        this.runtime.recipeManager.registerRecipe(givenRecipe) !==
+          currentRecipeId
+      ) {
+        const error = new Error("Recipe ID mismatch");
+        cleanup();
+        if (allowAsyncLoad) {
+          return Promise.reject(error);
+        }
+        throw error;
+      }
       instantiateRecipe(givenRecipe, tx);
       setupTypeWatcher();
       return allowAsyncLoad ? Promise.resolve(true) : undefined;
@@ -544,7 +544,7 @@ export class Runner {
           .loadRecipe(initialRecipeId, resultCell.space)
           .then((loaded) => {
             currentRecipeId = initialRecipeId;
-            instantiateRecipe(this.resolveToRecipe(loaded));
+            instantiateRecipe(loaded);
             setupTypeWatcher();
             return true;
           })
@@ -565,30 +565,53 @@ export class Runner {
     return allowAsyncLoad ? Promise.resolve(true) : undefined;
   }
 
-  private doStart<T = any>(resultCell: Cell<T>): Promise<boolean> {
-    // For subpath cells, get the root cell
+  /**
+   * Internal start implementation with cascade of checks.
+   * Each check: if it fails and needs async work, return a promise that
+   * resolves the missing piece and retries.
+   */
+  private doStart<T = any>(
+    resultCell: Cell<T>,
+    seenCells: Set<Cell> = new Set(),
+  ): Promise<boolean> {
+    // Step 1: For subpath cells, resolve to root cell
     const link = resultCell.getAsNormalizedFullLink();
     const rootCell = link.path.length > 0
       ? this.runtime.getCellFromLink({ ...link, path: [] })
       : resultCell;
 
     const key = this.getDocKey(rootCell);
-    // Check again after potential sync
+
+    // Step 2: Already started? Return success
     if (this.cancels.has(key)) return Promise.resolve(true);
 
-    // No process cell means setup() wasn't called or this isn't a charm.
-    // We need to check after ensuring data is synced.
+    // Step 3: Not synced yet? Sync and retry
+    // Once getRaw() has a value, all properties including source are synced.
+    if (rootCell.getRaw() === undefined) {
+      return Promise.resolve(rootCell.sync()).then(() =>
+        this.doStart(resultCell, seenCells)
+      );
+    }
+
+    // Step 4: If data is a link to another cell, follow it
+    if (isLink(rootCell.getRaw())) {
+      const nextCell = this.runtime.getCellFromLink(
+        rootCell.getRaw() as CellLink,
+      );
+      if (seenCells.has(nextCell)) {
+        return Promise.reject(new Error("Circular link detected"));
+      }
+      seenCells.add(nextCell);
+      return this.doStart(nextCell, seenCells);
+    }
+
+    // Step 5: Get process cell - required for a charm
     const processCell = rootCell.getSourceCell();
     if (!processCell) {
-      // If getRaw() is undefined, the cell hasn't synced yet - sync and retry.
-      // Once getRaw() has a value, the source cell (if any) would already be
-      // synced, so a missing processCell means there truly isn't one.
-      if (rootCell.getRaw() === undefined) {
-        return Promise.resolve(rootCell.sync()).then(() => this.doStart(resultCell));
-      }
       return Promise.reject(new Error("Cannot start: no process cell"));
     }
 
+    // Step 6: Start the recipe
     return this.startCore(rootCell, processCell, {
       allowAsyncLoad: true,
     }) as Promise<boolean>;
