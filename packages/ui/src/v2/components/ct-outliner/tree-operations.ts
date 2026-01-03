@@ -1,14 +1,14 @@
 import type { MutableNode, Node, NodeCreationOptions, Tree } from "./types.ts";
-import { Cell, ID } from "@commontools/runner";
+import { CellHandle, ID } from "@commontools/runtime-client";
 
 /**
  * Executes a mutation on a Cell within a transaction
  * @param cell - The Cell to mutate
  * @param mutator - Function that performs the mutation
  */
-async function mutateCell<T>(
-  cell: Cell<T>,
-  mutator: (cell: Cell<T>) => void,
+async function mutateCellHandle<T>(
+  cell: CellHandle<T>,
+  mutator: (cell: CellHandle<T>) => void,
 ): Promise<void> {
   const tx = cell.runtime.edit();
   mutator(cell.withTx(tx));
@@ -152,12 +152,12 @@ export const TreeOperations = {
   },
 
   /**
-   * Find the parent node containing a child (for Cell<Node>)
+   * Find the parent node containing a child (for CellHandle<Node>)
    */
   findParentNodeCell(
-    node: Cell<Node>,
-    targetNode: Cell<Node>,
-  ): Cell<Node> | null {
+    node: CellHandle<Node>,
+    targetNode: CellHandle<Node>,
+  ): CellHandle<Node> | null {
     const nodeChildren = node.key("children");
     const childrenArray = nodeChildren.getAsQueryResult();
 
@@ -201,7 +201,7 @@ export const TreeOperations = {
   /**
    * Get the index of a node in its parent's children array
    */
-  getNodeIndex(parent: Cell<Node>, targetNode: Cell<Node>): number {
+  getNodeIndex(parent: CellHandle<Node>, targetNode: CellHandle<Node>): number {
     const parentChildren = parent.key("children");
     const childrenArray = parentChildren.getAsQueryResult();
 
@@ -219,12 +219,12 @@ export const TreeOperations = {
    * Navigate to a node's children Cell by path
    */
   getChildrenCellByPath(
-    rootCell: Cell<Node>,
+    rootCell: CellHandle<Node>,
     nodePath: number[],
-  ): Cell<Node[]> {
-    let childrenCell = rootCell.key("children") as Cell<Node[]>;
+  ): CellHandle<Node[]> {
+    let childrenCell = rootCell.key("children") as CellHandle<Node[]>;
     for (const pathIndex of nodePath) {
-      childrenCell = childrenCell.key(pathIndex).key("children") as Cell<
+      childrenCell = childrenCell.key(pathIndex).key("children") as CellHandle<
         Node[]
       >;
     }
@@ -281,8 +281,8 @@ export const TreeOperations = {
    * @returns Promise<boolean> indicating success
    */
   async moveNodeUpCell(
-    rootCell: Cell<Node>,
-    nodeCell: Cell<Node>,
+    rootCell: CellHandle<Node>,
+    nodeCell: CellHandle<Node>,
     _nodePath: number[],
   ): Promise<boolean> {
     const parentNode = TreeOperations.findParentNodeCell(rootCell, nodeCell);
@@ -295,7 +295,7 @@ export const TreeOperations = {
       return false; // Cannot move node up: already at first position
     }
 
-    const parentChildrenCell = parentNode.key("children") as Cell<Node[]>;
+    const parentChildrenCell = parentNode.key("children") as CellHandle<Node[]>;
 
     // V-DOM style: swap positions directly
     await mutateCell(parentChildrenCell, (cell) => {
@@ -322,8 +322,8 @@ export const TreeOperations = {
    * @returns Promise<boolean> indicating success
    */
   async moveNodeDownCell(
-    rootCell: Cell<Node>,
-    nodeCell: Cell<Node>,
+    rootCell: CellHandle<Node>,
+    nodeCell: CellHandle<Node>,
     _nodePath: number[],
   ): Promise<boolean> {
     const parentNode = TreeOperations.findParentNodeCell(rootCell, nodeCell);
@@ -337,7 +337,7 @@ export const TreeOperations = {
       return false; // Cannot move node down: already at last position
     }
 
-    const parentChildrenCell = parentNode.key("children") as Cell<Node[]>;
+    const parentChildrenCell = parentNode.key("children") as CellHandle<Node[]>;
 
     // V-DOM style: swap positions directly
     await mutateCell(parentChildrenCell, (cell) => {
@@ -408,8 +408,8 @@ export const TreeOperations = {
    * @returns Promise resolving to new focus path or null
    */
   async deleteNodeCell(
-    rootCell: Cell<Node>,
-    nodeCell: Cell<Node>,
+    rootCell: CellHandle<Node>,
+    nodeCell: CellHandle<Node>,
     nodePath: number[],
   ): Promise<number[] | null> {
     const parentNode = TreeOperations.findParentNodeCell(rootCell, nodeCell);
@@ -424,10 +424,10 @@ export const TreeOperations = {
       return null;
     }
 
-    const parentChildrenCell = parentNode.key("children") as Cell<Node[]>;
+    const parentChildrenCell = parentNode.key("children") as CellHandle<Node[]>;
 
     // Get the children to promote before modifying anything
-    const nodeChildrenCell = nodeCell.key("children") as Cell<Node[]>;
+    const nodeChildrenCell = nodeCell.key("children") as CellHandle<Node[]>;
     const childrenToPromote = nodeChildrenCell.getAsQueryResult();
 
     await mutateCell(parentChildrenCell, (cell) => {
@@ -476,7 +476,7 @@ export const TreeOperations = {
    * @returns Promise resolving to new focus path or null if operation failed
    */
   async indentNodeCell(
-    rootCell: Cell<Node>,
+    rootCell: CellHandle<Node>,
     nodePath: number[],
   ): Promise<number[] | null> {
     // Check if we can indent (must not be first child)
@@ -497,7 +497,7 @@ export const TreeOperations = {
 
     // Navigate to sibling's children Cell
     const siblingChildrenCell = parentChildrenCell.key(previousSiblingIndex)
-      .key("children") as Cell<Node[]>;
+      .key("children") as CellHandle<Node[]>;
 
     // Get both current states before any modifications
     const parentChildren = parentChildrenCell.getAsQueryResult();
@@ -529,7 +529,7 @@ export const TreeOperations = {
    * @returns Promise resolving to new focus path or null if operation failed
    */
   async outdentNodeCell(
-    rootCell: Cell<Node>,
+    rootCell: CellHandle<Node>,
     nodePath: number[],
   ): Promise<number[] | null> {
     // Check if we can outdent (must have grandparent)

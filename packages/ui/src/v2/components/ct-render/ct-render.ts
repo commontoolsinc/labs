@@ -1,8 +1,10 @@
 import { css, html, PropertyValues } from "lit";
+import { createRef, type Ref, ref } from "lit/directives/ref.js";
+import { state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { render } from "@commontools/html";
-import type { Cell } from "@commontools/runner";
-import { type VNode } from "@commontools/runner";
+import type { CellHandle } from "@commontools/runtime-client";
+import { type VNode } from "@commontools/runtime-client";
 import "../ct-loader/ct-loader.ts";
 
 // Set to true to enable debug logging
@@ -33,7 +35,7 @@ export type UIVariant =
  * Maps variant names to the property key to look for on the charm.
  * null means use the default [UI] rendering via render().
  */
-const VARIANT_TO_KEY: Record<UIVariant, string | null> = {
+const _VARIANT_TO_KEY: Record<UIVariant, VariantCellKey | null> = {
   default: null,
   preview: "previewUI",
   thumbnail: "thumbnailUI",
@@ -43,12 +45,20 @@ const VARIANT_TO_KEY: Record<UIVariant, string | null> = {
   settings: "settingsUI",
 };
 
+type VariantCellKey =
+  | "previewUI"
+  | "thumbnailUI"
+  | "sidebarUI"
+  | "fabUI"
+  | "embeddedUI"
+  | "settingsUI";
+
 /**
  * CTRender - Renders a cell that contains a charm recipe with UI
  *
  * @element ct-render
  *
- * @property {Cell} cell - The cell containing the charm to render
+ * @property {CellHandle} cell - The cell containing the charm to render
  * @property {UIVariant} variant - UI variant to render: "default" | "preview" | "thumbnail" | "sidebar" | "fab" | "settings" | "embedded"
  *   Each variant maps to a property on the charm (e.g., "preview" -> "previewUI", "embedded" -> "embeddedUI").
  *   Falls back to default [UI] if the variant property doesn't exist.
@@ -86,6 +96,13 @@ export class CTRender extends BaseElement {
       justify-content: center;
       width: 100%;
       height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+
+    :host {
+      position: relative;
     }
   `;
 
@@ -94,20 +111,24 @@ export class CTRender extends BaseElement {
     variant: { type: String },
   };
 
-  declare cell: Cell;
+  declare cell: CellHandle;
   declare variant: UIVariant | undefined;
 
-  private _renderContainer?: HTMLDivElement;
+  // Use Lit ref directive for stable container reference across re-renders
+  private _containerRef: Ref<HTMLDivElement> = createRef();
+
   private _cleanup?: () => void;
-  private _isRenderInProgress = false;
+  // Track the cell ID we're currently rendering to detect stale renders
+  private _renderingCellId?: string;
+
+  @state()
   private _hasRendered = false;
-  private _cellValueUnsubscribe?: () => void;
 
   // Debug helpers
   private _instanceId = DEBUG_LOGGING
     ? Math.random().toString(36).substring(7)
     : "";
-  private _log(...args: any[]) {
+  private _log(...args: unknown[]) {
     if (DEBUG_LOGGING) {
       console.log(`[ct-render ${this._instanceId}]`, ...args);
     }
@@ -115,7 +136,7 @@ export class CTRender extends BaseElement {
 
   protected override render() {
     // Note: ct-cell-context is now auto-injected by the renderer when
-    // traversing [UI] with a Cell, so we don't need to wrap here
+    // traversing [UI] with a CellHandle, so we don't need to wrap here
     return html`
       ${!this._hasRendered
         ? html`
@@ -124,20 +145,8 @@ export class CTRender extends BaseElement {
           </div>
         `
         : null}
-      <div class="render-container"></div>
+      <div class="render-container" ${ref(this._containerRef)}></div>
     `;
-  }
-
-  protected override firstUpdated() {
-    this._log("firstUpdated called");
-    this._renderContainer = this.shadowRoot?.querySelector(
-      ".render-container",
-    ) as HTMLDivElement;
-
-    // Skip initial render if cell is already set - updated() will handle it
-    if (!this.cell) {
-      this._renderCell();
-    }
   }
 
   protected override updated(changedProperties: PropertyValues) {
@@ -153,7 +162,7 @@ export class CTRender extends BaseElement {
       let shouldRerender = false;
 
       if (cellChanged) {
-        const oldCell = changedProperties.get("cell") as Cell | undefined;
+        const oldCell = changedProperties.get("cell") as CellHandle | undefined;
         // Only re-render if the cell actually changed
         shouldRerender = !oldCell || !this.cell || !oldCell.equals(this.cell);
         this._log("cell property changed, should rerender:", shouldRerender);
@@ -162,9 +171,6 @@ export class CTRender extends BaseElement {
           // Reset render state when cell changes - ensures we'll render the new cell
           this._hasRendered = false;
         }
-
-        // Set up subscription to cell value changes
-        this._setupCellValueSubscription();
       }
 
       if (variantChanged) {
@@ -184,170 +190,54 @@ export class CTRender extends BaseElement {
     }
   }
 
-  /**
-   * Subscribe to cell value changes to handle async loading.
-   * This enables ct-render to work with cells that start undefined
-   * and later transition to a valid charm (e.g., from fetchAndRunPattern).
-   */
-  private _setupCellValueSubscription() {
-    // Clean up any existing subscription
-    this._cleanupCellValueSubscription();
-
-    if (!this.cell) {
-      this._log("no cell to subscribe to");
-      return;
-    }
-
-    this._log("setting up cell value subscription");
-
-    this._cellValueUnsubscribe = this.cell.sink((value) => {
-      this._log(
-        "cell value changed:",
-        value ? "truthy" : "falsy",
-        "hasRendered:",
-        this._hasRendered,
-      );
-
-      // Trigger render if we have a value but haven't rendered yet.
-      // This handles async loading where the cell starts undefined.
-      if (value && !this._hasRendered && !this._isRenderInProgress) {
-        this._log("triggering render due to cell value becoming available");
-        this._renderCell();
-      }
-    });
-  }
-
-  private async _renderUiFromCell(cell: Cell<unknown>) {
-    if (!this._renderContainer) {
-      throw new Error("Render container not found");
-    }
-
-    await cell.sync();
-
-    // Resolve UI variant with fallback to default [UI]
-    let uiCell: Cell<unknown> = cell;
-
-    if (this.variant && this.variant !== "default") {
-      const variantKey = VARIANT_TO_KEY[this.variant];
-      if (variantKey) {
-        const variantCell = cell.key(variantKey);
-        const variantValue = variantCell?.get();
-        if (variantValue !== undefined && variantValue !== null) {
-          uiCell = variantCell;
-          this._log("using variant:", this.variant, "->", variantKey);
-        } else {
-          this._log("variant not found, falling back to [UI]:", this.variant);
-        }
-      }
-    }
-
-    this._log("rendering UI");
-    this._cleanup = render(this._renderContainer, uiCell as Cell<VNode>);
-  }
-
-  /**
-   * Check if a cell is a subpath (created via .key()) vs a root cell.
-   *
-   * NOTE: This is a STRUCTURAL HEURISTIC, not a principled solution.
-   *
-   * The underlying problem is that Cells don't distinguish between:
-   *   1. "Async-loading undefined" - root cell from fetchAndRunPattern that is
-   *      temporarily undefined because data hasn't loaded yet
-   *   2. "Intentionally undefined" - subpath cell where the pattern explicitly
-   *      sets the property to undefined (e.g., sidebarUI: undefined)
-   *
-   * We use path.length as a proxy: root cells have path=[], subpath cells have
-   * path=["key"]. This works but conflates WHERE the cell points with WHETHER
-   * it's loading, which are independent concepts.
-   *
-   * PRINCIPLED SOLUTION: The codebase already has a pattern for async state:
-   * `{ pending: boolean, result: T, error: unknown }` used by fetchData,
-   * fetchProgram, compileAndRun, generateText, etc.
-   *
-   * A proper fix would:
-   *   1. Have async operations (fetchAndRunPattern) return an AsyncCellRef:
-   *      `{ cell: Cell<T>, pending: Cell<boolean>, error?: Cell<unknown> }`
-   *   2. ct-render accepts either Cell or AsyncCellRef
-   *   3. Check `pending` explicitly instead of inferring from undefined
-   *
-   * Or at the Cell level:
-   *   - Add `cell.isPending()` / `cell.pendingState()` methods
-   *   - Async builtins set pending state on result cells
-   *
-   * This aligns with React Suspense, Vue Suspense, and Svelte await blocks -
-   * all make loading state EXPLICIT rather than inferring from data values.
-   */
-  private _isSubPath(cell: Cell<unknown>): boolean {
-    const link = cell.getAsNormalizedFullLink();
-    return Array.isArray(link?.path) && link.path.length > 0;
-  }
-
   private async _renderCell() {
-    this._log("_renderCell called");
+    const container = this._containerRef.value;
+    const cellId = this.cell.id();
+    this._renderingCellId = cellId;
 
-    // Prevent concurrent renders
-    if (this._isRenderInProgress) {
-      this._log("render already in progress, skipping");
+    this._log(`_renderCell called: ${cellId}`);
+
+    if (!container || !this.cell) {
       return;
     }
 
-    // Early exits
-    if (!this._renderContainer || !this.cell) {
-      this._log("missing container or cell, returning");
-      return;
-    }
+    this._cleanupRender();
 
-    const isSubPath = this._isSubPath(this.cell);
-
-    // For root charm cells (not subpaths), check if value is defined.
-    // If not, wait for subscription to trigger - this handles async loading
-    // where the Cell exists but the charm data hasn't loaded yet.
-    //
-    // For subpath cells (like .key("fabUI") or .key("sidebarUI")), we should
-    // render immediately even if the value is undefined/null - the pattern
-    // may intentionally set these properties to undefined (e.g., sidebarUI: undefined).
-    //
-    // See _isSubPath() comment for why this is a heuristic, not a principled solution.
-    if (!isSubPath) {
-      let cellValue: unknown;
-      try {
-        cellValue = this.cell.get();
-      } catch {
-        cellValue = undefined;
+    try {
+      // If not a subpath, need to run the charm first
+      if (!isSubPath(this.cell)) {
+        await this.cell.runtime().runCharmSynced(cellId);
       }
 
-      if (cellValue === undefined || cellValue === null) {
-        this._log(
-          "root cell value is undefined/null, waiting for async load",
-        );
-        // Don't set _hasRendered - subscription will trigger render when value becomes available
+      // Check if cell changed during async operation
+      if (this._renderingCellId !== cellId) {
+        this._log("cell changed during render setup, aborting");
         return;
       }
-    }
 
-    // Mark render as in progress
-    this._isRenderInProgress = true;
-    try {
-      // Clean up any previous render
-      this._cleanupPreviousRender();
+      await this.cell.deepSync(20);
 
-      // start() handles all cases: syncs if needed, loads recipe, runs nodes.
-      // For subpaths or cells without recipes, it's a no-op.
-      await this.cell.runtime.start(this.cell);
+      if (this._renderingCellId !== cellId) {
+        this._log("cell changed during sync, aborting");
+        return;
+      }
 
-      await this._renderUiFromCell(this.cell);
-
-      // Mark as rendered and trigger re-render to hide spinner
+      // @TODO(runtime-worker-refactor): We must type all renderable cells
+      // as potentially having these variant keys?
+      const variantKey = undefined; //VARIANT_TO_KEY[this.variant ?? "default"];
+      const renderCell = variantKey ? this.cell.key(variantKey) : this.cell;
+      this._log("rendering UI into container");
+      this._cleanup = render(container, renderCell as CellHandle<VNode>);
       this._hasRendered = true;
-      this.requestUpdate();
     } catch (error) {
-      this._handleRenderError(error);
-    } finally {
-      this._isRenderInProgress = false;
+      // Only show error if we're still rendering this cell
+      if (this._renderingCellId === cellId) {
+        this._handleRenderError(error);
+      }
     }
   }
 
-  private _cleanupPreviousRender() {
+  private _cleanupRender() {
     if (this._cleanup) {
       this._log("cleaning up previous render");
       this._cleanup();
@@ -355,19 +245,12 @@ export class CTRender extends BaseElement {
     }
   }
 
-  private _cleanupCellValueSubscription() {
-    if (this._cellValueUnsubscribe) {
-      this._log("cleaning up cell value subscription");
-      this._cellValueUnsubscribe();
-      this._cellValueUnsubscribe = undefined;
-    }
-  }
-
   private _handleRenderError(error: unknown) {
     console.error("[ct-render] Error rendering cell:", error);
 
-    if (this._renderContainer) {
-      this._renderContainer.innerHTML =
+    const container = this._containerRef.value;
+    if (container) {
+      container.innerHTML =
         `<div style="color: var(--ct-color-destructive)">Error rendering content: ${
           error instanceof Error ? error.message : "Unknown error"
         }</div>`;
@@ -377,23 +260,14 @@ export class CTRender extends BaseElement {
   override disconnectedCallback() {
     this._log("disconnectedCallback called");
     super.disconnectedCallback();
-
-    // Cancel any in-progress renders
-    this._isRenderInProgress = false;
-
-    // Reset render state
+    this._renderingCellId = undefined;
     this._hasRendered = false;
-
-    // Clean up
-    this._cleanupCellValueSubscription();
-    this._cleanupPreviousRender();
+    this._cleanupRender();
   }
 }
 
 globalThis.customElements.define("ct-render", CTRender);
 
-declare global {
-  interface HTMLElementTagNameMap {
-    "ct-render": CTRender;
-  }
+function isSubPath(cell: CellHandle<unknown>): boolean {
+  return cell.ref().path.length > 0;
 }

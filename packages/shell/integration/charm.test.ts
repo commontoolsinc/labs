@@ -1,9 +1,8 @@
-import { env } from "@commontools/integration";
+import { env, waitFor } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
-import { assert } from "@std/assert";
 import "../src/globals.ts";
 import { Identity } from "@commontools/identity";
 import { CharmsController } from "@commontools/charm/ops";
@@ -72,12 +71,13 @@ describe("shell charm tests", () => {
       handle.click();
       await sleep(1000);
     }
-    const handle = await page.waitForSelector(
-      "#counter-result",
-      { strategy: "pierce" },
-    );
-    await sleep(1500);
-    const text = await handle.innerText();
-    assert(text === "Counter is the -2th number");
+    await waitFor(async () => {
+      const handle = await page.waitForSelector(
+        "#counter-result",
+        { strategy: "pierce" },
+      );
+      const text = await handle.innerText();
+      return text === "Counter is the -2th number";
+    });
   });
 });

@@ -82,6 +82,8 @@ import {
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { getLogger } from "@commontools/utils/logger";
+import { ensureNotRenderThread } from "@commontools/utils/env";
+ensureNotRenderThread();
 
 const logger = getLogger("cell");
 

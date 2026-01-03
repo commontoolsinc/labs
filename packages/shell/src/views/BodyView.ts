@@ -1,10 +1,15 @@
 import { css, html } from "lit";
-import { property, state } from "lit/decorators.js";
+import { property } from "lit/decorators.js";
 import { Task } from "@lit/task";
 import { BaseView } from "./BaseView.ts";
-import { RuntimeInternals } from "../lib/runtime.ts";
-import { CharmController } from "@commontools/charm/ops";
+import { CharmHandle, RuntimeInternals } from "../lib/runtime.ts";
 import "../components/OmniLayout.ts";
+import { CellHandle, isCellHandle, VNode } from "@commontools/runtime-client";
+
+type SubPages = {
+  sidebarUI?: VNode;
+  fabUI?: VNode;
+};
 
 export class XBodyView extends BaseView {
   static override styles = css`
@@ -64,10 +69,10 @@ export class XBodyView extends BaseView {
   rt?: RuntimeInternals;
 
   @property({ attribute: false })
-  activePattern?: CharmController;
+  activePattern?: CharmHandle;
 
   @property({ attribute: false })
-  spaceRootPattern?: CharmController;
+  spaceRootPattern?: CharmHandle;
 
   @property()
   showShellCharmListView = false;
@@ -78,24 +83,60 @@ export class XBodyView extends BaseView {
   @property({ attribute: false })
   patternError?: Error;
 
-  @state()
-  private hasSidebarContent = false;
-
   private _charms = new Task(this, {
     task: async ([rt, _spaceRootPattern]) => {
       if (!rt) return undefined;
-      // Include spaceRootPattern in args so we re-fetch when it changes.
-      // This ensures newly created default patterns appear in the list.
 
-      const manager = rt.cc().manager();
-      await manager.synced();
-      return rt.cc().getAllCharms();
+      await rt.synced();
+      const charmsListCell = await rt.getCharmsListCell();
+      await charmsListCell.sync();
+
+      const charmsList = charmsListCell.get() as any[];
+      if (!charmsList) return [];
+
+      const handles: CharmHandle[] = [];
+      for (const charmData of charmsList) {
+        const id = isCellHandle(charmData) ? charmData.id() : charmData?.$ID;
+        if (id) {
+          const charm = await rt.getPattern(id) as CharmHandle<unknown>;
+          if (charm) {
+            handles.push(charm);
+          }
+        }
+      }
+      return handles;
     },
     args: () => [this.rt, this.spaceRootPattern],
   });
 
+  private _subPages = new Task(this, {
+    task: async ([activePattern, spaceRootPattern]) => {
+      const [
+        sidebarUI,
+        fabUI,
+      ] = await Promise.all([
+        getSubPageCell(
+          activePattern?.getCell() as CellHandle<SubPages> | undefined,
+          "sidebarUI",
+        ),
+        getSubPageCell(
+          spaceRootPattern?.getCell() as CellHandle<SubPages> | undefined,
+          "fabUI",
+        ),
+      ]);
+      return {
+        sidebarUI,
+        fabUI,
+      };
+    },
+    args: () => [this.activePattern, this.spaceRootPattern],
+  });
+
   override render() {
     const charms = this._charms.value;
+    const spaceName = this.rt?.spaceName();
+    const spaceDid = this.rt?.space();
+    /*
     if (!charms) {
       return html`
         <div class="content">
@@ -103,10 +144,9 @@ export class XBodyView extends BaseView {
         </div>
       `;
     }
+    */
 
     if (this.showShellCharmListView) {
-      const spaceName = this.rt?.cc().manager().getSpaceName();
-      const spaceDid = this.rt?.cc().manager().getSpace();
       return html`
         <div class="content">
           <x-charm-list-view
@@ -136,36 +176,19 @@ export class XBodyView extends BaseView {
       `
       : null;
 
-    const sidebarCell = this.activePattern?.getCell().key("sidebarUI");
-    const fabCell = this.spaceRootPattern?.getCell().key("fabUI");
-
-    // Update sidebar content detection
-    // TODO(seefeld): Fix possible race here where charm is already set, but
-    // sidebar isn't loaded yet, which will now eventually render the sidebar,
-    // but not the button to hide it.
-    const hasSidebarContent = !!sidebarCell?.get();
-    if (this.hasSidebarContent !== hasSidebarContent) {
-      this.hasSidebarContent = hasSidebarContent;
-      // Notify parent of sidebar content changes
-      this.dispatchEvent(
-        new CustomEvent("sidebar-content-change", {
-          detail: { hasSidebarContent },
-          bubbles: true,
-          composed: true,
-        }),
-      );
-    }
+    const sidebar = this._subPages?.value?.sidebarUI;
+    const fab = this._subPages?.value?.fabUI;
 
     return html`
       <div class="content">
         <x-omni-layout .sidebarOpen="${this.showSidebar}">
-          ${mainContent} ${sidebarCell
+          ${mainContent} ${sidebar
             ? html`
-              <ct-render slot="sidebar" .cell="${sidebarCell}"></ct-render>
+              <ct-render slot="sidebar" .cell="${sidebar}"></ct-render>
             `
-            : null} ${fabCell
+            : null} ${fab
             ? html`
-              <ct-render slot="fab" .cell="${fabCell}"></ct-render>
+              <ct-render slot="fab" .cell="${fab}"></ct-render>
             `
             : null}
         </x-omni-layout>
@@ -175,3 +198,18 @@ export class XBodyView extends BaseView {
 }
 
 globalThis.customElements.define("x-body-view", XBodyView);
+
+async function getSubPageCell(
+  cell: CellHandle<SubPages> | undefined,
+  key: "fabUI" | "sidebarUI",
+): Promise<CellHandle<VNode> | undefined> {
+  if (!cell) return undefined;
+  let value = cell.getMaybe();
+  if (!value) {
+    await cell.sync();
+    value = cell.get();
+  }
+  if (key in value && value[key]) {
+    return cell.key(key) as CellHandle<VNode>;
+  }
+}

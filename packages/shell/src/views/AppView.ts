@@ -2,16 +2,14 @@ import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseView, createDefaultAppState } from "./BaseView.ts";
 import { KeyStore } from "@commontools/identity";
-import { RuntimeInternals } from "../lib/runtime.ts";
+import { CharmHandle, RuntimeInternals } from "../lib/runtime.ts";
 import { DebuggerController } from "../lib/debugger-controller.ts";
-import "./DebuggerView.ts";
 import { Task, TaskStatus } from "@lit/task";
-import { CharmController } from "@commontools/charm/ops";
 import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
-import { NAME } from "@commontools/runner";
 import { type NameSchema } from "@commontools/runner/schemas";
-import { updatePageTitle } from "../lib/navigate.ts";
+import { updatePageTitle } from "../../shared/mod.ts";
 import { KeyboardController } from "../lib/keyboard-router.ts";
+import { NAME } from "@commontools/runtime-client";
 
 export class XAppView extends BaseView {
   static override styles = css`
@@ -53,10 +51,7 @@ export class XAppView extends BaseView {
   charmTitle?: string;
 
   @property({ attribute: false })
-  private titleSubscription?: CellEventTarget<string | undefined>;
-
-  @state()
-  private hasSidebarContent = false;
+  private titleSubscription?: CellEventTarget<string>;
 
   @state()
   private _patternError?: Error;
@@ -64,33 +59,11 @@ export class XAppView extends BaseView {
   private debuggerController = new DebuggerController(this);
   private _keyboard = new KeyboardController(this);
 
-  override connectedCallback() {
-    super.connectedCallback();
-    this.addEventListener(
-      "sidebar-content-change",
-      this.handleSidebarContentChange,
-    );
-  }
-
-  override disconnectedCallback() {
-    this.removeEventListener(
-      "sidebar-content-change",
-      this.handleSidebarContentChange,
-    );
-    super.disconnectedCallback();
-  }
-
-  private handleSidebarContentChange = (e: Event) => {
-    const event = e as CustomEvent<{ hasSidebarContent: boolean }>;
-    this.hasSidebarContent = event.detail.hasSidebarContent;
-  };
-
-  // Fetches the space root pattern from the space.
   _spaceRootPattern = new Task(this, {
     task: async (
       [rt],
     ): Promise<
-      | CharmController<NameSchema>
+      | CharmHandle<NameSchema>
       | undefined
     > => {
       if (!rt) return;
@@ -104,26 +77,24 @@ export class XAppView extends BaseView {
     args: () => [this.rt],
   });
 
-  // Gets the selected pattern synchronously - no await needed.
-  // The charm starts in the background; errors are captured in _patternError.
   _selectedPattern = new Task(this, {
-    task: (
+    task: async (
       [app, rt],
-    ): CharmController<NameSchema> | undefined => {
+      { signal },
+    ): Promise<
+      | CharmHandle<NameSchema>
+      | undefined
+    > => {
       if (!rt) return;
-      this._patternError = undefined; // Clear previous error
-
+      this._patternError = undefined;
       if ("charmId" in app.view && app.view.charmId) {
-        const { controller, ready } = rt.getPattern(app.view.charmId);
-
-        // Handle errors from the start() promise
-        ready.catch((err) => {
-          console.error("[AppView] Failed to start pattern:", err);
-          this._patternError = err;
-          this.requestUpdate();
-        });
-
-        return controller;
+        try {
+          return await rt.getPattern(app.view.charmId);
+        } catch (e) {
+          if (!signal.aborted) {
+            this._patternError = e as any;
+          }
+        }
       }
     },
     args: () => [this.app, this.rt],
@@ -143,8 +114,8 @@ export class XAppView extends BaseView {
         selectedPatternStatus,
       ],
     ): {
-      activePattern: CharmController<NameSchema> | undefined;
-      spaceRootPattern: CharmController<NameSchema> | undefined;
+      activePattern: CharmHandle<NameSchema> | undefined;
+      spaceRootPattern: CharmHandle<NameSchema> | undefined;
     } {
       const spaceRootPattern = spaceRootPatternStatus === TaskStatus.COMPLETE
         ? spaceRootPatternValue
@@ -172,7 +143,7 @@ export class XAppView extends BaseView {
     ],
   });
 
-  #setTitleSubscription(activeCharm?: CharmController<NameSchema>) {
+  #setTitleSubscription(activeCharm?: CharmHandle<NameSchema>) {
     if (!activeCharm) {
       if (this.titleSubscription) {
         this.titleSubscription.removeEventListener(
@@ -185,9 +156,19 @@ export class XAppView extends BaseView {
         ? this.app.view.spaceName
         : "Common Tools";
     } else {
-      const cell = activeCharm.getCell();
-      this.titleSubscription = new CellEventTarget(cell.key(NAME));
-      this.charmTitle = cell.key(NAME).get();
+      const cell = activeCharm.getCell().key(NAME);
+      if (
+        this.titleSubscription && cell.equals(this.titleSubscription.cell())
+      ) {
+        return;
+      }
+      this.titleSubscription = new CellEventTarget(cell);
+      try {
+        this.charmTitle = cell.get();
+      } catch {
+        // Cell not synced yet
+        this.charmTitle = undefined;
+      }
     }
   }
 
@@ -275,7 +256,6 @@ export class XAppView extends BaseView {
           .showShellCharmListView="${config.showShellCharmListView ?? false}"
           .showDebuggerView="${config.showDebuggerView ?? false}"
           .showSidebar="${config.showSidebar ?? false}"
-          .hasSidebarContent="${this.hasSidebarContent}"
         ></x-header-view>
         <div class="content-area">
           ${content}

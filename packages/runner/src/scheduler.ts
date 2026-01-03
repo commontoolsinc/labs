@@ -37,11 +37,14 @@ import {
 } from "./reactive-dependencies.ts";
 import { ensureCharmRunning } from "./ensure-charm-running.ts";
 import type {
+  ActionStats,
   SchedulerActionInfo,
   SchedulerGraphEdge,
   SchedulerGraphNode,
   SchedulerGraphSnapshot,
 } from "./telemetry.ts";
+import { ensureNotRenderThread } from "@commontools/utils/env";
+ensureNotRenderThread();
 
 const logger = getLogger("scheduler", {
   enabled: false,
@@ -131,17 +134,6 @@ const AUTO_DEBOUNCE_DELAY_MS = 100;
 const CYCLE_DEBOUNCE_THRESHOLD_MS = 100; // Min iteration time to trigger cycle debounce
 const CYCLE_DEBOUNCE_MIN_RUNS = 3; // Action must run this many times to be considered cycling
 const CYCLE_DEBOUNCE_MULTIPLIER = 2; // Debounce delay = multiplier × iteration time
-
-/**
- * Statistics tracked for each action's execution performance.
- */
-export interface ActionStats {
-  runCount: number;
-  totalTime: number;
-  averageTime: number;
-  lastRunTime: number;
-  lastRunTimestamp: number; // When the action last ran (performance.now())
-}
 
 export class Scheduler {
   private eventQueue: {

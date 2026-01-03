@@ -9,7 +9,7 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 
 /**
@@ -106,8 +106,8 @@ function processItem(item: AutocompleteItem): ProcessedItem {
  * @attr {boolean} multiple - Enable multi-select mode (default: false)
  * @attr {boolean} disabled - Whether the component is disabled
  *
- * @prop {AutocompleteItem[]|Cell<AutocompleteItem[]>} items - Items to choose from (supports Cell binding for reactive updates)
- * @prop {Cell<string>|Cell<string[]>|string|string[]} value - Selected value(s) - supports Cell binding
+ * @prop {CellHandle<AutocompleteItem[]> | AutocompleteItem[]} items - Items to choose from
+ * @prop {CellHandle<string>|CellHandle<string[]>|string|string[]} value - Selected value(s) - supports Cell binding
  *
  * @fires ct-change - Fired when value changes: { value, oldValue }
  * @fires ct-select - Fired when an item is selected: { value, label, group?, isCustom, data? }
@@ -332,10 +332,10 @@ export class CTAutocomplete extends BaseElement {
     };
 
     // Public properties
-    declare items: AutocompleteItem[] | Cell<AutocompleteItem[]>;
+    declare items: AutocompleteItem[] | CellHandle<AutocompleteItem[]>;
     declare value:
-      | Cell<string>
-      | Cell<string[]>
+      | CellHandle<string>
+      | CellHandle<string[]>
       | string
       | string[]
       | undefined;
@@ -347,10 +347,8 @@ export class CTAutocomplete extends BaseElement {
 
     // Cell controller for value binding
     // Note: Don't call requestUpdate() in onChange - cell controller already does it
-    private _changeGroup = crypto.randomUUID();
     private _cellController = createCellController<string | string[]>(this, {
       timing: { strategy: "debounce", delay: 50 },
-      changeGroup: this._changeGroup,
       onChange: (newValue, oldValue) => {
         this.emit("ct-change", { value: newValue, oldValue });
       },
@@ -459,10 +457,10 @@ export class CTAutocomplete extends BaseElement {
 
       // Initialize cell controller bindings
       this._cellController.bind(
-        this.value as Cell<string | string[]> | string | string[],
+        this.value as CellHandle<string | string[]> | string | string[],
       );
       this._itemsCellController.bind(
-        this.items as Cell<AutocompleteItem[]> | AutocompleteItem[],
+        this.items as CellHandle<AutocompleteItem[]> | AutocompleteItem[],
       );
 
       applyThemeToElement(this, this.theme ?? defaultTheme);
@@ -474,14 +472,14 @@ export class CTAutocomplete extends BaseElement {
       // If the value property itself changed (e.g., switched to a different cell)
       if (changedProperties.has("value")) {
         this._cellController.bind(
-          this.value as Cell<string | string[]> | string | string[],
+          this.value as CellHandle<string | string[]> | string | string[],
         );
       }
 
       // If the items property changed (e.g., switched to a different cell or array)
       if (changedProperties.has("items")) {
         this._itemsCellController.bind(
-          this.items as Cell<AutocompleteItem[]> | AutocompleteItem[],
+          this.items as CellHandle<AutocompleteItem[]> | AutocompleteItem[],
         );
       }
 
@@ -663,25 +661,6 @@ export class CTAutocomplete extends BaseElement {
       return queryWords.every((queryWord) =>
         processed.words.some((itemWord) => itemWord.startsWith(queryWord))
       );
-    }
-
-    // Legacy helper for compatibility - wraps the optimized version
-    private _itemMatchesQuery(item: AutocompleteItem, query: string): boolean {
-      const processed = this._processedItems.find((p) => p.item === item);
-      if (processed) {
-        const queryWords = splitIntoWords(query);
-        return this._processedItemMatchesQuery(processed, queryWords);
-      }
-      // Fallback for items not in processed list
-      const label = (item.label || item.value).toLowerCase();
-      return label.includes(query.toLowerCase());
-    }
-
-    // Get the set of already-selected values (for multi-select)
-    private get _selectedValues(): Set<string> {
-      if (!this.multiple) return new Set();
-      const selected = (this._getCurrentValue() as string[] | undefined) || [];
-      return new Set(selected);
     }
 
     // Memoized getters - return cached values computed in willUpdate

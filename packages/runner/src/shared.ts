@@ -20,10 +20,12 @@ export {
   TYPE,
   UI,
 } from "./builder/types.ts";
-export { effect } from "./reactivity.ts";
 export { type Cancel, useCancelGroup } from "./cancel.ts";
 export type {
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
   RuntimeTelemetryMarkerResult,
+  SchedulerGraphEdge,
+  SchedulerGraphNode,
+  SchedulerGraphSnapshot,
 } from "./telemetry.ts";

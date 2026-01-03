@@ -1,5 +1,9 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
-import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
+import {
+  type CellHandle,
+  isCellHandle,
+  NAME,
+} from "@commontools/runtime-client";
 import { type Mentionable, type MentionableArray } from "./mentionable.ts";
 
 /**
@@ -14,7 +18,7 @@ export interface MentionControllerConfig {
   /**
    * Callback when a mention is inserted
    */
-  onInsert?: (markdown: string, mention: Cell<Mentionable>) => void;
+  onInsert?: (markdown: string, mention: CellHandle<Mentionable>) => void;
 
   /**
    * Callback to get current cursor position in the input element
@@ -81,7 +85,7 @@ export class MentionController implements ReactiveController {
   };
 
   // Mentionable items
-  private _mentionable: Cell<MentionableArray> | null = null;
+  private _mentionable: CellHandle<MentionableArray> | null = null;
   private _mentionableUnsubscribe: (() => void) | null = null;
 
   constructor(
@@ -109,10 +113,8 @@ export class MentionController implements ReactiveController {
   /**
    * Set the mentionable items
    */
-  setMentionable(mentionable: Cell<MentionableArray> | null): void {
-    // Clean up old subscription if it exists
+  setMentionable(mentionable: CellHandle<MentionableArray> | null): void {
     this._cleanupMentionableSubscription();
-
     this._mentionable = mentionable;
 
     // Set up new subscription
@@ -138,7 +140,7 @@ export class MentionController implements ReactiveController {
   /**
    * Get filtered mentions based on current query
    */
-  getFilteredMentions(): Cell<Mentionable>[] {
+  getFilteredMentions(): CellHandle<Mentionable>[] {
     if (!this._mentionable) {
       return [];
     }
@@ -150,7 +152,7 @@ export class MentionController implements ReactiveController {
 
     const query = this._state.query.toLowerCase();
 
-    const filtered: Cell<Mentionable>[] = [];
+    const filtered: CellHandle<Mentionable>[] = [];
     for (let i = 0; i < mentionableArray.length; i++) {
       // Use .key(i) to get Cell reference, preserving cell-ness
       const mentionCell = this._mentionable.key(i);
@@ -255,7 +257,7 @@ export class MentionController implements ReactiveController {
   /**
    * Insert a mention at the current cursor position
    */
-  insertMention(mention: Cell<Mentionable>): void {
+  insertMention(mention: CellHandle<Mentionable>): void {
     const markdown = this.encodeCharmAsMarkdown(mention);
     this.config.onInsert(markdown, mention);
     this.hide();
@@ -282,26 +284,22 @@ export class MentionController implements ReactiveController {
   /**
    * Encode a charm as markdown link [name](#entityId)
    */
-  private encodeCharmAsMarkdown(charm: Cell<Mentionable>): string {
+  private encodeCharmAsMarkdown(charm: CellHandle<Mentionable>): string {
     // Only call .get() when we need the actual values
     const name = charm.get()?.[NAME] || "Unknown";
-    const entityId = getEntityId(charm);
-    const href = encodeURIComponent(JSON.stringify(entityId)) || "";
+    const href = encodeURIComponent(charm.id()) || "";
     return `[${name}](${href})`;
   }
 
   /**
    * Decode charm reference from href (entity ID)
    */
-  decodeCharmFromHref(href: string | null): Cell<Mentionable> | null {
+  decodeCharmFromHref(href: string | null): CellHandle<Mentionable> | null {
     if (!href) return null;
 
     const all = this.readMentionables();
     for (const mention of all) {
-      // Only call getEntityId (which calls .get()) when comparing
-      const mentionEntityId = encodeURIComponent(
-        JSON.stringify(getEntityId(mention)),
-      );
+      const mentionEntityId = encodeURIComponent(mention.id());
       if (mentionEntityId === href) {
         return mention;
       }
@@ -312,10 +310,10 @@ export class MentionController implements ReactiveController {
 
   /**
    * Extract all mentions from markdown text
-   * Returns array of Cell<Mentionable> objects referenced in the text
+   * Returns array of CellHandle<Mentionable> objects referenced in the text
    */
-  extractMentionsFromText(text: string): Cell<Mentionable>[] {
-    const mentions: Cell<Mentionable>[] = [];
+  extractMentionsFromText(text: string): CellHandle<Mentionable>[] {
+    const mentions: CellHandle<Mentionable>[] = [];
     const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
     let match;
 
@@ -330,7 +328,7 @@ export class MentionController implements ReactiveController {
     return mentions;
   }
 
-  private readMentionables(): Cell<Mentionable>[] {
+  private readMentionables(): CellHandle<Mentionable>[] {
     if (!this._mentionable) {
       return [];
     }
@@ -341,7 +339,7 @@ export class MentionController implements ReactiveController {
     }
 
     // Use .key(i) to preserve cell-ness of items
-    const mentions: Cell<Mentionable>[] = [];
+    const mentions: CellHandle<Mentionable>[] = [];
     for (let i = 0; i < mentionableArray.length; i++) {
       const mentionCell = this._mentionable.key(i);
       if (mentionCell) {
@@ -362,8 +360,8 @@ export class MentionController implements ReactiveController {
     // (e.g., if setMentionable() was called before hostConnected())
     this._cleanupMentionableSubscription();
 
-    if (isCell(this._mentionable)) {
-      this._mentionableUnsubscribe = this._mentionable.sink(() => {
+    if (isCellHandle(this._mentionable)) {
+      this._mentionableUnsubscribe = this._mentionable.subscribe(() => {
         this.host.requestUpdate();
       });
     }

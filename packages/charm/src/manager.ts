@@ -21,6 +21,7 @@ import * as favorites from "./favorites.ts";
 import { ALL_CHARMS_ID } from "../../runner/src/builtins/well-known.ts";
 import { type Session } from "@commontools/identity";
 import { isRecord } from "@commontools/utils/types";
+import { ensureNotRenderThread } from "@commontools/utils/env";
 import {
   charmListSchema,
   charmSourceCellSchema,
@@ -29,6 +30,7 @@ import {
   processSchema,
 } from "@commontools/runner/schemas";
 import { type FavoriteList } from "@commontools/home-schemas";
+ensureNotRenderThread();
 
 /**
  * Extracts the ID from a charm.

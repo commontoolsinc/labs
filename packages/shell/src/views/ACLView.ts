@@ -5,6 +5,13 @@ import { ACLUser, Capability } from "@commontools/memory/acl";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import "../components/Button.ts";
 
+/**
+ * ACL (Access Control List) view component.
+ *
+ * NOTE: ACL functionality is currently disabled while RuntimeClient
+ * integration is in progress.
+ * TODO: Re-enable once ACL IPC is implemented.
+ */
 export class XACLView extends LitElement {
   static override styles = css`
     :host {
@@ -100,6 +107,14 @@ export class XACLView extends LitElement {
       margin-bottom: 1rem;
     }
 
+    .warning-message {
+      color: #a50;
+      padding: 0.5rem;
+      background-color: #fec;
+      border: 1px solid #a50;
+      margin-bottom: 1rem;
+    }
+
     .loading {
       text-align: center;
       padding: 1rem;
@@ -129,64 +144,36 @@ export class XACLView extends LitElement {
   private error?: string;
 
   private _aclTask = new Task(this, {
-    task: async ([rt]) => {
-      if (!rt) return undefined;
-      try {
-        const aclManager = rt.cc().acl();
-        return await aclManager.get();
-      } catch (err) {
-        console.error("Failed to load ACL:", err);
-        this.error = err instanceof Error ? err.message : String(err);
-        return undefined;
-      }
+    task: ([_rt]) => {
+      // TODO(runtime-worker-refactor)
+      return undefined;
     },
     args: () => [this.rt],
   });
 
-  private async handleCapabilityChange(user: ACLUser, capability: Capability) {
-    if (!this.rt) return;
-
-    try {
-      this.error = undefined;
-      const aclManager = this.rt.cc().acl();
-      await aclManager.set(user, capability);
-      this._aclTask.run();
-    } catch (err) {
-      console.error("Failed to update capability:", err);
-      this.error = err instanceof Error ? err.message : String(err);
-    }
+  private handleCapabilityChange(
+    _user: ACLUser,
+    _capability: Capability,
+  ) {
+    // TODO(runtime-worker-refactor)
+    console.warn(
+      "[ACLView] ACL functionality is disabled during RuntimeClient migration",
+    );
   }
 
-  private async handleRemoveUser(user: ACLUser) {
-    if (!this.rt) return;
-
-    try {
-      this.error = undefined;
-      const aclManager = this.rt.cc().acl();
-      await aclManager.remove(user);
-      this._aclTask.run();
-    } catch (err) {
-      console.error("Failed to remove user:", err);
-      this.error = err instanceof Error ? err.message : String(err);
-    }
+  private handleRemoveUser(_user: ACLUser) {
+    // TODO(runtime-worker-refactor)
+    console.warn(
+      "[ACLView] ACL functionality is disabled during RuntimeClient migration",
+    );
   }
 
-  private async handleAddUser(e: Event) {
+  private handleAddUser(e: Event) {
     e.preventDefault();
-    if (!this.rt || !this.newUser.trim()) return;
-
-    try {
-      this.error = undefined;
-      const aclManager = this.rt.cc().acl();
-      await aclManager.set(this.newUser as ACLUser, this.newCapability);
-      this.newUser = "";
-      this.newCapability = "READ";
-      this.showAddForm = false;
-      this._aclTask.run();
-    } catch (err) {
-      console.error("Failed to add user:", err);
-      this.error = err instanceof Error ? err.message : String(err);
-    }
+    // TODO(runtime-worker-refactor)
+    console.warn(
+      "[ACLView] ACL functionality is disabled during RuntimeClient migration",
+    );
   }
 
   private handleToggle() {
@@ -205,6 +192,7 @@ export class XACLView extends LitElement {
           <select
             class="capability-select"
             .value="${capability}"
+            disabled
             @change="${(e: Event) =>
               this.handleCapabilityChange(
                 user,
@@ -217,6 +205,7 @@ export class XACLView extends LitElement {
           </select>
           <x-button
             size="small"
+            disabled
             @click="${() => this.handleRemoveUser(user)}"
             title="Remove ${user}"
           >
@@ -232,6 +221,7 @@ export class XACLView extends LitElement {
       return html`
         <x-button
           variant="primary"
+          disabled
           @click="${() => (this.showAddForm = true)}"
         >
           Add User
@@ -246,6 +236,7 @@ export class XACLView extends LitElement {
             type="text"
             placeholder="DID or * for anyone"
             .value="${this.newUser}"
+            disabled
             @input="${(
               e: Event,
             ) => (this.newUser = (e.target as HTMLInputElement).value)}"
@@ -253,6 +244,7 @@ export class XACLView extends LitElement {
           />
           <select
             .value="${this.newCapability}"
+            disabled
             @change="${(
               e: Event,
             ) => (this.newCapability = (e.target as HTMLSelectElement)
@@ -267,7 +259,7 @@ export class XACLView extends LitElement {
           <x-button size="small" @click="${() => (this.showAddForm = false)}">
             Cancel
           </x-button>
-          <x-button type="submit" size="small" variant="primary">
+          <x-button type="submit" size="small" variant="primary" disabled>
             Add
           </x-button>
         </div>
@@ -290,43 +282,14 @@ export class XACLView extends LitElement {
 
       ${this.expanded
         ? html`
+          <div class="warning-message">
+            ACL management is temporarily disabled during RuntimeClient migration.
+          </div>
           ${this.error
             ? html`
               <div class="error-message">${this.error}</div>
             `
-            : null} ${this._aclTask.render({
-              pending: () =>
-                html`
-                  <div class="loading">Loading ACL...</div>
-                `,
-              complete: (acl) => {
-                if (!acl) {
-                  return html`
-                    <div class="error-message">
-                      No ACL initialized for this space.
-                    </div>
-                  `;
-                }
-
-                const entries = Object.entries(acl).filter(
-                  ([_, capability]) => capability !== undefined,
-                ) as [ACLUser, Capability][];
-                return html`
-                  <ul class="acl-list">
-                    ${entries.map(([user, capability]) =>
-                      this.renderACLEntry(user, capability)
-                    )}
-                  </ul>
-                  ${this.renderAddForm()}
-                `;
-              },
-              error: (err) =>
-                html`
-                  <div class="error-message">
-                    Error loading ACL: ${err}
-                  </div>
-                `,
-            })}
+            : null}
         `
         : null}
     `;

@@ -2,7 +2,7 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { createRef, type Ref, ref } from "lit/directives/ref.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
 import {
@@ -226,8 +226,10 @@ export class CTVoiceInput extends BaseElement {
   ];
 
   @property({ attribute: false })
-  transcription: Cell<TranscriptionData | null> | TranscriptionData | null =
-    null;
+  transcription:
+    | CellHandle<TranscriptionData | null>
+    | TranscriptionData
+    | null = null;
 
   @property({ type: String })
   recordingMode: "hold" | "toggle" = "hold";
@@ -270,12 +272,10 @@ export class CTVoiceInput extends BaseElement {
   @property({ attribute: false })
   declare theme?: CTTheme;
 
-  private _changeGroup = crypto.randomUUID();
   private _cellController = createCellController<TranscriptionData | null>(
     this,
     {
       timing: { strategy: "immediate" },
-      changeGroup: this._changeGroup,
       onChange: (newValue) => {
         this.emit("ct-change", { transcription: newValue });
       },

@@ -3,9 +3,19 @@
 // contexts to visualize or log events inside the runtime.
 
 import { IMemoryChange } from "./storage/interface.ts";
-import type { ActionStats } from "./scheduler.ts";
 import { StorageTelemetry } from "./storage/telemetry.ts";
 import type * as Inspector from "./storage/inspector.ts";
+
+/**
+ * Statistics tracked for each action's execution performance.
+ */
+export interface ActionStats {
+  runCount: number;
+  totalTime: number;
+  averageTime: number;
+  lastRunTime: number;
+  lastRunTimestamp: number; // When the action last ran (performance.now())
+}
 
 // Types for scheduler graph visualization
 export interface SchedulerGraphNode {
