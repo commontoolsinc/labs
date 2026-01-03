@@ -87,7 +87,7 @@ describe("ct-render integration test", () => {
     await clickNthButton(page, "[data-ct-button]", 1);
 
     await waitFor(async () => {
-      return await await charm.result.get(["value"]) === 1;
+      return (await charm.result.get(["value"])) === 1;
     });
     assertEquals(await charm.result.get(["value"]), 1);
   });
