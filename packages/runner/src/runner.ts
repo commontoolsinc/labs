@@ -485,7 +485,8 @@ export class Runner {
           const resolved = this.runtime.recipeManager.recipeById(newRecipeId);
           if (!resolved) {
             if (allowAsyncLoad) {
-              // Async load
+              // Async load for recipe change after initial start.
+              // Errors are logged here since there's no caller to propagate to.
               this.runtime.recipeManager
                 .loadRecipe(newRecipeId, resultCell.space)
                 .then((loaded) => {
@@ -493,7 +494,7 @@ export class Runner {
                   instantiateRecipe(this.resolveToRecipe(loaded));
                 })
                 .catch((err) => {
-                  console.error(`Failed to load recipe ${newRecipeId}:`, err);
+                  logger.error("recipe-load-error", `Failed to load recipe ${newRecipeId}`, err);
                 });
               return;
             }
