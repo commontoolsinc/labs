@@ -363,11 +363,8 @@ export class Runner {
    * Returns a Promise that resolves to true on success, or rejects with an error.
    * Runs synchronously when data is available (important for tests).
    */
-  start<T = any>(
-    resultCell: Cell<T>,
-    seenCells: Set<Cell> = new Set(),
-  ): Promise<boolean> {
-    return this.doStart(resultCell, seenCells);
+  start<T = any>(resultCell: Cell<T>): Promise<boolean> {
+    return this.doStart(resultCell);
   }
 
   /** Convert a module to recipe format */
@@ -410,10 +407,9 @@ export class Runner {
     options: {
       tx?: IExtendedStorageTransaction;
       givenRecipe?: Recipe;
-      allowAsyncLoad?: boolean;
     } = {},
-  ): Promise<boolean> | void {
-    const { tx, givenRecipe, allowAsyncLoad = false } = options;
+  ): void {
+    const { tx, givenRecipe } = options;
     const key = this.getDocKey(resultCell);
 
     // Create cancel group early - before the $TYPE sink
@@ -483,6 +479,18 @@ export class Runner {
               .loadRecipe(newRecipeId, resultCell.space)
               .then((loaded) => {
                 if (currentRecipeId !== newRecipeId) return;
+                logger.info("recipe changed", {
+                  new: {
+                    id: newRecipeId,
+                    recipe: loaded,
+                  },
+                  current: {
+                    id: currentRecipeId,
+                    recipe: this.runtime.recipeManager.recipeById(
+                      currentRecipeId,
+                    ),
+                  },
+                });
                 instantiateRecipe(loaded);
               })
               .catch((err) => {
@@ -507,11 +515,7 @@ export class Runner {
 
     if (!initialRecipeId) {
       cleanup();
-      const error = new Error("Cannot start: no recipe ID ($TYPE)");
-      if (allowAsyncLoad) {
-        return Promise.reject(error);
-      }
-      throw error;
+      throw new Error("Cannot start: no recipe ID ($TYPE)");
     }
 
     // Determine initial recipe
@@ -521,16 +525,12 @@ export class Runner {
         this.runtime.recipeManager.registerRecipe(givenRecipe) !==
           currentRecipeId
       ) {
-        const error = new Error("Recipe ID mismatch");
         cleanup();
-        if (allowAsyncLoad) {
-          return Promise.reject(error);
-        }
-        throw error;
+        throw new Error("Recipe ID mismatch");
       }
       instantiateRecipe(givenRecipe, tx);
       setupTypeWatcher();
-      return allowAsyncLoad ? Promise.resolve(true) : undefined;
+      return;
     }
 
     // Try sync lookup
@@ -538,21 +538,6 @@ export class Runner {
       initialRecipeId,
     );
     if (!initialResolved) {
-      if (allowAsyncLoad) {
-        // Async load, then instantiate
-        return this.runtime.recipeManager
-          .loadRecipe(initialRecipeId, resultCell.space)
-          .then((loaded) => {
-            currentRecipeId = initialRecipeId;
-            instantiateRecipe(loaded);
-            setupTypeWatcher();
-            return true;
-          })
-          .catch((err) => {
-            cleanup();
-            throw err;
-          });
-      }
       cleanup();
       throw new Error(`Unknown recipe: ${initialRecipeId}`);
     }
@@ -562,7 +547,7 @@ export class Runner {
     instantiateRecipe(this.resolveToRecipe(initialResolved), tx);
     setupTypeWatcher();
 
-    return allowAsyncLoad ? Promise.resolve(true) : undefined;
+    return;
   }
 
   /**
@@ -588,33 +573,62 @@ export class Runner {
     // Step 3: Not synced yet? Sync and retry
     // Once getRaw() has a value, all properties including source are synced.
     if (rootCell.getRaw() === undefined) {
-      return Promise.resolve(rootCell.sync()).then(() =>
-        this.doStart(resultCell, seenCells)
-      );
+      return Promise.resolve(rootCell.sync()).then(() => {
+        if (rootCell.getRaw() === undefined) {
+          return Promise.reject(new Error("No data at cell"));
+        } else {
+          return this.doStart(rootCell, seenCells);
+        }
+      });
     }
 
-    // Step 4: If data is a link to another cell, follow it
-    if (isLink(rootCell.getRaw())) {
-      const nextCell = this.runtime.getCellFromLink(
-        rootCell.getRaw() as CellLink,
-      );
-      if (seenCells.has(nextCell)) {
-        return Promise.reject(new Error("Circular link detected"));
-      }
-      seenCells.add(nextCell);
-      return this.doStart(nextCell, seenCells);
-    }
-
-    // Step 5: Get process cell - required for a charm
+    // Step 4: Check for process cell, or follow link if there is one
     const processCell = rootCell.getSourceCell();
     if (!processCell) {
-      return Promise.reject(new Error("Cannot start: no process cell"));
+      if (isLink(resultCell.getRaw())) {
+        const nextCell = this.runtime.getCellFromLink(
+          resultCell.getRaw() as CellLink,
+        );
+        if (seenCells.has(nextCell)) {
+          return Promise.reject(new Error("Circular link detected"));
+        }
+        seenCells.add(nextCell);
+        return this.doStart(nextCell, seenCells);
+      } else {
+        return Promise.reject(new Error("Cannot start: no process cell"));
+      }
+    }
+
+    // Step 5: Check whether the recipe is available, otherwise load it
+    const recipeId = processCell.key(TYPE).getRaw() as string | undefined;
+    if (!recipeId) {
+      return Promise.reject(
+        new Error(`Cannot start: no recipe ID ($TYPE)`),
+      );
+    }
+    const recipe = this.runtime.recipeManager.recipeById(recipeId);
+    if (!recipe) {
+      return this.runtime.recipeManager.loadRecipe(recipeId, resultCell.space)
+        .then((loaded) => {
+          if (loaded) {
+            return this.doStart(rootCell, seenCells);
+          } else {
+            return Promise.reject(
+              new Error(`Could not load recipe ${recipeId}`),
+            );
+          }
+        });
     }
 
     // Step 6: Start the recipe
-    return this.startCore(rootCell, processCell, {
-      allowAsyncLoad: true,
-    }) as Promise<boolean>;
+    try {
+      this.startCore(rootCell, processCell);
+    } catch (err) {
+      return Promise.reject(err);
+    }
+
+    // Success!
+    return Promise.resolve(true);
   }
 
   private startWithTx<T = any>(
