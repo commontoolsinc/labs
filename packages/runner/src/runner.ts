@@ -365,6 +365,22 @@ export class Runner {
     return this.doStart(resultCell);
   }
 
+  private startWithTx<T = any>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<T>,
+    givenRecipe?: Recipe,
+  ): void {
+    const key = this.getDocKey(resultCell);
+    if (this.cancels.has(key)) return; // Already started
+
+    const processCell = resultCell.withTx(tx).getSourceCell();
+    if (!processCell) {
+      throw new Error("Cannot start: no process cell");
+    }
+
+    this.startCore(resultCell, processCell, { tx, givenRecipe, noSink: true });
+  }
+
   /** Convert a module to recipe format */
   private moduleToRecipe(module: Module): Recipe {
     return {
@@ -405,9 +421,10 @@ export class Runner {
     options: {
       tx?: IExtendedStorageTransaction;
       givenRecipe?: Recipe;
+      noSink?: boolean;
     } = {},
   ): void {
-    const { tx, givenRecipe } = options;
+    const { tx, givenRecipe, noSink: noSync } = options;
     const key = this.getDocKey(resultCell);
 
     // Create cancel group early - before the $TYPE sink
@@ -465,8 +482,7 @@ export class Runner {
           if (!newRecipeId) return;
           if (newRecipeId === currentRecipeId) return; // No change
 
-          // Recipe changed - cancel previous nodes and re-instantiate
-          cancelNodes?.();
+          // Recipe changed
           const previousRecipeId = currentRecipeId;
           currentRecipeId = newRecipeId;
 
@@ -478,6 +494,7 @@ export class Runner {
               .loadRecipe(newRecipeId, resultCell.space)
               .then((loaded) => {
                 if (currentRecipeId !== newRecipeId) return;
+
                 logger.info("recipe changed", {
                   from: {
                     id: previousRecipeId,
@@ -487,6 +504,10 @@ export class Runner {
                   },
                   to: { id: newRecipeId, recipe: loaded },
                 });
+
+                // Cancel previous nodes (after we're sure it's a valid one)
+                cancelNodes?.();
+
                 instantiateRecipe(loaded);
               })
               .catch((err) => {
@@ -541,7 +562,9 @@ export class Runner {
     // Sync path - instantiate immediately
     currentRecipeId = initialRecipeId;
     instantiateRecipe(this.resolveToRecipe(initialResolved), tx);
-    setupTypeWatcher();
+    if (!noSync) {
+      setupTypeWatcher();
+    }
 
     return;
   }
@@ -630,22 +653,6 @@ export class Runner {
 
     // Success!
     return Promise.resolve(true);
-  }
-
-  private startWithTx<T = any>(
-    tx: IExtendedStorageTransaction,
-    resultCell: Cell<T>,
-    givenRecipe?: Recipe,
-  ): void {
-    const key = this.getDocKey(resultCell);
-    if (this.cancels.has(key)) return; // Already started
-
-    const processCell = resultCell.withTx(tx).getSourceCell();
-    if (!processCell) {
-      throw new Error("Cannot start: no process cell");
-    }
-
-    this.startCore(resultCell, processCell, { tx, givenRecipe });
   }
 
   /**
