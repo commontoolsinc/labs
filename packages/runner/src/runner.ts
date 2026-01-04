@@ -467,6 +467,7 @@ export class Runner {
 
           // Recipe changed - cancel previous nodes and re-instantiate
           cancelNodes?.();
+          const previousRecipeId = currentRecipeId;
           currentRecipeId = newRecipeId;
 
           const resolved = this.runtime.recipeManager.recipeById(newRecipeId);
@@ -478,16 +479,13 @@ export class Runner {
               .then((loaded) => {
                 if (currentRecipeId !== newRecipeId) return;
                 logger.info("recipe changed", {
-                  new: {
-                    id: newRecipeId,
-                    recipe: loaded,
-                  },
-                  current: {
-                    id: currentRecipeId,
+                  from: {
+                    id: previousRecipeId,
                     recipe: this.runtime.recipeManager.recipeById(
-                      currentRecipeId,
+                      previousRecipeId!,
                     ),
                   },
+                  to: { id: newRecipeId, recipe: loaded },
                 });
                 instantiateRecipe(loaded);
               })
