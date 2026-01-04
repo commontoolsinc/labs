@@ -35,7 +35,6 @@ import {
 import { resolveLink } from "./link-resolution.ts";
 import {
   areNormalizedLinksSame,
-  type CellLink,
   createSigilLinkFromParsedLink,
   isCellLink,
   isSigilLink,
@@ -62,7 +61,6 @@ import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
-import { isLink } from "@commontools/runner";
 
 const logger = getLogger("runner");
 
@@ -585,14 +583,19 @@ export class Runner {
     // Step 4: Check for process cell, or follow link if there is one
     const processCell = rootCell.getSourceCell();
     if (!processCell) {
-      if (isLink(resultCell.getRaw())) {
-        const nextCell = this.runtime.getCellFromLink(
-          resultCell.getRaw() as CellLink,
-        );
+      const maybeLink = parseLink(resultCell.getRaw(), resultCell);
+      if (maybeLink) {
+        // Follow link. This happens when the id is for a handle that pointed to
+        // the actual pattern instance, sometimes because it was passed along.
+        const nextCell = this.runtime.getCellFromLink(maybeLink);
         if (seenCells.has(nextCell)) {
           return Promise.reject(new Error("Circular link detected"));
         }
         seenCells.add(nextCell);
+        logger.info("start: followed link", {
+          from: resultCell.getAsNormalizedFullLink(),
+          to: nextCell.getAsNormalizedFullLink(),
+        });
         return this.doStart(nextCell, seenCells);
       } else {
         return Promise.reject(new Error("Cannot start: no process cell"));
