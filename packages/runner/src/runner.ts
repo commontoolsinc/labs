@@ -362,69 +362,75 @@ export class Runner {
    * Runs synchronously when data is available (important for tests).
    */
   start<T = any>(resultCell: Cell<T>): Promise<boolean> {
-    const key = this.getDocKey(resultCell);
-    if (this.cancels.has(key)) return Promise.resolve(true); // Already started
-
-    // Sync result cell if empty, then continue
-    if (resultCell.getRaw() === undefined) {
-      return Promise.resolve(resultCell.sync()).then(() =>
-        this.doStart(resultCell)
-      );
-    }
-
-    // Data available - run synchronously
     return this.doStart(resultCell);
   }
 
-  private doStart<T = any>(resultCell: Cell<T>): Promise<boolean> {
+  /** Convert a module to recipe format */
+  private moduleToRecipe(module: Module): Recipe {
+    return {
+      argumentSchema: module.argumentSchema ?? {},
+      resultSchema: module.resultSchema ?? {},
+      result: { $alias: { path: ["internal"] } },
+      nodes: [
+        {
+          module,
+          inputs: { $alias: { path: ["argument"] } },
+          outputs: { $alias: { path: ["internal"] } },
+        },
+      ],
+    } satisfies Recipe;
+  }
+
+  /** Resolve a Recipe or Module to a Recipe */
+  private resolveToRecipe(recipeOrModule: Recipe | Module): Recipe {
+    return isModule(recipeOrModule)
+      ? this.moduleToRecipe(recipeOrModule as Module)
+      : (recipeOrModule as Recipe);
+  }
+
+  /**
+   * Core start implementation. Sets up cancel groups, instantiates nodes,
+   * and watches for recipe changes.
+   *
+   * @param resultCell - The result cell to start
+   * @param processCell - The process cell containing recipe state
+   * @param options.tx - Transaction to use for initial setup (optional)
+   * @param options.givenRecipe - Recipe to use instead of looking up by ID
+   * @param options.allowAsyncLoad - Whether to allow async recipe loading
+   * @returns Promise for async mode, void for sync mode
+   */
+  private startCore<T = any>(
+    resultCell: Cell<T>,
+    processCell: Cell<any>,
+    options: {
+      tx?: IExtendedStorageTransaction;
+      givenRecipe?: Recipe;
+    } = {},
+  ): void {
+    const { tx, givenRecipe } = options;
     const key = this.getDocKey(resultCell);
-    // Check again after potential sync
-    if (this.cancels.has(key)) return Promise.resolve(true);
-
-    // Subpath cells (created via .key()) have nothing to start - the parent
-    // charm is responsible for running. Just return success.
-    const link = resultCell.getAsNormalizedFullLink();
-    if (link.path.length > 0) {
-      return Promise.resolve(true);
-    }
-
-    // No process cell means this is just data, not a charm. Nothing to start.
-    const processCell = resultCell.getSourceCell();
-    if (!processCell) {
-      return Promise.resolve(true);
-    }
 
     // Create cancel group early - before the $TYPE sink
     const [cancel, addCancel] = useCancelGroup();
     this.cancels.set(key, cancel);
     this.allCancels.add(cancel);
 
+    // Helper to clean up on error
+    const cleanup = () => {
+      this.cancels.delete(key);
+      this.allCancels.delete(cancel);
+      cancel();
+    };
+
     // Track recipe ID and node cancellation
     let currentRecipeId: string | undefined;
     let cancelNodes: Cancel | undefined;
 
-    // Helper to resolve module to recipe
-    const resolveToRecipe = (recipeOrModule: Recipe | Module): Recipe => {
-      if (isModule(recipeOrModule)) {
-        const module = recipeOrModule as Module;
-        return {
-          argumentSchema: module.argumentSchema ?? {},
-          resultSchema: module.resultSchema ?? {},
-          result: { $alias: { path: ["internal"] } },
-          nodes: [
-            {
-              module,
-              inputs: { $alias: { path: ["argument"] } },
-              outputs: { $alias: { path: ["internal"] } },
-            },
-          ],
-        } satisfies Recipe;
-      }
-      return recipeOrModule as Recipe;
-    };
-
     // Helper to instantiate nodes for a recipe
-    const instantiateRecipe = (recipe: Recipe) => {
+    const instantiateRecipe = (
+      recipe: Recipe,
+      useTx?: IExtendedStorageTransaction,
+    ) => {
       // Create new cancel group for nodes
       const [nodeCancel, addNodeCancel] = useCancelGroup();
       cancelNodes = nodeCancel;
@@ -432,11 +438,12 @@ export class Runner {
 
       // Instantiate nodes
       this.discoverAndCacheFunctions(recipe, new Set());
-      const tx = this.runtime.edit();
+      const actualTx = useTx ?? this.runtime.edit();
+      const shouldCommit = !useTx;
       try {
         for (const node of recipe.nodes) {
           this.instantiateNode(
-            tx,
+            actualTx,
             node.module,
             node.inputs,
             node.outputs,
@@ -446,72 +453,182 @@ export class Runner {
           );
         }
       } finally {
-        tx.commit();
+        if (shouldCommit) actualTx.commit();
       }
     };
 
     // Helper to set up the $TYPE watcher
     const setupTypeWatcher = () => {
-      const typeCell = processCell.key(TYPE);
+      const typeCell = processCell.key(TYPE).asSchema({ type: "string" });
       addCancel(
-        typeCell.sink((typeValue) => {
-          const newRecipeId = typeValue as unknown as string | undefined;
+        typeCell.sink((newRecipeId) => {
           if (!newRecipeId) return;
           if (newRecipeId === currentRecipeId) return; // No change
 
           // Recipe changed - cancel previous nodes and re-instantiate
           cancelNodes?.();
+          const previousRecipeId = currentRecipeId;
           currentRecipeId = newRecipeId;
 
           const resolved = this.runtime.recipeManager.recipeById(newRecipeId);
           if (!resolved) {
-            // Async load
+            // Async load for recipe change after initial start.
+            // Errors are logged here since there's no caller to propagate to.
             this.runtime.recipeManager
               .loadRecipe(newRecipeId, resultCell.space)
               .then((loaded) => {
                 if (currentRecipeId !== newRecipeId) return;
-                instantiateRecipe(resolveToRecipe(loaded));
+                logger.info("recipe changed", {
+                  from: {
+                    id: previousRecipeId,
+                    recipe: this.runtime.recipeManager.recipeById(
+                      previousRecipeId!,
+                    ),
+                  },
+                  to: { id: newRecipeId, recipe: loaded },
+                });
+                instantiateRecipe(loaded);
+              })
+              .catch((err) => {
+                logger.error(
+                  "recipe-load-error",
+                  `Failed to load recipe ${newRecipeId}`,
+                  err,
+                );
               });
-            return;
+          } else {
+            instantiateRecipe(resolved);
           }
-
-          instantiateRecipe(resolveToRecipe(resolved));
         }),
       );
     };
 
     // Get initial recipe ID
-    const initialRecipeId = processCell.key(TYPE).getRaw({
+    const processCellForRead = tx ? processCell.withTx(tx) : processCell;
+    const initialRecipeId = processCellForRead.key(TYPE).getRaw({
       meta: ignoreReadForScheduling,
     }) as string | undefined;
 
     if (!initialRecipeId) {
-      // No recipe yet - set up watcher to handle when $TYPE is set
-      setupTypeWatcher();
-      return Promise.resolve(true);
+      cleanup();
+      throw new Error("Cannot start: no recipe ID ($TYPE)");
     }
 
-    // Try sync lookup first for initial recipe
+    // Determine initial recipe
+    if (givenRecipe) {
+      currentRecipeId = initialRecipeId;
+      if (
+        this.runtime.recipeManager.registerRecipe(givenRecipe) !==
+          currentRecipeId
+      ) {
+        cleanup();
+        throw new Error("Recipe ID mismatch");
+      }
+      instantiateRecipe(givenRecipe, tx);
+      setupTypeWatcher();
+      return;
+    }
+
+    // Try sync lookup
     const initialResolved = this.runtime.recipeManager.recipeById(
       initialRecipeId,
     );
     if (!initialResolved) {
-      // Async load, then instantiate
-      return this.runtime.recipeManager
-        .loadRecipe(initialRecipeId, resultCell.space)
-        .then((loaded) => {
-          currentRecipeId = initialRecipeId;
-          instantiateRecipe(resolveToRecipe(loaded));
-          setupTypeWatcher();
-          return true;
-        });
+      cleanup();
+      throw new Error(`Unknown recipe: ${initialRecipeId}`);
     }
 
     // Sync path - instantiate immediately
     currentRecipeId = initialRecipeId;
-    instantiateRecipe(resolveToRecipe(initialResolved));
+    instantiateRecipe(this.resolveToRecipe(initialResolved), tx);
     setupTypeWatcher();
 
+    return;
+  }
+
+  /**
+   * Internal start implementation with cascade of checks.
+   * Each check: if it fails and needs async work, return a promise that
+   * resolves the missing piece and retries.
+   */
+  private doStart<T = any>(
+    resultCell: Cell<T>,
+    seenCells: Set<Cell> = new Set(),
+  ): Promise<boolean> {
+    // Step 1: For subpath cells, resolve to root cell
+    const link = resultCell.getAsNormalizedFullLink();
+    const rootCell = link.path.length > 0
+      ? this.runtime.getCellFromLink({ ...link, path: [] })
+      : resultCell;
+
+    const key = this.getDocKey(rootCell);
+
+    // Step 2: Already started? Return success
+    if (this.cancels.has(key)) return Promise.resolve(true);
+
+    // Step 3: Not synced yet? Sync and retry
+    // Once getRaw() has a value, all properties including source are synced.
+    if (rootCell.getRaw() === undefined) {
+      return Promise.resolve(rootCell.sync()).then(() => {
+        if (rootCell.getRaw() === undefined) {
+          return Promise.reject(new Error("No data at cell"));
+        } else {
+          return this.doStart(rootCell, seenCells);
+        }
+      });
+    }
+
+    // Step 4: Check for process cell, or follow link if there is one
+    const processCell = rootCell.getSourceCell();
+    if (!processCell) {
+      const maybeLink = parseLink(resultCell.getRaw(), resultCell);
+      if (maybeLink) {
+        // Follow link. This happens when the id is for a handle that pointed to
+        // the actual pattern instance, sometimes because it was passed along.
+        const nextCell = this.runtime.getCellFromLink(maybeLink);
+        if (seenCells.has(nextCell)) {
+          return Promise.reject(new Error("Circular link detected"));
+        }
+        seenCells.add(nextCell);
+        logger.info("start: followed link", {
+          from: resultCell.getAsNormalizedFullLink(),
+          to: nextCell.getAsNormalizedFullLink(),
+        });
+        return this.doStart(nextCell, seenCells);
+      } else {
+        return Promise.reject(new Error("Cannot start: no process cell"));
+      }
+    }
+
+    // Step 5: Check whether the recipe is available, otherwise load it
+    const recipeId = processCell.key(TYPE).getRaw() as string | undefined;
+    if (!recipeId) {
+      return Promise.reject(
+        new Error(`Cannot start: no recipe ID ($TYPE)`),
+      );
+    }
+    const recipe = this.runtime.recipeManager.recipeById(recipeId);
+    if (!recipe) {
+      return this.runtime.recipeManager.loadRecipe(recipeId, resultCell.space)
+        .then((loaded) => {
+          if (loaded) {
+            return this.doStart(rootCell, seenCells);
+          } else {
+            return Promise.reject(
+              new Error(`Could not load recipe ${recipeId}`),
+            );
+          }
+        });
+    }
+
+    // Step 6: Start the recipe
+    try {
+      this.startCore(rootCell, processCell);
+    } catch (err) {
+      return Promise.reject(err);
+    }
+
+    // Success!
     return Promise.resolve(true);
   }
 
@@ -525,105 +642,10 @@ export class Runner {
 
     const processCell = resultCell.withTx(tx).getSourceCell();
     if (!processCell) {
-      console.warn("Cannot start: process cell missing. Did you call setup()?");
-      return;
+      throw new Error("Cannot start: no process cell");
     }
 
-    // Create cancel group early - before the $TYPE sink
-    const [cancel, addCancel] = useCancelGroup();
-    this.cancels.set(key, cancel);
-    this.allCancels.add(cancel);
-
-    // Track recipe ID and node cancellation
-    let currentRecipeId: string | undefined;
-    let cancelNodes: Cancel | undefined;
-
-    // Helper to resolve module to recipe
-    const resolveToRecipe = (recipeOrModule: Recipe | Module): Recipe => {
-      if (isModule(recipeOrModule)) {
-        const module = recipeOrModule as Module;
-        return {
-          argumentSchema: module.argumentSchema ?? {},
-          resultSchema: module.resultSchema ?? {},
-          result: { $alias: { path: ["internal"] } },
-          nodes: [
-            {
-              module,
-              inputs: { $alias: { path: ["argument"] } },
-              outputs: { $alias: { path: ["internal"] } },
-            },
-          ],
-        } satisfies Recipe;
-      }
-      return recipeOrModule as Recipe;
-    };
-
-    // Helper to instantiate nodes for a recipe
-    const instantiateRecipe = (
-      recipe: Recipe,
-      useTx: IExtendedStorageTransaction,
-      commitTx: boolean,
-    ) => {
-      // Create new cancel group for nodes
-      const [nodeCancel, addNodeCancel] = useCancelGroup();
-      cancelNodes = nodeCancel;
-      addCancel(nodeCancel);
-
-      // Instantiate nodes
-      this.discoverAndCacheFunctions(recipe, new Set());
-      try {
-        for (const node of recipe.nodes) {
-          this.instantiateNode(
-            useTx,
-            node.module,
-            node.inputs,
-            node.outputs,
-            processCell,
-            addNodeCancel,
-            recipe,
-          );
-        }
-      } finally {
-        if (commitTx) useTx.commit();
-      }
-    };
-
-    // Get initial recipe ID and do initial setup
-    const initialRecipeId = processCell.withTx(tx).key(TYPE).getRaw({
-      meta: ignoreReadForScheduling,
-    }) as string | undefined;
-
-    if (initialRecipeId) {
-      currentRecipeId = initialRecipeId;
-      const initialRecipe = givenRecipe ??
-        (() => {
-          const resolved = this.runtime.recipeManager.recipeById(
-            initialRecipeId,
-          );
-          if (!resolved) throw new Error(`Unknown recipe: ${initialRecipeId}`);
-          return resolveToRecipe(resolved);
-        })();
-      instantiateRecipe(initialRecipe, tx, false);
-    }
-
-    // Watch $TYPE for future changes
-    const typeCell = processCell.key(TYPE);
-    addCancel(
-      typeCell.sink((newRecipeId) => {
-        if (!newRecipeId) return; // No recipe yet
-        if (newRecipeId === currentRecipeId) return; // No change
-
-        // Recipe changed - cancel previous nodes and re-instantiate
-        cancelNodes?.();
-        currentRecipeId = newRecipeId;
-
-        const resolved = this.runtime.recipeManager.recipeById(newRecipeId);
-        if (!resolved) throw new Error(`Unknown recipe: ${newRecipeId}`);
-        const recipe = resolveToRecipe(resolved);
-
-        instantiateRecipe(recipe, this.runtime.edit(), true);
-      }),
-    );
+    this.startCore(resultCell, processCell, { tx, givenRecipe });
   }
 
   /**
