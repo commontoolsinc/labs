@@ -58,22 +58,57 @@ export const styles = css`
     border-radius: var(--ct-theme-border-radius, 0.375rem);
   }
 
-  /* Backlink styling - make [[backlinks]] visually distinct */
+  /* Backlink styling - focus-aware display */
   .cm-content .cm-line {
     position: relative;
   }
 
-  /* Style for backlinks - we'll use a highlight mark */
-  .cm-backlink {
-    background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.1));
-    border-radius: 0.25rem;
-    padding: 0.125rem 0.25rem;
+  /* Collapsed pill view - complete backlink with ID (click to navigate) */
+  .cm-backlink-pill {
+    background-color: var(--ct-color-primary-100, hsla(212, 100%, 47%, 0.15));
+    color: var(--ct-color-primary-700, hsl(212, 80%, 40%));
+    border-radius: 9999px;
+    padding: 0.125rem 0.5rem;
     cursor: pointer;
+    font-weight: 500;
+    text-decoration: none;
     transition: background-color var(--ct-theme-animation-duration, 150ms)
       var(--ct-transition-timing-ease);
     }
 
-    .cm-backlink:hover {
-      background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.2));
+    .cm-backlink-pill:hover {
+      background-color: var(--ct-color-primary-200, hsla(212, 100%, 47%, 0.25));
     }
-  `;
+
+    /* Pending pill - incomplete backlink without ID */
+    .cm-backlink-pending {
+      background-color: var(--ct-color-warning-100, hsla(45, 100%, 50%, 0.15));
+      color: var(--ct-color-warning-700, hsl(45, 80%, 35%));
+      border-radius: 9999px;
+      padding: 0.125rem 0.5rem;
+      cursor: text;
+      font-weight: 500;
+      border: 1px dashed var(--ct-color-warning-400, hsl(45, 70%, 50%));
+    }
+
+    /* Editing view - full [[Name (id)]] format visible */
+    .cm-backlink-editing {
+      background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.1));
+      border-radius: 0.25rem;
+      padding: 0.125rem 0.25rem;
+    }
+
+    /* Legacy fallback - keep for any old usages */
+    .cm-backlink {
+      background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.1));
+      border-radius: 0.25rem;
+      padding: 0.125rem 0.25rem;
+      cursor: pointer;
+      transition: background-color var(--ct-theme-animation-duration, 150ms)
+        var(--ct-transition-timing-ease);
+      }
+
+      .cm-backlink:hover {
+        background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.2));
+      }
+    `;
