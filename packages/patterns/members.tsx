@@ -20,7 +20,7 @@ import {
   wish,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
-import { type MentionableCharm } from "./backlinks-index.tsx";
+import { type MentionableCharm } from "./system/backlinks-index.tsx";
 // Import from pure utility to avoid circular dependency
 import { inferTypeFromModules } from "./record/type-inference.ts";
 

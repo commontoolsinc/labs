@@ -40,7 +40,7 @@ import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
 import { getResultSchema } from "./record/extraction/schema-utils.ts";
 import { MembersModule } from "./members.tsx";
 import type { ContainerCoordinationContext } from "./container-protocol.ts";
-import type { MentionableCharm } from "./backlinks-index.tsx";
+import type { MentionableCharm } from "./system/backlinks-index.tsx";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 
 // ===== Standard Labels for Smart Defaults =====
@@ -846,10 +846,6 @@ const createSibling = handler<
 });
 
 // ===== The Record Pattern =====
-// Type for mentionable charms (matches backlinks-index.tsx)
-type MentionableCharm = {
-  [NAME]?: string;
-};
 
 const Record = pattern<RecordInput, RecordOutput>(
   ({ title, subCharms, trashedSubCharms }) => {
