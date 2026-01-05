@@ -313,9 +313,41 @@ export class RuntimeInternals extends EventTarget {
     // Set up iframe context handler
     setupIframe(runtime);
 
+    // Sync with timeout - handles cold start where first sync may hang
+    // On cold start, the first websocket connection may get stuck. Caller (RootView)
+    // will retry with a fresh Runtime/websocket if this times out.
+    const SYNC_TIMEOUT_MS = 10_000; // 10 second timeout
+
+    console.log(`[RuntimeInternals] Starting sync...`);
     charmManager = new CharmManager(session, runtime);
-    await charmManager.synced();
-    const cc = new CharmsController(charmManager);
+    const syncedPromise = charmManager.synced();
+
+    const result = await Promise.race([
+      syncedPromise.then(() => {
+        console.log(`[RuntimeInternals] synced() resolved!`);
+        return "synced" as const;
+      }),
+      new Promise<"timeout">((resolve) =>
+        setTimeout(() => resolve("timeout"), SYNC_TIMEOUT_MS)
+      ),
+    ]);
+
+    if (result === "timeout") {
+      console.error(
+        `[RuntimeInternals] Sync timed out after ${SYNC_TIMEOUT_MS}ms - closing storage and throwing`,
+      );
+      // Close storage to clean up stuck websocket - caller can retry
+      await runtime.storageManager.close().catch((e) =>
+        console.warn("[RuntimeInternals] Error closing storage:", e)
+      );
+      throw new Error(
+        `Sync timed out after ${SYNC_TIMEOUT_MS}ms. Server may be initializing - try refreshing.`,
+      );
+    }
+
+    console.log(`[RuntimeInternals] Sync complete`);
+
+    const cc = new CharmsController(charmManager!);
     return new RuntimeInternals(
       cc,
       telemetry,

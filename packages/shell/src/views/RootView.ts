@@ -83,11 +83,45 @@ export class XRootView extends BaseView {
           return undefined;
         }
 
-        const rt = await RuntimeInternals.create({
-          identity: app.identity,
-          view: app.view,
-          apiUrl: app.apiUrl,
-        });
+        // Retry RuntimeInternals creation on timeout - handles cold start
+        const MAX_ATTEMPTS = 3;
+        let rt: RuntimeInternals | undefined;
+        let lastError: Error | undefined;
+
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+          try {
+            if (attempt > 1) {
+              console.log(
+                `[RootView] Retrying RuntimeInternals.create (attempt ${attempt}/${MAX_ATTEMPTS})...`,
+              );
+            }
+            rt = await RuntimeInternals.create({
+              identity: app.identity,
+              view: app.view,
+              apiUrl: app.apiUrl,
+            });
+            break; // Success
+          } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+            const isTimeout = lastError.message.includes("timed out");
+
+            if (isTimeout && attempt < MAX_ATTEMPTS) {
+              console.warn(
+                `[RootView] RuntimeInternals creation timed out, retrying...`,
+              );
+              // Small delay before retry
+              await new Promise((resolve) => setTimeout(resolve, 500));
+              continue;
+            }
+
+            // Non-timeout error or last attempt - rethrow
+            throw lastError;
+          }
+        }
+
+        if (!rt) {
+          throw lastError || new Error("Failed to create RuntimeInternals");
+        }
 
         if (signal.aborted) {
           rt.dispose().catch(console.error);
