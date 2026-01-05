@@ -427,48 +427,46 @@ const dismiss = handler<
 });
 
 /**
- * Create a toggle source handler for a specific index
+ * Toggle source handler - receives Cell as parameter for proper transaction context
  */
-function createToggleSourceHandler(
-  index: number,
-  sourceSelections: Cell<
-    Default<Record<number, boolean>, Record<number, never>>
-  >,
-) {
-  return handler<unknown, Record<string, never>>(
-    () => {
-      const current = sourceSelections.get() || {};
-      // Default is selected (true), so toggle means: if undefined or true -> false, if false -> true
-      const currentValue = current[index] !== false;
-      sourceSelections.set({
-        ...current,
-        [index]: !currentValue,
-      });
-    },
-  );
-}
+const toggleSourceHandler = handler<
+  unknown,
+  {
+    index: number;
+    sourceSelectionsCell: Cell<
+      Default<Record<number, boolean>, Record<number, never>>
+    >;
+  }
+>((_event, { index, sourceSelectionsCell }) => {
+  const current = sourceSelectionsCell.get() || {};
+  // Default is selected (true), so toggle means: if undefined or true -> false, if false -> true
+  const currentValue = current[index] !== false;
+  sourceSelectionsCell.set({
+    ...current,
+    [index]: !currentValue,
+  });
+});
 
 /**
- * Create a toggle trash handler for a specific index
+ * Toggle trash handler - receives Cell as parameter for proper transaction context
  */
-function createToggleTrashHandler(
-  index: number,
-  trashSelections: Cell<
-    Default<Record<number, boolean>, Record<number, never>>
-  >,
-) {
-  return handler<unknown, Record<string, never>>(
-    () => {
-      const current = trashSelections.get() || {};
-      // Default is not selected (false)
-      const currentValue = current[index] === true;
-      trashSelections.set({
-        ...current,
-        [index]: !currentValue,
-      });
-    },
-  );
-}
+const toggleTrashHandler = handler<
+  unknown,
+  {
+    index: number;
+    trashSelectionsCell: Cell<
+      Default<Record<number, boolean>, Record<number, never>>
+    >;
+  }
+>((_event, { index, trashSelectionsCell }) => {
+  const current = trashSelectionsCell.get() || {};
+  // Default is not selected (false)
+  const currentValue = current[index] === true;
+  trashSelectionsCell.set({
+    ...current,
+    [index]: !currentValue,
+  });
+});
 
 /**
  * Handler to start extraction - defined at module scope
@@ -485,6 +483,7 @@ const startExtraction = handler<
       Default<"select" | "extracting" | "preview", "select">
     >;
     notesContentSnapshotCell: Cell<Default<string, "">>;
+    // Read-only: computed() provides OpaqueRef, no Cell wrapper needed
     ocrResultsValue: Record<number, string>;
   }
 >(
@@ -502,9 +501,14 @@ const startExtraction = handler<
     // Use .get() to read Cell values inside handler
     const selectionsMap = sourceSelectionsCell.get() || {};
     const subCharmsData = parentSubCharmsCell.get() || [];
+    const ocrResultsMap = ocrResultsValue || {};
+
+    // First pass: use scanExtractableSources to identify sources and their indices
+    // This may return stale content for some sources
     const sources = scanExtractableSources(subCharmsData);
 
     // Build combined content from selected sources
+    // For notes/text-import, use Cell.key() navigation to ensure we read live content
     const parts: string[] = [];
     let notesContent = "";
 
@@ -512,17 +516,45 @@ const startExtraction = handler<
       // Skip if explicitly deselected
       if (selectionsMap[source.index] === false) continue;
 
-      if (source.type === "notes" || source.type === "text-import") {
-        if (source.content) {
-          parts.push(`--- ${source.label} ---\n${source.content}`);
-          // Capture Notes content for cleanup preview
-          if (source.type === "notes") {
-            notesContent = source.content;
-          }
+      if (source.type === "notes") {
+        // Access charm content via .get() first to resolve links, then access properties
+        // Cell.key() navigation doesn't work through link boundaries - charm is stored as a link
+        const entry = (parentSubCharmsCell as Cell<SubCharmEntry[]>)
+          .key(source.index)
+          .get();
+        const charm = entry?.charm as Record<string, unknown>;
+        const contentCell = charm?.content;
+        const liveContent = typeof contentCell === "object" &&
+            contentCell !== null &&
+            "get" in contentCell
+          ? (contentCell as { get: () => unknown }).get()
+          : contentCell;
+        const content = typeof liveContent === "string" ? liveContent : "";
+
+        if (content.trim()) {
+          parts.push(`--- ${source.label} ---\n${content}`);
+          notesContent = content;
+        }
+      } else if (source.type === "text-import") {
+        // Same pattern for text-import
+        const entry = (parentSubCharmsCell as Cell<SubCharmEntry[]>)
+          .key(source.index)
+          .get();
+        const charm = entry?.charm as Record<string, unknown>;
+        const contentCell = charm?.content;
+        const liveContent = typeof contentCell === "object" &&
+            contentCell !== null &&
+            "get" in contentCell
+          ? (contentCell as { get: () => unknown }).get()
+          : contentCell;
+        const content = typeof liveContent === "string" ? liveContent : "";
+
+        if (content.trim()) {
+          parts.push(`--- ${source.label} ---\n${content}`);
         }
       } else if (source.type === "photo") {
         // Include OCR text for photos
-        const ocrText = ocrResultsValue[source.index];
+        const ocrText = ocrResultsMap[source.index];
         if (ocrText && ocrText.trim()) {
           parts.push(`--- ${source.label} (OCR) ---\n${ocrText}`);
         }
@@ -869,10 +901,13 @@ export const ExtractorModule = recipe<
     });
 
     // Check if any sources are selected
+    // Flatten this computed to directly access parentSubCharms rather than chaining through extractableSources
+    // Chained computed access (computed -> computed) doesn't properly establish reactive dependencies
     const hasSelectedSources = computed(() => {
-      const sources = extractableSources;
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
       const selectionsMap = sourceSelections.get() || {};
-      if (!sources || sources.length === 0) return false;
+      if (sources.length === 0) return false;
       // At least one source must not be explicitly deselected
       return sources.some((s: ExtractableSource) =>
         selectionsMap[s.index] !== false
@@ -880,20 +915,23 @@ export const ExtractorModule = recipe<
     });
 
     // Count selected sources
+    // Flatten this computed to directly access parentSubCharms rather than chaining through extractableSources
+    // Chained computed access (computed -> computed) doesn't properly establish reactive dependencies
     const selectedSourceCount = computed(() => {
-      const sources = extractableSources;
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
       const selectionsMap = sourceSelections.get() || {};
-      if (!sources) return 0;
       return sources.filter((s: ExtractableSource) =>
         selectionsMap[s.index] !== false
       ).length;
     });
 
     // Build OCR prompts for selected photos
+    // Flatten this computed to directly access parentSubCharms rather than chaining through extractableSources
     const photoSources = computed(() => {
-      const sources = extractableSources;
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
       const selectionsMap = sourceSelections.get() || {};
-      if (!sources) return [];
       return sources.filter(
         (s: ExtractableSource) =>
           s.type === "photo" && s.requiresOCR &&
@@ -970,8 +1008,12 @@ export const ExtractorModule = recipe<
     // Build preview from extraction result
     const preview = computed((): ExtractionPreview | null => {
       if (!extraction.result) return null;
+      // Debug: Log what the LLM extracted
+      console.log("[Extract] LLM result:", JSON.stringify(extraction.result, null, 2));
       const subCharms = parentSubCharms.get() || [];
-      return buildPreview(extraction.result, subCharms);
+      const result = buildPreview(extraction.result, subCharms);
+      console.log("[Extract] Preview fields:", result.fields.length, result.fields.map((f: ExtractedField) => f.fieldName));
+      return result;
     });
 
     // Count selected fields for button text
@@ -986,13 +1028,16 @@ export const ExtractorModule = recipe<
     });
 
     // Determine current phase based on state
+    // Force reactive dependency on preview by assigning to local variable BEFORE any early returns
+    // Without this, early return paths (pending/error) prevent preview from being tracked as dependency
     const currentPhase = computed(() => {
+      const p = preview; // Establish reactive dependency before any conditionals
       const phase = extractPhase.get() || "select";
       if (phase === "extracting") {
         if (extraction.pending) return "extracting";
         if (extraction.error) return "error";
-        if (preview?.fields?.length) return "preview";
-        if (extraction.result && !preview?.fields?.length) return "no-results";
+        if (p?.fields?.length) return "preview";
+        if (extraction.result && !p?.fields?.length) return "no-results";
         return "extracting";
       }
       return phase;
@@ -1129,19 +1174,47 @@ ${extractedSummary.join("\n")}`;
       const subCharms = parentSubCharms.get() || [];
       return scanExtractableSources(subCharms).length === 0;
     });
-    const isSingleSource = computed(() => selectedSourceCount === 1);
+    // Dereference computed values properly to avoid comparing Cell objects to primitives
+    const isSingleSource = computed(() => Number(selectedSourceCount) === 1);
     const extractButtonDisabled = computed(() =>
-      !hasSelectedSources || ocrPending
+      !Boolean(hasSelectedSources) || Boolean(ocrPending)
     );
     const extractButtonBackground = computed(() =>
-      hasSelectedSources && !ocrPending ? "#f59e0b" : "#d1d5db"
+      Boolean(hasSelectedSources) && !Boolean(ocrPending) ? "#f59e0b" : "#d1d5db"
     );
     const extractButtonCursor = computed(() =>
-      hasSelectedSources && !ocrPending ? "pointer" : "not-allowed"
+      Boolean(hasSelectedSources) && !Boolean(ocrPending) ? "pointer" : "not-allowed"
     );
-    const isCleanedNotesEmpty = computed(() => cleanedNotesContent === "");
-    const hasMultipleChanges = computed(() => totalChangesCount !== 1);
-    const hasTrashItems = computed(() => trashCount > 0);
+    const isCleanedNotesEmpty = computed(() => String(cleanedNotesContent) === "");
+    const hasMultipleChanges = computed(() => Number(totalChangesCount) !== 1);
+    const hasTrashItems = computed(() => Number(trashCount) > 0);
+
+    // Pre-computed selection state maps to avoid inline computed() in .map()
+    // Creating computed() inside .map() creates new nodes on each render, causing scheduler thrashing
+    const sourceCheckStates = computed(() => {
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
+      const selectionsMap = sourceSelections.get() || {};
+      const result: Record<number, boolean> = {};
+      for (const source of sources) {
+        result[source.index] = selectionsMap[source.index] !== false;
+      }
+      return result;
+    });
+
+    const trashCheckStates = computed(() => {
+      const selectionsMap = trashSelections.get() || {};
+      const result: Record<number, boolean> = {};
+      // Trash sources use same indexing as extractable sources
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
+      for (const source of sources) {
+        if (source.type !== "notes") {
+          result[source.index] = selectionsMap[source.index] === true;
+        }
+      }
+      return result;
+    });
 
     // Preview phase computed values
     const hasNotesSnapshot = computed(() => {
@@ -1152,26 +1225,28 @@ ${extractedSummary.join("\n")}`;
     const showCleanupPreview = computed(() => {
       const rawEnabled = cleanupNotesEnabled.get();
       const enabled = typeof rawEnabled === "boolean" ? rawEnabled : true;
-      return enabled && hasNotesChanges;
+      return enabled && Boolean(hasNotesChanges);
     });
     const cleanupDisabled = computed(() => {
       const rawEnabled = cleanupNotesEnabled.get();
       const enabled = typeof rawEnabled === "boolean" ? rawEnabled : true;
       return !enabled;
     });
-    const hasTrashableSources = computed(() =>
-      extractableSources.filter((s: ExtractableSource) => s.type !== "notes")
-        .length > 0
-    );
+    // Force reactive dependency on extractableSources by assigning to local variable
+    const hasTrashableSources = computed(() => {
+      const sources = extractableSources;
+      return sources.filter((s: ExtractableSource) => s.type !== "notes")
+        .length > 0;
+    });
     const cleanupFailed = computed(() => {
       const status = cleanupApplyStatus.get();
       return status === "failed";
     });
     const applyButtonBackground = computed(() =>
-      cleanupPending ? "#d1d5db" : "#059669"
+      Boolean(cleanupPending) ? "#d1d5db" : "#059669"
     );
     const applyButtonCursor = computed(() =>
-      cleanupPending ? "not-allowed" : "pointer"
+      Boolean(cleanupPending) ? "not-allowed" : "pointer"
     );
 
     return {
@@ -1268,15 +1343,11 @@ ${extractedSummary.join("\n")}`;
                       >
                         <input
                           type="checkbox"
-                          checked={computed(
-                            () =>
-                              (sourceSelections.get() || {})[source.index] !==
-                                false,
-                          )}
-                          onChange={createToggleSourceHandler(
-                            source.index,
-                            sourceSelections,
-                          )({})}
+                          checked={sourceCheckStates[source.index]}
+                          onChange={toggleSourceHandler({
+                            index: source.index,
+                            sourceSelectionsCell: sourceSelections,
+                          })}
                           style={{ marginTop: "2px" }}
                         />
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -1362,6 +1433,7 @@ ${extractedSummary.join("\n")}`;
                         extractionPromptCell: extractionPrompt,
                         extractPhaseCell: extractPhase,
                         notesContentSnapshotCell: notesContentSnapshot,
+                        // Read-only value from computed() - no Cell wrapper needed
                         ocrResultsValue: ocrResults,
                       })}
                       style={{
@@ -1765,15 +1837,11 @@ ${extractedSummary.join("\n")}`;
                       >
                         <input
                           type="checkbox"
-                          checked={computed(
-                            () =>
-                              (trashSelections.get() || {})[source.index] ===
-                                true,
-                          )}
-                          onChange={createToggleTrashHandler(
-                            source.index,
-                            trashSelections,
-                          )({})}
+                          checked={trashCheckStates[source.index]}
+                          onChange={toggleTrashHandler({
+                            index: source.index,
+                            trashSelectionsCell: trashSelections,
+                          })}
                         />
                         <span style={{ fontSize: "13px", color: "#6b7280" }}>
                           {source.icon} {source.label}
