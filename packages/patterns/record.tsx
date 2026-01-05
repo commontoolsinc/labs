@@ -880,6 +880,7 @@ const Record = pattern<RecordInput, RecordOutput>(
       index: number;
       isExpanded: boolean;
       displayInfo: { icon: string; label: string };
+      isPinned: boolean;
     };
 
     // Pre-compute entries with their indices AND expanded state for stable reference during render
@@ -914,6 +915,7 @@ const Record = pattern<RecordInput, RecordOutput>(
             index,
             isExpanded: expandedIdx === index,
             displayInfo,
+            isPinned: entry.pinned || false,
           };
         });
         const pinned = entries.filter((item) => item.entry?.pinned);
@@ -1177,7 +1179,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                   }}
                 >
                   {pinnedEntries.map(
-                    ({ entry, index, isExpanded, displayInfo }) => {
+                    ({ entry, index, isExpanded, displayInfo, isPinned }) => {
                       return (
                         <div
                           style={isExpanded
@@ -1353,16 +1355,16 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   <button
                                     type="button"
                                     onClick={togglePin({ subCharms, index })}
-                                    style={{
-                                      background: "#e0f2fe",
-                                      border: "1px solid #7dd3fc",
+                                    style={computed(() => ({
+                                      background: isPinned ? "#e0f2fe" : "transparent",
+                                      border: isPinned ? "1px solid #7dd3fc" : "1px solid #e5e7eb",
                                       borderRadius: "4px",
                                       cursor: "pointer",
                                       padding: "4px 8px",
                                       fontSize: "12px",
-                                      color: "#0369a1",
-                                    }}
-                                    title="Unpin"
+                                      color: isPinned ? "#0369a1" : "#6b7280",
+                                    }))}
+                                    title={computed(() => isPinned ? "Unpin" : "Pin")}
                                   >
                                     📌
                                   </button>
@@ -1453,7 +1455,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                     }}
                   >
                     {unpinnedEntries.map(
-                      ({ entry, index, isExpanded, displayInfo }) => {
+                      ({ entry, index, isExpanded, displayInfo, isPinned }) => {
                         return (
                           <div
                             style={isExpanded
@@ -1632,16 +1634,16 @@ const Record = pattern<RecordInput, RecordOutput>(
                                     <button
                                       type="button"
                                       onClick={togglePin({ subCharms, index })}
-                                      style={{
-                                        background: "transparent",
-                                        border: "1px solid #e5e7eb",
+                                      style={computed(() => ({
+                                        background: isPinned ? "#e0f2fe" : "transparent",
+                                        border: isPinned ? "1px solid #7dd3fc" : "1px solid #e5e7eb",
                                         borderRadius: "4px",
                                         cursor: "pointer",
                                         padding: "4px 8px",
                                         fontSize: "12px",
-                                        color: "#6b7280",
-                                      }}
-                                      title="Pin"
+                                        color: isPinned ? "#0369a1" : "#6b7280",
+                                      }))}
+                                      title={computed(() => isPinned ? "Unpin" : "Pin")}
                                     >
                                       📌
                                     </button>
@@ -1731,7 +1733,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                   gap: "12px",
                 }}
               >
-                {allEntries.map(({ entry, index, isExpanded, displayInfo }) => {
+                {allEntries.map(({ entry, index, isExpanded, displayInfo, isPinned }) => {
                   return (
                     <div
                       style={isExpanded
@@ -1903,16 +1905,16 @@ const Record = pattern<RecordInput, RecordOutput>(
                               <button
                                 type="button"
                                 onClick={togglePin({ subCharms, index })}
-                                style={{
-                                  background: "transparent",
-                                  border: "1px solid #e5e7eb",
+                                style={computed(() => ({
+                                  background: isPinned ? "#e0f2fe" : "transparent",
+                                  border: isPinned ? "1px solid #7dd3fc" : "1px solid #e5e7eb",
                                   borderRadius: "4px",
                                   cursor: "pointer",
                                   padding: "4px 8px",
                                   fontSize: "12px",
-                                  color: "#6b7280",
-                                }}
-                                title="Pin"
+                                  color: isPinned ? "#0369a1" : "#6b7280",
+                                }))}
+                                title={computed(() => isPinned ? "Unpin" : "Pin")}
                               >
                                 📌
                               </button>
