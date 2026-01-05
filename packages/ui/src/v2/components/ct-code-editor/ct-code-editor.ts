@@ -443,10 +443,15 @@ export class CTCodeEditor extends BaseElement {
 
       // parse + start the recipe + link the inputs
       const pattern = JSON.parse(this.pattern.get());
+      // Simple random ID generator for noteId (matches pattern used in note.tsx)
+      const generateId = () =>
+        `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+
       // Provide mentionable list so the pattern can wire backlinks immediately
       const inputs: Record<string, unknown> = {
         title: backlinkText,
         content: "",
+        noteId: generateId(), // Ensure notes created via [[mention]] have unique IDs
       };
 
       rt.run(tx, pattern, inputs, result);

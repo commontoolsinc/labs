@@ -14,6 +14,7 @@ import {
   type VNode,
   wish,
 } from "commontools";
+import NoteMd from "./note-md.tsx";
 
 // Type for backlinks (inline to work around CLI path resolution bug)
 type MentionableCharm = {
@@ -105,9 +106,13 @@ const handleNewBacklink = handler<
   },
   {
     mentionable: Cell<MentionableCharm[]>;
+    allCharms: Cell<MinimalCharm[]>;
   }
->(({ detail }, { mentionable }) => {
+>(({ detail }, { mentionable, allCharms }) => {
   console.log("new charm", detail.text, detail.charmId);
+
+  // Push to allCharms so it appears in default-app (this was the missing piece!)
+  allCharms.push(detail.charm as unknown as MinimalCharm);
 
   if (detail.navigate) {
     return navigateTo(detail.charm);
@@ -332,7 +337,7 @@ const Note = pattern<Input, Output>(
         $mentioned={mentioned}
         $pattern={patternJson}
         onbacklink-click={handleCharmLinkClick({})}
-        onbacklink-create={handleNewBacklink({ mentionable })}
+        onbacklink-create={handleNewBacklink({ mentionable, allCharms })}
         language="text/markdown"
         theme="light"
         wordWrap
@@ -340,6 +345,29 @@ const Note = pattern<Input, Output>(
         lineNumbers
       />
     );
+
+    // Handler that creates NoteMd dynamically when clicked (not during pattern construction)
+    // This avoids the sub-recipe serialization issue with $pattern
+    const goToViewer = handler<
+      void,
+      {
+        title: Cell<string>;
+        content: Cell<string>;
+        backlinks: Cell<MentionableCharm[]>;
+        noteId: Cell<string>;
+      }
+    >((_, state) => {
+      return navigateTo(
+        NoteMd({
+          note: {
+            title: state.title,
+            content: state.content,
+            backlinks: state.backlinks,
+            noteId: state.noteId,
+          },
+        }),
+      );
+    });
 
     return {
       [NAME]: computed(() => `📝 ${title.get()}`),
@@ -410,6 +438,21 @@ const Note = pattern<Input, Output>(
                   onct-keydown={handleTitleKeydown({ isEditingTitle })}
                 />
               </div>
+
+              {/* View Mode button */}
+              <ct-button
+                variant="ghost"
+                onClick={goToViewer({ title, content, backlinks, noteId })}
+                style={{
+                  alignItems: "center",
+                  padding: "6px 12px",
+                  fontSize: "14px",
+                  borderRadius: "8px",
+                }}
+                title="View as markdown"
+              >
+                View
+              </ct-button>
 
               {/* New Note button */}
               <ct-button
