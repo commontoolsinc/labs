@@ -12,6 +12,80 @@ import type { Runtime } from "./runtime.ts";
 
 const logger = getLogger("link-resolution");
 
+// Cross-space sync timeout and retry settings
+const CROSS_SPACE_SYNC_TIMEOUT_MS = 5_000; // 5 second timeout per attempt
+const CROSS_SPACE_SYNC_RETRY_DELAY_MS = 2_000; // 2 second delay between retries
+const CROSS_SPACE_SYNC_MAX_RETRIES = 10; // Max retries before giving up
+
+/**
+ * Wraps a cross-space sync with timeout and retry logic.
+ * This prevents hanging forever if the target space is unavailable.
+ */
+async function syncCrossSpaceWithRetry(
+  syncFn: () => unknown,
+  targetSpace: string,
+): Promise<void> {
+  for (let attempt = 1; attempt <= CROSS_SPACE_SYNC_MAX_RETRIES; attempt++) {
+    try {
+      const syncResult = syncFn();
+      if (!(syncResult instanceof Promise)) {
+        return; // Sync completed synchronously
+      }
+      const syncPromise = syncResult as Promise<unknown>;
+
+      // Race between sync and timeout
+      const result = await Promise.race([
+        syncPromise.then(() => "success" as const),
+        new Promise<"timeout">((resolve) =>
+          setTimeout(() => resolve("timeout"), CROSS_SPACE_SYNC_TIMEOUT_MS)
+        ),
+      ]);
+
+      if (result === "success") {
+        if (attempt > 1) {
+          logger.info(
+            "cross-space-sync",
+            () => [
+              `Cross-space sync to ${targetSpace} succeeded on attempt ${attempt}`,
+            ],
+          );
+        }
+        return;
+      }
+
+      // Timeout - log and retry
+      if (attempt < CROSS_SPACE_SYNC_MAX_RETRIES) {
+        logger.warn(
+          "cross-space-sync",
+          () => [
+            `Cross-space sync to ${targetSpace} timed out (attempt ${attempt}/${CROSS_SPACE_SYNC_MAX_RETRIES}), retrying...`,
+          ],
+        );
+        await new Promise((resolve) =>
+          setTimeout(resolve, CROSS_SPACE_SYNC_RETRY_DELAY_MS)
+        );
+      }
+    } catch (error) {
+      logger.error(
+        "cross-space-sync",
+        () => [`Cross-space sync to ${targetSpace} failed:`, error],
+      );
+      throw error;
+    }
+  }
+
+  // All retries exhausted
+  logger.error(
+    "cross-space-sync",
+    () => [
+      `Cross-space sync to ${targetSpace} failed after ${CROSS_SPACE_SYNC_MAX_RETRIES} attempts`,
+    ],
+  );
+  throw new Error(
+    `Cross-space sync to ${targetSpace} timed out after ${CROSS_SPACE_SYNC_MAX_RETRIES} attempts`,
+  );
+}
+
 export type LastNode = "value" | "writeRedirect" | "top";
 
 /**
@@ -184,14 +258,17 @@ export function resolveLink(
       }
       // If we're crossing spaces, force fetching data from server, as the
       // original server will not have pushed the data to the client yet.
+      // Use timeout+retry to prevent hanging forever if target space is unavailable.
       if (crossSpace) {
-        const maybePromise = runtime.getCellFromLink(link).sync();
-        if (maybePromise instanceof Promise) {
-          const promise = maybePromise.finally(() => {
-            runtime.storageManager.removeCrossSpacePromise(promise);
-          }) as unknown as Promise<void>;
-          runtime.storageManager.addCrossSpacePromise(promise);
-        }
+        const targetSpace = link.space ?? "unknown";
+        const cell = runtime.getCellFromLink(link);
+        const promise = syncCrossSpaceWithRetry(
+          () => cell.sync(),
+          targetSpace,
+        ).finally(() => {
+          runtime.storageManager.removeCrossSpacePromise(promise);
+        });
+        runtime.storageManager.addCrossSpacePromise(promise);
       }
     } else {
       break;
