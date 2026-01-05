@@ -1427,6 +1427,10 @@ export class Replica {
     this.selectorTracker = new SelectorTracker();
     // Clear the pull queue
     this.queue = new PullQueue();
+    // Clear in-flight commit promises - they will never resolve after reconnection
+    // because the transaction response handlers are lost with the old websocket
+    console.log(`[Replica] reset() clearing ${this.commitPromises.size} orphaned commit promises`);
+    this.commitPromises.clear();
 
     this.subscription.next({
       type: "reset",
@@ -1709,6 +1713,12 @@ class ProviderConnection implements IStorageProvider {
       // if our connection changed while we were waiting on read we bail out
       // and let the reconnection logic pick up.
       if (this.connection !== socket || next.done) {
+        // If we read a command but the socket changed, re-queue it so it's
+        // not lost. The new socket's onOpen will drain the queue.
+        if (!next.done && next.value) {
+          console.log(`[ProviderConnection] Socket changed mid-read, re-queueing command`);
+          queue.add(next.value);
+        }
         break;
       }
       // otherwise we pass the command via web-socket.
@@ -1975,8 +1985,12 @@ export class Provider implements IStorageProvider {
 
   synced() {
     const serverPromises = [...this.serverSubscriptions.getAllPromises()];
-    const commitPromises = [...this.workspace.commitPromises];
-    console.log(`[Provider] synced() waiting for ${serverPromises.length} server promises, ${commitPromises.length} commit promises`);
+    // NOTE: We intentionally do NOT wait on commitPromises here.
+    // Commits (like ACL init) may be in-flight during initial sync, but they
+    // can fail/retry independently. Blocking synced() on commits can cause
+    // hangs if the websocket disconnects mid-commit since the old promise
+    // is orphaned but synced() still holds a reference to it.
+    console.log(`[Provider] synced() waiting for ${serverPromises.length} server promises (ignoring ${this.workspace.commitPromises.size} commit promises)`);
 
     // Log when each promise resolves
     serverPromises.forEach((p, i) => {
@@ -1984,10 +1998,7 @@ export class Provider implements IStorageProvider {
        .catch((e) => console.log(`[Provider] server promise ${i} rejected:`, e));
     });
 
-    return Promise.all([
-      Promise.all(serverPromises),
-      Promise.all(commitPromises),
-    ]) as unknown as Promise<void>;
+    return Promise.all(serverPromises) as unknown as Promise<void>;
   }
 
   get<T = any>(uri: URI): StorageValue<T> | undefined {
