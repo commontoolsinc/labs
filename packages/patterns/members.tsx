@@ -456,12 +456,11 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
 
     // Derive parent ID from parent record for self-filtering
     // Used by autocomplete to exclude self from search results
-    const parentId = computed(() => {
-      const pr = parentRecord;
+    const parentId = lift(({ parentRecord: pr }: { parentRecord: unknown | null }) => {
       if (!pr) return null;
       // Get the entity ID from the parent record
       return (pr as any)?.["/"] || null;
-    });
+    })({ parentRecord });
 
     // Build autocomplete items from mentionable using lift()
     // lift() properly unwraps OpaqueRefs from wish()
