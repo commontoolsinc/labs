@@ -9,6 +9,7 @@ import {
   Compartment,
   EditorState,
   Extension,
+  Range,
 } from "@codemirror/state";
 import { indentUnit, LanguageSupport } from "@codemirror/language";
 import { javascript as createJavaScript } from "@codemirror/lang-javascript";
@@ -326,10 +327,25 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Handle backlink clicks with Cmd/Ctrl+Click
+   * Handle backlink clicks:
+   * - Cmd/Ctrl+Click: always navigate
+   * - Regular click on collapsed pill: navigate (don't place cursor)
+   * - Regular click elsewhere: normal cursor placement
    */
   private createBacklinkClickHandler() {
     return EditorView.domEventHandlers({
+      mousedown: (event, view) => {
+        // Check if clicking on a collapsed pill (cm-backlink-pill)
+        const target = event.target as HTMLElement;
+        if (target.closest(".cm-backlink-pill")) {
+          // Navigate to the backlink instead of placing cursor
+          event.preventDefault();
+          // Use setTimeout to let the event finish before navigating
+          setTimeout(() => this.handlePillClick(view, event), 0);
+          return true;
+        }
+        return false;
+      },
       click: (event, view) => {
         if (event.ctrlKey || event.metaKey) {
           return this.handleBacklinkActivation(view, event);
@@ -337,6 +353,62 @@ export class CTCodeEditor extends BaseElement {
         return false;
       },
     });
+  }
+
+  /**
+   * Handle click on a collapsed backlink pill - navigate to the linked charm
+   */
+  private handlePillClick(view: EditorView, event: MouseEvent): void {
+    // Get the position in the document from the click coordinates
+    const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+    if (pos === null) return;
+
+    const doc = view.state.doc;
+    const line = doc.lineAt(pos);
+    const lineText = line.text;
+
+    // Find all backlinks on this line
+    const backlinkRegex = /\[\[([^\]]+)\]\]/g;
+    let match;
+
+    while ((match = backlinkRegex.exec(lineText)) !== null) {
+      const matchStart = line.from + match.index;
+      const _matchEnd = matchStart + match[0].length;
+      const innerText = match[1];
+
+      // Check if has ID
+      const idMatch = innerText.match(/^(.+?)\s+\(([^)]+)\)$/);
+      if (!idMatch) continue; // Skip incomplete backlinks
+
+      const name = idMatch[1];
+      const id = idMatch[2];
+      const nameStart = matchStart + 2; // After [[
+      const nameEnd = nameStart + name.length;
+
+      // Check if click position is within the name portion (the visible pill)
+      if (pos >= nameStart && pos <= nameEnd) {
+        // Navigate to this charm
+        const runtime = this.pattern?.runtime ??
+          this.mentionable?.runtime ??
+          this.mentioned?.runtime;
+        const space = this.pattern?.space ??
+          this.mentionable?.space ??
+          this.mentioned?.space;
+
+        if (runtime && space) {
+          const charmCell = runtime.getCellFromEntityId(space, { "/": id });
+          if (runtime.navigateCallback) {
+            runtime.navigateCallback(charmCell);
+          }
+          this.emit("backlink-click", {
+            id,
+            text: innerText,
+            charm: charmCell,
+          });
+        }
+        return;
+      }
+    }
   }
   /**
    * Handle backlink activation (Cmd/Ctrl+Click on a backlink)
@@ -559,10 +631,16 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Create a plugin to decorate backlinks with special styling
+   * Create a plugin to decorate backlinks with focus-aware styling.
+   * - When cursor is outside: show as collapsed pill (hide brackets and ID)
+   * - When cursor is inside: show full [[Name (id)]] format for editing
+   * - Incomplete backlinks show as pending pills
    */
   private createBacklinkDecorationPlugin() {
-    const backlinkMark = Decoration.mark({ class: "cm-backlink" });
+    const editingMark = Decoration.mark({ class: "cm-backlink-editing" });
+    const pillMark = Decoration.mark({ class: "cm-backlink-pill" });
+    const pendingMark = Decoration.mark({ class: "cm-backlink-pending" });
+    const hiddenReplace = Decoration.replace({});
 
     return ViewPlugin.fromClass(
       class {
@@ -573,14 +651,22 @@ export class CTCodeEditor extends BaseElement {
         }
 
         update(update: ViewUpdate) {
-          if (update.docChanged || update.viewportChanged) {
+          // Update on doc changes, viewport changes, selection changes, OR focus changes
+          if (
+            update.docChanged || update.viewportChanged ||
+            update.selectionSet || update.focusChanged
+          ) {
             this.decorations = this.getBacklinkDecorations(update.view);
           }
         }
 
         getBacklinkDecorations(view: EditorView) {
-          const decorations = [];
+          const decorations: Range<Decoration>[] = [];
           const doc = view.state.doc;
+          const hasFocus = view.hasFocus;
+          const cursorPos = view.state.selection.main.head;
+          const selectionFrom = view.state.selection.main.from;
+          const selectionTo = view.state.selection.main.to;
           const backlinkRegex = /\[\[([^\]]+)\]\]/g;
 
           for (const { from, to } of view.visibleRanges) {
@@ -593,16 +679,48 @@ export class CTCodeEditor extends BaseElement {
               while ((match = backlinkRegex.exec(text)) !== null) {
                 const start = line.from + match.index;
                 const end = start + match[0].length;
+                const innerText = match[1]; // Text between [[ and ]]
 
                 // Only decorate if within visible range
-                if (start >= from && end <= to) {
-                  decorations.push(backlinkMark.range(start, end));
+                if (start < from || end > to) continue;
+
+                // Check if cursor/selection is inside this backlink
+                // Use strict bounds - cursor at start/end boundaries is "outside"
+                // Only consider cursor inside if editor has focus
+                const cursorInside = hasFocus && cursorPos > start &&
+                  cursorPos < end;
+                const selectionOverlaps = hasFocus && selectionFrom < end &&
+                  selectionTo > start;
+
+                // Parse: check if has ID in format "Name (id)"
+                const idMatch = innerText.match(/^(.+?)\s+\(([^)]+)\)$/);
+                const hasId = idMatch !== null;
+                const name = hasId ? idMatch[1] : innerText;
+                const nameStart = start + 2; // After [[
+                const nameEnd = nameStart + name.length;
+
+                if (cursorInside || selectionOverlaps) {
+                  // Show full text with editing style
+                  decorations.push(editingMark.range(start, end));
+                } else if (!hasId) {
+                  // Incomplete backlink - show as pending pill
+                  decorations.push(hiddenReplace.range(start, start + 2)); // Hide [[
+                  decorations.push(pendingMark.range(start + 2, end - 2)); // Style inner text
+                  decorations.push(hiddenReplace.range(end - 2, end)); // Hide ]]
+                } else {
+                  // Complete backlink - show as navigable pill
+                  decorations.push(hiddenReplace.range(start, start + 2)); // Hide [[
+                  decorations.push(pillMark.range(nameStart, nameEnd)); // Style name only
+                  decorations.push(hiddenReplace.range(nameEnd, end)); // Hide  (id)]]
                 }
               }
 
               pos = line.to + 1;
             }
           }
+
+          // Sort decorations by position (required by CodeMirror)
+          decorations.sort((a, b) => a.from - b.from || a.to - b.to);
 
           return Decoration.set(decorations);
         }
