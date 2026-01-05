@@ -13,8 +13,8 @@ import type { Runtime } from "./runtime.ts";
 const logger = getLogger("link-resolution");
 
 // Cross-space sync timeout and retry settings
-const CROSS_SPACE_SYNC_TIMEOUT_MS = 5_000; // 5 second timeout per attempt
-const CROSS_SPACE_SYNC_RETRY_DELAY_MS = 2_000; // 2 second delay between retries
+const CROSS_SPACE_SYNC_TIMEOUT_MS = 1_000; // 1 second timeout per attempt (short for testing)
+const CROSS_SPACE_SYNC_RETRY_DELAY_MS = 500; // 0.5 second delay between retries
 const CROSS_SPACE_SYNC_MAX_RETRIES = 10; // Max retries before giving up
 
 /**

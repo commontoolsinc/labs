@@ -316,7 +316,7 @@ export class RuntimeInternals extends EventTarget {
     // Sync with timeout - handles cold start where first sync may hang
     // On cold start, the first websocket connection may get stuck. Caller (RootView)
     // will retry with a fresh Runtime/websocket if this times out.
-    const SYNC_TIMEOUT_MS = 10_000; // 10 second timeout
+    const SYNC_TIMEOUT_MS = 300_000; // 5 minute timeout (high for testing cross-space timeouts)
 
     console.log(`[RuntimeInternals] Starting sync...`);
     charmManager = new CharmManager(session, runtime);
