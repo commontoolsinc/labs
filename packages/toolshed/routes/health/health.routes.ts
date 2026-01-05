@@ -3,6 +3,7 @@ import * as HttpStatusCodes from "stoker/http-status-codes";
 import { jsonContent } from "stoker/openapi/helpers";
 import { z } from "zod";
 import {
+  HealthNotReadyResponseSchema,
   HealthResponseSchema,
   LLMHealthResponseSchema,
 } from "./health.handlers.ts";
@@ -17,6 +18,10 @@ export const index = createRoute({
     [HttpStatusCodes.OK]: jsonContent(
       HealthResponseSchema,
       "The health status",
+    ),
+    [HttpStatusCodes.SERVICE_UNAVAILABLE]: jsonContent(
+      HealthNotReadyResponseSchema,
+      "Service not ready - memory provider not initialized",
     ),
   },
 });

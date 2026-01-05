@@ -4,10 +4,19 @@ import { z } from "zod";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type { IndexRoute, LLMRoute } from "./health.routes.ts";
 import { checkLLMHealth } from "./llm-health.service.ts";
+// Import memory to ensure it's initialized before health check returns OK
+// The memory module uses top-level await, so if this import succeeds,
+// the memory provider is ready for websocket sync operations
+import { memory } from "@/routes/storage/memory.ts";
 
 export const HealthResponseSchema = z.object({
   status: z.literal("OK"),
   timestamp: z.number(),
+});
+
+export const HealthNotReadyResponseSchema = z.object({
+  status: z.literal("NOT_READY"),
+  reason: z.string(),
 });
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 
@@ -29,6 +38,36 @@ export const LLMHealthResponseSchema = z.object({
 export type LLMHealthResponse = z.infer<typeof LLMHealthResponseSchema>;
 
 export const index: AppRouteHandler<IndexRoute> = (c) => {
+  // Verify memory provider is available and can create sessions
+  // This ensures websocket sync operations will work
+  if (!memory) {
+    return c.json(
+      { status: "NOT_READY", reason: "Memory provider not initialized" },
+      HttpStatusCodes.SERVICE_UNAVAILABLE,
+    );
+  }
+
+  // Verify we can actually create a session (required for websocket sync)
+  try {
+    const session = memory.session();
+    if (!session) {
+      return c.json(
+        { status: "NOT_READY", reason: "Memory session creation failed" },
+        HttpStatusCodes.SERVICE_UNAVAILABLE,
+      );
+    }
+  } catch (error) {
+    return c.json(
+      {
+        status: "NOT_READY",
+        reason: `Memory session error: ${
+          error instanceof Error ? error.message : "unknown"
+        }`,
+      },
+      HttpStatusCodes.SERVICE_UNAVAILABLE,
+    );
+  }
+
   const response: HealthResponse = {
     status: "OK",
     timestamp: Date.now(),

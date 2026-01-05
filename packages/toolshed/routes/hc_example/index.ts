@@ -4,7 +4,10 @@ import { jsonContent } from "stoker/openapi/helpers";
 import * as HttpStatusCodes from "stoker/http-status-codes";
 
 import { createRouter } from "@/lib/create-app.ts";
-import { HealthResponseSchema } from "@/routes/health/health.handlers.ts";
+import {
+  HealthNotReadyResponseSchema,
+  HealthResponseSchema,
+} from "@/routes/health/health.handlers.ts";
 import { type AppType } from "@/app.ts";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import env from "@/env.ts";
@@ -18,6 +21,10 @@ export const index = createRoute({
     [HttpStatusCodes.OK]: jsonContent(
       HealthResponseSchema,
       "The health status",
+    ),
+    [HttpStatusCodes.SERVICE_UNAVAILABLE]: jsonContent(
+      HealthNotReadyResponseSchema,
+      "Service not ready",
     ),
   },
 });
@@ -35,8 +42,19 @@ export const indexHandler: AppRouteHandler<typeof index> = async (c) => {
   // Parse the response as JSON.
   const data = await res.json();
 
+  // Return with the same status code as the upstream response
+  if (res.status === HttpStatusCodes.SERVICE_UNAVAILABLE) {
+    return c.json(
+      data as { status: "NOT_READY"; reason: string },
+      HttpStatusCodes.SERVICE_UNAVAILABLE,
+    );
+  }
+
   // Return the parsed data.
-  return c.json(data, HttpStatusCodes.OK);
+  return c.json(
+    data as { status: "OK"; timestamp: number },
+    HttpStatusCodes.OK,
+  );
 };
 
 const router = createRouter()
