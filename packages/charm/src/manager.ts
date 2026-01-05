@@ -145,10 +145,21 @@ export class CharmManager {
 
     // Initialize all cells in parallel. linkSpaceCellContents already
     // depends on syncSpaceCellContents internally, so ordering is preserved.
+    const charmsSync = this.syncCharms(this.charms);
+    const pinnedSync = this.syncCharms(this.pinnedCharms);
+    const recentSync = this.syncCharms(this.recentCharms);
+
+    // Debug logging for sync progress
+    console.log(`[CharmManager] Starting cell syncs...`);
+    Promise.resolve(charmsSync).then(() => console.log(`[CharmManager] charms sync complete`));
+    Promise.resolve(pinnedSync).then(() => console.log(`[CharmManager] pinnedCharms sync complete`));
+    Promise.resolve(recentSync).then(() => console.log(`[CharmManager] recentCharms sync complete`));
+    linkSpaceCellContents.then(() => console.log(`[CharmManager] linkSpaceCellContents complete`));
+
     this.ready = Promise.all([
-      this.syncCharms(this.charms),
-      this.syncCharms(this.pinnedCharms),
-      this.syncCharms(this.recentCharms),
+      charmsSync,
+      pinnedSync,
+      recentSync,
       linkSpaceCellContents,
     ]).then(() => {});
   }

@@ -320,7 +320,19 @@ export class RuntimeInternals extends EventTarget {
 
     console.log(`[RuntimeInternals] Starting sync...`);
     charmManager = new CharmManager(session, runtime);
+
+    // Add detailed timing for debugging
+    console.log(`[RuntimeInternals] CharmManager created, waiting for ready...`);
+    const readyStart = performance.now();
+    charmManager.ready.then(() => {
+      console.log(`[RuntimeInternals] CharmManager.ready resolved after ${(performance.now() - readyStart).toFixed(0)}ms`);
+    });
+
+    console.log(`[RuntimeInternals] Calling synced()...`);
     const syncedPromise = charmManager.synced();
+    syncedPromise.then(() => {
+      console.log(`[RuntimeInternals] synced() resolved after ${(performance.now() - readyStart).toFixed(0)}ms`);
+    });
 
     const result = await Promise.race([
       syncedPromise.then(() => {

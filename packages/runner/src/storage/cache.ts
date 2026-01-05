@@ -336,6 +336,12 @@ class PullQueue {
 }
 
 // This class helps us maintain a client model of our server side subscriptions
+interface PromiseWithResolver<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
+}
+
 export class SelectorTracker<T = Result<Unit, Error>> {
   // Map from BaseMemoryAddress key string to set of selectorRef strings
   private refTracker = new MapSet<string, string>();
@@ -345,6 +351,8 @@ export class SelectorTracker<T = Result<Unit, Error>> {
   // Map from string combination of BaseMemoryAddress and selectorRef to
   // promise that contains the result of querying that selector.
   private selectorPromises = new Map<string, Promise<T>>();
+  // Map to store resolvers for promises we control
+  private promiseResolvers = new Map<string, PromiseWithResolver<T>>();
 
   add(
     address: BaseMemoryAddress,
@@ -369,11 +377,75 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       },
     });
     const promiseKey = `${toKey(address)}?${selectorRef}`;
-    this.selectorPromises.set(promiseKey, promise);
+
+    // Check if we already have a controllable promise for this key
+    const existing = this.promiseResolvers.get(promiseKey);
+    if (existing) {
+      console.log(`[SelectorTracker] add() FOUND existing resolver for key: ${promiseKey} - wiring new promise`);
+      // Wire the new promise to resolve the existing controllable promise
+      promise.then((result) => {
+        console.log(`[SelectorTracker] new promise resolved for key: ${promiseKey}, resolving original`);
+        existing.resolve(result);
+      }).catch((error) => {
+        console.log(`[SelectorTracker] new promise rejected for key: ${promiseKey}`, error);
+        existing.reject(error);
+      });
+      // Also update selectorPromises to point to the existing controllable promise
+      this.selectorPromises.set(promiseKey, existing.promise);
+    } else {
+      console.log(`[SelectorTracker] add() creating NEW resolver for key: ${promiseKey}`);
+      // Create a new controllable promise
+      const { promise: controllablePromise, resolve, reject } = Promise.withResolvers<T>();
+      this.promiseResolvers.set(promiseKey, { promise: controllablePromise, resolve, reject });
+      this.selectorPromises.set(promiseKey, controllablePromise);
+
+      // Wire the actual promise to resolve our controllable promise
+      promise.then((result) => {
+        console.log(`[SelectorTracker] first promise resolved for key: ${promiseKey}`);
+        resolve(result);
+      }).catch((error) => {
+        console.log(`[SelectorTracker] first promise rejected for key: ${promiseKey}`, error);
+        reject(error);
+      });
+    }
   }
 
   has(address: BaseMemoryAddress): boolean {
     return this.refTracker.has(toKey(address));
+  }
+
+  /**
+   * Clear tracking state but preserve promise resolvers.
+   * When new promises are added for the same subscriptions,
+   * they will resolve the original promises that callers are waiting on.
+   */
+  clearForReconnect() {
+    console.log(`[SelectorTracker] clearForReconnect: clearing refTracker/selectors/selectorPromises, keeping ${this.promiseResolvers.size} promise resolvers`);
+    // Log the keys we're keeping
+    for (const key of this.promiseResolvers.keys()) {
+      console.log(`[SelectorTracker] keeping resolver for key: ${key}`);
+    }
+
+    // Clear tracking state so new syncs can be issued
+    this.refTracker = new MapSet<string, string>();
+    this.selectors = new Map();
+    this.standardizedSelector = new Map();
+    // IMPORTANT: Also clear selectorPromises so getPromise() returns undefined
+    // and sync() issues new queries. The promiseResolvers will wire the new
+    // promises to the original controllable promises.
+    this.selectorPromises = new Map();
+    // Keep promiseResolvers - when add() is called, it will wire new promises to these
+  }
+
+  /**
+   * Clear all tracked selectors and promises completely.
+   */
+  clear() {
+    this.refTracker = new MapSet<string, string>();
+    this.selectors = new Map();
+    this.standardizedSelector = new Map();
+    this.selectorPromises = new Map();
+    this.promiseResolvers = new Map();
   }
 
   hasSelector(
@@ -1452,6 +1524,11 @@ export interface ProviderConnectionOptions extends ConnectionOptions {
   provider: Provider;
 }
 
+// Maximum consecutive connection failures before giving up
+const MAX_CONSECUTIVE_FAILURES = 30;
+// Time window to track failures (reset counter if we haven't failed in this long)
+const FAILURE_RESET_WINDOW_MS = 60_000;
+
 class ProviderConnection implements IStorageProvider {
   address: URL;
   connection: WebSocket | null = null;
@@ -1470,6 +1547,11 @@ class ProviderConnection implements IStorageProvider {
    * send because connection was down.
    */
   queue: Set<UCAN<ConsumerCommandInvocation<Protocol>>> = new Set();
+
+  // Track consecutive connection failures
+  consecutiveFailures = 0;
+  lastFailureTime = 0;
+  connectionFailed = false;
 
   constructor(
     { id, address, provider, inspector, spaceIdentity }:
@@ -1579,6 +1661,8 @@ class ProviderConnection implements IStorageProvider {
   async onOpen(socket: WebSocket) {
     const { reader, queue } = this;
 
+    console.log(`[ProviderConnection] WebSocket CONNECTED! connectionCount=${this.connectionCount}, space=${this.provider.workspace.space}`);
+
     // Report connection to inspector
     this.inspect({
       connect: { attempt: this.connectionCount },
@@ -1586,16 +1670,23 @@ class ProviderConnection implements IStorageProvider {
 
     // If we did have connection, schedule reestablishment without blocking
     if (this.connectionCount > 1) {
+      console.log(`[ProviderConnection] Reconnection detected, will reestablish subscriptions`);
       // Use queueMicrotask to ensure message pump starts first
       queueMicrotask(() => {
         this.provider.poll();
-        this.provider.reestablishSubscriptions().catch((error) => {
+        console.log(`[ProviderConnection] Calling reestablishSubscriptions...`);
+        this.provider.reestablishSubscriptions().then(() => {
+          console.log(`[ProviderConnection] reestablishSubscriptions completed!`);
+        }).catch((error) => {
+          console.error(`[ProviderConnection] reestablishSubscriptions FAILED:`, error);
           logger.error(
             "subscription-error",
             () => ["Failed to reestablish subscriptions:", error],
           );
         });
       });
+    } else {
+      console.log(`[ProviderConnection] First connection, no reestablishment needed`);
     }
 
     while (this.connection === socket) {
@@ -1859,8 +1950,10 @@ export class Provider implements IStorageProvider {
         selector,
       );
       if (existingPromise) {
+        console.log(`[Provider] sync() found existing promise for ${uri}, returning cached promise`);
         return existingPromise;
       }
+      console.log(`[Provider] sync() issuing NEW query for ${uri}`);
       const promise = this.workspace.load([[factAddress, selector]]);
       this.serverSubscriptions.add(factAddress, selector, promise);
       return promise;
@@ -1870,9 +1963,19 @@ export class Provider implements IStorageProvider {
   }
 
   synced() {
+    const serverPromises = [...this.serverSubscriptions.getAllPromises()];
+    const commitPromises = [...this.workspace.commitPromises];
+    console.log(`[Provider] synced() waiting for ${serverPromises.length} server promises, ${commitPromises.length} commit promises`);
+
+    // Log when each promise resolves
+    serverPromises.forEach((p, i) => {
+      p.then(() => console.log(`[Provider] server promise ${i} resolved`))
+       .catch((e) => console.log(`[Provider] server promise ${i} rejected:`, e));
+    });
+
     return Promise.all([
-      Promise.all(this.serverSubscriptions.getAllPromises()),
-      Promise.all(this.workspace.commitPromises),
+      Promise.all(serverPromises),
+      Promise.all(commitPromises),
     ]) as unknown as Promise<void>;
   }
 
@@ -1957,7 +2060,10 @@ export class Provider implements IStorageProvider {
    * See `ProviderConnection.onOpen()`
    */
   async reestablishSubscriptions(): Promise<void> {
+    // Save subscription info before clearing
     const subscriptions = this.serverSubscriptions.getAllSubscriptions();
+    const pendingPromiseCount = [...this.serverSubscriptions.getAllPromises()].length;
+    console.log(`[Provider] reestablishSubscriptions: ${subscriptions.length} subscriptions, ${pendingPromiseCount} pending promises`);
 
     // Try to clear pending invocations from the consumer session
     try {
@@ -1972,23 +2078,29 @@ export class Provider implements IStorageProvider {
     // Reset the existing Replica to clear its state
     this.workspace.reset();
 
-    // Re-establish subscriptions
-    const need: [BaseMemoryAddress, SchemaPathSelector?][] = [];
+    // Clear tracking state but KEEP the promise resolvers.
+    // When we re-issue syncs, the new promises will wire to the old resolvers,
+    // which will resolve the original promises that callers are waiting on.
+    this.serverSubscriptions.clearForReconnect();
 
-    // Always include the space commit object to ensure proper query context
+    // Re-establish subscriptions using sync() which properly tracks promises
+    const syncPromises: Promise<unknown>[] = [];
+
+    // Always sync the space commit object
     const spaceCommitAddress: BaseMemoryAddress = {
       type: COMMIT_LOG_TYPE,
       id: this.workspace.space,
     };
-    need.push([spaceCommitAddress, undefined]);
+    syncPromises.push(this.workspace.load([[spaceCommitAddress, undefined]]));
 
-    // Add all tracked subscriptions
+    // Re-sync all tracked subscriptions - this adds new promises to serverSubscriptions
     for (const { address: factAddress, selector } of subscriptions) {
-      need.push([factAddress, selector]);
+      const promise = this.sync(factAddress.id, selector);
+      syncPromises.push(promise);
     }
 
     try {
-      await this.workspace.pull(need);
+      await Promise.all(syncPromises);
     } catch (error) {
       logger.error(
         "subscription-error",
