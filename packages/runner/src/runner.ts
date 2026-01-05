@@ -365,22 +365,6 @@ export class Runner {
     return this.doStart(resultCell);
   }
 
-  private startWithTx<T = any>(
-    tx: IExtendedStorageTransaction,
-    resultCell: Cell<T>,
-    givenRecipe?: Recipe,
-  ): void {
-    const key = this.getDocKey(resultCell);
-    if (this.cancels.has(key)) return; // Already started
-
-    const processCell = resultCell.withTx(tx).getSourceCell();
-    if (!processCell) {
-      throw new Error("Cannot start: no process cell");
-    }
-
-    this.startCore(resultCell, processCell, { tx, givenRecipe, noSink: true });
-  }
-
   /** Convert a module to recipe format */
   private moduleToRecipe(module: Module): Recipe {
     return {
@@ -421,10 +405,10 @@ export class Runner {
     options: {
       tx?: IExtendedStorageTransaction;
       givenRecipe?: Recipe;
-      noSink?: boolean;
+      doNotUpdateOnPatternChange?: boolean;
     } = {},
   ): void {
-    const { tx, givenRecipe, noSink: noSync } = options;
+    const { tx, givenRecipe, doNotUpdateOnPatternChange } = options;
     const key = this.getDocKey(resultCell);
 
     // Create cancel group early - before the $TYPE sink
@@ -464,7 +448,7 @@ export class Runner {
             node.module,
             node.inputs,
             node.outputs,
-            processCell,
+            processCell.withTx(actualTx),
             addNodeCancel,
             recipe,
           );
@@ -518,6 +502,7 @@ export class Runner {
                 );
               });
           } else {
+            cancelNodes?.();
             instantiateRecipe(resolved);
           }
         }),
@@ -546,7 +531,9 @@ export class Runner {
         throw new Error("Recipe ID mismatch");
       }
       instantiateRecipe(givenRecipe, tx);
-      setupTypeWatcher();
+      if (!doNotUpdateOnPatternChange) {
+        setupTypeWatcher();
+      }
       return;
     }
 
@@ -562,7 +549,7 @@ export class Runner {
     // Sync path - instantiate immediately
     currentRecipeId = initialRecipeId;
     instantiateRecipe(this.resolveToRecipe(initialResolved), tx);
-    if (!noSync) {
+    if (!doNotUpdateOnPatternChange) {
       setupTypeWatcher();
     }
 
@@ -655,6 +642,27 @@ export class Runner {
     return Promise.resolve(true);
   }
 
+  private startWithTx<T = any>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<T>,
+    givenRecipe?: Recipe,
+    options: { doNotUpdateOnPatternChange?: boolean } = {},
+  ): void {
+    const key = this.getDocKey(resultCell);
+    if (this.cancels.has(key)) return; // Already started
+
+    const processCell = resultCell.withTx(tx).getSourceCell();
+    if (!processCell) {
+      throw new Error("Cannot start: no process cell");
+    }
+
+    this.startCore(resultCell, processCell, {
+      tx,
+      givenRecipe,
+      doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
+    });
+  }
+
   /**
    * Run a recipe.
    *
@@ -684,18 +692,21 @@ export class Runner {
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
+    options?: { doNotUpdateOnPatternChange?: boolean },
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    options?: { doNotUpdateOnPatternChange?: boolean },
   ): Cell<R>;
   run<T, R = any>(
     providedTx: IExtendedStorageTransaction,
     recipeOrModule: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    options: { doNotUpdateOnPatternChange?: boolean } = {},
   ): Cell<R> {
     const tx = providedTx ?? this.runtime.edit();
 
@@ -707,7 +718,7 @@ export class Runner {
     );
 
     if (needsStart) {
-      this.startWithTx(tx, resultCell, recipe);
+      this.startWithTx(tx, resultCell, recipe, options);
     }
 
     if (!providedTx) tx.commit();
@@ -1707,7 +1718,11 @@ export class Runner {
       sendToBindings = true;
     }
 
-    this.run(tx, recipeImpl, inputs, resultCell);
+    // Run the nested recipe without the $TYPE watcher to prevent infinite loops.
+    // Nested recipes don't need to watch for recipe changes - their parent manages lifecycle.
+    this.run(tx, recipeImpl, inputs, resultCell, {
+      doNotUpdateOnPatternChange: true,
+    });
 
     if (sendToBindings) {
       sendValueToBinding(

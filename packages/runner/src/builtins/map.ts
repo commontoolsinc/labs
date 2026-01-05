@@ -140,6 +140,7 @@ export function map(
         opRecipe,
         recipeInputs,
         resultCell,
+        { doNotUpdateOnPatternChange: true },
       );
       resultCell.getSourceCell()!.setSourceCell(parentCell);
       // Add cancel from runtime's runner
