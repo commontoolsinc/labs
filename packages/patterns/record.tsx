@@ -1355,7 +1355,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   <button
                                     type="button"
                                     onClick={togglePin({ subCharms, index })}
-                                    style={computed(() => ({
+                                    style={{
                                       background: isPinned ? "#e0f2fe" : "transparent",
                                       border: isPinned ? "1px solid #7dd3fc" : "1px solid #e5e7eb",
                                       borderRadius: "4px",
@@ -1363,8 +1363,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                                       padding: "4px 8px",
                                       fontSize: "12px",
                                       color: isPinned ? "#0369a1" : "#6b7280",
-                                    }))}
-                                    title={computed(() => isPinned ? "Unpin" : "Pin")}
+                                    }}
+                                    title={isPinned ? "Unpin" : "Pin"}
                                   >
                                     📌
                                   </button>
@@ -1634,7 +1634,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                     <button
                                       type="button"
                                       onClick={togglePin({ subCharms, index })}
-                                      style={computed(() => ({
+                                      style={{
                                         background: isPinned ? "#e0f2fe" : "transparent",
                                         border: isPinned ? "1px solid #7dd3fc" : "1px solid #e5e7eb",
                                         borderRadius: "4px",
@@ -1642,8 +1642,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                                         padding: "4px 8px",
                                         fontSize: "12px",
                                         color: isPinned ? "#0369a1" : "#6b7280",
-                                      }))}
-                                      title={computed(() => isPinned ? "Unpin" : "Pin")}
+                                      }}
+                                      title={isPinned ? "Unpin" : "Pin"}
                                     >
                                       📌
                                     </button>
@@ -1905,7 +1905,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                               <button
                                 type="button"
                                 onClick={togglePin({ subCharms, index })}
-                                style={computed(() => ({
+                                style={{
                                   background: isPinned ? "#e0f2fe" : "transparent",
                                   border: isPinned ? "1px solid #7dd3fc" : "1px solid #e5e7eb",
                                   borderRadius: "4px",
@@ -1913,8 +1913,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   padding: "4px 8px",
                                   fontSize: "12px",
                                   color: isPinned ? "#0369a1" : "#6b7280",
-                                }))}
-                                title={computed(() => isPinned ? "Unpin" : "Pin")}
+                                }}
+                                title={isPinned ? "Unpin" : "Pin"}
                               >
                                 📌
                               </button>
