@@ -144,6 +144,24 @@ export interface IRemoteStorageProviderSettings {
    * abort.
    */
   connectionTimeout: number;
+
+  /**
+   * Base delay in milliseconds for reconnection attempts.
+   * This is the initial delay after the first disconnect.
+   */
+  reconnectBaseDelay: number;
+
+  /**
+   * Maximum delay in milliseconds between reconnection attempts.
+   * The delay will not exceed this value even with exponential backoff.
+   */
+  reconnectMaxDelay: number;
+
+  /**
+   * Maximum number of reconnection attempts before giving up.
+   * Set to -1 for unlimited attempts.
+   */
+  maxReconnectAttempts: number;
 }
 
 export interface LocalStorageOptions {

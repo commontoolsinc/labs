@@ -1435,6 +1435,9 @@ export interface RemoteStorageProviderOptions {
 export const defaultSettings: IRemoteStorageProviderSettings = {
   maxSubscriptionsPerSpace: 50_000,
   connectionTimeout: 30_000,
+  reconnectBaseDelay: 100,
+  reconnectMaxDelay: 30_000,
+  maxReconnectAttempts: -1, // unlimited by default
 };
 
 export interface ConnectionOptions {
@@ -1457,6 +1460,8 @@ class ProviderConnection implements IStorageProvider {
   connection: WebSocket | null = null;
   connectionCount = 0;
   timeoutID = 0;
+  reconnectAttempts = 0;
+  reconnectTimeoutID = 0;
   inspector?: Channel;
   provider: Provider;
   spaceIdentity?: Signer;
@@ -1584,6 +1589,9 @@ class ProviderConnection implements IStorageProvider {
       connect: { attempt: this.connectionCount },
     });
 
+    // Reset reconnect backoff on successful connection
+    this.reconnectAttempts = 0;
+
     // If we did have connection, schedule reestablishment without blocking
     if (this.connectionCount > 1) {
       // Use queueMicrotask to ensure message pump starts first
@@ -1640,11 +1648,63 @@ class ProviderConnection implements IStorageProvider {
           throw new RangeError(`Unknown event type: ${event.type}`);
       }
 
-      this.connect();
+      this.scheduleReconnect();
     }
   }
 
+  /**
+   * Schedule a reconnection attempt with exponential backoff.
+   * Starts fast (baseDelay) and increases exponentially up to maxDelay.
+   */
+  scheduleReconnect() {
+    // Clear any existing reconnect timeout
+    clearTimeout(this.reconnectTimeoutID);
+
+    const { reconnectBaseDelay, reconnectMaxDelay, maxReconnectAttempts } =
+      this.settings;
+
+    // Check if we've exceeded max attempts (if configured)
+    if (
+      maxReconnectAttempts >= 0 &&
+      this.reconnectAttempts >= maxReconnectAttempts
+    ) {
+      logger.warn(
+        "websocket-reconnect",
+        () => [
+          `Giving up after ${this.reconnectAttempts} reconnection attempts`,
+        ],
+      );
+      return;
+    }
+
+    // Calculate exponential backoff delay: baseDelay * 2^attempts
+    // Cap at maxDelay
+    const exponentialDelay = Math.min(
+      reconnectBaseDelay * Math.pow(2, this.reconnectAttempts),
+      reconnectMaxDelay,
+    );
+
+    // Add jitter (±25%) to prevent thundering herd
+    const jitter = exponentialDelay * 0.25 * (Math.random() * 2 - 1);
+    const delay = Math.max(0, exponentialDelay + jitter);
+
+    logger.debug(
+      "websocket-reconnect",
+      () => [
+        `Scheduling reconnect attempt ${this.reconnectAttempts + 1} in ${
+          Math.round(delay)
+        }ms`,
+      ],
+    );
+
+    this.reconnectAttempts += 1;
+    this.reconnectTimeoutID = setTimeout(() => this.connect(), delay);
+  }
+
   async close() {
+    // Cancel any pending reconnection
+    clearTimeout(this.reconnectTimeoutID);
+
     const { connection } = this;
     this.connection = null;
     if (connection && connection.readyState !== WebSocket.CLOSED) {
