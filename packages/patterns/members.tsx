@@ -425,14 +425,6 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
     const roleInputValue = Cell.of("");
     const errorMessage = Cell.of("");
 
-    // Derive parent ID from parentSubCharms Cell for self-filtering
-    // Used by autocomplete to exclude self from search results
-    const parentId = computed(() => {
-      if (!parentSubCharms) return null;
-      // Use parentSubCharms Cell's entity ID as proxy for parent record ID
-      return (parentSubCharms as any)?.["/"] || null;
-    });
-
     // Find parent record lazily - only used for bidirectional linking
     // Cached via lift, only recalculates when mentionable changes
     const parentRecord = lift(
@@ -461,6 +453,15 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
         return null;
       },
     )({ mentionable, parentSC: parentSubCharms });
+
+    // Derive parent ID from parent record for self-filtering
+    // Used by autocomplete to exclude self from search results
+    const parentId = computed(() => {
+      const pr = parentRecord;
+      if (!pr) return null;
+      // Get the entity ID from the parent record
+      return (pr as any)?.["/"] || null;
+    });
 
     // Build autocomplete items from mentionable using lift()
     // lift() properly unwraps OpaqueRefs from wish()

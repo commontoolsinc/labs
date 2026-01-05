@@ -62,6 +62,8 @@ function getNextUnusedLabel(
   // Collect labels already used by modules of this type
   const usedLabels = new Set<string>();
   for (const entry of existingCharms) {
+    // Skip undefined/null entries
+    if (!entry) continue;
     if (entry.type === type) {
       try {
         // Access the label field from the charm pattern output
@@ -926,23 +928,27 @@ const Record = pattern<RecordInput, RecordOutput>(
           expandedIdx: number | undefined;
         },
       ) => {
-        const entries = (sc || []).map((entry, index) => {
-          // Compute displayInfo inline (same logic as getModuleDisplay)
-          const def = getDefinition(entry.type);
-          // deno-lint-ignore no-explicit-any
-          const charmLabel = (entry.charm as any)?.label;
-          const displayInfo = {
-            icon: def?.icon || "📋",
-            label: charmLabel || def?.label || entry.type,
-          };
-          return {
-            entry,
-            index,
-            isExpanded: expandedIdx === index,
-            displayInfo,
-            isPinned: entry.pinned || false,
-          };
-        });
+        const entries = (sc || [])
+          .map((entry, index) => {
+            // Skip undefined/null entries
+            if (!entry) return null;
+            // Compute displayInfo inline (same logic as getModuleDisplay)
+            const def = getDefinition(entry.type);
+            // deno-lint-ignore no-explicit-any
+            const charmLabel = (entry.charm as any)?.label;
+            const displayInfo = {
+              icon: def?.icon || "📋",
+              label: charmLabel || def?.label || entry.type,
+            };
+            return {
+              entry,
+              index,
+              isExpanded: expandedIdx === index,
+              displayInfo,
+              isPinned: entry.pinned || false,
+            };
+          })
+          .filter((item): item is NonNullable<typeof item> => item !== null);
         const pinned = entries.filter((item) => item.entry?.pinned);
         const unpinned = entries.filter((item) => !item.entry?.pinned);
         return {
@@ -1079,17 +1085,21 @@ const Record = pattern<RecordInput, RecordOutput>(
     };
     const trashedEntriesWithDisplay = lift(
       ({ t }: { t: TrashedSubCharmEntry[] }) => {
-        return (t || []).map((entry, trashIndex) => {
-          // Compute displayInfo inline (same logic as getModuleDisplay)
-          const def = getDefinition(entry.type);
-          // deno-lint-ignore no-explicit-any
-          const charmLabel = (entry.charm as any)?.label;
-          const displayInfo = {
-            icon: def?.icon || "📋",
-            label: charmLabel || def?.label || entry.type,
-          };
-          return { entry, trashIndex, displayInfo };
-        });
+        return (t || [])
+          .map((entry, trashIndex) => {
+            // Skip undefined/null entries
+            if (!entry) return null;
+            // Compute displayInfo inline (same logic as getModuleDisplay)
+            const def = getDefinition(entry.type);
+            // deno-lint-ignore no-explicit-any
+            const charmLabel = (entry.charm as any)?.label;
+            const displayInfo = {
+              icon: def?.icon || "📋",
+              label: charmLabel || def?.label || entry.type,
+            };
+            return { entry, trashIndex, displayInfo };
+          })
+          .filter((item): item is NonNullable<typeof item> => item !== null);
       },
     )({ t: trashedSubCharms });
 
