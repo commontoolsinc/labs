@@ -1456,6 +1456,8 @@ class ProviderConnection implements IStorageProvider {
   address: URL;
   connection: WebSocket | null = null;
   connectionCount = 0;
+  // Track if we've ever had a successful connection (entered the message pump)
+  hasConnectedSuccessfully = false;
   timeoutID = 0;
   inspector?: Channel;
   provider: Provider;
@@ -1584,8 +1586,10 @@ class ProviderConnection implements IStorageProvider {
       connect: { attempt: this.connectionCount },
     });
 
-    // If we did have connection, schedule reestablishment without blocking
-    if (this.connectionCount > 1) {
+    // Only re-establish subscriptions if we previously had a successful
+    // connection that we lost. Don't re-establish on first successful
+    // connection even if there were failed attempts before.
+    if (this.hasConnectedSuccessfully) {
       // Use queueMicrotask to ensure message pump starts first
       queueMicrotask(() => {
         this.provider.poll();
@@ -1597,6 +1601,9 @@ class ProviderConnection implements IStorageProvider {
         });
       });
     }
+
+    // Mark that we've successfully connected
+    this.hasConnectedSuccessfully = true;
 
     while (this.connection === socket) {
       // First drain the queued commands if we have them.
@@ -1610,6 +1617,11 @@ class ProviderConnection implements IStorageProvider {
       // if our connection changed while we were waiting on read we bail out
       // and let the reconnection logic pick up.
       if (this.connection !== socket || next.done) {
+        // If we read a command but the socket changed, re-queue it so it's
+        // not lost. The new socket's onOpen will drain the queue.
+        if (!next.done && next.value) {
+          queue.add(next.value);
+        }
         break;
       }
       // otherwise we pass the command via web-socket.
