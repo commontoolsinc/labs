@@ -110,16 +110,16 @@ const navigateToMember = handler<
   return navigateTo(charm as Cell<unknown>);
 });
 
-/** Remove a member by index with reverse link cleanup */
+/** Remove a member by charm reference with reverse link cleanup */
 const removeMember = handler<
   Event,
   {
     members: Cell<MemberEntry[]>;
-    index: number;
+    charm: unknown;
     parentRecord: unknown;
     errorMessage: Cell<string>;
   }
->((event, { members, index, parentRecord, errorMessage }) => {
+>((event, { members, charm, parentRecord, errorMessage }) => {
   event.stopPropagation?.();
   errorMessage.set("");
 
@@ -127,9 +127,14 @@ const removeMember = handler<
     // === PHASE 1: Read current state and prepare updates ===
 
     const current = members.get() || [];
-    const entry = current[index];
+    // Find the entry by charm reference using Cell.equals for robust identity comparison
+    const index = current.findIndex((m: MemberEntry) =>
+      Cell.equals(m?.charm as Cell<unknown>, charm as Cell<unknown>)
+    );
 
-    if (!entry) return; // Invalid index
+    if (index < 0) return; // Entry not found
+
+    const entry = current[index];
 
     // Prepare local update
     const newLocalMembersList = current.toSpliced(index, 1);
@@ -189,15 +194,15 @@ const removeMember = handler<
 const startEditRole = handler<
   Event,
   {
-    editingRoleIndex: Cell<number | null>;
+    editingCharm: Cell<unknown | null>;
     roleInputValue: Cell<string>;
-    index: number;
+    charm: unknown;
     currentRole: string;
   }
->((event, { editingRoleIndex, roleInputValue, index, currentRole }) => {
+>((event, { editingCharm, roleInputValue, charm, currentRole }) => {
   event.stopPropagation?.();
   roleInputValue.set(currentRole);
-  editingRoleIndex.set(index);
+  editingCharm.set(charm);
 });
 
 /** Stop event propagation for role input clicks */
@@ -210,29 +215,33 @@ const confirmRoleEdit = handler<
   Event,
   {
     members: Cell<MemberEntry[]>;
-    index: number;
+    charm: unknown;
     roleInputValue: Cell<string>;
-    editingRoleIndex: Cell<number | null>;
+    editingCharm: Cell<unknown | null>;
   }
->((event, { members, index, roleInputValue, editingRoleIndex }) => {
+>((event, { members, charm, roleInputValue, editingCharm }) => {
   event.stopPropagation?.();
   const newRole = roleInputValue.get();
   const current = members.get() || [];
-  if (index >= 0 && index < current.length) {
+  // Find the entry by charm reference using Cell.equals for robust identity comparison
+  const index = current.findIndex((m: MemberEntry) =>
+    Cell.equals(m?.charm as Cell<unknown>, charm as Cell<unknown>)
+  );
+  if (index >= 0) {
     const updated = [...current];
     updated[index] = { ...updated[index], role: newRole || undefined };
     members.set(updated);
   }
-  editingRoleIndex.set(null);
+  editingCharm.set(null);
 });
 
 /** Cancel role edit - just closes edit mode */
 const cancelRoleEdit = handler<
   Event,
-  { editingRoleIndex: Cell<number | null> }
->((event, { editingRoleIndex }) => {
+  { editingCharm: Cell<unknown | null> }
+>((event, { editingCharm }) => {
   event.stopPropagation?.();
-  editingRoleIndex.set(null);
+  editingCharm.set(null);
 });
 
 /** Add a member from autocomplete selection */
@@ -411,7 +420,8 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
     // This resolves to spaceCell.defaultPattern.backlinksIndex.mentionable
     // Sub-charms share the same MemorySpace as their parent, so wish() works
     const mentionable = wish<MentionableCharm[]>("#mentionable");
-    const editingRoleIndex = Cell.of<number | null>(null);
+    // Track which charm is being edited by reference (not index) for robustness
+    const editingCharm = Cell.of<unknown | null>(null);
     const roleInputValue = Cell.of("");
     const errorMessage = Cell.of("");
 
@@ -656,7 +666,13 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                   </span>
                   {/* Role editing */}
                   {ifElse(
-                    computed(() => editingRoleIndex.get() === index),
+                    computed(() => {
+                      const editing = editingCharm.get();
+                      return editing != null && Cell.equals(
+                        editing as Cell<unknown>,
+                        entry.charm as Cell<unknown>
+                      );
+                    }),
                     // Editing mode - inline input with save/cancel
                     <span
                       style={{
@@ -675,9 +691,9 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                         type="button"
                         onClick={confirmRoleEdit({
                           members,
-                          index,
+                          charm: entry.charm,
                           roleInputValue,
-                          editingRoleIndex,
+                          editingCharm,
                         })}
                         style={{
                           background: "#3b82f6",
@@ -695,7 +711,7 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                       </button>
                       <button
                         type="button"
-                        onClick={cancelRoleEdit({ editingRoleIndex })}
+                        onClick={cancelRoleEdit({ editingCharm })}
                         style={{
                           background: "#e5e7eb",
                           border: "none",
@@ -722,9 +738,9 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                             cursor: "text",
                           }}
                           onClick={startEditRole({
-                            editingRoleIndex,
+                            editingCharm,
                             roleInputValue,
-                            index,
+                            charm: entry.charm,
                             currentRole: entry.role || "",
                           })}
                           title="Click to edit role"
@@ -740,9 +756,9 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                             cursor: "pointer",
                           }}
                           onClick={startEditRole({
-                            editingRoleIndex,
+                            editingCharm,
                             roleInputValue,
-                            index,
+                            charm: entry.charm,
                             currentRole: "",
                           })}
                           title="Click to edit role"
@@ -760,7 +776,7 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                     type="button"
                     onClick={removeMember({
                       members,
-                      index,
+                      charm: entry.charm,
                       parentRecord,
                       errorMessage,
                     })}
