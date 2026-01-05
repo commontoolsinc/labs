@@ -354,13 +354,19 @@ export class SelectorTracker<T = Result<Unit, Error>> {
   // Map to store resolvers for promises we control
   private promiseResolvers = new Map<string, PromiseWithResolver<T>>();
 
+  /**
+   * Add a subscription with its promise. Returns the controllable promise
+   * that callers should await instead of the original promise.
+   * This ensures that if the connection is reset, new queries will resolve
+   * the original awaited promises.
+   */
   add(
     address: BaseMemoryAddress,
     selector: SchemaPathSelector,
     promise: Promise<T>,
-  ) {
+  ): Promise<T> | undefined {
     if (selector === undefined || selector.schemaContext === undefined) {
-      return;
+      return undefined;
     }
     const selectorRef = refer(JSON.stringify(selector)).toString();
     this.refTracker.add(toKey(address), selectorRef);
@@ -392,6 +398,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       });
       // Also update selectorPromises to point to the existing controllable promise
       this.selectorPromises.set(promiseKey, existing.promise);
+      return existing.promise;
     } else {
       console.log(`[SelectorTracker] add() creating NEW resolver for key: ${promiseKey}`);
       // Create a new controllable promise
@@ -407,6 +414,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
         console.log(`[SelectorTracker] first promise rejected for key: ${promiseKey}`, error);
         reject(error);
       });
+      return controllablePromise;
     }
   }
 
@@ -1955,8 +1963,11 @@ export class Provider implements IStorageProvider {
       }
       console.log(`[Provider] sync() issuing NEW query for ${uri}`);
       const promise = this.workspace.load([[factAddress, selector]]);
-      this.serverSubscriptions.add(factAddress, selector, promise);
-      return promise;
+      // Return the controllable promise from add(), not the original promise.
+      // This ensures that if the connection is reset, the promise callers are
+      // awaiting will be resolved when the new query completes.
+      const controllablePromise = this.serverSubscriptions.add(factAddress, selector, promise);
+      return controllablePromise ?? promise;
     } else {
       return this.workspace.load([[factAddress, undefined]]);
     }
