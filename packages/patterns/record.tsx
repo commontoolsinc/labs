@@ -1431,7 +1431,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                             >
                               <ct-render
                                 $cell={entry.charm}
-                                variant="embedded"
+                                variant={getDefinition(entry.type)?.hasEmbeddedUI ? "embedded" : undefined}
                               />
                             </div>,
                             null,
@@ -1710,7 +1710,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                               >
                                 <ct-render
                                   $cell={entry.charm}
-                                  variant="embedded"
+                                  variant={getDefinition(entry.type)?.hasEmbeddedUI ? "embedded" : undefined}
                                 />
                               </div>,
                               null,
@@ -1978,7 +1978,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                         >
                           <ct-render
                             $cell={entry.charm}
-                            variant="embedded"
+                            variant={getDefinition(entry.type)?.hasEmbeddedUI ? "embedded" : undefined}
                           />
                         </div>,
                         null,
