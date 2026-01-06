@@ -112,7 +112,7 @@ Do not add any commentary, explanation, or formatting like markdown.
 If no text is visible, return an empty string.`;
 
 const NOTES_CLEANUP_SYSTEM_PROMPT =
-  `You are a notes cleanup tool. Your ONLY output must be the cleaned text itself - nothing else.
+  `You are a notes cleanup tool.
 
 Given original notes and a list of extracted fields, output a cleaned version with extracted data removed.
 
@@ -122,7 +122,21 @@ Rules:
 3. Keep formatting (headers, bullets, blank lines) where they make sense
 4. If notes become empty, output empty string
 
-CRITICAL: Output ONLY the cleaned text. No explanations, no markdown formatting, no commentary, no "here is the result", no thinking out loud. Just the cleaned content.`;
+DO NOT include any reasoning, analysis, or explanation in your response.
+DO NOT say things like "I need to analyze" or "Looking at the original notes".
+DO NOT explain what you're doing or what you found.
+Your response must contain ONLY the cleaned text itself - nothing more, nothing less.
+If the result is empty, respond with an empty string.
+
+Example:
+Input: "Meeting notes: Call John at 555-1234 tomorrow about the project"
+Extracted: [phone: 555-1234]
+Output: "Meeting notes: Call John tomorrow about the project"
+
+Example:
+Input: "John Doe, email: john@example.com, phone: 555-1234"
+Extracted: [name: John Doe, email: john@example.com, phone: 555-1234]
+Output: (empty string, since all content was extracted)`;
 
 // ===== Helper Functions =====
 
