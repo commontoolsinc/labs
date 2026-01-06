@@ -1,0 +1,523 @@
+import { css, html } from "lit";
+import { property, state } from "lit/decorators.js";
+import { BaseElement } from "../../core/base-element.ts";
+import { type Cell } from "@commontools/runner";
+import { createCellController } from "../../core/cell-controller.ts";
+import { consume } from "@lit/context";
+import {
+  applyThemeToElement,
+  type CTTheme,
+  defaultTheme,
+  themeContext,
+} from "../theme-context.ts";
+import { classMap } from "lit/directives/class-map.js";
+
+/**
+ * Location request state machine to prevent race conditions
+ */
+type LocationState = "idle" | "requesting" | "watching" | "error";
+
+/**
+ * Location data structure matching the Geolocation API
+ */
+export interface LocationData {
+  /** Unique ID for this location capture */
+  id: string;
+  /** Latitude in decimal degrees */
+  latitude: number;
+  /** Longitude in decimal degrees */
+  longitude: number;
+  /** Accuracy of the position in meters */
+  accuracy: number;
+  /** Altitude in meters above sea level (if available) */
+  altitude?: number;
+  /** Accuracy of altitude in meters (if available) */
+  altitudeAccuracy?: number;
+  /** Direction of travel in degrees (0-360, if available) */
+  heading?: number;
+  /** Speed in meters per second (if available) */
+  speed?: number;
+  /** Unix timestamp in milliseconds when the location was captured */
+  timestamp: number;
+}
+
+/**
+ * CTLocation - Browser Geolocation API wrapper component
+ *
+ * @element ct-location
+ *
+ * @attr {boolean} enableHighAccuracy - Request high accuracy GPS (default: false)
+ * @attr {number} timeout - Timeout in milliseconds (default: 10000)
+ * @attr {number} maximumAge - Maximum age of cached position in ms (default: 0)
+ * @attr {boolean} continuous - Enable watch mode for continuous updates (default: false)
+ * @attr {boolean} disabled - Disable location requests (default: false)
+ *
+ * @fires ct-location-start - Location request started. detail: { timestamp: number }
+ * @fires ct-location-update - New location received. detail: { location: LocationData }
+ * @fires ct-location-error - Location error occurred. detail: { error: GeolocationPositionError, message: string }
+ * @fires ct-change - Location data changed. detail: { location: LocationData | null }
+ *
+ * @example
+ * <ct-location $location={location}></ct-location>
+ *
+ * @example With high accuracy
+ * <ct-location $location={location} enableHighAccuracy></ct-location>
+ *
+ * @example Continuous tracking
+ * <ct-location $location={location} continuous></ct-location>
+ */
+export class CTLocation extends BaseElement {
+  static override styles = [
+    BaseElement.baseStyles,
+    css`
+      :host {
+        display: block;
+        box-sizing: border-box;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: inherit;
+      }
+
+      .container {
+        display: flex;
+        flex-direction: column;
+        gap: var(--ct-theme-spacing-small, 0.5rem);
+      }
+
+      .button-row {
+        display: flex;
+        align-items: center;
+        gap: var(--ct-theme-spacing-small, 0.5rem);
+      }
+
+      .location-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        border-radius: var(--ct-theme-border-radius, 0.375rem);
+        background-color: var(
+          --ct-theme-color-surface,
+          var(--ct-color-gray-100, #f3f4f6)
+        );
+        border: 1px solid
+          var(--ct-theme-color-border, var(--ct-color-gray-300, #d1d5db));
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 0.875rem;
+        font-family: inherit;
+        color: var(--ct-theme-color-text, inherit);
+      }
+
+      .location-button:hover:not(:disabled) {
+        background-color: var(
+          --ct-theme-color-surface-hover,
+          var(--ct-color-gray-200, #e5e7eb)
+        );
+      }
+
+      .location-button:active:not(:disabled) {
+        transform: scale(0.98);
+      }
+
+      .location-button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .location-button.requesting {
+        background-color: var(
+          --ct-theme-color-primary-light,
+          var(--ct-color-blue-100, #dbeafe)
+        );
+        border-color: var(
+          --ct-theme-color-primary,
+          var(--ct-color-blue-500, #3b82f6)
+        );
+      }
+
+      .location-button.watching {
+        background-color: var(
+          --ct-theme-color-success-light,
+          var(--ct-color-green-100, #dcfce7)
+        );
+        border-color: var(
+          --ct-theme-color-success,
+          var(--ct-color-green-500, #22c55e)
+        );
+        animation: pulse 2s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.8;
+        }
+      }
+
+      .icon {
+        font-size: 1rem;
+      }
+
+      .spinner {
+        display: inline-block;
+        width: 1rem;
+        height: 1rem;
+        border: 2px solid var(--ct-theme-color-border, #d1d5db);
+        border-top-color: var(--ct-theme-color-primary, #3b82f6);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .location-display {
+        font-size: 0.75rem;
+        color: var(--ct-theme-color-text-muted, var(--ct-color-gray-500, #6b7280));
+        font-family: var(--ct-theme-font-mono, monospace);
+      }
+
+      .location-display .coords {
+        font-weight: 500;
+      }
+
+      .location-display .accuracy {
+        margin-left: 0.5rem;
+        opacity: 0.8;
+      }
+
+      .error {
+        padding: 0.5rem;
+        border-radius: var(--ct-theme-border-radius, 0.375rem);
+        background-color: var(
+          --ct-theme-color-error-light,
+          var(--ct-color-red-100, #fee2e2)
+        );
+        color: var(--ct-theme-color-error, var(--ct-color-red-600, #dc2626));
+        font-size: 0.75rem;
+      }
+    `,
+  ];
+
+  // Theme context
+  @consume({ context: themeContext, subscribe: true })
+  @property({ attribute: false })
+  declare theme?: CTTheme;
+
+  // Cell binding for location data
+  @property({ attribute: false })
+  location: Cell<LocationData | null> | LocationData | null = null;
+
+  // Configuration
+  @property({ type: Boolean })
+  enableHighAccuracy = false;
+
+  @property({ type: Number })
+  timeout = 10000;
+
+  @property({ type: Number })
+  maximumAge = 0;
+
+  @property({ type: Boolean })
+  continuous = false;
+
+  @property({ type: Boolean })
+  disabled = false;
+
+  // Internal state
+  @state()
+  private _state: LocationState = "idle";
+
+  @state()
+  private _errorMessage = "";
+
+  private _watchId: number | null = null;
+  private _changeGroup = crypto.randomUUID();
+
+  private _cellController = createCellController<LocationData | null>(this, {
+    timing: { strategy: "immediate" },
+    changeGroup: this._changeGroup,
+    onChange: (newValue) => {
+      this.emit("ct-change", { location: newValue });
+    },
+  });
+
+  override firstUpdated() {
+    this._cellController.bind(this.location);
+    this._updateThemeProperties();
+  }
+
+  override willUpdate(changedProperties: Map<string, unknown>) {
+    if (changedProperties.has("location")) {
+      this._cellController.bind(this.location);
+    }
+  }
+
+  override updated(changedProperties: Map<string, unknown>) {
+    if (changedProperties.has("theme")) {
+      this._updateThemeProperties();
+    }
+  }
+
+  override disconnectedCallback() {
+    this._cleanup();
+    super.disconnectedCallback();
+  }
+
+  private _updateThemeProperties() {
+    const currentTheme = this.theme || defaultTheme;
+    applyThemeToElement(this, currentTheme);
+  }
+
+  private _cleanup() {
+    if (this._watchId !== null) {
+      navigator.geolocation.clearWatch(this._watchId);
+      this._watchId = null;
+    }
+    this._state = "idle";
+  }
+
+  /**
+   * Request the current location (one-shot)
+   */
+  async requestLocation(): Promise<LocationData | null> {
+    if (!navigator.geolocation) {
+      this._handleError({
+        code: 2,
+        message: "Geolocation is not supported by this browser",
+        PERMISSION_DENIED: 1,
+        POSITION_UNAVAILABLE: 2,
+        TIMEOUT: 3,
+      } as GeolocationPositionError);
+      return null;
+    }
+
+    if (this._state === "requesting") {
+      return null;
+    }
+
+    this._state = "requesting";
+    this._errorMessage = "";
+    this.emit("ct-location-start", { timestamp: Date.now() });
+
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const locationData = this._positionToLocationData(position);
+          this._cellController.setValue(locationData);
+          this._state = "idle";
+          this.emit("ct-location-update", { location: locationData });
+          resolve(locationData);
+        },
+        (error) => {
+          this._handleError(error);
+          this._state = "error";
+          resolve(null);
+        },
+        {
+          enableHighAccuracy: this.enableHighAccuracy,
+          timeout: this.timeout,
+          maximumAge: this.maximumAge,
+        },
+      );
+    });
+  }
+
+  /**
+   * Start watching location (continuous mode)
+   */
+  startWatching(): void {
+    if (!navigator.geolocation) {
+      this._handleError({
+        code: 2,
+        message: "Geolocation is not supported by this browser",
+        PERMISSION_DENIED: 1,
+        POSITION_UNAVAILABLE: 2,
+        TIMEOUT: 3,
+      } as GeolocationPositionError);
+      return;
+    }
+
+    if (this._watchId !== null) {
+      return; // Already watching
+    }
+
+    this._state = "watching";
+    this._errorMessage = "";
+    this.emit("ct-location-start", { timestamp: Date.now() });
+
+    this._watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const locationData = this._positionToLocationData(position);
+        this._cellController.setValue(locationData);
+        this.emit("ct-location-update", { location: locationData });
+      },
+      (error) => {
+        this._handleError(error);
+        this._cleanup();
+        this._state = "error";
+      },
+      {
+        enableHighAccuracy: this.enableHighAccuracy,
+        timeout: this.timeout,
+        maximumAge: this.maximumAge,
+      },
+    );
+  }
+
+  /**
+   * Stop watching location
+   */
+  stopWatching(): void {
+    this._cleanup();
+  }
+
+  private _positionToLocationData(position: GeolocationPosition): LocationData {
+    const coords = position.coords;
+    return {
+      id: crypto.randomUUID(),
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      accuracy: coords.accuracy,
+      altitude: coords.altitude ?? undefined,
+      altitudeAccuracy: coords.altitudeAccuracy ?? undefined,
+      heading: coords.heading ?? undefined,
+      speed: coords.speed ?? undefined,
+      timestamp: position.timestamp,
+    };
+  }
+
+  private _handleError(error: GeolocationPositionError) {
+    let message: string;
+
+    switch (error.code) {
+      case error.PERMISSION_DENIED:
+        message = "Location permission denied";
+        break;
+      case error.POSITION_UNAVAILABLE:
+        message = "Location unavailable";
+        break;
+      case error.TIMEOUT:
+        message = "Location request timed out";
+        break;
+      default:
+        message = `Location error: ${error.message}`;
+    }
+
+    this._errorMessage = message;
+    this.emit("ct-location-error", { error, message });
+  }
+
+  private _handleButtonClick() {
+    if (this.disabled) return;
+
+    if (this.continuous) {
+      if (this._state === "watching") {
+        this.stopWatching();
+      } else {
+        this.startWatching();
+      }
+    } else {
+      this.requestLocation();
+    }
+  }
+
+  private _getButtonText(): string {
+    if (this._state === "requesting") {
+      return "Getting...";
+    }
+    if (this._state === "watching") {
+      return "Stop Tracking";
+    }
+
+    const currentLocation = this._cellController.getValue();
+    if (currentLocation) {
+      return "Update Location";
+    }
+
+    return this.continuous ? "Start Tracking" : "Get Location";
+  }
+
+  private _getButtonIcon(): string {
+    if (this._state === "requesting") {
+      return ""; // Will show spinner instead
+    }
+    if (this._state === "watching") {
+      return "\u{23F9}"; // Stop
+    }
+    return "\u{1F4CD}"; // Pin
+  }
+
+  private _formatCoords(location: LocationData): string {
+    const lat = location.latitude.toFixed(6);
+    const lng = location.longitude.toFixed(6);
+    return `${lat}, ${lng}`;
+  }
+
+  private _formatAccuracy(accuracy: number): string {
+    if (accuracy < 10) {
+      return `\u00B1${accuracy.toFixed(0)}m`;
+    }
+    if (accuracy < 100) {
+      return `\u00B1${accuracy.toFixed(0)}m`;
+    }
+    return `\u00B1${(accuracy / 1000).toFixed(1)}km`;
+  }
+
+  override render() {
+    const currentLocation = this._cellController.getValue();
+
+    const buttonClasses = {
+      "location-button": true,
+      requesting: this._state === "requesting",
+      watching: this._state === "watching",
+    };
+
+    return html`
+      <div class="container">
+        <div class="button-row">
+          <button
+            class="${classMap(buttonClasses)}"
+            ?disabled="${this.disabled || this._state === "requesting"}"
+            @click="${this._handleButtonClick}"
+            aria-label="${this._getButtonText()}"
+          >
+            ${this._state === "requesting"
+              ? html`
+                <span class="spinner"></span>
+              `
+              : html`
+                <span class="icon">${this._getButtonIcon()}</span>
+              `}
+            <span>${this._getButtonText()}</span>
+          </button>
+        </div>
+
+        ${currentLocation
+          ? html`
+            <div class="location-display">
+              <span class="coords">${this._formatCoords(currentLocation)}</span>
+              <span class="accuracy">${this._formatAccuracy(
+                currentLocation.accuracy,
+              )}</span>
+            </div>
+          `
+          : ""} ${this._errorMessage
+          ? html`
+            <div class="error">${this._errorMessage}</div>
+          `
+          : ""}
+      </div>
+    `;
+  }
+}
