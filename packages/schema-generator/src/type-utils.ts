@@ -398,7 +398,10 @@ export function getNamedTypeKey(
   }
   // Avoid promoting wrappers/containers into definitions
   if (name === "Array" || name === "ReadonlyArray") return undefined;
-  if (CELL_LIKE_WRAPPER_NAMES.has(name ?? "") || name === "Stream" || name === "Default") {
+  if (
+    CELL_LIKE_WRAPPER_NAMES.has(name ?? "") || name === "Stream" ||
+    name === "Default"
+  ) {
     return undefined;
   }
   if (name && NATIVE_TYPE_NAMES.has(name)) return undefined;
@@ -690,8 +693,13 @@ export function resolveWrapperNode(
     literalName === "Stream" || literalName === "OpaqueRef"
   ) {
     // Normalize "Writable" to "Cell" for internal processing
-    const kind = CELL_LIKE_WRAPPER_NAMES.has(literalName) ? "Cell" : literalName;
-    return { kind: kind as "Default" | "Cell" | "Stream" | "OpaqueRef", node: typeNode };
+    const kind = CELL_LIKE_WRAPPER_NAMES.has(literalName)
+      ? "Cell"
+      : literalName;
+    return {
+      kind: kind as "Default" | "Cell" | "Stream" | "OpaqueRef",
+      node: typeNode,
+    };
   }
 
   // Follow alias chain
@@ -732,7 +740,10 @@ function followAliasToWrapperNode(
   ) {
     // Normalize "Writable" to "Cell" for internal processing
     const kind = CELL_LIKE_WRAPPER_NAMES.has(typeName) ? "Cell" : typeName;
-    return { kind: kind as "Default" | "Cell" | "Stream" | "OpaqueRef", node: typeNode };
+    return {
+      kind: kind as "Default" | "Cell" | "Stream" | "OpaqueRef",
+      node: typeNode,
+    };
   }
 
   // Look up the symbol for this type name
