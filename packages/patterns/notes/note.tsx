@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   type Default,
   generateText,
@@ -13,6 +12,7 @@ import {
   UI,
   type VNode,
   wish,
+  Writable,
 } from "commontools";
 import NoteMd from "./note-md.tsx";
 
@@ -132,7 +132,10 @@ const handleEditContent = handler<
   },
 );
 
-const handleCharmLinkClicked = handler<void, { charm: Writable<MentionableCharm> }>(
+const handleCharmLinkClicked = handler<
+  void,
+  { charm: Writable<MentionableCharm> }
+>(
   (_, { charm }) => {
     return navigateTo(charm);
   },

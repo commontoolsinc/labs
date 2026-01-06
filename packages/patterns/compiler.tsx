@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   compileAndRun,
   Default,
   handler,
@@ -9,12 +8,13 @@ import {
   navigateTo,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 type Input = {
   code: Default<
     string,
-    '/// <cts-enable />\nimport { Cell, computed, Default, handler, NAME, pattern, UI } from "commontools";\n\ninterface Input {\n  value: Default<number, 0>;\n}\n\nconst increment = handler<unknown, { value: Writable<number> }>((_, state) => {\n  state.value.set(state.value.get() + 1);\n});\n\nconst decrement = handler<unknown, { value: Writable<number> }>((_, state) => {\n  state.value.set(state.value.get() - 1);\n});\n\nexport default pattern<Input>(({ value }) => {\n  return {\n    [NAME]: computed(() => `Simple counter: ${value}`),\n    [UI]: (\n      <div>\n        <ct-button onClick={decrement({ value })}>-</ct-button>\n        <b>{value}</b>\n        <ct-button onClick={increment({ value })}>+</ct-button>\n      </div>\n    ),\n    value,\n  };\n});\n'
+    '/// <cts-enable />\nimport { computed, Default, handler, NAME, pattern, UI } from "commontools";\n\ninterface Input {\n  value: Default<number, 0>;\n}\n\nconst increment = handler<unknown, { value: Writable<number> }>((_, state) => {\n  state.value.set(state.value.get() + 1);\n});\n\nconst decrement = handler<unknown, { value: Writable<number> }>((_, state) => {\n  state.value.set(state.value.get() - 1);\n});\n\nexport default pattern<Input>(({ value }) => {\n  return {\n    [NAME]: computed(() => `Simple counter: ${value}`),\n    [UI]: (\n      <div>\n        <ct-button onClick={decrement({ value })}>-</ct-button>\n        <b>{value}</b>\n        <ct-button onClick={increment({ value })}>+</ct-button>\n      </div>\n    ),\n    value,\n  };\n});\n'
   >;
 };
 

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Writable, handler, NAME } from "commontools";
+import { handler, NAME, Writable } from "commontools";
 import { MentionableCharm } from "./backlinks-index.tsx";
 
 /**

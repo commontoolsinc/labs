@@ -15,7 +15,14 @@
  * See: community-docs/superstitions/2025-12-19-auto-init-use-two-lift-pattern.md
  */
 
-import { Cell, Writable, type Default, handler, NAME, pattern, UI } from "commontools";
+import {
+  type Default,
+  handler,
+  NAME,
+  pattern,
+  UI,
+  Writable,
+} from "commontools";
 import type {
   ContainerCoordinationContext,
   ModuleMetadata,

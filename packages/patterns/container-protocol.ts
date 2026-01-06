@@ -4,7 +4,7 @@
 /// description: Protocol for controller patterns that coordinate with parent containers
 /// </cts-meta>
 
-import type { Cell, Writable } from "commontools";
+import type { Writable } from "commontools";
 
 /**
  * ContainerCoordinationContext - Passed to controller patterns that need

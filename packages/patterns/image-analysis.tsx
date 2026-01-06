@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   generateText,
   ifElse,
@@ -9,6 +8,7 @@ import {
   pattern,
   UI,
   VNode,
+  Writable,
 } from "commontools";
 
 /**

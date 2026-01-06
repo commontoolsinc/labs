@@ -38,7 +38,6 @@
  */
 
 import {
-  Cell, Writable,
   Default,
   derive,
   fetchData,
@@ -46,6 +45,7 @@ import {
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 
 // Handler WITH await (supposedly blocks UI)

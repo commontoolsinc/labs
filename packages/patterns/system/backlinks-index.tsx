@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Writable, lift, NAME, OpaqueRef, pattern, UI } from "commontools";
+import { lift, NAME, OpaqueRef, pattern, UI, Writable } from "commontools";
 
 export type MentionableCharm = {
   [NAME]?: string;

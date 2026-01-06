@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   Default,
   handler,
@@ -9,6 +8,7 @@ import {
   navigateTo,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 import GroupChatRoom, { Message, User } from "./group-chat-room.tsx";
 
@@ -63,7 +63,11 @@ function getInitials(name: string): string {
 // Handler to reset the lobby (clear all state and generate new session)
 const resetLobby = handler<
   unknown,
-  { messages: Writable<Message[]>; users: Writable<User[]>; sessionId: Writable<string> }
+  {
+    messages: Writable<Message[]>;
+    users: Writable<User[]>;
+    sessionId: Writable<string>;
+  }
 >((_event, { messages, users, sessionId }) => {
   console.log("[resetLobby] Resetting all chat state...");
   // Generate new session ID to invalidate all existing chat room connections

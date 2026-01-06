@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   Default,
   handler,
@@ -11,6 +10,7 @@ import {
   recipe,
   toSchema,
   UI,
+  Writable,
 } from "commontools";
 
 type Charm = {

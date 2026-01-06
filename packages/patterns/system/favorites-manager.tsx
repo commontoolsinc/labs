@@ -5,7 +5,7 @@
  *
  * @reviewed 2025-12-10 docs-rationalization
  */
-import { Cell, Writable, handler, NAME, pattern, UI, wish } from "commontools";
+import { handler, NAME, pattern, UI, wish, Writable } from "commontools";
 
 type Favorite = {
   cell: Writable<{ [NAME]?: string }>;

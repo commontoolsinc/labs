@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   Default,
   handler,
@@ -9,6 +8,7 @@ import {
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 
 // NOTE: This example uses [ID] to demonstrate advanced array manipulation features

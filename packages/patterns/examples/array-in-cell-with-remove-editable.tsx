@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Writable, Default, handler, NAME, pattern, UI } from "commontools";
+import { Default, handler, NAME, pattern, UI, Writable } from "commontools";
 
 interface Item {
   text: Default<string, "">;

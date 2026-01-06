@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   handler,
   ifElse,
@@ -11,6 +10,7 @@ import {
   UI,
   when,
   wish,
+  Writable,
 } from "commontools";
 import Chatbot from "../chatbot.tsx";
 import {

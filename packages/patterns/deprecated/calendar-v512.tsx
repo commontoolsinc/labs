@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   Default,
   derive,
   handler,
@@ -11,6 +10,7 @@ import {
   str,
   Stream,
   UI,
+  Writable,
 } from "commontools";
 
 interface Note {
@@ -2963,7 +2963,10 @@ export default recipe<Input, Output>(
     // Handler to set duration for a note (exposed for external use)
     const setDurationHandler = handler<
       { date: string; noteId: string; duration?: string },
-      { entries: Writable<DayEntry[]>; seriesOverrides: Writable<SeriesOverride[]> }
+      {
+        entries: Writable<DayEntry[]>;
+        seriesOverrides: Writable<SeriesOverride[]>;
+      }
     >(({ date, noteId, duration }, { entries, seriesOverrides }) => {
       const allEntries = entries.get();
       const existingIndex = allEntries.findIndex((e: DayEntry) =>
@@ -3028,7 +3031,10 @@ export default recipe<Input, Output>(
         value?: number;
         unit?: "minute" | "hour" | "day" | "week";
       },
-      { entries: Writable<DayEntry[]>; seriesOverrides: Writable<SeriesOverride[]> }
+      {
+        entries: Writable<DayEntry[]>;
+        seriesOverrides: Writable<SeriesOverride[]>;
+      }
     >((
       { date, noteId, enabled, value, unit },
       { entries, seriesOverrides },

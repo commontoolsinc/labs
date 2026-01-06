@@ -10,7 +10,15 @@
  *
  * SETUP: After deploying, you must FAVORITE this charm for wish() to find it.
  */
-import { Cell, Writable, Default, handler, NAME, pattern, Stream, UI } from "commontools";
+import {
+  Default,
+  handler,
+  NAME,
+  pattern,
+  Stream,
+  UI,
+  Writable,
+} from "commontools";
 
 interface Input {
   // Counter value that increments each time the stream is invoked

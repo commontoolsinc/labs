@@ -1,6 +1,6 @@
 /// <cts-enable />
 
-import { Cell, Writable, Default, NAME, pattern, UI } from "commontools";
+import { Default, NAME, pattern, UI, Writable } from "commontools";
 
 type Input = {
   selected: Writable<Default<string, "opt_1">>;

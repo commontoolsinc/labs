@@ -6,13 +6,13 @@
  * Each emoji has comprehensive search aliases including slang terms.
  */
 import {
-  type Cell, Writable,
   computed,
   type Default,
   handler,
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 

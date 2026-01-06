@@ -25,7 +25,6 @@
  * - The hidden branch's counter stays frozen until it becomes visible
  */
 import {
-  Cell, Writable,
   computed,
   Default,
   handler,
@@ -33,6 +32,7 @@ import {
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 interface Input {

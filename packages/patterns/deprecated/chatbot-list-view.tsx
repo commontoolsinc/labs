@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   Default,
   handler,
@@ -14,6 +13,7 @@ import {
   toSchema,
   UI,
   wish,
+  Writable,
 } from "commontools";
 
 import Chat from "./chatbot-note-composed.tsx";
@@ -238,7 +238,9 @@ export default pattern<Input, Output>(
   ({ selectedCharm, charmsList, theme }) => {
     const wishedCharms = wish<MentionableCharm[]>("#allCharms");
     const allCharms = computed(() => wishedCharms ?? []);
-    logCharmsList({ charmsList: charmsList as unknown as Writable<CharmEntry[]> });
+    logCharmsList({
+      charmsList: charmsList as unknown as Writable<CharmEntry[]>,
+    });
 
     populateChatList({
       selectedCharm: selectedCharm as unknown as Writable<

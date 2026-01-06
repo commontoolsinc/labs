@@ -1,12 +1,12 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   type Default,
   handler,
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 // Type definition for transcription data (from ct-voice-input component)

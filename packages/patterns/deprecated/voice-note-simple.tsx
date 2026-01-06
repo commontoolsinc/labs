@@ -1,5 +1,12 @@
 /// <cts-enable />
-import { Cell, Writable, computed, type Default, NAME, recipe, UI } from "commontools";
+import {
+  computed,
+  type Default,
+  NAME,
+  recipe,
+  UI,
+  Writable,
+} from "commontools";
 
 // Type definition for transcription data (from ct-voice-input component)
 interface TranscriptionChunk {

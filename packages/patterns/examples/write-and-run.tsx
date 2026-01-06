@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   compileAndRun,
   computed,
   Default,
@@ -11,11 +10,12 @@ import {
   navigateTo,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 // Template for the AI to reference
 const TEMPLATE = `/// <cts-enable />
-import { Cell, computed, handler, Default, NAME, pattern, UI } from "commontools";
+import { computed, handler, Default, NAME, pattern, UI } from "commontools";
 
 interface Input {
   value: Default<number, 0>;

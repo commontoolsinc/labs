@@ -31,7 +31,6 @@
  * 7. Check console for any "Tried to directly access opaque value" errors (should be none)
  */
 import {
-  Cell, Writable,
   Default,
   derive,
   generateObject,
@@ -39,6 +38,7 @@ import {
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 interface Item {
@@ -71,7 +71,10 @@ const addItem = handler<
   },
 );
 
-const removeItem = handler<unknown, { items: Writable<Item[]>; itemId: string }>(
+const removeItem = handler<
+  unknown,
+  { items: Writable<Item[]>; itemId: string }
+>(
   (_event, { items, itemId }) => {
     const current = items.get();
     items.set(current.filter((item) => item.id !== itemId));

@@ -8,7 +8,7 @@
  * Falls back to manual registry for legacy entries that don't have stored schema.
  */
 
-import type { Cell, Writable } from "commontools";
+import type { Writable } from "commontools";
 import type { SubCharmEntry } from "../types.ts";
 import type { JSONSchema } from "./schema-utils-pure.ts";
 

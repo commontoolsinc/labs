@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   Default,
   handler,
@@ -9,6 +8,7 @@ import {
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 /**
@@ -73,7 +73,11 @@ function getInitials(name: string): string {
 // Handler to send a text message
 const sendMessage = handler<
   unknown,
-  { messages: Writable<Message[]>; myName: string; contentInput: Writable<string> }
+  {
+    messages: Writable<Message[]>;
+    myName: string;
+    contentInput: Writable<string>;
+  }
 >((_event, { messages, myName, contentInput }) => {
   const content = contentInput.get().trim();
   if (!content || !myName) return;
@@ -93,7 +97,11 @@ const sendMessage = handler<
 // Handler to send an image message
 const sendImageMessage = handler<
   unknown,
-  { messages: Writable<Message[]>; myName: string; chatImages: Writable<ImageData[]> }
+  {
+    messages: Writable<Message[]>;
+    myName: string;
+    chatImages: Writable<ImageData[]>;
+  }
 >((_event, { messages, myName, chatImages }) => {
   const images = chatImages.get() || [];
   if (images.length === 0 || !myName) return;
@@ -115,7 +123,11 @@ const sendImageMessage = handler<
 // Handler to confirm and save the avatar from avatarImages cell
 const confirmAvatar = handler<
   unknown,
-  { users: Writable<User[]>; myName: string; avatarImages: Writable<ImageData[]> }
+  {
+    users: Writable<User[]>;
+    myName: string;
+    avatarImages: Writable<ImageData[]>;
+  }
 >((_event, { users, myName, avatarImages }) => {
   const images = avatarImages.get() || [];
   if (images.length === 0) return;

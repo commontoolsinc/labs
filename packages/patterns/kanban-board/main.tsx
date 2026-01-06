@@ -9,7 +9,6 @@
  * Array position determines ordering (simple and effective).
  */
 import {
-  Cell, Writable,
   computed,
   Default,
   handler,
@@ -17,6 +16,7 @@ import {
   pattern,
   Stream,
   UI,
+  Writable,
 } from "commontools";
 
 // ============ HELPERS ============

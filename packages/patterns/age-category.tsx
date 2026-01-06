@@ -9,13 +9,13 @@
  * Design: Single enum prevents invalid states (e.g., adult + baby subcategory).
  */
 import {
-  Cell, Writable,
   computed,
   type Default,
   handler,
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 

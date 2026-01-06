@@ -6,13 +6,13 @@
  * like Record. Provides add/remove tag functionality with chip display.
  */
 import {
-  Cell, Writable,
   computed,
   type Default,
   handler,
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 

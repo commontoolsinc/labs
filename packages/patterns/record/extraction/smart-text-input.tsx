@@ -25,12 +25,12 @@
  */
 
 import {
-  Cell, Writable,
   computed,
   generateText,
   handler,
   ifElse,
   type ImageData,
+  Writable,
 } from "commontools";
 
 // ===== Types =====

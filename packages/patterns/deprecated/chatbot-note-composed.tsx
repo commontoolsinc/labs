@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   BuiltInLLMMessage,
-  Cell, Writable,
   Default,
   handler,
   NAME,
@@ -9,6 +8,7 @@ import {
   OpaqueRef,
   pattern,
   wish,
+  Writable,
 } from "commontools";
 
 import Chat from "../chatbot.tsx";

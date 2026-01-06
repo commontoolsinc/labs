@@ -25,7 +25,7 @@
  * 4. Verify all values update: Count=1, User="Bob", Items=4, Status="Active"
  * 5. Click multiple times to verify continuous updates
  */
-import { Cell, Writable, Default, handler, NAME, pattern, UI } from "commontools";
+import { Default, handler, NAME, pattern, UI, Writable } from "commontools";
 
 interface Item {
   title: string;

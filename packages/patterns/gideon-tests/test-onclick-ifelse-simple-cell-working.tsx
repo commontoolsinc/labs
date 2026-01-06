@@ -39,7 +39,15 @@
  * CAVEAT: This works for LOCAL cells. If the cell comes from a composed
  * pattern, it may create reactive loops. See folk wisdom for details.
  */
-import { Cell, Writable, Default, handler, ifElse, NAME, pattern, UI } from "commontools";
+import {
+  Default,
+  handler,
+  ifElse,
+  NAME,
+  pattern,
+  UI,
+  Writable,
+} from "commontools";
 
 interface State {
   count: Default<number, 0>;

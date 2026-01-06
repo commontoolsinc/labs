@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Writable, Default, NAME, pattern, UI } from "commontools";
+import { Default, NAME, pattern, UI, Writable } from "commontools";
 import { type CategoryBudget, type Expense } from "./schemas.tsx";
 import DataView from "./data-view.tsx";
 import ExpenseForm from "./expense-form.tsx";

@@ -25,7 +25,6 @@
  * - Idempotent: Check-before-write ensures no actual change after first run, system settles
  */
 import {
-  Cell, Writable,
   computed,
   Default,
   handler,
@@ -33,6 +32,7 @@ import {
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 interface TestInput {

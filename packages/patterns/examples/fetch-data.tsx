@@ -1,12 +1,12 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   Default,
   fetchData,
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 type GithubResponse = {

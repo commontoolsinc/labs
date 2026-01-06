@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   BuiltInLLMTool,
-  Cell, Writable,
   compileAndRun,
   computed,
   fetchData,
@@ -11,6 +10,7 @@ import {
   navigateTo,
   pattern,
   wish,
+  Writable,
 } from "commontools";
 
 ///// COMMON TOOLS (get it?) ////

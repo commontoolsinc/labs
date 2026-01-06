@@ -31,7 +31,6 @@
  * 6. Verify BOTH values update identically
  */
 import {
-  Cell, Writable,
   computed,
   Default,
   derive,
@@ -39,6 +38,7 @@ import {
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 interface TestInput {

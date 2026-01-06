@@ -1,12 +1,12 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   Default,
   handler,
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 interface RecipeState {

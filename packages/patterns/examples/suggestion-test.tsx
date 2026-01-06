@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, NAME, pattern, UI } from "commontools";
+import { Default, NAME, pattern, UI } from "commontools";
 import Suggestion from "../system/suggestion.tsx";
 
 export default pattern<{ title: Default<string, "Suggestion Tester"> }>(

@@ -31,7 +31,7 @@
  * - Requires production-style ACL configuration
  * - Code review verification is sufficient for claim validation
  */
-import { Cell, Writable, Default, handler, NAME, pattern, UI } from "commontools";
+import { Default, handler, NAME, pattern, UI, Writable } from "commontools";
 
 interface Input {
   runCount: Default<number, 0>;

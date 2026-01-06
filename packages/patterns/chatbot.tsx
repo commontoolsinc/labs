@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   BuiltInLLMMessage,
-  Cell, Writable,
   computed,
   Default,
   fetchData,
@@ -15,6 +14,7 @@ import {
   UI,
   VNode,
   wish,
+  Writable,
 } from "commontools";
 import { type MentionableCharm } from "./system/backlinks-index.tsx";
 

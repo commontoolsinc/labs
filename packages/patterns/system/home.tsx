@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, NAME, pattern, UI } from "commontools";
+import { NAME, pattern, UI } from "commontools";
 import FavoritesManager from "./favorites-manager.tsx";
 import Journal from "./journal.tsx";
 

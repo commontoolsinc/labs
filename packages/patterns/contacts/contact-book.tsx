@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   Default,
   ifElse,
@@ -8,6 +7,7 @@ import {
   navigateTo,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 import ContactDetail, { type Contact } from "./contact-detail.tsx";

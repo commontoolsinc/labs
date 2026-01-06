@@ -6,13 +6,13 @@
  * like Record. Provides interactive star rating with toggle-off support.
  */
 import {
-  Cell, Writable,
   computed,
   type Default,
   handler,
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 

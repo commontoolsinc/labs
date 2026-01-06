@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Writable, Default, NAME, recipe, UI } from "commontools";
+import { Default, NAME, recipe, UI, Writable } from "commontools";
 
 interface Item {
   title: string;

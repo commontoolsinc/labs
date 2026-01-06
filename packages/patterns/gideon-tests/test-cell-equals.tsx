@@ -27,13 +27,13 @@
  * - The pattern uses object references (cells) instead of string IDs
  */
 import {
-  Cell, Writable,
   computed,
   handler,
   ifElse,
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 interface Item {
@@ -66,7 +66,11 @@ const addItem = handler<unknown, { items: Writable<Item[]> }>(
 // which gives us plain values instead of cell references.
 const selectItem = handler<
   unknown,
-  { selectedItem: Writable<Item | null>; items: Writable<Item[]>; index: number }
+  {
+    selectedItem: Writable<Item | null>;
+    items: Writable<Item[]>;
+    index: number;
+  }
 >(
   (_, { selectedItem, items, index }) => {
     const current = selectedItem.get();

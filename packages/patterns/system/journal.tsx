@@ -5,7 +5,15 @@
  *
  * Access via: wish({ query: "#journal" })
  */
-import { Cell, Writable, computed, handler, NAME, pattern, UI, wish } from "commontools";
+import {
+  computed,
+  handler,
+  NAME,
+  pattern,
+  UI,
+  wish,
+  Writable,
+} from "commontools";
 
 // Raw journal entry as stored - subject is a cell link, not a Cell
 type JournalEntry = {

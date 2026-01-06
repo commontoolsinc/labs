@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Writable, computed, Default, NAME, pattern, UI } from "commontools";
+import { computed, Default, NAME, pattern, UI, Writable } from "commontools";
 
 /** Wrap all fields of T in Writable<> for write access */
 type Cellify<T> = { [K in keyof T]: Writable<T[K]> };

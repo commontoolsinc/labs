@@ -1,6 +1,6 @@
 /// <cts-enable />
 
-import { Cell, Writable, Default, handler, NAME, recipe, UI } from "commontools";
+import { Default, handler, NAME, recipe, UI, Writable } from "commontools";
 
 type Input = {
   tags: string[];

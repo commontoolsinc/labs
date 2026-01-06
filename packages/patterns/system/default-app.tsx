@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   handler,
   ifElse,
@@ -10,6 +9,7 @@ import {
   pattern,
   UI,
   wish,
+  Writable,
 } from "commontools";
 
 import { default as Note } from "../notes/note.tsx";

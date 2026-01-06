@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   Default,
   handler,
@@ -8,6 +7,7 @@ import {
   navigateTo,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 interface RecipeState {

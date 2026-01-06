@@ -16,7 +16,15 @@
  * ReadOnlyAddressError. The issue is not the handler definition or the button itself,
  * but the cell references captured at the point of handler binding inside derive().
  */
-import { Cell, Writable, Default, derive, handler, NAME, pattern, UI } from "commontools";
+import {
+  Default,
+  derive,
+  handler,
+  NAME,
+  pattern,
+  UI,
+  Writable,
+} from "commontools";
 
 interface State {
   count: Default<number, 0>;

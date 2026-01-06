@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Writable, Default, ifElse, NAME, recipe, UI } from "commontools";
+import { Default, ifElse, NAME, recipe, UI, Writable } from "commontools";
 
 interface CheckboxSimpleInput {
   enabled: Writable<Default<boolean, false>>;

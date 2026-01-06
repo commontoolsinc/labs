@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   BuiltInLLMContent,
-  Cell, Writable,
   Default,
   derive,
   generateText,
@@ -9,6 +8,7 @@ import {
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 
 type LLMTestInput = {

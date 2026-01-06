@@ -31,7 +31,6 @@
  * derive() defers evaluation until reactive context is established.
  */
 import {
-  Cell, Writable,
   Default,
   derive,
   generateObject,
@@ -39,6 +38,7 @@ import {
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 interface Article {

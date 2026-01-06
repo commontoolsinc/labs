@@ -1,11 +1,11 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   type Default,
   pattern,
   UI,
   type WishState,
+  Writable,
 } from "commontools";
 
 // Copy of the original with less fancy types, since we ran into limits of the

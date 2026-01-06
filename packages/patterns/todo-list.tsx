@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Writable, Default, NAME, pattern, UI, wish } from "commontools";
+import { Default, NAME, pattern, UI, wish, Writable } from "commontools";
 
 interface TodoItem {
   title: string;

@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   type Default,
   handler,
@@ -11,6 +10,7 @@ import {
   Stream,
   UI,
   wish,
+  Writable,
 } from "commontools";
 
 import Note from "./note.tsx";
@@ -64,7 +64,10 @@ interface Output {
 }
 
 // Handler to show the new note modal
-const showNewNoteModal = handler<void, { showNewNotePrompt: Writable<boolean> }>(
+const showNewNoteModal = handler<
+  void,
+  { showNewNotePrompt: Writable<boolean> }
+>(
   (_, { showNewNotePrompt }) => showNewNotePrompt.set(true),
 );
 
@@ -512,7 +515,10 @@ const goToAllNotes = handler<void, { allCharms: Writable<NoteCharm[]> }>(
 );
 
 // Handler for clicking on a backlink
-const handleBacklinkClick = handler<void, { charm: Writable<MentionableCharm> }>(
+const handleBacklinkClick = handler<
+  void,
+  { charm: Writable<MentionableCharm> }
+>(
   (_, { charm }) => navigateTo(charm),
 );
 
@@ -684,7 +690,9 @@ const addSelectedToNotebook = handler<
     const note = notesList[idx];
     if (note) notesToAdd.push(note);
   }
-  (targetNotebookNotes as Writable<NoteCharm[] | undefined>).push(...notesToAdd);
+  (targetNotebookNotes as Writable<NoteCharm[] | undefined>).push(
+    ...notesToAdd,
+  );
 
   selectedNoteIndices.set([]);
   selectedAddNotebook.set("");
@@ -758,7 +766,9 @@ const moveSelectedToNotebook = handler<
   };
 
   // Add to target notebook in one operation
-  (targetNotebookNotes as Writable<NoteCharm[] | undefined>).push(...notesToMove);
+  (targetNotebookNotes as Writable<NoteCharm[] | undefined>).push(
+    ...notesToMove,
+  );
 
   // Remove from all notebooks
   for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {

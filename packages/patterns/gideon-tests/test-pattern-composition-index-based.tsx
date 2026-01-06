@@ -9,7 +9,6 @@
  * is the root cause.
  */
 import {
-  Cell, Writable,
   computed,
   Default,
   derive,
@@ -18,6 +17,7 @@ import {
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 interface ShoppingItem {

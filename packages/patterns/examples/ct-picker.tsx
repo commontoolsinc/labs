@@ -1,6 +1,6 @@
 /// <cts-enable />
 
-import { Cell, computed, NAME, recipe, UI } from "commontools";
+import { computed, NAME, recipe, UI } from "commontools";
 import Counter from "../counter.tsx";
 import Note from "../notes/note.tsx";
 

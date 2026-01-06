@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, NAME, pattern, UI, wish } from "commontools";
+import { NAME, pattern, UI, wish } from "commontools";
 
 export default pattern<Record<string, never>>((_) => {
   const wishText = Cell.of("#note");

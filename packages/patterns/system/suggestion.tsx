@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   generateObject,
   pattern,
@@ -8,6 +7,7 @@ import {
   toSchema,
   UI,
   type WishState,
+  Writable,
 } from "commontools";
 import { fetchAndRunPattern, listPatternIndex } from "./common-tools.tsx";
 

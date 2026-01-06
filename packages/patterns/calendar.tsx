@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   Default,
   ifElse,
@@ -9,6 +8,7 @@ import {
   navigateTo,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 import EventDetail from "./event-detail.tsx";

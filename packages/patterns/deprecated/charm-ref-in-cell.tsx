@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   Default,
   handler,
@@ -11,6 +10,7 @@ import {
   recipe,
   toSchema,
   UI,
+  Writable,
 } from "commontools";
 
 // full recipe state
@@ -74,7 +74,10 @@ const storeCharmAndNavigate = lift(
 // 1. Creates a local isInitialized cell to track one-time execution
 // 2. Instantiates SimpleRecipe charm
 // 3. Uses storeCharmAndNavigate lift to save reference and navigate
-const createSimpleRecipe = handler<unknown, { cellRef: Writable<{ charm: any }> }>(
+const createSimpleRecipe = handler<
+  unknown,
+  { cellRef: Writable<{ charm: any }> }
+>(
   (_, { cellRef }) => {
     const isInitialized = Cell.of(false);
 

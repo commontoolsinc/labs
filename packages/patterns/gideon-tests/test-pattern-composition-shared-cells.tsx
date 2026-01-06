@@ -27,7 +27,6 @@
  * 7. Verify it disappears from "Basic List" too
  */
 import {
-  Cell, Writable,
   computed,
   Default,
   derive,
@@ -36,6 +35,7 @@ import {
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 interface ShoppingItem {
@@ -52,7 +52,10 @@ interface BasicListInput {
 const BasicList = pattern<BasicListInput>(({ items }) => {
   const removeItem = handler<
     unknown,
-    { items: Writable<Array<Writable<ShoppingItem>>>; item: Writable<ShoppingItem> }
+    {
+      items: Writable<Array<Writable<ShoppingItem>>>;
+      item: Writable<ShoppingItem>;
+    }
   >(
     (_event, { items: itemsList, item }) => {
       const current = itemsList.get();
@@ -140,7 +143,10 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
 
   const removeItem = handler<
     unknown,
-    { items: Writable<Array<Writable<ShoppingItem>>>; item: Writable<ShoppingItem> }
+    {
+      items: Writable<Array<Writable<ShoppingItem>>>;
+      item: Writable<ShoppingItem>;
+    }
   >(
     (_event, { items: itemsList, item }) => {
       const current = itemsList.get();

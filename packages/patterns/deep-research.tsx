@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   generateObject,
   NAME,
@@ -9,6 +8,7 @@ import {
   str,
   toSchema,
   UI,
+  Writable,
 } from "commontools";
 import { readWebpage, searchWeb } from "./system/common-tools.tsx";
 

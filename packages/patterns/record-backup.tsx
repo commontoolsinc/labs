@@ -13,7 +13,6 @@
  * - Per-module error handling on import
  */
 import {
-  Cell, Writable,
   computed,
   type Default,
   handler,
@@ -24,6 +23,7 @@ import {
   pattern,
   UI,
   wish,
+  Writable,
 } from "commontools";
 
 import { createSubCharm, getDefinition } from "./record/registry.ts";

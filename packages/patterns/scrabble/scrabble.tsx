@@ -11,7 +11,6 @@
  */
 
 import {
-  Cell, Writable,
   computed,
   Default,
   handler,
@@ -19,6 +18,7 @@ import {
   navigateTo,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 import ScrabbleGame, {

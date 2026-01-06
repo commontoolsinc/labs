@@ -7,7 +7,6 @@
  * Demonstrates the settingsUI pattern for module configuration.
  */
 import {
-  Cell, Writable,
   type Default,
   handler,
   ifElse,
@@ -17,6 +16,7 @@ import {
   recipe,
   str,
   UI,
+  Writable,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 

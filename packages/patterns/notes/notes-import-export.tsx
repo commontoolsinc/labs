@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell, Writable,
   computed,
   type Default,
   handler,
@@ -10,6 +9,7 @@ import {
   pattern,
   UI,
   wish,
+  Writable,
 } from "commontools";
 
 import Note from "./note.tsx";
@@ -1720,7 +1720,10 @@ const moveToNotebook = handler<
 // Handler to select all notebooks
 const selectAllNotebooks = handler<
   Record<string, never>,
-  { notebooks: Writable<NotebookCharm[]>; selectedNotebookIndices: Writable<number[]> }
+  {
+    notebooks: Writable<NotebookCharm[]>;
+    selectedNotebookIndices: Writable<number[]>;
+  }
 >((_, { notebooks, selectedNotebookIndices }) => {
   const nbList = notebooks.get();
   selectedNotebookIndices.set(nbList.map((_, i) => i));

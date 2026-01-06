@@ -36,13 +36,13 @@
  * - .set() operations succeed because cells are writable
  */
 import {
-  Cell, Writable,
   computed,
   Default,
   handler,
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 interface State {
@@ -53,7 +53,11 @@ interface State {
 
 const incrementHandler = handler<
   unknown,
-  { count: Writable<number>; pending: Writable<boolean>; isProcessing: Writable<boolean> }
+  {
+    count: Writable<number>;
+    pending: Writable<boolean>;
+    isProcessing: Writable<boolean>;
+  }
 >((_event, { count, pending, isProcessing }) => {
   // Handler handles conditions internally with early return
   if (pending.get() || isProcessing.get()) {

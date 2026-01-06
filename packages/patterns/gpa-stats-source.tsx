@@ -5,7 +5,15 @@
  *
  * @reviewed 2025-12-10 docs-rationalization
  */
-import { Cell, Writable, Default, handler, lift, NAME, pattern, UI } from "commontools";
+import {
+  Default,
+  handler,
+  lift,
+  NAME,
+  pattern,
+  UI,
+  Writable,
+} from "commontools";
 
 interface Stats {
   average: number;

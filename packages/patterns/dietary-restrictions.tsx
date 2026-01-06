@@ -13,7 +13,6 @@
  * - Comprehensive dietary patterns (vegetarian, vegan, halal, kosher, keto, etc.)
  */
 import {
-  Cell, Writable,
   computed,
   type Default,
   handler,
@@ -21,6 +20,7 @@ import {
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 

@@ -7,7 +7,7 @@
  * 2. Set selectedItem to that value
  * 3. Check if it creates links/aliases vs copies
  */
-import { Cell, Writable, Default, handler, NAME, pattern, UI } from "commontools";
+import { Default, handler, NAME, pattern, UI, Writable } from "commontools";
 
 interface Item {
   title: string;
@@ -21,7 +21,10 @@ interface DiagInput {
 }
 
 // Add item handler
-const addItem = handler<unknown, { items: Writable<Item[]>; log: Writable<string[]> }>(
+const addItem = handler<
+  unknown,
+  { items: Writable<Item[]>; log: Writable<string[]> }
+>(
   (_, { items, log }) => {
     const newItem: Item = {
       title: `Item-${Date.now()}`,

@@ -9,13 +9,13 @@
  * or composed into a larger pattern.
  */
 import {
-  Cell, Writable,
   computed,
   handler,
   NAME,
   pattern,
   Stream,
   UI,
+  Writable,
 } from "commontools";
 import { type CategoryBudget, type Expense, getTodayDate } from "./schemas.tsx";
 

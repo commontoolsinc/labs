@@ -25,7 +25,6 @@
  *    4. Click "Invoke Server Stream" - server counter should increment
  */
 import {
-  Cell, Writable,
   Default,
   derive,
   handler,
@@ -34,6 +33,7 @@ import {
   Stream,
   UI,
   wish,
+  Writable,
 } from "commontools";
 
 interface Input {

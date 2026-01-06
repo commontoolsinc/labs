@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Writable, computed, Default, NAME, pattern, UI } from "commontools";
+import { computed, Default, NAME, pattern, UI, Writable } from "commontools";
 
 interface Event {
   title: Writable<string>;
