@@ -88,27 +88,62 @@ export const styles = css`
       padding: 0.125rem 0.5rem;
       cursor: text;
       font-weight: 500;
+      text-decoration: none;
       border: 1px dashed var(--ct-color-warning-400, hsl(45, 70%, 50%));
     }
 
-    /* Editing view - full [[Name (id)]] format visible */
+    /* Editing view - full [[Name (id)]] format visible (for incomplete backlinks) */
     .cm-backlink-editing {
       background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.1));
       border-radius: 0.25rem;
       padding: 0.125rem 0.25rem;
+      text-decoration: none;
     }
 
-    /* Legacy fallback - keep for any old usages */
-    .cm-backlink {
-      background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.1));
+    /* Editing mode for name-only view (complete backlinks) */
+    .cm-backlink-editing-name {
+      background-color: var(--ct-color-primary-100, hsla(212, 100%, 47%, 0.15));
+      color: var(--ct-color-primary-700, hsl(212, 80%, 40%));
+      border-radius: 0;
+      padding: 0.125rem 0;
+      font-weight: 500;
+      text-decoration: none;
+    }
+
+    /* Editing mode bracket styling - shows [[ and ]] */
+    .cm-backlink-editing-bracket {
+      color: var(--ct-color-neutral-400, hsl(0, 0%, 60%));
+      font-weight: normal;
+      background-color: var(--ct-color-primary-50, hsla(212, 100%, 47%, 0.08));
+    }
+
+    /* Adjacent mode - cursor next to pill, show [[Name]] with visible brackets */
+    .cm-backlink-adjacent-bracket {
+      color: var(--ct-color-neutral-400, hsl(0, 0%, 60%));
+      font-weight: normal;
+    }
+
+    .cm-backlink-adjacent-name {
+      background-color: var(--ct-color-primary-100, hsla(212, 100%, 47%, 0.15));
+      color: var(--ct-color-primary-700, hsl(212, 80%, 40%));
       border-radius: 0.25rem;
       padding: 0.125rem 0.25rem;
-      cursor: pointer;
-      transition: background-color var(--ct-theme-animation-duration, 150ms)
-        var(--ct-transition-timing-ease);
+      font-weight: 500;
+      box-shadow: 0 0 0 1px
+        var(--ct-color-primary-200, hsla(212, 100%, 47%, 0.2));
       }
 
-      .cm-backlink:hover {
-        background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.2));
-      }
-    `;
+      /* Legacy fallback - keep for any old usages */
+      .cm-backlink {
+        background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.1));
+        border-radius: 0.25rem;
+        padding: 0.125rem 0.25rem;
+        cursor: pointer;
+        transition: background-color var(--ct-theme-animation-duration, 150ms)
+          var(--ct-transition-timing-ease);
+        }
+
+        .cm-backlink:hover {
+          background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.2));
+        }
+      `;
