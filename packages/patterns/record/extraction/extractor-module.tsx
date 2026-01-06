@@ -360,6 +360,16 @@ function scanExtractableSources(
           preview: content.slice(0, 100) + (content.length > 100 ? "..." : ""),
           content,
         });
+      } else {
+        // Include empty Notes so users know it's recognized but needs content
+        sources.push({
+          index,
+          type: "notes",
+          icon: "\u{1F4DD}", // 📝
+          label: "Notes",
+          preview: "(empty)",
+          isEmpty: true,
+        });
       }
     } else if (entry.type === "text-import") {
       // Text Import module - extract content and filename
@@ -1215,9 +1225,17 @@ ${extractedSummary.join("\n")}`;
     const isExtractingPhase = computed(() => currentPhase === "extracting");
     const isErrorPhase = computed(() => currentPhase === "error");
     const isNoResultsPhase = computed(() => currentPhase === "no-results");
-    const hasNoSources = computed(() => {
+    // True when there are no source modules at all (Notes, Photo, Text Import)
+    const hasNoSourceModules = computed(() => {
       const subCharms = parentSubCharms.get() || [];
       return scanExtractableSources(subCharms).length === 0;
+    });
+    // True when all sources are empty (modules exist but have no content)
+    const hasNoUsableSources = computed(() => {
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
+      // Only count non-empty sources - empty ones are shown but not usable
+      return sources.filter((s) => !s.isEmpty).length === 0;
     });
     // Dereference computed values properly to avoid comparing Cell objects to primitives
     const isSingleSource = computed(() => Number(selectedSourceCount) === 1);
@@ -1242,7 +1260,12 @@ ${extractedSummary.join("\n")}`;
       const selectionsMap = sourceSelections.get() || {};
       const result: Record<number, boolean> = {};
       for (const source of sources) {
-        result[source.index] = selectionsMap[source.index] !== false;
+        // Empty sources are never selected
+        if (source.isEmpty) {
+          result[source.index] = false;
+        } else {
+          result[source.index] = selectionsMap[source.index] !== false;
+        }
       }
       return result;
     });
@@ -1343,7 +1366,7 @@ ${extractedSummary.join("\n")}`;
               style={{ display: "flex", flexDirection: "column", gap: "12px" }}
             >
               {ifElse(
-                hasNoSources,
+                hasNoSourceModules,
                 <div
                   style={{
                     padding: "16px",
@@ -1368,7 +1391,11 @@ ${extractedSummary.join("\n")}`;
                       color: "#6b7280",
                     }}
                   >
-                    Select sources to extract from:
+                    {ifElse(
+                      hasNoUsableSources,
+                      "Add content to sources below:",
+                      "Select sources to extract from:",
+                    )}
                   </div>
                   <div
                     style={{
@@ -1387,6 +1414,7 @@ ${extractedSummary.join("\n")}`;
                           gap: "8px",
                           padding: "10px 12px",
                           borderBottom: "1px solid #f3f4f6",
+                          opacity: source.isEmpty ? 0.5 : 1,
                         }}
                       >
                         <input
@@ -1396,6 +1424,7 @@ ${extractedSummary.join("\n")}`;
                             index: source.index,
                             sourceSelectionsCell: sourceSelections,
                           })}
+                          disabled={source.isEmpty}
                           style={{ marginTop: "2px" }}
                         />
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -1409,7 +1438,10 @@ ${extractedSummary.join("\n")}`;
                           >
                             <span>{source.icon}</span>
                             <span
-                              style={{ fontWeight: "500", color: "#374151" }}
+                              style={{
+                                fontWeight: "500",
+                                color: source.isEmpty ? "#9ca3af" : "#374151",
+                              }}
                             >
                               {source.label}
                             </span>
@@ -1434,6 +1466,7 @@ ${extractedSummary.join("\n")}`;
                               whiteSpace: "nowrap",
                               overflow: "hidden",
                               textOverflow: "ellipsis",
+                              fontStyle: source.isEmpty ? "italic" : "normal",
                             }}
                           >
                             {source.preview}

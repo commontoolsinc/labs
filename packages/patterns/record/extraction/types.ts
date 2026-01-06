@@ -44,4 +44,5 @@ export interface ExtractableSource {
   content?: string; // Full text content (for notes/text-import)
   requiresOCR?: boolean; // True for photos
   imageData?: ImageData; // Image data for OCR (photos only)
+  isEmpty?: boolean; // True if source exists but has no content yet
 }
