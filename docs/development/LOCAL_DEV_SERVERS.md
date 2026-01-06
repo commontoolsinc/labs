@@ -87,7 +87,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:5173          # Shell
 | Stale data | Cache issues | Use `--clear-cache` flag |
 | `*.ts.net` URLs hang | Not on Tailscale | Connect to CT network via Tailscale |
 | OAuth error: `Unexpected token '<'` | Fetching from wrong port | Use port 8000 for API calls ([see below](#oauth-returns-html-instead-of-json)) |
-| UI component changes not appearing | Shell doesn't watch packages/ui | Touch shell source to trigger rebuild ([see below](#ui-component-changes-not-rebuilding)) |
+| UI component changes not appearing | Shell doesn't watch packages/ui | Restart local dev server |
 
 ### Manual Fallback
 
@@ -148,30 +148,9 @@ This happens when OAuth or API calls hit port 5173 (frontend) instead of port 80
 - In patterns: Check `getRecipeEnvironment().apiUrl`
 - Browser testing: Navigate to `http://localhost:5173` for UI, but API calls should target 8000
 
-### UI Component Changes Not Rebuilding
+### UI Component Changes Not Appearing
 
-When modifying UI components in `packages/ui/src/v2/components/`, the shell dev server doesn't automatically rebuild because it only watches `packages/shell/src/`.
-
-**Symptom:** You modify a UI component, redeploy a charm, but your changes don't appear.
-
-**Fix:** Touch a file in shell/src to trigger a full rebuild:
-
-```bash
-# Touch shell source to trigger rebuild
-touch packages/shell/src/index.ts
-
-# Watch the log for rebuild confirmation
-tail -f packages/shell/local-dev-shell.log
-# Should see: "🔨 Building..." then "✓ Built..."
-```
-
-**Why this works:** The shell's esbuild config bundles all dependencies (including `@commontools/ui`). When any watched file changes, esbuild rebuilds the entire bundle with the latest UI component code.
-
-**Verify your changes are included:**
-```bash
-# Search for a unique string from your changes
-grep "your-unique-string" packages/shell/dist/scripts/index.js
-```
+When editing `ct-*` components in `packages/ui/`, restart the local dev server to ensure the updated code is running.
 
 ---
 

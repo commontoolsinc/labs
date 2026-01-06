@@ -18,6 +18,18 @@ Use `$` prefix for automatic two-way sync. No handler needed for simple updates.
 
 For when to use handlers vs binding, see [PATTERNS.md](PATTERNS.md).
 
+## Property Names: Use CamelCase
+
+Use camelCase for `ct-*` component properties. Kebab-case JSX attributes don't map correctly:
+
+```tsx
+// ❌ Kebab-case won't work
+<ct-autocomplete allow-custom={true} />  // Sets element["allow-custom"], not allowCustom
+
+// ✅ CamelCase works
+<ct-autocomplete allowCustom={true} />  // Sets element.allowCustom correctly
+```
+
 ---
 
 ## ct-button
@@ -125,7 +137,7 @@ interface CtListItem {
 
 ## ct-message-input
 
-Input + button combo for adding items. Button always shows "Send" - `buttonText` prop is not available in JSX types.
+Input + button combo for adding items.
 
 ```tsx
 <ct-message-input
@@ -136,8 +148,6 @@ Input + button combo for adding items. Button always shows "Send" - `buttonText`
   }}
 />
 ```
-
-**Note:** The `buttonText` property exists in the component but is intentionally omitted from JSX types. Use `ct-input` + `ct-button` separately if you need custom button text.
 
 ---
 
@@ -242,7 +252,7 @@ const removeItem = handler<unknown, { items: Writable<Item[]>; item: Item }>(
 
 ## ct-screen
 
-Full-screen container for app-like layouts. Use instead of `<div style={{ height: "100%" }}>` which doesn't work (parent has no explicit height).
+Full-screen container for app-like layouts. Use instead of `<div style={{ height: "100%" }}>` which doesn't work (parent has no explicit height). The component already sets `display: flex; flex-direction: column;` internally.
 
 ```tsx
 // ❌ DOESN'T WORK - content appears blank
@@ -251,11 +261,11 @@ Full-screen container for app-like layouts. Use instead of `<div style={{ height
 </div>
 
 // ✅ WORKS - full available width and height
-<ct-screen style="display: flex; flex-direction: column;">
+<ct-screen>
   <header>Title</header>
-  <div style="flex: 1; overflow: auto;">
+  <ct-vscroll style="flex: 1;">
     {/* Scrollable content */}
-  </div>
+  </ct-vscroll>
 </ct-screen>
 ```
 
@@ -266,13 +276,13 @@ Full-screen container for app-like layouts. Use instead of `<div style={{ height
 ```tsx
 <ct-image-input
   onct-change={handleImageUpload}
-  maxSizeBytes={3932160}  // See note below
+  maxSizeBytes={5000000}
 >
   📷 Add Photo
 </ct-image-input>
 ```
 
-**Base64 overhead:** `maxSizeBytes` checks the original file size, but APIs receive base64-encoded data (~33% larger). For a 5MB API limit, use `maxSizeBytes={3932160}` (75% of limit).
+The component compresses images to fit within `maxSizeBytes`.
 
 ---
 
@@ -326,15 +336,3 @@ SVG elements (`<svg>`, `<path>`, `<circle>`, etc.) are not in the JSX type defin
 ```
 
 **Workarounds:** Use styled `<div>` elements for bar charts, text sparklines (`▁▂▃▄▅▆▇█`), or request a `ct-chart` component.
-
-### Component Authoring: Use CamelCase
-
-When authoring `ct-*` components, use camelCase for property names. Kebab-case JSX attributes don't map to camelCase Lit properties:
-
-```tsx
-// ❌ Kebab-case won't work
-<ct-autocomplete allow-custom={true} />  // Sets element["allow-custom"], not allowCustom
-
-// ✅ CamelCase works
-<ct-autocomplete allowCustom={true} />  // Sets element.allowCustom correctly
-```

@@ -843,54 +843,6 @@ const activeItems = computed(() => items.filter(item => !item.done));
 <ct-checkbox $checked={item.done} />
 ```
 
-**Check 4: Using $checked on computed results?**
-
-The `$checked` binding only works for writes when mapping over direct `Cell<T[]>` inputs. On computed results, writes silently fail (no error thrown, but changes don't persist):
-
-```typescript
-// ❌ SILENT FAILURE - reads work, writes are ignored
-const activeItems = computed(() => items.filter(i => i.active));
-{activeItems.map(item => <ct-checkbox $checked={item.done} />)}
-// Checkbox displays correctly, but clicking doesn't persist changes
-
-// ✅ WORKS - direct Cell map
-{items.map(item => <ct-checkbox $checked={item.done} />)}
-
-// ✅ WORKS for filtered lists - use separate selection state
-const selections = Cell.of<Record<string, boolean>>({});
-{activeItems.map(item => (
-  <ct-checkbox
-    checked={selections.key(item.id)}
-    onClick={() => {
-      const sel = selections.get();
-      selections.set({ ...sel, [item.id]: !sel[item.id] });
-    }}
-  />
-))}
-```
-
-**Rule:** For checkboxes on computed/filtered lists, separate selection state into a writable Cell.
-
-**Check 5: Using .key().set() on empty Records?**
-
-`.key(k).set(v)` fails on empty `Record<string, T>` cells. Once a Record has at least one key, adding new keys works:
-
-```typescript
-// ❌ FAILS - "Value at path ... is not an object"
-const data: Cell<Record<string, Item>> = Cell.of({});  // Empty!
-data.key("newkey").set({ value: "test" });
-
-// ✅ WORKS - Record already has entries
-const data: Cell<Record<string, Item>> = Cell.of({ existing: { value: "preset" } });
-data.key("newkey").set({ value: "test" });
-
-// ✅ WORKS - Spread workaround for empty Records
-const current = data.get() ?? {};
-data.set({ ...current, newkey: { value: "test" } });
-```
-
-**Rule:** Use spread syntax when adding keys to potentially-empty Records.
-
 ## Summary
 
 **Key Takeaways:**

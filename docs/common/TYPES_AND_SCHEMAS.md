@@ -163,40 +163,6 @@ const removeItem = handler<
 
 ---
 
-## Boxed Selection Pattern
-
-When tracking a selected item from an array, **box the selection in an object** rather than storing a Cell reference directly:
-
-```typescript
-// ✅ CORRECT - Boxed selection
-interface BoxedSelection {
-  selected: Item | null;
-}
-const selection = Cell.of<BoxedSelection>({ selected: null });
-
-// Select an item
-const selectItem = handler<unknown, { sel: Cell<BoxedSelection>; item: Item }>(
-  (_, { sel, item }) => {
-    sel.update({ selected: item });
-  }
-);
-
-// ❌ WRONG - Don't store Cell<Cell<T>>
-const selection = Cell.of<Cell<Item> | null>(null);
-// This causes rendering bugs when items come from .map()
-```
-
-**Why avoid `Cell<Cell<T>>`?**
-- Items from `.map()` are `Cell<Item>` (OpaqueRef)
-- Storing them creates `Cell<Cell<Item>>` which is unstable
-- Runtime behavior: clicking buttons causes rendering bugs (labels swap incorrectly)
-
-**When you need to compare items by identity:**
-- Use `.equals()` for *comparison* (finding/removing items)
-- Use boxed selection or index/ID for *storage*
-
----
-
 ## Handler Types in Output Interfaces
 
 Handlers exposed in Output interfaces must be typed as `Stream<T>`.

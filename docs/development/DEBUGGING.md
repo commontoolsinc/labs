@@ -15,7 +15,6 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | "Type 'string' is not assignable to type 'CSSProperties'" | String style on HTML element | Use object syntax `style={{ ... }}` ([COMPONENTS](COMPONENTS.md)) |
 | Type mismatch binding item to `$checked` | Binding whole item, not property | Bind `item.done`, not `item` |
 | "ReadOnlyAddressError" | onClick inside computed() | Move button outside, use disabled ([see below](#onclick-inside-computed)) |
-| "ReadOnlyAddressError" on `$checked`/`$value` | Default\<T[], []\> items are read-only | Use `Cell<Default<T[], []>>` ([see below](#bidirectional-binding-on-array-items)) |
 | Charm hangs, never renders | ifElse with composed pattern cell | Use local computed cell ([see below](#ifelse-with-composed-pattern-cells)) |
 | Data not updating | Missing `$` prefix or wrong event | Use `$checked`, `$value` ([COMPONENTS](COMPONENTS.md)) |
 | Filtered list not updating | Need computed() | Wrap in `computed()` ([REACTIVITY](REACTIVITY.md)) |
@@ -25,8 +24,6 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | Can't access variable in nested scope | Variable scoping limitation | Pre-compute grouped data or use lift() with explicit params ([see below](#variable-scoping-in-reactive-contexts)) |
 | "Cannot access cell via closure" / "Accessing an opaque ref via closure is not supported" | Using lift() with closure | Pass all reactive deps as params to lift() ([REACTIVITY](REACTIVITY.md#lift-and-closure-limitations)) |
 | CLI `get` returns stale computed values | `charm set` doesn't trigger recompute | Run `charm step` after `set` to trigger re-evaluation ([see below](#stale-computed-values-after-charm-set)) |
-| "Property 'onMouseEnter' does not exist" | Hover events not supported | Use click handlers instead ([see below](#hover-events-not-supported)) |
-| ct-tabs panels all hidden | Value attribute reflection issue | Use custom tabs with ifElse ([see below](#ct-tabs-panels-not-showing)) |
 | Space URL 404 or routing errors | Space name contains `/` | Use only `a-z`, `0-9`, `-`, `_` in space names |
 
 ---
@@ -141,34 +138,6 @@ See [REACTIVITY.md](REACTIVITY.md#using-reactive-values-to-index-objects-in-map)
 
 **Why:** `computed()` creates read-only inline data addresses. Always render buttons at the top level and control visibility with `disabled`.
 
-### Bidirectional Binding on Array Items
-
-**Error:** "ReadOnlyAddressError: Cannot write to read-only address: data:application/json..."
-
-```typescript
-// ❌ Default<> arrays have read-only item properties
-interface Input {
-  items: Default<Item[], []>;  // OpaqueRef - items are read-only!
-}
-
-{items.map((item) => (
-  <ct-checkbox $checked={item.done} />  // ReadOnlyAddressError on click
-))}
-
-// ✅ Use Cell<Default<>> for write access to item properties
-interface Input {
-  items: Cell<Default<Item[], []>>;  // Cell wrapper enables writes
-}
-
-{items.map((item) => (
-  <ct-checkbox $checked={item.done} />  // Works!
-))}
-```
-
-**Why:** `Default<T[], []>` creates an OpaqueRef array where item properties become read-only data URIs at runtime. Wrapping with `Cell<>` provides write access needed for bidirectional binding (`$checked`, `$value`).
-
-**Rule:** For the "state on objects" pattern (`$checked={item.property}`), use `Cell<Default<Item[], []>>`, not just `Default<Item[], []>`.
-
 ### ifElse with Composed Pattern Cells
 
 **Symptom:** Charm never renders, no errors, blank UI
@@ -271,55 +240,6 @@ return { addItem };
 ```
 
 **Why:** Streams aren't created directly - they're the result of binding a handler with state. The bound handler IS the stream that can receive events.
-
-### Hover Events Not Supported
-
-**Error:** "Property 'onMouseEnter' does not exist on type..."
-
-Hover events (`onMouseEnter`, `onMouseLeave`) are not supported on div elements:
-
-```typescript
-// ❌ Hover events don't work
-<div onMouseEnter={handler}>Hover me</div>
-
-// ✅ Use click handlers instead
-<button
-  style={{ background: "transparent", border: "none", cursor: "pointer" }}
-  onClick={handleSelect}
->
-  Click to select
-</button>
-```
-
-**Why:** The framework JSX types don't include these events (marked as `@TODO`).
-**Benefit:** Click-based interactions are more mobile-friendly anyway.
-
-### ct-tabs Panels Not Showing
-
-**Symptom:** All ct-tab-panel elements stay hidden, even though tab values are set correctly.
-
-```typescript
-// ❌ May not work - panels stay hidden
-<ct-tabs value={activeTab} onct-change={handleChange}>
-  <ct-tab-list>
-    <ct-tab value="a">Tab A</ct-tab>
-  </ct-tab-list>
-  <ct-tab-panel value="a">Content A</ct-tab-panel>
-</ct-tabs>
-
-// ✅ Use custom tabs with ifElse instead
-const activeTab = Cell.of("dashboard");
-const isDashboard = computed(() => activeTab.get() === "dashboard");
-
-<div>
-  <ct-button onClick={() => activeTab.set("dashboard")}>Dashboard</ct-button>
-  <ct-button onClick={() => activeTab.set("settings")}>Settings</ct-button>
-</div>
-
-{ifElse(isDashboard, <div>Dashboard content</div>, <div>Settings content</div>)}
-```
-
-**Why:** Value attribute reflection issue between JSX properties and HTML attributes.
 
 ---
 
