@@ -92,7 +92,7 @@ interface ExtractorModuleOutput {
 // ===== Constants =====
 
 const EXTRACTION_SYSTEM_PROMPT =
-  `You are a precise data extractor for structured fields from text like signatures, bios, or vCards.
+  `You are a precise data extractor for STRUCTURED fields from text like signatures, bios, or vCards.
 
 === Field Ownership (fields belong to specific modules) ===
 - Phone: "number" only (preserve formatting)
@@ -102,18 +102,34 @@ const EXTRACTION_SYSTEM_PROMPT =
 - Birthday: "birthMonth" (1-12), "birthDay" (1-31), "birthYear" (YYYY) as separate strings
 - Location: "locationName", "locationAddress", "coordinates"
 - Link: "url", "linkTitle", "description"
-- Dietary: "restrictions" as simple string array, e.g. ["dairy", "nightshades", "vegetarian"]
+- Dietary: "restrictions" as string array - ONLY explicit dietary restrictions/allergies. PRESERVE intensity words, e.g. ["extremely allergic to nightshades", "vegetarian", "severely allergic to peanuts"]
+
+=== What TO Extract (structured data only) ===
+- Email addresses, phone numbers, physical addresses
+- Social media handles and profile URLs
+- Specific dates (birthdays, anniversaries)
+- Explicit dietary restrictions or allergies (e.g. "allergic to peanuts", "vegetarian", "gluten-free")
+- URLs and links
+
+=== What NOT to Extract (leave in Notes) ===
+- Vague preferences: "loves coffee", "enjoys hiking", "likes rabbits"
+- Opinions or personality traits: "is very friendly", "great sense of humor"
+- Conversational text or context: "met at the conference", "works with Sarah"
+- Gift ideas unless explicitly labeled: "loves bonny rabbits" is NOT a gift preference
+- Hobby mentions: "plays guitar", "into photography"
+- Food preferences that aren't restrictions: "loves Italian food", "favorite is pizza"
 
 === Rules ===
-1. Only extract explicitly stated or clearly implied data
-2. Return null for missing fields
+1. Only extract EXPLICITLY STRUCTURED data (emails, phones, dates, addresses, URLs)
+2. Return null for missing fields - when in doubt, return null
 3. Arrays (tags, restrictions): use simple string arrays like ["item1", "item2"]
 4. DO NOT extract labels like "Mobile", "Work", "Personal" as separate fields - these are UI defaults
 5. Normalize social platforms to lowercase (X/Twitter -> "twitter", Insta -> "instagram")
 6. Preserve original formatting for phone numbers
-7. Be conservative - only extract what you're confident about
+7. Be VERY conservative - leave conversational/descriptive text for the user to read in Notes
+8. "Loves X", "likes X", "enjoys X" should NEVER be extracted unless X is an explicit dietary restriction
 
-Return JSON with extracted fields. Use null for missing data.`;
+Return JSON with extracted fields. Use null for missing data. Prefer leaving text in Notes over aggressive extraction.`;
 
 const OCR_SYSTEM_PROMPT =
   `You are an OCR system. Extract all text from the provided image.
@@ -121,8 +137,7 @@ Return ONLY the extracted text, preserving formatting and line breaks.
 Do not add any commentary, explanation, or formatting like markdown.
 If no text is visible, return an empty string.`;
 
-const NOTES_CLEANUP_SYSTEM_PROMPT =
-  `You are a notes cleanup tool.
+const NOTES_CLEANUP_SYSTEM_PROMPT = `You are a notes cleanup tool.
 
 Given original notes and a list of extracted fields, output a cleaned version with extracted data removed.
 
@@ -352,12 +367,15 @@ function scanExtractableSources(
         : contentCell;
 
       if (content && typeof content === "string" && content.trim()) {
+        // Replace newlines with spaces for clean single-line preview display
+        const cleanPreview = content.replace(/\n+/g, " ").trim();
         sources.push({
           index,
           type: "notes",
           icon: "\u{1F4DD}", // 📝
           label: "Notes",
-          preview: content.slice(0, 100) + (content.length > 100 ? "..." : ""),
+          preview: cleanPreview.slice(0, 100) +
+            (cleanPreview.length > 100 ? "..." : ""),
           content,
         });
       } else {
@@ -393,12 +411,15 @@ function scanExtractableSources(
         const label = (filename && typeof filename === "string")
           ? filename
           : "Text Import";
+        // Replace newlines with spaces for clean single-line preview display
+        const cleanPreview = content.replace(/\n+/g, " ").trim();
         sources.push({
           index,
           type: "text-import",
           icon: "\u{1F4C4}", // 📄
           label,
-          preview: content.slice(0, 100) + (content.length > 100 ? "..." : ""),
+          preview: cleanPreview.slice(0, 100) +
+            (cleanPreview.length > 100 ? "..." : ""),
           content,
         });
       }
@@ -1038,7 +1059,8 @@ export const ExtractorModule = recipe<
       const calls = ocrCalls;
       if (!calls || calls.length === 0) return false;
       return calls.some(
-        (call: { index: number; ocr: { pending: boolean } }) => call.ocr.pending,
+        (call: { index: number; ocr: { pending: boolean } }) =>
+          call.ocr.pending,
       );
     });
 
@@ -1240,15 +1262,21 @@ ${extractedSummary.join("\n")}`;
     // Dereference computed values properly to avoid comparing Cell objects to primitives
     const isSingleSource = computed(() => Number(selectedSourceCount) === 1);
     const extractButtonDisabled = computed(() =>
-      !Boolean(hasSelectedSources) || Boolean(ocrPending)
+      !hasSelectedSources || ocrPending
     );
     const extractButtonBackground = computed(() =>
-      Boolean(hasSelectedSources) && !Boolean(ocrPending) ? "#f59e0b" : "#d1d5db"
+      hasSelectedSources && !ocrPending
+        ? "#f59e0b"
+        : "#d1d5db"
     );
     const extractButtonCursor = computed(() =>
-      Boolean(hasSelectedSources) && !Boolean(ocrPending) ? "pointer" : "not-allowed"
+      hasSelectedSources && !ocrPending
+        ? "pointer"
+        : "not-allowed"
     );
-    const isCleanedNotesEmpty = computed(() => String(cleanedNotesContent) === "");
+    const isCleanedNotesEmpty = computed(() =>
+      String(cleanedNotesContent) === ""
+    );
     const hasMultipleChanges = computed(() => Number(totalChangesCount) !== 1);
     const hasTrashItems = computed(() => Number(trashCount) > 0);
 
@@ -1311,13 +1339,13 @@ ${extractedSummary.join("\n")}`;
       return status === "failed";
     });
     const applyButtonDisabled = computed(() =>
-      Boolean(cleanupPending) || applyInProgress.get() === true
+      cleanupPending || applyInProgress.get() === true
     );
     const applyButtonBackground = computed(() =>
-      Boolean(applyButtonDisabled) ? "#d1d5db" : "#059669"
+      applyButtonDisabled ? "#d1d5db" : "#059669"
     );
     const applyButtonCursor = computed(() =>
-      Boolean(applyButtonDisabled) ? "not-allowed" : "pointer"
+      applyButtonDisabled ? "not-allowed" : "pointer"
     );
 
     return {
@@ -1340,23 +1368,27 @@ ${extractedSummary.join("\n")}`;
             }}
           >
             <span style={{ color: "#92400e", fontWeight: "500" }}>
-              {ifElse(isPreviewPhase, "Review Changes", "AI Extract")}
+              {ifElse(isPreviewPhase, "Review Changes", "Select Sources")}
             </span>
-            <button
-              type="button"
-              onClick={dismiss({ parentSubCharms, parentTrashedSubCharms })}
-              style={{
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-                color: "#6b7280",
-                fontSize: "16px",
-                padding: "4px",
-              }}
-              title="Dismiss"
-            >
-              x
-            </button>
+            {ifElse(
+              isExtractingPhase,
+              null,
+              <button
+                type="button"
+                onClick={dismiss({ parentSubCharms, parentTrashedSubCharms })}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#6b7280",
+                  fontSize: "16px",
+                  padding: "4px",
+                }}
+                title="Dismiss"
+              >
+                x
+              </button>,
+            )}
           </div>
 
           {/* Select Sources Phase */}
@@ -1419,7 +1451,7 @@ ${extractedSummary.join("\n")}`;
                       >
                         <input
                           type="checkbox"
-                          checked={sourceCheckStates[source.index]}
+                          checked={sourceCheckStates[source.index] === true}
                           onChange={toggleSourceHandler({
                             index: source.index,
                             sourceSelectionsCell: sourceSelections,
@@ -1918,7 +1950,7 @@ ${extractedSummary.join("\n")}`;
                       >
                         <input
                           type="checkbox"
-                          checked={trashCheckStates[source.index]}
+                          checked={trashCheckStates[source.index] === true}
                           onChange={toggleTrashHandler({
                             index: source.index,
                             trashSelectionsCell: trashSelections,

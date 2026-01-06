@@ -1058,10 +1058,84 @@ function getDefaultLevel(name: string): RestrictionLevel {
 }
 
 /**
+ * Parse intensity words from a restriction string and determine severity level.
+ * Handles phrases like "EXTREMELY allergic to nightshades" or "deathly allergic to peanuts".
+ *
+ * Returns { name: cleanedName, level: inferredLevel } where:
+ * - cleanedName has intensity words removed
+ * - inferredLevel is upgraded based on intensity (or uses default if no intensity found)
+ */
+function parseIntensityFromText(input: string): {
+  name: string;
+  level: RestrictionLevel;
+} {
+  const text = input.trim();
+
+  // Intensity patterns that indicate severity levels
+  // Order matters: check highest severity first
+  const ABSOLUTE_PATTERNS =
+    /\b(extremely|deathly|severely|deadly|fatal|life[- ]?threatening|anaphylactic)\b/i;
+  const STRICT_PATTERNS =
+    /\b(very|highly|serious|strong|major|bad|significant)\b/i;
+  const PREFER_PATTERNS = /\b(mild|slight|minor|a bit|somewhat|moderate)\b/i;
+  const FLEXIBLE_PATTERNS =
+    /\b(very mild|very slight|barely|hardly|occasional)\b/i;
+
+  // Allergy/intolerance indicator patterns
+  const ALLERGY_PATTERNS =
+    /\b(allergic|allergy|anaphylactic|anaphylaxis)\s*(to)?\b/gi;
+  const INTOLERANCE_PATTERNS =
+    /\b(intolerant|intolerance|sensitive|sensitivity)\s*(to)?\b/gi;
+  const AVOID_PATTERNS = /\b(avoid|can'?t\s+eat|don'?t\s+eat|no)\b/gi;
+
+  // Determine level from intensity words
+  let inferredLevel: RestrictionLevel | null = null;
+
+  if (FLEXIBLE_PATTERNS.test(text)) {
+    inferredLevel = "flexible";
+  } else if (PREFER_PATTERNS.test(text)) {
+    inferredLevel = "prefer";
+  } else if (ABSOLUTE_PATTERNS.test(text)) {
+    inferredLevel = "absolute";
+  } else if (STRICT_PATTERNS.test(text)) {
+    inferredLevel = "strict";
+  }
+
+  // Clean the name: remove intensity words and allergy/intolerance phrases
+  let cleanedName = text
+    // Remove intensity words
+    .replace(ABSOLUTE_PATTERNS, "")
+    .replace(STRICT_PATTERNS, "")
+    .replace(PREFER_PATTERNS, "")
+    .replace(FLEXIBLE_PATTERNS, "")
+    // Remove allergy/intolerance phrases
+    .replace(ALLERGY_PATTERNS, "")
+    .replace(INTOLERANCE_PATTERNS, "")
+    .replace(AVOID_PATTERNS, "")
+    // Clean up extra whitespace
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // If name is empty after cleaning, use original
+  if (!cleanedName) {
+    cleanedName = text;
+  }
+
+  // If we found an intensity word, use it; otherwise get default for the cleaned name
+  const level = inferredLevel ?? getDefaultLevel(cleanedName);
+
+  return { name: cleanedName, level };
+}
+
+/**
  * Normalize a single restriction item to RestrictionEntry format.
  * Accepts both string (from LLM extraction) and RestrictionEntry (from UI).
  * This enables the module to handle extraction data like ["nightshades", "dairy"]
  * as well as existing data like [{ name: "dairy", level: "strict" }].
+ *
+ * For string inputs, parses intensity words to infer severity level:
+ * - "EXTREMELY allergic to nightshades" -> { name: "nightshades", level: "absolute" }
+ * - "mildly sensitive to dairy" -> { name: "dairy", level: "prefer" }
  *
  * IMPORTANT: When iterating over reactive arrays inside computed(), each item
  * is a proxy object. `typeof item === "string"` returns false for proxies.
@@ -1094,16 +1168,18 @@ function normalizeRestrictionItem(
     // This handles proxy objects wrapping string values
     const strValue = String(item);
     if (strValue && strValue !== "[object Object]") {
-      return { name: strValue, level: getDefaultLevel(strValue) };
+      // Parse intensity words from string value
+      return parseIntensityFromText(strValue);
     }
     // Fallback for malformed objects
     return { name: "", level: "prefer" };
   }
 
   // Handle primitive string format (from LLM extraction or direct values)
+  // Parse intensity words to infer severity level
   const strValue = String(item);
   if (strValue && strValue.trim()) {
-    return { name: strValue, level: getDefaultLevel(strValue) };
+    return parseIntensityFromText(strValue);
   }
 
   // Fallback for empty strings or other edge cases
