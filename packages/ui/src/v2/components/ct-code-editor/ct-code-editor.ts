@@ -22,7 +22,6 @@ import { json as createJson } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
 
 import {
-  acceptCompletion,
   autocompletion,
   Completion,
   CompletionContext,
@@ -209,7 +208,7 @@ const backlinkEditFilter = EditorState.transactionFilter.of((tr) => {
     let blocked = false;
 
     tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-      let adjustedFrom = fromA;
+      const adjustedFrom = fromA;
       let adjustedTo = toA;
       let shouldInclude = true;
 
@@ -342,6 +341,8 @@ export class CTCodeEditor extends BaseElement {
   private _changeGroup = crypto.randomUUID();
   // Track previous backlink names to detect changes for syncing to charm NAME
   private _previousBacklinkNames = new Map<string, string>();
+  // Track subscriptions to charm NAME cells for bidirectional sync
+  private _charmNameSubscriptions = new Map<string, () => void>();
 
   // Transaction annotation to mark Cell-originated updates.
   // This is the idiomatic CodeMirror 6 way to distinguish programmatic
@@ -418,7 +419,6 @@ export class CTCodeEditor extends BaseElement {
       }
 
       const query = backlink.text.slice(2); // Remove [[ prefix
-      const raw = query.trim();
 
       const mentionable = this.getFilteredMentionable(query);
 
@@ -578,9 +578,8 @@ export class CTCodeEditor extends BaseElement {
 
   /**
    * Handle backlink clicks:
-   * - Cmd/Ctrl+Click: always navigate
-   * - Regular click on collapsed pill: navigate (don't place cursor)
-   * - Regular click elsewhere: normal cursor placement
+   * - Click on pill: navigate to linked charm
+   * - Click when expanded (editing mode): places cursor normally
    */
   private createBacklinkClickHandler() {
     return EditorView.domEventHandlers({
@@ -588,17 +587,10 @@ export class CTCodeEditor extends BaseElement {
         // Check if clicking on a collapsed pill (cm-backlink-pill)
         const target = event.target as HTMLElement;
         if (target.closest(".cm-backlink-pill")) {
-          // Navigate to the backlink instead of placing cursor
+          // Navigate to the backlink
           event.preventDefault();
-          // Use setTimeout to let the event finish before navigating
           setTimeout(() => this.handlePillClick(view, event), 0);
           return true;
-        }
-        return false;
-      },
-      click: (event, view) => {
-        if (event.ctrlKey || event.metaKey) {
-          return this.handleBacklinkActivation(view, event);
         }
         return false;
       },
@@ -883,14 +875,14 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Create a plugin to decorate backlinks with focus-aware styling.
    * - When cursor is outside: show as collapsed pill (hide brackets and ID)
-   * - When cursor is inside NAME area: show name with editing style (still hide ID)
-   * - Incomplete backlinks show as pending pills
+   * - When cursor is adjacent/inside: show [[Name]] with visible brackets (ID never visible)
+   * - Incomplete backlinks show as pending pills or [[text]] when editing
+   *
+   * The charm ID is never shown to the user - it's stored in the document
+   * as [[Name (id)]] but displayed as [[Name]] when editing or just Name when collapsed.
    */
   private createBacklinkDecorationPlugin() {
     const editingMark = Decoration.mark({ class: "cm-backlink-editing" });
-    const editingNameMark = Decoration.mark({
-      class: "cm-backlink-editing-name",
-    });
     const pillMark = Decoration.mark({ class: "cm-backlink-pill" });
     const pendingMark = Decoration.mark({ class: "cm-backlink-pending" });
     const hiddenReplace = Decoration.replace({});
@@ -933,30 +925,28 @@ export class CTCodeEditor extends BaseElement {
             const endLine = doc.lineAt(end).number;
             if (startLine !== endLine) continue;
 
-            // Check if cursor is within the NAME portion of this backlink
-            // (not the [[ or (id)]] parts)
-            const cursorInName = hasFocus && cursorPos >= nameFrom &&
-              cursorPos <= nameTo;
-            // Check if cursor is adjacent to the backlink (right before [[ or right after ]])
-            const cursorAdjacent = hasFocus &&
-              (cursorPos === start || cursorPos === end);
+            // Check if cursor is anywhere within the backlink (including hidden areas)
+            // This ensures editing mode triggers when cursor is adjacent to visible pill
+            const cursorInBacklink = hasFocus && cursorPos >= start &&
+              cursorPos <= end;
             // Check if selection overlaps with the entire backlink
             const selectionOverlaps = hasFocus && selectionFrom < end &&
               selectionTo > start;
 
-            if (
-              hasId && (cursorInName || cursorAdjacent || selectionOverlaps)
-            ) {
-              // EDITING MODE: User is editing the name of a complete backlink
-              // Hide [[ and (id)]], show only the name with editing style
-              decorations.push(hiddenReplace.range(start, nameFrom)); // Hide [[
-              decorations.push(editingNameMark.range(nameFrom, nameTo)); // Style name
-              decorations.push(hiddenReplace.range(nameTo, end)); // Hide (id)]]
+            if (hasId && (cursorInBacklink || selectionOverlaps)) {
+              // EDITING MODE: Show plain [[Name]] text, hide only the " (id)" portion
+              // The closing ]] stays visible so user sees [[Name]]
+              // Safety check: only hide if there's actually content between nameTo and end-2
+              const idStart = nameTo;
+              const idEnd = end - 2; // Position before ]]
+              if (idEnd > idStart) {
+                decorations.push(hiddenReplace.range(idStart, idEnd)); // Hide " (id)"
+              }
             } else if (!hasId) {
               // Incomplete backlink - show as pending pill or full text when editing
-              const cursorInside = hasFocus && cursorPos > start &&
-                cursorPos < end;
-              if (cursorInside || cursorAdjacent || selectionOverlaps) {
+              const cursorInside = hasFocus && cursorPos >= start &&
+                cursorPos <= end;
+              if (cursorInside || selectionOverlaps) {
                 // Cursor inside or adjacent - show full [[mention]] with editing style
                 decorations.push(editingMark.range(start, end));
               } else {
@@ -1092,6 +1082,7 @@ export class CTCodeEditor extends BaseElement {
 
   private _cleanup(): void {
     this._cleanupCellSyncHandler();
+    this._cleanupCharmNameSubscriptions();
     if (this._mentionableUnsub) {
       this._mentionableUnsub();
       this._mentionableUnsub = null;
@@ -1244,6 +1235,9 @@ export class CTCodeEditor extends BaseElement {
 
     // Initialize backlink name tracking for sync detection
     this._initializeBacklinkNameTracking();
+
+    // Set up subscriptions for bidirectional NAME sync
+    this._setupCharmNameSubscriptions();
   }
 
   /**
@@ -1318,6 +1312,8 @@ export class CTCodeEditor extends BaseElement {
           this._updateMentionedFromContent();
           // Sync name changes to linked charms
           this._detectAndSyncNameChanges();
+          // Refresh subscriptions for any new backlinks
+          this._setupCharmNameSubscriptions();
         }
       }),
       // Handle focus/blur events
@@ -1356,12 +1352,28 @@ export class CTCodeEditor extends BaseElement {
           }
         }
       }),
-      // Enter: complete backlink with exact match OR create new charm
+      // Enter: complete backlink OR exit editing mode (no newline inside backlinks)
       // Use Prec.highest to ensure this runs before autocompletion handlers
       Prec.highest(keymap.of([{
         key: "Enter",
         run: (view) => {
-          // If typing a backlink like [[mention, complete it
+          const pos = view.state.selection.main.head;
+          const backlinks = view.state.field(backlinkField);
+
+          // Check if cursor is inside a complete backlink (from [[ up to but not after ]])
+          // Enter inside backlink exits editing; Enter after ]] allows normal newline
+          for (const bl of backlinks) {
+            if (bl.id && pos >= bl.from && pos < bl.to) {
+              // Cursor is inside the backlink - exit editing mode
+              // Move cursor to after ]] without inserting newline
+              view.dispatch({
+                selection: { anchor: bl.to },
+              });
+              return true; // Consume Enter, no newline
+            }
+          }
+
+          // If typing a new backlink like [[mention, complete it
           const query = this._currentBacklinkQuery(view);
           if (query != null) {
             const text = query.trim();
@@ -1490,6 +1502,111 @@ export class CTCodeEditor extends BaseElement {
     const tx = this.mentioned.runtime.edit();
     this.mentioned.withTx(tx).set(newMentioned);
     tx.commit();
+
+    // Set up subscriptions for bidirectional NAME sync
+    this._setupCharmNameSubscriptions();
+  }
+
+  /**
+   * Set up subscriptions to charm TITLE cells for bidirectional sync.
+   * We subscribe to title (not NAME) because:
+   * - We UPDATE title when user edits backlink in doc
+   * - NAME is computed from title, so subscribing to NAME would cause feedback loops
+   * - By subscribing to title with same changeGroup, our own edits are filtered out
+   */
+  private _setupCharmNameSubscriptions(): void {
+    if (!this._editorView) return;
+
+    const backlinks = this._editorView.state.field(backlinkField);
+    const activeIds = new Set<string>();
+
+    for (const bl of backlinks) {
+      if (!bl.id) continue;
+      activeIds.add(bl.id);
+
+      // Skip if already subscribed
+      if (this._charmNameSubscriptions.has(bl.id)) continue;
+
+      const charmCell = this.findCharmById(bl.id);
+      if (!charmCell) continue;
+
+      // Subscribe to TITLE cell (not NAME) - this is what we update
+      const titleCell = charmCell.key("title");
+      const charmId = bl.id;
+
+      // Subscribe with changeGroup so our own edits are filtered out
+      const unsub = titleCell.sink(() => {
+        this._handleExternalTitleChange(charmId, charmCell);
+      }, { changeGroup: this._changeGroup });
+
+      this._charmNameSubscriptions.set(charmId, unsub);
+    }
+
+    // Clean up subscriptions for charms no longer in document
+    for (const [id, unsub] of this._charmNameSubscriptions) {
+      if (!activeIds.has(id)) {
+        unsub();
+        this._charmNameSubscriptions.delete(id);
+      }
+    }
+  }
+
+  /**
+   * Handle external title change from a charm - update the pill text in the document.
+   * This is called when a charm's title field changes externally (not from our own edit).
+   */
+  private _handleExternalTitleChange(
+    charmId: string,
+    charmCell: Cell<Mentionable>,
+  ): void {
+    if (!this._editorView) return;
+
+    // Get the charm's title (without emoji prefix)
+    const title = charmCell.key("title").get() as string;
+    if (!title) return;
+
+    // Find backlink in document
+    const backlinks = this._editorView.state.field(backlinkField);
+    const bl = backlinks.find((b) => b.id === charmId);
+    if (!bl) return;
+
+    // Strip emoji from document name for comparison
+    const docNameStripped = bl.name.replace(/^(?:📝|📓|📁|🗒️|🗒)\s*/, "");
+
+    // Skip if stripped names match (no actual title change)
+    if (docNameStripped === title) return;
+
+    // Get the full NAME (with emoji) to insert into document
+    const currentName = charmCell.key(NAME).get() as string;
+    if (!currentName) return;
+
+    // Update tracking map BEFORE dispatch so _detectAndSyncNameChanges doesn't
+    // try to sync this change back to the charm (it runs synchronously during dispatch)
+    this._previousBacklinkNames.set(charmId, currentName);
+
+    // Update document with annotation to prevent updateListener from calling setValue
+    this._editorView.dispatch({
+      changes: { from: bl.nameFrom, to: bl.nameTo, insert: currentName },
+      annotations: CTCodeEditor._cellSyncAnnotation.of(true),
+    });
+
+    // Update Cell value IMMEDIATELY (bypass debounce) so Cell sync doesn't revert
+    const newDocValue = this._editorView.state.doc.toString();
+    if (isCell(this.value)) {
+      const tx = this.value.runtime.edit({ changeGroup: this._changeGroup });
+      this.value.withTx(tx).set(newDocValue);
+      tx.commit();
+    }
+  }
+
+  /**
+   * Clean up all charm NAME subscriptions.
+   */
+  private _cleanupCharmNameSubscriptions(): void {
+    for (const unsub of this._charmNameSubscriptions.values()) {
+      unsub();
+    }
+    this._charmNameSubscriptions.clear();
   }
 
   /**
@@ -1546,7 +1663,9 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Update a charm's NAME property when the backlink text changes.
+   * Update a charm's name when the backlink text changes.
+   * Tries to update 'title' field first (for patterns where NAME is computed),
+   * then falls back to NAME directly.
    */
   private _updateCharmName(
     charmId: string,
@@ -1561,7 +1680,7 @@ export class CTCodeEditor extends BaseElement {
       return;
     }
 
-    // Get the runtime from the charm cell and update NAME
+    // Get the runtime from the charm cell
     const runtime = charmCell.runtime;
     if (!runtime) {
       console.warn(
@@ -1570,14 +1689,22 @@ export class CTCodeEditor extends BaseElement {
       return;
     }
 
-    // Access the NAME key on the charm cell and update it
     const tx = runtime.edit({ changeGroup: this._changeGroup });
-    charmCell.key(NAME).withTx(tx).set(newName);
-    tx.commit();
 
-    console.log(
-      `[ct-code-editor] Updated charm ${charmId} name: "${oldName}" → "${newName}"`,
-    );
+    // Strip common emoji prefixes to get the raw title
+    // Use alternation instead of character class - emoji are multi-codepoint
+    const titleValue = newName.replace(/^(?:📝|📓|📁|🗒️|🗒)\s*/, "");
+
+    // Try to update 'title' first (for patterns where NAME is computed from title)
+    const titleCell = charmCell.key("title");
+    if (titleCell) {
+      titleCell.withTx(tx).set(titleValue);
+    } else {
+      // Fall back to setting NAME directly
+      charmCell.key(NAME).withTx(tx).set(newName);
+    }
+
+    tx.commit();
 
     // Emit event for external listeners
     this.emit("backlink-name-changed", {
