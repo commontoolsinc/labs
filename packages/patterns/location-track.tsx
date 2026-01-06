@@ -8,7 +8,7 @@
  *
  * TODO: Add confirmation dialog before "Clear All" to prevent accidental data loss
  * TODO: Add allowMultiple: true to MODULE_METADATA for multiple tracks per record
- * TODO: Increase remove button tap target to 44x44px for mobile accessibility
+ * TODO: Consider increasing remove button tap target to 44x44px for mobile accessibility (currently 32x32px)
  * TODO: Add export functionality (GPX, GeoJSON, CSV)
  * TODO: Add virtualization for large point lists (100+ points)
  * TODO: Expose continuous tracking mode from ct-location
@@ -100,10 +100,12 @@ const handleLocationUpdate = handler<
 >(({ detail }, { locations }) => {
   const newPoint = detail.location;
   // Validate required fields exist
-  if (newPoint &&
-      typeof newPoint.latitude === 'number' &&
-      typeof newPoint.longitude === 'number' &&
-      typeof newPoint.timestamp === 'number') {
+  if (
+    newPoint &&
+    typeof newPoint.latitude === "number" &&
+    typeof newPoint.longitude === "number" &&
+    typeof newPoint.timestamp === "number"
+  ) {
     locations.push(newPoint);
   }
 });
@@ -132,14 +134,17 @@ const removeLocation = handler<
 // ===== Helper Functions =====
 
 function formatCoords(lat: number, lng: number): string {
-  if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) {
+  if (
+    typeof lat !== "number" || typeof lng !== "number" || isNaN(lat) ||
+    isNaN(lng)
+  ) {
     return "Invalid coordinates";
   }
   return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 }
 
 function formatTimestamp(ts: number): string {
-  if (typeof ts !== 'number' || isNaN(ts)) {
+  if (typeof ts !== "number" || isNaN(ts)) {
     return "Invalid time";
   }
   const date = new Date(ts);
@@ -152,7 +157,7 @@ function formatTimestamp(ts: number): string {
 }
 
 function formatAccuracy(accuracy: number): string {
-  if (typeof accuracy !== 'number' || isNaN(accuracy)) {
+  if (typeof accuracy !== "number" || isNaN(accuracy)) {
     return "";
   }
   if (accuracy < 100) {
@@ -176,31 +181,6 @@ export const LocationTrackModule = recipe<
     return count > 0
       ? `${labelText}${count} point${count !== 1 ? "s" : ""}`
       : `${labelText}No points`;
-  });
-
-  // Most recent point info (pre-computed to avoid null access issues)
-  const lastPointCoords = computed(() => {
-    const pts = locations || [];
-    if (pts.length === 0) return "";
-    const pt = pts[pts.length - 1];
-    if (!pt || typeof pt.latitude !== "number") return "";
-    return formatCoords(pt.latitude, pt.longitude);
-  });
-
-  const lastPointAccuracy = computed(() => {
-    const pts = locations || [];
-    if (pts.length === 0) return "";
-    const pt = pts[pts.length - 1];
-    if (!pt || typeof pt.accuracy !== "number") return "";
-    return formatAccuracy(pt.accuracy);
-  });
-
-  const lastPointTime = computed(() => {
-    const pts = locations || [];
-    if (pts.length === 0) return "";
-    const pt = pts[pts.length - 1];
-    if (!pt || typeof pt.timestamp !== "number") return "";
-    return formatTimestamp(pt.timestamp);
   });
 
   const hasPoints = computed(() => (locations || []).length > 0);
@@ -253,7 +233,9 @@ export const LocationTrackModule = recipe<
             borderTop: "1px solid #e5e7eb",
           }}
         >
-          <span style={{ fontSize: "14px", color: "#374151" }}>
+          <span
+            style={{ fontSize: "14px", color: "#374151", padding: "0 8px" }}
+          >
             {computed(() => {
               const count = (locations || []).length || 0;
               return `${count} point${count !== 1 ? "s" : ""} captured`;
@@ -265,39 +247,18 @@ export const LocationTrackModule = recipe<
               variant="ghost"
               size="sm"
               onClick={clearLocations({ locations })}
-              style={{ fontSize: "12px", color: "#ef4444" }}
+              style={{
+                fontSize: "12px",
+                color: "#ef4444",
+                display: "inline-flex",
+                alignItems: "center",
+              }}
             >
               Clear All
             </ct-button>,
             null,
           )}
         </ct-hstack>
-
-        {/* Last captured point */}
-        {ifElse(
-          hasPoints,
-          <ct-vstack
-            style={{
-              gap: "4px",
-              padding: "8px",
-              background: "#f9fafb",
-              borderRadius: "6px",
-              fontSize: "12px",
-            }}
-          >
-            <span style={{ fontWeight: "500", color: "#374151" }}>
-              Latest Point
-            </span>
-            <span style={{ fontFamily: "monospace", color: "#6b7280" }}>
-              {lastPointCoords}
-            </span>
-            <ct-hstack style={{ gap: "12px", color: "#9ca3af" }}>
-              <span>{lastPointAccuracy}</span>
-              <span>{lastPointTime}</span>
-            </ct-hstack>
-          </ct-vstack>,
-          null,
-        )}
 
         {/* Points list (collapsible for many points) */}
         {ifElse(
@@ -306,28 +267,59 @@ export const LocationTrackModule = recipe<
             <span slot="trigger" style={{ fontSize: "12px", color: "#6b7280" }}>
               View all points
             </span>
-            <ct-vstack style={{ gap: "6px", paddingTop: "8px" }}>
+            <ct-vstack style={{ gap: "0", marginTop: "8px" }}>
               {validLocationsWithIndex.map(({ point, index }) => (
                 <ct-hstack
                   key={index}
+                  gap="3"
                   style={{
-                    justifyContent: "space-between",
                     alignItems: "center",
-                    padding: "6px 8px",
-                    background: "#f3f4f6",
-                    borderRadius: "4px",
-                    fontSize: "11px",
+                    padding: "8px 4px",
+                    borderBottom: "1px solid var(--border-subtle, #e5e7eb)",
                   }}
                 >
-                  <ct-vstack style={{ gap: "2px" }}>
-                    <span style={{ fontFamily: "monospace" }}>
+                  {/* Point number - badge style */}
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      fontWeight: "500",
+                      color: "#6b7280",
+                      background: "#f3f4f6",
+                      borderRadius: "4px",
+                      padding: "2px 6px",
+                      minWidth: "24px",
+                      textAlign: "center",
+                      flexShrink: "0",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      alignSelf: "center",
+                    }}
+                  >
+                    {index + 1}
+                  </span>
+
+                  {/* Main content: coords + metadata stacked */}
+                  <ct-vstack style={{ flex: "1", gap: "2px", minWidth: "0" }}>
+                    {/* Coordinates */}
+                    <span
+                      style={{
+                        fontFamily: "ui-monospace, monospace",
+                        fontSize: "13px",
+                        color: "#1f2937",
+                      }}
+                    >
                       {formatCoords(point.latitude, point.longitude)}
                     </span>
-                    <span style={{ color: "#9ca3af" }}>
-                      {formatTimestamp(point.timestamp)} •{" "}
+                    {/* Timestamp + Accuracy on same line */}
+                    <span style={{ fontSize: "11px", color: "#9ca3af" }}>
+                      {formatTimestamp(point.timestamp)}{" "}
+                      <span style={{ color: "#d1d5db" }}>·</span>{" "}
                       {formatAccuracy(point.accuracy)}
                     </span>
                   </ct-vstack>
+
+                  {/* Delete button - more visible */}
                   <button
                     type="button"
                     onClick={removeLocation({ locations, index })}
@@ -335,10 +327,11 @@ export const LocationTrackModule = recipe<
                       background: "none",
                       border: "none",
                       cursor: "pointer",
-                      padding: "4px",
-                      fontSize: "14px",
+                      padding: "4px 8px",
+                      fontSize: "16px",
                       color: "#9ca3af",
-                      lineHeight: "1",
+                      borderRadius: "4px",
+                      flexShrink: "0",
                     }}
                     title="Remove point"
                   >

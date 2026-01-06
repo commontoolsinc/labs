@@ -299,7 +299,7 @@ export class CTLocation extends BaseElement {
   /**
    * Request the current location (one-shot)
    */
-  async requestLocation(): Promise<LocationData | null> {
+  requestLocation(): Promise<LocationData | null> {
     if (!navigator.geolocation) {
       this._handleError({
         code: 2,
@@ -308,11 +308,11 @@ export class CTLocation extends BaseElement {
         POSITION_UNAVAILABLE: 2,
         TIMEOUT: 3,
       } as GeolocationPositionError);
-      return null;
+      return Promise.resolve(null);
     }
 
     if (this._state === "requesting") {
-      return null;
+      return Promise.resolve(null);
     }
 
     this._state = "requesting";
