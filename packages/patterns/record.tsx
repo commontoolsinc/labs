@@ -278,7 +278,8 @@ const addSubCharm = handler<
     title: Writable<string>;
     selectedAddType: Writable<string>;
     recordPatternJson: string;
-    mentionable: MentionableCharm[];
+    mentionableExcludingSelf: MentionableCharm[];
+    selfRecord: MentionableCharm | null;
   }
 >((
   { detail },
@@ -288,7 +289,8 @@ const addSubCharm = handler<
     title,
     selectedAddType: sat,
     recordPatternJson,
-    mentionable,
+    mentionableExcludingSelf,
+    selfRecord,
   },
 ) => {
   const type = detail?.value;
@@ -317,7 +319,8 @@ const addSubCharm = handler<
     : type === "members"
     ? MembersModule({
       parentSubCharms: sc,
-      mentionable,
+      mentionable: mentionableExcludingSelf,
+      parentRecord: selfRecord,
     } as any)
     : createSubCharm(type, initialValues);
 
@@ -879,6 +882,38 @@ const Record = pattern<RecordInput, RecordOutput>(
     // (Sub-charms run in their own space context and can't use wish directly)
     const mentionable = wish<Default<MentionableCharm[], []>>("#mentionable");
 
+    // Pre-filter mentionable to exclude self
+    // Use lift() with title comparison - safe and doesn't cause reactive loops
+    // Note: Cell.equals() inside computed() causes infinite iteration loops
+    // MentionableCharm uses [NAME] symbol for title, accessed via item[NAME]
+    const mentionableExcludingSelf = lift(
+      ({ all, selfTitle }: { all: MentionableCharm[]; selfTitle: string }) => {
+        if (!selfTitle) return all;
+        return all.filter((item) => {
+          // deno-lint-ignore no-explicit-any
+          const itemName = (item as any)?.[NAME];
+          // Exclude items with matching name (self-filter)
+          // Note: Records with identical titles will all be excluded
+          return itemName !== selfTitle;
+        });
+      },
+    )({ all: mentionable || [], selfTitle: title || "" });
+
+    // Find self in mentionable for bidirectional linking
+    const selfRecord = lift(
+      ({ all, selfTitle }: { all: MentionableCharm[]; selfTitle: string }) => {
+        if (!selfTitle) return null;
+        for (const item of all) {
+          // deno-lint-ignore no-explicit-any
+          const itemName = (item as any)?.[NAME];
+          if (itemName === selfTitle) {
+            return item;
+          }
+        }
+        return null;
+      },
+    )({ all: mentionable || [], selfTitle: title || "" });
+
     // Create Record pattern JSON for wiki-links in Notes
     // Using computed() defers evaluation until render time, avoiding circular dependency
     const recordPatternJson = computed(() => JSON.stringify(Record));
@@ -1185,7 +1220,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                   title,
                   selectedAddType,
                   recordPatternJson,
-                  mentionable,
+                  mentionableExcludingSelf,
+                  selfRecord,
                 })}
                 style={{ width: "130px" }}
               />

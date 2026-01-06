@@ -43,6 +43,10 @@ export interface MembersModuleInput {
   parentSubCharms?: Cell<{ type: string; charm: unknown }[]>;
   /** Pattern JSON for creating new stub records (serialized pattern definition) */
   createPattern?: Default<string, "">;
+  /** Pre-filtered mentionable list (excludes self). If not provided, uses wish("#mentionable") */
+  mentionable?: MentionableCharm[];
+  /** Parent record reference for bidirectional linking (passed directly from Record) */
+  parentRecord?: MentionableCharm | null;
 }
 
 // ===== Self-Describing Metadata =====
@@ -194,15 +198,15 @@ const removeMember = handler<
 const startEditRole = handler<
   Event,
   {
-    editingCharm: Cell<unknown | null>;
+    editingIndex: Cell<number>;
     roleInputValue: Cell<string>;
-    charm: unknown;
+    index: number;
     currentRole: string;
   }
->((event, { editingCharm, roleInputValue, charm, currentRole }) => {
+>((event, { editingIndex, roleInputValue, index, currentRole }) => {
   event.stopPropagation?.();
   roleInputValue.set(currentRole);
-  editingCharm.set(charm);
+  editingIndex.set(index);
 });
 
 /** Stop event propagation for role input clicks */
@@ -215,33 +219,30 @@ const confirmRoleEdit = handler<
   Event,
   {
     members: Cell<MemberEntry[]>;
-    charm: unknown;
+    index: number;
     roleInputValue: Cell<string>;
-    editingCharm: Cell<unknown | null>;
+    editingIndex: Cell<number>;
   }
->((event, { members, charm, roleInputValue, editingCharm }) => {
+>((event, { members, index, roleInputValue, editingIndex }) => {
   event.stopPropagation?.();
   const newRole = roleInputValue.get();
   const current = members.get() || [];
-  // Find the entry by charm reference using Cell.equals for robust identity comparison
-  const index = current.findIndex((m: MemberEntry) =>
-    Cell.equals(m?.charm as Cell<unknown>, charm as Cell<unknown>)
-  );
-  if (index >= 0) {
+  // Use the index directly instead of Cell.equals lookup (avoids reactive subscriptions)
+  if (index >= 0 && index < current.length) {
     const updated = [...current];
     updated[index] = { ...updated[index], role: newRole || undefined };
     members.set(updated);
   }
-  editingCharm.set(null);
+  editingIndex.set(-1);
 });
 
 /** Cancel role edit - just closes edit mode */
 const cancelRoleEdit = handler<
   Event,
-  { editingCharm: Cell<unknown | null> }
->((event, { editingCharm }) => {
+  { editingIndex: Cell<number> }
+>((event, { editingIndex }) => {
   event.stopPropagation?.();
-  editingCharm.set(null);
+  editingIndex.set(-1);
 });
 
 /** Add a member from autocomplete selection */
@@ -412,113 +413,84 @@ const addMember = handler<
 // ===== The Pattern =====
 export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
   "MembersModule",
-  ({ members, parentSubCharms, createPattern: _createPattern }) => {
+  ({
+    members,
+    parentSubCharms,
+    createPattern: _createPattern,
+    mentionable: mentionableProp,
+    parentRecord: parentRecordProp,
+  }) => {
     // Local state
     const filterMode = Cell.of<FilterMode>("all-records");
 
-    // Get mentionable charms via wish("#mentionable")
-    // This resolves to spaceCell.defaultPattern.backlinksIndex.mentionable
-    // Sub-charms share the same MemorySpace as their parent, so wish() works
-    const mentionable = wish<MentionableCharm[]>("#mentionable");
-    // Track which charm is being edited by reference (not index) for robustness
-    const editingCharm = Cell.of<unknown | null>(null);
+    // Get mentionable charms - use prop if provided (pre-filtered by Record), otherwise wish
+    // When passed from Record, the list is already filtered to exclude self
+    const mentionableFromWish = wish<MentionableCharm[]>("#mentionable");
+    const mentionable = mentionableProp ?? mentionableFromWish;
+    // Track which member index is being edited (-1 means none)
+    // Using index instead of charm reference avoids Cell.equals() in reactive contexts
+    const editingIndex = Cell.of<number>(-1);
     const roleInputValue = Cell.of("");
     const errorMessage = Cell.of("");
 
-    // Find parent record lazily - only used for bidirectional linking
-    // Cached via lift, only recalculates when mentionable changes
-    const parentRecord = lift(
-      ({ mentionable: all, parentSC }: {
-        mentionable: MentionableCharm[];
-        parentSC: { type: string; charm: unknown }[] | undefined;
-      }) => {
-        if (!parentSC) return null;
-        // Find the record that contains our members module in its subCharms
-        for (const item of all || []) {
-          if (!isRecord(item)) continue;
-          const subCharms = (item as any)?.subCharms;
-          if (!Array.isArray(subCharms)) continue;
-          const membersEntry = subCharms.find((sc: any) =>
-            sc?.type === "members"
-          );
-          if (
-            membersEntry &&
-            parentSC.some((psc: any) =>
-              psc?.type === "members" && psc?.charm === membersEntry?.charm
-            )
-          ) {
-            return item;
-          }
-        }
-        return null;
-      },
-    )({ mentionable, parentSC: parentSubCharms });
-
-    // Derive parent ID from parent record for self-filtering
-    // Used by autocomplete to exclude self from search results
-    const parentId = lift(({ parentRecord: pr }: { parentRecord: unknown | null }) => {
-      if (!pr) return null;
-      // Get the entity ID from the parent record
-      return (pr as any)?.["/"] || null;
-    })({ parentRecord });
+    // Parent record for bidirectional linking
+    // When passed from Record, we use the prop directly - no need to search
+    // This avoids all reactive proxy comparison issues
+    const parentRecord = parentRecordProp ?? null;
 
     // Build autocomplete items from mentionable using lift()
     // lift() properly unwraps OpaqueRefs from wish()
-    // Also filters out self (using parentId) to prevent self-reference
+    // NOTE: When mentionable comes from Record (mentionableProp), self is already filtered out
+    // Self-filtering is done at the source (Record) to avoid reactive proxy comparison issues
     const autocompleteItems = lift(
-      ({ mentionable: all, filterMode: mode, pid }: {
+      ({ mentionable: all, filterMode: mode }: {
         mentionable: MentionableCharm[];
         filterMode: FilterMode;
-        pid: string | null;
       }) => {
         const items = all || [];
-        // Helper to check if item is self (using pre-computed parentId)
-        const isSelf = (m: any) => pid && (m as any)?.["/"] === pid;
 
-        // Filter based on mode (and always exclude self)
-        let filtered: MentionableCharm[];
+        // Build array of { item, originalIndex } to track indices through filtering
+        const indexedItems = items.map((item, idx) => ({ item, originalIndex: idx }));
+
+        // Filter based on mode (self already excluded if using mentionableProp)
+        let filtered: { item: MentionableCharm; originalIndex: number }[];
         switch (mode) {
           case "all-records":
-            filtered = items.filter((m: any) => !isSelf(m) && isRecord(m));
+            filtered = indexedItems.filter(({ item }) => isRecord(item));
             break;
           case "people":
-            filtered = items.filter((m: any) => {
-              if (isSelf(m) || !isRecord(m)) return false;
-              const inferred = inferTypeFromModules(getModuleTypes(m));
+            filtered = indexedItems.filter(({ item }) => {
+              if (!isRecord(item)) return false;
+              const inferred = inferTypeFromModules(getModuleTypes(item));
               return inferred.type === "person";
             });
             break;
           case "families":
-            filtered = items.filter((m: any) => {
-              if (isSelf(m) || !isRecord(m)) return false;
-              const inferred = inferTypeFromModules(getModuleTypes(m));
+            filtered = indexedItems.filter(({ item }) => {
+              if (!isRecord(item)) return false;
+              const inferred = inferTypeFromModules(getModuleTypes(item));
               return inferred.type === "family";
             });
             break;
           case "places":
-            filtered = items.filter((m: any) => {
-              if (isSelf(m) || !isRecord(m)) return false;
-              const inferred = inferTypeFromModules(getModuleTypes(m));
+            filtered = indexedItems.filter(({ item }) => {
+              if (!isRecord(item)) return false;
+              const inferred = inferTypeFromModules(getModuleTypes(item));
               return inferred.type === "place";
             });
             break;
           case "everything":
           default:
-            filtered = items.filter((m: any) => !isSelf(m));
+            filtered = indexedItems;
         }
 
         // Build autocomplete items with charm index for lookup in handler
         // Reactive proxies become undefined during event sanitization, so we pass
         // the index into the mentionable array. The handler receives the mentionable
         // Cell and uses .key(index) for Cell navigation.
-        return filtered.map((charm: any) => {
+        return filtered.map(({ item: charm, originalIndex: charmIndex }) => {
           const name = getCharmName(charm);
           const charmIsRecord = isRecord(charm);
-
-          // Find the original index in mentionable (not filtered array)
-          const charmIndex = items.findIndex((m: any) =>
-            Cell.equals(m as object, charm as object)
-          );
 
           let icon = "🔗";
           let group = "linked";
@@ -544,7 +516,7 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
           };
         });
       },
-    )({ mentionable, filterMode, pid: parentId });
+    )({ mentionable, filterMode });
 
     // Display text for NAME
     const displayText = computed(() => {
@@ -664,15 +636,9 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                   >
                     {memberName}
                   </span>
-                  {/* Role editing */}
+                  {/* Role editing - use index comparison to avoid Cell.equals() in reactive context */}
                   {ifElse(
-                    computed(() => {
-                      const editing = editingCharm.get();
-                      return editing != null && Cell.equals(
-                        editing as Cell<unknown>,
-                        entry.charm as Cell<unknown>
-                      );
-                    }),
+                    computed(() => editingIndex.get() === index),
                     // Editing mode - inline input with save/cancel
                     <span
                       style={{
@@ -691,9 +657,9 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                         type="button"
                         onClick={confirmRoleEdit({
                           members,
-                          charm: entry.charm,
+                          index,
                           roleInputValue,
-                          editingCharm,
+                          editingIndex,
                         })}
                         style={{
                           background: "#3b82f6",
@@ -711,7 +677,7 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                       </button>
                       <button
                         type="button"
-                        onClick={cancelRoleEdit({ editingCharm })}
+                        onClick={cancelRoleEdit({ editingIndex })}
                         style={{
                           background: "#e5e7eb",
                           border: "none",
@@ -738,9 +704,9 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                             cursor: "text",
                           }}
                           onClick={startEditRole({
-                            editingCharm,
+                            editingIndex,
                             roleInputValue,
-                            charm: entry.charm,
+                            index,
                             currentRole: entry.role || "",
                           })}
                           title="Click to edit role"
@@ -756,9 +722,9 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
                             cursor: "pointer",
                           }}
                           onClick={startEditRole({
-                            editingCharm,
+                            editingIndex,
                             roleInputValue,
-                            charm: entry.charm,
+                            index,
                             currentRole: "",
                           })}
                           title="Click to edit role"
