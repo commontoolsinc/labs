@@ -9,7 +9,9 @@ import {
   Compartment,
   EditorState,
   Extension,
+  Prec,
   Range,
+  StateField,
 } from "@codemirror/state";
 import { indentUnit, LanguageSupport } from "@codemirror/language";
 import { javascript as createJavaScript } from "@codemirror/lang-javascript";
@@ -25,6 +27,8 @@ import {
   Completion,
   CompletionContext,
   CompletionResult,
+  completionStatus,
+  startCompletion,
 } from "@codemirror/autocomplete";
 import {
   Decoration,
@@ -75,6 +79,173 @@ langRegistry.set(MimeType.json, createJson());
 const getLangExtFromMimeType = (mime: MimeType) => {
   return langRegistry.get(mime) ?? defaultLang;
 };
+
+/**
+ * Represents a parsed backlink with position and content info
+ */
+interface BacklinkInfo {
+  from: number; // Start of [[
+  to: number; // End of ]]
+  nameFrom: number; // Start of name (after [[)
+  nameTo: number; // End of name (before " (id)" or "]]")
+  id: string; // The charm ID (empty string if incomplete)
+  name: string; // The display name text
+}
+
+/**
+ * Parse all backlinks from a document string
+ */
+function parseBacklinks(doc: string): BacklinkInfo[] {
+  const backlinks: BacklinkInfo[] = [];
+  const backlinkRegex = /\[\[([^\]]+)\]\]/g;
+  let match;
+
+  while ((match = backlinkRegex.exec(doc)) !== null) {
+    const from = match.index;
+    const to = from + match[0].length;
+    const innerText = match[1];
+
+    // Parse: check if has ID in format "Name (id)"
+    const idMatch = innerText.match(/^(.+?)\s+\(([^)]+)\)$/);
+    const hasId = idMatch !== null;
+    const name = hasId ? idMatch[1] : innerText;
+    const id = hasId ? idMatch[2] : "";
+
+    const nameFrom = from + 2; // After [[
+    const nameTo = nameFrom + name.length;
+
+    backlinks.push({ from, to, nameFrom, nameTo, id, name });
+  }
+
+  return backlinks;
+}
+
+/**
+ * StateField to track all backlink positions in the document.
+ * Updated whenever the document changes.
+ */
+const backlinkField = StateField.define<BacklinkInfo[]>({
+  create(state) {
+    return parseBacklinks(state.doc.toString());
+  },
+  update(value, tr) {
+    if (!tr.docChanged) return value;
+    return parseBacklinks(tr.newDoc.toString());
+  },
+});
+
+/**
+ * Create atomic ranges that make cursor skip over [[ and (id)]] portions.
+ * This prevents the cursor from entering the ID area during navigation.
+ * Note: We must ensure ranges don't span line breaks.
+ */
+const atomicBacklinkRanges = EditorView.atomicRanges.of((view) => {
+  const backlinks = view.state.field(backlinkField);
+  const doc = view.state.doc;
+  const decorations: Range<Decoration>[] = [];
+
+  for (const bl of backlinks) {
+    if (!bl.id) continue; // Only protect complete backlinks with IDs
+
+    // Safety: ensure the backlink is on a single line
+    const startLine = doc.lineAt(bl.from).number;
+    const endLine = doc.lineAt(bl.to).number;
+    if (startLine !== endLine) continue; // Skip multi-line backlinks
+
+    // Make [[ atomic (cursor skips from before [[ to after [[)
+    if (bl.from < bl.nameFrom) {
+      decorations.push(Decoration.mark({}).range(bl.from, bl.nameFrom));
+    }
+
+    // Make " (id)]]" atomic (cursor skips from end of name to after ]])
+    if (bl.nameTo < bl.to) {
+      decorations.push(Decoration.mark({}).range(bl.nameTo, bl.to));
+    }
+  }
+
+  decorations.sort((a, b) => a.from - b.from);
+  return Decoration.set(decorations);
+});
+
+/**
+ * Transaction filter to prevent edits from corrupting the ID portion of backlinks.
+ * - Blocks edits that start within the ID portion
+ * - Truncates edits that span from name into ID
+ * - Allows full backlink deletions
+ */
+const backlinkEditFilter = EditorState.transactionFilter.of((tr) => {
+  if (!tr.docChanged) return tr;
+
+  const backlinks = tr.startState.field(backlinkField);
+  if (backlinks.length === 0) return tr;
+
+  let needsModification = false;
+
+  // Check each change to see if it affects any backlink's protected area
+  tr.changes.iterChanges((fromA, toA, _fromB, _toB, _inserted) => {
+    for (const bl of backlinks) {
+      if (!bl.id) continue; // Only protect complete backlinks
+
+      // Case: Edit starts in the ID portion " (id)]]" - block it
+      if (fromA > bl.nameTo && fromA < bl.to) {
+        needsModification = true;
+        return;
+      }
+
+      // Case: Edit spans from name into ID - needs truncation
+      if (fromA <= bl.nameTo && toA > bl.nameTo && toA < bl.to) {
+        needsModification = true;
+        return;
+      }
+    }
+  });
+
+  // If we detected a problematic edit, we need to filter/modify the transaction
+  // For now, we'll rely on atomicRanges to prevent cursor entry,
+  // and handle edge cases like paste operations here
+  if (needsModification) {
+    // Build a modified changes array that respects backlink boundaries
+    const specs: { from: number; to: number; insert: string }[] = [];
+    let blocked = false;
+
+    tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+      let adjustedFrom = fromA;
+      let adjustedTo = toA;
+      let shouldInclude = true;
+
+      for (const bl of backlinks) {
+        if (!bl.id) continue;
+
+        // Block edits that start in ID area
+        if (fromA > bl.nameTo && fromA < bl.to) {
+          shouldInclude = false;
+          blocked = true;
+          break;
+        }
+
+        // Truncate edits that span into ID area
+        if (fromA <= bl.nameTo && toA > bl.nameTo && toA < bl.to) {
+          adjustedTo = bl.nameTo;
+        }
+      }
+
+      if (shouldInclude) {
+        specs.push({ from: adjustedFrom, to: adjustedTo, insert: inserted.toString() });
+      }
+    });
+
+    if (blocked) {
+      // Return a modified transaction with adjusted changes
+      return {
+        changes: specs,
+        selection: tr.selection,
+        effects: tr.effects,
+      };
+    }
+  }
+
+  return tr;
+});
 
 /**
  * CTCodeEditor - Code editor component with syntax highlighting and debounced changes
@@ -165,6 +336,8 @@ export class CTCodeEditor extends BaseElement {
   private _cleanupFns: Array<() => void> = [];
   private _mentionableUnsub: (() => void) | null = null;
   private _changeGroup = crypto.randomUUID();
+  // Track previous backlink names to detect changes for syncing to charm NAME
+  private _previousBacklinkNames = new Map<string, string>();
 
   // Transaction annotation to mark Cell-originated updates.
   // This is the idiomatic CodeMirror 6 way to distinguish programmatic
@@ -217,26 +390,36 @@ export class CTCodeEditor extends BaseElement {
 
   /**
    * Create a backlink completion source for [[backlinks]]
+   * The dropdown stays open as long as cursor is inside [[...
    */
   private createBacklinkCompletionSource() {
     return (context: CompletionContext): CompletionResult | null => {
-      // Look for incomplete backlinks: [[ followed by optional text
+      // Look for incomplete backlinks: [[ followed by optional text (not yet closed)
       const backlink = context.matchBefore(/\[\[([^\]]*)?/);
 
       if (!backlink) {
         return null;
       }
 
-      // Check what comes after the cursor
+      // Check if this is already a complete backlink WITH an ID (not just auto-closed brackets)
+      // Pattern: [[Name (id)]] - if there's an ID, don't show dropdown
       const afterCursor = context.state.doc.sliceString(
         context.pos,
-        context.pos + 2,
+        context.pos + 50, // Look ahead for potential ]] and ID pattern
       );
+      const hasIdPattern = afterCursor.match(/^\s*\([^)]+\)\]\]/);
+      if (hasIdPattern) {
+        // This is a complete backlink with ID - don't show dropdown
+        return null;
+      }
 
-      // Allow completion inside existing backlinks - we'll replace the content between [[ and ]]
       const query = backlink.text.slice(2); // Remove [[ prefix
+      const raw = query.trim();
 
       const mentionable = this.getFilteredMentionable(query);
+
+      // Check if auto-close added ]] after cursor
+      const hasAutoCloseBrackets = afterCursor.startsWith("]]");
 
       // Build options from existing mentionable items
       const options: Completion[] = mentionable.map((charm) => {
@@ -246,44 +429,25 @@ export class CTCodeEditor extends BaseElement {
         const insertText = `${charmName} (${charmId})`;
         return {
           label: charmName,
-          apply: afterCursor === "]]" ? insertText : insertText + "]]",
+          // Use apply function to handle auto-closed brackets
+          apply: (view, _completion, from, to) => {
+            // If auto-close added ]], extend replacement to include them
+            const replaceTo = hasAutoCloseBrackets ? to + 2 : to;
+            view.dispatch({
+              changes: { from, to: replaceTo, insert: insertText + "]]" },
+              selection: { anchor: from + insertText.length + 2 },
+            });
+          },
           type: "text",
-          info: "Backlink to " + charmName,
+          info: "Link to " + charmName,
         };
       });
 
-      // Inject a "create new" option when the typed text doesn't exactly match
-      // any existing charm. This ensures there's a selectable option for
-      // keyboard users when creating a novel backlink.
-      const raw = query.trim();
-      if (raw.length > 0) {
-        const lower = raw.toLowerCase();
-        const hasExact = options.some((o) => o.label.toLowerCase() === lower);
-        if (!hasExact) {
-          options.push({
-            label: raw,
-            detail: "Create",
-            type: "text",
-            info: "Create new backlink",
-            apply: () => {
-              // Instantiate the pattern if available
-              if (this.pattern) {
-                this.createBacklinkFromPattern(raw, false);
-              } else {
-                this.emit("backlink-create", { text: raw, navigate: false });
-              }
-            },
-          });
-        }
-      }
-
-      if (options.length === 0) return null;
-
+      // Only show existing charms - no "Create" option
+      // Enter will complete with exact match or create new charm
       return {
-        from: backlink.from + 2, // Start after [[
-        to: afterCursor === "]]" ? context.pos : undefined,
+        from: backlink.from + 2, // Start after [[ (original behavior)
         options,
-        validFor: /^[^\]]*$/,
       };
     };
   }
@@ -324,6 +488,88 @@ export class CTCodeEditor extends BaseElement {
     }
 
     return matches;
+  }
+
+  /**
+   * Find exact case-insensitive match in mentionable items
+   */
+  private _findExactMentionable(query: string): Cell<Mentionable> | null {
+    const mentionableCell = this._getMentionableCell();
+    if (!mentionableCell) return null;
+
+    const rawMentionable = mentionableCell.get();
+    const mentionableData = Array.isArray(rawMentionable)
+      ? rawMentionable as MentionableArray
+      : isCell(rawMentionable)
+      ? ((rawMentionable.get() ?? []) as MentionableArray)
+      : [];
+
+    const queryLower = query.toLowerCase();
+
+    for (let i = 0; i < mentionableData.length; i++) {
+      const mention = mentionableData[i];
+      const name = mention?.[NAME] ?? "";
+      if (name.toLowerCase() === queryLower) {
+        return mentionableCell.key(i) as Cell<Mentionable>;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Complete a backlink by inserting the full [[Name (id)]] format
+   */
+  private _completeBacklinkWithId(
+    view: EditorView,
+    _queryText: string,
+    charmName: string,
+    charmId: string,
+  ): void {
+    // Find the [[ start position
+    const pos = view.state.selection.main.head;
+    const doc = view.state.doc.toString();
+    const beforeCursor = doc.slice(0, pos);
+    const bracketPos = beforeCursor.lastIndexOf("[[");
+
+    if (bracketPos === -1) return;
+
+    // Check if there are auto-closed brackets after cursor
+    const afterCursor = doc.slice(pos, pos + 2);
+    const hasAutoClose = afterCursor === "]]";
+
+    // Build the complete backlink
+    const fullBacklink = `[[${charmName} (${charmId})]]`;
+
+    // Calculate replacement range
+    const replaceFrom = bracketPos;
+    const replaceTo = hasAutoClose ? pos + 2 : pos;
+
+    view.dispatch({
+      changes: { from: replaceFrom, to: replaceTo, insert: fullBacklink },
+      selection: { anchor: replaceFrom + fullBacklink.length },
+    });
+  }
+
+  /**
+   * Complete a backlink as pending (just [[text]] without ID)
+   */
+  private _completeBacklinkText(view: EditorView): void {
+    const pos = view.state.selection.main.head;
+    const afterCursor = view.state.doc.sliceString(pos, pos + 2);
+
+    if (afterCursor === "]]") {
+      // Already has closing brackets - just move cursor past them
+      view.dispatch({
+        selection: { anchor: pos + 2 },
+      });
+    } else {
+      // Insert ]] to complete the backlink
+      view.dispatch({
+        changes: { from: pos, to: pos, insert: "]]" },
+        selection: { anchor: pos + 2 },
+      });
+    }
   }
 
   /**
@@ -633,11 +879,12 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Create a plugin to decorate backlinks with focus-aware styling.
    * - When cursor is outside: show as collapsed pill (hide brackets and ID)
-   * - When cursor is inside: show full [[Name (id)]] format for editing
+   * - When cursor is inside NAME area: show name with editing style (still hide ID)
    * - Incomplete backlinks show as pending pills
    */
   private createBacklinkDecorationPlugin() {
     const editingMark = Decoration.mark({ class: "cm-backlink-editing" });
+    const editingNameMark = Decoration.mark({ class: "cm-backlink-editing-name" });
     const pillMark = Decoration.mark({ class: "cm-backlink-pill" });
     const pendingMark = Decoration.mark({ class: "cm-backlink-pending" });
     const hiddenReplace = Decoration.replace({});
@@ -667,55 +914,52 @@ export class CTCodeEditor extends BaseElement {
           const cursorPos = view.state.selection.main.head;
           const selectionFrom = view.state.selection.main.from;
           const selectionTo = view.state.selection.main.to;
-          const backlinkRegex = /\[\[([^\]]+)\]\]/g;
 
-          for (const { from, to } of view.visibleRanges) {
-            for (let pos = from; pos <= to;) {
-              const line = doc.lineAt(pos);
-              const text = line.text;
-              let match;
+          // Use the StateField for backlink positions
+          const backlinks = view.state.field(backlinkField);
 
-              backlinkRegex.lastIndex = 0; // Reset regex
-              while ((match = backlinkRegex.exec(text)) !== null) {
-                const start = line.from + match.index;
-                const end = start + match[0].length;
-                const innerText = match[1]; // Text between [[ and ]]
+          for (const bl of backlinks) {
+            const { from: start, to: end, nameFrom, nameTo, id } = bl;
+            const hasId = id !== "";
 
-                // Only decorate if within visible range
-                if (start < from || end > to) continue;
+            // Safety: skip backlinks that span multiple lines (would cause decoration errors)
+            const startLine = doc.lineAt(start).number;
+            const endLine = doc.lineAt(end).number;
+            if (startLine !== endLine) continue;
 
-                // Check if cursor/selection is inside this backlink
-                // Use strict bounds - cursor at start/end boundaries is "outside"
-                // Only consider cursor inside if editor has focus
-                const cursorInside = hasFocus && cursorPos > start &&
-                  cursorPos < end;
-                const selectionOverlaps = hasFocus && selectionFrom < end &&
-                  selectionTo > start;
+            // Check if cursor is within the NAME portion of this backlink
+            // (not the [[ or (id)]] parts)
+            const cursorInName = hasFocus && cursorPos >= nameFrom &&
+              cursorPos <= nameTo;
+            // Check if cursor is adjacent to the backlink (right before [[ or right after ]])
+            const cursorAdjacent = hasFocus && (cursorPos === start || cursorPos === end);
+            // Check if selection overlaps with the entire backlink
+            const selectionOverlaps = hasFocus && selectionFrom < end &&
+              selectionTo > start;
 
-                // Parse: check if has ID in format "Name (id)"
-                const idMatch = innerText.match(/^(.+?)\s+\(([^)]+)\)$/);
-                const hasId = idMatch !== null;
-                const name = hasId ? idMatch[1] : innerText;
-                const nameStart = start + 2; // After [[
-                const nameEnd = nameStart + name.length;
-
-                if (cursorInside || selectionOverlaps) {
-                  // Show full text with editing style
-                  decorations.push(editingMark.range(start, end));
-                } else if (!hasId) {
-                  // Incomplete backlink - show as pending pill
-                  decorations.push(hiddenReplace.range(start, start + 2)); // Hide [[
-                  decorations.push(pendingMark.range(start + 2, end - 2)); // Style inner text
-                  decorations.push(hiddenReplace.range(end - 2, end)); // Hide ]]
-                } else {
-                  // Complete backlink - show as navigable pill
-                  decorations.push(hiddenReplace.range(start, start + 2)); // Hide [[
-                  decorations.push(pillMark.range(nameStart, nameEnd)); // Style name only
-                  decorations.push(hiddenReplace.range(nameEnd, end)); // Hide  (id)]]
-                }
+            if (hasId && (cursorInName || cursorAdjacent || selectionOverlaps)) {
+              // EDITING MODE: User is editing the name of a complete backlink
+              // Hide [[ and (id)]], show only the name with editing style
+              decorations.push(hiddenReplace.range(start, nameFrom)); // Hide [[
+              decorations.push(editingNameMark.range(nameFrom, nameTo)); // Style name
+              decorations.push(hiddenReplace.range(nameTo, end)); // Hide (id)]]
+            } else if (!hasId) {
+              // Incomplete backlink - show as pending pill or full text when editing
+              const cursorInside = hasFocus && cursorPos > start && cursorPos < end;
+              if (cursorInside || cursorAdjacent || selectionOverlaps) {
+                // Cursor inside or adjacent - show full [[mention]] with editing style
+                decorations.push(editingMark.range(start, end));
+              } else {
+                // Cursor away - show as pending pill
+                decorations.push(hiddenReplace.range(start, start + 2)); // Hide [[
+                decorations.push(pendingMark.range(start + 2, end - 2)); // Style inner text
+                decorations.push(hiddenReplace.range(end - 2, end)); // Hide ]]
               }
-
-              pos = line.to + 1;
+            } else {
+              // Complete backlink, cursor outside - show as navigable pill
+              decorations.push(hiddenReplace.range(start, start + 2)); // Hide [[
+              decorations.push(pillMark.range(nameFrom, nameTo)); // Style name only
+              decorations.push(hiddenReplace.range(nameTo, end)); // Hide (id)]]
             }
           }
 
@@ -987,6 +1231,24 @@ export class CTCodeEditor extends BaseElement {
     // Set up mentionable sync handler and initialize mentioned list
     this._setupMentionableSyncHandler();
     this._updateMentionedFromContent();
+
+    // Initialize backlink name tracking for sync detection
+    this._initializeBacklinkNameTracking();
+  }
+
+  /**
+   * Initialize the backlink name tracking map with current document state.
+   * This establishes a baseline so we can detect subsequent name changes.
+   */
+  private _initializeBacklinkNameTracking(): void {
+    if (!this._editorView) return;
+    const backlinks = this._editorView.state.field(backlinkField);
+    this._previousBacklinkNames.clear();
+    for (const bl of backlinks) {
+      if (bl.id) {
+        this._previousBacklinkNames.set(bl.id, bl.name);
+      }
+    }
   }
 
   private _initializeEditor(): void {
@@ -998,6 +1260,10 @@ export class CTCodeEditor extends BaseElement {
     // Create editor extensions
     const extensions: Extension[] = [
       basicSetup,
+      // Backlink protection: StateField + atomic ranges + edit filter
+      backlinkField,
+      atomicBacklinkRanges,
+      backlinkEditFilter,
       // Tab indentation keymap (toggleable)
       this._tabIndentComp.of(this.tabIndent ? keymap.of([indentWithTab]) : []),
       this._lang.of(getLangExtFromMimeType(this.language)),
@@ -1040,6 +1306,8 @@ export class CTCodeEditor extends BaseElement {
           this.setValue(value);
           // Keep $mentioned current as user types
           this._updateMentionedFromContent();
+          // Sync name changes to linked charms
+          this._detectAndSyncNameChanges();
         }
       }),
       // Handle focus/blur events
@@ -1063,43 +1331,58 @@ export class CTCodeEditor extends BaseElement {
       autocompletion({
         override: [this.createBacklinkCompletionSource()],
         activateOnTyping: true,
-        closeOnBlur: true,
+        defaultKeymap: true,
+        // Don't auto-select first option - let user explicitly choose or press Enter
+        selectOnOpen: false,
       }),
-      // Enter: accept selected completion, or create novel backlink
-      keymap.of([{
+      // Force completion to stay open when inside [[ context
+      EditorView.updateListener.of((update) => {
+        if (!update.docChanged) return;
+        const query = this._currentBacklinkQuery(update.view);
+        if (query !== null) {
+          const status = completionStatus(update.state);
+          if (status === null) {
+            setTimeout(() => startCompletion(update.view), 0);
+          }
+        }
+      }),
+      // Enter: complete backlink with exact match OR create new charm
+      // Use Prec.highest to ensure this runs before autocompletion handlers
+      Prec.highest(keymap.of([{
         key: "Enter",
         run: (view) => {
-          // Try accepting an active completion first
-          if (acceptCompletion(view)) return true;
-
-          // If typing a backlink with no matches, create new backlink
+          // If typing a backlink like [[mention, complete it
           const query = this._currentBacklinkQuery(view);
           if (query != null) {
-            const matches = this.getFilteredMentionable(query);
-            if (matches.length === 0) {
-              const text = query.trim();
-              if (text.length > 0) {
-                // Instantiate the pattern if available
-                if (this.pattern) {
-                  this.createBacklinkFromPattern(text, false);
-                } else {
-                  this.emit("backlink-create", { text, navigate: false });
-                }
-                return true;
+            const text = query.trim();
+            if (text.length > 0) {
+              // Check for exact match in mentionable
+              const exactMatch = this._findExactMentionable(text);
+
+              if (exactMatch) {
+                // Found exact match - insert complete backlink with ID
+                const charmIdObj = getEntityId(exactMatch.resolveAsCell());
+                const charmId = charmIdObj?.["/"] || "";
+                const charmName = exactMatch.key(NAME).get() || text;
+                this._completeBacklinkWithId(view, text, charmName, charmId);
+              } else if (this.pattern) {
+                // No exact match - create new charm without navigating
+                // First complete the backlink text, then create the charm
+                this._completeBacklinkText(view);
+                // createBacklinkFromPattern will insert the ID and emit event
+                this.createBacklinkFromPattern(text, false);
               }
+              return true;
             }
           }
 
           return false;
         },
-      }]),
+      }])),
       // Intercept Cmd/Ctrl+S when editor is focused
       keymap.of([{
         key: "Mod-s",
-        run: () => {
-          console.log("[ct-code-editor] Intercepted save (Cmd/Ctrl+S).");
-          return true; // prevent default browser save
-        },
+        run: () => true, // prevent default browser save
       }]),
     ];
 
@@ -1226,6 +1509,63 @@ export class CTCodeEditor extends BaseElement {
       }
     }
     return result;
+  }
+
+  /**
+   * Detect name changes in backlinks and sync them to linked charm's NAME property.
+   * Called when document changes.
+   */
+  private _detectAndSyncNameChanges(): void {
+    if (!this._editorView) return;
+
+    const backlinks = this._editorView.state.field(backlinkField);
+    const currentNames = new Map<string, string>();
+
+    for (const bl of backlinks) {
+      if (!bl.id) continue;
+      currentNames.set(bl.id, bl.name);
+
+      const previousName = this._previousBacklinkNames.get(bl.id);
+      if (previousName !== undefined && previousName !== bl.name) {
+        // Name changed! Update the charm's NAME property
+        this._updateCharmName(bl.id, bl.name, previousName);
+      }
+    }
+
+    this._previousBacklinkNames = currentNames;
+  }
+
+  /**
+   * Update a charm's NAME property when the backlink text changes.
+   */
+  private _updateCharmName(charmId: string, newName: string, oldName: string): void {
+    const charmCell = this.findCharmById(charmId);
+    if (!charmCell) {
+      console.warn(`[ct-code-editor] Cannot update name: charm ${charmId} not found`);
+      return;
+    }
+
+    // Get the runtime from the charm cell and update NAME
+    const runtime = charmCell.runtime;
+    if (!runtime) {
+      console.warn(`[ct-code-editor] Cannot update name: no runtime for charm ${charmId}`);
+      return;
+    }
+
+    // Access the NAME key on the charm cell and update it
+    const tx = runtime.edit({ changeGroup: this._changeGroup });
+    charmCell.key(NAME).withTx(tx).set(newName);
+    tx.commit();
+
+    console.log(`[ct-code-editor] Updated charm ${charmId} name: "${oldName}" → "${newName}"`);
+
+    // Emit event for external listeners
+    this.emit("backlink-name-changed", {
+      charmId,
+      oldName,
+      newName,
+      charm: charmCell,
+    });
   }
 
   /**

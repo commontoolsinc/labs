@@ -88,14 +88,28 @@ export const styles = css`
       padding: 0.125rem 0.5rem;
       cursor: text;
       font-weight: 500;
+      text-decoration: none;
       border: 1px dashed var(--ct-color-warning-400, hsl(45, 70%, 50%));
     }
 
-    /* Editing view - full [[Name (id)]] format visible */
+    /* Editing view - full [[Name (id)]] format visible (for incomplete backlinks) */
     .cm-backlink-editing {
       background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.1));
       border-radius: 0.25rem;
       padding: 0.125rem 0.25rem;
+      text-decoration: none;
+    }
+
+    /* Editing mode for name-only view (complete backlinks) */
+    .cm-backlink-editing-name {
+      background-color: var(--ct-color-primary-100, hsla(212, 100%, 47%, 0.15));
+      color: var(--ct-color-primary-700, hsl(212, 80%, 40%));
+      border-radius: 9999px;
+      padding: 0.125rem 0.5rem;
+      font-weight: 500;
+      text-decoration: none;
+      /* Focus ring to indicate editing */
+      box-shadow: 0 0 0 2px var(--ct-color-primary-300, hsla(212, 100%, 47%, 0.3));
     }
 
     /* Legacy fallback - keep for any old usages */
