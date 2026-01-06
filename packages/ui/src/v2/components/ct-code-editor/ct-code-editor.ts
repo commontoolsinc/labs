@@ -1695,14 +1695,9 @@ export class CTCodeEditor extends BaseElement {
     // Use alternation instead of character class - emoji are multi-codepoint
     const titleValue = newName.replace(/^(?:📝|📓|📁|🗒️|🗒)\s*/, "");
 
-    // Try to update 'title' first (for patterns where NAME is computed from title)
-    const titleCell = charmCell.key("title");
-    if (titleCell) {
-      titleCell.withTx(tx).set(titleValue);
-    } else {
-      // Fall back to setting NAME directly
-      charmCell.key(NAME).withTx(tx).set(newName);
-    }
+    // Update 'title' field - for note patterns, NAME is computed from title
+    // (NAME = `📝 ${title}`) so setting title will update NAME automatically
+    charmCell.key("title").withTx(tx).set(titleValue);
 
     tx.commit();
 
