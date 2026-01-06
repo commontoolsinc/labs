@@ -44,6 +44,13 @@ export interface LocationData {
 /**
  * CTLocation - Browser Geolocation API wrapper component
  *
+ * TODO: Add throttling option for watch mode to prevent excessive updates (1-10Hz possible)
+ * TODO: Improve error messages with actionable guidance (e.g., "enable location in settings")
+ * TODO: Consider renaming `continuous` prop to `mode="watch" | "single"` for clarity
+ * TODO: Change maximumAge default from 0 to 30000ms to reduce battery drain
+ * TODO: Add maxWatchDuration and auto-stop for continuous mode safety
+ * TODO: Document in docs/common/COMPONENTS.md
+ *
  * @element ct-location
  *
  * @attr {boolean} enableHighAccuracy - Request high accuracy GPS (default: false)
@@ -84,13 +91,13 @@ export class CTLocation extends BaseElement {
       .container {
         display: flex;
         flex-direction: column;
-        gap: var(--ct-theme-spacing-small, 0.5rem);
+        gap: var(--ct-theme-spacing-normal, 0.5rem);
       }
 
       .button-row {
         display: flex;
         align-items: center;
-        gap: var(--ct-theme-spacing-small, 0.5rem);
+        gap: var(--ct-theme-spacing-normal, 0.5rem);
       }
 
       .location-button {
@@ -252,12 +259,14 @@ export class CTLocation extends BaseElement {
     },
   });
 
-  override firstUpdated() {
+  override firstUpdated(changedProperties: Map<string, unknown>) {
+    super.firstUpdated(changedProperties);
     this._cellController.bind(this.location);
     this._updateThemeProperties();
   }
 
   override willUpdate(changedProperties: Map<string, unknown>) {
+    super.willUpdate(changedProperties);
     if (changedProperties.has("location")) {
       this._cellController.bind(this.location);
     }
@@ -313,6 +322,7 @@ export class CTLocation extends BaseElement {
     return new Promise((resolve) => {
       navigator.geolocation.getCurrentPosition(
         (position) => {
+          if (!this.isConnected) return;
           const locationData = this._positionToLocationData(position);
           this._cellController.setValue(locationData);
           this._state = "idle";
@@ -320,6 +330,7 @@ export class CTLocation extends BaseElement {
           resolve(locationData);
         },
         (error) => {
+          if (!this.isConnected) return;
           this._handleError(error);
           this._state = "error";
           resolve(null);
@@ -358,11 +369,13 @@ export class CTLocation extends BaseElement {
 
     this._watchId = navigator.geolocation.watchPosition(
       (position) => {
+        if (!this.isConnected) return;
         const locationData = this._positionToLocationData(position);
         this._cellController.setValue(locationData);
         this.emit("ct-location-update", { location: locationData });
       },
       (error) => {
+        if (!this.isConnected) return;
         this._handleError(error);
         this._cleanup();
         this._state = "error";

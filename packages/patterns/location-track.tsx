@@ -5,6 +5,15 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Captures GPS coordinates with timestamps, storing them as an
  * array for track/breadcrumb logging.
+ *
+ * TODO: Add confirmation dialog before "Clear All" to prevent accidental data loss
+ * TODO: Add allowMultiple: true to MODULE_METADATA for multiple tracks per record
+ * TODO: Increase remove button tap target to 44x44px for mobile accessibility
+ * TODO: Add export functionality (GPX, GeoJSON, CSV)
+ * TODO: Add virtualization for large point lists (100+ points)
+ * TODO: Expose continuous tracking mode from ct-location
+ * TODO: Add schema fields for altitudeAccuracy, heading, speed
+ * TODO: Consider adding to "place" template or creating "trip" template
  */
 import {
   Cell,
@@ -87,11 +96,14 @@ const handleLocationUpdate = handler<
   { detail: { location: LocationPoint } },
   { locations: Cell<LocationPoint[]> }
 >(({ detail }, { locations }) => {
-  const current = locations.get() || [];
   const newPoint = detail.location;
-
-  // Append the new point to the array
-  locations.set([...current, newPoint]);
+  // Validate required fields exist
+  if (newPoint &&
+      typeof newPoint.latitude === 'number' &&
+      typeof newPoint.longitude === 'number' &&
+      typeof newPoint.timestamp === 'number') {
+    locations.push(newPoint);
+  }
 });
 
 /**
@@ -118,10 +130,16 @@ const removeLocation = handler<
 // ===== Helper Functions =====
 
 function formatCoords(lat: number, lng: number): string {
+  if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) {
+    return "Invalid coordinates";
+  }
   return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 }
 
 function formatTimestamp(ts: number): string {
+  if (typeof ts !== 'number' || isNaN(ts)) {
+    return "Invalid time";
+  }
   const date = new Date(ts);
   return date.toLocaleString(undefined, {
     month: "short",
@@ -132,6 +150,9 @@ function formatTimestamp(ts: number): string {
 }
 
 function formatAccuracy(accuracy: number): string {
+  if (typeof accuracy !== 'number' || isNaN(accuracy)) {
+    return "";
+  }
   if (accuracy < 100) {
     return `\u00B1${accuracy.toFixed(0)}m`;
   }
@@ -259,7 +280,7 @@ export const LocationTrackModule = recipe<
               View all points
             </span>
             <ct-vstack style={{ gap: "6px", paddingTop: "8px" }}>
-              {locations.map((point: LocationPoint, index: number) => (
+              {locations.filter((p: LocationPoint) => p && typeof p.latitude === 'number').map((point: LocationPoint, index: number) => (
                 <ct-hstack
                   key={index}
                   style={{
