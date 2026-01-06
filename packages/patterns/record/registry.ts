@@ -34,6 +34,10 @@ import {
   MODULE_METADATA as LocationMeta,
 } from "../location.tsx";
 import {
+  LocationTrackModule,
+  MODULE_METADATA as LocationTrackMeta,
+} from "../location-track.tsx";
+import {
   MODULE_METADATA as RelationshipMeta,
   RelationshipModule,
 } from "../relationship.tsx";
@@ -155,6 +159,10 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
   social: fromMetadata(SocialMeta, (init) => SocialModule(init as any)),
   link: fromMetadata(LinkMeta, (init) => LinkModule(init as any)),
   location: fromMetadata(LocationMeta, (init) => LocationModule(init as any)),
+  "location-track": fromMetadata(
+    LocationTrackMeta,
+    (init) => LocationTrackModule(init as any),
+  ),
   relationship: fromMetadata(
     RelationshipMeta,
     (init) => RelationshipModule(init as any),
