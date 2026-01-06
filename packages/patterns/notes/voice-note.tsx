@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   computed,
   type Default,
   handler,
@@ -25,7 +25,7 @@ interface TranscriptionData {
 }
 
 type Input = {
-  title?: Cell<Default<string, "Voice Note">>;
+  title?: Writable<Default<string, "Voice Note">>;
 };
 
 type Output = {
@@ -35,7 +35,7 @@ type Output = {
 
 const handleTranscriptionComplete = handler<
   { detail: { transcription: TranscriptionData } },
-  { notes: Cell<TranscriptionData[]> }
+  { notes: Writable<TranscriptionData[]> }
 >(({ detail }, { notes }) => {
   // Add the transcription to our notes list
   notes.push(detail.transcription);
@@ -43,7 +43,7 @@ const handleTranscriptionComplete = handler<
 
 const handleDeleteNote = handler<
   undefined,
-  { noteId: string; notes: Cell<TranscriptionData[]> }
+  { noteId: string; notes: Writable<TranscriptionData[]> }
 >((_, { noteId, notes }) => {
   const currentNotes = notes.get();
   const filtered = currentNotes.filter((note) => note.id !== noteId);

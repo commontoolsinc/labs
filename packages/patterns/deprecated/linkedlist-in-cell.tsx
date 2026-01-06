@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, derive, handler, NAME, recipe, UI } from "commontools";
+import { Cell, Writable, Default, derive, handler, NAME, recipe, UI } from "commontools";
 
 interface LinkedList {
   value: string;
@@ -17,7 +17,7 @@ type InputEventType = {
 };
 
 interface ListState {
-  items_list: Cell<LinkedList>;
+  items_list: Writable<LinkedList>;
 }
 
 // Helper function to add a node to the linked list

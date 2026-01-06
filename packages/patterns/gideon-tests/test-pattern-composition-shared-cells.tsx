@@ -27,7 +27,7 @@
  * 7. Verify it disappears from "Basic List" too
  */
 import {
-  Cell,
+  Cell, Writable,
   computed,
   Default,
   derive,
@@ -46,13 +46,13 @@ interface ShoppingItem {
 
 // Sub-pattern 1: Basic list view
 interface BasicListInput {
-  items: Cell<ShoppingItem[]>;
+  items: Writable<ShoppingItem[]>;
 }
 
 const BasicList = pattern<BasicListInput>(({ items }) => {
   const removeItem = handler<
     unknown,
-    { items: Cell<Array<Cell<ShoppingItem>>>; item: Cell<ShoppingItem> }
+    { items: Writable<Array<Writable<ShoppingItem>>>; item: Writable<ShoppingItem> }
   >(
     (_event, { items: itemsList, item }) => {
       const current = itemsList.get();
@@ -65,7 +65,7 @@ const BasicList = pattern<BasicListInput>(({ items }) => {
 
   const addItem = handler<
     { detail: { message: string } },
-    { items: Cell<ShoppingItem[]> }
+    { items: Writable<ShoppingItem[]> }
   >(
     ({ detail }, { items: itemsList }) => {
       const input = detail?.message?.trim();
@@ -122,7 +122,7 @@ const BasicList = pattern<BasicListInput>(({ items }) => {
 
 // Sub-pattern 2: Categorized view
 interface CategoryListInput {
-  items: Cell<ShoppingItem[]>;
+  items: Writable<ShoppingItem[]>;
 }
 
 const CategoryList = pattern<CategoryListInput>(({ items }) => {
@@ -140,7 +140,7 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
 
   const removeItem = handler<
     unknown,
-    { items: Cell<Array<Cell<ShoppingItem>>>; item: Cell<ShoppingItem> }
+    { items: Writable<Array<Writable<ShoppingItem>>>; item: Writable<ShoppingItem> }
   >(
     (_event, { items: itemsList, item }) => {
       const current = itemsList.get();

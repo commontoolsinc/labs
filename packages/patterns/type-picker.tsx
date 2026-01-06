@@ -15,7 +15,7 @@
  * See: community-docs/superstitions/2025-12-19-auto-init-use-two-lift-pattern.md
  */
 
-import { Cell, type Default, handler, NAME, pattern, UI } from "commontools";
+import { Cell, Writable, type Default, handler, NAME, pattern, UI } from "commontools";
 import type {
   ContainerCoordinationContext,
   ModuleMetadata,
@@ -56,8 +56,8 @@ interface TypePickerOutput {
 const applyTemplate = handler<
   unknown,
   {
-    entries: Cell<SubCharmEntry[]>;
-    trashedEntries: Cell<TrashedSubCharmEntry[]>;
+    entries: Writable<SubCharmEntry[]>;
+    trashedEntries: Writable<TrashedSubCharmEntry[]>;
     // deno-lint-ignore no-explicit-any
     createModule: any;
     templateId: string;
@@ -106,8 +106,8 @@ const applyTemplate = handler<
 const dismiss = handler<
   unknown,
   {
-    entries: Cell<SubCharmEntry[]>;
-    trashedEntries: Cell<TrashedSubCharmEntry[]>;
+    entries: Writable<SubCharmEntry[]>;
+    trashedEntries: Writable<TrashedSubCharmEntry[]>;
   }
 >((_event, { entries, trashedEntries }) => {
   const current = entries.get() || [];

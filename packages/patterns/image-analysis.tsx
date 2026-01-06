@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   computed,
   generateText,
   ifElse,
@@ -21,8 +21,8 @@ type ImageChatInput = {
 };
 
 type ImageChatOutput = {
-  images: Cell<ImageData[]>;
-  prompt: Cell<string>;
+  images: Writable<ImageData[]>;
+  prompt: Writable<string>;
   response: string | undefined;
   pending: boolean | undefined;
   ui: VNode;

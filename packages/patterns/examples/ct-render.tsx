@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   computed,
   Default,
   handler,
@@ -14,13 +14,13 @@ interface RecipeState {
 }
 
 // In this case we do not have to type our event parameter because it is not used in the body.
-// By requesting a Cell<number> we get a mutable handle when our handler is invoked.
-const increment = handler<unknown, { value: Cell<number> }>((_, state) => {
+// By requesting a Writable<number> we get a mutable handle when our handler is invoked.
+const increment = handler<unknown, { value: Writable<number> }>((_, state) => {
   state.value.set(state.value.get() + 1);
 });
 
 // This can also be done with inline types + inference
-const decrement = handler((_, state: { value: Cell<number> }) => {
+const decrement = handler((_, state: { value: Writable<number> }) => {
   state.value.set(state.value.get() - 1);
 });
 
@@ -49,7 +49,7 @@ export const Counter = pattern<RecipeState>((state) => {
       <div>
         {
           /* Even though we could end up passing extra data to decrement, our schema prevents that actually reaching the handler.
-          In fact, we are passing `value` as an OpaqueRef<number> here but it becomes a Cell<number> at invocation time */
+          In fact, we are passing `value` as an OpaqueRef<number> here but it becomes a Writable<number> at invocation time */
         }
         <ct-button onClick={decrement(state)}>
           dec to {previous(state.value)}

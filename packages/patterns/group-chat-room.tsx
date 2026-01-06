@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   computed,
   Default,
   handler,
@@ -44,11 +44,11 @@ export interface User {
 }
 
 interface RoomInput {
-  messages: Cell<Default<Message[], []>>;
-  users: Cell<Default<User[], []>>;
+  messages: Writable<Default<Message[], []>>;
+  users: Writable<Default<User[], []>>;
   myName: Default<string, "">;
   mySessionId: Default<string, "">;
-  currentSessionId: Cell<Default<string, "">>;
+  currentSessionId: Writable<Default<string, "">>;
 }
 
 interface RoomOutput {
@@ -73,7 +73,7 @@ function getInitials(name: string): string {
 // Handler to send a text message
 const sendMessage = handler<
   unknown,
-  { messages: Cell<Message[]>; myName: string; contentInput: Cell<string> }
+  { messages: Writable<Message[]>; myName: string; contentInput: Writable<string> }
 >((_event, { messages, myName, contentInput }) => {
   const content = contentInput.get().trim();
   if (!content || !myName) return;
@@ -93,7 +93,7 @@ const sendMessage = handler<
 // Handler to send an image message
 const sendImageMessage = handler<
   unknown,
-  { messages: Cell<Message[]>; myName: string; chatImages: Cell<ImageData[]> }
+  { messages: Writable<Message[]>; myName: string; chatImages: Writable<ImageData[]> }
 >((_event, { messages, myName, chatImages }) => {
   const images = chatImages.get() || [];
   if (images.length === 0 || !myName) return;
@@ -115,7 +115,7 @@ const sendImageMessage = handler<
 // Handler to confirm and save the avatar from avatarImages cell
 const confirmAvatar = handler<
   unknown,
-  { users: Cell<User[]>; myName: string; avatarImages: Cell<ImageData[]> }
+  { users: Writable<User[]>; myName: string; avatarImages: Writable<ImageData[]> }
 >((_event, { users, myName, avatarImages }) => {
   const images = avatarImages.get() || [];
   if (images.length === 0) return;
@@ -136,7 +136,7 @@ const confirmAvatar = handler<
 // Handler to cancel pending avatar
 const cancelAvatar = handler<
   unknown,
-  { avatarImages: Cell<ImageData[]> }
+  { avatarImages: Writable<ImageData[]> }
 >((_event, { avatarImages }) => {
   avatarImages.set([]);
 });
@@ -144,7 +144,7 @@ const cancelAvatar = handler<
 // Handler to toggle emoji picker for a message
 const toggleEmojiPicker = handler<
   unknown,
-  { emojiPickerMessageId: Cell<string>; msgId: string }
+  { emojiPickerMessageId: Writable<string>; msgId: string }
 >((_event, { emojiPickerMessageId, msgId }) => {
   const current = emojiPickerMessageId.get();
   // Toggle: if already open for this message, close it; otherwise open for this message
@@ -155,11 +155,11 @@ const toggleEmojiPicker = handler<
 const toggleReaction = handler<
   unknown,
   {
-    messages: Cell<Message[]>;
+    messages: Writable<Message[]>;
     msgId: string;
     emoji: string;
     myName: string;
-    emojiPickerMessageId: Cell<string>;
+    emojiPickerMessageId: Writable<string>;
   }
 >((_event, { messages, msgId, emoji, myName, emojiPickerMessageId }) => {
   const msgs = messages.get() || [];

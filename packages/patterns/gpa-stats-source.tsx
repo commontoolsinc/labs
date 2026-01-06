@@ -5,7 +5,7 @@
  *
  * @reviewed 2025-12-10 docs-rationalization
  */
-import { Cell, Default, handler, lift, NAME, pattern, UI } from "commontools";
+import { Cell, Writable, Default, handler, lift, NAME, pattern, UI } from "commontools";
 
 interface Stats {
   average: number;
@@ -47,7 +47,7 @@ const calculateStats = lift((values: number[]): Stats | null => {
 
 const updateData = handler<
   { target: { value: string } },
-  { rawData: Cell<string> }
+  { rawData: Writable<string> }
 >((event, { rawData }) => {
   rawData.set(event.target.value);
 });

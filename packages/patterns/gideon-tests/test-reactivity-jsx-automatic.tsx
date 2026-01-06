@@ -25,7 +25,7 @@
  * 4. Verify all values update: Count=1, User="Bob", Items=4, Status="Active"
  * 5. Click multiple times to verify continuous updates
  */
-import { Cell, Default, handler, NAME, pattern, UI } from "commontools";
+import { Cell, Writable, Default, handler, NAME, pattern, UI } from "commontools";
 
 interface Item {
   title: string;
@@ -47,7 +47,7 @@ interface TestInput {
 
 const updateAllValues = handler<
   unknown,
-  { count: Cell<number>; user: Cell<User>; items: Cell<Item[]> }
+  { count: Writable<number>; user: Writable<User>; items: Writable<Item[]> }
 >((_args, { count, user, items }) => {
   // Increment count
   count.set(count.get() + 1);

@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   computed,
   Default,
   handler,
@@ -22,8 +22,8 @@ type Charm = {
 // Define interfaces for type safety
 interface AddCharmState {
   charm: any;
-  cellRef: Cell<Charm[]>;
-  isInitialized: Cell<boolean>;
+  cellRef: Writable<Charm[]>;
+  isInitialized: Writable<boolean>;
 }
 const AddCharmSchema = toSchema<AddCharmState>();
 
@@ -56,7 +56,7 @@ const addCharmAndNavigate = lift(
 
 // Handler that creates a new charm instance and adds it to the array.
 // Each invocation creates its own isInitialized cell for tracking.
-const createSimpleRecipe = handler<unknown, { cellRef: Cell<Charm[]> }>(
+const createSimpleRecipe = handler<unknown, { cellRef: Writable<Charm[]> }>(
   (_, { cellRef }) => {
     // Create isInitialized cell for this charm addition
     const isInitialized = Cell.of(false);

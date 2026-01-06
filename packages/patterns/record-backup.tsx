@@ -13,7 +13,7 @@
  * - Per-module error handling on import
  */
 import {
-  Cell,
+  Cell, Writable,
   computed,
   type Default,
   handler,
@@ -417,9 +417,9 @@ function createModuleFromData(
 const importRecords = handler<
   Record<string, never>,
   {
-    importJson: Cell<string>;
-    allCharms: Cell<RecordCharm[]>;
-    importResult: Cell<ImportResult | null>;
+    importJson: Writable<string>;
+    allCharms: Writable<RecordCharm[]>;
+    importResult: Writable<ImportResult | null>;
   }
 >((_, { importJson, allCharms, importResult }) => {
   const jsonText = importJson.get();
@@ -574,7 +574,7 @@ const importRecords = handler<
  */
 const clearImportResult = handler<
   Record<string, never>,
-  { importResult: Cell<ImportResult | null> }
+  { importResult: Writable<ImportResult | null> }
 >((_, { importResult }) => {
   importResult.set(null);
 });
@@ -584,7 +584,7 @@ const clearImportResult = handler<
  */
 const handleFileUpload = handler<
   { detail: { files: Array<{ data: string; name: string }> } },
-  { importJson: Cell<string> }
+  { importJson: Writable<string> }
 >(({ detail }, { importJson }) => {
   const files = detail?.files;
   if (!files || files.length === 0) return;

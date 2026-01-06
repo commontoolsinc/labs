@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   computed,
   handler,
   ifElse,
@@ -24,14 +24,14 @@ import {
 import { MentionableCharm } from "./backlinks-index.tsx";
 
 interface OmniboxFABInput {
-  mentionable: Cell<MentionableCharm[]>;
+  mentionable: Writable<MentionableCharm[]>;
 }
 
-const toggle = handler<any, { value: Cell<boolean> }>((_, { value }) => {
+const toggle = handler<any, { value: Writable<boolean> }>((_, { value }) => {
   value.set(!value.get());
 });
 
-const closeFab = handler<any, { fabExpanded: Cell<boolean> }>(
+const closeFab = handler<any, { fabExpanded: Writable<boolean> }>(
   (_, { fabExpanded }) => {
     fabExpanded.set(false);
   },
@@ -39,7 +39,7 @@ const closeFab = handler<any, { fabExpanded: Cell<boolean> }>(
 
 const dismissPeek = handler<
   any,
-  { peekDismissedIndex: Cell<number>; assistantMessageCount: number }
+  { peekDismissedIndex: Writable<number>; assistantMessageCount: number }
 >((_, { peekDismissedIndex, assistantMessageCount }) => {
   // Store the current assistant message count so we know which message was dismissed
   peekDismissedIndex.set(assistantMessageCount);

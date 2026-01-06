@@ -1,11 +1,11 @@
 /// <cts-enable />
-import { Cell, computed, Default, NAME, pattern, UI } from "commontools";
+import { Cell, Writable, computed, Default, NAME, pattern, UI } from "commontools";
 
 interface Event {
-  title: Cell<string>;
-  date: Cell<string>;
-  time: Cell<Default<string, "">>;
-  notes: Cell<Default<string, "">>;
+  title: Writable<string>;
+  date: Writable<string>;
+  time: Writable<Default<string, "">>;
+  notes: Writable<Default<string, "">>;
 }
 
 interface Input {

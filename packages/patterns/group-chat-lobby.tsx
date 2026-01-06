@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   computed,
   Default,
   handler,
@@ -21,16 +21,16 @@ import GroupChatRoom, { Message, User } from "./group-chat-room.tsx";
 
 interface LobbyInput {
   chatName: Default<string, "Group Chat">;
-  messages: Cell<Default<Message[], []>>;
-  users: Cell<Default<User[], []>>;
-  sessionId: Cell<Default<string, "">>;
+  messages: Writable<Default<Message[], []>>;
+  users: Writable<Default<User[], []>>;
+  sessionId: Writable<Default<string, "">>;
 }
 
 interface LobbyOutput {
   chatName: Default<string, "Group Chat">;
-  messages: Cell<Default<Message[], []>>;
-  users: Cell<Default<User[], []>>;
-  sessionId: Cell<Default<string, "">>;
+  messages: Writable<Default<Message[], []>>;
+  users: Writable<Default<User[], []>>;
+  sessionId: Writable<Default<string, "">>;
 }
 
 // Random color selection from a pool of distinct colors
@@ -63,7 +63,7 @@ function getInitials(name: string): string {
 // Handler to reset the lobby (clear all state and generate new session)
 const resetLobby = handler<
   unknown,
-  { messages: Cell<Message[]>; users: Cell<User[]>; sessionId: Cell<string> }
+  { messages: Writable<Message[]>; users: Writable<User[]>; sessionId: Writable<string> }
 >((_event, { messages, users, sessionId }) => {
   console.log("[resetLobby] Resetting all chat state...");
   // Generate new session ID to invalidate all existing chat room connections
@@ -84,10 +84,10 @@ const joinChat = handler<
   unknown,
   {
     chatName: string;
-    messages: Cell<Message[]>;
-    users: Cell<User[]>;
-    sessionId: Cell<string>;
-    nameInput: Cell<string>;
+    messages: Writable<Message[]>;
+    users: Writable<User[]>;
+    sessionId: Writable<string>;
+    nameInput: Writable<string>;
   }
 >((_event, { messages, users, sessionId, nameInput }) => {
   const name = nameInput.get().trim();

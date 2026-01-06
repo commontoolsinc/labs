@@ -5,7 +5,7 @@
  *
  * Access via: wish({ query: "#journal" })
  */
-import { Cell, computed, handler, NAME, pattern, UI, wish } from "commontools";
+import { Cell, Writable, computed, handler, NAME, pattern, UI, wish } from "commontools";
 
 // Raw journal entry as stored - subject is a cell link, not a Cell
 type JournalEntry = {
@@ -65,7 +65,7 @@ function eventTypeEmoji(eventType: string | undefined): string {
 
 const clearJournal = handler<
   Record<string, never>,
-  { journal: Cell<JournalEntry[]> }
+  { journal: Writable<JournalEntry[]> }
 >((_, { journal }) => {
   journal.set([]);
 });

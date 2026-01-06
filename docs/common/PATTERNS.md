@@ -27,14 +27,14 @@ const grouped = computed(() => {
 });
 ```
 
-### 2. Only Declare Cell<> When You Need to Mutate
+### 2. Only Declare Writable<> When You Need to Mutate
 
-Everything is reactive by default. `Cell<>` in type signatures indicates you'll call `.set()`, `.push()`, or `.update()`:
+Everything is reactive by default. `Writable<>` in type signatures indicates you'll call `.set()`, `.push()`, or `.update()`:
 
 ```typescript
 interface Input {
-  count: number;         // Read-only (still reactive!)
-  items: Cell<Item[]>;   // Will mutate (call .push(), .set())
+  count: number;             // Read-only (still reactive!)
+  items: Writable<Item[]>;   // Will mutate (call .push(), .set())
 }
 ```
 
@@ -61,7 +61,7 @@ The following examples are complete, self-contained patterns illustrating progre
 The simplest pattern: a list with bidirectional binding and inline handlers.
 
 ```typescript
-import { Cell, Default, NAME, pattern, UI } from "commontools";
+import { Cell, Default, NAME, pattern, UI, Writable } from "commontools";
 
 interface Item {
   title: string;
@@ -69,7 +69,7 @@ interface Item {
 }
 
 interface Input {
-  items: Cell<Item[]>;
+  items: Writable<Item[]>;
 }
 
 export default pattern<Input, Input>(({ items }) => ({
@@ -190,7 +190,7 @@ Direct writes to another charm's cells fail with `WriteIsolationError`. Use `Str
 ```typescript
 // Charm B: Expose a stream for receiving updates
 interface Input {
-  items: Cell<Item[]>;
+  items: Writable<Item[]>;
   addItem: Stream<{ title: string }>;
 }
 
@@ -295,12 +295,12 @@ return {
 | Cross-charm mutation | `Stream.send()` |
 | Make charm discoverable | Export `mentionable` |
 
-### Cell<> in Type Signatures
+### Writable<> in Type Signatures
 
 | Type | Meaning |
 |------|---------|
 | `items: Item[]` | Read-only, reactive |
-| `items: Cell<Item[]>` | Read + write (will mutate) |
+| `items: Writable<Item[]>` | Read + write (will mutate) |
 | `items: Default<Item[], []>` | Optional with default |
 
 ### Handler Type Signatures

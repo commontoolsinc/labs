@@ -8,7 +8,7 @@
  * Falls back to manual registry for legacy entries that don't have stored schema.
  */
 
-import type { Cell } from "commontools";
+import type { Cell, Writable } from "commontools";
 import type { SubCharmEntry } from "../types.ts";
 import type { JSONSchema } from "./schema-utils-pure.ts";
 
@@ -128,7 +128,7 @@ export function buildExtractionSchema(
  */
 export function buildExtractionSchemaFromCell(
   // deno-lint-ignore no-explicit-any
-  parentSubCharms: Cell<SubCharmEntry[]> | any,
+  parentSubCharms: Writable<SubCharmEntry[]> | any,
 ): JSONSchema {
   const properties: Record<string, JSONSchema> = {};
   const fieldOwners: Record<string, string> = {}; // Track which module defines each field

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, lift, NAME, OpaqueRef, pattern, UI } from "commontools";
+import { Cell, Writable, lift, NAME, OpaqueRef, pattern, UI } from "commontools";
 
 export type MentionableCharm = {
   [NAME]?: string;
@@ -11,7 +11,7 @@ export type MentionableCharm = {
 
 export type WriteableBacklinks = {
   mentioned: WriteableBacklinks[];
-  backlinks: Cell<WriteableBacklinks[]>;
+  backlinks: Writable<WriteableBacklinks[]>;
 };
 
 type Input = {

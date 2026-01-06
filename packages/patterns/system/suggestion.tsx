@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   computed,
   generateObject,
   pattern,
@@ -13,7 +13,7 @@ import { fetchAndRunPattern, listPatternIndex } from "./common-tools.tsx";
 
 export default pattern<
   { situation: string; context: { [id: string]: any } },
-  WishState<Cell<any>>
+  WishState<Writable<any>>
 >(({ situation, context }) => {
   const suggestion = generateObject({
     system: "Find a useful pattern, run it, pass link to final result",
@@ -24,7 +24,7 @@ export default pattern<
       listPatternIndex: patternTool(listPatternIndex),
     },
     model: "anthropic:claude-haiku-4-5",
-    schema: toSchema<{ cell: Cell<any> }>(),
+    schema: toSchema<{ cell: Writable<any> }>(),
   });
 
   const result = computed(() => suggestion.result?.cell);

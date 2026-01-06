@@ -25,7 +25,7 @@
  * - Idempotent: Check-before-write ensures no actual change after first run, system settles
  */
 import {
-  Cell,
+  Cell, Writable,
   computed,
   Default,
   handler,
@@ -41,14 +41,14 @@ interface TestInput {
 }
 
 interface TestOutput {
-  triggerCount: Cell<number>;
+  triggerCount: Writable<number>;
   nonIdempotentRunCount: number;
   idempotentRunCount: number;
   nonIdempotentData: unknown[];
   idempotentData: Record<string, unknown>;
 }
 
-const incrementTrigger = handler<unknown, { triggerCount: Cell<number> }>(
+const incrementTrigger = handler<unknown, { triggerCount: Writable<number> }>(
   (_args, state) => {
     state.triggerCount.set(state.triggerCount.get() + 1);
   },
@@ -288,7 +288,7 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
         </div>
       </div>
     ),
-    triggerCount: triggerCount as unknown as Cell<number>,
+    triggerCount: triggerCount as unknown as Writable<number>,
     nonIdempotentRunCount: nonIdempotentCounter,
     idempotentRunCount: idempotentCounter,
     nonIdempotentData: nonIdempotentArray,

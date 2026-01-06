@@ -1,7 +1,7 @@
 /// <cts-enable />
 import {
   BuiltInLLMMessage,
-  Cell,
+  Cell, Writable,
   computed,
   Default,
   fetchData,
@@ -45,8 +45,8 @@ const clearChat = handler(
   (
     _: never,
     { messages, pending }: {
-      messages: Cell<Array<BuiltInLLMMessage>>;
-      pending: Cell<boolean | undefined>;
+      messages: Writable<Array<BuiltInLLMMessage>>;
+      pending: Writable<boolean | undefined>;
     },
   ) => {
     messages.set([]);
@@ -55,7 +55,7 @@ const clearChat = handler(
 );
 
 type ChatInput = {
-  messages?: Cell<Default<Array<BuiltInLLMMessage>, []>>;
+  messages?: Writable<Default<Array<BuiltInLLMMessage>, []>>;
   tools?: any;
   theme?: any;
   system?: string;
@@ -125,7 +125,7 @@ export const TitleGenerator = pattern<
 
 const listMentionable = pattern<
   { mentionable: Array<MentionableCharm> },
-  { result: Array<{ label: string; cell: Cell<unknown> }> }
+  { result: Array<{ label: string; cell: Writable<unknown> }> }
 >(
   ({ mentionable }) => {
     const result = mentionable.map((charm) => ({
@@ -138,7 +138,7 @@ const listMentionable = pattern<
 
 const listRecent = pattern<
   { recentCharms: Array<MentionableCharm> },
-  { result: Array<{ label: string; cell: Cell<unknown> }> }
+  { result: Array<{ label: string; cell: Writable<unknown> }> }
 >(
   ({ recentCharms }) => {
     const namesList = recentCharms.map((charm) => ({

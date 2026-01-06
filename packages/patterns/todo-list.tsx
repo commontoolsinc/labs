@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, NAME, pattern, UI, wish } from "commontools";
+import { Cell, Writable, Default, NAME, pattern, UI, wish } from "commontools";
 
 interface TodoItem {
   title: string;
@@ -7,11 +7,11 @@ interface TodoItem {
 }
 
 interface Input {
-  items: Cell<Default<TodoItem[], []>>;
+  items: Writable<Default<TodoItem[], []>>;
 }
 
 interface Output {
-  items: Cell<TodoItem[]>;
+  items: Writable<TodoItem[]>;
 }
 
 export default pattern<Input, Output>(({ items }) => {

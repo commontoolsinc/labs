@@ -9,7 +9,7 @@
  * is the root cause.
  */
 import {
-  Cell,
+  Cell, Writable,
   computed,
   Default,
   derive,
@@ -28,14 +28,14 @@ interface ShoppingItem {
 
 // Sub-pattern 1: Basic list view
 interface BasicListInput {
-  items: Cell<ShoppingItem[]>;
+  items: Writable<ShoppingItem[]>;
 }
 
 const BasicList = pattern<BasicListInput>(({ items }) => {
   // INDEX-BASED removal - no .equals() needed
   const removeItemByIndex = handler<
     unknown,
-    { items: Cell<ShoppingItem[]>; index: number }
+    { items: Writable<ShoppingItem[]>; index: number }
   >(
     (_event, { items: itemsList, index }) => {
       const current = itemsList.get();
@@ -47,7 +47,7 @@ const BasicList = pattern<BasicListInput>(({ items }) => {
 
   const addItem = handler<
     { detail: { message: string } },
-    { items: Cell<ShoppingItem[]> }
+    { items: Writable<ShoppingItem[]> }
   >(
     ({ detail }, { items: itemsList }) => {
       const input = detail?.message?.trim();
@@ -106,7 +106,7 @@ const BasicList = pattern<BasicListInput>(({ items }) => {
 
 // Sub-pattern 2: Categorized view - ALSO index-based
 interface CategoryListInput {
-  items: Cell<ShoppingItem[]>;
+  items: Writable<ShoppingItem[]>;
 }
 
 const CategoryList = pattern<CategoryListInput>(({ items }) => {
@@ -124,7 +124,7 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
   // INDEX-BASED removal - no .equals() needed
   const removeItemByIndex = handler<
     unknown,
-    { items: Cell<ShoppingItem[]>; index: number }
+    { items: Writable<ShoppingItem[]>; index: number }
   >(
     (_event, { items: itemsList, index }) => {
       const current = itemsList.get();

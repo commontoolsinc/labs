@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   computed,
   Default,
   ifElse,
@@ -18,7 +18,7 @@ import ReadingItemDetail, {
 } from "./reading-item-detail.tsx";
 
 interface Input {
-  items: Cell<Default<ReadingItem[], []>>;
+  items: Writable<Default<ReadingItem[], []>>;
 }
 
 interface Output {

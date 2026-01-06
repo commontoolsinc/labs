@@ -30,7 +30,7 @@ Before starting pattern development:
    - `docs/common/CELLS_AND_REACTIVITY.md` - Cell system, computed(), lift(), frame-based execution
 3. **Reference docs as needed:**
    - `docs/common/COMPONENTS.md` - UI components and bidirectional binding
-   - `docs/common/TYPES_AND_SCHEMAS.md` - Type system, Cell<> vs OpaqueRef<>
+   - `docs/common/TYPES_AND_SCHEMAS.md` - Type system, Writable<>, defaults
    - `docs/development/DEBUGGING.md` - Error reference and troubleshooting
 4. **Check example patterns** - Look in `packages/patterns/` for working examples
 
@@ -211,9 +211,9 @@ Use the **ct** skill to retrieve source:
 
 ## Key Concepts Summary
 
-### Direct Cell<> Binding
+### Direct Writable<> Binding
 
-**Use `$` prefix to pass a raw Cell to a component (for deep interop, see `lit-component` skill):**
+**Use `$` prefix to pass a Writable cell to a component (for deep interop, see `lit-component` skill):**
 
 ```typescript
 <ct-checkbox $checked={item.done} />
@@ -230,7 +230,7 @@ See `COMPONENTS.md` for full details.
 Handlers have **two-step binding**: define with `handler<EventType, StateType>`, then bind with state only.
 
 ```typescript
-const addItem = handler<{ detail: { message: string } }, { items: Cell<Item[]> }>(
+const addItem = handler<{ detail: { message: string } }, { items: Writable<Item[]> }>(
   ({ detail }, { items }) => { items.push({ title: detail.message }); }
 );
 
@@ -241,7 +241,7 @@ const addItem = handler<{ detail: { message: string } }, { items: Cell<Item[]> }
 - Pass **state only** when binding - event data comes at runtime
 - For test buttons with hardcoded data, use **inline handlers**: `onClick={() => items.push(...)}`
 - A bound handler IS a `Stream<T>` - don't use `Stream.of()` or `.subscribe()`
-- Use `Cell<T[]>` in handler state, not `Cell<OpaqueRef<T>[]>`
+- Use `Writable<T[]>` in handler state (plain array type)
 
 See `PATTERNS.md` for handler patterns, `TYPES_AND_SCHEMAS.md` for Stream typing, `DEBUGGING.md` for common errors.
 
@@ -276,7 +276,7 @@ See `PATTERNS.md` Level 3-4 for linking and composition patterns.
 |------|------|
 | Main tutorial and common patterns | `docs/common/PATTERNS.md` |
 | Cells, reactivity, computed() | `docs/common/CELLS_AND_REACTIVITY.md` |
-| Type system, Cell<> vs OpaqueRef<> | `docs/common/TYPES_AND_SCHEMAS.md` |
+| Type system, Writable<>, defaults | `docs/common/TYPES_AND_SCHEMAS.md` |
 | Component usage and bidirectional binding | `docs/common/COMPONENTS.md` |
 | Error reference and debugging | `docs/development/DEBUGGING.md` |
 | LLM integration (generateObject, etc.) | `docs/common/LLM.md` |

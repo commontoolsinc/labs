@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   computed,
   Default,
   ifElse,
@@ -23,8 +23,8 @@ interface HabitLog {
 }
 
 interface Input {
-  habits: Cell<Default<Habit[], []>>;
-  logs: Cell<Default<HabitLog[], []>>;
+  habits: Writable<Default<Habit[], []>>;
+  logs: Writable<Default<HabitLog[], []>>;
 }
 
 interface Output {

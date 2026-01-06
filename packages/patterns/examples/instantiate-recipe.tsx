@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   computed,
   Default,
   handler,
@@ -14,11 +14,11 @@ interface RecipeState {
   value: Default<number, 0>;
 }
 
-const increment = handler<unknown, { value: Cell<number> }>((_, state) => {
+const increment = handler<unknown, { value: Writable<number> }>((_, state) => {
   state.value.set(state.value.get() + 1);
 });
 
-const decrement = handler((_, state: { value: Cell<number> }) => {
+const decrement = handler((_, state: { value: Writable<number> }) => {
   state.value.set(state.value.get() - 1);
 });
 

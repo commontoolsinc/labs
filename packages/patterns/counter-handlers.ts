@@ -1,9 +1,9 @@
 /// <cts-enable />
-import { Cell, Default, handler } from "commontools";
+import { Cell, Writable, Default, handler } from "commontools";
 
 export const increment = handler<
   unknown,
-  { value: Cell<Default<number, 0>> }
+  { value: Writable<Default<number, 0>> }
 >(
   (_args, state) => {
     state.value.set(state.value.get() + 1);
@@ -12,7 +12,7 @@ export const increment = handler<
 
 export const decrement = handler<
   unknown,
-  { value: Cell<Default<number, 0>> }
+  { value: Writable<Default<number, 0>> }
 >(
   (_args, state) => {
     state.value.set(state.value.get() - 1);
@@ -20,8 +20,8 @@ export const decrement = handler<
 );
 
 export const getValue = handler<
-  { result: Cell<string> },
-  { value: Cell<Default<number, 0>> }
+  { result: Writable<string> },
+  { value: Writable<Default<number, 0>> }
 >(
   (args, state) => {
     args.result.set(`Value is ${state.value.get()}`);

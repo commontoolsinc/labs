@@ -2,11 +2,11 @@
 
 # Types and Schemas
 
-CommonTools type system: when to use `Cell<>`, type contexts, and CTS.
+CommonTools type system: when to use `Writable<>`, type contexts, and CTS.
 
-## Cell<> = Write Intent
+## Writable<> = Write Intent
 
-`Cell<>` in type signatures indicates **write intent**, not reactivity. Everything is reactive by default.
+`Writable<>` in type signatures indicates **write intent**, not reactivity. Everything is reactive by default.
 
 ```typescript
 // Read-only (still reactive!)
@@ -17,14 +17,14 @@ interface ReadOnlyInput {
 
 // Write access needed
 interface WritableInput {
-  count: Cell<number>;    // Will call .set()
-  items: Cell<Item[]>;    // Will call .push()
+  count: Writable<number>;    // Will call .set()
+  items: Writable<Item[]>;    // Will call .push()
 }
 ```
 
-### Cell Methods
+### Writable Methods
 
-With `Cell<T>` in your signature:
+With `Writable<T>` in your signature:
 
 | Method | Purpose |
 |--------|---------|
@@ -34,7 +34,7 @@ With `Cell<T>` in your signature:
 | `.push(item)` | Add to array |
 | `.key("property")` | Navigate nested data |
 
-Without `Cell<>`, you can still display values in JSX, pass to `computed()`, and map over arrays - all reactively. Note: filtering and transformations must be done in `computed()` outside JSX, then the result can be mapped inside JSX.
+Without `Writable<>`, you can still display values in JSX, pass to `computed()`, and map over arrays - all reactively. Note: filtering and transformations must be done in `computed()` outside JSX, then the result can be mapped inside JSX.
 
 ### Cell<> with Default<>
 
@@ -69,18 +69,17 @@ interface Input {
   items: Default<ShoppingItem[], []>;
 }
 
-// Context 2: Pattern parameter (with Cell<> for write access)
+// Context 2: Pattern parameter (with Writable<> for write access)
 interface WritableInput {
-  items: Cell<ShoppingItem[]>;
+  items: Writable<ShoppingItem[]>;
 }
 
 export default pattern<WritableInput>(({ items }) => {
-  // Context 3: items is Cell<ShoppingItem[]>
+  // Context 3: items is Writable<ShoppingItem[]>
 
   return {
     [UI]: (
       <div>
-        {/* Context 4: In .map() - item is OpaqueRef<ShoppingItem> */}
         {items.map((item) => (
           <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
         ))}
@@ -92,12 +91,12 @@ export default pattern<WritableInput>(({ items }) => {
 
 ---
 
-## Cell<T[]> vs Cell<Array<Cell<T>>>
+## Writable<T[]> vs Writable<Array<Writable<T>>>
 
-**Use `Cell<T[]>` by default:**
+**Use `Writable<T[]>` by default:**
 
 ```typescript
-const addItem = handler<unknown, { items: Cell<Item[]> }>(
+const addItem = handler<unknown, { items: Writable<Item[]> }>(
   (_, { items }) => {
     items.push({ title: "New", done: false });
     items.set(items.get().filter(x => !x.done));
@@ -105,12 +104,12 @@ const addItem = handler<unknown, { items: Cell<Item[]> }>(
 );
 ```
 
-**Use `Cell<Array<Cell<T>>>` only when you need `.equals()` on elements:**
+**Use `Writable<Array<Writable<T>>>` only when you need `.equals()` on elements:**
 
 ```typescript
 const removeItem = handler<
   unknown,
-  { items: Cell<Array<Cell<Item>>>; item: Cell<Item> }
+  { items: Writable<Array<Writable<Item>>>; item: Writable<Item> }
 >((_, { items, item }) => {
   const index = items.get().findIndex(el => el.equals(item));
   if (index >= 0) items.set(items.get().toSpliced(index, 1));
@@ -121,26 +120,19 @@ const removeItem = handler<
 
 ## Handler Types in Output Interfaces
 
-Handlers exposed in Output interfaces must be typed as `Stream<T>`, NOT `OpaqueRef<T>`.
+Handlers exposed in Output interfaces must be typed as `Stream<T>`.
 
 ```typescript
-// ✅ CORRECT - Use Stream<T> for handlers in Output
 interface Output {
   count: number;
   increment: Stream<void>;           // Handler with no parameters
   setCount: Stream<{ value: number }>; // Handler with parameters
-}
-
-// ❌ WRONG - OpaqueRef in Output interface
-interface Output {
-  increment: OpaqueRef<void>;        // Wrong!
 }
 ```
 
 **Why Stream<T>?**
 - `Stream<T>` represents a write-only channel for triggering actions
 - Other charms can call these handlers via `.send()` when linked
-- `OpaqueRef<T>` is for reactive references in `.map()` contexts, not handlers
 
 ### Creating Streams (Bound Handlers)
 
@@ -153,8 +145,8 @@ addItem.subscribe(({ title }) => { ... });  // Error!
 
 // ✅ CORRECT - Define handler, bind with state
 const addItemHandler = handler<
-  { title: string },      // Event type
-  { items: Cell<Item[]> } // State type
+  { title: string },          // Event type
+  { items: Writable<Item[]> } // State type
 >(({ title }, { items }) => {
   items.push({ title });
 });
@@ -239,41 +231,13 @@ import type { TodoItem } from "./schemas.ts";
 
 ---
 
-## Anti-Pattern: Manual OpaqueRef Casting
-
-Don't manually cast to/from `OpaqueRef`. The framework handles reactive tracking automatically.
-
-```typescript
-// ❌ WRONG - Don't cast
-myHandler({ items: itemsCell as unknown as OpaqueRef<Item[]> })
-
-// ✅ CORRECT - Pass directly
-myHandler({ items: itemsCell })
-
-// ❌ WRONG - Don't use OpaqueRef in handler types
-handler<Event, { items: Cell<OpaqueRef<Item>[]> }>(...)
-
-// ✅ CORRECT - Use plain array type
-handler<Event, { items: Cell<Item[]> }>((_, { items }) => {
-  items.push({ title: "New" });
-})
-```
-
-**Why casting breaks things:**
-- Bypasses reactive tracking
-- Bypasses TypeScript guidance
-- Framework already handles this automatically
-
----
-
 ## Summary
 
 | Concept | Usage |
 |---------|-------|
-| `Cell<T>` | Write access (`.set()`, `.push()`) |
+| `Writable<T>` | Write access (`.set()`, `.push()`) |
 | `Default<T, V>` | Schema default values |
-| `OpaqueRef<T>` | Auto-wrapped in `.map()` - don't use manually |
 | `Stream<T>` | Handlers in Output interfaces |
 | `/// <cts-enable />` | Enable CTS type processing |
-| `Cell<T[]>` | Standard array (default) |
-| `Cell<Array<Cell<T>>>` | When you need `.equals()` on elements |
+| `Writable<T[]>` | Standard array (default) |
+| `Writable<Array<Writable<T>>>` | When you need `.equals()` on elements |

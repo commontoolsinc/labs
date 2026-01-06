@@ -10,7 +10,7 @@
  *
  * SETUP: After deploying, you must FAVORITE this charm for wish() to find it.
  */
-import { Cell, Default, handler, NAME, pattern, Stream, UI } from "commontools";
+import { Cell, Writable, Default, handler, NAME, pattern, Stream, UI } from "commontools";
 
 interface Input {
   // Counter value that increments each time the stream is invoked
@@ -32,7 +32,7 @@ interface Output {
 // Handler that increments the counter and logs the invocation
 const incrementHandler = handler<
   unknown,
-  { counter: Cell<number>; invocationLog: Cell<string[]> }
+  { counter: Writable<number>; invocationLog: Writable<string[]> }
 >((_event, { counter, invocationLog }) => {
   // Increment counter
   counter.set(counter.get() + 1);

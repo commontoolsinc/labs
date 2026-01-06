@@ -8,7 +8,7 @@
 import { computed, NAME, OpaqueRef, pattern, UI } from "commontools";
 import { type CategoryBudget, type Expense } from "./schemas.tsx";
 
-// Sub-patterns use OpaqueRef for read-only access (no Cell<> needed)
+// Sub-patterns use OpaqueRef for read-only access (no Writable<> needed)
 interface Input {
   expenses: OpaqueRef<Expense[]>;
   budgets: OpaqueRef<CategoryBudget[]>;

@@ -6,7 +6,7 @@
  * like Record. Provides rapid keyboard entry, checkboxes, and indent toggle.
  */
 import {
-  Cell,
+  Cell, Writable,
   computed,
   type Default,
   handler,
@@ -50,7 +50,7 @@ interface SimpleListItem {
 }
 
 export interface SimpleListModuleInput {
-  items: Cell<Default<SimpleListItem[], []>>;
+  items: Writable<Default<SimpleListItem[], []>>;
 }
 
 // ===== Handlers =====
@@ -58,7 +58,7 @@ export interface SimpleListModuleInput {
 // Toggle indent on an item
 const toggleIndent = handler<
   unknown,
-  { items: Cell<SimpleListItem[]>; index: number }
+  { items: Writable<SimpleListItem[]>; index: number }
 >((_event, { items, index }) => {
   const current = items.get() || [];
   if (index < 0 || index >= current.length) return;
@@ -74,7 +74,7 @@ const toggleIndent = handler<
 // Delete an item
 const deleteItem = handler<
   unknown,
-  { items: Cell<SimpleListItem[]>; index: number }
+  { items: Writable<SimpleListItem[]>; index: number }
 >((_event, { items, index }) => {
   const current = items.get() || [];
   if (index < 0 || index >= current.length) return;

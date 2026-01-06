@@ -3,13 +3,13 @@
  * Budget Tracker - Expense Form Sub-Pattern
  *
  * Provides UI and handlers for adding/removing expenses and budgets.
- * Requires Cell<> for write access to data.
+ * Requires Writable<> for write access to data.
  *
  * Can be deployed standalone for testing handlers,
  * or composed into a larger pattern.
  */
 import {
-  Cell,
+  Cell, Writable,
   computed,
   handler,
   NAME,
@@ -23,8 +23,8 @@ import { type CategoryBudget, type Expense, getTodayDate } from "./schemas.tsx";
 
 // Sub-patterns don't use Default<> - the parent pattern owns initialization
 interface Input {
-  expenses: Cell<Expense[]>;
-  budgets: Cell<CategoryBudget[]>;
+  expenses: Writable<Expense[]>;
+  budgets: Writable<CategoryBudget[]>;
 }
 
 interface Output {
@@ -44,7 +44,7 @@ interface Output {
 
 const addExpenseHandler = handler<
   { description: string; amount: number; category?: string; date?: string },
-  { expenses: Cell<Expense[]> }
+  { expenses: Writable<Expense[]> }
 >(({ description, amount, category, date }, { expenses }) => {
   if (!description?.trim() || typeof amount !== "number" || amount <= 0) {
     return;
@@ -59,7 +59,7 @@ const addExpenseHandler = handler<
 
 const setBudgetHandler = handler<
   { category: string; limit: number },
-  { budgets: Cell<CategoryBudget[]> }
+  { budgets: Writable<CategoryBudget[]> }
 >(({ category, limit }, { budgets }) => {
   if (!category?.trim() || typeof limit !== "number" || limit < 0) {
     return;
@@ -80,7 +80,7 @@ const setBudgetHandler = handler<
 
 const removeBudgetHandler = handler<
   { category: string },
-  { budgets: Cell<CategoryBudget[]> }
+  { budgets: Writable<CategoryBudget[]> }
 >(({ category }, { budgets }) => {
   const current = budgets.get();
   const index = current.findIndex((b) => b.category === category);

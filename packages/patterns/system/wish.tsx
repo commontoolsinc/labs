@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   computed,
   type Default,
   pattern,
@@ -19,7 +19,7 @@ export type WishParams = {
 };
 
 export default pattern<
-  WishParams & { candidates: Default<Cell<never>[], []> },
+  WishParams & { candidates: Default<Writable<never>[], []> },
   WishState<never>
 >(
   ({ query: _query, context: _context, candidates }) => {

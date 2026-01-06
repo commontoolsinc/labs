@@ -7,7 +7,7 @@
  * Demonstrates the settingsUI pattern for module configuration.
  */
 import {
-  Cell,
+  Cell, Writable,
   type Default,
   handler,
   ifElse,
@@ -57,7 +57,7 @@ interface PhotoModuleOutput {
 // Handler to clear the photo
 const clearPhoto = handler<
   unknown,
-  { images: Cell<ImageData[]> }
+  { images: Writable<ImageData[]> }
 >((_event, { images }) => {
   images.set([]);
 });

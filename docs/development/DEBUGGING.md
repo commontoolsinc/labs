@@ -8,11 +8,9 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 
 | Error Message | Cause | Fix |
 |---------------|-------|-----|
-| "Property 'set' does not exist" | Missing `Cell<>` in signature | Add `Cell<T>` for write access ([TYPES](TYPES_AND_SCHEMAS.md)) |
-| "Property X does not exist on type 'OpaqueRef\<unknown\>'" | Missing type in `.map()` | Add `OpaqueRef<T>` annotation ([TYPES](TYPES_AND_SCHEMAS.md)) |
+| "Property 'set' does not exist" | Missing `Writable<>` in signature | Add `Writable<T>` for write access ([TYPES](TYPES_AND_SCHEMAS.md)) |
 | "Type 'string' is not assignable to type 'CSSProperties'" | String style on HTML element | Use object syntax `style={{ ... }}` ([COMPONENTS](COMPONENTS.md)) |
-| "Type 'OpaqueRef\<T\>' is not assignable to 'Cell\<T\>'" | Binding whole item, not property | Bind `item.done`, not `item` |
-| Using `OpaqueRef<T>` in Output for handlers | Should use `Stream<T>` | Use `Stream<T>` for handlers ([TYPES](TYPES_AND_SCHEMAS.md)) |
+| Type mismatch binding item to `$checked` | Binding whole item, not property | Bind `item.done`, not `item` |
 | "ReadOnlyAddressError" | onClick inside computed() | Move button outside, use disabled ([see below](#onclick-inside-computed)) |
 | Charm hangs, never renders | ifElse with composed pattern cell | Use local computed cell ([see below](#ifelse-with-composed-pattern-cells)) |
 | Data not updating | Missing `$` prefix or wrong event | Use `$checked`, `$value` ([COMPONENTS](COMPONENTS.md)) |
@@ -113,8 +111,8 @@ const total = calcTotal({ expenses });
 ```typescript
 // ❌ WRONG: Passing event data at binding time
 const addItem = handler<
-  { title: string },           // Event type
-  { items: Cell<Item[]> }      // State type
+  { title: string },               // Event type
+  { items: Writable<Item[]> }      // State type
 >(({ title }, { items }) => { items.push({ title }); });
 
 <button onClick={addItem({ title: "Test", items })}>  // Error!
@@ -143,7 +141,7 @@ addItem.subscribe(({ title }) => {
 });
 
 // ✅ CORRECT: A bound handler IS the stream
-const addItemHandler = handler<{ title: string }, { items: Cell<Item[]> }>(
+const addItemHandler = handler<{ title: string }, { items: Writable<Item[]> }>(
   ({ title }, { items }) => { items.push({ title }); }
 );
 const addItem = addItemHandler({ items });  // This IS Stream<{ title: string }>
@@ -160,7 +158,7 @@ return { addItem };
 
 ### Wrong Type for Binding
 
-**Error:** "Type 'OpaqueRef\<ShoppingItem\>' is not assignable to type 'Cell\<boolean\>'"
+**Error:** Type mismatch when binding to `$checked` or similar
 
 ❌ **Problem:** Trying to bind the whole item instead of a property
 
@@ -174,70 +172,20 @@ return { addItem };
 <ct-checkbox $checked={item.done} />  {/* Bind the boolean property */}
 ```
 
-### OpaqueRef in Handler Parameters
+### Writable<T[]> vs Writable<Array<Writable<T>>>
 
-**Error:** Type errors when calling handler methods
-
-❌ **Problem:** Using `OpaqueRef<>` in handler type signature
+Use `Writable<T[]>` by default. Only use `Writable<Array<Writable<T>>>` when you need Writable methods on individual elements:
 
 ```typescript
-const addItem = handler<
-  unknown,
-  { items: Cell<OpaqueRef<ShoppingItem>[]> }  // Wrong!
->(/* ... */);
-```
-
-✅ **Solution:** Use `Cell<T[]>` instead
-
-```typescript
-const addItem = handler<
-  unknown,
-  { items: Cell<ShoppingItem[]> }  // Correct!
->((_event, { items }) => {
-  items.push({ title: "New", done: false });
-});
-```
-
-Don't use `OpaqueRef<>` in handler signatures. Use `Cell<T[]>` instead.
-
-### OpaqueRef in Output Interface Handlers
-
-**Error:** Type errors when exposing handlers in Output interface
-
-❌ **Problem:** Using `OpaqueRef<>` for handlers in Output interface
-
-```typescript
-interface Output {
-  increment: OpaqueRef<void>;  // Wrong!
-  addItem: OpaqueRef<{ title: string }>;  // Wrong!
-}
-```
-
-✅ **Solution:** Use `Stream<T>` for handlers in Output interfaces
-
-```typescript
-interface Output {
-  increment: Stream<void>;  // Correct!
-  addItem: Stream<{ title: string }>;  // Correct!
-}
-```
-
-**Rule:** Handlers in Output interfaces must be typed as `Stream<T>`, not `OpaqueRef<T>`. See [TYPES_AND_SCHEMAS.md](TYPES_AND_SCHEMAS.md) section "Handler Types in Output Interfaces" for details.
-
-### Cell<T[]> vs Cell<Array<Cell<T>>>
-
-Use `Cell<T[]>` by default. Only use `Cell<Array<Cell<T>>>` when you need Cell methods on individual elements:
-
-```typescript
-// ✅ Standard - Cell<T[]>
-const addItem = handler<unknown, { items: Cell<Item[]> }>(
+// ✅ Standard - Writable<T[]>
+const addItem = handler<unknown, { items: Writable<Item[]> }>(
   (_, { items }) => items.push({ title: "New" })
 );
 
-// ✅ Advanced - Cell<Array<Cell<T>>> for .equals()
+// ✅ Advanced - Writable<Array<Writable<T>>> for .equals()
 const removeItem = handler<
   unknown,
-  { items: Cell<Array<Cell<Item>>>; item: Cell<Item> }
+  { items: Writable<Array<Writable<Item>>>; item: Writable<Item> }
 >((_event, { items, item }) => {
   const index = items.get().findIndex(el => el.equals(item));
   if (index >= 0) items.set(items.get().toSpliced(index, 1));
@@ -467,7 +415,7 @@ export default pattern(({ searchQuery }) => {
   const { result, error, loading } = fetchData({ url: searchUrl });
 
   // Handler just updates the query, fetchData handles the rest
-  const handleSearch = handler<{ detail: { message: string } }, { searchQuery: Cell<string> }>(
+  const handleSearch = handler<{ detail: { message: string } }, { searchQuery: Writable<string> }>(
     ({ detail }, { searchQuery }) => searchQuery.set(detail.message)
   );
 
@@ -535,8 +483,7 @@ deno task ct charm inspect --identity key.json --api-url URL --space SPACE --cha
 
 | Problem | Fix |
 |---------|-----|
-| Can't call `.set()` | Add `Cell<T>` to type signature |
-| Type error in `.map()` | Add `OpaqueRef<T>` annotation |
+| Can't call `.set()` | Add `Writable<T>` to type signature |
 | Filter not updating | Use `computed(() => items.filter(...))` |
 | Checkbox not syncing | Use `$checked` not `checked` |
 | Style not applying | Check element type (object vs string syntax) |

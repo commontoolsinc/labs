@@ -7,7 +7,7 @@
  * 2. Set selectedItem to that value
  * 3. Check if it creates links/aliases vs copies
  */
-import { Cell, Default, handler, NAME, pattern, UI } from "commontools";
+import { Cell, Writable, Default, handler, NAME, pattern, UI } from "commontools";
 
 interface Item {
   title: string;
@@ -21,7 +21,7 @@ interface DiagInput {
 }
 
 // Add item handler
-const addItem = handler<unknown, { items: Cell<Item[]>; log: Cell<string[]> }>(
+const addItem = handler<unknown, { items: Writable<Item[]>; log: Writable<string[]> }>(
   (_, { items, log }) => {
     const newItem: Item = {
       title: `Item-${Date.now()}`,
@@ -36,9 +36,9 @@ const addItem = handler<unknown, { items: Cell<Item[]>; log: Cell<string[]> }>(
 const selectByIndex = handler<
   unknown,
   {
-    items: Cell<Item[]>;
-    selectedItem: Cell<Item | null>;
-    log: Cell<string[]>;
+    items: Writable<Item[]>;
+    selectedItem: Writable<Item | null>;
+    log: Writable<string[]>;
     index: number;
   }
 >(
@@ -72,7 +72,7 @@ const selectByIndex = handler<
 // Clear selection
 const clearSelection = handler<
   unknown,
-  { selectedItem: Cell<Item | null>; log: Cell<string[]> }
+  { selectedItem: Writable<Item | null>; log: Writable<string[]> }
 >(
   (_, { selectedItem, log }) => {
     selectedItem.set(null);
@@ -81,7 +81,7 @@ const clearSelection = handler<
 );
 
 // Clear log
-const clearLog = handler<unknown, { log: Cell<string[]> }>(
+const clearLog = handler<unknown, { log: Writable<string[]> }>(
   (_, { log }) => {
     log.set([]);
   },

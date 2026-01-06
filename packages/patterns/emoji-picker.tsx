@@ -6,7 +6,7 @@
  * Each emoji has comprehensive search aliases including slang terms.
  */
 import {
-  type Cell,
+  type Cell, Writable,
   computed,
   type Default,
   handler,
@@ -2672,13 +2672,13 @@ const EMOJI_ITEMS: AutocompleteItem[] = [
 
 const onSelectEmoji = handler<
   CustomEvent<{ value: string; label: string }>,
-  { selectedEmoji: Cell<string> }
+  { selectedEmoji: Writable<string> }
 >((event, { selectedEmoji }) => {
   const { value } = event.detail;
   selectedEmoji.set(value);
 });
 
-const clearSelection = handler<unknown, { selectedEmoji: Cell<string> }>(
+const clearSelection = handler<unknown, { selectedEmoji: Writable<string> }>(
   (_event, { selectedEmoji }) => {
     selectedEmoji.set("");
   },

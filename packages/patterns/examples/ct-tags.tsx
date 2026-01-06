@@ -1,6 +1,6 @@
 /// <cts-enable />
 
-import { Cell, Default, handler, NAME, recipe, UI } from "commontools";
+import { Cell, Writable, Default, handler, NAME, recipe, UI } from "commontools";
 
 type Input = {
   tags: string[];
@@ -17,7 +17,7 @@ const updateTags = handler<
     };
   },
   {
-    tags: Cell<string[]>;
+    tags: Writable<string[]>;
   }
 >(({ detail }, state) => {
   state.tags.set(detail?.tags ?? []);

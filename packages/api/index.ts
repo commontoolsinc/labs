@@ -734,6 +734,14 @@ export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}
 export declare const Cell: CellTypeConstructor<AsCell>;
 
 /**
+ * Writable<T> is an alias for Cell<T> that better expresses the semantic meaning.
+ * In patterns, requesting data as Writable<T> means "I need write access" -
+ * all data in patterns is reactive by default, whether wrapped or not.
+ */
+export type Writable<T = unknown> = Cell<T>;
+export declare const Writable: CellTypeConstructor<AsCell>;
+
+/**
  * Stream-only cell - can only send events, not read or write.
  * Has .send() only
  * Does NOT have .key()/.equals()/.get()/.set()/.resolveAsCell()

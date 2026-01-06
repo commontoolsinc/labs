@@ -25,7 +25,7 @@
  * - The hidden branch's counter stays frozen until it becomes visible
  */
 import {
-  Cell,
+  Cell, Writable,
   computed,
   Default,
   handler,
@@ -49,7 +49,7 @@ interface Output {
 
 const toggle = handler<
   unknown,
-  { condition: Cell<boolean>; toggleCount: Cell<number> }
+  { condition: Writable<boolean>; toggleCount: Writable<number> }
 >((_event, { condition, toggleCount }) => {
   condition.set(!condition.get());
   toggleCount.set(toggleCount.get() + 1);

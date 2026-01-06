@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   computed,
   Default,
   handler,
@@ -81,7 +81,7 @@ const getSuitColor = lift((suit: Suit): string => {
 // Handler to move a card to pile 1
 const moveToPile1 = handler<
   { detail: { sourceCell: Cell } },
-  { pile1: Cell<Card[]>; pile2: Cell<Card[]> }
+  { pile1: Writable<Card[]>; pile2: Writable<Card[]> }
 >((event, { pile1, pile2 }) => {
   const sourceCard = event.detail?.sourceCell?.get() as Card;
   if (!sourceCard) return;
@@ -100,7 +100,7 @@ const moveToPile1 = handler<
 // Handler to move a card to pile 2
 const moveToPile2 = handler<
   { detail: { sourceCell: Cell } },
-  { pile1: Cell<Card[]>; pile2: Cell<Card[]> }
+  { pile1: Writable<Card[]>; pile2: Writable<Card[]> }
 >((event, { pile1, pile2 }) => {
   const sourceCard = event.detail?.sourceCell?.get() as Card;
   if (!sourceCard) return;

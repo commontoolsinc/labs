@@ -1,7 +1,7 @@
 /// <cts-enable />
 import {
   BuiltInLLMContent,
-  Cell,
+  Cell, Writable,
   Default,
   derive,
   generateText,
@@ -22,7 +22,7 @@ type LLMTestResult = {
 
 const askQuestion = handler<
   { detail: { message: string } },
-  { question: Cell<string> }
+  { question: Writable<string> }
 >((event, { question }) => {
   const userQuestion = event.detail?.message?.trim();
   if (userQuestion) {

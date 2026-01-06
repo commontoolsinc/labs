@@ -27,7 +27,7 @@
  * - The pattern uses object references (cells) instead of string IDs
  */
 import {
-  Cell,
+  Cell, Writable,
   computed,
   handler,
   ifElse,
@@ -42,15 +42,15 @@ interface Item {
 }
 
 interface TestCellEqualsInput {
-  items: Cell<Item[]>;
-  selectedItem: Cell<Item | null>;
+  items: Writable<Item[]>;
+  selectedItem: Writable<Item | null>;
 }
 
 interface TestCellEqualsOutput extends TestCellEqualsInput {}
 
 // Handler to add a new item at the END of the list
 // (Adding at end keeps indices stable for existing items)
-const addItem = handler<unknown, { items: Cell<Item[]> }>(
+const addItem = handler<unknown, { items: Writable<Item[]> }>(
   (_, { items }) => {
     const timestamp = new Date().toLocaleTimeString();
     const newItem: Item = {
@@ -66,7 +66,7 @@ const addItem = handler<unknown, { items: Cell<Item[]> }>(
 // which gives us plain values instead of cell references.
 const selectItem = handler<
   unknown,
-  { selectedItem: Cell<Item | null>; items: Cell<Item[]>; index: number }
+  { selectedItem: Writable<Item | null>; items: Writable<Item[]>; index: number }
 >(
   (_, { selectedItem, items, index }) => {
     const current = selectedItem.get();
@@ -89,7 +89,7 @@ const selectItem = handler<
 // Handler to remove the selected item
 const removeSelected = handler<
   unknown,
-  { items: Cell<Item[]>; selectedItem: Cell<Item | null> }
+  { items: Writable<Item[]>; selectedItem: Writable<Item | null> }
 >(
   (_, { items, selectedItem }) => {
     const selected = selectedItem.get();

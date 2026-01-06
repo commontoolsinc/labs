@@ -203,7 +203,7 @@ Tree structure editor. See `packages/patterns/page.tsx` for complete example.
 type OutlinerNode = {
   body: Default<string, "">;
   children: Default<any[], []>;
-  attachments: Default<OpaqueRef<any>[], []>;
+  attachments: Default<any[], []>;
 };
 
 <ct-outliner $value={outline} />
@@ -228,7 +228,7 @@ Debugging tool for inspecting cell values. See [CELL_CONTEXT.md](CELL_CONTEXT.md
 Use `Cell.equals()` for identity comparison:
 
 ```tsx
-const removeItem = handler<unknown, { items: Cell<Item[]>; item: OpaqueRef<Item> }>(
+const removeItem = handler<unknown, { items: Writable<Item[]>; item: Item }>(
   (_, { items, item }) => {
     const current = items.get();
     const index = current.findIndex((el) => Cell.equals(item, el));

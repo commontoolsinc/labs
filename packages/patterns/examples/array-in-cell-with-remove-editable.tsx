@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, NAME, pattern, UI } from "commontools";
+import { Cell, Writable, Default, handler, NAME, pattern, UI } from "commontools";
 
 interface Item {
   text: Default<string, "">;
@@ -17,7 +17,7 @@ type InputEventType = {
 };
 
 interface ListState {
-  items: Cell<Item[]>;
+  items: Writable<Item[]>;
 }
 
 const addItem = handler<InputEventType, ListState>(
@@ -28,7 +28,7 @@ const addItem = handler<InputEventType, ListState>(
 
 const removeItem = handler<
   unknown,
-  { items: Cell<Array<Cell<Item>>>; item: Cell<Item> }
+  { items: Writable<Array<Writable<Item>>>; item: Writable<Item> }
 >((_event, { items, item }) => {
   const currentItems = items.get();
   const index = currentItems.findIndex((el) => el.equals(item));
@@ -39,7 +39,7 @@ const removeItem = handler<
 
 const updateItem = handler<
   { detail: { value: string } },
-  { items: Cell<Item[]>; index: number }
+  { items: Writable<Item[]>; index: number }
 >(({ detail: { value } }, { items, index }) => {
   const itemsCopy = items.get().slice();
   if (index >= 0 && index < itemsCopy.length) {

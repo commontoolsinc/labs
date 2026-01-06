@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, NAME, recipe, UI } from "commontools";
+import { Cell, Writable, Default, handler, NAME, recipe, UI } from "commontools";
 
 interface Item {
   text: Default<string, "">;
@@ -17,7 +17,7 @@ type InputEventType = {
 };
 
 interface ListState {
-  items: Cell<Item[]>;
+  items: Writable<Item[]>;
 }
 
 const addItem = handler<InputEventType, ListState>(

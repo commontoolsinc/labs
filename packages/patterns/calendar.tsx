@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   computed,
   Default,
   ifElse,
@@ -21,7 +21,7 @@ interface Event {
 }
 
 interface Input {
-  events: Cell<Default<Event[], []>>;
+  events: Writable<Default<Event[], []>>;
 }
 
 interface Output {

@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   computed,
   Default,
   ifElse,
@@ -19,8 +19,8 @@ interface Relationship {
 }
 
 interface Input {
-  contacts: Cell<Default<Contact[], []>>;
-  relationships: Cell<Default<Relationship[], []>>;
+  contacts: Writable<Default<Contact[], []>>;
+  relationships: Writable<Default<Relationship[], []>>;
 }
 
 interface Output {

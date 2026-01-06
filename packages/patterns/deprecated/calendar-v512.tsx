@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   Default,
   derive,
   handler,
@@ -1192,7 +1192,7 @@ const _getButtonClassName = lift((note: Note | undefined) => {
 // Handler to navigate to previous day
 const previousDay = handler<
   never,
-  { currentDate: Cell<string> }
+  { currentDate: Writable<string> }
 >((_event, { currentDate }) => {
   const current = new Date(currentDate.get());
   current.setDate(current.getDate() - 1);
@@ -1202,7 +1202,7 @@ const previousDay = handler<
 // Handler to navigate to next day
 const nextDay = handler<
   never,
-  { currentDate: Cell<string> }
+  { currentDate: Writable<string> }
 >((_event, { currentDate }) => {
   const current = new Date(currentDate.get());
   current.setDate(current.getDate() + 1);
@@ -1213,7 +1213,7 @@ const nextDay = handler<
 // OPTIMIZATION v508: Also update viewedYearMonth when going to today
 const goToToday = handler<
   never,
-  { currentDate: Cell<string>; viewedYearMonth: Cell<string> }
+  { currentDate: Writable<string>; viewedYearMonth: Writable<string> }
 >((_event, { currentDate, viewedYearMonth }) => {
   const today = getTodayISO();
   currentDate.set(today);
@@ -1224,7 +1224,7 @@ const goToToday = handler<
 // OPTIMIZATION v508: Handlers also update viewedYearMonth for proper separation
 const previousMonth = handler<
   never,
-  { currentDate: Cell<string>; viewedYearMonth: Cell<string> }
+  { currentDate: Writable<string>; viewedYearMonth: Writable<string> }
 >((_event, { currentDate, viewedYearMonth }) => {
   const current = new Date(currentDate.get() + "T00:00:00");
   current.setMonth(current.getMonth() - 1);
@@ -1236,7 +1236,7 @@ const previousMonth = handler<
 // Handler to navigate to next month
 const nextMonth = handler<
   never,
-  { currentDate: Cell<string>; viewedYearMonth: Cell<string> }
+  { currentDate: Writable<string>; viewedYearMonth: Writable<string> }
 >((_event, { currentDate, viewedYearMonth }) => {
   const current = new Date(currentDate.get() + "T00:00:00");
   current.setMonth(current.getMonth() + 1);
@@ -1991,7 +1991,7 @@ export default recipe<Input, Output>(
     // OPTIMIZATION v508: Also update viewedYearMonth when selecting a day
     const selectDayFromCalendar = handler<
       { target: { dataset: { date: string } } },
-      { currentDate: Cell<string>; viewedYearMonth: Cell<string> }
+      { currentDate: Writable<string>; viewedYearMonth: Writable<string> }
     >(({ target }, { currentDate, viewedYearMonth }) => {
       const date = target.dataset.date;
       if (date) {
@@ -2222,7 +2222,7 @@ export default recipe<Input, Output>(
     // Handler to change month
     const _changeMonth = handler<
       { detail: { value: number } },
-      { currentDate: Cell<string> }
+      { currentDate: Writable<string> }
     >(({ detail }, { currentDate }) => {
       const current = new Date(currentDate.get() + "T00:00:00");
       current.setMonth(detail.value);
@@ -2232,7 +2232,7 @@ export default recipe<Input, Output>(
     // Handler to change year
     const _changeYear = handler<
       { detail: { value: number } },
-      { currentDate: Cell<string> }
+      { currentDate: Writable<string> }
     >(({ detail }, { currentDate }) => {
       const current = new Date(currentDate.get() + "T00:00:00");
       current.setFullYear(detail.value);
@@ -2242,7 +2242,7 @@ export default recipe<Input, Output>(
     // Handler to add a new note to current date
     const addNote = handler<
       never,
-      { entries: Cell<DayEntry[]>; currentDate: Cell<string> }
+      { entries: Writable<DayEntry[]>; currentDate: Writable<string> }
     >((_event, { entries, currentDate }) => {
       const date = currentDate.get();
       const allEntries = entries.get();
@@ -2276,8 +2276,8 @@ export default recipe<Input, Output>(
     const addNoteAtTime = handler<
       never,
       {
-        entries: Cell<DayEntry[]>;
-        currentDate: Cell<string>;
+        entries: Writable<DayEntry[]>;
+        currentDate: Writable<string>;
         scheduledTime: string;
         duration?: number;
       }
@@ -2315,10 +2315,10 @@ export default recipe<Input, Output>(
     const updateNote = handler<
       { target: { value: string } },
       {
-        entries: Cell<DayEntry[]>;
-        currentDate: Cell<string>;
+        entries: Writable<DayEntry[]>;
+        currentDate: Writable<string>;
         noteId: string;
-        customTimeLabels: Cell<TimeLabel[]>;
+        customTimeLabels: Writable<TimeLabel[]>;
       }
     >(({ target }, { entries, currentDate, noteId, customTimeLabels }) => {
       const text = target?.value ?? "";
@@ -2439,9 +2439,9 @@ export default recipe<Input, Output>(
     // Handler to delete a note
     // Helper function to perform deletion logic
     const performDeleteLogic = (state: {
-      entries: Cell<DayEntry[]>;
-      recurringSeries: Cell<RecurringSeries[]>;
-      seriesOverrides: Cell<SeriesOverride[]>;
+      entries: Writable<DayEntry[]>;
+      recurringSeries: Writable<RecurringSeries[]>;
+      seriesOverrides: Writable<SeriesOverride[]>;
       noteId: string;
       date: string;
       deleteScope: string;
@@ -2584,15 +2584,15 @@ export default recipe<Input, Output>(
     const deleteNote = handler<
       never,
       {
-        entries: Cell<DayEntry[]>;
-        recurringSeries: Cell<RecurringSeries[]>;
-        seriesOverrides: Cell<SeriesOverride[]>;
-        currentDate: Cell<string>;
+        entries: Writable<DayEntry[]>;
+        recurringSeries: Writable<RecurringSeries[]>;
+        seriesOverrides: Writable<SeriesOverride[]>;
+        currentDate: Writable<string>;
         noteId: string;
         seriesId?: string;
-        deletionConfirmingScopeCell: Cell<boolean>;
-        deletionPendingCell: Cell<{ noteId: string; date: string } | null>;
-        scheduleEditScopeCell: Cell<string>;
+        deletionConfirmingScopeCell: Writable<boolean>;
+        deletionPendingCell: Writable<{ noteId: string; date: string } | null>;
+        scheduleEditScopeCell: Writable<string>;
       }
     >((
       _event,
@@ -2666,7 +2666,7 @@ export default recipe<Input, Output>(
     // Handler for date picker input (used on small screens)
     const handleDateInputChange = handler<
       { target: { value: string } },
-      { currentDate: Cell<string> }
+      { currentDate: Writable<string> }
     >(({ target }, { currentDate }) => {
       const value = target.value;
       if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -2678,9 +2678,9 @@ export default recipe<Input, Output>(
     const addEntryHandler = handler<
       { date: string; text: string },
       {
-        entries: Cell<DayEntry[]>;
-        customTimeLabels: Cell<TimeLabel[]>;
-        recurringSeries: Cell<RecurringSeries[]>;
+        entries: Writable<DayEntry[]>;
+        customTimeLabels: Writable<TimeLabel[]>;
+        recurringSeries: Writable<RecurringSeries[]>;
       }
     >(({ date, text }, { entries, customTimeLabels, recurringSeries }) => {
       const trimmedText = (text || "").trim();
@@ -2812,7 +2812,7 @@ export default recipe<Input, Output>(
     // Handler to update an existing note by ID (exposed for external use)
     const updateEntryHandler = handler<
       { date: string; noteId: string; text: string },
-      { entries: Cell<DayEntry[]> }
+      { entries: Writable<DayEntry[]> }
     >(({ date, noteId, text }, { entries }) => {
       const trimmedText = (text || "").trim();
 
@@ -2846,7 +2846,7 @@ export default recipe<Input, Output>(
     // OPTIMIZATION v508: Also update viewedYearMonth
     const goToDateHandler = handler<
       { date: string },
-      { currentDate: Cell<string>; viewedYearMonth: Cell<string> }
+      { currentDate: Writable<string>; viewedYearMonth: Writable<string> }
     >(({ date }, { currentDate, viewedYearMonth }) => {
       // Validate date format (YYYY-MM-DD)
       if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -2871,14 +2871,14 @@ export default recipe<Input, Output>(
     const showSettings = Cell.of<boolean>(false);
 
     // Handler to toggle settings
-    const toggleSettings = handler<never, { showSettings: Cell<boolean> }>(
+    const toggleSettings = handler<never, { showSettings: Writable<boolean> }>(
       (_event, { showSettings }) => {
         showSettings.set(!showSettings.get());
       },
     );
 
     // Handler to close settings
-    const closeSettings = handler<never, { showSettings: Cell<boolean> }>(
+    const closeSettings = handler<never, { showSettings: Writable<boolean> }>(
       (_event, { showSettings }) => {
         showSettings.set(false);
       },
@@ -2887,7 +2887,7 @@ export default recipe<Input, Output>(
     // Handler to rename the calendar (exposed for external use)
     const renameHandler = handler<
       { name: string },
-      { name: Cell<string> }
+      { name: Writable<string> }
     >(({ name: newName }, { name }) => {
       if (newName && newName.trim().length > 0) {
         name.set(newName.trim());
@@ -2898,9 +2898,9 @@ export default recipe<Input, Output>(
     const setScheduledTimeHandler = handler<
       { date: string; noteId: string; scheduledTime?: string },
       {
-        entries: Cell<DayEntry[]>;
-        recurringSeries: Cell<RecurringSeries[]>;
-        seriesOverrides: Cell<SeriesOverride[]>;
+        entries: Writable<DayEntry[]>;
+        recurringSeries: Writable<RecurringSeries[]>;
+        seriesOverrides: Writable<SeriesOverride[]>;
       }
     >((
       { date, noteId, scheduledTime },
@@ -2963,7 +2963,7 @@ export default recipe<Input, Output>(
     // Handler to set duration for a note (exposed for external use)
     const setDurationHandler = handler<
       { date: string; noteId: string; duration?: string },
-      { entries: Cell<DayEntry[]>; seriesOverrides: Cell<SeriesOverride[]> }
+      { entries: Writable<DayEntry[]>; seriesOverrides: Writable<SeriesOverride[]> }
     >(({ date, noteId, duration }, { entries, seriesOverrides }) => {
       const allEntries = entries.get();
       const existingIndex = allEntries.findIndex((e: DayEntry) =>
@@ -3028,7 +3028,7 @@ export default recipe<Input, Output>(
         value?: number;
         unit?: "minute" | "hour" | "day" | "week";
       },
-      { entries: Cell<DayEntry[]>; seriesOverrides: Cell<SeriesOverride[]> }
+      { entries: Writable<DayEntry[]>; seriesOverrides: Writable<SeriesOverride[]> }
     >((
       { date, noteId, enabled, value, unit },
       { entries, seriesOverrides },
@@ -3107,7 +3107,7 @@ export default recipe<Input, Output>(
         until?: string;
         count?: number;
       },
-      { recurringSeries: Cell<RecurringSeries[]> }
+      { recurringSeries: Writable<RecurringSeries[]> }
     >((
       {
         text,
@@ -3158,7 +3158,7 @@ export default recipe<Input, Output>(
         until?: string;
         count?: number;
       },
-      { recurringSeries: Cell<RecurringSeries[]> }
+      { recurringSeries: Writable<RecurringSeries[]> }
     >((
       {
         seriesId,
@@ -3204,7 +3204,7 @@ export default recipe<Input, Output>(
     // Handler to delete a recurring series (exposed for external use)
     const deleteSeriesHandler = handler<
       { seriesId: string },
-      { recurringSeries: Cell<RecurringSeries[]> }
+      { recurringSeries: Writable<RecurringSeries[]> }
     >(({ seriesId }, { recurringSeries }) => {
       const allSeries = recurringSeries.get();
       const filtered = allSeries.filter((s: RecurringSeries) =>
@@ -3219,7 +3219,7 @@ export default recipe<Input, Output>(
     // Handler to update name from settings input
     const updateName = handler<
       { detail: { message: string } },
-      { name: Cell<string>; showSettings: Cell<boolean> }
+      { name: Writable<string>; showSettings: Writable<boolean> }
     >(({ detail }, { name, showSettings }) => {
       const newName = detail?.message?.trim();
       if (newName && newName.length > 0) {
@@ -3231,7 +3231,7 @@ export default recipe<Input, Output>(
     // Handlers for managing custom time labels
     const addTimeLabel = handler<
       never,
-      { customTimeLabels: Cell<TimeLabel[]> }
+      { customTimeLabels: Writable<TimeLabel[]> }
     >((_event, { customTimeLabels }) => {
       const labels = customTimeLabels.get();
       customTimeLabels.set([...labels, { label: "", time: "09:00" }]);
@@ -3240,7 +3240,7 @@ export default recipe<Input, Output>(
     const updateTimeLabel = handler<
       { target: { value: string } },
       {
-        customTimeLabels: Cell<TimeLabel[]>;
+        customTimeLabels: Writable<TimeLabel[]>;
         index: number;
         field: "label" | "time";
       }
@@ -3253,7 +3253,7 @@ export default recipe<Input, Output>(
 
     const deleteTimeLabel = handler<
       never,
-      { customTimeLabels: Cell<TimeLabel[]>; index: number }
+      { customTimeLabels: Writable<TimeLabel[]>; index: number }
     >((_event, { customTimeLabels, index }) => {
       const labels = customTimeLabels.get();
       const updated = labels.filter((_label, i) => i !== index);
@@ -3263,21 +3263,21 @@ export default recipe<Input, Output>(
     // Handlers for time grid settings
     const _updateStartTime = handler<
       { target: { value: string } },
-      { startTime: Cell<number> }
+      { startTime: Writable<number> }
     >(({ target }, { startTime }) => {
       startTime.set(parseInt(target.value, 10));
     });
 
     const _updateEndTime = handler<
       { target: { value: string } },
-      { endTime: Cell<number> }
+      { endTime: Writable<number> }
     >(({ target }, { endTime }) => {
       endTime.set(parseInt(target.value, 10));
     });
 
     const _updateTimeInterval = handler<
       { target: { value: string } },
-      { timeInterval: Cell<30 | 60> }
+      { timeInterval: Writable<30 | 60> }
     >(({ target }, { timeInterval }) => {
       timeInterval.set(parseInt(target.value, 10) as 30 | 60);
     });
@@ -3465,7 +3465,7 @@ export default recipe<Input, Output>(
     // Handler to toggle a day of the week for weekly recurrence
     const toggleRepeatDay = handler<
       never,
-      { day: string; scheduleRepeatDaysCell: Cell<string[]> }
+      { day: string; scheduleRepeatDaysCell: Writable<string[]> }
     >((_event, { day, scheduleRepeatDaysCell }) => {
       const days = scheduleRepeatDaysCell.get();
       if (days.includes(day)) {
@@ -3480,8 +3480,8 @@ export default recipe<Input, Output>(
     const onRepeatTypeChange = handler<
       { detail: { value: string } },
       {
-        scheduleRepeatDaysCell: Cell<string[]>;
-        scheduleStartDateCell: Cell<string>;
+        scheduleRepeatDaysCell: Writable<string[]>;
+        scheduleStartDateCell: Writable<string>;
       }
     >(({ detail }, { scheduleRepeatDaysCell, scheduleStartDateCell }) => {
       const newValue = detail?.value || "none";
@@ -3503,30 +3503,30 @@ export default recipe<Input, Output>(
     const openScheduleModal = handler<
       never,
       {
-        scheduleModalState: Cell<{ noteId: string; date: string } | null>;
+        scheduleModalState: Writable<{ noteId: string; date: string } | null>;
         noteId: string;
-        currentDate: Cell<string>;
-        entries: Cell<DayEntry[]>;
-        recurringSeries: Cell<RecurringSeries[]>;
-        scheduleTimeCell: Cell<string>;
-        scheduleTextCell: Cell<string>;
-        scheduleStartDateCell: Cell<string>;
-        scheduleHourCell: Cell<string>;
-        scheduleMinuteCell: Cell<string>;
-        schedulePeriodCell: Cell<string>;
-        scheduleDurationCell: Cell<string>;
-        scheduleNotifEnabledCell: Cell<boolean>;
-        scheduleNotifValueCell: Cell<number>;
-        scheduleNotifUnitCell: Cell<string>;
-        scheduleRepeatCell: Cell<string>;
-        scheduleRepeatDaysCell: Cell<string[]>;
-        scheduleRepeatEndsCell: Cell<string>;
-        scheduleRepeatUntilCell: Cell<string>;
-        scheduleRepeatCountCell: Cell<number>;
-        scheduleEditScopeCell: Cell<string>;
-        scheduleConfirmingScopeCell: Cell<boolean>;
-        scheduleOriginalWeeklyDaysCell: Cell<string[]>;
-        isNewEventCell: Cell<boolean>;
+        currentDate: Writable<string>;
+        entries: Writable<DayEntry[]>;
+        recurringSeries: Writable<RecurringSeries[]>;
+        scheduleTimeCell: Writable<string>;
+        scheduleTextCell: Writable<string>;
+        scheduleStartDateCell: Writable<string>;
+        scheduleHourCell: Writable<string>;
+        scheduleMinuteCell: Writable<string>;
+        schedulePeriodCell: Writable<string>;
+        scheduleDurationCell: Writable<string>;
+        scheduleNotifEnabledCell: Writable<boolean>;
+        scheduleNotifValueCell: Writable<number>;
+        scheduleNotifUnitCell: Writable<string>;
+        scheduleRepeatCell: Writable<string>;
+        scheduleRepeatDaysCell: Writable<string[]>;
+        scheduleRepeatEndsCell: Writable<string>;
+        scheduleRepeatUntilCell: Writable<string>;
+        scheduleRepeatCountCell: Writable<number>;
+        scheduleEditScopeCell: Writable<string>;
+        scheduleConfirmingScopeCell: Writable<boolean>;
+        scheduleOriginalWeeklyDaysCell: Writable<string[]>;
+        isNewEventCell: Writable<boolean>;
       }
     >((_event, {
       scheduleModalState,
@@ -3733,8 +3733,8 @@ export default recipe<Input, Output>(
     const closeScheduleModal = handler<
       never,
       {
-        scheduleModalState: Cell<{ noteId: string; date: string } | null>;
-        isNewEventCell: Cell<boolean>;
+        scheduleModalState: Writable<{ noteId: string; date: string } | null>;
+        isNewEventCell: Writable<boolean>;
       }
     >((_event, { scheduleModalState, isNewEventCell }) => {
       scheduleModalState.set(null);
@@ -3746,19 +3746,19 @@ export default recipe<Input, Output>(
     const onNoteChange = handler<
       { target: { value: string } },
       {
-        scheduleTextCell: Cell<string>;
-        scheduleHourCell: Cell<string>;
-        scheduleMinuteCell: Cell<string>;
-        schedulePeriodCell: Cell<string>;
-        scheduleDurationCell: Cell<string>;
-        scheduleNotifEnabledCell: Cell<boolean>;
-        scheduleNotifValueCell: Cell<number>;
-        scheduleNotifUnitCell: Cell<string>;
-        scheduleRepeatCell: Cell<string>;
-        scheduleRepeatDaysCell: Cell<string[]>;
-        scheduleMonthlyPatternCell: Cell<string>;
-        scheduleModalState: Cell<{ noteId: string; date: string } | null>;
-        customTimeLabels: Cell<TimeLabel[]>;
+        scheduleTextCell: Writable<string>;
+        scheduleHourCell: Writable<string>;
+        scheduleMinuteCell: Writable<string>;
+        schedulePeriodCell: Writable<string>;
+        scheduleDurationCell: Writable<string>;
+        scheduleNotifEnabledCell: Writable<boolean>;
+        scheduleNotifValueCell: Writable<number>;
+        scheduleNotifUnitCell: Writable<string>;
+        scheduleRepeatCell: Writable<string>;
+        scheduleRepeatDaysCell: Writable<string[]>;
+        scheduleMonthlyPatternCell: Writable<string>;
+        scheduleModalState: Writable<{ noteId: string; date: string } | null>;
+        customTimeLabels: Writable<TimeLabel[]>;
       }
     >(({ target }, state) => {
       const text = target?.value ?? "";
@@ -3885,13 +3885,13 @@ export default recipe<Input, Output>(
     const deleteNoteFromModal = handler<
       never,
       {
-        entries: Cell<DayEntry[]>;
-        recurringSeries: Cell<RecurringSeries[]>;
-        scheduleModalState: Cell<{ noteId: string; date: string } | null>;
-        seriesOverrides: Cell<SeriesOverride[]>;
-        deletionConfirmingScopeCell: Cell<boolean>;
-        deletionPendingCell: Cell<{ noteId: string; date: string } | null>;
-        scheduleEditScopeCell: Cell<string>;
+        entries: Writable<DayEntry[]>;
+        recurringSeries: Writable<RecurringSeries[]>;
+        scheduleModalState: Writable<{ noteId: string; date: string } | null>;
+        seriesOverrides: Writable<SeriesOverride[]>;
+        deletionConfirmingScopeCell: Writable<boolean>;
+        deletionPendingCell: Writable<{ noteId: string; date: string } | null>;
+        scheduleEditScopeCell: Writable<string>;
       }
     >((
       _event,
@@ -3964,15 +3964,15 @@ export default recipe<Input, Output>(
     const _parseScheduleText = handler<
       never,
       {
-        scheduleTextCell: Cell<string>;
-        scheduleHourCell: Cell<string>;
-        scheduleMinuteCell: Cell<string>;
-        schedulePeriodCell: Cell<string>;
-        scheduleDurationCell: Cell<string>;
-        scheduleNotifEnabledCell: Cell<boolean>;
-        scheduleNotifValueCell: Cell<number>;
-        scheduleNotifUnitCell: Cell<string>;
-        customTimeLabels: Cell<TimeLabel[]>;
+        scheduleTextCell: Writable<string>;
+        scheduleHourCell: Writable<string>;
+        scheduleMinuteCell: Writable<string>;
+        schedulePeriodCell: Writable<string>;
+        scheduleDurationCell: Writable<string>;
+        scheduleNotifEnabledCell: Writable<boolean>;
+        scheduleNotifValueCell: Writable<number>;
+        scheduleNotifUnitCell: Writable<string>;
+        customTimeLabels: Writable<TimeLabel[]>;
       }
     >((_event, {
       scheduleTextCell,
@@ -4068,18 +4068,18 @@ export default recipe<Input, Output>(
     const feelingLucky = handler<
       never,
       {
-        entries: Cell<DayEntry[]>;
-        recurringSeries: Cell<RecurringSeries[]>;
-        scheduleModalState: Cell<{ noteId: string; date: string } | null>;
-        scheduleTextCell: Cell<string>;
-        scheduleHourCell: Cell<string>;
-        scheduleMinuteCell: Cell<string>;
-        schedulePeriodCell: Cell<string>;
-        scheduleDurationCell: Cell<string>;
-        scheduleNotifEnabledCell: Cell<boolean>;
-        scheduleNotifValueCell: Cell<number>;
-        scheduleNotifUnitCell: Cell<string>;
-        customTimeLabels: Cell<TimeLabel[]>;
+        entries: Writable<DayEntry[]>;
+        recurringSeries: Writable<RecurringSeries[]>;
+        scheduleModalState: Writable<{ noteId: string; date: string } | null>;
+        scheduleTextCell: Writable<string>;
+        scheduleHourCell: Writable<string>;
+        scheduleMinuteCell: Writable<string>;
+        schedulePeriodCell: Writable<string>;
+        scheduleDurationCell: Writable<string>;
+        scheduleNotifEnabledCell: Writable<boolean>;
+        scheduleNotifValueCell: Writable<number>;
+        scheduleNotifUnitCell: Writable<string>;
+        customTimeLabels: Writable<TimeLabel[]>;
       }
     >((_event, {
       entries,
@@ -4335,27 +4335,27 @@ export default recipe<Input, Output>(
     const applyScopeThis = handler<
       never,
       {
-        entries: Cell<DayEntry[]>;
-        recurringSeries: Cell<RecurringSeries[]>;
-        seriesOverrides: Cell<SeriesOverride[]>;
-        scheduleModalState: Cell<{ noteId: string; date: string } | null>;
-        scheduleConfirmingScopeCell: Cell<boolean>;
-        scheduleTextCell: Cell<string>;
-        scheduleStartDateCell: Cell<string>;
-        scheduleHourCell: Cell<string>;
-        scheduleMinuteCell: Cell<string>;
-        schedulePeriodCell: Cell<string>;
-        scheduleDurationCell: Cell<string>;
-        scheduleNotifEnabledCell: Cell<boolean>;
-        scheduleNotifValueCell: Cell<number>;
-        scheduleNotifUnitCell: Cell<string>;
-        scheduleRepeatCell: Cell<string>;
-        scheduleRepeatDaysCell: Cell<string[]>;
-        scheduleMonthlyPatternCell: Cell<string>;
-        scheduleRepeatEndsCell: Cell<string>;
-        scheduleRepeatUntilCell: Cell<string>;
-        scheduleRepeatCountCell: Cell<number>;
-        scheduleEditScopeCell: Cell<string>;
+        entries: Writable<DayEntry[]>;
+        recurringSeries: Writable<RecurringSeries[]>;
+        seriesOverrides: Writable<SeriesOverride[]>;
+        scheduleModalState: Writable<{ noteId: string; date: string } | null>;
+        scheduleConfirmingScopeCell: Writable<boolean>;
+        scheduleTextCell: Writable<string>;
+        scheduleStartDateCell: Writable<string>;
+        scheduleHourCell: Writable<string>;
+        scheduleMinuteCell: Writable<string>;
+        schedulePeriodCell: Writable<string>;
+        scheduleDurationCell: Writable<string>;
+        scheduleNotifEnabledCell: Writable<boolean>;
+        scheduleNotifValueCell: Writable<number>;
+        scheduleNotifUnitCell: Writable<string>;
+        scheduleRepeatCell: Writable<string>;
+        scheduleRepeatDaysCell: Writable<string[]>;
+        scheduleMonthlyPatternCell: Writable<string>;
+        scheduleRepeatEndsCell: Writable<string>;
+        scheduleRepeatUntilCell: Writable<string>;
+        scheduleRepeatCountCell: Writable<number>;
+        scheduleEditScopeCell: Writable<string>;
       }
     >((_event, state) => {
       // Set scope and reset confirmation state
@@ -4368,27 +4368,27 @@ export default recipe<Input, Output>(
     const applyScopeFuture = handler<
       never,
       {
-        entries: Cell<DayEntry[]>;
-        recurringSeries: Cell<RecurringSeries[]>;
-        seriesOverrides: Cell<SeriesOverride[]>;
-        scheduleModalState: Cell<{ noteId: string; date: string } | null>;
-        scheduleConfirmingScopeCell: Cell<boolean>;
-        scheduleTextCell: Cell<string>;
-        scheduleStartDateCell: Cell<string>;
-        scheduleHourCell: Cell<string>;
-        scheduleMinuteCell: Cell<string>;
-        schedulePeriodCell: Cell<string>;
-        scheduleDurationCell: Cell<string>;
-        scheduleNotifEnabledCell: Cell<boolean>;
-        scheduleNotifValueCell: Cell<number>;
-        scheduleNotifUnitCell: Cell<string>;
-        scheduleRepeatCell: Cell<string>;
-        scheduleRepeatDaysCell: Cell<string[]>;
-        scheduleMonthlyPatternCell: Cell<string>;
-        scheduleRepeatEndsCell: Cell<string>;
-        scheduleRepeatUntilCell: Cell<string>;
-        scheduleRepeatCountCell: Cell<number>;
-        scheduleEditScopeCell: Cell<string>;
+        entries: Writable<DayEntry[]>;
+        recurringSeries: Writable<RecurringSeries[]>;
+        seriesOverrides: Writable<SeriesOverride[]>;
+        scheduleModalState: Writable<{ noteId: string; date: string } | null>;
+        scheduleConfirmingScopeCell: Writable<boolean>;
+        scheduleTextCell: Writable<string>;
+        scheduleStartDateCell: Writable<string>;
+        scheduleHourCell: Writable<string>;
+        scheduleMinuteCell: Writable<string>;
+        schedulePeriodCell: Writable<string>;
+        scheduleDurationCell: Writable<string>;
+        scheduleNotifEnabledCell: Writable<boolean>;
+        scheduleNotifValueCell: Writable<number>;
+        scheduleNotifUnitCell: Writable<string>;
+        scheduleRepeatCell: Writable<string>;
+        scheduleRepeatDaysCell: Writable<string[]>;
+        scheduleMonthlyPatternCell: Writable<string>;
+        scheduleRepeatEndsCell: Writable<string>;
+        scheduleRepeatUntilCell: Writable<string>;
+        scheduleRepeatCountCell: Writable<number>;
+        scheduleEditScopeCell: Writable<string>;
       }
     >((_event, state) => {
       state.scheduleEditScopeCell.set("future");
@@ -4399,27 +4399,27 @@ export default recipe<Input, Output>(
     const applyScopeAll = handler<
       never,
       {
-        entries: Cell<DayEntry[]>;
-        recurringSeries: Cell<RecurringSeries[]>;
-        seriesOverrides: Cell<SeriesOverride[]>;
-        scheduleModalState: Cell<{ noteId: string; date: string } | null>;
-        scheduleConfirmingScopeCell: Cell<boolean>;
-        scheduleTextCell: Cell<string>;
-        scheduleStartDateCell: Cell<string>;
-        scheduleHourCell: Cell<string>;
-        scheduleMinuteCell: Cell<string>;
-        schedulePeriodCell: Cell<string>;
-        scheduleDurationCell: Cell<string>;
-        scheduleNotifEnabledCell: Cell<boolean>;
-        scheduleNotifValueCell: Cell<number>;
-        scheduleNotifUnitCell: Cell<string>;
-        scheduleRepeatCell: Cell<string>;
-        scheduleRepeatDaysCell: Cell<string[]>;
-        scheduleMonthlyPatternCell: Cell<string>;
-        scheduleRepeatEndsCell: Cell<string>;
-        scheduleRepeatUntilCell: Cell<string>;
-        scheduleRepeatCountCell: Cell<number>;
-        scheduleEditScopeCell: Cell<string>;
+        entries: Writable<DayEntry[]>;
+        recurringSeries: Writable<RecurringSeries[]>;
+        seriesOverrides: Writable<SeriesOverride[]>;
+        scheduleModalState: Writable<{ noteId: string; date: string } | null>;
+        scheduleConfirmingScopeCell: Writable<boolean>;
+        scheduleTextCell: Writable<string>;
+        scheduleStartDateCell: Writable<string>;
+        scheduleHourCell: Writable<string>;
+        scheduleMinuteCell: Writable<string>;
+        schedulePeriodCell: Writable<string>;
+        scheduleDurationCell: Writable<string>;
+        scheduleNotifEnabledCell: Writable<boolean>;
+        scheduleNotifValueCell: Writable<number>;
+        scheduleNotifUnitCell: Writable<string>;
+        scheduleRepeatCell: Writable<string>;
+        scheduleRepeatDaysCell: Writable<string[]>;
+        scheduleMonthlyPatternCell: Writable<string>;
+        scheduleRepeatEndsCell: Writable<string>;
+        scheduleRepeatUntilCell: Writable<string>;
+        scheduleRepeatCountCell: Writable<number>;
+        scheduleEditScopeCell: Writable<string>;
       }
     >((_event, state) => {
       state.scheduleEditScopeCell.set("all");
@@ -4429,7 +4429,7 @@ export default recipe<Input, Output>(
 
     const cancelScopeConfirmation = handler<
       never,
-      { scheduleConfirmingScopeCell: Cell<boolean> }
+      { scheduleConfirmingScopeCell: Writable<boolean> }
     >((_event, { scheduleConfirmingScopeCell }) => {
       scheduleConfirmingScopeCell.set(false);
     });
@@ -4438,12 +4438,12 @@ export default recipe<Input, Output>(
     const deleteScopeThis = handler<
       never,
       {
-        entries: Cell<DayEntry[]>;
-        recurringSeries: Cell<RecurringSeries[]>;
-        seriesOverrides: Cell<SeriesOverride[]>;
-        deletionConfirmingScopeCell: Cell<boolean>;
-        deletionPendingCell: Cell<{ noteId: string; date: string } | null>;
-        scheduleEditScopeCell: Cell<string>;
+        entries: Writable<DayEntry[]>;
+        recurringSeries: Writable<RecurringSeries[]>;
+        seriesOverrides: Writable<SeriesOverride[]>;
+        deletionConfirmingScopeCell: Writable<boolean>;
+        deletionPendingCell: Writable<{ noteId: string; date: string } | null>;
+        scheduleEditScopeCell: Writable<string>;
       }
     >((_event, state) => {
       const pending = state.deletionPendingCell.get();
@@ -4465,12 +4465,12 @@ export default recipe<Input, Output>(
     const deleteScopeFuture = handler<
       never,
       {
-        entries: Cell<DayEntry[]>;
-        recurringSeries: Cell<RecurringSeries[]>;
-        seriesOverrides: Cell<SeriesOverride[]>;
-        deletionConfirmingScopeCell: Cell<boolean>;
-        deletionPendingCell: Cell<{ noteId: string; date: string } | null>;
-        scheduleEditScopeCell: Cell<string>;
+        entries: Writable<DayEntry[]>;
+        recurringSeries: Writable<RecurringSeries[]>;
+        seriesOverrides: Writable<SeriesOverride[]>;
+        deletionConfirmingScopeCell: Writable<boolean>;
+        deletionPendingCell: Writable<{ noteId: string; date: string } | null>;
+        scheduleEditScopeCell: Writable<string>;
       }
     >((_event, state) => {
       const pending = state.deletionPendingCell.get();
@@ -4492,12 +4492,12 @@ export default recipe<Input, Output>(
     const deleteScopeAll = handler<
       never,
       {
-        entries: Cell<DayEntry[]>;
-        recurringSeries: Cell<RecurringSeries[]>;
-        seriesOverrides: Cell<SeriesOverride[]>;
-        deletionConfirmingScopeCell: Cell<boolean>;
-        deletionPendingCell: Cell<{ noteId: string; date: string } | null>;
-        scheduleEditScopeCell: Cell<string>;
+        entries: Writable<DayEntry[]>;
+        recurringSeries: Writable<RecurringSeries[]>;
+        seriesOverrides: Writable<SeriesOverride[]>;
+        deletionConfirmingScopeCell: Writable<boolean>;
+        deletionPendingCell: Writable<{ noteId: string; date: string } | null>;
+        scheduleEditScopeCell: Writable<string>;
       }
     >((_event, state) => {
       const pending = state.deletionPendingCell.get();
@@ -4519,8 +4519,8 @@ export default recipe<Input, Output>(
     const cancelDeletionConfirmation = handler<
       never,
       {
-        deletionConfirmingScopeCell: Cell<boolean>;
-        deletionPendingCell: Cell<{ noteId: string; date: string } | null>;
+        deletionConfirmingScopeCell: Writable<boolean>;
+        deletionPendingCell: Writable<{ noteId: string; date: string } | null>;
       }
     >((_event, { deletionConfirmingScopeCell, deletionPendingCell }) => {
       deletionConfirmingScopeCell.set(false);
@@ -4529,26 +4529,26 @@ export default recipe<Input, Output>(
 
     // Helper function that performs the actual save logic
     const performSaveLogic = (state: {
-      entries: Cell<DayEntry[]>;
-      recurringSeries: Cell<RecurringSeries[]>;
-      seriesOverrides: Cell<SeriesOverride[]>;
-      scheduleModalState: Cell<{ noteId: string; date: string } | null>;
-      scheduleTextCell: Cell<string>;
-      scheduleStartDateCell: Cell<string>;
-      scheduleHourCell: Cell<string>;
-      scheduleMinuteCell: Cell<string>;
-      schedulePeriodCell: Cell<string>;
-      scheduleDurationCell: Cell<string>;
-      scheduleNotifEnabledCell: Cell<boolean>;
-      scheduleNotifValueCell: Cell<number>;
-      scheduleNotifUnitCell: Cell<string>;
-      scheduleRepeatCell: Cell<string>;
-      scheduleRepeatDaysCell: Cell<string[]>;
-      scheduleMonthlyPatternCell: Cell<string>;
-      scheduleRepeatEndsCell: Cell<string>;
-      scheduleRepeatUntilCell: Cell<string>;
-      scheduleRepeatCountCell: Cell<number>;
-      scheduleEditScopeCell: Cell<string>;
+      entries: Writable<DayEntry[]>;
+      recurringSeries: Writable<RecurringSeries[]>;
+      seriesOverrides: Writable<SeriesOverride[]>;
+      scheduleModalState: Writable<{ noteId: string; date: string } | null>;
+      scheduleTextCell: Writable<string>;
+      scheduleStartDateCell: Writable<string>;
+      scheduleHourCell: Writable<string>;
+      scheduleMinuteCell: Writable<string>;
+      schedulePeriodCell: Writable<string>;
+      scheduleDurationCell: Writable<string>;
+      scheduleNotifEnabledCell: Writable<boolean>;
+      scheduleNotifValueCell: Writable<number>;
+      scheduleNotifUnitCell: Writable<string>;
+      scheduleRepeatCell: Writable<string>;
+      scheduleRepeatDaysCell: Writable<string[]>;
+      scheduleMonthlyPatternCell: Writable<string>;
+      scheduleRepeatEndsCell: Writable<string>;
+      scheduleRepeatUntilCell: Writable<string>;
+      scheduleRepeatCountCell: Writable<number>;
+      scheduleEditScopeCell: Writable<string>;
     }) => {
       const {
         entries,
@@ -5047,27 +5047,27 @@ export default recipe<Input, Output>(
     const saveSchedule = handler<
       never,
       {
-        entries: Cell<DayEntry[]>;
-        recurringSeries: Cell<RecurringSeries[]>;
-        seriesOverrides: Cell<SeriesOverride[]>;
-        scheduleModalState: Cell<{ noteId: string; date: string } | null>;
-        scheduleConfirmingScopeCell: Cell<boolean>;
-        scheduleTextCell: Cell<string>;
-        scheduleStartDateCell: Cell<string>;
-        scheduleHourCell: Cell<string>;
-        scheduleMinuteCell: Cell<string>;
-        schedulePeriodCell: Cell<string>;
-        scheduleDurationCell: Cell<string>;
-        scheduleNotifEnabledCell: Cell<boolean>;
-        scheduleNotifValueCell: Cell<number>;
-        scheduleNotifUnitCell: Cell<string>;
-        scheduleRepeatCell: Cell<string>;
-        scheduleRepeatDaysCell: Cell<string[]>;
-        scheduleMonthlyPatternCell: Cell<string>;
-        scheduleRepeatEndsCell: Cell<string>;
-        scheduleRepeatUntilCell: Cell<string>;
-        scheduleRepeatCountCell: Cell<number>;
-        scheduleEditScopeCell: Cell<string>;
+        entries: Writable<DayEntry[]>;
+        recurringSeries: Writable<RecurringSeries[]>;
+        seriesOverrides: Writable<SeriesOverride[]>;
+        scheduleModalState: Writable<{ noteId: string; date: string } | null>;
+        scheduleConfirmingScopeCell: Writable<boolean>;
+        scheduleTextCell: Writable<string>;
+        scheduleStartDateCell: Writable<string>;
+        scheduleHourCell: Writable<string>;
+        scheduleMinuteCell: Writable<string>;
+        schedulePeriodCell: Writable<string>;
+        scheduleDurationCell: Writable<string>;
+        scheduleNotifEnabledCell: Writable<boolean>;
+        scheduleNotifValueCell: Writable<number>;
+        scheduleNotifUnitCell: Writable<string>;
+        scheduleRepeatCell: Writable<string>;
+        scheduleRepeatDaysCell: Writable<string[]>;
+        scheduleMonthlyPatternCell: Writable<string>;
+        scheduleRepeatEndsCell: Writable<string>;
+        scheduleRepeatUntilCell: Writable<string>;
+        scheduleRepeatCountCell: Writable<number>;
+        scheduleEditScopeCell: Writable<string>;
       }
     >((_event, state) => {
       const { scheduleModalState, scheduleConfirmingScopeCell } = state;
@@ -5103,10 +5103,10 @@ export default recipe<Input, Output>(
         notificationUnit: string;
       },
       {
-        entries: Cell<DayEntry[]>;
+        entries: Writable<DayEntry[]>;
         noteId: string;
         date: string;
-        scheduleModalState: Cell<{ noteId: string; date: string } | null>;
+        scheduleModalState: Writable<{ noteId: string; date: string } | null>;
       }
     >((
       { time, notificationEnabled, notificationValue, notificationUnit },

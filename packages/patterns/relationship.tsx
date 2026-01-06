@@ -6,7 +6,7 @@
  * like Record. Tracks relationship types, closeness, and inner circle status.
  */
 import {
-  Cell,
+  Cell, Writable,
   computed,
   type Default,
   handler,
@@ -78,7 +78,7 @@ const CLOSENESS_OPTIONS = [
 // Handler to toggle a relation type - type is in context
 const toggleRelationType = handler<
   unknown,
-  { relationTypes: Cell<string[]>; type: string }
+  { relationTypes: Writable<string[]>; type: string }
 >((_event, { relationTypes, type }) => {
   const current = relationTypes.get() || [];
   if (current.includes(type)) {
@@ -91,7 +91,7 @@ const toggleRelationType = handler<
 // Handler to toggle inner circle
 const toggleInnerCircle = handler<
   unknown,
-  { innerCircle: Cell<boolean> }
+  { innerCircle: Writable<boolean> }
 >((_event, { innerCircle }) => {
   innerCircle.set(!innerCircle.get());
 });

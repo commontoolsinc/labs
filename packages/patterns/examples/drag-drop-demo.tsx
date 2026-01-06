@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   computed,
   Default,
   handler,
@@ -18,18 +18,18 @@ interface Item {
 
 interface DragDropDemoInput {
   availableItems: Default<Item[], []>;
-  droppedItems: Cell<Item[]>;
+  droppedItems: Writable<Item[]>;
 }
 
 interface DragDropDemoOutput {
   availableItems: Default<Item[], []>;
-  droppedItems: Cell<Item[]>;
+  droppedItems: Writable<Item[]>;
 }
 
 // Handler to remove an item from the dropped list
 const removeItem = handler<
   unknown,
-  { droppedItems: Cell<Item[]>; item: Cell<Item> }
+  { droppedItems: Writable<Item[]>; item: Writable<Item> }
 >(
   (_, { droppedItems, item }) => {
     const current = droppedItems.get();

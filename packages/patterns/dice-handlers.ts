@@ -1,9 +1,9 @@
 /// <cts-enable />
-import { Cell, Default, handler } from "commontools";
+import { Cell, Writable, Default, handler } from "commontools";
 
 export const roll = handler<
   { sides?: Default<number, 6> },
-  { value: Cell<number> }
+  { value: Writable<number> }
 >(
   (args, state) => {
     const rawSides = args.sides ?? 6;
@@ -15,8 +15,8 @@ export const roll = handler<
 );
 
 export const getValue = handler<
-  { result?: Cell<string> },
-  { value: Cell<number> }
+  { result?: Writable<string> },
+  { value: Writable<number> }
 >(
   (args, state) => {
     const current = state.value.get();

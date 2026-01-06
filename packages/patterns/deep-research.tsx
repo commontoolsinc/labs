@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  Cell,
+  Cell, Writable,
   computed,
   generateObject,
   NAME,
@@ -31,7 +31,7 @@ export default pattern<
   { question: string; context?: { [id: string]: any } },
   {
     question: string;
-    result: Cell<ResearchResult | undefined>;
+    result: Writable<ResearchResult | undefined>;
     pending: boolean;
     error: string | undefined;
   }

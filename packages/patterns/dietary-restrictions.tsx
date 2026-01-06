@@ -13,7 +13,7 @@
  * - Comprehensive dietary patterns (vegetarian, vegan, halal, kosher, keto, etc.)
  */
 import {
-  Cell,
+  Cell, Writable,
   computed,
   type Default,
   handler,
@@ -1285,9 +1285,9 @@ const emptyState = (
 const _addRestriction = handler<
   unknown,
   {
-    restrictions: Cell<RestrictionEntry[]>;
-    input: Cell<string>;
-    selectedLevel: Cell<RestrictionLevel>;
+    restrictions: Writable<RestrictionEntry[]>;
+    input: Writable<string>;
+    selectedLevel: Writable<RestrictionLevel>;
   }
 >((_event, { restrictions, input, selectedLevel }) => {
   const name = input.get().trim();
@@ -1313,7 +1313,7 @@ const _addRestriction = handler<
 
 const removeRestriction = handler<
   unknown,
-  { restrictions: Cell<RestrictionEntry[]>; index: number }
+  { restrictions: Writable<RestrictionEntry[]>; index: number }
 >((_event, { restrictions, index }) => {
   // Normalize to handle both string[] and RestrictionEntry[] from storage
   // Filter out null items and empty names to match normalizedRestrictions computed
@@ -1334,7 +1334,7 @@ const LEVEL_CYCLE: Record<RestrictionLevel, RestrictionLevel> = {
 
 const cycleLevel = handler<
   unknown,
-  { restrictions: Cell<RestrictionEntry[]>; index: number }
+  { restrictions: Writable<RestrictionEntry[]>; index: number }
 >((_event, { restrictions, index }) => {
   // Normalize to handle both string[] and RestrictionEntry[] from storage
   // Filter out null items and empty names to match normalizedRestrictions computed
@@ -1354,9 +1354,9 @@ const cycleLevel = handler<
 const _selectSuggestion = handler<
   unknown,
   {
-    restrictions: Cell<RestrictionEntry[]>;
-    input: Cell<string>;
-    selectedLevel: Cell<RestrictionLevel>;
+    restrictions: Writable<RestrictionEntry[]>;
+    input: Writable<string>;
+    selectedLevel: Writable<RestrictionLevel>;
     suggestion: string;
   }
 >((_event, { restrictions, input, selectedLevel, suggestion }) => {
@@ -1378,8 +1378,8 @@ const _selectSuggestion = handler<
 const onSelectRestriction = handler<
   CustomEvent<{ value: string; label: string; isCustom?: boolean }>,
   {
-    restrictions: Cell<RestrictionEntry[]>;
-    selectedLevel: Cell<RestrictionLevel>;
+    restrictions: Writable<RestrictionEntry[]>;
+    selectedLevel: Writable<RestrictionLevel>;
   }
 >((event, { restrictions, selectedLevel }) => {
   const { value } = event.detail;
@@ -1507,7 +1507,7 @@ export const DietaryRestrictionsModule = recipe<
       restrictionsCell,
     }: {
       list: RestrictionEntry[];
-      restrictionsCell: Cell<RestrictionEntry[]>;
+      restrictionsCell: Writable<RestrictionEntry[]>;
     }) => {
       if (!list || list.length === 0) return emptyState;
 

@@ -31,7 +31,7 @@
  * derive() defers evaluation until reactive context is established.
  */
 import {
-  Cell,
+  Cell, Writable,
   Default,
   derive,
   generateObject,
@@ -57,7 +57,7 @@ interface Input {
 
 const addArticle = handler<
   { detail: { message: string } },
-  { articles: Cell<Article[]> }
+  { articles: Writable<Article[]> }
 >(
   ({ detail }, { articles }) => {
     const text = detail?.message?.trim();
@@ -72,7 +72,7 @@ const addArticle = handler<
   },
 );
 
-const clearArticles = handler<unknown, { articles: Cell<Article[]> }>(
+const clearArticles = handler<unknown, { articles: Writable<Article[]> }>(
   (_, { articles }) => {
     articles.set([]);
   },

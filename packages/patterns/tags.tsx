@@ -6,7 +6,7 @@
  * like Record. Provides add/remove tag functionality with chip display.
  */
 import {
-  Cell,
+  Cell, Writable,
   computed,
   type Default,
   handler,
@@ -38,7 +38,7 @@ export interface TagsModuleInput {
 // Handler to add a new tag
 const addTag = handler<
   unknown,
-  { tags: Cell<string[]>; tagInput: Cell<string> }
+  { tags: Writable<string[]>; tagInput: Writable<string> }
 >((_event, { tags, tagInput }) => {
   const newTag = tagInput.get().trim();
   if (!newTag) return;
@@ -53,7 +53,7 @@ const addTag = handler<
 // Handler to remove a tag by index
 const removeTag = handler<
   unknown,
-  { tags: Cell<string[]>; index: number }
+  { tags: Writable<string[]>; index: number }
 >((_event, { tags, index }) => {
   const current = tags.get() || [];
   tags.set(current.toSpliced(index, 1));
