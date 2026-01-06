@@ -106,6 +106,8 @@ model: "opus-4-1"
 
 If you get `TypeError: Cannot read properties of undefined (reading 'model')`, check your model name format first.
 
+**Discovery:** Query `/api/ai/llm/models` to see all available models.
+
 ---
 
 ## Handling Pending State
@@ -177,38 +179,6 @@ prompt: `Title: ${article.title}\nContent: ${article.content}`
 prompt: computed(() => `Title: ${article.title}\nContent: ${article.content}`)
 ```
 
-### Optional Type Annotations for Nested Access
-
-When accessing nested properties of `generateObject` results in the UI (like `item.analysis?.pending`), you need explicit type annotations to make the property optional in the generated schema. Otherwise you'll get runtime errors like "Cannot read properties of undefined".
-
-```typescript
-// Define the return type with optional analysis
-type GenerateObjectResult = ReturnType<typeof generateObject<SentimentResult>>;
-
-interface AnalysisMapItem {
-  itemId: string;
-  analysis?: GenerateObjectResult;  // Must be optional
-}
-
-// Use explicit return type annotation on the map callback
-const results = items.map((item): AnalysisMapItem => ({
-  itemId: item.id,
-  analysis: generateObject<SentimentResult>({
-    prompt: computed(() => `Analyze: ${item.content}`),
-  }),
-}));
-
-// Now optional chaining works correctly in UI
-{results.map((item) => (
-  <div>
-    <div>Pending: {String(item.analysis?.pending ?? "loading")}</div>
-    <div>Result: {item.analysis?.result ? JSON.stringify(item.analysis.result) : "null"}</div>
-  </div>
-))}
-```
-
-Without the explicit `?: GenerateObjectResult` annotation, the schema generator marks `analysis` as required, and the runtime fails when trying to access nested properties before the generateObject state is fully initialized.
-
 ---
 
 ## Constraints
@@ -272,6 +242,8 @@ const agentGoal = computed(() => {
 
 If your server gets stuck at 100% CPU, check for feedback loops where agent output affects agent input.
 
+**Tip:** Use `llmDialog` with `addMessage` handler to control the feedback loop explicitly.
+
 ---
 
 ## Automatic Caching
@@ -289,39 +261,18 @@ const result = generateText({ prompt });
 
 When adding items to an array, only new items trigger LLM requests.
 
-**Important:** Always use `generateText`/`generateObject` instead of raw `fetch()` to LLM endpoints. Raw fetch bypasses caching and may be restricted in future.
+**Important:** Never use raw `fetch()` for LLM endpoints. Always use `generateText`/`generateObject` - they handle caching and are the supported API. Use `fetchData` for other HTTP requests.
 
 ### Cache Busting for Regeneration
 
-When implementing "respin" or "regenerate" features, add a nonce to bust the cache:
+For "respin" or "regenerate" features, set `cache: false` in the options:
 
 ```typescript
-interface Config {
-  prompt: string;
-  respinNonce?: number;  // Cache-busting nonce
-}
-
-// In respin handler - increment the nonce
-const respin = handler<unknown, { config: Cell<Config> }>(
-  (_, { config }) => {
-    const current = config.get();
-    config.set({ ...current, respinNonce: (current.respinNonce || 0) + 1 });
-  }
-);
-
-// Include nonce in prompt
-const fullPrompt = computed(() => {
-  let prompt = config.prompt;
-  if (config.respinNonce) {
-    prompt += `\n[Generation attempt: ${config.respinNonce}]`;
-  }
-  return prompt;
+const result = generateText({
+  prompt,
+  cache: false,  // Forces fresh generation
 });
 ```
-
-This separates two behaviors:
-- **Page refresh**: Same cached result (consistent UX)
-- **Respin button**: Fresh generation (user explicitly requested new output)
 
 ---
 
@@ -339,4 +290,4 @@ This separates two behaviors:
 - Schema root must be object (not array)
 - Use correct model name format (`vendor:model`)
 - Don't derive prompt from cells the agent writes to
-- Use nonces for regeneration features
+- Use `cache: false` for regeneration features
