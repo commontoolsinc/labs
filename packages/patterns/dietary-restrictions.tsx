@@ -29,21 +29,15 @@ export const MODULE_METADATA: ModuleMetadata = {
   type: "dietary-restrictions",
   label: "Dietary Restrictions",
   icon: "\u{1F37D}\u{FE0F}", // 🍽️ plate with cutlery
+  // NOTE: For LLM extraction, we accept simple string arrays like ["nightshades", "dairy"].
+  // The module converts these to RestrictionEntry objects with default levels.
+  // This makes extraction more reliable (LLMs naturally output string arrays).
   schema: {
     restrictions: {
       type: "array",
-      items: {
-        type: "object",
-        properties: {
-          name: { type: "string", description: "Restriction name" },
-          level: {
-            type: "string",
-            enum: ["flexible", "prefer", "strict", "absolute"],
-            description: "Restriction level",
-          },
-        },
-      },
-      description: "List of dietary restrictions",
+      items: { type: "string" },
+      description:
+        "List of dietary restrictions, allergies, or intolerances (e.g., 'nightshades', 'dairy', 'vegetarian', 'gluten')",
     },
   },
   fieldMapping: ["restrictions", "dietary", "allergies", "diet"],
@@ -1059,6 +1053,31 @@ function getDefaultLevel(name: string): RestrictionLevel {
   return getGroup(name)?.defaultLevel || "prefer";
 }
 
+/**
+ * Normalize a single restriction item to RestrictionEntry format.
+ * Accepts both string (from LLM extraction) and RestrictionEntry (from UI).
+ * This enables the module to handle extraction data like ["nightshades", "dairy"]
+ * as well as existing data like [{ name: "dairy", level: "strict" }].
+ */
+function normalizeRestrictionItem(
+  item: string | RestrictionEntry | unknown,
+): RestrictionEntry {
+  // Handle string format (from LLM extraction)
+  if (typeof item === "string") {
+    return { name: item, level: getDefaultLevel(item) };
+  }
+  // Handle RestrictionEntry format (from UI interaction)
+  if (item && typeof item === "object" && "name" in item) {
+    const entry = item as RestrictionEntry;
+    return {
+      name: String(entry.name),
+      level: entry.level || getDefaultLevel(String(entry.name)),
+    };
+  }
+  // Fallback for unexpected formats
+  return { name: String(item), level: "prefer" };
+}
+
 // Build reverse index: member -> parent groups
 function buildParentIndex(): Map<string, string[]> {
   const index = new Map<string, string[]>();
@@ -1228,7 +1247,8 @@ const _addRestriction = handler<
   const name = input.get().trim();
   if (!name) return;
 
-  const current = restrictions.get() || [];
+  // Normalize to handle both string[] and RestrictionEntry[] from storage
+  const current = (restrictions.get() || []).map(normalizeRestrictionItem);
   if (current.some((r) => r.name.toLowerCase() === name.toLowerCase())) {
     input.set("");
     return;
@@ -1245,7 +1265,8 @@ const removeRestriction = handler<
   unknown,
   { restrictions: Cell<RestrictionEntry[]>; index: number }
 >((_event, { restrictions, index }) => {
-  const current = restrictions.get() || [];
+  // Normalize to handle both string[] and RestrictionEntry[] from storage
+  const current = (restrictions.get() || []).map(normalizeRestrictionItem);
   restrictions.set(current.toSpliced(index, 1));
 });
 
@@ -1261,7 +1282,8 @@ const cycleLevel = handler<
   unknown,
   { restrictions: Cell<RestrictionEntry[]>; index: number }
 >((_event, { restrictions, index }) => {
-  const current = restrictions.get() || [];
+  // Normalize to handle both string[] and RestrictionEntry[] from storage
+  const current = (restrictions.get() || []).map(normalizeRestrictionItem);
   const entry = current[index];
   if (!entry) return;
 
@@ -1280,7 +1302,8 @@ const _selectSuggestion = handler<
     suggestion: string;
   }
 >((_event, { restrictions, input, selectedLevel, suggestion }) => {
-  const current = restrictions.get() || [];
+  // Normalize to handle both string[] and RestrictionEntry[] from storage
+  const current = (restrictions.get() || []).map(normalizeRestrictionItem);
   if (current.some((r) => r.name.toLowerCase() === suggestion.toLowerCase())) {
     input.set("");
     return;
@@ -1302,7 +1325,8 @@ const onSelectRestriction = handler<
   }
 >((event, { restrictions, selectedLevel }) => {
   const { value } = event.detail;
-  const current = restrictions.get() || [];
+  // Normalize to handle both string[] and RestrictionEntry[] from storage
+  const current = (restrictions.get() || []).map(normalizeRestrictionItem);
 
   // Don't add duplicates
   if (current.some((r) => r.name.toLowerCase() === value.toLowerCase())) {
@@ -1330,6 +1354,13 @@ export const DietaryRestrictionsModule = recipe<
 >("DietaryRestrictionsModule", ({ restrictions }) => {
   const selectedLevel = Cell.of<RestrictionLevel>("prefer");
 
+  // Normalize raw restrictions to RestrictionEntry[] format
+  // Handles both string[] (from LLM extraction) and RestrictionEntry[] (from UI)
+  const normalizedRestrictions = computed(() => {
+    const raw = (restrictions || []) as Array<string | RestrictionEntry>;
+    return raw.map(normalizeRestrictionItem);
+  });
+
   // Cache for impliedItems to avoid recomputation when restrictions haven't changed
   let _cachedImpliedItems: Array<{
     name: string;
@@ -1342,7 +1373,7 @@ export const DietaryRestrictionsModule = recipe<
   // VERIFIED: This computed() only runs when restrictions change, not on autocomplete keypress.
   // Console instrumentation confirmed memoization works correctly (Dec 2025).
   const impliedItems = computed(() => {
-    const current = (restrictions || []) as RestrictionEntry[];
+    const current = normalizedRestrictions as RestrictionEntry[];
 
     // Full hash to catch ALL item changes (including middle items)
     const hash = current.map((e) => `${e.name}:${e.level}`).join("|");
@@ -1389,7 +1420,7 @@ export const DietaryRestrictionsModule = recipe<
   });
 
   const displayText = computed(() => {
-    const count = (restrictions || []).length || 0;
+    const count = (normalizedRestrictions || []).length || 0;
     if (count === 0) return "None";
     return `${count} restriction${count !== 1 ? "s" : ""}`;
   });
@@ -1531,8 +1562,11 @@ export const DietaryRestrictionsModule = recipe<
           />
         </ct-hstack>
 
-        {/* Restrictions list - lift with both value and Cell for handlers */}
-        {restrictionsUI({ list: restrictions, restrictionsCell: restrictions })}
+        {/* Restrictions list - use normalized for display, raw Cell for handlers */}
+        {restrictionsUI({
+          list: normalizedRestrictions,
+          restrictionsCell: restrictions,
+        })}
 
         {/* Implied items - lift for display only */}
         {impliedUI(impliedItems)}

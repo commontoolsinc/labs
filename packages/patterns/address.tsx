@@ -28,7 +28,10 @@ export const MODULE_METADATA: ModuleMetadata = {
       description: "Address label (Home, Work, etc.)",
     },
   },
-  fieldMapping: ["street", "city", "state", "zip", "label"],
+  // NOTE: "label" is intentionally omitted from fieldMapping.
+  // Labels (Home/Work/etc) are module-specific UI defaults, not extractable data.
+  // Including "label" causes field collisions with other modules like Phone that also have labels.
+  fieldMapping: ["street", "city", "state", "zip"],
 };
 
 // ===== Types =====

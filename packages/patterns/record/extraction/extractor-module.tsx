@@ -92,18 +92,28 @@ interface ExtractorModuleOutput {
 // ===== Constants =====
 
 const EXTRACTION_SYSTEM_PROMPT =
-  `You are a precise data extractor. Extract structured fields from unstructured text like email signatures, bios, vCards, or notes.
+  `You are a precise data extractor for structured fields from text like signatures, bios, or vCards.
 
-Rules:
-1. Only extract data that is explicitly stated or clearly implied
-2. Return null for fields where no relevant information is found
-3. For dates, use ISO format (YYYY-MM-DD) when possible
-4. For partial dates (e.g., "March 15"), use MM-DD format
-5. For arrays (tags, favorites), extract as arrays of strings
+=== Field Ownership (fields belong to specific modules) ===
+- Phone: "number" only (preserve formatting)
+- Email: "address" only
+- Address: "street", "city", "state", "zip"
+- Social: "platform" (twitter/linkedin/github/instagram/facebook/youtube/tiktok/mastodon/bluesky), "handle" (without @), "profileUrl"
+- Birthday: "birthMonth" (1-12), "birthDay" (1-31), "birthYear" (YYYY) as separate strings
+- Location: "locationName", "locationAddress", "coordinates"
+- Link: "url", "linkTitle", "description"
+- Dietary: "restrictions" as simple string array, e.g. ["dairy", "nightshades", "vegetarian"]
+
+=== Rules ===
+1. Only extract explicitly stated or clearly implied data
+2. Return null for missing fields
+3. Arrays (tags, restrictions): use simple string arrays like ["item1", "item2"]
+4. DO NOT extract labels like "Mobile", "Work", "Personal" as separate fields - these are UI defaults
+5. Normalize social platforms to lowercase (X/Twitter -> "twitter", Insta -> "instagram")
 6. Preserve original formatting for phone numbers
 7. Be conservative - only extract what you're confident about
 
-Return a JSON object with the extracted fields. Use null for fields without data.`;
+Return JSON with extracted fields. Use null for missing data.`;
 
 const OCR_SYSTEM_PROMPT =
   `You are an OCR system. Extract all text from the provided image.
