@@ -20,6 +20,8 @@ import {
   computed,
   type Default,
   handler,
+  ifElse,
+  lift,
   NAME,
   recipe,
   UI,
@@ -176,11 +178,45 @@ export const LocationTrackModule = recipe<
       : `${labelText}No points`;
   });
 
-  // Most recent point
-  const lastPoint = computed(() => {
+  // Most recent point info (pre-computed to avoid null access issues)
+  const lastPointCoords = computed(() => {
     const pts = locations || [];
-    return pts.length > 0 ? pts[pts.length - 1] : null;
+    if (pts.length === 0) return "";
+    const pt = pts[pts.length - 1];
+    if (!pt || typeof pt.latitude !== "number") return "";
+    return formatCoords(pt.latitude, pt.longitude);
   });
+
+  const lastPointAccuracy = computed(() => {
+    const pts = locations || [];
+    if (pts.length === 0) return "";
+    const pt = pts[pts.length - 1];
+    if (!pt || typeof pt.accuracy !== "number") return "";
+    return formatAccuracy(pt.accuracy);
+  });
+
+  const lastPointTime = computed(() => {
+    const pts = locations || [];
+    if (pts.length === 0) return "";
+    const pt = pts[pts.length - 1];
+    if (!pt || typeof pt.timestamp !== "number") return "";
+    return formatTimestamp(pt.timestamp);
+  });
+
+  const hasPoints = computed(() => (locations || []).length > 0);
+  const hasMultiplePoints = computed(() => (locations || []).length > 1);
+
+  // Pre-compute filtered locations with indices for the list
+  // Using lift() instead of computed() so we can map over the result in JSX
+  // IMPORTANT: We pre-compute index here because closures over index in .map() callbacks
+  // don't work correctly with the reactive system
+  const validLocationsWithIndex = lift(
+    ({ locs }: { locs: LocationPoint[] }) => {
+      return (locs || [])
+        .map((point, index) => ({ point, index }))
+        .filter(({ point }) => point && typeof point.latitude === "number");
+    },
+  )({ locs: locations });
 
   return {
     [NAME]: computed(() => `${MODULE_METADATA.icon} Track: ${displayText}`),
@@ -223,7 +259,8 @@ export const LocationTrackModule = recipe<
               return `${count} point${count !== 1 ? "s" : ""} captured`;
             })}
           </span>
-          {computed(() => (locations || []).length > 0) && (
+          {ifElse(
+            hasPoints,
             <ct-button
               variant="ghost"
               size="sm"
@@ -231,12 +268,14 @@ export const LocationTrackModule = recipe<
               style={{ fontSize: "12px", color: "#ef4444" }}
             >
               Clear All
-            </ct-button>
+            </ct-button>,
+            null,
           )}
         </ct-hstack>
 
         {/* Last captured point */}
-        {lastPoint && (
+        {ifElse(
+          hasPoints,
           <ct-vstack
             style={{
               gap: "4px",
@@ -250,37 +289,25 @@ export const LocationTrackModule = recipe<
               Latest Point
             </span>
             <span style={{ fontFamily: "monospace", color: "#6b7280" }}>
-              {computed(() => {
-                const pt = lastPoint;
-                if (!pt) return "";
-                return formatCoords(pt.latitude, pt.longitude);
-              })}
+              {lastPointCoords}
             </span>
             <ct-hstack style={{ gap: "12px", color: "#9ca3af" }}>
-              <span>
-                {computed(() => {
-                  const pt = lastPoint;
-                  return pt ? formatAccuracy(pt.accuracy) : "";
-                })}
-              </span>
-              <span>
-                {computed(() => {
-                  const pt = lastPoint;
-                  return pt ? formatTimestamp(pt.timestamp) : "";
-                })}
-              </span>
+              <span>{lastPointAccuracy}</span>
+              <span>{lastPointTime}</span>
             </ct-hstack>
-          </ct-vstack>
+          </ct-vstack>,
+          null,
         )}
 
         {/* Points list (collapsible for many points) */}
-        {computed(() => (locations || []).length > 1) && (
+        {ifElse(
+          hasMultiplePoints,
           <ct-collapsible>
             <span slot="trigger" style={{ fontSize: "12px", color: "#6b7280" }}>
               View all points
             </span>
             <ct-vstack style={{ gap: "6px", paddingTop: "8px" }}>
-              {locations.filter((p: LocationPoint) => p && typeof p.latitude === 'number').map((point: LocationPoint, index: number) => (
+              {validLocationsWithIndex.map(({ point, index }) => (
                 <ct-hstack
                   key={index}
                   style={{
@@ -320,7 +347,8 @@ export const LocationTrackModule = recipe<
                 </ct-hstack>
               ))}
             </ct-vstack>
-          </ct-collapsible>
+          </ct-collapsible>,
+          null,
         )}
       </ct-vstack>
     ),
