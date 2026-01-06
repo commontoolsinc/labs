@@ -102,7 +102,14 @@ const EXTRACTION_SYSTEM_PROMPT =
 - Birthday: "birthMonth" (1-12), "birthDay" (1-31), "birthYear" (YYYY) as separate strings
 - Location: "locationName", "locationAddress", "coordinates"
 - Link: "url", "linkTitle", "description"
-- Dietary: "restrictions" as string array - ONLY explicit dietary restrictions/allergies. PRESERVE intensity words, e.g. ["extremely allergic to nightshades", "vegetarian", "severely allergic to peanuts"]
+- Dietary: "restrictions" as array of {name, level} objects where:
+  - name: the restriction (e.g., "nightshades", "peanuts", "vegetarian", "gluten")
+  - level: severity - "absolute" (allergy/no exceptions), "strict" (strong avoidance), "prefer" (try to avoid), "flexible" (if convenient)
+  - Examples: [{"name": "peanuts", "level": "absolute"}, {"name": "dairy", "level": "prefer"}]
+  - Use "absolute" for allergies, anaphylaxis, or words like "extremely", "severely", "deadly"
+  - Use "strict" for strong avoidance or "very" modifiers
+  - Use "prefer" for general avoidance or intolerances
+  - Use "flexible" for mild preferences
 
 === What TO Extract (structured data only) ===
 - Email addresses, phone numbers, physical addresses
@@ -1265,14 +1272,10 @@ ${extractedSummary.join("\n")}`;
       !hasSelectedSources || ocrPending
     );
     const extractButtonBackground = computed(() =>
-      hasSelectedSources && !ocrPending
-        ? "#f59e0b"
-        : "#d1d5db"
+      hasSelectedSources && !ocrPending ? "#f59e0b" : "#d1d5db"
     );
     const extractButtonCursor = computed(() =>
-      hasSelectedSources && !ocrPending
-        ? "pointer"
-        : "not-allowed"
+      hasSelectedSources && !ocrPending ? "pointer" : "not-allowed"
     );
     const isCleanedNotesEmpty = computed(() =>
       String(cleanedNotesContent) === ""
