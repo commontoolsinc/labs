@@ -36,6 +36,22 @@ With `Cell<T>` in your signature:
 
 Without `Cell<>`, you can still display values in JSX, pass to `computed()`, and map over arrays - all reactively. Note: filtering and transformations must be done in `computed()` outside JSX, then the result can be mapped inside JSX.
 
+### Cell<> with Default<>
+
+When you need write access on a pattern input with a default value, wrap `Default<>` in `Cell<>`:
+
+```typescript
+// ❌ No write access - .get()/.set() won't work in handlers
+interface Input {
+  rating: Default<number | null, null>;
+}
+
+// ✅ Write access - .get()/.set() work in handlers
+interface Input {
+  rating: Cell<Default<number | null, null>>;
+}
+```
+
 ---
 
 ## Type Contexts

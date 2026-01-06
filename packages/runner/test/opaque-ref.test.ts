@@ -31,6 +31,8 @@ describe("opaqueRef function", () => {
 
   it("throws on get", () => {
     const c = opaqueRef<number>();
-    expect(() => c.get()).toThrow();
+    // Use type assertion since .get() is no longer on OpaqueRef type
+    // but we want to verify runtime still throws
+    expect(() => (c as any).get()).toThrow();
   });
 });

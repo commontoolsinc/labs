@@ -35,7 +35,7 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface RatingModuleInput {
   /** Rating from 1-5 stars */
-  rating: Default<number | null, null>;
+  rating: Cell<Default<number | null, null>>;
 }
 
 // ===== Handlers =====

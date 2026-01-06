@@ -270,10 +270,6 @@ export interface IDerivable<T> {
 
 export interface IOpaquable<T> {
   /** deprecated */
-  get(): T;
-  /** deprecated */
-  set(newValue: Opaque<Partial<T>>): void;
-  /** deprecated */
   setSchema(schema: JSONSchema): void;
 }
 

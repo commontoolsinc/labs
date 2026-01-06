@@ -21,7 +21,7 @@ interface Item {
 }
 
 interface ListInput {
-  items: Default<Item[], []>;
+  items: Cell<Default<Item[], []>>;
 }
 
 interface ListOutput extends ListInput {}
@@ -101,7 +101,7 @@ export default recipe<ListInput, ListOutput>(
     // caveat: behaviour is only guaranteed to be correct for all operations IF the items include an [ID] property.
     // excluding the [ID] in this recipe leads to item alignment bugs when insertig or removing from items at the FRONT of an array
     const itemsLessThanB = computed(
-      () => items.filter((item) => item.title < "B"),
+      () => items.get().filter((item) => item.title < "B"),
     );
     const extendedItems = computed(
       () =>
@@ -111,7 +111,8 @@ export default recipe<ListInput, ListOutput>(
         ]),
     );
     const combinedItems = computed(
-      () => items.reduce((acc: string, item: Item) => acc += item.title, ""),
+      () =>
+        items.get().reduce((acc: string, item: Item) => acc += item.title, ""),
     );
 
     // Notice that you can bind the same cell to many types
