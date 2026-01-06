@@ -181,9 +181,7 @@ class Nursery implements SyncPush<State> {
    * falling back to expensive JSON.stringify comparison.
    */
   static evict(before?: State, after?: State) {
-    return before == undefined
-      ? undefined
-      : after === undefined
+    return before == undefined ? undefined : after === undefined
       ? before
       // Fast path: reference equality checks before JSON.stringify
       : before === after ||
