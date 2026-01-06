@@ -6,10 +6,10 @@
  * the transformer generates asOpaque: true instead of asCell: true, which
  * prevents mutation.
  */
-import { pattern, UI } from "commontools";
+import { Default, pattern, UI } from "commontools";
 
 interface State {
-  count: number;
+  count: Default<number, 0>;
 }
 
 export default pattern<State>((state) => {
