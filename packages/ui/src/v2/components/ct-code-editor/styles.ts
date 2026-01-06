@@ -109,20 +109,21 @@ export const styles = css`
       font-weight: 500;
       text-decoration: none;
       /* Focus ring to indicate editing */
-      box-shadow: 0 0 0 2px var(--ct-color-primary-300, hsla(212, 100%, 47%, 0.3));
-    }
-
-    /* Legacy fallback - keep for any old usages */
-    .cm-backlink {
-      background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.1));
-      border-radius: 0.25rem;
-      padding: 0.125rem 0.25rem;
-      cursor: pointer;
-      transition: background-color var(--ct-theme-animation-duration, 150ms)
-        var(--ct-transition-timing-ease);
+      box-shadow: 0 0 0 2px
+        var(--ct-color-primary-300, hsla(212, 100%, 47%, 0.3));
       }
 
-      .cm-backlink:hover {
-        background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.2));
-      }
-    `;
+      /* Legacy fallback - keep for any old usages */
+      .cm-backlink {
+        background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.1));
+        border-radius: 0.25rem;
+        padding: 0.125rem 0.25rem;
+        cursor: pointer;
+        transition: background-color var(--ct-theme-animation-duration, 150ms)
+          var(--ct-transition-timing-ease);
+        }
+
+        .cm-backlink:hover {
+          background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.2));
+        }
+      `;

@@ -230,7 +230,11 @@ const backlinkEditFilter = EditorState.transactionFilter.of((tr) => {
       }
 
       if (shouldInclude) {
-        specs.push({ from: adjustedFrom, to: adjustedTo, insert: inserted.toString() });
+        specs.push({
+          from: adjustedFrom,
+          to: adjustedTo,
+          insert: inserted.toString(),
+        });
       }
     });
 
@@ -884,7 +888,9 @@ export class CTCodeEditor extends BaseElement {
    */
   private createBacklinkDecorationPlugin() {
     const editingMark = Decoration.mark({ class: "cm-backlink-editing" });
-    const editingNameMark = Decoration.mark({ class: "cm-backlink-editing-name" });
+    const editingNameMark = Decoration.mark({
+      class: "cm-backlink-editing-name",
+    });
     const pillMark = Decoration.mark({ class: "cm-backlink-pill" });
     const pendingMark = Decoration.mark({ class: "cm-backlink-pending" });
     const hiddenReplace = Decoration.replace({});
@@ -932,12 +938,15 @@ export class CTCodeEditor extends BaseElement {
             const cursorInName = hasFocus && cursorPos >= nameFrom &&
               cursorPos <= nameTo;
             // Check if cursor is adjacent to the backlink (right before [[ or right after ]])
-            const cursorAdjacent = hasFocus && (cursorPos === start || cursorPos === end);
+            const cursorAdjacent = hasFocus &&
+              (cursorPos === start || cursorPos === end);
             // Check if selection overlaps with the entire backlink
             const selectionOverlaps = hasFocus && selectionFrom < end &&
               selectionTo > start;
 
-            if (hasId && (cursorInName || cursorAdjacent || selectionOverlaps)) {
+            if (
+              hasId && (cursorInName || cursorAdjacent || selectionOverlaps)
+            ) {
               // EDITING MODE: User is editing the name of a complete backlink
               // Hide [[ and (id)]], show only the name with editing style
               decorations.push(hiddenReplace.range(start, nameFrom)); // Hide [[
@@ -945,7 +954,8 @@ export class CTCodeEditor extends BaseElement {
               decorations.push(hiddenReplace.range(nameTo, end)); // Hide (id)]]
             } else if (!hasId) {
               // Incomplete backlink - show as pending pill or full text when editing
-              const cursorInside = hasFocus && cursorPos > start && cursorPos < end;
+              const cursorInside = hasFocus && cursorPos > start &&
+                cursorPos < end;
               if (cursorInside || cursorAdjacent || selectionOverlaps) {
                 // Cursor inside or adjacent - show full [[mention]] with editing style
                 decorations.push(editingMark.range(start, end));
@@ -1538,17 +1548,25 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Update a charm's NAME property when the backlink text changes.
    */
-  private _updateCharmName(charmId: string, newName: string, oldName: string): void {
+  private _updateCharmName(
+    charmId: string,
+    newName: string,
+    oldName: string,
+  ): void {
     const charmCell = this.findCharmById(charmId);
     if (!charmCell) {
-      console.warn(`[ct-code-editor] Cannot update name: charm ${charmId} not found`);
+      console.warn(
+        `[ct-code-editor] Cannot update name: charm ${charmId} not found`,
+      );
       return;
     }
 
     // Get the runtime from the charm cell and update NAME
     const runtime = charmCell.runtime;
     if (!runtime) {
-      console.warn(`[ct-code-editor] Cannot update name: no runtime for charm ${charmId}`);
+      console.warn(
+        `[ct-code-editor] Cannot update name: no runtime for charm ${charmId}`,
+      );
       return;
     }
 
@@ -1557,7 +1575,9 @@ export class CTCodeEditor extends BaseElement {
     charmCell.key(NAME).withTx(tx).set(newName);
     tx.commit();
 
-    console.log(`[ct-code-editor] Updated charm ${charmId} name: "${oldName}" → "${newName}"`);
+    console.log(
+      `[ct-code-editor] Updated charm ${charmId} name: "${oldName}" → "${newName}"`,
+    );
 
     // Emit event for external listeners
     this.emit("backlink-name-changed", {
