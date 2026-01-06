@@ -313,6 +313,9 @@ export const attest = ({ the, of, is }: Omit<State, "cause">): IAttestation => {
  * current state matches provided attestation function succeeds with a state
  * of the fact in the given replica otherwise function fails with
  * `IStorageTransactionInconsistent` error.
+ *
+ * Optimized to check reference equality before falling back to JSON.stringify
+ * comparison, avoiding expensive hashing when the replica state is unchanged.
  */
 export const claim = (
   { address, value: expected }: IAttestation,
@@ -323,7 +326,12 @@ export const claim = (
   const source = attest(state);
   const actual = read(source, address)?.ok?.value;
 
-  if (JSON.stringify(expected) === JSON.stringify(actual)) {
+  // Fast path: reference equality check avoids expensive JSON.stringify
+  // when the replica state hasn't changed since the original read
+  if (
+    expected === actual ||
+    JSON.stringify(expected) === JSON.stringify(actual)
+  ) {
     return { ok: state };
   } else {
     return {
