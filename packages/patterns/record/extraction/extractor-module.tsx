@@ -947,7 +947,8 @@ export const ExtractorModule = recipe<
 
     // Check if any sources are selected
     const hasSelectedSources = computed(() => {
-      const sources = extractableSources; // Access first to establish dependency
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
       const selectionsMap = sourceSelections.get() || {};
       if (sources.length === 0) return false;
       // At least one source must not be explicitly deselected
@@ -958,7 +959,8 @@ export const ExtractorModule = recipe<
 
     // Count selected sources
     const selectedSourceCount = computed(() => {
-      const sources = extractableSources; // Access first to establish dependency
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
       const selectionsMap = sourceSelections.get() || {};
       return sources.filter((s: ExtractableSource) =>
         selectionsMap[s.index] !== false
@@ -967,7 +969,8 @@ export const ExtractorModule = recipe<
 
     // Build OCR prompts for selected photos
     const photoSources = computed(() => {
-      const sources = extractableSources; // Access first to establish dependency
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
       const selectionsMap = sourceSelections.get() || {};
       return sources.filter(
         (s: ExtractableSource) =>
@@ -1188,9 +1191,9 @@ ${extractedSummary.join("\n")}`;
 
     // Count sources selected for trash (excluding Notes - Notes is never trashed)
     const trashCount = computed(() => {
-      const sources = extractableSources;
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
       const trashMap = trashSelections.get() || {};
-      if (!sources) return 0;
       return sources.filter((s: ExtractableSource) =>
         s.type !== "notes" && trashMap[s.index] === true
       ).length;
@@ -1203,8 +1206,8 @@ ${extractedSummary.join("\n")}`;
     const isErrorPhase = computed(() => currentPhase === "error");
     const isNoResultsPhase = computed(() => currentPhase === "no-results");
     const hasNoSources = computed(() => {
-      const sources = extractableSources; // Access first to establish dependency
-      return sources.length === 0;
+      const subCharms = parentSubCharms.get() || [];
+      return scanExtractableSources(subCharms).length === 0;
     });
     // Dereference computed values properly to avoid comparing Cell objects to primitives
     const isSingleSource = computed(() => Number(selectedSourceCount) === 1);
@@ -1224,7 +1227,8 @@ ${extractedSummary.join("\n")}`;
     // Pre-computed selection state maps to avoid inline computed() in .map()
     // Creating computed() inside .map() creates new nodes on each render, causing scheduler thrashing
     const sourceCheckStates = computed(() => {
-      const sources = extractableSources; // Access first to establish dependency
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
       const selectionsMap = sourceSelections.get() || {};
       const result: Record<number, boolean> = {};
       for (const source of sources) {
@@ -1234,9 +1238,11 @@ ${extractedSummary.join("\n")}`;
     });
 
     const trashCheckStates = computed(() => {
-      const sources = extractableSources; // Access first to establish dependency
       const selectionsMap = trashSelections.get() || {};
       const result: Record<number, boolean> = {};
+      // Trash sources use same indexing as extractable sources
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
       for (const source of sources) {
         if (source.type !== "notes") {
           result[source.index] = selectionsMap[source.index] === true;
@@ -1261,9 +1267,9 @@ ${extractedSummary.join("\n")}`;
       const enabled = typeof rawEnabled === "boolean" ? rawEnabled : true;
       return !enabled;
     });
-    // Force reactive dependency on extractableSources by assigning to local variable
     const hasTrashableSources = computed(() => {
-      const sources = extractableSources;
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
       return sources.filter((s: ExtractableSource) => s.type !== "notes")
         .length > 0;
     });
