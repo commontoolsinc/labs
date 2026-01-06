@@ -63,14 +63,20 @@ describe("nested counter integration test", () => {
       identity,
     });
 
+    // Use try/catch because element may become stale between waitForSelector and evaluate
     await waitFor(async () => {
-      const counterResult = await page.waitForSelector("#counter-result", {
-        strategy: "pierce",
-      });
-      const initialText = await counterResult.evaluate((el: HTMLElement) =>
-        el.textContent
-      );
-      return initialText?.trim() === "Counter is the 0th number";
+      try {
+        const counterResult = await page.waitForSelector("#counter-result", {
+          strategy: "pierce",
+          timeout: 500,
+        });
+        const initialText = await counterResult.evaluate((el: HTMLElement) =>
+          el.textContent
+        );
+        return initialText?.trim() === "Counter is the 0th number";
+      } catch (_) {
+        return false;
+      }
     });
 
     // Verify via direct operations that the nested structure works
@@ -120,34 +126,45 @@ describe("nested counter integration test", () => {
   it("should verify nested counter has multiple counter displays", async () => {
     const page = shell.page();
 
+    // Use try/catch because elements may become stale between $$ and evaluate
     await waitFor(async () => {
-      // Find all counter result elements (should be 2 for nested counter)
-      const counterResults = await page.$$("#counter-result", {
-        strategy: "pierce",
-      });
-      if (counterResults.length !== 2) {
-        return false;
-      }
-      // Verify both show the same value
-      for (const counter of counterResults) {
-        const text = await counter.evaluate((el: HTMLElement) =>
-          el.textContent
-        );
-        if (text?.trim() !== "Counter is the 5th number") {
+      try {
+        // Find all counter result elements (should be 2 for nested counter)
+        const counterResults = await page.$$("#counter-result", {
+          strategy: "pierce",
+        });
+        if (counterResults.length !== 2) {
           return false;
         }
+        // Verify both show the same value
+        for (const counter of counterResults) {
+          const text = await counter.evaluate((el: HTMLElement) =>
+            el.textContent
+          );
+          if (text?.trim() !== "Counter is the 5th number") {
+            return false;
+          }
+        }
+        return true;
+      } catch (_) {
+        return false;
       }
-      return true;
     });
   });
 });
 
 async function waitForCounter(page: Page, text: string) {
+  // Use try/catch because element may become stale between waitForSelector and innerText
   await waitFor(async () => {
-    const counterResult = await page.waitForSelector("#counter-result", {
-      strategy: "pierce",
-    });
-    return (await counterResult?.innerText())?.trim() === text;
+    try {
+      const counterResult = await page.waitForSelector("#counter-result", {
+        strategy: "pierce",
+        timeout: 500,
+      });
+      return (await counterResult?.innerText())?.trim() === text;
+    } catch (_) {
+      return false;
+    }
   });
 }
 
