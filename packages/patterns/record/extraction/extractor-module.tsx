@@ -780,10 +780,41 @@ const applySelected = handler<
         return;
       }
 
-      // Apply Notes cleanup if enabled and we have cleaned content
-      // We try multiple approaches:
-      // 1. editContent stream handler (preferred - triggers UI reactivity)
-      // 2. Cell key navigation fallback (data saves, UI may need refresh)
+      // ===== Notes Cleanup: Dual-Approach Architecture =====
+      //
+      // PROBLEM: We need to update Notes.content from the Extractor module (cross-charm mutation).
+      //
+      // WHY TWO APPROACHES ARE NECESSARY:
+      //
+      // The correct CommonTools pattern for cross-charm mutations is Stream.send() (see docs/common/PATTERNS.md).
+      // Direct Cell.set() on another charm's cells throws WriteIsolationError. However, Stream handlers
+      // can be "lost" when accessing charms through reactive proxies in Cell<SubCharmEntry[]>.
+      //
+      // APPROACH 1: editContent.send() - Stream Handler (PREFERRED)
+      //   - Uses the Notes pattern's exposed Stream<{ detail: { value: string } }> handler
+      //   - This is the canonical cross-charm mutation pattern in CommonTools
+      //   - The handler (handleEditContent in notes/note.tsx) calls content.set() within the Notes charm's scope
+      //   - Guarantees UI reactivity: ct-code-editor subscriptions fire immediately
+      //   - WHY IT CAN FAIL: Stream handlers may not be accessible when the Notes charm is accessed
+      //     through notesEntry.charm (reactive proxy may strip the handler reference)
+      //
+      // APPROACH 2: Cell.key() Navigation (FALLBACK)
+      //   - Directly navigates through parentSubCharmsCell.key(notesIndex).key("charm").key("content")
+      //   - Sets the content field directly using Cell navigation (same underlying data as Approach 1)
+      //   - This works because we're navigating through our INPUT Cell (parentSubCharms), not crossing
+      //     charm boundaries (no WriteIsolationError)
+      //   - WHY IT WORKS: Cell.key() creates a new Cell reference to the same underlying data
+      //   - UI REACTIVITY: In practice, Lit's reactivity picks up the change without page refresh
+      //     (the ct-code-editor's $value binding still updates), though Stream.send is more reliable
+      //
+      // FAILURE MODES:
+      //   - If both approaches fail: cleanupApplyStatus -> "failed", user sees warning UI
+      //   - Extraction still succeeds (new modules created), only Notes cleanup fails
+      //   - User can manually edit Notes or retry extraction
+      //
+      // This dual-approach pattern is a pragmatic solution to the reactive proxy access issue.
+      // If Stream handler access could be guaranteed, Approach 1 alone would be sufficient.
+      //
       if (cleanupEnabledValue && cleanedNotesValue !== undefined) {
         const notesIndex = current.findIndex((e) => e?.type === "notes");
         const notesEntry = notesIndex >= 0 ? current[notesIndex] : undefined;
@@ -915,11 +946,8 @@ export const ExtractorModule = recipe<
     });
 
     // Check if any sources are selected
-    // Flatten this computed to directly access parentSubCharms rather than chaining through extractableSources
-    // Chained computed access (computed -> computed) doesn't properly establish reactive dependencies
     const hasSelectedSources = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
+      const sources = extractableSources; // Access first to establish dependency
       const selectionsMap = sourceSelections.get() || {};
       if (sources.length === 0) return false;
       // At least one source must not be explicitly deselected
@@ -929,11 +957,8 @@ export const ExtractorModule = recipe<
     });
 
     // Count selected sources
-    // Flatten this computed to directly access parentSubCharms rather than chaining through extractableSources
-    // Chained computed access (computed -> computed) doesn't properly establish reactive dependencies
     const selectedSourceCount = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
+      const sources = extractableSources; // Access first to establish dependency
       const selectionsMap = sourceSelections.get() || {};
       return sources.filter((s: ExtractableSource) =>
         selectionsMap[s.index] !== false
@@ -941,10 +966,8 @@ export const ExtractorModule = recipe<
     });
 
     // Build OCR prompts for selected photos
-    // Flatten this computed to directly access parentSubCharms rather than chaining through extractableSources
     const photoSources = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
+      const sources = extractableSources; // Access first to establish dependency
       const selectionsMap = sourceSelections.get() || {};
       return sources.filter(
         (s: ExtractableSource) =>
@@ -1022,11 +1045,8 @@ export const ExtractorModule = recipe<
     // Build preview from extraction result
     const preview = computed((): ExtractionPreview | null => {
       if (!extraction.result) return null;
-      // Debug: Log what the LLM extracted
-      console.log("[Extract] LLM result:", JSON.stringify(extraction.result, null, 2));
       const subCharms = parentSubCharms.get() || [];
       const result = buildPreview(extraction.result, subCharms);
-      console.log("[Extract] Preview fields:", result.fields.length, result.fields.map((f: ExtractedField) => f.fieldName));
       return result;
     });
 
@@ -1182,11 +1202,9 @@ ${extractedSummary.join("\n")}`;
     const isExtractingPhase = computed(() => currentPhase === "extracting");
     const isErrorPhase = computed(() => currentPhase === "error");
     const isNoResultsPhase = computed(() => currentPhase === "no-results");
-    // Flatten this computed to directly access parentSubCharms rather than chaining through extractableSources
-    // Chained computed access (computed -> computed) doesn't properly establish reactive dependencies
     const hasNoSources = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      return scanExtractableSources(subCharms).length === 0;
+      const sources = extractableSources; // Access first to establish dependency
+      return sources.length === 0;
     });
     // Dereference computed values properly to avoid comparing Cell objects to primitives
     const isSingleSource = computed(() => Number(selectedSourceCount) === 1);
@@ -1206,8 +1224,7 @@ ${extractedSummary.join("\n")}`;
     // Pre-computed selection state maps to avoid inline computed() in .map()
     // Creating computed() inside .map() creates new nodes on each render, causing scheduler thrashing
     const sourceCheckStates = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
+      const sources = extractableSources; // Access first to establish dependency
       const selectionsMap = sourceSelections.get() || {};
       const result: Record<number, boolean> = {};
       for (const source of sources) {
@@ -1217,11 +1234,9 @@ ${extractedSummary.join("\n")}`;
     });
 
     const trashCheckStates = computed(() => {
+      const sources = extractableSources; // Access first to establish dependency
       const selectionsMap = trashSelections.get() || {};
       const result: Record<number, boolean> = {};
-      // Trash sources use same indexing as extractable sources
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
       for (const source of sources) {
         if (source.type !== "notes") {
           result[source.index] = selectionsMap[source.index] === true;
@@ -1256,11 +1271,14 @@ ${extractedSummary.join("\n")}`;
       const status = cleanupApplyStatus.get();
       return status === "failed";
     });
+    const applyButtonDisabled = computed(() =>
+      Boolean(cleanupPending) || applyInProgress.get() === true
+    );
     const applyButtonBackground = computed(() =>
-      Boolean(cleanupPending) ? "#d1d5db" : "#059669"
+      Boolean(applyButtonDisabled) ? "#d1d5db" : "#059669"
     );
     const applyButtonCursor = computed(() =>
-      Boolean(cleanupPending) ? "not-allowed" : "pointer"
+      Boolean(applyButtonDisabled) ? "not-allowed" : "pointer"
     );
 
     return {
@@ -1932,7 +1950,7 @@ ${extractedSummary.join("\n")}`;
                 </button>
                 <button
                   type="button"
-                  disabled={cleanupPending}
+                  disabled={applyButtonDisabled}
                   onClick={applySelected({
                     parentSubCharmsCell: parentSubCharms,
                     parentTrashedSubCharmsCell: parentTrashedSubCharms,
@@ -1967,8 +1985,12 @@ ${extractedSummary.join("\n")}`;
                   }}
                 >
                   {ifElse(
-                    cleanupPending,
-                    "Preparing cleanup...",
+                    applyButtonDisabled,
+                    ifElse(
+                      cleanupPending,
+                      "Preparing cleanup...",
+                      "Applying changes...",
+                    ),
                     <>
                       Apply {totalChangesCount} Change{ifElse(
                         hasMultipleChanges,
