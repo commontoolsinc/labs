@@ -1,5 +1,5 @@
 import { Command } from "@cliffy/command";
-import { join, dirname } from "@std/path";
+import { dirname, join } from "@std/path";
 import { render } from "../lib/render.ts";
 import { process, runTests } from "../lib/dev.ts";
 import { isRecord } from "@commontools/utils/types";

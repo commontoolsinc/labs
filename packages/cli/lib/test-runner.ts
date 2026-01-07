@@ -9,7 +9,7 @@
  */
 
 import { Identity } from "@commontools/identity";
-import { Engine, Runtime, isCell, isStream } from "@commontools/runner";
+import { Engine, isCell, isStream, Runtime } from "@commontools/runner";
 import type { Cell, Recipe, Stream } from "@commontools/runner";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { basename } from "@std/path";
@@ -191,7 +191,9 @@ export async function runTestPattern(
           }
         } catch (err) {
           passed = false;
-          error = `Error reading assertion: ${err instanceof Error ? err.message : String(err)}`;
+          error = `Error reading assertion: ${
+            err instanceof Error ? err.message : String(err)
+          }`;
         }
 
         results.push({
@@ -276,7 +278,9 @@ export async function runTests(
   // Summary
   const totalTime = allResults.reduce((sum, r) => sum + r.totalDurationMs, 0);
   console.log(
-    `\n${totalPassed} passed, ${totalFailed} failed (${Math.round(totalTime)}ms)`,
+    `\n${totalPassed} passed, ${totalFailed} failed (${
+      Math.round(totalTime)
+    }ms)`,
   );
 
   return { passed: totalPassed, failed: totalFailed, results: allResults };

@@ -1,9 +1,6 @@
 import { Command } from "@cliffy/command";
 import { join } from "@std/path";
-import {
-  discoverTestFiles,
-  runTests,
-} from "../lib/test-runner.ts";
+import { discoverTestFiles, runTests } from "../lib/test-runner.ts";
 
 export const test = new Command()
   .name("test")

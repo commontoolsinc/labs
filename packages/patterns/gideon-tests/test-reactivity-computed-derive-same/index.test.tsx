@@ -10,7 +10,7 @@
 import { Cell, computed, handler, pattern } from "commontools";
 import TestPattern from "./index.tsx";
 
-export default pattern<{}, {}>(() => {
+export default pattern(() => {
   // 1. Instantiate the pattern under test with initial state
   const subject = TestPattern({
     firstName: Cell.of("John"),
