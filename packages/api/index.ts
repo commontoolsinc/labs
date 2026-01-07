@@ -186,6 +186,21 @@ export interface IKeyable<out T, Wrap extends HKT> {
     this: IsThisObject,
     valueKey: K,
   ): KeyResultType<T, K, Wrap>;
+
+  /**
+   * Navigate to a nested property by chaining multiple keys.
+   * Equivalent to chaining .key() calls: cell.focus("a", "b") === cell.key("a").key("b")
+   *
+   * @example
+   * // Instead of:
+   * cell.key("user").key("profile").key("name")
+   * // Use:
+   * cell.focus("user", "profile", "name")
+   */
+  focus<Keys extends readonly PropertyKey[]>(
+    this: IsThisObject,
+    ...keys: Keys
+  ): FocusResultType<T, Keys, Wrap>;
 }
 
 export type KeyResultType<T, K, Wrap extends HKT> = [unknown] extends [K]
@@ -194,6 +209,41 @@ export type KeyResultType<T, K, Wrap extends HKT> = [unknown] extends [K]
   : T extends AnyBrandedCell<any, any> // wrapping a cell? delegate to it's .key
     ? (T extends { key(k: K): infer R } ? R : Apply<Wrap, never>)
   : Apply<Wrap, K extends keyof T ? T[K] : any>; // select key, fallback to any
+
+/**
+ * Result type for focus() - chains multiple key lookups.
+ * Equivalent to chaining .key() calls: cell.focus("a", "b") === cell.key("a").key("b")
+ */
+export type FocusResultType<
+  T,
+  Keys extends readonly PropertyKey[],
+  Wrap extends HKT,
+> = Keys extends readonly []
+  ? Apply<Wrap, T>
+  : Keys extends
+    readonly [infer First extends PropertyKey, ...infer Rest extends readonly PropertyKey[]]
+    ? [unknown] extends [First] ? Apply<Wrap, any> // variance guard
+    : [0] extends [1 & T] ? Apply<Wrap, any> // keep any as-is
+    : First extends keyof T ? FocusResultType<T[First], Rest, Wrap>
+    : Apply<Wrap, any> // unknown key fallback
+  : Apply<Wrap, any>;
+
+/**
+ * Result type for focus() on OpaqueCell - chains multiple key lookups.
+ */
+export type FocusResultTypeOpaque<
+  T,
+  Keys extends readonly PropertyKey[],
+> = Keys extends readonly []
+  ? OpaqueCell<T>
+  : Keys extends
+    readonly [infer First extends PropertyKey, ...infer Rest extends readonly PropertyKey[]]
+    ? [unknown] extends [First] ? OpaqueCell<any>
+    : [0] extends [1 & T] ? OpaqueCell<any>
+    : First extends keyof UnwrapCell<T>
+      ? FocusResultTypeOpaque<UnwrapCell<T>[First], Rest>
+    : OpaqueCell<any>
+  : OpaqueCell<any>;
 
 /**
  * Cells that support key() for property access - OpaqueCell variant.
@@ -211,6 +261,15 @@ export interface IKeyableOpaque<T> {
         : UnwrapCell<T>[K] extends AnyBrandedCell<infer U> ? OpaqueCell<U>
         : OpaqueCell<UnwrapCell<T>[K]>)
     : OpaqueCell<any>;
+
+  /**
+   * Navigate to a nested property by chaining multiple keys.
+   * Equivalent to chaining .key() calls: cell.focus("a", "b") === cell.key("a").key("b")
+   */
+  focus<Keys extends readonly PropertyKey[]>(
+    this: IsThisObject,
+    ...keys: Keys
+  ): FocusResultTypeOpaque<T, Keys>;
 }
 
 /**
