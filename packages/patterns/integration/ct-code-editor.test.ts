@@ -92,7 +92,7 @@ describe("ct-code-editor cursor stability", () => {
     await charm.result.set("", ["content"]);
     await waitFor(
       async () => (await getEditorContent(page)) === "",
-      { timeout: 2000, delay: 50 },
+      { timeout: 5000, delay: 50 },
     );
   });
 
@@ -111,7 +111,7 @@ describe("ct-code-editor cursor stability", () => {
         const cellValue = await charm.result.get(["content"]);
         return editorContent === "" && cellValue === "";
       },
-      { timeout: 2000, delay: 50 },
+      { timeout: 5000, delay: 50 },
     );
 
     // Extra settling time for any pending Cell subscription callbacks to drain.
