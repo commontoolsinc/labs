@@ -318,11 +318,11 @@ const addSubCharm = handler<
     } as any)
     : type === "members"
     ? MembersModule({
-      parentSubCharms: sc,
       mentionable: mentionableExcludingSelf,
       parentRecord: selfRecord,
       // NOTE: createRecord callback not passed - functions can't survive serialization boundary
       // See CT-1130 for future work on pattern instantiation
+      // deno-lint-ignore no-explicit-any -- MembersModuleInput allows extra props for future use
     } as any)
     : createSubCharm(type, initialValues);
 

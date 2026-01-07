@@ -36,21 +36,30 @@ export interface MemberEntry {
   bidirectional?: boolean;
 }
 
+/**
+ * Input properties for the MembersModule pattern.
+ *
+ * Can be used standalone (will use wish("#mentionable") to find charms) or
+ * embedded in Record (receives pre-filtered mentionable list and parentRecord).
+ *
+ * NOTE: Creating new records from Members is not yet supported (CT-1130).
+ * Functions cannot survive the pattern input serialization boundary.
+ */
 export interface MembersModuleInput {
-  /** Array of member entries */
+  /** Array of member entries with charm references and optional roles */
   members: Default<MemberEntry[], []>;
-  /** Parent's subCharms for finding self and bidirectional linking */
-  parentSubCharms?: Cell<{ type: string; charm: unknown }[]>;
-  /** Pattern JSON for creating new stub records (serialized pattern definition) */
-  createPattern?: Default<string, "">;
-  /** Pre-filtered mentionable list (excludes self). If not provided, uses wish("#mentionable") */
+  /**
+   * Pre-filtered list of mentionable charms. If provided, used directly.
+   * If not provided, falls back to wish("#mentionable").
+   * When passed from Record, this list already excludes self.
+   */
   mentionable?: MentionableCharm[];
-  /** Parent record reference for bidirectional linking (passed directly from Record) */
+  /**
+   * Parent record reference for bidirectional linking.
+   * When a member is added with bidirectional=true, this record gets added
+   * to the target's members as well.
+   */
   parentRecord?: MentionableCharm | null;
-  // NOTE: createRecord callback is NOT supported yet due to serialization limitations.
-  // Functions cannot survive the pattern input boundary. See CT-1130 for alternatives:
-  // - Option 1: instantiate() builtin to create charms from pattern JSON
-  // - Option 2: ct-charm-creator component for UI-based creation
 }
 
 // ===== Self-Describing Metadata =====
@@ -89,22 +98,26 @@ function isRecord(charm: unknown): boolean {
   // Instead, check for subCharms property which IS a stored Record property
   // NOTE: Array.isArray() doesn't work on reactive proxies - it returns false even for arrays
   // So we check for property existence and length instead
+  // deno-lint-ignore no-explicit-any -- charm is unknown, can't import RecordOutput (circular dep)
   const subCharms = (charm as any)?.subCharms;
   return subCharms !== undefined && subCharms !== null && typeof subCharms.length === "number";
 }
 
 /** Get module types from a record's subCharms */
 function getModuleTypes(charm: unknown): string[] {
+  // deno-lint-ignore no-explicit-any -- charm is unknown, can't import RecordOutput (circular dep)
   const subCharms = (charm as any)?.subCharms;
   // Use length check instead of Array.isArray() - reactive proxies don't pass Array.isArray
   if (subCharms == null || typeof subCharms.length !== "number") return [];
   // Convert to array if it's array-like (reactive proxy), then map
   const arr = Array.from(subCharms as ArrayLike<unknown>);
+  // deno-lint-ignore no-explicit-any -- subCharm entries are untyped here (circular dep)
   return arr.map((e: any) => e?.type).filter(Boolean);
 }
 
 /** Get display name from a charm */
 function getCharmName(charm: unknown): string {
+  // deno-lint-ignore no-explicit-any -- NAME symbol access requires any cast
   return (charm as any)?.[NAME] || "Unknown";
 }
 
@@ -153,8 +166,12 @@ const removeMember = handler<
 
     if (entry.bidirectional && isRecord(entry.charm) && parentRecord) {
       try {
-        const targetCharm = entry.charm as Cell<any>;
-        const targetSubCharms = targetCharm.key?.("subCharms")?.get?.() || [];
+        // Navigate into the target Record's structure to find its members module
+        // Using Cell<unknown> since we can't import RecordOutput (circular dep)
+        const targetCharm = entry.charm as Cell<unknown>;
+        // deno-lint-ignore no-explicit-any -- Cell.key() requires any for dynamic property access
+        const targetSubCharms = (targetCharm as Cell<any>).key?.("subCharms")?.get?.() || [];
+        // deno-lint-ignore no-explicit-any -- subCharm entries untyped (circular dep with Record)
         const targetMembersEntry = targetSubCharms.find(
           (e: any) => e?.type === "members",
         );
@@ -374,6 +391,7 @@ const addMember = handler<
       const targetSubCharms = charmCell.key("subCharms").get() || [];
 
       // Find the members module entry
+      // deno-lint-ignore no-explicit-any -- subCharm entries untyped (circular dep with Record)
       const membersEntryIndex = targetSubCharms.findIndex(
         (e: any) => e?.type === "members",
       );
@@ -456,8 +474,6 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
   "MembersModule",
   ({
     members,
-    parentSubCharms: _parentSubCharms,
-    createPattern: _createPattern,
     mentionable: mentionableProp,
     parentRecord: parentRecordProp,
   }) => {
