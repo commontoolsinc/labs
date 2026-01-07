@@ -119,9 +119,9 @@ const DEFAULT_AREAS: AreaOfInterest[] = [
 
 // Handler for adding a new stop when map is clicked
 const addStopHandler = handler<
-  { lat: number; lng: number },
+  { detail: { lat: number; lng: number } },
   { stops: Cell<TripStop[]>; stopCount: number }
->(({ lat, lng }, { stops, stopCount }) => {
+>(({ detail: { lat, lng } }, { stops, stopCount }) => {
   stops.push({
     position: { lat, lng },
     title: `Stop ${stopCount + 1}`,
@@ -133,9 +133,9 @@ const addStopHandler = handler<
 
 // Handler for updating marker position after drag
 const markerDragHandler = handler<
-  { index: number; position: LatLng },
+  { detail: { index: number; position: LatLng } },
   { stops: Cell<TripStop[]> }
->(({ index, position }, { stops }) => {
+>(({ detail: { index, position } }, { stops }) => {
   const currentStops = stops.get();
   if (index >= 0 && index < currentStops.length) {
     const updated = currentStops.map((stop, i) =>
@@ -301,12 +301,12 @@ export default pattern<Input, Output>(
                   fitToBounds={computed(
                     () => fitBoundsTrigger.get() > 0 && stops.get().length > 0
                   )}
-                  @ct-click={addStopHandler({
+                  onct-click={addStopHandler({
                     stops,
                     stopCount: stopCount,
                   })}
-                  @ct-marker-drag-end={markerDragHandler({ stops })}
-                  @ct-marker-click={(e: CustomEvent) => {
+                  onct-marker-drag-end={markerDragHandler({ stops })}
+                  onct-marker-click={(e: CustomEvent) => {
                     selectedStopIndex.set(e.detail?.index ?? null);
                   }}
                 />
