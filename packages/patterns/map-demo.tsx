@@ -147,9 +147,9 @@ const markerDragHandler = handler<
 
 // Handler for removing a stop
 const removeStopHandler = handler<
-  { index: number },
-  { stops: Cell<TripStop[]> }
->(({ index }, { stops }) => {
+  void,
+  { stops: Cell<TripStop[]>; index: number }
+>((_event, { stops, index }) => {
   const current = stops.get();
   if (index >= 0 && index < current.length) {
     stops.set(current.toSpliced(index, 1));
@@ -208,7 +208,12 @@ export default pattern<Input, Output>(
     const areaCount = computed(() => areasOfInterest.get().length);
 
     // Bound handler for initialization
-    const initializeDemo = initHandler({ stops, areasOfInterest, center, initialized });
+    const initializeDemo = initHandler({
+      stops,
+      areasOfInterest,
+      center,
+      initialized,
+    });
 
     // Build map value from stops and areas
     const mapValue = computed(() => {
@@ -237,17 +242,16 @@ export default pattern<Input, Output>(
       }));
 
       // Polyline connecting all stops (if enabled and more than 1 stop)
-      const polylines =
-        currentShowRoute && currentStops.length > 1
-          ? [
-              {
-                points: currentStops.map((stop) => stop.position),
-                color: "#6366f1",
-                strokeWidth: 3,
-                dashArray: "10, 5",
-              },
-            ]
-          : [];
+      const polylines = currentShowRoute && currentStops.length > 1
+        ? [
+          {
+            points: currentStops.map((stop) => stop.position),
+            color: "#6366f1",
+            strokeWidth: 3,
+            dashArray: "10, 5",
+          },
+        ]
+        : [];
 
       return { markers, circles, polylines };
     });
@@ -281,14 +285,15 @@ export default pattern<Input, Output>(
                   <ct-vstack gap="2" align="center">
                     <ct-heading level={5}>Welcome to Trip Planner!</ct-heading>
                     <p style="text-align: center; color: var(--ct-color-gray-600); margin: 0;">
-                      Get started with demo data or click on the map to add your first stop.
+                      Get started with demo data or click on the map to add your
+                      first stop.
                     </p>
                     <ct-button variant="primary" onClick={initializeDemo}>
                       Load Demo Data
                     </ct-button>
                   </ct-vstack>
                 </ct-card>,
-                null
+                null,
               )}
 
               {/* Map container */}
@@ -299,7 +304,7 @@ export default pattern<Input, Output>(
                   $zoom={zoom}
                   style="height: 400px; width: 100%;"
                   fitToBounds={computed(
-                    () => fitBoundsTrigger.get() > 0 && stops.get().length > 0
+                    () => fitBoundsTrigger.get() > 0 && stops.get().length > 0,
                   )}
                   onct-click={addStopHandler({
                     stops,
@@ -338,8 +343,15 @@ export default pattern<Input, Output>(
                   </ct-hstack>
                   <ct-hstack gap="3">
                     <span style="font-size: 0.875rem;">
-                      Center: {computed(() => formatCoord((center.get() ?? { lat: 37.6, lng: -122.2 }).lat))},{" "}
-                      {computed(() => formatCoord((center.get() ?? { lat: 37.6, lng: -122.2 }).lng))}
+                      Center: {computed(() =>
+                        formatCoord(
+                          (center.get() ?? { lat: 37.6, lng: -122.2 }).lat,
+                        )
+                      )}, {computed(() =>
+                        formatCoord(
+                          (center.get() ?? { lat: 37.6, lng: -122.2 }).lng,
+                        )
+                      )}
                     </span>
                     <span style="font-size: 0.875rem;">
                       Zoom: {computed(() => zoom.get().toFixed(1))}
@@ -368,7 +380,7 @@ export default pattern<Input, Output>(
                         backgroundColor: ifElse(
                           computed(() => selectedStopIndex.get() === index),
                           "var(--ct-color-blue-100)",
-                          "var(--ct-color-gray-50)"
+                          "var(--ct-color-gray-50)",
                         ),
                       }}
                     >
@@ -383,7 +395,9 @@ export default pattern<Input, Output>(
                         <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                           {computed(
                             () =>
-                              `${formatCoord(stop.position.lat)}, ${formatCoord(stop.position.lng)}`
+                              `${formatCoord(stop.position.lat)}, ${
+                                formatCoord(stop.position.lng)
+                              }`,
                           )}
                         </span>
                       </ct-vstack>
@@ -398,15 +412,7 @@ export default pattern<Input, Output>(
                       </ct-button>
                       <ct-button
                         variant="ghost"
-                        onClick={() => {
-                          const current = stops.get();
-                          const idx = current.findIndex((s) =>
-                            Cell.equals(stop, s)
-                          );
-                          if (idx >= 0) {
-                            stops.set(current.toSpliced(idx, 1));
-                          }
-                        }}
+                        onClick={removeStopHandler({ stops, index })}
                       >
                         x
                       </ct-button>
@@ -418,7 +424,7 @@ export default pattern<Input, Output>(
                     <div style="text-align: center; color: var(--ct-color-gray-500); padding: 1rem;">
                       Click on the map to add your first stop!
                     </div>,
-                    null
+                    null,
                   )}
                 </ct-vstack>
               </ct-card>
@@ -452,7 +458,10 @@ export default pattern<Input, Output>(
                         }}
                       />
                       <ct-vstack gap="0" style="flex: 1;">
-                        <ct-input $value={area.title} style="font-weight: 500;" />
+                        <ct-input
+                          $value={area.title}
+                          style="font-weight: 500;"
+                        />
                         <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                           Radius: {area.radius}m
                         </span>
@@ -488,7 +497,7 @@ export default pattern<Input, Output>(
                     <div style="text-align: center; color: var(--ct-color-gray-500); padding: 1rem;">
                       No areas defined. Click "Add Area" to highlight a region.
                     </div>,
-                    null
+                    null,
                   )}
                 </ct-vstack>
               </ct-card>
@@ -504,12 +513,14 @@ export default pattern<Input, Output>(
                         <ct-hstack gap="1" align="center">
                           <span style="font-weight: 500;">{stop.title}</span>
                           {ifElse(
-                            computed(() => index < stops.get().length - 1),
+                            computed(() =>
+                              index < stops.get().length - 1
+                            ),
                             <span style="color: var(--ct-color-gray-400);">
                               {" "}
                               -&gt;{" "}
                             </span>,
-                            null
+                            null,
                           )}
                         </ct-hstack>
                       ))}
@@ -519,7 +530,7 @@ export default pattern<Input, Output>(
                     </span>
                   </ct-vstack>
                 </ct-card>,
-                null
+                null,
               )}
 
               {/* Instructions */}
@@ -531,7 +542,9 @@ export default pattern<Input, Output>(
                     <li>Drag markers to reposition stops</li>
                     <li>Use "Fit to All Stops" to zoom to see all markers</li>
                     <li>Toggle "Show Route" to display/hide the route line</li>
-                    <li>Add areas of interest to highlight regions on the map</li>
+                    <li>
+                      Add areas of interest to highlight regions on the map
+                    </li>
                     <li>Edit stop names inline in the list below</li>
                   </ul>
                 </ct-vstack>
@@ -576,5 +589,5 @@ export default pattern<Input, Output>(
       fitBoundsTrigger: computed(() => fitBoundsTrigger.get()),
       initialized: computed(() => initialized.get()),
     };
-  }
+  },
 );
