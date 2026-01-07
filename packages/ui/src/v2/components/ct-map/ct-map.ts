@@ -33,6 +33,17 @@ const TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const TILE_ATTRIBUTION =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
+// Valid coordinate and zoom ranges
+const MIN_ZOOM = 0;
+const MAX_ZOOM = 18;
+const MIN_LAT = -90;
+const MAX_LAT = 90;
+const MIN_LNG = -180;
+const MAX_LNG = 180;
+
+// Keyboard navigation constants
+const PAN_AMOUNT = 100; // pixels to pan per arrow key press
+
 /**
  * CTMap - Interactive map component with markers, circles, and polylines
  *
@@ -50,6 +61,9 @@ const TILE_ATTRIBUTION =
  * @fires ct-marker-click - Marker click with { marker, index, lat, lng }
  * @fires ct-marker-drag-end - Marker drag end with { marker, index, position, oldPosition }
  * @fires ct-circle-click - Circle click with { circle, index, lat, lng }
+ *
+ * @note Polyline click events are not currently supported. Polylines are rendered
+ * for display only (routes, paths). For clickable segments, use circles as waypoints.
  *
  * @example
  * <ct-map
@@ -93,6 +107,9 @@ export class CTMap extends BaseElement {
   // Track circles for click events
   private _leafletCircles: L.Circle[] = [];
 
+  // RAF ID for map initialization (prevent race condition on disconnect)
+  private _rafId: number | null = null;
+
   // Change group for internal edits to avoid echo loops
   private _changeGroup = crypto.randomUUID();
 
@@ -124,6 +141,9 @@ export class CTMap extends BaseElement {
     changeGroup: this._changeGroup,
   });
 
+  // Bound event handler for cleanup
+  private _boundHandleKeydown = this._handleKeydown.bind(this);
+
   constructor() {
     super();
     this.fitToBounds = false;
@@ -132,10 +152,12 @@ export class CTMap extends BaseElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
+    this.addEventListener("keydown", this._boundHandleKeydown);
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
+    this.removeEventListener("keydown", this._boundHandleKeydown);
     this._cleanup();
   }
 
@@ -209,8 +231,57 @@ export class CTMap extends BaseElement {
 
   override render() {
     return html`
-      <div class="map-container"></div>
+      <div
+        class="map-container"
+        role="application"
+        aria-label="Interactive map"
+        tabindex="0"
+      >
+      </div>
     `;
+  }
+
+  // === Keyboard Navigation ===
+
+  private _handleKeydown(event: KeyboardEvent): void {
+    // Only handle when interactive and map exists
+    if (!this.interactive || !this._map) return;
+
+    // Check that the event target is within the map container
+    const mapContainer = this.shadowRoot?.querySelector(".map-container");
+    if (!mapContainer) return;
+
+    // Only handle events when focus is on the map container
+    const target = event.target as Node;
+    if (target !== mapContainer && !mapContainer.contains(target)) return;
+
+    switch (event.key) {
+      case "ArrowUp":
+        event.preventDefault();
+        this._map.panBy([0, -PAN_AMOUNT]);
+        break;
+      case "ArrowDown":
+        event.preventDefault();
+        this._map.panBy([0, PAN_AMOUNT]);
+        break;
+      case "ArrowLeft":
+        event.preventDefault();
+        this._map.panBy([-PAN_AMOUNT, 0]);
+        break;
+      case "ArrowRight":
+        event.preventDefault();
+        this._map.panBy([PAN_AMOUNT, 0]);
+        break;
+      case "+":
+      case "=":
+        event.preventDefault();
+        this._map.zoomIn();
+        break;
+      case "-":
+        event.preventDefault();
+        this._map.zoomOut();
+        break;
+    }
   }
 
   // === Map Initialization ===
@@ -254,8 +325,9 @@ export class CTMap extends BaseElement {
 
     // Invalidate size after initialization to ensure proper tile loading
     // This is necessary when the map is rendered in Shadow DOM
-    requestAnimationFrame(() => {
+    this._rafId = requestAnimationFrame(() => {
       this._map?.invalidateSize();
+      this._rafId = null;
     });
   }
 
@@ -392,17 +464,23 @@ export class CTMap extends BaseElement {
   }
 
   private _getCenter(): LatLng {
+    let center: LatLng;
     if (isCell(this.center)) {
-      return this.center.get() || DEFAULT_CENTER;
+      center = this.center.get() || DEFAULT_CENTER;
+    } else {
+      center = this.center || DEFAULT_CENTER;
     }
-    return this.center || DEFAULT_CENTER;
+    return this._validateLatLng(center);
   }
 
   private _getZoom(): number {
+    let zoom: number;
     if (isCell(this.zoom)) {
-      return this.zoom.get() || DEFAULT_ZOOM;
+      zoom = this.zoom.get() ?? DEFAULT_ZOOM;
+    } else {
+      zoom = this.zoom ?? DEFAULT_ZOOM;
     }
-    return this.zoom || DEFAULT_ZOOM;
+    return this._clampZoom(zoom);
   }
 
   private _getBounds(): Bounds | null {
@@ -445,7 +523,7 @@ export class CTMap extends BaseElement {
 
     this._isUpdatingFromCell = true;
     try {
-      const center = this._getCenter();
+      const center = this._getCenter(); // Already validated by _getCenter()
       this._map.setView([center.lat, center.lng], this._map.getZoom(), {
         animate: true,
       });
@@ -459,7 +537,7 @@ export class CTMap extends BaseElement {
 
     this._isUpdatingFromCell = true;
     try {
-      const zoom = this._getZoom();
+      const zoom = this._getZoom(); // Already validated by _getZoom()
       this._map.setZoom(zoom, { animate: true });
     } finally {
       this._isUpdatingFromCell = false;
@@ -659,6 +737,8 @@ export class CTMap extends BaseElement {
       const latLngs: L.LatLngExpression[] = points.map((p) => [p.lat, p.lng]);
 
       // Create Leaflet polyline
+      // Note: Polylines are display-only (no click events). Use circles as
+      // waypoints if clickable segments are needed.
       const leafletPolyline = L.polyline(latLngs, {
         color: color || "#3b82f6",
         weight: strokeWidth ?? 3,
@@ -769,9 +849,57 @@ export class CTMap extends BaseElement {
     return emojiRegex.test(str);
   }
 
+  // === Coordinate Validation ===
+
+  /**
+   * Clamp zoom level to valid range, handling NaN/Infinity
+   */
+  private _clampZoom(zoom: number): number {
+    if (!Number.isFinite(zoom)) {
+      return DEFAULT_ZOOM;
+    }
+    return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+  }
+
+  /**
+   * Clamp latitude to valid range, handling NaN/Infinity
+   */
+  private _clampLat(lat: number): number {
+    if (!Number.isFinite(lat)) {
+      return DEFAULT_CENTER.lat;
+    }
+    return Math.max(MIN_LAT, Math.min(MAX_LAT, lat));
+  }
+
+  /**
+   * Clamp longitude to valid range, handling NaN/Infinity
+   */
+  private _clampLng(lng: number): number {
+    if (!Number.isFinite(lng)) {
+      return DEFAULT_CENTER.lng;
+    }
+    return Math.max(MIN_LNG, Math.min(MAX_LNG, lng));
+  }
+
+  /**
+   * Validate and clamp a LatLng object
+   */
+  private _validateLatLng(latLng: LatLng): LatLng {
+    return {
+      lat: this._clampLat(latLng.lat),
+      lng: this._clampLng(latLng.lng),
+    };
+  }
+
   // === Cleanup ===
 
   private _cleanup(): void {
+    // Cancel pending RAF to prevent race condition if component disconnects before it fires
+    if (this._rafId !== null) {
+      cancelAnimationFrame(this._rafId);
+      this._rafId = null;
+    }
+
     // Unsubscribe from Cells
     if (this._valueUnsubscribe) {
       this._valueUnsubscribe();
@@ -802,6 +930,11 @@ export class CTMap extends BaseElement {
     this._polylineLayer = null;
     this._leafletMarkers = [];
     this._leafletCircles = [];
+
+    // Note: CellControllers (_centerController, _zoomController, _boundsController)
+    // are automatically cleaned up by Lit's reactive controller system.
+    // They implement ReactiveController with hostDisconnected() callbacks that
+    // are automatically invoked when the host element disconnects.
   }
 
   // === Public API ===
