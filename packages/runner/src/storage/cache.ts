@@ -176,13 +176,17 @@ class Nursery implements SyncPush<State> {
    * yet we keep value from `before` as nursery is more likely ahead. If
    * `before` is `undefined` keep it as is because reads would fall through
    * to `heap` anyway.
+   *
+   * Optimized: checks reference equality and value reference equality before
+   * falling back to expensive JSON.stringify comparison.
    */
   static evict(before?: State, after?: State) {
-    return before == undefined
-      ? undefined
-      : after === undefined
+    return before == undefined ? undefined : after === undefined
       ? before
-      : JSON.stringify(before) === JSON.stringify(after)
+      // Fast path: reference equality checks before JSON.stringify
+      : before === after ||
+          before.is === after.is ||
+          JSON.stringify(before) === JSON.stringify(after)
       ? undefined
       : before;
   }

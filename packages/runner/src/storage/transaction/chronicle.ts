@@ -381,7 +381,11 @@ class History {
         const expected = read(candidate, address).ok?.value;
         const actual = read(attestation, address).ok?.value;
 
-        if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+        // Fast path: reference equality check avoids expensive JSON.stringify
+        if (
+          expected !== actual &&
+          JSON.stringify(expected) !== JSON.stringify(actual)
+        ) {
           return {
             error: StateInconsistency({
               address,
@@ -511,6 +515,14 @@ class Novelty {
 
   [Symbol.iterator]() {
     return this.#model.values();
+  }
+
+  /**
+   * Returns true if there are any changes tracked in novelty.
+   * Used for early exit optimization in commit().
+   */
+  hasChanges(): boolean {
+    return this.#model.size > 0;
   }
 
   *changes(): Iterable<IAttestation> {
