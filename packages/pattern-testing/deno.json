@@ -1,0 +1,9 @@
+{
+  "name": "@commontools/pattern-testing",
+  "tasks": {
+    "test": "deno test --allow-ffi --allow-env --allow-read --allow-write --allow-net -A src/*.test.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

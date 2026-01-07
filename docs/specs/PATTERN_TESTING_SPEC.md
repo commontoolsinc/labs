@@ -1,6 +1,6 @@
 # Pattern Testing System Specification
 
-**Status:** Draft
+**Status:** Implemented (Phase 1+2)
 **Author:** Claude (with Gideon)
 **Date:** 2026-01-07
 
@@ -456,6 +456,28 @@ expect(cells.selectedItem.get()?.title).toBe("Item B");
 ### `@commontools/pattern-testing`
 
 ```typescript
+/**
+ * A test cell that wraps a Cell and handles transaction management automatically.
+ * In tests, you can call .set(value) without worrying about transactions.
+ */
+export interface TestCell<T> {
+  /**
+   * Set the cell value. Creates a transaction, sets the value, and commits.
+   * @param value - The new value to set
+   */
+  set(value: T): Promise<void>;
+
+  /**
+   * Get the current cell value.
+   */
+  get(): T;
+
+  /**
+   * Access the underlying Cell for advanced use cases.
+   */
+  readonly cell: Cell<T>;
+}
+
 // Core harness
 export interface TestHarness {
   // Load and instantiate a pattern with initial state
@@ -463,8 +485,8 @@ export interface TestHarness {
     patternPath: string,
     initialState: Partial<Input>
   ): Promise<{
-    pattern: { result: Output };
-    cells: { [K in keyof Input]: Cell<Input[K]> };
+    pattern: { result: Output; cell: Cell<Output> };
+    cells: { [K in keyof Input]: TestCell<Input[K]> };  // Note: TestCell, not Cell
   }>;
 
   // Wait for all pending scheduler actions
@@ -479,6 +501,9 @@ export interface TestHarness {
 
   // Access underlying runtime (escape hatch)
   runtime: Runtime;
+  engine: Engine;
+  identity: Identity;
+  space: string;
 }
 
 // Note: To trigger handlers, use the native .send() API on handler streams:
@@ -490,9 +515,10 @@ export interface TestHarness {
 // Factory function
 export function createTestHarness(options?: {
   identity?: Identity;
+  validateSchemas?: boolean;  // Default: false (opt-in for performance)
 }): Promise<TestHarness>;
 
-// Assertion helpers (optional, for convenience)
+// Assertion helpers (Phase 3 - not yet implemented)
 export function expectCell<T>(cell: Cell<T>): {
   toBe(expected: T): void;
   toEqual(expected: T): void;
@@ -508,6 +534,20 @@ export function expectHandler<E, T>(
     to: T[K]
   ): Promise<void>;
 };
+```
+
+### Important Usage Note: Async Cell Mutations
+
+Because cells need transactions for mutations, `TestCell.set()` is async:
+
+```typescript
+// ✅ Correct - await the set call
+await cells.firstName.set("Alice");
+await harness.idle();
+
+// ❌ Wrong - forgetting await will not properly commit the transaction
+cells.firstName.set("Alice");  // Returns Promise, doesn't wait
+await harness.idle();
 ```
 
 ### Implementation Sketch
@@ -634,14 +674,14 @@ ok | 5 passed | 0 failed (45ms)
 
 ## Implementation Phases
 
-### Phase 1: Core Infrastructure (MVP)
+### Phase 1: Core Infrastructure (MVP) ✅ COMPLETED
 
 **Deliverables:**
-- [ ] `@commontools/pattern-testing` package with `createTestHarness()`
-- [ ] `loadPattern()` - pattern compilation and instantiation
-- [ ] `idle()` - scheduler synchronization
-- [ ] `dispose()` - cleanup
-- [ ] `ct dev --test` command (basic discovery)
+- [x] `@commontools/pattern-testing` package with `createTestHarness()`
+- [x] `loadPattern()` - pattern compilation and instantiation
+- [x] `idle()` - scheduler synchronization
+- [x] `dispose()` - cleanup
+- [x] `ct dev --test` command (basic discovery)
 - [ ] Documentation with counter example
 
 **Test coverage enabled:**
@@ -650,13 +690,18 @@ ok | 5 passed | 0 failed (45ms)
 
 **Estimated scope:** ~500 LOC
 
-### Phase 2: Handler and Reactivity Testing
+### Phase 2: Handler and Reactivity Testing ✅ COMPLETED
 
 **Deliverables:**
-- [ ] `sendEvent()` - handler event injection
-- [ ] `subscribe()` - cell change observation
-- [ ] Cell mutation helpers (`cells.foo.set()`, `cells.foo.push()`)
-- [ ] Test file discovery (all three methods)
+- [x] Handler triggering via native `.send()` API on result streams
+- [x] `subscribe()` - cell change observation
+- [x] Cell mutation helpers via `TestCell` wrapper (`cells.foo.set()`)
+- [x] Test file discovery (`__tests__/` subdirectory)
+
+**Implementation Notes:**
+- Cells are wrapped in `TestCell<T>` interface for automatic transaction management
+- `TestCell.set(value)` is async and creates/commits transactions automatically
+- Tests must `await` cell mutations: `await cells.foo.set(value)`
 
 **Test coverage enabled:**
 - Handler tests (Level 3)
