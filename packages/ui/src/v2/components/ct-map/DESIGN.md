@@ -197,6 +197,12 @@ interface CtCircleClickDetail {
 }
 ```
 
+## Events - Important Notes
+
+**Polyline click events are not implemented.** Polylines are rendered for
+display only (routes, paths). For clickable segments, use circles as waypoints
+instead.
+
 ## Usage Examples
 
 ### Simple: Display Locations
