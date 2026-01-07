@@ -572,19 +572,20 @@ export class CTMap extends BaseElement {
     // Clear existing layers
     this._clearLayers();
 
-    // Render markers - convert to plain array to avoid reactive proxy deep-access issues
+    // Render markers - iterate directly to avoid reactive proxy deep-access issues
+    // (spread operator [...arr] triggers proxy copy which accesses all properties)
     if (value.markers && value.markers.length > 0) {
-      this._renderMarkers([...value.markers]);
+      this._renderMarkers(value.markers);
     }
 
-    // Render circles - convert to plain array to avoid reactive proxy deep-access issues
+    // Render circles - iterate directly to avoid reactive proxy deep-access issues
     if (value.circles && value.circles.length > 0) {
-      this._renderCircles([...value.circles]);
+      this._renderCircles(value.circles);
     }
 
-    // Render polylines - convert to plain array to avoid reactive proxy deep-access issues
+    // Render polylines - iterate directly to avoid reactive proxy deep-access issues
     if (value.polylines && value.polylines.length > 0) {
-      this._renderPolylines([...value.polylines]);
+      this._renderPolylines(value.polylines);
     }
   }
 
