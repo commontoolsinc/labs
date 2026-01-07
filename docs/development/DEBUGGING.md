@@ -9,17 +9,19 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | Error Message | Cause | Fix |
 |---------------|-------|-----|
 | "Property 'set' does not exist" | Missing `Writable<>` in signature | Add `Writable<T>` for write access ([TYPES](TYPES_AND_SCHEMAS.md)) |
+| "X.get is not a function" | Calling `.get()` on computed/lift result | Access directly without `.get()` - only `Writable<>` has `.get()` ([see below](#get-is-not-a-function)) |
+| "Tried to access a reactive reference outside a reactive context" | Using reactive value to index plain object in `.map()` | Use `lift()` for object indexing ([see below](#reactive-reference-outside-context)) |
 | "Type 'string' is not assignable to type 'CSSProperties'" | String style on HTML element | Use object syntax `style={{ ... }}` ([COMPONENTS](COMPONENTS.md)) |
 | Type mismatch binding item to `$checked` | Binding whole item, not property | Bind `item.done`, not `item` |
 | "ReadOnlyAddressError" | onClick inside computed() | Move button outside, use disabled ([see below](#onclick-inside-computed)) |
 | Charm hangs, never renders | ifElse with composed pattern cell | Use local computed cell ([see below](#ifelse-with-composed-pattern-cells)) |
 | Data not updating | Missing `$` prefix or wrong event | Use `$checked`, `$value` ([COMPONENTS](COMPONENTS.md)) |
-| Filtered list not updating | Need computed() | Wrap in `computed()` ([CELLS](CELLS_AND_REACTIVITY.md)) |
+| Filtered list not updating | Need computed() | Wrap in `computed()` ([REACTIVITY](REACTIVITY.md)) |
 | lift() returns 0/empty | Passing cell directly to lift() | Use `computed()` or pass as object param ([see below](#lift-returns-staleempty-data)) |
 | Handler binding: unknown property | Passing event data at binding time | Use inline handler for test buttons ([see below](#handler-binding-error-unknown-property)) |
 | Stream.subscribe doesn't exist | Using Stream.of()/subscribe() | Bound handler IS the stream ([see below](#streamof--subscribe-dont-exist)) |
 | Can't access variable in nested scope | Variable scoping limitation | Pre-compute grouped data or use lift() with explicit params ([see below](#variable-scoping-in-reactive-contexts)) |
-| "Cannot access cell via closure" | Using lift() with closure | Pass all reactive deps as params to lift() ([CELLS](CELLS_AND_REACTIVITY.md#lift-and-closure-limitations)) |
+| "Cannot access cell via closure" | Using lift() with closure | Pass all reactive deps as params to lift() ([REACTIVITY](REACTIVITY.md#lift-and-closure-limitations)) |
 | CLI `get` returns stale computed values | `charm set` doesn't trigger recompute | Run `charm step` after `set` to trigger re-evaluation ([see below](#stale-computed-values-after-charm-set)) |
 
 ---
@@ -27,6 +29,57 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 ## Common Gotchas
 
 These issues compile without errors but fail at runtime.
+
+### .get() is Not a Function
+
+**Error:** `X.get is not a function`
+
+**Cause:** Calling `.get()` on a `computed()` or `lift()` result. Only `Writable<>` types have `.get()`.
+
+```typescript
+// Given:
+const filteredItems = computed(() => items.filter(item => !item.done));
+
+// ✅ CORRECT - Access computed results directly
+const count = filteredItems.length;
+const paulinaItems = filteredItems.filter(item => item.owner === "paulina");
+
+// Also correct for lift() results
+const formattedValue = getFormattedDate(date);  // Access directly
+```
+
+**Access pattern summary:**
+| Type | Has `.get()`? |
+|------|---------------|
+| `Writable<>` (pattern inputs with write access) | Yes |
+| `computed()` results | No - access directly |
+| `lift()` results | No - access directly |
+
+### Reactive Reference Outside Context
+
+**Error:** `Tried to access a reactive reference outside a reactive context`
+
+**Cause:** Using a reactive value (from `.map()` iteration) to index into a plain JavaScript object.
+
+```typescript
+const STYLES = {
+  pending: { color: "#92400e" },
+  active: { color: "#1e40af" },
+};
+
+// ✅ CORRECT - Use lift() for object indexing
+const getStyleColor = lift((status: Status): string => STYLES[status].color);
+
+items.map((item) => (
+  <div style={{ color: getStyleColor(item.status) }}>
+    {item.title}
+  </div>
+));
+```
+
+**Why this happens:** Inside `.map()`, each item's properties are reactive references. Using them to index plain objects (`STYLES[item.status]`) tries to access the reactive reference outside a reactive context. The `lift()` function creates a proper reactive context for the lookup.
+
+See [REACTIVITY.md](REACTIVITY.md#using-reactive-values-to-index-objects-in-map) for more examples.
 
 ### onClick Inside computed()
 
@@ -365,7 +418,7 @@ const groupedItems = computed(() => {
 
 **Related issue with lift():**
 
-The same scoping limitation applies to `lift()`. See [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md#lift-and-closure-limitations) for the workaround pattern and explanation of frame-based execution.
+The same scoping limitation applies to `lift()`. See [REACTIVITY.md](REACTIVITY.md#lift-and-closure-limitations) for the workaround pattern and explanation of frame-based execution.
 
 ## Runtime Errors
 
@@ -449,7 +502,7 @@ Fix all type errors before deploying. Most issues are caught here.
 ### 2. Match Error to Doc
 
 - **Type errors** → [TYPES_AND_SCHEMAS.md](TYPES_AND_SCHEMAS.md)
-- **Reactivity issues** → [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md)
+- **Reactivity issues** → [REACTIVITY.md](REACTIVITY.md)
 - **Component questions** → [COMPONENTS.md](COMPONENTS.md)
 - **Pattern examples** → [PATTERNS.md](PATTERNS.md)
 
@@ -662,7 +715,7 @@ This keeps you working with the same charm instance, preserving any test data yo
 
 ## See Also
 
-- [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) - Reactivity system
+- [REACTIVITY.md](REACTIVITY.md) - Reactivity system
 - [TYPES_AND_SCHEMAS.md](TYPES_AND_SCHEMAS.md) - Type system
 - [COMPONENTS.md](COMPONENTS.md) - UI components
 - [CELL_CONTEXT.md](CELL_CONTEXT.md) - Debug tool details

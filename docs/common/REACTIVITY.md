@@ -1,6 +1,6 @@
 <!-- @reviewed 2025-12-10 docs-rationalization -->
 
-# Cells and Reactivity Guide
+# Reactivity Guide
 
 This guide explains CommonTools' reactive system: how cells work, when reactivity is automatic, and how to work with reactive data effectively.
 
@@ -73,6 +73,40 @@ Think of `Writable<>` as a permission declaration:
 | Still reactive for display | Can call `.set()`, `.update()`, `.push()` |
 | Can pass to `computed()` | Can mutate directly |
 | Can use in JSX | Everything read-only can do, plus mutation |
+
+## Accessing Reactive Values
+
+Different reactive types have different access patterns:
+
+| Type | How to access | Example |
+|------|---------------|---------|
+| `Writable<>` (pattern inputs) | Use `.get()` to read, `.set()` to write | `expenses.get().filter(...)` |
+| `computed()` results | Access directly - no `.get()` | `filteredItems.length` |
+| `lift()` results | Access directly - no `.get()` | `formattedDate` |
+| Values inside `.map()` | Properties are reactive, use `lift()` for object indexing | See below |
+
+### Using Reactive Values to Index Objects in `.map()`
+
+When iterating with `.map()`, each item's properties are reactive. To use a reactive value as an index into a plain object (like a lookup table), use `lift()`:
+
+```typescript
+const STYLES = {
+  pending: { bgColor: "#fef3c7", color: "#92400e" },
+  active: { bgColor: "#dbeafe", color: "#1e40af" },
+  complete: { bgColor: "#dcfce7", color: "#166534" },
+};
+
+// Create lifted helpers for each property you need
+const getStyleBgColor = lift((status: Status): string => STYLES[status].bgColor);
+const getStyleColor = lift((status: Status): string => STYLES[status].color);
+
+// Use the lifted functions in .map()
+items.map((item) => (
+  <div style={{ backgroundColor: getStyleBgColor(item.status), color: getStyleColor(item.status) }}>
+    {item.title}
+  </div>
+));
+```
 
 ## Writable Basics
 

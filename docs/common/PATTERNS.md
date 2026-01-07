@@ -405,7 +405,7 @@ const result = lift((args) => args.g[args.d])({ g: grouped, d: date });
 const result = computed(() => grouped[date]);
 ```
 
-See [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) section "lift() and Closure Limitations" for details on frame-based execution and why `computed()` doesn't have this issue.
+See [REACTIVITY.md](REACTIVITY.md) section "lift() and Closure Limitations" for details on frame-based execution and why `computed()` doesn't have this issue.
 
 ### Style Syntax
 
@@ -472,7 +472,7 @@ deno task ct charm inspect ... --charm CHARM_ID
 
 ## See Also
 
-- [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) - Deep dive on reactivity
+- [REACTIVITY.md](REACTIVITY.md) - Deep dive on reactivity
 - [COMPONENTS.md](COMPONENTS.md) - UI component reference
 - [TYPES_AND_SCHEMAS.md](TYPES_AND_SCHEMAS.md) - Type system details
 - [DEBUGGING.md](DEBUGGING.md) - Troubleshooting guide

@@ -27,7 +27,7 @@ Before starting pattern development:
 1. **Know the ct CLI** - Use the **ct** skill for ct command reference
 2. **Read the core documentation** - These two docs are essential; read them before starting:
    - `docs/common/PATTERNS.md` - Main tutorial with examples and common patterns
-   - `docs/common/CELLS_AND_REACTIVITY.md` - Cell system, computed(), lift(), frame-based execution
+   - `docs/common/REACTIVITY.md` - Cell system, computed(), lift(), frame-based execution
 3. **Reference docs as needed:**
    - `docs/common/COMPONENTS.md` - UI components and bidirectional binding
    - `docs/common/TYPES_AND_SCHEMAS.md` - Type system, Writable<>, defaults
@@ -42,7 +42,7 @@ Before starting pattern development:
 → **Modify existing pattern** → Go to "Modifying Patterns"
 → **Fix pattern errors** → Go to "Debugging Patterns"
 → **Deploy/link charms** → Use **ct** skill
-→ **Understand pattern concepts** → Read `docs/common/PATTERNS.md` and `CELLS_AND_REACTIVITY.md`
+→ **Understand pattern concepts** → Read `docs/common/PATTERNS.md` and `REACTIVITY.md`
 
 ## Starting a New Pattern
 
@@ -92,7 +92,7 @@ Whether using single-file or composition, build in this order:
 - Build computed values and transformations
 - Create debug UI showing all cell values
 - Test via CLI: set inputs, verify computed outputs
-- **Read:** `PATTERNS.md`, `CELLS_AND_REACTIVITY.md`
+- **Read:** `PATTERNS.md`, `REACTIVITY.md`
 
 **Layer 2: Mutation Handlers**
 - Add handlers one at a time
@@ -259,7 +259,9 @@ const totalAmount = computed(() => expenses.get().reduce((sum, e) => sum + e.amo
 - `lift()` requires passing all deps as object parameter: `lift((args) => ...)({ cell1, cell2 })`
 - Passing cells directly to `lift()` returns stale/empty data
 
-See `CELLS_AND_REACTIVITY.md` for details on frame-based execution and lift() limitations.
+**Access patterns:** `Writable<>` has `.get()`, but `computed()` and `lift()` results do NOT - access them directly.
+
+See `REACTIVITY.md` for details on frame-based execution, lift() limitations, and access patterns.
 
 ## Multi-File Patterns
 
@@ -275,7 +277,7 @@ See `PATTERNS.md` Level 3-4 for linking and composition patterns.
 | Task | Read |
 |------|------|
 | Main tutorial and common patterns | `docs/common/PATTERNS.md` |
-| Cells, reactivity, computed() | `docs/common/CELLS_AND_REACTIVITY.md` |
+| Cells, reactivity, computed() | `docs/common/REACTIVITY.md` |
 | Type system, Writable<>, defaults | `docs/common/TYPES_AND_SCHEMAS.md` |
 | Component usage and bidirectional binding | `docs/common/COMPONENTS.md` |
 | Error reference and debugging | `docs/development/DEBUGGING.md` |
@@ -285,7 +287,7 @@ See `PATTERNS.md` Level 3-4 for linking and composition patterns.
 
 ## Remember
 
-- Read docs before building - start with `PATTERNS.md` and `CELLS_AND_REACTIVITY.md`
+- Read docs before building - start with `PATTERNS.md` and `REACTIVITY.md`
 - Check `packages/patterns/` for working examples
 - Use **ct** skill for deployment commands
 - Start simple, test incrementally, use bidirectional binding when possible
