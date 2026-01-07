@@ -48,7 +48,7 @@ interface Input {
   tripName: Default<string, "My Bay Area Trip">;
   stops: Cell<Default<TripStop[], []>>;
   areasOfInterest: Cell<Default<AreaOfInterest[], []>>;
-  showRoute: Default<boolean, true>;
+  showRoute: Cell<Default<boolean, true>>;
   center: Cell<Default<LatLng | null, null>>;
   zoom: Cell<Default<number, 9>>;
   selectedStopIndex: Cell<Default<number | null, null>>;
@@ -219,7 +219,7 @@ export default pattern<Input, Output>(
     const mapValue = computed(() => {
       const currentStops = stops.get();
       const currentAreas = areasOfInterest.get();
-      const currentShowRoute = showRoute ?? true;
+      const currentShowRoute = showRoute;
 
       // Markers from stops
       const markers = currentStops.map((stop) => ({
@@ -504,7 +504,7 @@ export default pattern<Input, Output>(
 
               {/* Route summary */}
               {ifElse(
-                computed(() => showRoute && stops.get().length > 1),
+                computed(() => showRoute.get() && stops.get().length > 1),
                 <ct-card>
                   <ct-vstack gap="2">
                     <ct-heading level={5}>Route Overview</ct-heading>
