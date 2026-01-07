@@ -137,7 +137,11 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
       );
     },
     schema: {
-      content: { type: "string", description: "Free-form notes and content" },
+      content: {
+        type: "string",
+        description:
+          "IMPORTANT: Output the REMAINING text that should stay in Notes after extraction. Include any text that was NOT extracted into structured fields above (preferences, personality traits, conversational context, hobby mentions, etc). Return null ONLY if ALL content was extracted into structured fields.",
+      },
     },
     fieldMapping: ["content", "notes"],
     // Notes exports embeddedUI for streamlined container rendering
