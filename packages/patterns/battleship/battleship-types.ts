@@ -77,8 +77,9 @@ export const PLAYER_COLORS = ["#3b82f6", "#ef4444"]; // Blue, Red
 // =============================================================================
 
 export function createEmptyGrid(): SquareState[][] {
-  return Array.from({ length: BOARD_SIZE }, () =>
-    Array.from({ length: BOARD_SIZE }, () => "empty" as SquareState)
+  return Array.from(
+    { length: BOARD_SIZE },
+    () => Array.from({ length: BOARD_SIZE }, () => "empty" as SquareState),
   );
 }
 
@@ -110,7 +111,10 @@ export function isShipSunk(ship: Ship, shots: SquareState[][]): boolean {
   return coords.every((c) => shots[c.row]?.[c.col] === "hit");
 }
 
-export function areAllShipsSunk(ships: Ship[], shots: SquareState[][]): boolean {
+export function areAllShipsSunk(
+  ships: Ship[],
+  shots: SquareState[][],
+): boolean {
   return ships.every((ship) => isShipSunk(ship, shots));
 }
 
@@ -131,7 +135,7 @@ export function buildShipPositions(ships: Ship[]): Record<string, ShipType> {
 
 function canPlaceShip(
   ship: Ship,
-  occupiedPositions: Set<string>
+  occupiedPositions: Set<string>,
 ): boolean {
   const coords = getShipCoordinates(ship);
   // Check bounds
@@ -164,12 +168,17 @@ export function generateRandomShips(): Ship[] {
 
     while (!placed && attempts < maxAttempts) {
       attempts++;
-      const orientation: "horizontal" | "vertical" =
-        Math.random() < 0.5 ? "horizontal" : "vertical";
+      const orientation: "horizontal" | "vertical" = Math.random() < 0.5
+        ? "horizontal"
+        : "vertical";
       const size = SHIP_SIZES[type];
 
-      const maxRow = orientation === "vertical" ? BOARD_SIZE - size : BOARD_SIZE - 1;
-      const maxCol = orientation === "horizontal" ? BOARD_SIZE - size : BOARD_SIZE - 1;
+      const maxRow = orientation === "vertical"
+        ? BOARD_SIZE - size
+        : BOARD_SIZE - 1;
+      const maxCol = orientation === "horizontal"
+        ? BOARD_SIZE - size
+        : BOARD_SIZE - 1;
 
       const row = Math.floor(Math.random() * (maxRow + 1));
       const col = Math.floor(Math.random() * (maxCol + 1));

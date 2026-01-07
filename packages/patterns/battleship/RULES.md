@@ -9,7 +9,7 @@
 ## Ships
 
 | Ship       | Size |
-|------------|------|
+| ---------- | ---- |
 | Carrier    | 5    |
 | Battleship | 4    |
 | Cruiser    | 3    |
@@ -28,7 +28,8 @@
 ## Gameplay
 
 1. Players alternate turns
-2. On your turn, call a shot by selecting a cell on the opponent's grid (e.g., "B-7")
+2. On your turn, call a shot by selecting a cell on the opponent's grid (e.g.,
+   "B-7")
 3. Opponent announces result:
    - **Hit** - Shot landed on a ship
    - **Miss** - Shot landed in empty water
@@ -47,5 +48,6 @@
 
 - Each player sees:
   - **Own board:** All their ships + where opponent has fired (hits and misses)
-  - **Enemy board:** Only their own shots (hits and misses), ship positions hidden until hit
+  - **Enemy board:** Only their own shots (hits and misses), ship positions
+    hidden until hit
 - Designed for two browser windows (regular + incognito)

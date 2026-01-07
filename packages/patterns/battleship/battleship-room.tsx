@@ -25,7 +25,6 @@ import {
 
 import {
   areAllShipsSunk,
-  BOARD_SIZE,
   buildShipPositions,
   COLS,
   findShipAt,
@@ -88,7 +87,7 @@ const fireShot = handler<
       player2Json,
       shotsJson,
       gameStateJson,
-    }
+    },
   ) => {
     const gameState = parseGameStateJson(gameStateJson.get());
 
@@ -109,8 +108,9 @@ const fireShot = handler<
     if (targetShots[row]?.[col] !== "empty") return;
 
     // Get opponent's ships
-    const opponentJson =
-      targetPlayerNum === 1 ? player1Json.get() : player2Json.get();
+    const opponentJson = targetPlayerNum === 1
+      ? player1Json.get()
+      : player2Json.get();
     const opponentData = parsePlayerJson(opponentJson);
     if (!opponentData) return;
 
@@ -149,8 +149,9 @@ const fireShot = handler<
 
     if (allSunk) {
       // Get winner's name
-      const winnerJson =
-        myPlayerNumber === 1 ? player1Json.get() : player2Json.get();
+      const winnerJson = myPlayerNumber === 1
+        ? player1Json.get()
+        : player2Json.get();
       const winnerData = parsePlayerJson(winnerJson);
       const winnerName = winnerData?.name || `Player ${myPlayerNumber}`;
 
@@ -164,8 +165,9 @@ const fireShot = handler<
     } else {
       // Switch turns
       const nextTurn = myPlayerNumber === 1 ? 2 : 1;
-      const nextPlayerJson =
-        nextTurn === 1 ? player1Json.get() : player2Json.get();
+      const nextPlayerJson = nextTurn === 1
+        ? player1Json.get()
+        : player2Json.get();
       const nextPlayerData = parsePlayerJson(nextPlayerJson);
       const nextPlayerName = nextPlayerData?.name || `Player ${nextTurn}`;
 
@@ -176,7 +178,7 @@ const fireShot = handler<
       };
       gameStateJson.set(JSON.stringify(newState));
     }
-  }
+  },
 );
 
 // =============================================================================
@@ -194,15 +196,15 @@ const parseMyData = lift<
 
 // Parse both players for display
 const parsePlayer1 = lift<{ player1Json: string }, PlayerData | null>(
-  ({ player1Json }) => parsePlayerJson(player1Json)
+  ({ player1Json }) => parsePlayerJson(player1Json),
 );
 
 const parsePlayer2 = lift<{ player2Json: string }, PlayerData | null>(
-  ({ player2Json }) => parsePlayerJson(player2Json)
+  ({ player2Json }) => parsePlayerJson(player2Json),
 );
 
 const parseState = lift<{ gameStateJson: string }, GameStateData>(
-  ({ gameStateJson }) => parseGameStateJson(gameStateJson)
+  ({ gameStateJson }) => parseGameStateJson(gameStateJson),
 );
 
 // Parse my board cells (my ships + shots I received)
@@ -213,7 +215,14 @@ const parseMyBoardCells = lift<
     shotsJson: string;
     myPlayerNumber: number;
   },
-  { row: number; col: number; bgColor: string; content: string; gridRow: string; gridCol: string }[]
+  {
+    row: number;
+    col: number;
+    bgColor: string;
+    content: string;
+    gridRow: string;
+    gridCol: string;
+  }[]
 >(({ player1Json, player2Json, shotsJson, myPlayerNumber }) => {
   const playerJson = myPlayerNumber === 1 ? player1Json : player2Json;
   const playerData = parsePlayerJson(playerJson);
@@ -226,16 +235,14 @@ const parseMyBoardCells = lift<
   return GRID_INDICES.map(({ row, col }) => {
     const shotState: SquareState = myShots[row]?.[col] ?? "empty";
     const hasShip = !!shipPositions[`${row},${col}`];
-    const bgColor =
-      shotState === "hit"
-        ? "#dc2626"
-        : shotState === "miss"
-        ? "#374151"
-        : hasShip
-        ? "#22c55e"
-        : "#1e3a5f";
-    const content =
-      shotState === "hit" ? "X" : shotState === "miss" ? "O" : "";
+    const bgColor = shotState === "hit"
+      ? "#dc2626"
+      : shotState === "miss"
+      ? "#374151"
+      : hasShip
+      ? "#22c55e"
+      : "#1e3a5f";
+    const content = shotState === "hit" ? "X" : shotState === "miss" ? "O" : "";
     return {
       row,
       col,
@@ -254,7 +261,15 @@ const parseEnemyBoardCells = lift<
     gameStateJson: string;
     myPlayerNumber: number;
   },
-  { row: number; col: number; bgColor: string; content: string; gridRow: string; gridCol: string; cursor: string }[]
+  {
+    row: number;
+    col: number;
+    bgColor: string;
+    content: string;
+    gridRow: string;
+    gridCol: string;
+    cursor: string;
+  }[]
 >(({ shotsJson, gameStateJson, myPlayerNumber }) => {
   const shots = parseShotsJson(shotsJson);
   const gameState = parseGameStateJson(gameStateJson);
@@ -265,14 +280,12 @@ const parseEnemyBoardCells = lift<
 
   return GRID_INDICES.map(({ row, col }) => {
     const shotState: SquareState = oppShots[row]?.[col] ?? "empty";
-    const bgColor =
-      shotState === "hit"
-        ? "#dc2626"
-        : shotState === "miss"
-        ? "#374151"
-        : "#1e3a5f";
-    const content =
-      shotState === "hit" ? "X" : shotState === "miss" ? "O" : "";
+    const bgColor = shotState === "hit"
+      ? "#dc2626"
+      : shotState === "miss"
+      ? "#374151"
+      : "#1e3a5f";
+    const content = shotState === "hit" ? "X" : shotState === "miss" ? "O" : "";
     const canClick = shotState === "empty" && !isFinished;
     return {
       row,
@@ -292,7 +305,7 @@ const parseEnemyBoardCells = lift<
 
 const BattleshipRoom = pattern<GameInput, GameOutput>(
   ({
-    gameName,
+    gameName: _gameName,
     player1Json,
     player2Json,
     shotsJson,
@@ -321,29 +334,43 @@ const BattleshipRoom = pattern<GameInput, GameOutput>(
 
     // Derived values for display
     const myColor = derive(myData, (md) => md?.color || "#3b82f6");
-    const showTurnIndicator = derive(gameState, (gs) =>
-      gs.currentTurn === myPlayerNumber && gs.phase !== "finished" ? "block" : "none"
+    const showTurnIndicator = derive(
+      gameState,
+      (gs) =>
+        gs.currentTurn === myPlayerNumber && gs.phase !== "finished"
+          ? "block"
+          : "none",
     );
 
     // Player display values
     const player1Color = derive(player1, (p) => p?.color || "#3b82f6");
     const player1Name = derive(player1, (p) => p?.name || "Player 1");
-    const player1Initials = derive(player1, (p) => getInitials(p?.name || "P1"));
-    const player1BgColor = derive(gameState, (gs) =>
-      gs.currentTurn === 1 ? "#1e40af" : "#1e293b"
+    const player1Initials = derive(
+      player1,
+      (p) => getInitials(p?.name || "P1"),
     );
-    const player1Status = derive(gameState, (gs) =>
-      gs.currentTurn === 1 ? "Active" : "Waiting"
+    const player1BgColor = derive(
+      gameState,
+      (gs) => gs.currentTurn === 1 ? "#1e40af" : "#1e293b",
+    );
+    const player1Status = derive(
+      gameState,
+      (gs) => gs.currentTurn === 1 ? "Active" : "Waiting",
     );
 
     const player2Color = derive(player2, (p) => p?.color || "#ef4444");
     const player2Name = derive(player2, (p) => p?.name || "Player 2");
-    const player2Initials = derive(player2, (p) => getInitials(p?.name || "P2"));
-    const player2BgColor = derive(gameState, (gs) =>
-      gs.currentTurn === 2 ? "#1e40af" : "#1e293b"
+    const player2Initials = derive(
+      player2,
+      (p) => getInitials(p?.name || "P2"),
     );
-    const player2Status = derive(gameState, (gs) =>
-      gs.currentTurn === 2 ? "Active" : "Waiting"
+    const player2BgColor = derive(
+      gameState,
+      (gs) => gs.currentTurn === 2 ? "#1e40af" : "#1e293b",
+    );
+    const player2Status = derive(
+      gameState,
+      (gs) => gs.currentTurn === 2 ? "Active" : "Waiting",
     );
 
     const lastMessage = derive(gameState, (gs) => gs.lastMessage);
@@ -384,7 +411,11 @@ const BattleshipRoom = pattern<GameInput, GameOutput>(
       const finished = gs.phase === "finished";
       const won = gs.winner === myPlayerNumber;
       const myTurn = gs.currentTurn === myPlayerNumber;
-      return finished ? (won ? "#166534" : "#991b1b") : myTurn ? "#1e40af" : "#1e293b";
+      return finished
+        ? (won ? "#166534" : "#991b1b")
+        : myTurn
+        ? "#1e40af"
+        : "#1e293b";
     });
 
     const statusMessage = derive(gameState, (gs) => {
@@ -392,9 +423,13 @@ const BattleshipRoom = pattern<GameInput, GameOutput>(
       const won = gs.winner === myPlayerNumber;
       const myTurn = gs.currentTurn === myPlayerNumber;
       if (finished) {
-        return won ? "Victory! You sunk all enemy ships!" : "Defeat. Your fleet was destroyed.";
+        return won
+          ? "Victory! You sunk all enemy ships!"
+          : "Defeat. Your fleet was destroyed.";
       }
-      return myTurn ? "Your turn - fire at the enemy fleet!" : "Waiting for opponent...";
+      return myTurn
+        ? "Your turn - fire at the enemy fleet!"
+        : "Waiting for opponent...";
     });
 
     return {
@@ -513,9 +548,7 @@ const BattleshipRoom = pattern<GameInput, GameOutput>(
               </h3>
               <div style={gridContainerStyle}>
                 <div style={headerCellStyle} />
-                {COLS.map((c) => (
-                  <div style={headerCellStyle}>{c}</div>
-                ))}
+                {COLS.map((c, i) => <div key={i} style={headerCellStyle}>{c}</div>)}
                 {ROWS.map((rowIdx) => (
                   <div
                     style={{
@@ -549,9 +582,7 @@ const BattleshipRoom = pattern<GameInput, GameOutput>(
               </h3>
               <div style={gridContainerStyle}>
                 <div style={headerCellStyle} />
-                {COLS.map((c) => (
-                  <div style={headerCellStyle}>{c}</div>
-                ))}
+                {COLS.map((c, i) => <div key={i} style={headerCellStyle}>{c}</div>)}
                 {ROWS.map((rowIdx) => (
                   <div
                     style={{
@@ -684,10 +715,9 @@ const BattleshipRoom = pattern<GameInput, GameOutput>(
                 padding: "8px 16px",
                 backgroundColor: player1BgColor,
                 borderRadius: "8px",
-                border:
-                  myPlayerNumber === 1
-                    ? "2px solid #fbbf24"
-                    : "2px solid transparent",
+                border: myPlayerNumber === 1
+                  ? "2px solid #fbbf24"
+                  : "2px solid transparent",
               }}
             >
               <div
@@ -736,10 +766,9 @@ const BattleshipRoom = pattern<GameInput, GameOutput>(
                 padding: "8px 16px",
                 backgroundColor: player2BgColor,
                 borderRadius: "8px",
-                border:
-                  myPlayerNumber === 2
-                    ? "2px solid #fbbf24"
-                    : "2px solid transparent",
+                border: myPlayerNumber === 2
+                  ? "2px solid #fbbf24"
+                  : "2px solid transparent",
               }}
             >
               <div
@@ -788,7 +817,7 @@ const BattleshipRoom = pattern<GameInput, GameOutput>(
       myName,
       myPlayerNumber,
     };
-  }
+  },
 );
 
 export default BattleshipRoom;

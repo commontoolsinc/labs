@@ -15,7 +15,12 @@ import {
 
 type Coordinate = { row: number; col: number };
 
-type ShipType = "carrier" | "battleship" | "cruiser" | "submarine" | "destroyer";
+type ShipType =
+  | "carrier"
+  | "battleship"
+  | "cruiser"
+  | "submarine"
+  | "destroyer";
 
 interface Ship {
   type: ShipType;
@@ -70,8 +75,9 @@ const GRID_INDICES = ROWS.flatMap((r) => ROWS.map((c) => ({ row: r, col: c })));
 // =============================================================================
 
 function createEmptyGrid(): SquareState[][] {
-  return Array.from({ length: 10 }, () =>
-    Array.from({ length: 10 }, () => "empty" as SquareState)
+  return Array.from(
+    { length: 10 },
+    () => Array.from({ length: 10 }, () => "empty" as SquareState),
   );
 }
 
@@ -122,7 +128,11 @@ function buildShipPositions(ships: Ship[]): Record<string, ShipType> {
 function createDefaultShips1(): Ship[] {
   return [
     { type: "carrier", start: { row: 0, col: 0 }, orientation: "horizontal" },
-    { type: "battleship", start: { row: 2, col: 1 }, orientation: "horizontal" },
+    {
+      type: "battleship",
+      start: { row: 2, col: 1 },
+      orientation: "horizontal",
+    },
     { type: "cruiser", start: { row: 4, col: 3 }, orientation: "vertical" },
     { type: "submarine", start: { row: 5, col: 7 }, orientation: "horizontal" },
     { type: "destroyer", start: { row: 8, col: 5 }, orientation: "vertical" },
@@ -132,7 +142,11 @@ function createDefaultShips1(): Ship[] {
 function createDefaultShips2(): Ship[] {
   return [
     { type: "carrier", start: { row: 1, col: 2 }, orientation: "vertical" },
-    { type: "battleship", start: { row: 0, col: 6 }, orientation: "horizontal" },
+    {
+      type: "battleship",
+      start: { row: 0, col: 6 },
+      orientation: "horizontal",
+    },
     { type: "cruiser", start: { row: 3, col: 0 }, orientation: "horizontal" },
     { type: "submarine", start: { row: 7, col: 4 }, orientation: "vertical" },
     { type: "destroyer", start: { row: 9, col: 8 }, orientation: "horizontal" },
@@ -162,13 +176,13 @@ function createInitialState(): GameState {
 // Pattern
 // =============================================================================
 
-interface Input {}
+type Input = Record<string, never>;
 
 interface Output {
   game: Cell<GameState>;
 }
 
-export default pattern<Input, Output>(({}) => {
+export default pattern<Input, Output>((_input) => {
   const game = Cell.of<GameState>(createInitialState());
 
   // ---------------------------------------------------------------------------
@@ -200,7 +214,10 @@ export default pattern<Input, Output>(({}) => {
     // Check if hit
     const hitShip = findShipAt(targetBoard.ships, { row, col });
     const newShots = shots.map((r, ri) =>
-      r.map((c, ci) => (ri === row && ci === col ? (hitShip ? "hit" : "miss") : c))
+      r.map((
+        c,
+        ci,
+      ) => (ri === row && ci === col ? (hitShip ? "hit" : "miss") : c))
     );
 
     const newTargetBoard = { ...targetBoard, shots: newShots };
@@ -258,7 +275,7 @@ export default pattern<Input, Output>(({}) => {
         viewingAs: null,
         awaitingPass: false,
       });
-    }
+    },
   );
 
   const playerReady = handler<unknown, { game: Cell<GameState> }>(
@@ -271,15 +288,16 @@ export default pattern<Input, Output>(({}) => {
         ...state,
         viewingAs: state.currentTurn,
         awaitingPass: false,
-        lastMessage: `Player ${state.currentTurn}'s turn - fire at the enemy board!`,
+        lastMessage:
+          `Player ${state.currentTurn}'s turn - fire at the enemy board!`,
       });
-    }
+    },
   );
 
   const resetGame = handler<unknown, { game: Cell<GameState> }>(
     (_, { game }) => {
       game.set(createInitialState());
-    }
+    },
   );
 
   // ---------------------------------------------------------------------------
@@ -315,12 +333,26 @@ export default pattern<Input, Output>(({}) => {
     return GRID_INDICES.map(({ row, col }) => {
       const shotState = shots[row]?.[col] ?? "empty";
       const hasShip = !!shipPositions[`${row},${col}`];
-      const bgColor =
-        shotState === "hit" ? "#dc2626" :
-        shotState === "miss" ? "#374151" :
-        hasShip ? "#22c55e" : "#1e3a5f";
-      const content = shotState === "hit" ? "X" : shotState === "miss" ? "O" : "";
-      return { row, col, bgColor, content, gridRow: `${row + 2}`, gridCol: `${col + 2}` };
+      const bgColor = shotState === "hit"
+        ? "#dc2626"
+        : shotState === "miss"
+        ? "#374151"
+        : hasShip
+        ? "#22c55e"
+        : "#1e3a5f";
+      const content = shotState === "hit"
+        ? "X"
+        : shotState === "miss"
+        ? "O"
+        : "";
+      return {
+        row,
+        col,
+        bgColor,
+        content,
+        gridRow: `${row + 2}`,
+        gridCol: `${col + 2}`,
+      };
     });
   });
 
@@ -334,11 +366,24 @@ export default pattern<Input, Output>(({}) => {
 
     return GRID_INDICES.map(({ row, col }) => {
       const shotState = shots[row]?.[col] ?? "empty";
-      const bgColor =
-        shotState === "hit" ? "#dc2626" :
-        shotState === "miss" ? "#374151" : "#1e3a5f";
-      const content = shotState === "hit" ? "X" : shotState === "miss" ? "O" : "";
-      return { row, col, bgColor, content, gridRow: `${row + 2}`, gridCol: `${col + 2}` };
+      const bgColor = shotState === "hit"
+        ? "#dc2626"
+        : shotState === "miss"
+        ? "#374151"
+        : "#1e3a5f";
+      const content = shotState === "hit"
+        ? "X"
+        : shotState === "miss"
+        ? "O"
+        : "";
+      return {
+        row,
+        col,
+        bgColor,
+        content,
+        gridRow: `${row + 2}`,
+        gridCol: `${col + 2}`,
+      };
     });
   });
 
@@ -381,12 +426,8 @@ export default pattern<Input, Output>(({}) => {
   // ---------------------------------------------------------------------------
 
   // Compute display styles for each screen - CSS changes instead of DOM swap
-  const transitionDisplay = derive(isTransition, (t) =>
-    t ? "flex" : "none"
-  );
-  const victoryDisplay = derive(isFinished, (f) =>
-    f ? "flex" : "none"
-  );
+  const transitionDisplay = derive(isTransition, (t) => t ? "flex" : "none");
+  const victoryDisplay = derive(isFinished, (f) => f ? "flex" : "none");
   const gameDisplay = computed(() => {
     const state = game.get();
     const showGame = state.phase !== "finished" && state.viewingAs !== null;
@@ -505,9 +546,7 @@ export default pattern<Input, Output>(({}) => {
           </h3>
           <div style={gridContainerStyle}>
             <div style={headerCellStyle} />
-            {COLS.map((c) => (
-              <div style={headerCellStyle}>{c}</div>
-            ))}
+            {COLS.map((c, i) => <div key={i} style={headerCellStyle}>{c}</div>)}
             {ROWS.map((rowIdx) => (
               <div
                 style={{
@@ -541,9 +580,7 @@ export default pattern<Input, Output>(({}) => {
           </h3>
           <div style={gridContainerStyle}>
             <div style={headerCellStyle} />
-            {COLS.map((c) => (
-              <div style={headerCellStyle}>{c}</div>
-            ))}
+            {COLS.map((c, i) => <div key={i} style={headerCellStyle}>{c}</div>)}
             {ROWS.map((rowIdx) => (
               <div
                 style={{

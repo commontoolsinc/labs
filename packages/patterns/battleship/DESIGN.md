@@ -7,7 +7,12 @@
 ```typescript
 type Coordinate = { row: number; col: number }; // 0-9 for both
 
-type ShipType = "carrier" | "battleship" | "cruiser" | "submarine" | "destroyer";
+type ShipType =
+  | "carrier"
+  | "battleship"
+  | "cruiser"
+  | "submarine"
+  | "destroyer";
 
 interface Ship {
   type: ShipType;
@@ -71,6 +76,7 @@ const SHIP_SIZES: Record<ShipType, number> = {
 ### Phase 2: Two-Player Mode (Future)
 
 Each player sees:
+
 - **Left panel:** Their own board with ships + incoming shots
 - **Right panel:** Enemy board with only their outgoing shots (hits/misses)
 
@@ -92,6 +98,7 @@ Each player sees:
 ## Handlers
 
 ### `fireShot`
+
 ```typescript
 // Input: target coordinate, current game state
 // Effect: Update opponent's board, check for hit/sink/win
@@ -99,6 +106,7 @@ Each player sees:
 ```
 
 ### `placeShip` (setup phase)
+
 ```typescript
 // Input: ship type, start coordinate, orientation
 // Validation: No overlap, within bounds
@@ -106,6 +114,7 @@ Each player sees:
 ```
 
 ### `resetGame`
+
 ```typescript
 // Reset all state to initial
 ```

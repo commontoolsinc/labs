@@ -59,7 +59,7 @@ let createGameAndNavigate: (
   shotsJson: Cell<string>,
   gameStateJson: Cell<string>,
   myName: string,
-  myPlayerNumber: 1 | 2
+  myPlayerNumber: 1 | 2,
 ) => unknown = null as any;
 
 // Handler for joining as a specific player slot
@@ -85,7 +85,7 @@ const joinAsPlayer = handler<
       player2Json,
       shotsJson,
       gameStateJson,
-    }
+    },
   ) => {
     console.log(`[joinAsPlayer] Handler started for slot ${playerSlot}`);
     const name = nameInput.get().trim();
@@ -148,10 +148,10 @@ const joinAsPlayer = handler<
         shotsJson,
         gameStateJson,
         name,
-        playerSlot
+        playerSlot,
       );
     }
-  }
+  },
 );
 
 // Handler to rejoin an existing game
@@ -175,7 +175,7 @@ const rejoinGame = handler<
       player2Json,
       shotsJson,
       gameStateJson,
-    }
+    },
   ) => {
     const playerJson = playerSlot === 1 ? player1Json : player2Json;
     const playerData = parsePlayerJson(playerJson.get());
@@ -190,10 +190,10 @@ const rejoinGame = handler<
         shotsJson,
         gameStateJson,
         playerData.name,
-        playerSlot
+        playerSlot,
       );
     }
-  }
+  },
 );
 
 // Handler to reset the lobby
@@ -293,55 +293,93 @@ const BattleshipLobby = pattern<LobbyInput, LobbyOutput>(
               >
                 Player 1
               </div>
-              {player1Name ? (
-                <div style={{ textAlign: "center", padding: "0.5rem 0" }}>
-                  <div
-                    style={{
-                      width: "60px",
-                      height: "60px",
-                      borderRadius: "50%",
-                      backgroundColor: "#3b82f6",
-                      color: "white",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: "600",
-                      fontSize: "20px",
-                      margin: "0 auto 0.75rem",
-                    }}
-                  >
-                    {player1Name}
+              {player1Name
+                ? (
+                  <div style={{ textAlign: "center", padding: "0.5rem 0" }}>
+                    <div
+                      style={{
+                        width: "60px",
+                        height: "60px",
+                        borderRadius: "50%",
+                        backgroundColor: "#3b82f6",
+                        color: "white",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: "600",
+                        fontSize: "20px",
+                        margin: "0 auto 0.75rem",
+                      }}
+                    >
+                      {player1Name}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "1.25rem",
+                        fontWeight: "600",
+                        color: "#fff",
+                        marginBottom: "0.5rem",
+                      }}
+                    >
+                      {player1Name}
+                    </div>
+                    <div style={{ fontSize: "0.875rem", color: "#94a3b8" }}>
+                      {isGameStarted ? "In Game" : "Ready"}
+                    </div>
+                    {isGameStarted
+                      ? (
+                        <button
+                          type="button"
+                          style={{
+                            marginTop: "1rem",
+                            width: "100%",
+                            padding: "0.75rem 1.5rem",
+                            fontSize: "0.875rem",
+                            backgroundColor: "#1e40af",
+                            color: "white",
+                            fontWeight: "600",
+                            border: "none",
+                            borderRadius: "8px",
+                            cursor: "pointer",
+                          }}
+                          onClick={rejoinGame({
+                            gameName,
+                            playerSlot: 1,
+                            player1Json,
+                            player2Json,
+                            shotsJson,
+                            gameStateJson,
+                          })}
+                        >
+                          Rejoin Game
+                        </button>
+                      )
+                      : <></>}
                   </div>
-                  <div
-                    style={{
-                      fontSize: "1.25rem",
-                      fontWeight: "600",
-                      color: "#fff",
-                      marginBottom: "0.5rem",
-                    }}
-                  >
-                    {player1Name}
-                  </div>
-                  <div style={{ fontSize: "0.875rem", color: "#94a3b8" }}>
-                    {isGameStarted ? "In Game" : "Ready"}
-                  </div>
-                  {isGameStarted ? (
+                )
+                : (
+                  <>
+                    <ct-input
+                      $value={player1NameInput}
+                      placeholder="Your name"
+                      style="width: 100%; margin-bottom: 1rem;"
+                    />
                     <button
                       type="button"
                       style={{
-                        marginTop: "1rem",
                         width: "100%",
                         padding: "0.75rem 1.5rem",
-                        fontSize: "0.875rem",
-                        backgroundColor: "#1e40af",
+                        fontSize: "1rem",
+                        backgroundColor: "#3b82f6",
                         color: "white",
                         fontWeight: "600",
                         border: "none",
                         borderRadius: "8px",
                         cursor: "pointer",
                       }}
-                      onClick={rejoinGame({
+                      onClick={joinAsPlayer({
                         gameName,
+                        nameInput: player1NameInput,
                         playerSlot: 1,
                         player1Json,
                         player2Json,
@@ -349,46 +387,10 @@ const BattleshipLobby = pattern<LobbyInput, LobbyOutput>(
                         gameStateJson,
                       })}
                     >
-                      Rejoin Game
+                      Join as Player 1
                     </button>
-                  ) : (
-                    <></>
-                  )}
-                </div>
-              ) : (
-                <>
-                  <ct-input
-                    $value={player1NameInput}
-                    placeholder="Your name"
-                    style="width: 100%; margin-bottom: 1rem;"
-                  />
-                  <button
-                    type="button"
-                    style={{
-                      width: "100%",
-                      padding: "0.75rem 1.5rem",
-                      fontSize: "1rem",
-                      backgroundColor: "#3b82f6",
-                      color: "white",
-                      fontWeight: "600",
-                      border: "none",
-                      borderRadius: "8px",
-                      cursor: "pointer",
-                    }}
-                    onClick={joinAsPlayer({
-                      gameName,
-                      nameInput: player1NameInput,
-                      playerSlot: 1,
-                      player1Json,
-                      player2Json,
-                      shotsJson,
-                      gameStateJson,
-                    })}
-                  >
-                    Join as Player 1
-                  </button>
-                </>
-              )}
+                  </>
+                )}
             </div>
 
             {/* Player 2 Section */}
@@ -414,55 +416,93 @@ const BattleshipLobby = pattern<LobbyInput, LobbyOutput>(
               >
                 Player 2
               </div>
-              {player2Name ? (
-                <div style={{ textAlign: "center", padding: "0.5rem 0" }}>
-                  <div
-                    style={{
-                      width: "60px",
-                      height: "60px",
-                      borderRadius: "50%",
-                      backgroundColor: "#ef4444",
-                      color: "white",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: "600",
-                      fontSize: "20px",
-                      margin: "0 auto 0.75rem",
-                    }}
-                  >
-                    {player2Name}
+              {player2Name
+                ? (
+                  <div style={{ textAlign: "center", padding: "0.5rem 0" }}>
+                    <div
+                      style={{
+                        width: "60px",
+                        height: "60px",
+                        borderRadius: "50%",
+                        backgroundColor: "#ef4444",
+                        color: "white",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: "600",
+                        fontSize: "20px",
+                        margin: "0 auto 0.75rem",
+                      }}
+                    >
+                      {player2Name}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "1.25rem",
+                        fontWeight: "600",
+                        color: "#fff",
+                        marginBottom: "0.5rem",
+                      }}
+                    >
+                      {player2Name}
+                    </div>
+                    <div style={{ fontSize: "0.875rem", color: "#94a3b8" }}>
+                      {isGameStarted ? "In Game" : "Ready"}
+                    </div>
+                    {isGameStarted
+                      ? (
+                        <button
+                          type="button"
+                          style={{
+                            marginTop: "1rem",
+                            width: "100%",
+                            padding: "0.75rem 1.5rem",
+                            fontSize: "0.875rem",
+                            backgroundColor: "#991b1b",
+                            color: "white",
+                            fontWeight: "600",
+                            border: "none",
+                            borderRadius: "8px",
+                            cursor: "pointer",
+                          }}
+                          onClick={rejoinGame({
+                            gameName,
+                            playerSlot: 2,
+                            player1Json,
+                            player2Json,
+                            shotsJson,
+                            gameStateJson,
+                          })}
+                        >
+                          Rejoin Game
+                        </button>
+                      )
+                      : <></>}
                   </div>
-                  <div
-                    style={{
-                      fontSize: "1.25rem",
-                      fontWeight: "600",
-                      color: "#fff",
-                      marginBottom: "0.5rem",
-                    }}
-                  >
-                    {player2Name}
-                  </div>
-                  <div style={{ fontSize: "0.875rem", color: "#94a3b8" }}>
-                    {isGameStarted ? "In Game" : "Ready"}
-                  </div>
-                  {isGameStarted ? (
+                )
+                : (
+                  <>
+                    <ct-input
+                      $value={player2NameInput}
+                      placeholder="Your name"
+                      style="width: 100%; margin-bottom: 1rem;"
+                    />
                     <button
                       type="button"
                       style={{
-                        marginTop: "1rem",
                         width: "100%",
                         padding: "0.75rem 1.5rem",
-                        fontSize: "0.875rem",
-                        backgroundColor: "#991b1b",
+                        fontSize: "1rem",
+                        backgroundColor: "#ef4444",
                         color: "white",
                         fontWeight: "600",
                         border: "none",
                         borderRadius: "8px",
                         cursor: "pointer",
                       }}
-                      onClick={rejoinGame({
+                      onClick={joinAsPlayer({
                         gameName,
+                        nameInput: player2NameInput,
                         playerSlot: 2,
                         player1Json,
                         player2Json,
@@ -470,46 +510,10 @@ const BattleshipLobby = pattern<LobbyInput, LobbyOutput>(
                         gameStateJson,
                       })}
                     >
-                      Rejoin Game
+                      Join as Player 2
                     </button>
-                  ) : (
-                    <></>
-                  )}
-                </div>
-              ) : (
-                <>
-                  <ct-input
-                    $value={player2NameInput}
-                    placeholder="Your name"
-                    style="width: 100%; margin-bottom: 1rem;"
-                  />
-                  <button
-                    type="button"
-                    style={{
-                      width: "100%",
-                      padding: "0.75rem 1.5rem",
-                      fontSize: "1rem",
-                      backgroundColor: "#ef4444",
-                      color: "white",
-                      fontWeight: "600",
-                      border: "none",
-                      borderRadius: "8px",
-                      cursor: "pointer",
-                    }}
-                    onClick={joinAsPlayer({
-                      gameName,
-                      nameInput: player2NameInput,
-                      playerSlot: 2,
-                      player1Json,
-                      player2Json,
-                      shotsJson,
-                      gameStateJson,
-                    })}
-                  >
-                    Join as Player 2
-                  </button>
-                </>
-              )}
+                  </>
+                )}
             </div>
           </div>
 
@@ -564,7 +568,7 @@ const BattleshipLobby = pattern<LobbyInput, LobbyOutput>(
       shotsJson,
       gameStateJson,
     };
-  }
+  },
 );
 
 // Navigation function setup
@@ -575,10 +579,15 @@ createGameAndNavigate = (
   shotsJson: Cell<string>,
   gameStateJson: Cell<string>,
   myName: string,
-  myPlayerNumber: 1 | 2
+  myPlayerNumber: 1 | 2,
 ) => {
   console.log("[createGameAndNavigate] Starting...");
-  console.log("[createGameAndNavigate] myName:", myName, "myPlayerNumber:", myPlayerNumber);
+  console.log(
+    "[createGameAndNavigate] myName:",
+    myName,
+    "myPlayerNumber:",
+    myPlayerNumber,
+  );
 
   const gameInstance = BattleshipRoom({
     gameName,
