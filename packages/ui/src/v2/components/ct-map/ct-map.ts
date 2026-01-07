@@ -572,19 +572,19 @@ export class CTMap extends BaseElement {
     // Clear existing layers
     this._clearLayers();
 
-    // Render markers
+    // Render markers - convert to plain array to avoid reactive proxy deep-access issues
     if (value.markers && value.markers.length > 0) {
-      this._renderMarkers(value.markers);
+      this._renderMarkers([...value.markers]);
     }
 
-    // Render circles
+    // Render circles - convert to plain array to avoid reactive proxy deep-access issues
     if (value.circles && value.circles.length > 0) {
-      this._renderCircles(value.circles);
+      this._renderCircles([...value.circles]);
     }
 
-    // Render polylines
+    // Render polylines - convert to plain array to avoid reactive proxy deep-access issues
     if (value.polylines && value.polylines.length > 0) {
-      this._renderPolylines(value.polylines);
+      this._renderPolylines([...value.polylines]);
     }
   }
 
@@ -600,6 +600,18 @@ export class CTMap extends BaseElement {
     if (!this._markerLayer) return;
 
     markers.forEach((marker, index) => {
+      // Skip markers without valid position data
+      if (
+        !marker?.position || typeof marker.position.lat !== "number" ||
+        typeof marker.position.lng !== "number"
+      ) {
+        console.warn(
+          `ct-map: Skipping marker at index ${index} - invalid position:`,
+          marker?.position,
+        );
+        return;
+      }
+
       const { position, title, description, icon, popup, draggable } = marker;
 
       // Create marker icon - always use divIcon to avoid Leaflet default icon issues in Shadow DOM
@@ -692,6 +704,18 @@ export class CTMap extends BaseElement {
     if (!this._circleLayer) return;
 
     circles.forEach((circle, index) => {
+      // Skip circles without valid center data
+      if (
+        !circle?.center || typeof circle.center.lat !== "number" ||
+        typeof circle.center.lng !== "number"
+      ) {
+        console.warn(
+          `ct-map: Skipping circle at index ${index} - invalid center:`,
+          circle?.center,
+        );
+        return;
+      }
+
       const { center, radius, color, fillOpacity, strokeWidth, popup, title } =
         circle;
 
@@ -730,11 +754,29 @@ export class CTMap extends BaseElement {
   private _renderPolylines(polylines: MapPolyline[]): void {
     if (!this._polylineLayer) return;
 
-    polylines.forEach((polyline) => {
+    polylines.forEach((polyline, index) => {
+      // Skip polylines without valid points array
+      if (!polyline?.points || !Array.isArray(polyline.points)) {
+        console.warn(
+          `ct-map: Skipping polyline at index ${index} - invalid points:`,
+          polyline?.points,
+        );
+        return;
+      }
+
       const { points, color, strokeWidth, dashArray } = polyline;
 
-      // Convert to Leaflet format
-      const latLngs: L.LatLngExpression[] = points.map((p) => [p.lat, p.lng]);
+      // Convert to Leaflet format, filtering out invalid points
+      const latLngs: L.LatLngExpression[] = points
+        .filter((p) =>
+          p && typeof p.lat === "number" && typeof p.lng === "number"
+        )
+        .map((p) => [p.lat, p.lng]);
+
+      // Skip if no valid points remain
+      if (latLngs.length === 0) {
+        return;
+      }
 
       // Create Leaflet polyline
       // Note: Polylines are display-only (no click events). Use circles as
@@ -805,23 +847,42 @@ export class CTMap extends BaseElement {
     // Collect all marker positions
     if (value.markers) {
       value.markers.forEach((m) => {
-        allPoints.push(L.latLng(m.position.lat, m.position.lng));
+        // Skip markers without valid position
+        if (
+          m?.position && typeof m.position.lat === "number" &&
+          typeof m.position.lng === "number"
+        ) {
+          allPoints.push(L.latLng(m.position.lat, m.position.lng));
+        }
       });
     }
 
     // Collect all circle centers (could also use circle bounds)
     if (value.circles) {
       value.circles.forEach((c) => {
-        allPoints.push(L.latLng(c.center.lat, c.center.lng));
+        // Skip circles without valid center
+        if (
+          c?.center && typeof c.center.lat === "number" &&
+          typeof c.center.lng === "number"
+        ) {
+          allPoints.push(L.latLng(c.center.lat, c.center.lng));
+        }
       });
     }
 
     // Collect all polyline points
     if (value.polylines) {
       value.polylines.forEach((p) => {
-        p.points.forEach((pt) => {
-          allPoints.push(L.latLng(pt.lat, pt.lng));
-        });
+        if (p?.points) {
+          p.points.forEach((pt) => {
+            // Skip points without valid coordinates
+            if (
+              pt && typeof pt.lat === "number" && typeof pt.lng === "number"
+            ) {
+              allPoints.push(L.latLng(pt.lat, pt.lng));
+            }
+          });
+        }
       });
     }
 
