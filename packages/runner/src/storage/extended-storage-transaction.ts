@@ -124,10 +124,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       (writeResult.error.name === "NotFoundError")
     ) {
       // Create parent entries if needed
-      const lastValidPath = writeResult.error.name === "NotFoundError"
+      // The NotFoundError.path includes the key that wasn't found, but we need
+      // to read from the parent that DOES exist. So we slice off the last component.
+      const errorPath = writeResult.error.name === "NotFoundError"
         ? writeResult.error.path
         : undefined;
-      const currentValue = this.readValueOrThrow({
+      // The parent path is the error path minus the last component (the missing key)
+      const lastValidPath = errorPath && errorPath.length > 0
+        ? errorPath.slice(0, -1)
+        : errorPath;
+      // Use readOrThrow (not readValueOrThrow) because lastValidPath already
+      // includes "value" since it came from the writeOrThrow error path which
+      // was called with the "value" prefix from writeValueOrThrow
+      const currentValue = this.readOrThrow({
         ...address,
         path: lastValidPath ?? [],
       }, { meta: ignoreReadForScheduling });
