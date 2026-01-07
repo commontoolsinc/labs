@@ -125,11 +125,11 @@ interface MapValue {
   interactive?={boolean}         // Enable pan/zoom (default: true)
 
   // Events
-  @ct-click={handler}            // Map background click
-  @ct-bounds-change={handler}    // Viewport changed
-  @ct-marker-click={handler}     // Marker clicked
-  @ct-marker-drag-end={handler}  // Marker drag completed
-  @ct-circle-click={handler}     // Circle clicked
+  onct-click={handler}            // Map background click
+  onct-bounds-change={handler}    // Viewport changed
+  onct-marker-click={handler}     // Marker clicked
+  onct-marker-drag-end={handler}  // Marker drag completed
+  onct-circle-click={handler}     // Circle clicked
 ></ct-map>
 ```
 
@@ -225,7 +225,7 @@ const handleMapClick = handler(({ lat, lng }, { markers }) => {
   });
 });
 
-<ct-map $value={mapData} @ct-click={handleMapClick({ markers })} />;
+<ct-map $value={mapData} onct-click={handleMapClick({ markers })} />;
 ```
 
 ### Draggable Markers
@@ -235,7 +235,7 @@ const handleDragEnd = handler(({ index, position }, { markers }) => {
   markers.key(index).key("position").set(position);
 });
 
-<ct-map $value={mapData} @ct-marker-drag-end={handleDragEnd({ markers })} />;
+<ct-map $value={mapData} onct-marker-drag-end={handleDragEnd({ markers })} />;
 ```
 
 ### Coverage Areas with Circles
