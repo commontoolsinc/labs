@@ -47,6 +47,10 @@ export interface MembersModuleInput {
   mentionable?: MentionableCharm[];
   /** Parent record reference for bidirectional linking (passed directly from Record) */
   parentRecord?: MentionableCharm | null;
+  // NOTE: createRecord callback is NOT supported yet due to serialization limitations.
+  // Functions cannot survive the pattern input boundary. See CT-1130 for alternatives:
+  // - Option 1: instantiate() builtin to create charms from pattern JSON
+  // - Option 2: ct-charm-creator component for UI-based creation
 }
 
 // ===== Self-Describing Metadata =====
@@ -255,20 +259,57 @@ const addMember = handler<
     parentRecord: unknown;
     errorMessage: Cell<string>;
     mentionable: Cell<MentionableCharm[]>;
+    // deno-lint-ignore no-explicit-any
+    createRecord: any; // Function that creates a new Record with given title
   }
->((event, { members, parentRecord, errorMessage, mentionable }) => {
-  const { isCustom, data } = event.detail || {};
+>((event, { members, parentRecord, errorMessage, mentionable, createRecord }) => {
+  const { value, isCustom, data } = event.detail || {};
 
   // Clear previous errors
   errorMessage.set("");
 
   if (isCustom) {
-    // TODO(CT-1130): Creating new records from Members is not yet supported.
-    // The pattern system cannot pass factory functions through serialization.
-    // See: https://linear.app/common-tools/issue/CT-1130
-    errorMessage.set(
-      "Creating new records is not yet supported. Please create the record first, then add it here.",
-    );
+    // User typed a custom name - create a new Record if callback is available
+    // createRecord may be a Cell wrapper around the function - unwrap it
+    // deno-lint-ignore no-explicit-any
+    const createRecordFn = typeof (createRecord as any)?.get === "function"
+      // deno-lint-ignore no-explicit-any
+      ? (createRecord as any).get()
+      : createRecord;
+
+    if (!createRecordFn || typeof createRecordFn !== "function") {
+      // No createRecord callback - show error (fallback for standalone use)
+      errorMessage.set(
+        "Creating new records is not yet supported. Please create the record first, then add it here.",
+      );
+      return;
+    }
+
+    // Create new Record with the typed name
+    const newTitle = value?.trim();
+    if (!newTitle) {
+      errorMessage.set("Please enter a name for the new record.");
+      return;
+    }
+
+    try {
+      const newRecord = createRecordFn(newTitle);
+      if (!newRecord) {
+        errorMessage.set("Failed to create new record.");
+        return;
+      }
+
+      // Add the new record as a member (not bidirectional since it's new)
+      const currentMembers = members.get() || [];
+      const newEntry: MemberEntry = {
+        charm: newRecord,
+        bidirectional: false, // New record has no members module yet
+      };
+      members.set([...currentMembers, newEntry]);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      errorMessage.set(`Failed to create record: ${msg}`);
+    }
     return;
   }
 
@@ -415,7 +456,7 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
   "MembersModule",
   ({
     members,
-    parentSubCharms,
+    parentSubCharms: _parentSubCharms,
     createPattern: _createPattern,
     mentionable: mentionableProp,
     parentRecord: parentRecordProp,
@@ -552,11 +593,13 @@ export const MembersModule = recipe<MembersModuleInput, MembersModuleInput>(
             <ct-autocomplete
               items={autocompleteItems}
               placeholder="Search members..."
+              allowCustom={false}
               onct-select={addMember({
                 members,
                 parentRecord,
                 errorMessage,
                 mentionable,
+                createRecord: null,
               })}
               style={{ flex: "1" }}
             />

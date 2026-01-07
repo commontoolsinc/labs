@@ -267,9 +267,9 @@ const closeExpanded = handler<
   expandedIndex.set(undefined);
 });
 
-// Add a new sub-charm
+// Add a new sub-charm (module) to the Record
 // Note: Receives recordPatternJson to create Notes with correct wiki-link target
-// Note: Controller modules (extractor) also receive parent Cells and title
+// Note: Controller modules (extractor, members) receive parent Cells for coordination
 const addSubCharm = handler<
   { detail: { value: string } },
   {
@@ -306,7 +306,7 @@ const addSubCharm = handler<
   // Special case: create Note (rendered via ct-render variant="embedded")
   // Pass recordPatternJson so [[wiki-links]] create Record charms instead of Note charms
   // Special case: create ExtractorModule as controller with parent Cells
-  // Special case: create MembersModule with parent context for bidirectional links
+  // Special case: create MembersModule with parent context for bidirectional links and createRecord callback
   // deno-lint-ignore no-explicit-any
   const charm = type === "notes"
     ? Note({ linkPattern: recordPatternJson })
@@ -321,6 +321,8 @@ const addSubCharm = handler<
       parentSubCharms: sc,
       mentionable: mentionableExcludingSelf,
       parentRecord: selfRecord,
+      // NOTE: createRecord callback not passed - functions can't survive serialization boundary
+      // See CT-1130 for future work on pattern instantiation
     } as any)
     : createSubCharm(type, initialValues);
 

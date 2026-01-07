@@ -6,9 +6,11 @@
  * like Record. Provides interactive star rating with toggle-off support.
  */
 import {
+  type Cell,
   computed,
   type Default,
   handler,
+  lift,
   NAME,
   recipe,
   UI,
@@ -50,16 +52,30 @@ const setRating = handler<
   rating.set(current === value ? null : value);
 });
 
+// Helper to compute display text
+const getDisplayText = lift(({ rating }: { rating: number | null }) =>
+  rating ? `${rating}/5` : "Not rated"
+);
+
+// Helper to compute star opacity
+const getStarOpacity = lift(
+  ({ rating, value }: { rating: number | null; value: number }) =>
+    (rating ?? 0) >= value ? "1" : "0.3"
+);
+
+// Helper to compute NAME
+const getName = lift(({ displayText }: { displayText: string }) =>
+  `${MODULE_METADATA.icon} Rating: ${displayText}`
+);
+
 // ===== The Pattern =====
 export const RatingModule = recipe<RatingModuleInput, RatingModuleInput>(
   "RatingModule",
   ({ rating }) => {
-    const displayText = computed(() =>
-      rating.get() ? `${rating.get()}/5` : "Not rated"
-    );
+    const displayText = getDisplayText({ rating });
 
     return {
-      [NAME]: computed(() => `${MODULE_METADATA.icon} Rating: ${displayText}`),
+      [NAME]: getName({ displayText }),
       [UI]: (
         <ct-vstack style={{ gap: "8px" }}>
           <ct-hstack style={{ gap: "4px", justifyContent: "center" }}>
@@ -74,7 +90,7 @@ export const RatingModule = recipe<RatingModuleInput, RatingModuleInput>(
                   cursor: "pointer",
                   fontSize: "24px",
                   padding: "4px",
-                  opacity: (rating.get() ?? 0) >= value ? "1" : "0.3",
+                  opacity: getStarOpacity({ rating, value }),
                   transition: "opacity 0.1s, transform 0.1s",
                 }}
                 title={`Rate ${value} star${value > 1 ? "s" : ""}`}
