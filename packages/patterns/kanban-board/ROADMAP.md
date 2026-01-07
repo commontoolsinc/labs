@@ -3,6 +3,7 @@
 ## Current State (v0.1)
 
 A functional kanban board with:
+
 - Columns with nested cards
 - Add/remove cards and columns
 - Move cards between columns (← → buttons)
@@ -10,6 +11,7 @@ A functional kanban board with:
 - CLI-compatible handlers for cross-charm integration
 
 **Known Limitations:**
+
 - No inline editing (must delete and recreate cards)
 - No drag-and-drop (button-based movement only)
 - No visual differentiation between cards
@@ -24,6 +26,7 @@ A functional kanban board with:
 **Goal:** Make cards actually editable without delete/recreate workflow.
 
 **Features:**
+
 1. **Inline title editing** - Click to edit card title in place
    - Use `$value` binding on a `ct-input` that appears on click
    - Or always-visible `ct-textarea` with subtle styling
@@ -36,17 +39,19 @@ A functional kanban board with:
 3. **Column title editing** - Rename columns inline
 
 **Technical Approach:**
+
 - Add `editing` state per card (or track single `editingCardId`)
 - Use `ifElse()` to switch between display and edit modes
 - Consider: should edits be immediate (bidirectional binding) or require save?
 
 **Schema Changes:**
+
 ```typescript
 interface Card {
   id: string;
   title: string;
   description: Default<string, "">;
-  createdAt: Default<number, 0>;  // timestamp
+  createdAt: Default<number, 0>; // timestamp
 }
 ```
 
@@ -57,6 +62,7 @@ interface Card {
 **Goal:** Let users visually distinguish and categorize cards.
 
 **Features:**
+
 1. **Labels/Tags**
    - Predefined colors (red, orange, yellow, green, blue, purple)
    - Optional text labels
@@ -73,13 +79,14 @@ interface Card {
    - Computed `isOverdue`, `isDueSoon` for styling
 
 **Schema Changes:**
+
 ```typescript
 type Priority = "high" | "medium" | "low";
 
 interface Label {
   id: string;
   name: string;
-  color: string;  // hex or named color
+  color: string; // hex or named color
 }
 
 interface Card {
@@ -87,7 +94,7 @@ interface Card {
   title: string;
   description: Default<string, "">;
   priority: Default<Priority, "medium">;
-  dueDate: Default<string | null, null>;  // ISO date string
+  dueDate: Default<string | null, null>; // ISO date string
   labels: Default<Label[], []>;
   createdAt: Default<number, 0>;
 }
@@ -95,24 +102,27 @@ interface Card {
 // Board-level label definitions
 interface State {
   columns: Cell<Column[]>;
-  availableLabels: Cell<Default<Label[], [
-    { id: "bug", name: "Bug", color: "#ef4444" },
-    { id: "feature", name: "Feature", color: "#3b82f6" },
-    { id: "urgent", name: "Urgent", color: "#f97316" },
-  ]>>;
+  availableLabels: Cell<
+    Default<Label[], [
+      { id: "bug"; name: "Bug"; color: "#ef4444" },
+      { id: "feature"; name: "Feature"; color: "#3b82f6" },
+      { id: "urgent"; name: "Urgent"; color: "#f97316" },
+    ]>
+  >;
 }
 ```
 
 **Computed Derivations:**
+
 ```typescript
 const overdueCards = computed(() =>
-  allCards.filter(c => c.dueDate && new Date(c.dueDate) < today)
+  allCards.filter((c) => c.dueDate && new Date(c.dueDate) < today)
 );
 
 const cardsByPriority = computed(() => ({
-  high: allCards.filter(c => c.priority === "high"),
-  medium: allCards.filter(c => c.priority === "medium"),
-  low: allCards.filter(c => c.priority === "low"),
+  high: allCards.filter((c) => c.priority === "high"),
+  medium: allCards.filter((c) => c.priority === "medium"),
+  low: allCards.filter((c) => c.priority === "low"),
 }));
 ```
 
@@ -120,9 +130,11 @@ const cardsByPriority = computed(() => ({
 
 ### Phase 3: Drag and Drop (Very High UX Impact)
 
-**Goal:** Enable the intuitive drag-and-drop interaction users expect from kanban.
+**Goal:** Enable the intuitive drag-and-drop interaction users expect from
+kanban.
 
 **Challenges:**
+
 - CommonTools doesn't have native DnD primitives
 - Need to manage drag state across reactive boundaries
 - Touch support for mobile
@@ -130,12 +142,14 @@ const cardsByPriority = computed(() => ({
 **Approach Options:**
 
 **Option A: HTML5 Drag and Drop**
+
 - Use native `draggable`, `ondragstart`, `ondragover`, `ondrop`
 - Manage `draggingCardId` and `dropTargetColumnId` in cells
 - Pros: No external dependencies
 - Cons: Finicky API, limited mobile support
 
 **Option B: Pointer-based Custom Implementation**
+
 - Track `onpointerdown`, `onpointermove`, `onpointerup`
 - Create visual drag preview element
 - Calculate drop zones based on pointer position
@@ -143,22 +157,28 @@ const cardsByPriority = computed(() => ({
 - Cons: More complex implementation
 
 **Option C: Simplified "Pick and Place"**
+
 - Click card to "pick it up" (highlight it)
 - Click column or position to "place" it
 - Pros: Simple, accessible, touch-friendly
 - Cons: Less intuitive than true DnD
 
-**Recommended:** Start with Option C (pick-and-place) as an intermediate step, then implement Option A or B for true DnD.
+**Recommended:** Start with Option C (pick-and-place) as an intermediate step,
+then implement Option A or B for true DnD.
 
 **State for DnD:**
+
 ```typescript
-const dragState = Cell.of<{
-  cardId: string | null;
-  fromColumnId: string | null;
-} | null>(null);
+const dragState = Cell.of<
+  {
+    cardId: string | null;
+    fromColumnId: string | null;
+  } | null
+>(null);
 ```
 
 **Also Enable:**
+
 - Card reordering WITHIN columns (not just between)
 - Column reordering (drag columns left/right)
 
@@ -190,6 +210,7 @@ const dragState = Cell.of<{
    - Restore from archive
 
 **Schema Additions:**
+
 ```typescript
 interface ChecklistItem {
   id: string;
@@ -205,7 +226,7 @@ interface Card {
 
 interface Column {
   // ... existing fields
-  wipLimit: Default<number | null, null>;  // null = no limit
+  wipLimit: Default<number | null, null>; // null = no limit
 }
 ```
 
@@ -249,6 +270,7 @@ interface Column {
 ### Pattern Composition Strategy
 
 As complexity grows, consider splitting into sub-patterns:
+
 ```
 kanban-board/
 ├── main.tsx           # Composes sub-patterns, owns main state
@@ -263,6 +285,7 @@ kanban-board/
 ### State Management
 
 For complex features like DnD and multi-select:
+
 - Keep UI state (dragging, editing, selected) in local `Cell.of()`
 - Keep data state (cards, columns) in pattern inputs
 - Use handlers for data mutations, inline handlers for UI state
@@ -270,6 +293,7 @@ For complex features like DnD and multi-select:
 ### Performance
 
 For boards with many cards (100+):
+
 - Consider virtualization for long column card lists
 - Memoize expensive computed derivations
 - Lazy-load card details
@@ -313,11 +337,15 @@ For boards with many cards (100+):
 ## Session Notes
 
 **Bugs Fixed (2024-12-19):**
+
 - `Cell.equals(c, column)` doesn't work for comparing OpaqueRef to plain objects
 - Fix: Use `c.id === column.id` for lookups in inline handlers
-- Local `Cell.of()` state can get corrupted with `setsrc` iterations; fresh deploys are cleaner
+- Local `Cell.of()` state can get corrupted with `setsrc` iterations; fresh
+  deploys are cleaner
 
 **Patterns Learned:**
+
 - Define handlers with `handler()` for CLI compatibility
-- Use string ID comparison in inline handlers, not `Cell.equals()` across contexts
+- Use string ID comparison in inline handlers, not `Cell.equals()` across
+  contexts
 - `computed()` requires `.get()` when iterating over `Cell<T[]>`

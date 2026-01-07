@@ -440,84 +440,84 @@ export default pattern<State>(({ columns }) => {
                         justifyContent: "flex-end",
                       }}
                     >
-                        <ct-button
-                          variant="ghost"
-                          style="padding: 2px 6px; font-size: 0.7rem; min-width: auto;"
-                          onClick={() => {
-                            const cols = columns.get();
-                            const fromIndex = cols.findIndex((c) =>
-                              c.id === column.id
+                      <ct-button
+                        variant="ghost"
+                        style="padding: 2px 6px; font-size: 0.7rem; min-width: auto;"
+                        onClick={() => {
+                          const cols = columns.get();
+                          const fromIndex = cols.findIndex((c) =>
+                            c.id === column.id
+                          );
+                          const toIndex = fromIndex - 1;
+                          if (fromIndex > 0 && toIndex >= 0) {
+                            const cardData = cols[fromIndex].cards.find(
+                              (c) => c.id === card.id,
                             );
-                            const toIndex = fromIndex - 1;
-                            if (fromIndex > 0 && toIndex >= 0) {
-                              const cardData = cols[fromIndex].cards.find(
-                                (c) => c.id === card.id,
+                            if (cardData) {
+                              columns.set(
+                                cols.map((col, i) => {
+                                  if (i === fromIndex) {
+                                    return {
+                                      ...col,
+                                      cards: col.cards.filter(
+                                        (c) => c.id !== card.id,
+                                      ),
+                                    };
+                                  }
+                                  if (i === toIndex) {
+                                    return {
+                                      ...col,
+                                      cards: [...col.cards, cardData],
+                                    };
+                                  }
+                                  return col;
+                                }),
                               );
-                              if (cardData) {
-                                columns.set(
-                                  cols.map((col, i) => {
-                                    if (i === fromIndex) {
-                                      return {
-                                        ...col,
-                                        cards: col.cards.filter(
-                                          (c) => c.id !== card.id,
-                                        ),
-                                      };
-                                    }
-                                    if (i === toIndex) {
-                                      return {
-                                        ...col,
-                                        cards: [...col.cards, cardData],
-                                      };
-                                    }
-                                    return col;
-                                  }),
-                                );
-                              }
                             }
-                          }}
-                        >
-                          ←
-                        </ct-button>
-                        <ct-button
-                          variant="ghost"
-                          style="padding: 2px 6px; font-size: 0.7rem; min-width: auto;"
-                          onClick={() => {
-                            const cols = columns.get();
-                            const fromIndex = cols.findIndex((c) =>
-                              c.id === column.id
+                          }
+                        }}
+                      >
+                        ←
+                      </ct-button>
+                      <ct-button
+                        variant="ghost"
+                        style="padding: 2px 6px; font-size: 0.7rem; min-width: auto;"
+                        onClick={() => {
+                          const cols = columns.get();
+                          const fromIndex = cols.findIndex((c) =>
+                            c.id === column.id
+                          );
+                          const toIndex = fromIndex + 1;
+                          if (fromIndex >= 0 && toIndex < cols.length) {
+                            const cardData = cols[fromIndex].cards.find(
+                              (c) => c.id === card.id,
                             );
-                            const toIndex = fromIndex + 1;
-                            if (fromIndex >= 0 && toIndex < cols.length) {
-                              const cardData = cols[fromIndex].cards.find(
-                                (c) => c.id === card.id,
+                            if (cardData) {
+                              columns.set(
+                                cols.map((col, i) => {
+                                  if (i === fromIndex) {
+                                    return {
+                                      ...col,
+                                      cards: col.cards.filter(
+                                        (c) => c.id !== card.id,
+                                      ),
+                                    };
+                                  }
+                                  if (i === toIndex) {
+                                    return {
+                                      ...col,
+                                      cards: [...col.cards, cardData],
+                                    };
+                                  }
+                                  return col;
+                                }),
                               );
-                              if (cardData) {
-                                columns.set(
-                                  cols.map((col, i) => {
-                                    if (i === fromIndex) {
-                                      return {
-                                        ...col,
-                                        cards: col.cards.filter(
-                                          (c) => c.id !== card.id,
-                                        ),
-                                      };
-                                    }
-                                    if (i === toIndex) {
-                                      return {
-                                        ...col,
-                                        cards: [...col.cards, cardData],
-                                      };
-                                    }
-                                    return col;
-                                  }),
-                                );
-                              }
                             }
-                          }}
-                        >
-                          →
-                        </ct-button>
+                          }
+                        }}
+                      >
+                        →
+                      </ct-button>
                     </div>
 
                     {/* Created date (always shown) */}
