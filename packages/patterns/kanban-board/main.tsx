@@ -23,12 +23,24 @@ import {
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
+const formatDate = (timestamp: number) => {
+  if (!timestamp) return "Unknown";
+  return new Date(timestamp).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+};
+
 // ============ TYPES ============
 
 interface Card {
   id: string;
   title: string;
   description: Default<string, "">;
+  createdAt: Default<number, 0>; // timestamp
 }
 
 interface Column {
@@ -82,6 +94,7 @@ const addCardHandler = handler<
     id: generateId(),
     title: title.trim(),
     description: description?.trim() || "",
+    createdAt: Date.now(),
   };
 
   columns.set(
@@ -175,6 +188,12 @@ export default pattern<State>(({ columns }) => {
   // ============ LOCAL UI STATE ============
 
   const newColumnTitle = Cell.of("");
+
+  // Editing state (for future use - click handlers set these but no edit UI yet)
+  const editingCardId = Cell.of<string | null>(null);
+  const editingCardTitle = Cell.of("");
+  const editingColumnId = Cell.of<string | null>(null);
+  const editingColumnTitle = Cell.of("");
 
   // ============ COMPUTED DERIVATIONS ============
 
@@ -291,9 +310,17 @@ export default pattern<State>(({ columns }) => {
                     display: "flex",
                     alignItems: "center",
                     gap: "0.5rem",
+                    flex: 1,
                   }}
                 >
-                  <h3 style={{ margin: 0, fontSize: "1rem" }}>
+                  {/* Column title - clickable to edit */}
+                  <h3
+                    style={{ margin: 0, fontSize: "1rem", cursor: "pointer" }}
+                    onClick={() => {
+                      editingColumnId.set(column.id);
+                      editingColumnTitle.set(column.title);
+                    }}
+                  >
                     {column.title}
                   </h3>
                   <span
@@ -349,7 +376,18 @@ export default pattern<State>(({ columns }) => {
                         alignItems: "flex-start",
                       }}
                     >
-                      <div style={{ fontWeight: "500", flex: 1 }}>
+                      {/* Card title - clickable to edit */}
+                      <div
+                        style={{
+                          fontWeight: "500",
+                          flex: 1,
+                          cursor: "pointer",
+                        }}
+                        onClick={() => {
+                          editingCardId.set(card.id);
+                          editingCardTitle.set(card.title);
+                        }}
+                      >
                         {card.title}
                       </div>
                       <ct-button
@@ -481,6 +519,17 @@ export default pattern<State>(({ columns }) => {
                         →
                       </ct-button>
                     </div>
+
+                    {/* Created date (always shown) */}
+                    <div
+                      style={{
+                        fontSize: "0.7rem",
+                        color: "#999",
+                        marginTop: "0.5rem",
+                      }}
+                    >
+                      {formatDate(card.createdAt)}
+                    </div>
                   </div>
                 ))}
 
@@ -516,6 +565,7 @@ export default pattern<State>(({ columns }) => {
                         id: generateId(),
                         title,
                         description: "",
+                        createdAt: Date.now(),
                       };
                       columns.set(
                         cols.map((col, i) =>
