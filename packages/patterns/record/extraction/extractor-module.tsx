@@ -972,10 +972,14 @@ const applySelected = handler<
         }
       }
 
-      // Only proceed with trashing if at least one update succeeded
-      if (!anySuccess) {
+      // Only proceed with trashing if at least one update succeeded OR cleanup is pending
+      // Notes cleanup counts as a "success" because the extraction worked - we have cleaned content to apply
+      const cleanupWillApply = cleanupEnabledValue && cleanedNotesValue !== undefined &&
+        Object.keys(notesSnapshotMapValue || {}).length > 0;
+
+      if (!anySuccess && !cleanupWillApply) {
         console.warn(
-          "[Extract] No updates succeeded, keeping extractor for retry",
+          "[Extract] No updates succeeded and no cleanup pending, keeping extractor for retry",
         );
         return;
       }
