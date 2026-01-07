@@ -546,6 +546,12 @@ export abstract class BaseObjectTraverser<
             schemaTracker,
           );
           docItem = next;
+          if (next.value === undefined) {
+            logger.debug(
+              "traverse",
+              () => ["getAtPath returned undefined value for array entry", doc],
+            );
+          }
         }
         return this.traverseDAG(
           docItem,
@@ -594,6 +600,13 @@ export abstract class BaseObjectTraverser<
           this.traverseCells,
         );
         if (newDoc.value === undefined) {
+          logger.debug(
+            "traverse",
+            () => [
+              "getAtPath returned undefined value for",
+              doc,
+            ],
+          );
           return null;
         }
         // If the target doc was already tracked before this traversal,
@@ -723,6 +736,11 @@ export function getAtPath(
       };
     } else {
       // we can only descend into pointers, objects, and arrays
+      logger.debug("traverse", () => [
+        "Attempted to traverse into non-object/non-array value",
+        curDoc,
+        [part, ...remaining],
+      ]);
       return [{
         ...curDoc,
         address: { ...curDoc.address, path: [] },
@@ -795,6 +813,8 @@ function followPointer(
   IMemorySpaceAttestation,
   SchemaPathSelector | undefined,
 ] {
+  // doc.address's path doesn't have the same value nesting semantics as
+  // link path, but we don't use the path field from that argument.
   const link = parseLink(doc.value, doc.address)!;
   // We may access portions of the doc outside what we have in our doc
   // attestation, so set the target to the top level doc from the manager.
@@ -831,6 +851,7 @@ function followPointer(
       linkSchemaContext,
     );
   }
+  // Check to see if we've already included this link with this schema context
   using t = tracker.include(doc.value!, selector?.schemaContext, null, doc);
   if (t === null) {
     // Cycle detected - treat this as notFound to avoid traversal
@@ -863,6 +884,10 @@ function followPointer(
   // If the object we're pointing to is a retracted fact, just return undefined.
   // We can't do a better match, but we do want to include the result so we watch this doc
   if (valueEntry.value === undefined) {
+    logger.info(
+      "traverse",
+      () => ["followPointer found missing/retracted fact", valueEntry, target],
+    );
     return [notFound(target), selector];
   }
   // We can continue with the target, but provide the top level target doc
@@ -1082,6 +1107,15 @@ export function combineSchema(
     (isObject(linkSchema) && linkSchema.type === "object") &&
     (isObject(parentSchema) && parentSchema.type === "object")
   ) {
+    // If both schemas have required properties, only include those that are
+    // in both lists
+    const { required: parentRequired, ...parentSchemaRest } = parentSchema;
+    const { required: linkRequired, ...linkSchemaRest } = linkSchema;
+    const required = parentRequired && linkRequired
+      ? parentRequired.filter((item) => linkRequired.includes(item))
+      : parentRequired
+      ? parentRequired
+      : linkRequired;
     // When combining these object types, if they both have properties,
     // we only want to include any properties that they both have.
     // If only one has properties, we will use that set
@@ -1100,32 +1134,36 @@ export function combineSchema(
       parentSchema.properties === undefined &&
       ContextualFlowControl.isTrueSchema(parentAdditionalProperties)
     ) {
-      if (linkSchema.additionalProperties !== undefined) {
-        return {
-          ...linkSchema,
-          additionalProperties: mergeSchemaFlags(
-            parentAdditionalProperties,
-            linkSchema.additionalProperties,
-          ),
-        };
-      }
-      return linkSchema;
+      const additionalProperties = linkSchema.additionalProperties !== undefined
+        ? mergeSchemaFlags(
+          parentAdditionalProperties,
+          linkSchema.additionalProperties,
+        )
+        : parentAdditionalProperties;
+      // Need to keep the flags from parent schema here
+      // We'll also be explicit about additionalProperties and required
+      return mergeSchemaFlags(parentSchema, {
+        ...linkSchemaRest,
+        additionalProperties,
+        ...(required && { required }),
+      });
     } else if (
       linkSchema.properties === undefined &&
       ContextualFlowControl.isTrueSchema(linkAdditionalProperties)
     ) {
       if (parentSchema.additionalProperties !== undefined) {
         return {
-          ...parentSchema,
+          ...parentSchemaRest,
           additionalProperties: mergeSchemaFlags(
             linkAdditionalProperties,
             parentSchema.additionalProperties,
           ),
+          ...(required && { required }),
         };
       }
-      return parentSchema;
+      return { ...parentSchemaRest, ...(required && { required }) };
     }
-    // Both objects have properties
+    // Both objects may have properties
     const mergedSchemaProperties: Record<string, JSONSchema> = {};
     if (linkSchema.properties !== undefined) {
       for (const [key, value] of Object.entries(linkSchema.properties)) {
@@ -1160,13 +1198,12 @@ export function combineSchema(
         }
       }
     }
-    const { type: _pType, properties: _pProps, ...parentRest } = parentSchema;
-    const { type: _lType, properties: _lProps, ...linkRest } = linkSchema;
     return {
       type: "object",
+      ...linkSchema,
+      ...parentSchema,
       properties: mergedSchemaProperties,
-      ...linkRest,
-      ...parentRest,
+      ...(required && { required} ),
     };
   } else if (
     (isObject(linkSchema) && linkSchema.type === "array") &&
@@ -1191,9 +1228,11 @@ export function combineSchema(
     // this isn't great, but at least grab the flags from parent schema
     // Merge $defs from the two schema, with parent taking priority
     const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
-    return mergeSchemaFlags(parentSchema, {
-      ...linkSchema,
-      ...(Object.keys(mergedDefs).length > 0 ? { $defs: mergedDefs } : {}),
+    // In this case, we use the link for flags, but generally use the parent
+    // since the object types may be different
+    return mergeSchemaFlags(linkSchema, {
+      ...parentSchema,
+      ...(Object.keys(mergedDefs).length > 0 && { $defs: mergedDefs }),
     });
   }
   return linkSchema;
@@ -1446,7 +1485,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
         schemaContext.schema,
       );
       if (resolved === undefined) {
-        console.log("rEturning undefined");
         return undefined;
       }
       schemaContext = {
@@ -1619,8 +1657,16 @@ export class SchemaObjectTraverser<V extends JSONValue>
     } else if (Array.isArray(doc.value)) {
       if (this.isValidType(schemaObj, "array")) {
         const newValue: any = [];
+        // Our link is based on the last link in the chain and not the first.
+        const newLink = link ?? getNormalizedLink(
+          doc.address,
+          schemaObj,
+          schemaContext.rootSchema,
+        );
         using t = this.tracker.include(doc.value, schemaContext, newValue, doc);
         if (t === null) {
+          // newValue will be converted to a createObject result by the
+          // function that added it to the tracker, so don't do that here
           return this.tracker.getExisting(doc.value, schemaContext);
         }
         const entries = this.traverseArrayWithSchema(doc, {
@@ -1633,12 +1679,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
         for (const item of entries) {
           newValue.push(item);
         }
-        // Our link is based on the last link in the chain and not the first.
-        const newLink = link ?? getNormalizedLink(
-          doc.address,
-          schemaObj,
-          schemaContext.rootSchema,
-        );
         return this.objectCreator.createObject(newLink, newValue);
       }
       return undefined;
@@ -1650,8 +1690,16 @@ export class SchemaObjectTraverser<V extends JSONValue>
         }, link);
       } else if (this.isValidType(schemaObj, "object")) {
         const newValue: any = {};
+        // Our link is based on the last link in the chain and not the first.
+        const newLink = link ?? getNormalizedLink(
+          doc.address,
+          schemaObj,
+          schemaContext.rootSchema,
+        );
         using t = this.tracker.include(doc.value, schemaContext, newValue, doc);
         if (t === null) {
+          // newValue will be converted to a createObject result by the
+          // function that added it to the tracker, so don't do that here
           return this.tracker.getExisting(doc.value, schemaContext);
         }
         const entries = this.traverseObjectWithSchema(doc, {
@@ -1664,12 +1712,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
         for (const [k, v] of Object.entries(entries)) {
           newValue[k] = v;
         }
-        // Our link is based on the last link in the chain and not the first.
-        const newLink = link ?? getNormalizedLink(
-          doc.address,
-          schemaObj,
-          schemaContext.rootSchema,
-        );
         return this.objectCreator.createObject(newLink, newValue);
       }
     }
@@ -1812,6 +1854,12 @@ export class SchemaObjectTraverser<V extends JSONValue>
         );
         curDoc = next;
         curSelector = selector!;
+        if (curDoc.value === undefined) {
+          logger.debug(
+            "traverse",
+            () => ["Value is undefined following array element link", curDoc],
+          );
+        }
       } else if (
         isRecord(curDoc.value) &&
         !SchemaObjectTraverser.asCellOrStream(curSelector.schemaContext!.schema)
@@ -1916,6 +1964,8 @@ export class SchemaObjectTraverser<V extends JSONValue>
       // default to true. However, if we provided the `properties` field, we
       // treat this specially, and don't invalidate the object, but also don't
       // descend down into that property.
+      // This behavior is delegated to the objectCreator, so we can have 
+      // different handling in cell.get (validateAndTransform) and query.
       if (isObject(schemaProperties) && propSchema === undefined) {
         this.objectCreator.addOptionalProperty(filteredObj, propKey, propValue);
         continue;
@@ -2067,7 +2117,12 @@ export class SchemaObjectTraverser<V extends JSONValue>
     if (newDoc.value === undefined) {
       logger.debug(
         "traversePointerWithSchema",
-        () => ["Encountered link to undefined value", doc, normalizedLink],
+        () => [
+          "Encountered link to undefined value",
+          doc,
+          newDoc,
+          normalizedLink,
+        ],
       );
       return undefined;
     }
