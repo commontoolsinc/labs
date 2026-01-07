@@ -68,7 +68,10 @@ interface ExtractorModuleInput {
   // Notes cleanup state
   cleanupNotesEnabled: Cell<Default<boolean, true>>;
   // Snapshot of Notes content at extraction start (for cleanup comparison)
-  notesContentSnapshot: Cell<Default<string, "">>;
+  // Map of subCharm index -> original content for ALL selected Notes modules
+  notesContentSnapshot: Cell<
+    Default<Record<number, string>, Record<number, never>>
+  >;
   // Cleanup application status tracking
   cleanupApplyStatus: Cell<
     Default<"pending" | "success" | "failed" | "skipped", "pending">
@@ -84,7 +87,7 @@ interface ExtractorModuleOutput {
   extractPhase?: Default<"select" | "extracting" | "preview", "select">;
   extractionPrompt?: Default<string, "">;
   cleanupNotesEnabled?: Default<boolean, true>;
-  notesContentSnapshot?: Default<string, "">;
+  notesContentSnapshot?: Default<Record<number, string>, Record<number, never>>;
   cleanupApplyStatus?: Default<
     "pending" | "success" | "failed" | "skipped",
     "pending"
@@ -148,33 +151,57 @@ Return ONLY the extracted text, preserving formatting and line breaks.
 Do not add any commentary, explanation, or formatting like markdown.
 If no text is visible, return an empty string.`;
 
-const NOTES_CLEANUP_SYSTEM_PROMPT = `You are a notes cleanup tool.
-
-Given original notes and a list of extracted fields, output a cleaned version with extracted data removed.
-
-Rules:
-1. Remove lines containing ONLY extracted data (e.g., "Email: john@example.com", "Phone: 555-1234")
-2. Keep narrative text not captured in extracted fields
-3. Keep formatting (headers, bullets, blank lines) where they make sense
-4. If notes become empty, output empty string
-
-DO NOT include any reasoning, analysis, or explanation in your response.
-DO NOT say things like "I need to analyze" or "Looking at the original notes".
-DO NOT explain what you're doing or what you found.
-Your response must contain ONLY the cleaned text itself - nothing more, nothing less.
-If the result is empty, respond with an empty string.
-
-Example:
-Input: "Meeting notes: Call John at 555-1234 tomorrow about the project"
-Extracted: [phone: 555-1234]
-Output: "Meeting notes: Call John tomorrow about the project"
-
-Example:
-Input: "John Doe, email: john@example.com, phone: 555-1234"
-Extracted: [name: John Doe, email: john@example.com, phone: 555-1234]
-Output: (empty string, since all content was extracted)`;
+// NOTES_CLEANUP via extraction result:
+// =====================================
+// Instead of running a separate LLM cleanup call (which was broken - it only got
+// field summaries like "email: john@example.com" but had no way to know which
+// SPECIFIC text patterns like "Loves bunny rabbits" were NOT extracted), we now
+// use the extraction result's `notes` or `content` field directly.
+//
+// The extraction schema (from registry.ts) includes a `notes` field via the
+// Notes module's fieldMapping: ["content", "notes"]. This means when the LLM
+// extracts structured data, it ALSO explicitly outputs what should remain in
+// Notes via the `notes` field.
+//
+// This approach is:
+// - Simpler: No extra LLM call needed
+// - Faster: One LLM call instead of two
+// - More accurate: The extraction LLM has full context and explicitly says
+//   what should STAY in Notes (the `notes` field output)
+// - Correct: We use what the LLM says to KEEP, not trying to infer what to REMOVE
+//
+// The extraction prompt already instructs the LLM what NOT to extract
+// (preferences, personality traits, conversational text), so the `notes` field
+// contains exactly what should stay in Notes after extraction.
 
 // ===== Helper Functions =====
+
+/**
+ * Normalize LLM "null" string responses to actual null values.
+ *
+ * WORKAROUND: LLMs sometimes return the literal string "null" instead of JSON null.
+ * This happens because nullable types in schemas are represented as anyOf with string,
+ * and schema descriptions like "Null if X" cause the LLM to output "null" as text.
+ * Since "null" is a valid JSON string, it passes validation but breaks downstream logic.
+ *
+ * See: community-docs/superstitions/2025-11-29-llm-generateObject-returns-string-null.md
+ */
+function normalizeNullString(value: unknown): unknown {
+  if (typeof value === "string" && value.toLowerCase() === "null") {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    return value.map(normalizeNullString);
+  }
+  if (typeof value === "object" && value !== null) {
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      result[k] = normalizeNullString(v);
+    }
+    return result;
+  }
+  return value;
+}
 
 /**
  * Get the primary field name for a module type.
@@ -234,11 +261,15 @@ function getCurrentValue(entry: SubCharmEntry, fieldName: string): unknown {
 }
 
 /**
- * Check if a value is "empty" (null, undefined, empty string, empty array)
+ * Check if a value is "empty" (null, undefined, empty string, empty array, or "null" string)
+ *
+ * Note: Also treats the literal string "null" as empty (LLM workaround - see normalizeNullString)
  */
 function isEmpty(value: unknown): boolean {
   if (value === null || value === undefined) return true;
   if (value === "") return true;
+  // Treat "null" string as empty (LLM sometimes returns "null" instead of null)
+  if (typeof value === "string" && value.toLowerCase() === "null") return true;
   if (Array.isArray(value) && value.length === 0) return true;
   return false;
 }
@@ -255,13 +286,21 @@ function formatValue(value: unknown): string {
 
 /**
  * Validate that an extracted value matches the expected JSON Schema type
+ *
+ * Note: Normalizes "null" strings to null before validation (LLM workaround)
  */
 function validateFieldValue(
   value: unknown,
   schema: JSONSchema | undefined,
 ): boolean {
+  // Normalize "null" strings to actual null before validation
+  const normalizedValue = normalizeNullString(value);
+
   // No schema = allow anything (permissive for dynamic fields)
   if (!schema || !schema.type) return true;
+
+  // After normalization, null is always valid (field will be skipped in buildPreview)
+  if (normalizedValue === null) return true;
 
   const schemaType = schema.type;
 
@@ -337,19 +376,27 @@ function getFieldSchema(
 /**
  * Build extraction preview from raw LLM result and existing modules
  * @param currentTitle - Current Record title (for "record-title" pseudo-type)
+ *
+ * Note: Normalizes "null" strings to null before processing (LLM workaround)
  */
 function buildPreview(
   extracted: Record<string, unknown>,
   subCharms: readonly SubCharmEntry[],
   currentTitle?: string,
 ): ExtractionPreview {
+  // Normalize "null" strings to actual null in the entire extraction result
+  const normalizedExtracted = normalizeNullString(extracted) as Record<
+    string,
+    unknown
+  >;
+
   // Use FULL field-to-type mapping from registry - enables creating new modules
   const fieldToType = getFullFieldMapping();
   const fields: ExtractedField[] = [];
   const byModule: Record<string, ExtractedField[]> = {};
 
-  for (const [fieldName, extractedValue] of Object.entries(extracted)) {
-    // Skip null/undefined values
+  for (const [fieldName, extractedValue] of Object.entries(normalizedExtracted)) {
+    // Skip null/undefined values (including normalized "null" strings)
     if (extractedValue === null || extractedValue === undefined) continue;
 
     const moduleType = fieldToType[fieldName];
@@ -591,7 +638,9 @@ const startExtraction = handler<
     extractPhaseCell: Cell<
       Default<"select" | "extracting" | "preview", "select">
     >;
-    notesContentSnapshotCell: Cell<Default<string, "">>;
+    notesContentSnapshotCell: Cell<
+      Default<Record<number, string>, Record<number, never>>
+    >;
     // Read-only: computed() provides OpaqueRef, no Cell wrapper needed
     ocrResultsValue: Record<number, string>;
   }
@@ -619,7 +668,8 @@ const startExtraction = handler<
     // Build combined content from selected sources
     // For notes/text-import, use Cell.key() navigation to ensure we read live content
     const parts: string[] = [];
-    let notesContent = "";
+    // Map to store ALL selected Notes modules' content (index -> content)
+    const notesSnapshots: Record<number, string> = {};
 
     for (const source of sources) {
       // Skip if explicitly deselected
@@ -642,7 +692,8 @@ const startExtraction = handler<
 
         if (content.trim()) {
           parts.push(`--- ${source.label} ---\n${content}`);
-          notesContent = content;
+          // Store snapshot for this Notes module (keyed by index)
+          notesSnapshots[source.index] = content;
         }
       } else if (source.type === "text-import") {
         // Same pattern for text-import
@@ -673,8 +724,8 @@ const startExtraction = handler<
     const combinedContent = parts.join("\n\n");
 
     if (combinedContent.trim()) {
-      // Snapshot Notes content for cleanup comparison
-      notesContentSnapshotCell.set(notesContent);
+      // Snapshot ALL selected Notes content for cleanup (map of index -> content)
+      notesContentSnapshotCell.set(notesSnapshots);
       extractionPromptCell.set(combinedContent);
       extractPhaseCell.set("extracting");
     }
@@ -699,6 +750,8 @@ const applySelected = handler<
     >;
     cleanupEnabledValue: boolean;
     cleanedNotesValue: string;
+    // Map of Notes module index -> original content (for identifying which Notes to clean)
+    notesSnapshotMapValue: Record<number, string>;
     cleanupApplyStatusCell: Cell<
       Default<"pending" | "success" | "failed" | "skipped", "pending">
     >;
@@ -716,6 +769,7 @@ const applySelected = handler<
       trashSelectionsCell,
       cleanupEnabledValue,
       cleanedNotesValue,
+      notesSnapshotMapValue,
       cleanupApplyStatusCell,
       applyInProgressCell,
     },
@@ -962,55 +1016,88 @@ const applySelected = handler<
       // If Stream handler access could be guaranteed, Approach 1 alone would be sufficient.
       //
       if (cleanupEnabledValue && cleanedNotesValue !== undefined) {
-        const notesIndex = current.findIndex((e) => e?.type === "notes");
-        const notesEntry = notesIndex >= 0 ? current[notesIndex] : undefined;
-        if (notesEntry) {
-          let cleanupSucceeded = false;
+        // Get all Notes module indices that were used as extraction sources
+        const notesIndices = Object.keys(notesSnapshotMapValue || {}).map(
+          Number,
+        );
 
-          // Approach 1: Try editContent.send (best for UI reactivity)
-          try {
-            const notesCharm = notesEntry.charm as {
-              editContent?: { send?: (data: unknown) => void };
-            };
-            if (notesCharm?.editContent?.send) {
-              notesCharm.editContent.send({
-                detail: { value: cleanedNotesValue },
-              });
-              cleanupSucceeded = true;
-              console.debug(
-                "[Extract] Applied Notes cleanup via editContent stream",
+        if (notesIndices.length === 0) {
+          cleanupApplyStatusCell.set("skipped");
+        } else {
+          let allCleanupSucceeded = true;
+          let anyCleanupAttempted = false;
+
+          // Apply cleanup to ALL selected Notes modules
+          for (const notesIndex of notesIndices) {
+            const notesEntry = current[notesIndex];
+            if (!notesEntry || notesEntry.type !== "notes") {
+              console.warn(
+                `[Extract] Notes entry at index ${notesIndex} not found or wrong type`,
               );
+              allCleanupSucceeded = false;
+              continue;
             }
-          } catch (e) {
-            console.warn("[Extract] editContent.send failed:", e);
-          }
 
-          // Approach 2: Fallback to Cell key navigation
-          if (!cleanupSucceeded) {
+            anyCleanupAttempted = true;
+            let thisCleanupSucceeded = false;
+
+            // Approach 1: Try editContent.send (best for UI reactivity)
             try {
-              // Cast needed: Cell.key() navigation loses type info for dynamic nested paths
-              (parentSubCharmsCell as Cell<SubCharmEntry[]>).key(notesIndex)
-                .key("charm").key(
-                  "content",
-                ).set(cleanedNotesValue);
-              cleanupSucceeded = true;
-              console.debug(
-                "[Extract] Applied Notes cleanup via Cell key navigation (UI may need refresh)",
-              );
+              const notesCharm = notesEntry.charm as {
+                editContent?: { send?: (data: unknown) => void };
+              };
+              if (notesCharm?.editContent?.send) {
+                notesCharm.editContent.send({
+                  detail: { value: cleanedNotesValue },
+                });
+                thisCleanupSucceeded = true;
+                console.debug(
+                  `[Extract] Applied Notes cleanup to index ${notesIndex} via editContent stream`,
+                );
+              }
             } catch (e) {
-              console.warn("[Extract] Cell key navigation failed:", e);
+              console.warn(
+                `[Extract] editContent.send failed for index ${notesIndex}:`,
+                e,
+              );
+            }
+
+            // Approach 2: Fallback to Cell key navigation
+            if (!thisCleanupSucceeded) {
+              try {
+                // Cast needed: Cell.key() navigation loses type info for dynamic nested paths
+                (parentSubCharmsCell as Cell<SubCharmEntry[]>).key(notesIndex)
+                  .key("charm").key(
+                    "content",
+                  ).set(cleanedNotesValue);
+                thisCleanupSucceeded = true;
+                console.debug(
+                  `[Extract] Applied Notes cleanup to index ${notesIndex} via Cell key navigation`,
+                );
+              } catch (e) {
+                console.warn(
+                  `[Extract] Cell key navigation failed for index ${notesIndex}:`,
+                  e,
+                );
+              }
+            }
+
+            if (!thisCleanupSucceeded) {
+              allCleanupSucceeded = false;
+              console.warn(
+                `[Extract] All cleanup approaches failed for Notes at index ${notesIndex}`,
+              );
             }
           }
 
-          cleanupApplyStatusCell.set(cleanupSucceeded ? "success" : "failed");
-          if (!cleanupSucceeded) {
-            console.warn(
-              "[Extract] All Notes cleanup approaches failed",
+          if (!anyCleanupAttempted) {
+            cleanupApplyStatusCell.set("failed");
+            console.warn("[Extract] No valid Notes entries found for cleanup");
+          } else {
+            cleanupApplyStatusCell.set(
+              allCleanupSucceeded ? "success" : "failed",
             );
           }
-        } else {
-          cleanupApplyStatusCell.set("failed");
-          console.warn("[Extract] Notes entry not found for cleanup");
         }
       } else {
         cleanupApplyStatusCell.set("skipped");
@@ -1281,90 +1368,62 @@ export const ExtractorModule = recipe<
       }).join("\n");
     });
 
-    // Build cleanup prompt for Notes - only when extraction succeeds and Notes was used
-    const cleanupPrompt = computed(() => {
-      const rawSnapshot = notesContentSnapshot.get();
-      // Handle Default type - may be object or string
-      const snapshot = typeof rawSnapshot === "string" ? rawSnapshot : "";
-      const rawPhase = extractPhase.get();
-      const phase = typeof rawPhase === "string" ? rawPhase : "select";
+    // Notes cleanup now uses the extraction result's `notes` field directly.
+    // No separate LLM call needed - the extraction schema includes a `notes` field
+    // via the Notes module's fieldMapping: ["content", "notes"].
+    // See comment at NOTES_CLEANUP_SYSTEM_PROMPT location for full explanation.
 
-      // Only generate cleanup when we have extraction results and Notes content
-      if (phase !== "extracting" && phase !== "preview") return undefined;
-      if (!extraction.result) return undefined;
-      if (!snapshot.trim()) return undefined;
+    // Check if Notes cleanup is pending - always false now (no separate LLM call)
+    const cleanupPending = computed(() => false);
 
-      // Build a summary of what was extracted (excluding 'notes' field)
-      // The 'notes' field contains content that should STAY in notes, not be removed
-      // We only want to remove data that was extracted to OTHER fields (email, phone, etc.)
-      const extractedSummary: string[] = [];
-      const result = extraction.result as Record<string, unknown>;
-      for (const [key, value] of Object.entries(result)) {
-        // Skip the 'notes' field - that content should remain in Notes
-        if (key === "notes") continue;
-        if (value !== null && value !== undefined) {
-          const formattedValue = Array.isArray(value)
-            ? value.join(", ")
-            : String(value);
-          extractedSummary.push(`- ${key}: ${formattedValue}`);
-        }
-      }
+    // Check if cleanup has an error - always false now (no separate LLM call)
+    const cleanupHasError = computed(() => false);
 
-      if (extractedSummary.length === 0) return undefined;
-
-      return `Original notes:
-${snapshot}
-
-Extracted fields to remove:
-${extractedSummary.join("\n")}`;
-    });
-
-    // Cleanup call - runs in parallel with extraction review
-    const notesCleanup = generateText({
-      system: NOTES_CLEANUP_SYSTEM_PROMPT,
-      prompt: cleanupPrompt,
-      model: "anthropic:claude-haiku-4-5",
-    });
-
-    // Check if Notes cleanup is pending
-    const cleanupPending = computed(() => {
-      const rawSnapshot = notesContentSnapshot.get();
-      const snapshot = typeof rawSnapshot === "string" ? rawSnapshot : "";
-      if (!snapshot.trim()) return false;
-      return Boolean(notesCleanup.pending);
-    });
-
-    // Check if cleanup has an error
-    const cleanupHasError = computed(() => {
-      return Boolean(notesCleanup.error);
-    });
-
-    // Get the cleaned Notes content (or original if cleanup disabled/failed)
+    // Get the cleaned Notes content from extraction result's `notes` field
+    // Falls back to original content if cleanup disabled or no extraction result
     const cleanedNotesContent = computed(() => {
       const rawEnabled = cleanupNotesEnabled.get();
       const enabled = typeof rawEnabled === "boolean" ? rawEnabled : true;
       const rawSnapshot = notesContentSnapshot.get();
-      const snapshot = typeof rawSnapshot === "string" ? rawSnapshot : "";
+      const snapshotMap: Record<number, string> =
+        (typeof rawSnapshot === "object" && rawSnapshot !== null)
+          ? rawSnapshot as Record<number, string>
+          : {};
 
-      if (!enabled) return snapshot;
-      if (notesCleanup.error) return snapshot;
-      if (!notesCleanup.result) return snapshot;
+      // Combine all Notes snapshots for fallback
+      const combinedSnapshot = Object.values(snapshotMap).join("\n\n---\n\n");
+
+      if (!enabled) return combinedSnapshot;
+
+      // Use extraction result's `notes` field directly
+      // The extraction schema includes a `notes` field (from Notes module's fieldMapping)
+      // which contains what should STAY in Notes after extraction
+      if (!extraction.result) return combinedSnapshot;
+      const result = extraction.result as Record<string, unknown>;
+      const notesValue = result.notes;
+
+      // If extraction didn't produce a notes field, keep original content
+      if (notesValue === null || notesValue === undefined) return combinedSnapshot;
 
       // Validate result - should be string
-      const result = notesCleanup.result;
-      if (typeof result !== "string") return snapshot;
+      if (typeof notesValue !== "string") return combinedSnapshot;
 
-      return result.trim();
+      return notesValue.trim();
     });
 
     // Check if there are meaningful changes to Notes
     const hasNotesChanges = computed(() => {
       const rawSnapshot = notesContentSnapshot.get();
-      const snapshot = typeof rawSnapshot === "string" ? rawSnapshot : "";
-      if (!snapshot.trim()) return false;
+      const snapshotMap: Record<number, string> =
+        (typeof rawSnapshot === "object" && rawSnapshot !== null)
+          ? rawSnapshot as Record<number, string>
+          : {};
+
+      const combinedSnapshot = Object.values(snapshotMap).join("\n\n---\n\n");
+      if (!combinedSnapshot.trim()) return false;
 
       const cleaned = cleanedNotesContent;
-      return cleaned !== snapshot;
+      return cleaned !== combinedSnapshot;
     });
 
     // Total changes count includes Notes cleanup when enabled
@@ -1450,8 +1509,11 @@ ${extractedSummary.join("\n")}`;
     // Preview phase computed values
     const hasNotesSnapshot = computed(() => {
       const rawSnapshot = notesContentSnapshot.get();
-      const snapshot = typeof rawSnapshot === "string" ? rawSnapshot : "";
-      return snapshot.trim().length > 0;
+      const snapshotMap: Record<number, string> =
+        (typeof rawSnapshot === "object" && rawSnapshot !== null)
+          ? rawSnapshot as Record<number, string>
+          : {};
+      return Object.keys(snapshotMap).length > 0;
     });
     const showCleanupPreview = computed(() => {
       const rawEnabled = cleanupNotesEnabled.get();
@@ -2189,6 +2251,14 @@ ${extractedSummary.join("\n")}`;
                       // Dereference the computed value
                       const value = cleanedNotesContent;
                       return typeof value === "string" ? value : "";
+                    })(),
+                    notesSnapshotMapValue: (() => {
+                      // Get the snapshot map for identifying which Notes modules to clean
+                      const rawSnapshot = notesContentSnapshot.get();
+                      return (typeof rawSnapshot === "object" &&
+                          rawSnapshot !== null)
+                        ? rawSnapshot as Record<number, string>
+                        : {};
                     })(),
                     cleanupApplyStatusCell: cleanupApplyStatus,
                     applyInProgressCell: applyInProgress,
