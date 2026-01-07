@@ -66,6 +66,9 @@ export async function runTestPattern(
   });
   const engine = new Engine(runtime);
 
+  // Track sink subscription for cleanup
+  let sinkCancel: (() => void) | undefined;
+
   try {
     // 2. Compile the test pattern
     const program = await engine.resolve(
@@ -110,8 +113,8 @@ export async function runTestPattern(
     // Wait for initial setup to complete
     await runtime.idle();
 
-    // Keep the pattern reactive
-    const _sinkCancel = patternResult.sink(() => {});
+    // Keep the pattern reactive - store cancel function for cleanup
+    sinkCancel = patternResult.sink(() => {});
 
     // 4. Get the tests array from pattern output
     // Use .key() to get sub-cells without unwrapping
@@ -231,6 +234,7 @@ export async function runTestPattern(
     };
   } finally {
     // 6. Cleanup
+    sinkCancel?.();
     engine.dispose();
     await storageManager.close();
   }

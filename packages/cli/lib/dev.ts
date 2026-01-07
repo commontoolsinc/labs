@@ -83,11 +83,15 @@ export async function runTests(
       console.error(`Error: ${testDir} is not a directory`);
       return 1;
     }
-  } catch {
-    console.error(`Error: Test directory not found: ${testDir}`);
-    console.error(
-      `Create a __tests__/ subdirectory next to your pattern with *.test.ts files.`,
-    );
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      console.error(`Error: Test directory not found: ${testDir}`);
+      console.error(
+        `Create a __tests__/ subdirectory next to your pattern with *.test.ts files.`,
+      );
+    } else {
+      console.error(`Error accessing test directory ${testDir}:`, error);
+    }
     return 1;
   }
 
