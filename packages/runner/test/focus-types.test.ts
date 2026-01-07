@@ -6,7 +6,12 @@
  */
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { AsCell, Cell, KeyResultType } from "../src/builder/types.ts";
+import type {
+  AsCell,
+  Cell,
+  KeyResultType,
+  Stream,
+} from "../src/builder/types.ts";
 
 // ============================================================================
 // Type-level assertions (compile-time checks)
@@ -47,87 +52,134 @@ type User = {
 // ============================================================================
 // KeyResultType type tests
 // ============================================================================
+// Use value assignments to enforce type checks at compile time
 
 // Empty keys should return the original type
-type _Test1 = MustBeTrue<
+const _test1: MustBeTrue<
   AssertEqual<KeyResultType<User, [], AsCell>, Cell<User>>
->;
+> = true;
 
 // Single key
-type _Test2 = MustBeTrue<
+const _test2: MustBeTrue<
   AssertEqual<KeyResultType<User, ["name"], AsCell>, Cell<string>>
->;
+> = true;
 
-type _Test3 = MustBeTrue<
+const _test3: MustBeTrue<
   AssertEqual<KeyResultType<User, ["age"], AsCell>, Cell<number>>
->;
+> = true;
 
-type _Test4 = MustBeTrue<
+const _test4: MustBeTrue<
   AssertEqual<
     KeyResultType<User, ["profile"], AsCell>,
     Cell<User["profile"]>
   >
->;
+> = true;
 
 // Two keys
-type _Test5 = MustBeTrue<
+const _test5: MustBeTrue<
   AssertEqual<
     KeyResultType<User, ["profile", "bio"], AsCell>,
     Cell<string>
   >
->;
+> = true;
 
-type _Test6 = MustBeTrue<
+const _test6: MustBeTrue<
   AssertEqual<
     KeyResultType<User, ["profile", "settings"], AsCell>,
     Cell<User["profile"]["settings"]>
   >
->;
+> = true;
 
 // Three keys
-type _Test7 = MustBeTrue<
+const _test7: MustBeTrue<
   AssertEqual<
     KeyResultType<User, ["profile", "settings", "theme"], AsCell>,
     Cell<"light" | "dark">
   >
->;
+> = true;
 
-type _Test8 = MustBeTrue<
+const _test8: MustBeTrue<
   AssertEqual<
     KeyResultType<User, ["profile", "settings", "notifications"], AsCell>,
     Cell<boolean>
   >
->;
+> = true;
 
 // Array access
-type _Test9 = MustBeTrue<
+const _test9: MustBeTrue<
   AssertEqual<
     KeyResultType<User, ["posts", 0], AsCell>,
     Cell<User["posts"][0]>
   >
->;
+> = true;
 
-type _Test10 = MustBeTrue<
+const _test10: MustBeTrue<
   AssertEqual<
     KeyResultType<User, ["posts", 0, "title"], AsCell>,
     Cell<string>
   >
->;
+> = true;
 
 // Unknown keys should fall back to Cell<any>
-type _Test11 = MustBeTrue<
+const _test11: MustBeTrue<
   AssertEqual<
     KeyResultType<User, ["unknownKey"], AsCell>,
     Cell<any>
   >
->;
+> = true;
 
-type _Test12 = MustBeTrue<
+const _test12: MustBeTrue<
   AssertEqual<
     KeyResultType<User, ["profile", "unknownKey"], AsCell>,
     Cell<any>
   >
->;
+> = true;
+
+// ============================================================================
+// Nested Cell and Stream type tests
+// ============================================================================
+
+// Type with nested Cell and Stream
+type StateWithNestedCells = {
+  user: Cell<User>;
+  events: Stream<{ type: string; data: unknown }>;
+  nested: {
+    counter: Cell<number>;
+    notifications: Stream<string>;
+  };
+};
+
+// When accessing a property that is Cell<T>, returns Cell<T> directly (not Cell<Cell<T>>)
+const _testNestedCell1: MustBeTrue<
+  AssertEqual<
+    KeyResultType<StateWithNestedCells, ["user"], AsCell>,
+    Cell<User>
+  >
+> = true;
+
+// When accessing a property that is Stream<T>, returns Stream<T> directly (not Cell<Stream<T>>)
+const _testNestedStream1: MustBeTrue<
+  AssertEqual<
+    KeyResultType<StateWithNestedCells, ["events"], AsCell>,
+    Stream<{ type: string; data: unknown }>
+  >
+> = true;
+
+// Nested path to Cell - returns Cell<number> directly
+const _testNestedCell2: MustBeTrue<
+  AssertEqual<
+    KeyResultType<StateWithNestedCells, ["nested", "counter"], AsCell>,
+    Cell<number>
+  >
+> = true;
+
+// Nested path to Stream - returns Stream<string> directly
+const _testNestedStream2: MustBeTrue<
+  AssertEqual<
+    KeyResultType<StateWithNestedCells, ["nested", "notifications"], AsCell>,
+    Stream<string>
+  >
+> = true;
 
 // ============================================================================
 // Runtime tests (behavior verification)

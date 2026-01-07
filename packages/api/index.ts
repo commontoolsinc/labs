@@ -345,14 +345,26 @@ export interface IKeyable<out T, Wrap extends HKT> {
 }
 
 /**
+ * Helper to wrap a type, but preserve Cell/Stream types as-is to avoid double-wrapping.
+ * Uses non-distributive conditionals to handle union types correctly.
+ */
+export type WrapOrPreserve<T, Wrap extends HKT> = [T] extends [Cell<any>] ? T
+  : [T] extends [Stream<any>] ? T
+  : [T] extends [ComparableCell<any>] ? T
+  : [T] extends [ReadonlyCell<any>] ? T
+  : [T] extends [WriteonlyCell<any>] ? T
+  : Apply<Wrap, T>;
+
+/**
  * Result type for key() - chains multiple key lookups.
  * Supports single key: cell.key("a") or multiple: cell.key("a", "b", "c")
+ * When the final value is already a Cell/Stream type, returns it as-is.
  */
 export type KeyResultType<
   T,
   Keys extends readonly PropertyKey[],
   Wrap extends HKT,
-> = Keys extends readonly [] ? Apply<Wrap, T>
+> = Keys extends readonly [] ? WrapOrPreserve<T, Wrap>
   : Keys extends readonly [
     infer First extends PropertyKey,
     ...infer Rest extends readonly PropertyKey[],
