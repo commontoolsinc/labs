@@ -19,7 +19,6 @@
     "./packages/schema-generator",
     "./packages/llm",
     "./packages/memory",
-    "./packages/pattern-testing",
     "./packages/patterns",
     "./packages/runner",
     "./packages/seeder",
