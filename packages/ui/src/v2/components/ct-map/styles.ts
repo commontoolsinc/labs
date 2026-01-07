@@ -383,8 +383,8 @@ export const styles = css`
   }
   .leaflet-control-layers-toggle {
     /* Leaflet's default layers control image URLs do not work in Shadow DOM
-       because the relative path 'images/layers.png' cannot be resolved.
-       The component uses alternative styling or the layers control is not displayed. */
+      because the relative path 'images/layers.png' cannot be resolved.
+      The component uses alternative styling or the layers control is not displayed. */
     /* background-image: url(images/layers.png); */
     width: 36px;
     height: 36px;
@@ -436,7 +436,7 @@ export const styles = css`
   .leaflet-default-icon-path {
     /* used only in path-guessing heuristic, see L.Icon.Default */
     /* Disabled in Shadow DOM: the default marker icons cannot be resolved from relative paths.
-       The ct-map component uses custom emoji markers instead, so these icons are not needed. */
+      The ct-map component uses custom emoji markers instead, so these icons are not needed. */
     /* background-image: url(images/marker-icon.png); */
   }
 

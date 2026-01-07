@@ -3973,13 +3973,34 @@ interface CTMapAttributes<T> extends CTHTMLAttributes<T> {
   "interactive"?: boolean | CellLike<boolean>;
   "onct-click"?: (event: CustomEvent<{ lat: number; lng: number }>) => void;
   "@ct-click"?: any;
-  "onct-bounds-change"?: (event: CustomEvent<{ bounds: CTMapBounds; center: CTMapLatLng; zoom: number }>) => void;
+  "onct-bounds-change"?: (
+    event: CustomEvent<
+      { bounds: CTMapBounds; center: CTMapLatLng; zoom: number }
+    >,
+  ) => void;
   "@ct-bounds-change"?: any;
-  "onct-marker-click"?: (event: CustomEvent<{ marker: CTMapMarker; index: number; lat: number; lng: number }>) => void;
+  "onct-marker-click"?: (
+    event: CustomEvent<
+      { marker: CTMapMarker; index: number; lat: number; lng: number }
+    >,
+  ) => void;
   "@ct-marker-click"?: any;
-  "onct-marker-drag-end"?: (event: CustomEvent<{ marker: CTMapMarker; index: number; position: CTMapLatLng; oldPosition: CTMapLatLng }>) => void;
+  "onct-marker-drag-end"?: (
+    event: CustomEvent<
+      {
+        marker: CTMapMarker;
+        index: number;
+        position: CTMapLatLng;
+        oldPosition: CTMapLatLng;
+      }
+    >,
+  ) => void;
   "@ct-marker-drag-end"?: any;
-  "onct-circle-click"?: (event: CustomEvent<{ circle: CTMapCircle; index: number; lat: number; lng: number }>) => void;
+  "onct-circle-click"?: (
+    event: CustomEvent<
+      { circle: CTMapCircle; index: number; lat: number; lng: number }
+    >,
+  ) => void;
   "@ct-circle-click"?: any;
 }
 
