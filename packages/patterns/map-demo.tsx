@@ -256,9 +256,9 @@ export default pattern<Input, Output>(
       return { markers, circles, polylines };
     });
 
-    // Format coordinates for display
-    const formatCoord = (val: number, decimals = 4): string =>
-      val.toFixed(decimals);
+    // Format coordinates for display (handles undefined during reactive updates)
+    const formatCoord = (val: number | undefined | null, decimals = 4): string =>
+      val != null ? val.toFixed(decimals) : "N/A";
 
     return {
       [NAME]: computed(() => `Trip Planner: ${tripName}`),
