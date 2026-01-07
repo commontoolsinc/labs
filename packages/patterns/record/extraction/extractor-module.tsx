@@ -1553,6 +1553,16 @@ export const ExtractorModule = recipe<
       const status = cleanupApplyStatus.get();
       return status === "failed";
     });
+    // Combined snapshot string for display in "Before:" preview
+    // Must dereference the Cell to show actual content, not Cell reference
+    const combinedSnapshotDisplay = computed(() => {
+      const rawSnapshot = notesContentSnapshot.get();
+      const snapshotMap: Record<string, string> =
+        (typeof rawSnapshot === "object" && rawSnapshot !== null && !Array.isArray(rawSnapshot))
+          ? rawSnapshot as Record<string, string>
+          : {};
+      return Object.values(snapshotMap).join("\n\n---\n\n");
+    });
     const applyButtonDisabled = computed(() =>
       cleanupPending || applyInProgress.get() === true
     );
@@ -2056,7 +2066,7 @@ export const ExtractorModule = recipe<
                                   fontFamily: "monospace",
                                 }}
                               >
-                                {notesContentSnapshot}
+                                {combinedSnapshotDisplay}
                               </div>
                             </div>
                             <div>
