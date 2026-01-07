@@ -6,7 +6,7 @@
  */
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { Cell, KeyResultType, AsCell } from "../src/builder/types.ts";
+import type { AsCell, Cell, KeyResultType } from "../src/builder/types.ts";
 
 // ============================================================================
 // Type-level assertions (compile-time checks)
@@ -145,7 +145,7 @@ describe("Cell.key() with multiple keys", () => {
     const checkType = <T>(_cell: Cell<T>, _keyed: Cell<T>) => {};
     const _useCheckType = (cell: Cell<User>) => {
       // @ts-expect-error - key() with no args returns Cell<User>, not void
-      const keyed: void = cell.key();
+      const _keyed: void = cell.key();
       // This should compile fine:
       checkType(cell, cell.key());
     };

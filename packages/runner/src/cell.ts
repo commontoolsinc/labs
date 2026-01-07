@@ -6,7 +6,6 @@ import {
   type AnyCell,
   type AnyCellWrapping,
   type Apply,
-  type AsCell,
   type Cell,
   type CellKind,
   type CellTypeConstructor,
@@ -20,7 +19,6 @@ import {
   type IsThisObject,
   type IStreamable,
   type JSONSchema,
-  type KeyResultType,
   type NodeFactory,
   type NodeRef,
   type Opaque,
@@ -951,9 +949,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
    * cell.key("user", "profile")           // Cell<Profile>
    * cell.key("user", "profile", "name")   // Cell<string>
    */
-  key<Keys extends readonly PropertyKey[]>(
-    ...keys: Keys
-  ): KeyResultType<T, Keys, AsCell> {
+  key(...keys: PropertyKey[]): Cell<any> {
     let currentLink = this._link;
 
     for (const key of keys) {
@@ -986,7 +982,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       this.synced,
       this._causeContainer,
       this._kind,
-    ) as unknown as KeyResultType<T, Keys, AsCell>;
+    ) as unknown as Cell<any>;
   }
 
   asSchema<S extends JSONSchema = JSONSchema>(

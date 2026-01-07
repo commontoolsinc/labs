@@ -190,10 +190,38 @@ export interface IKeyable<out T, Wrap extends HKT> {
    * cell.key("user", "profile")           // Cell<Profile>
    * cell.key("user", "profile", "name")   // Cell<string>
    */
-  key<Keys extends readonly PropertyKey[]>(
+  // Overloads to avoid recursive type evaluation which causes stack overflow
+  // Zero keys
+  key(this: IsThisObject): Apply<Wrap, T>;
+  // One key
+  key<K1 extends keyof T>(this: IsThisObject, k1: K1): Apply<Wrap, T[K1]>;
+  // Two keys
+  key<K1 extends keyof T, K2 extends keyof T[K1]>(
     this: IsThisObject,
-    ...keys: Keys
-  ): KeyResultType<T, Keys, Wrap>;
+    k1: K1,
+    k2: K2,
+  ): Apply<Wrap, T[K1][K2]>;
+  // Three keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+  >(this: IsThisObject, k1: K1, k2: K2, k3: K3): Apply<Wrap, T[K1][K2][K3]>;
+  // Four keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+    K4 extends keyof T[K1][K2][K3],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+  ): Apply<Wrap, T[K1][K2][K3][K4]>;
+  // Fallback for 5+ keys or unknown keys
+  key(...keys: PropertyKey[]): Apply<Wrap, any>;
 }
 
 /**
@@ -204,11 +232,11 @@ export type KeyResultType<
   T,
   Keys extends readonly PropertyKey[],
   Wrap extends HKT,
-> = Keys extends readonly []
-  ? Apply<Wrap, T>
-  : Keys extends
-    readonly [infer First extends PropertyKey, ...infer Rest extends readonly PropertyKey[]]
-    ? [unknown] extends [First] ? Apply<Wrap, any> // variance guard
+> = Keys extends readonly [] ? Apply<Wrap, T>
+  : Keys extends readonly [
+    infer First extends PropertyKey,
+    ...infer Rest extends readonly PropertyKey[],
+  ] ? [unknown] extends [First] ? Apply<Wrap, any> // variance guard
     : [0] extends [1 & T] ? Apply<Wrap, any> // keep any as-is
     : First extends keyof T ? KeyResultType<T[First], Rest, Wrap>
     : Apply<Wrap, any> // unknown key fallback
@@ -220,11 +248,11 @@ export type KeyResultType<
 export type KeyResultTypeOpaque<
   T,
   Keys extends readonly PropertyKey[],
-> = Keys extends readonly []
-  ? OpaqueCell<T>
-  : Keys extends
-    readonly [infer First extends PropertyKey, ...infer Rest extends readonly PropertyKey[]]
-    ? [unknown] extends [First] ? OpaqueCell<any>
+> = Keys extends readonly [] ? OpaqueCell<T>
+  : Keys extends readonly [
+    infer First extends PropertyKey,
+    ...infer Rest extends readonly PropertyKey[],
+  ] ? [unknown] extends [First] ? OpaqueCell<any>
     : [0] extends [1 & T] ? OpaqueCell<any>
     : First extends keyof UnwrapCell<T>
       ? KeyResultTypeOpaque<UnwrapCell<T>[First], Rest>
@@ -241,10 +269,33 @@ export interface IKeyableOpaque<T> {
   /**
    * Navigate to nested properties by one or more keys.
    */
-  key<Keys extends readonly PropertyKey[]>(
+  // Overloads to avoid recursive type evaluation which causes stack overflow
+  key(this: IsThisObject): OpaqueCell<T>;
+  key<K1 extends keyof UnwrapCell<T>>(
     this: IsThisObject,
-    ...keys: Keys
-  ): KeyResultTypeOpaque<T, Keys>;
+    k1: K1,
+  ): OpaqueCell<UnwrapCell<T>[K1]>;
+  key<K1 extends keyof UnwrapCell<T>, K2 extends keyof UnwrapCell<T>[K1]>(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+  ): OpaqueCell<UnwrapCell<T>[K1][K2]>;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+  >(this: IsThisObject, k1: K1, k2: K2, k3: K3): OpaqueCell<
+    UnwrapCell<T>[K1][K2][K3]
+  >;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+    K4 extends keyof UnwrapCell<T>[K1][K2][K3],
+  >(this: IsThisObject, k1: K1, k2: K2, k3: K3, k4: K4): OpaqueCell<
+    UnwrapCell<T>[K1][K2][K3][K4]
+  >;
+  key(...keys: PropertyKey[]): OpaqueCell<any>;
 }
 
 /**
