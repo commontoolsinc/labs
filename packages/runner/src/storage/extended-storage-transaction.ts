@@ -124,22 +124,29 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       (writeResult.error.name === "NotFoundError")
     ) {
       // Create parent entries if needed
-      // The NotFoundError.path includes the key that wasn't found, but we need
-      // to read from the parent that DOES exist. So we slice off the last component.
+      // When errorPath exists and has length > 1, we need to find the actual parent
+      // that exists. The errorPath includes the key that wasn't found, but we need
+      // to read from the parent that DOES exist.
       const errorPath = writeResult.error.name === "NotFoundError"
         ? writeResult.error.path
         : undefined;
-      // The parent path is the error path minus the last component (the missing key)
-      const lastValidPath = errorPath && errorPath.length > 0
+      // For deeply nested paths (length > 1), slice to get the actual parent path
+      // For shallow paths or undefined, keep original behavior
+      const lastValidPath = errorPath && errorPath.length > 1
         ? errorPath.slice(0, -1)
         : errorPath;
-      // Use readOrThrow (not readValueOrThrow) because lastValidPath already
-      // includes "value" since it came from the writeOrThrow error path which
-      // was called with the "value" prefix from writeValueOrThrow
-      const currentValue = this.readOrThrow({
-        ...address,
-        path: lastValidPath ?? [],
-      }, { meta: ignoreReadForScheduling });
+      // When we sliced the error path, use readOrThrow at the sliced path
+      // (which already includes "value" prefix from writeValueOrThrow).
+      // Otherwise, use readValueOrThrow for backward compatibility.
+      const currentValue = errorPath && errorPath.length > 1
+        ? this.readOrThrow({
+          ...address,
+          path: lastValidPath ?? [],
+        }, { meta: ignoreReadForScheduling })
+        : this.readValueOrThrow({
+          ...address,
+          path: lastValidPath ?? [],
+        }, { meta: ignoreReadForScheduling });
       const valueObj = lastValidPath === undefined ? {} : currentValue;
       if (!isRecord(valueObj)) {
         // This should have already been caught as type mismatch error
