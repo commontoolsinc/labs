@@ -396,7 +396,9 @@ function buildPreview(
   const fields: ExtractedField[] = [];
   const byModule: Record<string, ExtractedField[]> = {};
 
-  for (const [fieldName, extractedValue] of Object.entries(normalizedExtracted)) {
+  for (
+    const [fieldName, extractedValue] of Object.entries(normalizedExtracted)
+  ) {
     // Skip null/undefined values (including normalized "null" strings)
     if (extractedValue === null || extractedValue === undefined) continue;
 
@@ -792,7 +794,11 @@ const applySelected = handler<
       if (!extractionResult) return;
 
       const currentTitle = parentTitleCell.get() || "";
-      const previewData = buildPreview(extractionResult, subCharmsData, currentTitle);
+      const previewData = buildPreview(
+        extractionResult,
+        subCharmsData,
+        currentTitle,
+      );
       const sourcesData = scanExtractableSources(subCharmsData);
 
       if (!previewData || !previewData.fields) return;
@@ -974,7 +980,8 @@ const applySelected = handler<
 
       // Only proceed with trashing if at least one update succeeded OR cleanup is pending
       // Notes cleanup counts as a "success" because the extraction worked - we have cleaned content to apply
-      const cleanupWillApply = cleanupEnabledValue && cleanedNotesValue !== undefined &&
+      const cleanupWillApply = cleanupEnabledValue &&
+        cleanedNotesValue !== undefined &&
         Object.keys(notesSnapshotMapValue || {}).length > 0;
 
       if (!anySuccess && !cleanupWillApply) {
@@ -1240,13 +1247,15 @@ export const ExtractorModule = recipe<
       // Use for-loop to filter (avoids transformer bug with .filter())
       const result: ExtractableSource[] = [];
       for (const s of sources) {
-        if (s.type === "photo" && s.requiresOCR && selectionsMap[s.index] !== false) {
+        if (
+          s.type === "photo" && s.requiresOCR &&
+          selectionsMap[s.index] !== false
+        ) {
           result.push(s);
         }
       }
       return result;
     });
-
 
     // Build OCR calls for all selected photos using .map() on computed Cell
     // Each photo gets its own generateText call (framework caches per-item)
@@ -1359,7 +1368,11 @@ export const ExtractorModule = recipe<
       if (!extraction.result) return "No fields extracted";
       const subCharms = parentSubCharms.get() || [];
       const currentTitle = parentTitle.get() || "";
-      const previewData = buildPreview(extraction.result, subCharms, currentTitle);
+      const previewData = buildPreview(
+        extraction.result,
+        subCharms,
+        currentTitle,
+      );
       if (!previewData?.fields?.length) return "No fields extracted";
       return previewData.fields.map((f: ExtractedField) => {
         const current = formatValue(f.currentValue);
@@ -1390,7 +1403,8 @@ export const ExtractorModule = recipe<
       const enabled = typeof rawEnabled === "boolean" ? rawEnabled : true;
       const rawSnapshot = notesContentSnapshot.get();
       const snapshotMap: Record<string, string> =
-        (typeof rawSnapshot === "object" && rawSnapshot !== null && !Array.isArray(rawSnapshot))
+        (typeof rawSnapshot === "object" && rawSnapshot !== null &&
+            !Array.isArray(rawSnapshot))
           ? rawSnapshot as Record<string, string>
           : {};
 
@@ -1409,7 +1423,9 @@ export const ExtractorModule = recipe<
       const notesValue = result.notes ?? result.content;
 
       // If extraction didn't produce notes content, keep original
-      if (notesValue === null || notesValue === undefined) return combinedSnapshot;
+      if (notesValue === null || notesValue === undefined) {
+        return combinedSnapshot;
+      }
 
       // Validate result - should be string
       if (typeof notesValue !== "string") return combinedSnapshot;
@@ -1421,7 +1437,8 @@ export const ExtractorModule = recipe<
     const hasNotesChanges = computed(() => {
       const rawSnapshot = notesContentSnapshot.get();
       const snapshotMap: Record<string, string> =
-        (typeof rawSnapshot === "object" && rawSnapshot !== null && !Array.isArray(rawSnapshot))
+        (typeof rawSnapshot === "object" && rawSnapshot !== null &&
+            !Array.isArray(rawSnapshot))
           ? rawSnapshot as Record<string, string>
           : {};
 
@@ -1516,7 +1533,8 @@ export const ExtractorModule = recipe<
     const hasNotesSnapshot = computed(() => {
       const rawSnapshot = notesContentSnapshot.get();
       const snapshotMap: Record<string, string> =
-        (typeof rawSnapshot === "object" && rawSnapshot !== null && !Array.isArray(rawSnapshot))
+        (typeof rawSnapshot === "object" && rawSnapshot !== null &&
+            !Array.isArray(rawSnapshot))
           ? rawSnapshot as Record<string, string>
           : {};
       return Object.keys(snapshotMap).length > 0;
@@ -1536,7 +1554,8 @@ export const ExtractorModule = recipe<
     // cause Cell runtime to coerce the object to an array, losing all data
     const notesSnapshotMapValue = computed(() => {
       const rawSnapshot = notesContentSnapshot.get();
-      return (typeof rawSnapshot === "object" && rawSnapshot !== null && !Array.isArray(rawSnapshot))
+      return (typeof rawSnapshot === "object" && rawSnapshot !== null &&
+          !Array.isArray(rawSnapshot))
         ? rawSnapshot as Record<string, string>
         : {};
     });
@@ -1558,7 +1577,8 @@ export const ExtractorModule = recipe<
     const combinedSnapshotDisplay = computed(() => {
       const rawSnapshot = notesContentSnapshot.get();
       const snapshotMap: Record<string, string> =
-        (typeof rawSnapshot === "object" && rawSnapshot !== null && !Array.isArray(rawSnapshot))
+        (typeof rawSnapshot === "object" && rawSnapshot !== null &&
+            !Array.isArray(rawSnapshot))
           ? rawSnapshot as Record<string, string>
           : {};
       return Object.values(snapshotMap).join("\n\n---\n\n");
