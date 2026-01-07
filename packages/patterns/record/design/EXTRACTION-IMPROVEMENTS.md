@@ -2,30 +2,33 @@
 
 ## Status: Proposed
 
-This document captures planned improvements to the AI extraction module (`extraction/extractor-module.tsx`) based on analysis of community patterns and best practices.
+This document captures planned improvements to the AI extraction module
+(`extraction/extractor-module.tsx`) based on analysis of community patterns and
+best practices.
 
 ---
 
 ## Summary
 
-| Improvement | Complexity | Impact | Priority |
-|-------------|------------|--------|----------|
-| Prompt Improvements | S | High | 1 |
-| Validation Improvements | M | High | 2 |
-| Confidence Scoring | M | High | 3 |
-| Per-Source Extraction | M | Medium | 4 |
-| Schema Selection Pattern | M | Medium | 5 |
+| Improvement              | Complexity | Impact | Priority |
+| ------------------------ | ---------- | ------ | -------- |
+| Prompt Improvements      | S          | High   | 1        |
+| Validation Improvements  | M          | High   | 2        |
+| Confidence Scoring       | M          | High   | 3        |
+| Per-Source Extraction    | M          | Medium | 4        |
+| Schema Selection Pattern | M          | Medium | 5        |
 
 ---
 
 ## 1. Prompt Improvements
 
-**Complexity:** Small (15-30 min)
-**Impact:** High - improves extraction accuracy immediately
+**Complexity:** Small (15-30 min) **Impact:** High - improves extraction
+accuracy immediately
 
 ### Problem
 
 Current prompts lack:
+
 - Field-specific pattern examples
 - Explicit stopping rules
 - Example input/output
@@ -70,18 +73,19 @@ SOCIAL MEDIA (fields: "platform", "handle"):
 ### Files to Modify
 
 - `extraction/extractor-module.tsx` lines 94-106 (EXTRACTION_SYSTEM_PROMPT)
-- `extraction/extractor-module.tsx` lines 114-139 (NOTES_CLEANUP_SYSTEM_PROMPT - minor)
+- `extraction/extractor-module.tsx` lines 114-139 (NOTES_CLEANUP_SYSTEM_PROMPT -
+  minor)
 
 ---
 
 ## 2. Validation Improvements
 
-**Complexity:** Medium (~430 lines)
-**Impact:** High - catches bugs before apply
+**Complexity:** Medium (~430 lines) **Impact:** High - catches bugs before apply
 
 ### Problem
 
 Current validation:
+
 - Binary pass/fail only
 - No handling for LLM returning string `"null"` instead of actual `null`
 - No duplicate detection
@@ -94,7 +98,7 @@ Current validation:
 
 ```typescript
 interface ValidationIssue {
-  code: string;           // "TYPE_MISMATCH", "STRING_NULL", "DUPLICATE"
+  code: string; // "TYPE_MISMATCH", "STRING_NULL", "DUPLICATE"
   message: string;
   severity: "error" | "warning" | "info";
   suggestion?: string;
@@ -102,17 +106,17 @@ interface ValidationIssue {
 
 interface FieldValidationResult {
   valid: boolean;
-  transformed: boolean;   // true if value was sanitized
+  transformed: boolean; // true if value was sanitized
   sanitizedValue: unknown;
   issues: ValidationIssue[];
 }
 
 interface ExtractionValidationResult {
-  canApply: boolean;      // false if any errors
+  canApply: boolean; // false if any errors
   errorCount: number;
   warningCount: number;
   fieldResults: Record<string, FieldValidationResult>;
-  globalIssues: ValidationIssue[];  // e.g., duplicates
+  globalIssues: ValidationIssue[]; // e.g., duplicates
 }
 ```
 
@@ -140,12 +144,13 @@ interface ExtractionValidationResult {
 
 ## 3. Confidence Scoring
 
-**Complexity:** Medium (4-6 hours)
-**Impact:** High - user trust and quality filtering
+**Complexity:** Medium (4-6 hours) **Impact:** High - user trust and quality
+filtering
 
 ### Problem
 
-Users have no visibility into extraction quality. Low-confidence extractions look the same as high-confidence ones.
+Users have no visibility into extraction quality. Low-confidence extractions
+look the same as high-confidence ones.
 
 ### Solution
 
@@ -157,15 +162,16 @@ interface ExtractedField {
   targetModule: string;
   extractedValue: unknown;
   currentValue?: unknown;
-  confidence: number;           // NEW: 0-1 score
+  confidence: number; // NEW: 0-1 score
   confidenceLevel: "high" | "medium" | "low";
-  confidenceReason?: string;    // NEW: LLM explanation
+  confidenceReason?: string; // NEW: LLM explanation
 }
 ```
 
 #### LLM Schema Wrapping
 
 Instead of `{ email: { type: "string" } }`, use:
+
 ```typescript
 {
   email: {
@@ -181,7 +187,8 @@ Instead of `{ email: { type: "string" } }`, use:
 
 #### UI Components
 
-- Confidence badges: High (green checkmark), Medium (yellow dot), Low (red warning)
+- Confidence badges: High (green checkmark), Medium (yellow dot), Low (red
+  warning)
 - Filter buttons: All | High | Medium | Review
 - Auto-deselect low-confidence fields by default
 - Show reason tooltip on hover
@@ -196,12 +203,12 @@ Instead of `{ email: { type: "string" } }`, use:
 
 ## 4. Per-Source Extraction
 
-**Complexity:** Medium (6-7 hours)
-**Impact:** Medium - performance and caching
+**Complexity:** Medium (6-7 hours) **Impact:** Medium - performance and caching
 
 ### Problem
 
-Current approach combines all sources into single LLM call. Changing one source re-extracts everything. No per-source caching.
+Current approach combines all sources into single LLM call. Changing one source
+re-extracts everything. No per-source caching.
 
 ### Solution
 
@@ -210,7 +217,7 @@ Use "dumb map approach" from folk wisdom - one `generateObject()` per source:
 ```typescript
 // Current: Single combined call
 const extraction = generateObject({
-  prompt: combinedContent,  // All sources concatenated
+  prompt: combinedContent, // All sources concatenated
   schema,
   model,
 });
@@ -220,7 +227,7 @@ const sourceExtractions = selectedSources.map((source) => ({
   sourceIndex: source.index,
   sourceType: source.type,
   extraction: generateObject({
-    prompt: source.content,  // Each source independently
+    prompt: source.content, // Each source independently
     schema,
     model,
   }),
@@ -246,6 +253,7 @@ photos > text-import > notes (later sources override earlier for same field)
 #### UI Additions
 
 Per-source status display:
+
 ```
 📝 Notes         ✓ 3 fields
 📄 Text Import   ⏳ extracting...
@@ -255,18 +263,20 @@ Per-source status display:
 ### Files to Modify
 
 - `extraction/types.ts` - Add SourceExtraction interface
-- `extraction/extractor-module.tsx` - Replace single call with map, add merge logic, add per-source UI
+- `extraction/extractor-module.tsx` - Replace single call with map, add merge
+  logic, add per-source UI
 
 ---
 
 ## 5. Schema Selection Pattern
 
-**Complexity:** Medium (12-17 hours)
-**Impact:** Medium - better UX, follows framework philosophy
+**Complexity:** Medium (12-17 hours) **Impact:** Medium - better UX, follows
+framework philosophy
 
 ### Problem
 
 Current "mega-schema" approach:
+
 - Combines all module types into one huge schema
 - No explanation of WHY fields were extracted
 - All-or-nothing acceptance
@@ -278,9 +288,9 @@ Replace combined schema with recommendations array:
 
 ```typescript
 interface ExtractionRecommendation {
-  type: string;           // "email", "birthday", "phone"
-  score: number;          // 0-100 confidence
-  explanation: string;    // "Found email format in signature"
+  type: string; // "email", "birthday", "phone"
+  score: number; // 0-100 confidence
+  explanation: string; // "Found email format in signature"
   extractedData: Record<string, unknown>;
   sourceExcerpt?: string; // "Contact: john@example.com"
 }
@@ -292,15 +302,15 @@ interface ExtractionRecommendation {
       type: "email",
       score: 95,
       explanation: "Explicit email address found",
-      extractedData: { address: "john@example.com" }
+      extractedData: { address: "john@example.com" },
     },
     {
       type: "birthday",
       score: 60,
       explanation: "Date found but unclear if birthday",
-      extractedData: { birthMonth: "3", birthDay: "15" }
-    }
-  ]
+      extractedData: { birthMonth: "3", birthDay: "15" },
+    },
+  ];
 }
 ```
 
@@ -349,7 +359,8 @@ interface ExtractionRecommendation {
 
 ## Implementation Order Rationale
 
-1. **Prompts first**: Quick win, immediate accuracy improvement, no structural changes
+1. **Prompts first**: Quick win, immediate accuracy improvement, no structural
+   changes
 2. **Validation second**: Catches bugs like string "null", improves reliability
 3. **Confidence third**: Builds on validation, gives users quality visibility
 4. **Per-source fourth**: Performance improvement, leverages framework caching
