@@ -604,34 +604,57 @@ export class CTMap extends BaseElement {
     // (reactive proxies can throw when iterating over partially loaded data)
     const length = markers.length;
     for (let i = 0; i < length; i++) {
-      const marker = markers[i];
       const index = i;
 
-      // Skip markers without valid position data
-      // Check each property access separately to avoid proxy iteration issues
-      if (!marker) {
-        continue;
-      }
+      // Extract all marker properties within try-catch to handle reactive proxy edge cases
+      // where accessing nested properties may throw during partial data loading
+      let marker: MapMarker;
+      let lat: number;
+      let lng: number;
+      let title: string | undefined;
+      let description: string | undefined;
+      let icon: string | undefined;
+      let popup: unknown;
+      let draggable: boolean | undefined;
 
-      const position = marker.position;
-      if (!position) {
+      try {
+        marker = markers[i];
+        if (!marker) {
+          continue;
+        }
+
+        const position = marker.position;
+        if (!position) {
+          console.warn(
+            `ct-map: Skipping marker at index ${index} - missing position`,
+          );
+          continue;
+        }
+
+        lat = position.lat;
+        lng = position.lng;
+        if (typeof lat !== "number" || typeof lng !== "number") {
+          console.warn(
+            `ct-map: Skipping marker at index ${index} - invalid position:`,
+            { lat, lng },
+          );
+          continue;
+        }
+
+        // Extract remaining properties
+        title = marker.title;
+        description = marker.description;
+        icon = marker.icon;
+        popup = marker.popup;
+        draggable = marker.draggable;
+      } catch (e) {
+        // Reactive proxy threw during property access - skip this marker
         console.warn(
-          `ct-map: Skipping marker at index ${index} - missing position`,
+          `ct-map: Skipping marker at index ${index} - error accessing properties:`,
+          e,
         );
         continue;
       }
-
-      const lat = position.lat;
-      const lng = position.lng;
-      if (typeof lat !== "number" || typeof lng !== "number") {
-        console.warn(
-          `ct-map: Skipping marker at index ${index} - invalid position:`,
-          { lat, lng },
-        );
-        continue;
-      }
-
-      const { title, description, icon, popup, draggable } = marker;
 
       // Create marker icon - always use divIcon to avoid Leaflet default icon issues in Shadow DOM
       let markerIcon: L.DivIcon;
@@ -726,34 +749,58 @@ export class CTMap extends BaseElement {
     // Use traditional for loop to avoid reactive proxy forEach issues
     const length = circles.length;
     for (let i = 0; i < length; i++) {
-      const circle = circles[i];
       const index = i;
 
-      // Skip circles without valid center data
-      // Check each property access separately to avoid proxy iteration issues
-      if (!circle) {
-        continue;
-      }
+      // Extract all circle properties within try-catch to handle reactive proxy edge cases
+      let circle: MapCircle;
+      let lat: number;
+      let lng: number;
+      let radius: number;
+      let color: string | undefined;
+      let fillOpacity: number | undefined;
+      let strokeWidth: number | undefined;
+      let popup: unknown;
+      let title: string | undefined;
 
-      const center = circle.center;
-      if (!center) {
+      try {
+        circle = circles[i];
+        if (!circle) {
+          continue;
+        }
+
+        const center = circle.center;
+        if (!center) {
+          console.warn(
+            `ct-map: Skipping circle at index ${index} - missing center`,
+          );
+          continue;
+        }
+
+        lat = center.lat;
+        lng = center.lng;
+        if (typeof lat !== "number" || typeof lng !== "number") {
+          console.warn(
+            `ct-map: Skipping circle at index ${index} - invalid center:`,
+            { lat, lng },
+          );
+          continue;
+        }
+
+        // Extract remaining properties
+        radius = circle.radius;
+        color = circle.color;
+        fillOpacity = circle.fillOpacity;
+        strokeWidth = circle.strokeWidth;
+        popup = circle.popup;
+        title = circle.title;
+      } catch (e) {
+        // Reactive proxy threw during property access - skip this circle
         console.warn(
-          `ct-map: Skipping circle at index ${index} - missing center`,
+          `ct-map: Skipping circle at index ${index} - error accessing properties:`,
+          e,
         );
         continue;
       }
-
-      const lat = center.lat;
-      const lng = center.lng;
-      if (typeof lat !== "number" || typeof lng !== "number") {
-        console.warn(
-          `ct-map: Skipping circle at index ${index} - invalid center:`,
-          { lat, lng },
-        );
-        continue;
-      }
-
-      const { radius, color, fillOpacity, strokeWidth, popup, title } = circle;
 
       // Create Leaflet circle (use validated lat/lng from above)
       const leafletCircle = L.circle([lat, lng], {
@@ -899,21 +946,25 @@ export class CTMap extends BaseElement {
     const allPoints: L.LatLng[] = [];
 
     // Collect all marker positions
-    // Use traditional for loops to avoid reactive proxy forEach issues
+    // Use traditional for loops with try-catch to avoid reactive proxy issues
     if (value.markers) {
       const markers = value.markers;
       const markersLength = markers.length;
       for (let i = 0; i < markersLength; i++) {
-        const m = markers[i];
-        if (m) {
-          const position = m.position;
-          if (position) {
-            const lat = position.lat;
-            const lng = position.lng;
-            if (typeof lat === "number" && typeof lng === "number") {
-              allPoints.push(L.latLng(lat, lng));
+        try {
+          const m = markers[i];
+          if (m) {
+            const position = m.position;
+            if (position) {
+              const lat = position.lat;
+              const lng = position.lng;
+              if (typeof lat === "number" && typeof lng === "number") {
+                allPoints.push(L.latLng(lat, lng));
+              }
             }
           }
+        } catch {
+          // Skip markers that throw during property access
         }
       }
     }
@@ -923,16 +974,20 @@ export class CTMap extends BaseElement {
       const circles = value.circles;
       const circlesLength = circles.length;
       for (let i = 0; i < circlesLength; i++) {
-        const c = circles[i];
-        if (c) {
-          const center = c.center;
-          if (center) {
-            const lat = center.lat;
-            const lng = center.lng;
-            if (typeof lat === "number" && typeof lng === "number") {
-              allPoints.push(L.latLng(lat, lng));
+        try {
+          const c = circles[i];
+          if (c) {
+            const center = c.center;
+            if (center) {
+              const lat = center.lat;
+              const lng = center.lng;
+              if (typeof lat === "number" && typeof lng === "number") {
+                allPoints.push(L.latLng(lat, lng));
+              }
             }
           }
+        } catch {
+          // Skip circles that throw during property access
         }
       }
     }
@@ -942,22 +997,30 @@ export class CTMap extends BaseElement {
       const polylines = value.polylines;
       const polylinesLength = polylines.length;
       for (let i = 0; i < polylinesLength; i++) {
-        const p = polylines[i];
-        if (p) {
-          const points = p.points;
-          if (points) {
-            const pointsLength = points.length;
-            for (let j = 0; j < pointsLength; j++) {
-              const pt = points[j];
-              if (pt) {
-                const lat = pt.lat;
-                const lng = pt.lng;
-                if (typeof lat === "number" && typeof lng === "number") {
-                  allPoints.push(L.latLng(lat, lng));
+        try {
+          const p = polylines[i];
+          if (p) {
+            const points = p.points;
+            if (points) {
+              const pointsLength = points.length;
+              for (let j = 0; j < pointsLength; j++) {
+                try {
+                  const pt = points[j];
+                  if (pt) {
+                    const lat = pt.lat;
+                    const lng = pt.lng;
+                    if (typeof lat === "number" && typeof lng === "number") {
+                      allPoints.push(L.latLng(lat, lng));
+                    }
+                  }
+                } catch {
+                  // Skip points that throw during property access
                 }
               }
             }
           }
+        } catch {
+          // Skip polylines that throw during property access
         }
       }
     }
