@@ -26,6 +26,9 @@ import type {
 } from "./types.ts";
 import "../ct-render/ct-render.ts";
 
+// Set to true to enable debug logging
+const DEBUG_LOGGING = false;
+
 // Default map configuration
 const DEFAULT_CENTER: LatLng = { lat: 37.7749, lng: -122.4194 }; // San Francisco
 const DEFAULT_ZOOM = 13;
@@ -110,6 +113,9 @@ export class CTMap extends BaseElement {
   // RAF ID for map initialization (prevent race condition on disconnect)
   private _rafId: number | null = null;
 
+  // ResizeObserver for automatic map resize when container changes
+  private _resizeObserver: ResizeObserver | null = null;
+
   // Change group for internal edits to avoid echo loops
   private _changeGroup = crypto.randomUUID();
 
@@ -143,6 +149,13 @@ export class CTMap extends BaseElement {
 
   // Bound event handler for cleanup
   private _boundHandleKeydown = this._handleKeydown.bind(this);
+
+  // Debug helper - only logs when DEBUG_LOGGING is true
+  private _logWarn(...args: unknown[]): void {
+    if (DEBUG_LOGGING) {
+      console.warn("[ct-map]", ...args);
+    }
+  }
 
   constructor() {
     super();
@@ -329,6 +342,13 @@ export class CTMap extends BaseElement {
       this._map?.invalidateSize();
       this._rafId = null;
     });
+
+    // Set up ResizeObserver to handle container size changes
+    // This handles responsive layouts, tab switching, accordion panels, etc.
+    this._resizeObserver = new ResizeObserver(() => {
+      this._map?.invalidateSize();
+    });
+    this._resizeObserver.observe(container);
   }
 
   private _setupMapEventHandlers(): void {
@@ -550,11 +570,15 @@ export class CTMap extends BaseElement {
     const bounds = this._getBounds();
     if (!bounds) return;
 
+    // Validate bounds before applying
+    const validatedBounds = this._validateBounds(bounds);
+    if (!validatedBounds) return;
+
     this._isUpdatingFromCell = true;
     try {
       const leafletBounds = L.latLngBounds(
-        [bounds.south, bounds.west],
-        [bounds.north, bounds.east],
+        [validatedBounds.south, validatedBounds.west],
+        [validatedBounds.north, validatedBounds.east],
       );
       this._map.fitBounds(leafletBounds, { animate: true });
     } finally {
@@ -625,8 +649,8 @@ export class CTMap extends BaseElement {
 
         const position = marker.position;
         if (!position) {
-          console.warn(
-            `ct-map: Skipping marker at index ${index} - missing position`,
+          this._logWarn(
+            `Skipping marker at index ${index} - missing position`,
           );
           continue;
         }
@@ -634,8 +658,8 @@ export class CTMap extends BaseElement {
         lat = position.lat;
         lng = position.lng;
         if (typeof lat !== "number" || typeof lng !== "number") {
-          console.warn(
-            `ct-map: Skipping marker at index ${index} - invalid position:`,
+          this._logWarn(
+            `Skipping marker at index ${index} - invalid position:`,
             { lat, lng },
           );
           continue;
@@ -649,8 +673,8 @@ export class CTMap extends BaseElement {
         draggable = marker.draggable;
       } catch (e) {
         // Reactive proxy threw during property access - skip this marker
-        console.warn(
-          `ct-map: Skipping marker at index ${index} - error accessing properties:`,
+        this._logWarn(
+          `Skipping marker at index ${index} - error accessing properties:`,
           e,
         );
         continue;
@@ -770,8 +794,8 @@ export class CTMap extends BaseElement {
 
         const center = circle.center;
         if (!center) {
-          console.warn(
-            `ct-map: Skipping circle at index ${index} - missing center`,
+          this._logWarn(
+            `Skipping circle at index ${index} - missing center`,
           );
           continue;
         }
@@ -779,8 +803,8 @@ export class CTMap extends BaseElement {
         lat = center.lat;
         lng = center.lng;
         if (typeof lat !== "number" || typeof lng !== "number") {
-          console.warn(
-            `ct-map: Skipping circle at index ${index} - invalid center:`,
+          this._logWarn(
+            `Skipping circle at index ${index} - invalid center:`,
             { lat, lng },
           );
           continue;
@@ -795,8 +819,8 @@ export class CTMap extends BaseElement {
         title = circle.title;
       } catch (e) {
         // Reactive proxy threw during property access - skip this circle
-        console.warn(
-          `ct-map: Skipping circle at index ${index} - error accessing properties:`,
+        this._logWarn(
+          `Skipping circle at index ${index} - error accessing properties:`,
           e,
         );
         continue;
@@ -850,8 +874,8 @@ export class CTMap extends BaseElement {
 
       const points = polyline.points;
       if (!points || !Array.isArray(points)) {
-        console.warn(
-          `ct-map: Skipping polyline at index ${index} - invalid points:`,
+        this._logWarn(
+          `Skipping polyline at index ${index} - invalid points:`,
           points,
         );
         continue;
@@ -1091,6 +1115,58 @@ export class CTMap extends BaseElement {
     };
   }
 
+  /**
+   * Validate bounds data
+   * Returns null if bounds are invalid (non-finite numbers, out of range, or south > north)
+   */
+  private _validateBounds(bounds: Bounds): Bounds | null {
+    const { north, south, east, west } = bounds;
+
+    // Check that all values are finite numbers
+    if (
+      !Number.isFinite(north) ||
+      !Number.isFinite(south) ||
+      !Number.isFinite(east) ||
+      !Number.isFinite(west)
+    ) {
+      this._logWarn("Invalid bounds - values must be finite numbers:", bounds);
+      return null;
+    }
+
+    // Check latitude range
+    if (
+      north < MIN_LAT ||
+      north > MAX_LAT ||
+      south < MIN_LAT ||
+      south > MAX_LAT
+    ) {
+      this._logWarn("Invalid bounds - latitude must be in [-90, 90]:", bounds);
+      return null;
+    }
+
+    // Check longitude range
+    if (
+      east < MIN_LNG ||
+      east > MAX_LNG ||
+      west < MIN_LNG ||
+      west > MAX_LNG
+    ) {
+      this._logWarn(
+        "Invalid bounds - longitude must be in [-180, 180]:",
+        bounds,
+      );
+      return null;
+    }
+
+    // Check that south <= north
+    if (south > north) {
+      this._logWarn("Invalid bounds - south must be <= north:", bounds);
+      return null;
+    }
+
+    return bounds;
+  }
+
   // === Cleanup ===
 
   private _cleanup(): void {
@@ -1098,6 +1174,12 @@ export class CTMap extends BaseElement {
     if (this._rafId !== null) {
       cancelAnimationFrame(this._rafId);
       this._rafId = null;
+    }
+
+    // Disconnect ResizeObserver
+    if (this._resizeObserver) {
+      this._resizeObserver.disconnect();
+      this._resizeObserver = null;
     }
 
     // Unsubscribe from Cells
@@ -1174,6 +1256,8 @@ export class CTMap extends BaseElement {
     this._map?.setView([lat, lng], zoom);
   }
 }
+
+globalThis.customElements.define("ct-map", CTMap);
 
 declare global {
   interface HTMLElementTagNameMap {

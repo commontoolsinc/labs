@@ -308,6 +308,141 @@ Rich text editor with wiki-link mentions. **Uses `[[` for completions, not `@`.*
 
 ---
 
+## ct-map
+
+Interactive map component using Leaflet with OpenStreetMap tiles. No API key required.
+
+### Properties
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `value` / `$value` | `MapValue \| Cell<MapValue>` | `{}` | Map data with markers, circles, polylines |
+| `center` / `$center` | `LatLng \| Cell<LatLng>` | San Francisco | Map center coordinates (bidirectional) |
+| `zoom` / `$zoom` | `number \| Cell<number>` | `13` | Zoom level 0-18 (bidirectional) |
+| `bounds` / `$bounds` | `Bounds \| Cell<Bounds>` | - | Visible map bounds (bidirectional) |
+| `fitToBounds` | `boolean` | `false` | Auto-fit to show all features |
+| `interactive` | `boolean` | `true` | Enable pan/zoom |
+
+### Types
+
+```tsx
+interface LatLng { lat: number; lng: number; }
+interface Bounds { north: number; south: number; east: number; west: number; }
+
+interface MapValue {
+  markers?: MapMarker[];
+  circles?: MapCircle[];
+  polylines?: MapPolyline[];
+}
+
+interface MapMarker {
+  position: LatLng;
+  title?: string;
+  description?: string;
+  icon?: string;        // Emoji or icon name
+  popup?: OpaqueRef<any>; // Advanced: pattern reference for rich popup
+  draggable?: boolean;
+}
+
+interface MapCircle {
+  center: LatLng;
+  radius: number;       // meters
+  color?: string;
+  fillOpacity?: number;
+  strokeWidth?: number;
+  title?: string;
+  description?: string;
+  popup?: OpaqueRef<any>;
+}
+
+interface MapPolyline {
+  points: LatLng[];
+  color?: string;
+  strokeWidth?: number;
+  dashArray?: string;   // e.g., "5, 10" for dashed
+}
+```
+
+### Events
+
+| Event | Detail | Description |
+|-------|--------|-------------|
+| `ct-click` | `{ lat, lng }` | Map background clicked |
+| `ct-bounds-change` | `{ bounds, center, zoom }` | Viewport changed |
+| `ct-marker-click` | `{ marker, index, lat, lng }` | Marker clicked |
+| `ct-marker-drag-end` | `{ marker, index, position, oldPosition }` | Marker drag completed |
+| `ct-circle-click` | `{ circle, index, lat, lng }` | Circle clicked |
+
+**Note:** Polylines do not emit click events. For clickable segments, use circles as waypoints.
+
+### Usage
+
+```tsx
+// Simple: Display locations
+const mapData = {
+  markers: stores.map(store => ({
+    position: { lat: store.lat, lng: store.lng },
+    title: store.name,
+    icon: "📍"
+  }))
+};
+<ct-map $value={mapData} fitToBounds />
+
+// Interactive: Click to add marker
+<ct-map
+  $value={mapData}
+  onct-click={(e) => {
+    markers.push({
+      position: { lat: e.detail.lat, lng: e.detail.lng },
+      title: "New Location",
+      draggable: true
+    });
+  }}
+/>
+
+// Draggable markers
+<ct-map
+  $value={mapData}
+  onct-marker-drag-end={(e) => {
+    markers.key(e.detail.index).key("position").set(e.detail.position);
+  }}
+/>
+
+// Coverage areas with circles
+const mapData = {
+  circles: areas.map(area => ({
+    center: { lat: area.lat, lng: area.lng },
+    radius: area.radiusMeters,
+    color: area.available ? "#22c55e" : "#ef4444",
+    fillOpacity: 0.2,
+    title: area.name
+  }))
+};
+
+// Route visualization
+const mapData = {
+  polylines: [{
+    points: route.waypoints,
+    color: "#3b82f6",
+    strokeWidth: 4
+  }],
+  markers: [
+    { position: route.start, icon: "🚀" },
+    { position: route.end, icon: "🏁" }
+  ]
+};
+```
+
+### Notes
+
+- **Bundle size:** Leaflet adds ~40KB gzipped
+- **Zoom range:** 0 (world) to 18 (street level)
+- **Default center:** San Francisco (37.7749, -122.4194)
+- **Emoji markers:** Use any emoji as the `icon` property
+- **Rich popups:** Pass a pattern reference via `popup` for interactive popup content
+
+---
+
 ## Style Syntax
 
 | Element | Syntax | Example |
