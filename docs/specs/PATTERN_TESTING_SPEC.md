@@ -178,7 +178,28 @@ describe("expense tracker computeds", () => {
 
 ### Level 3: Handler Tests
 
-Test mutations and side effects:
+Test mutations and side effects.
+
+**Important:** Handlers must be **returned from the pattern body** to be testable. This is already the recommended pattern:
+
+```typescript
+// counter.tsx - handlers are exposed on the output
+interface RecipeOutput {
+  value: Default<number, 0>;
+  increment: Stream<void>;  // ← Exposed for external triggering
+  decrement: Stream<void>;  // ← Exposed for external triggering
+}
+
+export default pattern<RecipeState, RecipeOutput>((state) => {
+  return {
+    // ...
+    increment: increment(state),  // ← Must be in return object!
+    decrement: decrement(state),  // ← Must be in return object!
+  };
+});
+```
+
+**Triggering handlers:** Use `.send()` directly on the handler stream (this is the existing API, not something we invent):
 
 ```typescript
 // counter.test.ts
@@ -202,8 +223,8 @@ describe("counter handlers", () => {
       value: 0,
     });
 
-    // Trigger the handler
-    await harness.sendEvent(pattern.result.increment);
+    // Trigger the handler using .send() - this is the native API
+    pattern.result.increment.send({});
     await harness.idle();
 
     expect(cells.value.get()).toBe(1);
@@ -214,7 +235,7 @@ describe("counter handlers", () => {
       value: 10,
     });
 
-    await harness.sendEvent(pattern.result.decrement);
+    pattern.result.decrement.send({});
     await harness.idle();
 
     expect(cells.value.get()).toBe(9);
@@ -225,9 +246,9 @@ describe("counter handlers", () => {
       value: 5,
     });
 
-    await harness.sendEvent(pattern.result.increment);
-    await harness.sendEvent(pattern.result.increment);
-    await harness.sendEvent(pattern.result.decrement);
+    pattern.result.increment.send({});
+    pattern.result.increment.send({});
+    pattern.result.decrement.send({});
     await harness.idle();
 
     expect(cells.value.get()).toBe(6);
@@ -296,7 +317,14 @@ describe("todo list reactivity", () => {
 
 ### Level 5: Cell.equals() and Identity Tests
 
-Test object identity handling:
+Test object identity handling.
+
+**Note on testability:** To test handlers, they must be exposed in the pattern output with a signature that allows external triggering. For patterns like `test-cell-equals.tsx` where handlers are bound inline in JSX with runtime values (like `index`), you have two options:
+
+1. **Expose a testable handler** that takes the index as event data (not bound state)
+2. **Test at the cell level** - directly manipulate cells to verify the logic
+
+Here's an example testing Cell.equals() behavior at the cell level:
 
 ```typescript
 // test-cell-equals.test.ts
@@ -328,12 +356,9 @@ describe("Cell.equals() behavior", () => {
       }
     );
 
-    // Select the second item
-    await harness.sendEvent(
-      pattern.result.selectItem,
-      { index: 1 },
-      { selectedItem: cells.selectedItem, items: cells.items }
-    );
+    // Select the second item by setting the cell directly
+    const itemB = cells.items.get()[1];
+    cells.selectedItem.set(itemB);
     await harness.idle();
 
     expect(cells.selectedItem.get()?.title).toBe("Item B");
@@ -345,7 +370,7 @@ describe("Cell.equals() behavior", () => {
     ]);
     await harness.idle();
 
-    // Selection should still be Item B (now at index 2)
+    // Selection should still reference Item B (Cell.equals tracks identity)
     expect(cells.selectedItem.get()?.title).toBe("Item B");
   });
 
@@ -363,18 +388,20 @@ describe("Cell.equals() behavior", () => {
     );
 
     // Select middle item
-    await harness.sendEvent(
-      pattern.result.selectItem,
-      { index: 1 },
-      { selectedItem: cells.selectedItem, items: cells.items }
-    );
+    const itemToRemove = cells.items.get()[1];
+    cells.selectedItem.set(itemToRemove);
     await harness.idle();
 
-    // Remove it
-    await harness.sendEvent(pattern.result.removeSelected, undefined, {
-      items: cells.items,
-      selectedItem: cells.selectedItem,
-    });
+    // Simulate the removeSelected handler logic manually
+    const selected = cells.selectedItem.get();
+    if (selected) {
+      const current = cells.items.get();
+      const index = current.findIndex((el) => Cell.equals(selected, el));
+      if (index >= 0) {
+        cells.items.set(current.toSpliced(index, 1));
+        cells.selectedItem.set(null);
+      }
+    }
     await harness.idle();
 
     expect(cells.items.get()).toHaveLength(2);
@@ -382,6 +409,44 @@ describe("Cell.equals() behavior", () => {
     expect(cells.selectedItem.get()).toBeNull();
   });
 });
+```
+
+**For better testability**, patterns should expose handlers with event-based signatures:
+
+```typescript
+// More testable pattern design
+interface RecipeOutput {
+  items: Cell<Item[]>;
+  selectedItem: Cell<Item | null>;
+  // Handler that takes index as event data, not bound state
+  selectByIndex: Stream<{ index: number }>;
+  removeSelected: Stream<void>;
+}
+
+export default pattern<Input, Output>(({ items, selectedItem }) => {
+  // Handler defined to receive index in event
+  const selectByIndex = handler<{ index: number }, { items: Cell<Item[]>; selectedItem: Cell<Item | null> }>(
+    ({ index }, { items, selectedItem }) => {
+      const targetItem = items.get()[index];
+      if (targetItem) selectedItem.set(targetItem);
+    }
+  );
+
+  return {
+    items,
+    selectedItem,
+    selectByIndex: selectByIndex({ items, selectedItem }),
+    removeSelected: removeSelected({ items, selectedItem }),
+  };
+});
+```
+
+Then testing becomes straightforward:
+
+```typescript
+pattern.result.selectByIndex.send({ index: 1 });
+await harness.idle();
+expect(cells.selectedItem.get()?.title).toBe("Item B");
 ```
 
 ---
@@ -403,14 +468,8 @@ export interface TestHarness {
   }>;
 
   // Wait for all pending scheduler actions
+  // Call this after .send() or cell mutations to let reactivity settle
   idle(): Promise<void>;
-
-  // Send an event to a handler stream
-  sendEvent<E>(
-    stream: Stream<E>,
-    event?: E,
-    boundState?: Record<string, Cell<unknown>>
-  ): Promise<void>;
 
   // Subscribe to cell changes (for reactivity tests)
   subscribe<T>(cell: Cell<T>, callback: (value: T) => void): () => void;
@@ -421,6 +480,12 @@ export interface TestHarness {
   // Access underlying runtime (escape hatch)
   runtime: Runtime;
 }
+
+// Note: To trigger handlers, use the native .send() API on handler streams:
+//   pattern.result.increment.send({});
+//   await harness.idle();
+//
+// Handlers must be returned from the pattern body to be accessible.
 
 // Factory function
 export function createTestHarness(options?: {
