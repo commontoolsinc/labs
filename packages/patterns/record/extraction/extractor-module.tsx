@@ -68,9 +68,10 @@ interface ExtractorModuleInput {
   // Notes cleanup state
   cleanupNotesEnabled: Cell<Default<boolean, true>>;
   // Snapshot of Notes content at extraction start (for cleanup comparison)
-  // Map of subCharm index -> original content for ALL selected Notes modules
+  // Map of subCharm index (as string) -> original content for ALL selected Notes modules
+  // NOTE: Uses string keys to avoid Cell coercing numeric keys to array indices
   notesContentSnapshot: Cell<
-    Default<Record<number, string>, Record<number, never>>
+    Default<Record<string, string>, Record<string, never>>
   >;
   // Cleanup application status tracking
   cleanupApplyStatus: Cell<
@@ -87,7 +88,7 @@ interface ExtractorModuleOutput {
   extractPhase?: Default<"select" | "extracting" | "preview", "select">;
   extractionPrompt?: Default<string, "">;
   cleanupNotesEnabled?: Default<boolean, true>;
-  notesContentSnapshot?: Default<Record<number, string>, Record<number, never>>;
+  notesContentSnapshot?: Default<Record<string, string>, Record<string, never>>;
   cleanupApplyStatus?: Default<
     "pending" | "success" | "failed" | "skipped",
     "pending"
@@ -669,7 +670,7 @@ const startExtraction = handler<
     // For notes/text-import, use Cell.key() navigation to ensure we read live content
     const parts: string[] = [];
     // Map to store ALL selected Notes modules' content (index -> content)
-    const notesSnapshots: Record<number, string> = {};
+    const notesSnapshots: Record<string, string> = {};
 
     for (const source of sources) {
       // Skip if explicitly deselected
@@ -692,8 +693,8 @@ const startExtraction = handler<
 
         if (content.trim()) {
           parts.push(`--- ${source.label} ---\n${content}`);
-          // Store snapshot for this Notes module (keyed by index)
-          notesSnapshots[source.index] = content;
+          // Store snapshot for this Notes module (keyed by index as string to avoid Cell array coercion)
+          notesSnapshots[String(source.index)] = content;
         }
       } else if (source.type === "text-import") {
         // Same pattern for text-import
@@ -750,8 +751,8 @@ const applySelected = handler<
     >;
     cleanupEnabledValue: boolean;
     cleanedNotesValue: string;
-    // Map of Notes module index -> original content (for identifying which Notes to clean)
-    notesSnapshotMapValue: Record<number, string>;
+    // Dereferenced value from notesContentSnapshot Cell (map of Notes module index as string -> original content)
+    notesSnapshotMapValue: Record<string, string>;
     cleanupApplyStatusCell: Cell<
       Default<"pending" | "success" | "failed" | "skipped", "pending">
     >;
@@ -776,7 +777,6 @@ const applySelected = handler<
   ) => {
     // Prevent double-click race condition using Cell state
     if (applyInProgressCell.get()) {
-      console.debug("[Extract] Apply already in progress, ignoring");
       return;
     }
     applyInProgressCell.set(true);
@@ -1389,9 +1389,9 @@ export const ExtractorModule = recipe<
       const rawEnabled = cleanupNotesEnabled.get();
       const enabled = typeof rawEnabled === "boolean" ? rawEnabled : true;
       const rawSnapshot = notesContentSnapshot.get();
-      const snapshotMap: Record<number, string> =
-        (typeof rawSnapshot === "object" && rawSnapshot !== null)
-          ? rawSnapshot as Record<number, string>
+      const snapshotMap: Record<string, string> =
+        (typeof rawSnapshot === "object" && rawSnapshot !== null && !Array.isArray(rawSnapshot))
+          ? rawSnapshot as Record<string, string>
           : {};
 
       // Combine all Notes snapshots for fallback
@@ -1420,9 +1420,9 @@ export const ExtractorModule = recipe<
     // Check if there are meaningful changes to Notes
     const hasNotesChanges = computed(() => {
       const rawSnapshot = notesContentSnapshot.get();
-      const snapshotMap: Record<number, string> =
-        (typeof rawSnapshot === "object" && rawSnapshot !== null)
-          ? rawSnapshot as Record<number, string>
+      const snapshotMap: Record<string, string> =
+        (typeof rawSnapshot === "object" && rawSnapshot !== null && !Array.isArray(rawSnapshot))
+          ? rawSnapshot as Record<string, string>
           : {};
 
       const combinedSnapshot = Object.values(snapshotMap).join("\n\n---\n\n");
@@ -1515,9 +1515,9 @@ export const ExtractorModule = recipe<
     // Preview phase computed values
     const hasNotesSnapshot = computed(() => {
       const rawSnapshot = notesContentSnapshot.get();
-      const snapshotMap: Record<number, string> =
-        (typeof rawSnapshot === "object" && rawSnapshot !== null)
-          ? rawSnapshot as Record<number, string>
+      const snapshotMap: Record<string, string> =
+        (typeof rawSnapshot === "object" && rawSnapshot !== null && !Array.isArray(rawSnapshot))
+          ? rawSnapshot as Record<string, string>
           : {};
       return Object.keys(snapshotMap).length > 0;
     });
@@ -1530,6 +1530,15 @@ export const ExtractorModule = recipe<
       const rawEnabled = cleanupNotesEnabled.get();
       const enabled = typeof rawEnabled === "boolean" ? rawEnabled : true;
       return !enabled;
+    });
+    // Computed to dereference notesContentSnapshot Cell for handler params
+    // NOTE: Must use Record<string, string> not Record<number, string> - numeric keys
+    // cause Cell runtime to coerce the object to an array, losing all data
+    const notesSnapshotMapValue = computed(() => {
+      const rawSnapshot = notesContentSnapshot.get();
+      return (typeof rawSnapshot === "object" && rawSnapshot !== null && !Array.isArray(rawSnapshot))
+        ? rawSnapshot as Record<string, string>
+        : {};
     });
     const hasTrashableSources = computed(() => {
       const subCharms = parentSubCharms.get() || [];
@@ -2253,19 +2262,11 @@ export const ExtractorModule = recipe<
                         ? rawEnabled
                         : true;
                     })(),
-                    cleanedNotesValue: (() => {
-                      // Dereference the computed value
-                      const value = cleanedNotesContent;
-                      return typeof value === "string" ? value : "";
-                    })(),
-                    notesSnapshotMapValue: (() => {
-                      // Get the snapshot map for identifying which Notes modules to clean
-                      const rawSnapshot = notesContentSnapshot.get();
-                      return (typeof rawSnapshot === "object" &&
-                          rawSnapshot !== null)
-                        ? rawSnapshot as Record<number, string>
-                        : {};
-                    })(),
+                    // Pass computed directly - auto-dereferences when accessed in handler
+                    // (IIFEs with String() dont properly dereference reactive proxies)
+                    cleanedNotesValue: cleanedNotesContent,
+                    // Pass computed that dereferences the Cell (Cells don't dereference in handlers)
+                    notesSnapshotMapValue: notesSnapshotMapValue,
                     cleanupApplyStatusCell: cleanupApplyStatus,
                     applyInProgressCell: applyInProgress,
                   })}
