@@ -80,10 +80,55 @@ Different reactive types have different access patterns:
 
 | Type | How to access | Example |
 |------|---------------|---------|
-| `Writable<>` (pattern inputs) | Use `.get()` to read, `.set()` to write | `expenses.get().filter(...)` |
+| Pattern inputs (no `Writable<>`) | Access directly | `items.filter(...)` |
+| Pattern inputs with `Writable<>` | Use `.get()` to read | `items.get().filter(...)` |
+| `Writable<>` with `.map()` | Exception: `.map()` works directly | `items.map(item => ...)` |
 | `computed()` results | Access directly - no `.get()` | `filteredItems.length` |
 | `lift()` results | Access directly - no `.get()` | `formattedDate` |
 | Values inside `.map()` | Properties are reactive, use `lift()` for object indexing | See below |
+
+### Pattern Input Access Patterns
+
+Pattern inputs follow the same rules—`Writable<>` needs `.get()`, everything else is accessed directly:
+
+```typescript
+interface Input {
+  // Read-only inputs - access directly
+  title: string;
+  items: Item[];
+
+  // Writable inputs - use .get() to read
+  count: Writable<number>;
+  todos: Writable<Todo[]>;
+}
+
+export default pattern<Input>(({ title, items, count, todos }) => {
+  // Read-only inputs: access directly (like computed/lift results)
+  const upperTitle = computed(() => title.toUpperCase());
+  const activeItems = computed(() => items.filter(item => !item.done));
+
+  // Writable inputs: use .get() to read the value
+  const doubled = computed(() => count.get() * 2);
+  const completedCount = computed(() => todos.get().filter(t => t.done).length);
+
+  // Exception: .map() works directly on Writable<T[]>
+  // The callback receives items that follow the same rules as pattern inputs
+  const todoTitles = todos.map(todo => todo.title);  // No .get() needed
+
+  return {
+    [UI]: (
+      <div>
+        <h1>{title}</h1>
+        <p>Count: {count}</p>
+        {items.map(i => <div>{i.name}</div>)}
+        {todos.map(todo => <div>{todo.title}</div>)}  {/* .map() on Writable works */}
+      </div>
+    ),
+  };
+});
+```
+
+**The rule:** If you declared it with `Writable<T>`, use `.get()` to read—except `.map()` which works directly. Inside `.map()` callbacks, items follow the same access rules as pattern inputs.
 
 ### Using Reactive Values to Index Objects in `.map()`
 
