@@ -196,8 +196,40 @@ export function generateRandomShips(): Ship[] {
     }
 
     if (!placed) {
-      // Fallback: use a deterministic placement
+      // Fallback: use deterministic placement by scanning the board
       console.warn(`Failed to place ${type} randomly, using fallback`);
+      const size = SHIP_SIZES[type];
+
+      // Try horizontal placement first, then vertical
+      for (const orientation of ["horizontal", "vertical"] as const) {
+        if (placed) break;
+        const maxRow = orientation === "vertical"
+          ? BOARD_SIZE - size
+          : BOARD_SIZE - 1;
+        const maxCol = orientation === "horizontal"
+          ? BOARD_SIZE - size
+          : BOARD_SIZE - 1;
+
+        for (let row = 0; row <= maxRow && !placed; row++) {
+          for (let col = 0; col <= maxCol && !placed; col++) {
+            const ship: Ship = { type, start: { row, col }, orientation };
+            if (canPlaceShip(ship, occupiedPositions)) {
+              ships.push(ship);
+              const coords = getShipCoordinates(ship);
+              for (const c of coords) {
+                occupiedPositions.add(`${c.row},${c.col}`);
+              }
+              placed = true;
+            }
+          }
+        }
+      }
+
+      if (!placed) {
+        console.error(
+          `Could not place ${type} even with fallback - board may be too crowded`,
+        );
+      }
     }
   }
 
