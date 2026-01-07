@@ -219,7 +219,7 @@ export default pattern<Input, Output>(
     const mapValue = computed(() => {
       const currentStops = stops.get();
       const currentAreas = areasOfInterest.get();
-      const currentShowRoute = showRoute;
+      const currentShowRoute = showRoute.get();
 
       // Markers from stops
       const markers = currentStops.map((stop) => ({
