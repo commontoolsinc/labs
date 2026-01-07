@@ -303,6 +303,48 @@ return {
 | `items: Cell<Item[]>` | Read + write (will mutate) |
 | `items: Default<Item[], []>` | Optional with default |
 
+### Handler Type Signatures
+
+```typescript
+const myHandler = handler<EventType, StateType>((event, state) => { ... });
+//                        ^^^^^^^^^  ^^^^^^^^^
+//                        1st param  2nd param (passed at invocation)
+```
+
+**The state type defines what you pass when invoking:**
+
+```typescript
+// Handler with mixed primitives and Cells
+const fireShot = handler<
+  unknown,  // event type (often unused for UI handlers)
+  { row: number; col: number; game: Cell<GameState> }
+>((_, { row, col, game }) => {
+  const state = game.get();
+  // row and col are plain numbers, game is a Cell
+});
+
+// Invocation - pass values matching state type
+<div onClick={fireShot({ row: 3, col: 5, game })} />
+```
+
+**Type annotations are required** - without them, handler parameters become `any`.
+
+### action() - Simplified Handlers
+
+For inline handlers where all data is in scope at definition time:
+
+```typescript
+// action - data bound at definition (closes over count)
+action(() => count.set(count.get() + 1))
+
+// handler - data bound at invocation (row, col passed per-call)
+handler<unknown, { row: number; col: number; game: Cell<Game> }>(...)
+```
+
+Use `handler()` when you need to pass data at invocation time (e.g., loop variables). Use `action()` for simple inline mutations where everything needed is already in scope.
+
+<!-- TODO: Expand action() documentation -->
+
 ---
 
 ## Common Mistakes
