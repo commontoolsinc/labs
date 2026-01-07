@@ -37,6 +37,27 @@ Later, I wish for "#note" and discover the first matching item in the list.
 const wishResult = wish<{ content: string }>({ query: "#note" });
 ```
 
+# Call wish() at Pattern Level
+
+Always call `wish()` at the pattern body level, not inside `computed()` or other reactive constructs:
+
+```tsx
+export default pattern<Input>(({ enableSearch }) => {
+  // ✅ Call wish() once at pattern level
+  const searchCharm = wish<SearchOutput>({ query: "#search" });
+
+  // Use computed() to conditionally process the result
+  const searchData = computed(() => {
+    if (!enableSearch) return null;
+    return searchCharm?.result?.data;
+  });
+
+  return { searchData, [UI]: <div>{searchData}</div> };
+});
+```
+
+This ensures the wish is established once. Conditional logic belongs in how you *use* the result, not in whether you *create* the wish.
+
 # Intended Usage
 
 Keep a handle to important information in a charm, e.g. google auth, user preferences/biography, cross-cutting data (calendar).
