@@ -10,6 +10,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 |---------------|-------|-----|
 | "Property 'set' does not exist" | Missing `Writable<>` in signature | Add `Writable<T>` for write access ([TYPES](TYPES_AND_SCHEMAS.md)) |
 | "X.get is not a function" | Calling `.get()` on computed/lift result | Access directly without `.get()` - only `Writable<>` has `.get()` ([see below](#get-is-not-a-function)) |
+| "X.filter is not a function" | Value isn't an array (yet) | Check `Default<>`, don't assume `.get()` is the fix ([see below](#filtermapfind-is-not-a-function)) |
 | "Tried to access a reactive reference outside a reactive context" | Using reactive value to index plain object in `.map()` | Use `lift()` for object indexing ([see below](#reactive-reference-outside-context)) |
 | "Type 'string' is not assignable to type 'CSSProperties'" | String style on HTML element | Use object syntax `style={{ ... }}` ([COMPONENTS](COMPONENTS.md)) |
 | Type mismatch binding item to `$checked` | Binding whole item, not property | Bind `item.done`, not `item` |
@@ -54,6 +55,40 @@ const formattedValue = getFormattedDate(date);  // Access directly
 | `Writable<>` (pattern inputs with write access) | Yes |
 | `computed()` results | No - access directly |
 | `lift()` results | No - access directly |
+
+### filter/map/find is Not a Function
+
+**Error:** `X.filter is not a function` (or `.map`, `.find`, `.reduce`, etc.)
+
+**Tempting but wrong diagnosis:** "I need to unwrap with `.get()`"
+
+**Actual cause:** The value isn't an array (yet). This usually means:
+1. The array hasn't been initialized (missing `Default<T[], []>`)
+2. You're accessing a nested property that doesn't exist
+3. A computed is returning the wrong type
+
+```typescript
+// ✅ CORRECT - Ensure array has a default value
+interface Input {
+  items: Default<Item[], []>;  // Defaults to empty array
+}
+
+// ✅ CORRECT - Inside computed(), just use the value directly
+const activeItems = computed(() => items.filter(item => !item.done));
+
+// ✅ CORRECT - Writable<T[]> requires .get() to access the array
+const handleClear = handler<never, { items: Writable<Item[]> }>(
+  (_, { items }) => {
+    const done = items.get().filter(item => item.done);  // .get() because items is Writable<>
+    // ...
+  }
+);
+```
+
+**Diagnostic questions:**
+1. Is the source a `Writable<>`? → Use `.get()` to read the value
+2. Is it a `computed()` or `lift()` result? → Access directly, no `.get()`
+3. Is the value possibly undefined? → Add `Default<T[], []>` to the interface
 
 ### Reactive Reference Outside Context
 
