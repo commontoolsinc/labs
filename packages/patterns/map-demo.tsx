@@ -49,6 +49,11 @@ interface Input {
   stops: Cell<Default<TripStop[], []>>;
   areasOfInterest: Cell<Default<AreaOfInterest[], []>>;
   showRoute: Default<boolean, true>;
+  center: Cell<Default<LatLng | null, null>>;
+  zoom: Cell<Default<number, 9>>;
+  selectedStopIndex: Cell<Default<number | null, null>>;
+  fitBoundsTrigger: Cell<Default<number, 0>>;
+  initialized: Cell<Default<boolean, false>>;
 }
 
 interface Output {
@@ -58,9 +63,12 @@ interface Output {
   showRoute: boolean;
   center: LatLng;
   zoom: number;
+  selectedStopIndex: number | null;
+  fitBoundsTrigger: number;
+  initialized: boolean;
 }
 
-// Default Bay Area locations for the demo
+// Runtime values for the defaults (for use in handlers like Reset)
 const DEFAULT_STOPS: TripStop[] = [
   {
     position: { lat: 37.7749, lng: -122.4194 },
@@ -77,7 +85,7 @@ const DEFAULT_STOPS: TripStop[] = [
     draggable: true,
   },
   {
-    position: { lat: 37.5485, lng: -122.0590 },
+    position: { lat: 37.5485, lng: -122.059 },
     title: "Fremont",
     description: "Gateway to Silicon Valley",
     icon: "computer",
@@ -101,7 +109,7 @@ const DEFAULT_AREAS: AreaOfInterest[] = [
     color: "#ef4444",
   },
   {
-    center: { lat: 37.4419, lng: -122.1430 },
+    center: { lat: 37.4419, lng: -122.143 },
     radius: 5000,
     title: "Stanford Area",
     description: "University and research hub",
@@ -151,12 +159,13 @@ const removeStopHandler = handler<
 // Handler for adding an area of interest
 const addAreaHandler = handler<
   void,
-  { areas: Cell<AreaOfInterest[]>; center: LatLng }
+  { areas: Cell<AreaOfInterest[]>; center: Cell<LatLng | null> }
 >((_event, { areas, center }) => {
   const colors = ["#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#8b5cf6"];
   const colorIndex = areas.get().length % colors.length;
+  const currentCenter = center.get() ?? { lat: 37.6, lng: -122.2 };
   areas.push({
-    center,
+    center: currentCenter,
     radius: 2000,
     title: `Area ${areas.get().length + 1}`,
     description: "New area of interest",
@@ -164,25 +173,42 @@ const addAreaHandler = handler<
   });
 });
 
+// Handler to initialize demo data
+const initHandler = handler<
+  void,
+  {
+    stops: Cell<TripStop[]>;
+    areasOfInterest: Cell<AreaOfInterest[]>;
+    center: Cell<LatLng | null>;
+    initialized: Cell<boolean>;
+  }
+>((_event, { stops, areasOfInterest, center, initialized }) => {
+  if (!initialized.get()) {
+    stops.set(DEFAULT_STOPS);
+    areasOfInterest.set(DEFAULT_AREAS);
+    center.set({ lat: 37.6, lng: -122.2 });
+    initialized.set(true);
+  }
+});
+
 export default pattern<Input, Output>(
-  ({ tripName, stops, areasOfInterest, showRoute }) => {
-    // Initialize with default data if empty
-    if (stops.get().length === 0) {
-      stops.set(DEFAULT_STOPS);
-    }
-    if (areasOfInterest.get().length === 0) {
-      areasOfInterest.set(DEFAULT_AREAS);
-    }
-
-    // Local UI state
-    const center = Cell.of<LatLng>({ lat: 37.6, lng: -122.2 });
-    const zoom = Cell.of<number>(9);
-    const selectedStopIndex = Cell.of<number | null>(null);
-    const fitBoundsTrigger = Cell.of<number>(0);
-
+  ({
+    tripName,
+    stops,
+    areasOfInterest,
+    showRoute,
+    center,
+    zoom,
+    selectedStopIndex,
+    fitBoundsTrigger,
+    initialized,
+  }) => {
     // Computed values
     const stopCount = computed(() => stops.get().length);
     const areaCount = computed(() => areasOfInterest.get().length);
+
+    // Bound handler for initialization
+    const initializeDemo = initHandler({ stops, areasOfInterest, center, initialized });
 
     // Build map value from stops and areas
     const mapValue = computed(() => {
@@ -248,6 +274,23 @@ export default pattern<Input, Output>(
 
           <ct-vscroll flex showScrollbar fadeEdges>
             <ct-vstack gap="3" style="padding: 1rem;">
+              {/* Initialization prompt for empty state */}
+              {ifElse(
+                computed(() => !initialized.get() && stops.get().length === 0),
+                <ct-card style="background: var(--ct-color-yellow-50); border: 1px solid var(--ct-color-yellow-300);">
+                  <ct-vstack gap="2" align="center">
+                    <ct-heading level={5}>Welcome to Trip Planner!</ct-heading>
+                    <p style="text-align: center; color: var(--ct-color-gray-600); margin: 0;">
+                      Get started with demo data or click on the map to add your first stop.
+                    </p>
+                    <ct-button variant="primary" onClick={initializeDemo}>
+                      Load Demo Data
+                    </ct-button>
+                  </ct-vstack>
+                </ct-card>,
+                null
+              )}
+
               {/* Map container */}
               <ct-card style="padding: 0; overflow: hidden;">
                 <ct-map
@@ -295,8 +338,8 @@ export default pattern<Input, Output>(
                   </ct-hstack>
                   <ct-hstack gap="3">
                     <span style="font-size: 0.875rem;">
-                      Center: {computed(() => formatCoord(center.get().lat))},{" "}
-                      {computed(() => formatCoord(center.get().lng))}
+                      Center: {computed(() => formatCoord((center.get() ?? { lat: 37.6, lng: -122.2 }).lat))},{" "}
+                      {computed(() => formatCoord((center.get() ?? { lat: 37.6, lng: -122.2 }).lng))}
                     </span>
                     <span style="font-size: 0.875rem;">
                       Zoom: {computed(() => zoom.get().toFixed(1))}
@@ -527,8 +570,11 @@ export default pattern<Input, Output>(
       stops,
       areasOfInterest,
       showRoute,
-      center: computed(() => center.get()),
+      center: computed(() => center.get() ?? { lat: 37.6, lng: -122.2 }),
       zoom: computed(() => zoom.get()),
+      selectedStopIndex: computed(() => selectedStopIndex.get()),
+      fitBoundsTrigger: computed(() => fitBoundsTrigger.get()),
+      initialized: computed(() => initialized.get()),
     };
   }
 );

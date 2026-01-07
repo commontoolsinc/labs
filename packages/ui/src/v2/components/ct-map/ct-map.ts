@@ -588,7 +588,7 @@ export class CTMap extends BaseElement {
       }
 
       // Add to layer and track
-      leafletMarker.addTo(this._markerLayer);
+      leafletMarker.addTo(this._markerLayer!);
       this._leafletMarkers.push(leafletMarker);
     });
   }
@@ -627,7 +627,7 @@ export class CTMap extends BaseElement {
       });
 
       // Add to layer and track
-      leafletCircle.addTo(this._circleLayer);
+      leafletCircle.addTo(this._circleLayer!);
       this._leafletCircles.push(leafletCircle);
     });
   }

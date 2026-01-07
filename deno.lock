@@ -1952,7 +1952,9 @@
           "npm:@codemirror/theme-one-dark@^6.1.2",
           "npm:@codemirror/view@^6.26.0",
           "npm:@lit/context@^1.1.2",
+          "npm:@types/leaflet@^1.9.21",
           "npm:codemirror@^6.0.1",
+          "npm:leaflet@^1.9.4",
           "npm:marked@4"
         ]
       },
