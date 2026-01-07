@@ -987,10 +987,23 @@ export const ExtractorModule = recipe<
       return buildFullSchema() as JSONSchema;
     });
 
-    // Scan for extractable sources
+    // Scan for extractable sources with selection state included
+    // Including selection state ON the source objects is more idiomatic than
+    // using a separate lookup table, and ensures proper reactive tracking
     const extractableSources = computed((): ExtractableSource[] => {
       const subCharms = parentSubCharms.get() || [];
-      return scanExtractableSources(subCharms);
+      const selectionsMap = sourceSelections.get() || {};
+      const sources = scanExtractableSources(subCharms);
+
+      // Add selection state to each source
+      // Non-empty sources are selected by default (undefined !== false is true)
+      // Empty sources are never selected
+      return sources.map((source) => ({
+        ...source,
+        selected: source.isEmpty
+          ? false
+          : selectionsMap[source.index] !== false,
+      }));
     });
 
     // Check if any sources are selected
@@ -1283,24 +1296,9 @@ ${extractedSummary.join("\n")}`;
     const hasMultipleChanges = computed(() => Number(totalChangesCount) !== 1);
     const hasTrashItems = computed(() => Number(trashCount) > 0);
 
-    // Pre-computed selection state maps to avoid inline computed() in .map()
-    // Creating computed() inside .map() creates new nodes on each render, causing scheduler thrashing
-    const sourceCheckStates = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
-      const selectionsMap = sourceSelections.get() || {};
-      const result: Record<number, boolean> = {};
-      for (const source of sources) {
-        // Empty sources are never selected
-        if (source.isEmpty) {
-          result[source.index] = false;
-        } else {
-          result[source.index] = selectionsMap[source.index] !== false;
-        }
-      }
-      return result;
-    });
-
+    // Pre-computed trash selection state map
+    // Note: sourceCheckStates was removed - selection state is now ON the source objects
+    // in extractableSources computed (more idiomatic pattern)
     const trashCheckStates = computed(() => {
       const selectionsMap = trashSelections.get() || {};
       const result: Record<number, boolean> = {};
@@ -1454,7 +1452,7 @@ ${extractedSummary.join("\n")}`;
                       >
                         <input
                           type="checkbox"
-                          checked={sourceCheckStates[source.index] === true}
+                          checked={source.selected === true}
                           onChange={toggleSourceHandler({
                             index: source.index,
                             sourceSelectionsCell: sourceSelections,
