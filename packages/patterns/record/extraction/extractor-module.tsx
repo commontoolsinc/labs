@@ -106,14 +106,14 @@ const EXTRACTION_SYSTEM_PROMPT =
 - Location: "locationName", "locationAddress", "coordinates"
 - Link: "url", "linkTitle", "description"
 - Dietary: "restrictions" as array of {name, level} objects where:
-  - name: the restriction (e.g., "nightshades", "peanuts", "vegetarian", "gluten")
-  - level: severity - "absolute" (allergy/no exceptions), "strict" (strong avoidance), "prefer" (try to avoid), "flexible" (if convenient)
+  - name: the restriction item (e.g., "nightshades", "peanuts", "gluten", "vegetarian")
+  - level: severity level based on context:
+    - "absolute": Medical necessity, allergies, anaphylaxis risk, religious requirements - no exceptions ever
+    - "strict": Strong avoidance, ethical commitment (e.g., vegan lifestyle) - very important but not medical
+    - "prefer": General preference or mild intolerance - would rather avoid but can be flexible
+    - "flexible": Slight preference - only if convenient
   - Examples: [{"name": "peanuts", "level": "absolute"}, {"name": "dairy", "level": "prefer"}]
-  - Use "absolute" for ANY allergy (the word "allergic" or "allergy" always means absolute - it's a medical safety issue)
-  - Use "absolute" for anaphylaxis, or intensity words like "extremely", "severely", "deadly", "deathly"
-  - Use "strict" for strong avoidance without allergy mentioned (e.g., "very strict vegetarian", "strongly avoid gluten")
-  - Use "prefer" for general avoidance or mild intolerances
-  - Use "flexible" for slight preferences
+  - Infer severity from context clues (allergies→absolute, preferences→prefer, etc.)
 
 === What TO Extract (structured data only) ===
 - Email addresses, phone numbers, physical addresses
@@ -1148,8 +1148,9 @@ export const ExtractorModule = recipe<
     });
 
 
-    // Build OCR calls for all selected photos using map pattern
+    // Build OCR calls for all selected photos using .map() on computed Cell
     // Each photo gets its own generateText call (framework caches per-item)
+    // .map() on OpaqueRef works reactively - returns another OpaqueRef<Array>
     const ocrCalls = photoSources.map((photo: ExtractableSource) => {
       // Build prompt for this photo
       const prompt = computed(() => {
@@ -1184,6 +1185,7 @@ export const ExtractorModule = recipe<
 
     // Check if any OCR is pending
     const ocrPending = computed(() => {
+      // ocrCalls auto-dereferences inside computed()
       const calls = ocrCalls;
       if (!calls || calls.length === 0) return false;
       return calls.some(
@@ -1194,6 +1196,7 @@ export const ExtractorModule = recipe<
 
     // Get OCR results as a map (index -> text)
     const ocrResults = computed((): Record<number, string> => {
+      // ocrCalls auto-dereferences inside computed()
       const calls = ocrCalls;
       const results: Record<number, string> = {};
       if (!calls || calls.length === 0) return results;
