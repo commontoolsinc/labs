@@ -1086,65 +1086,74 @@ export const ExtractorModule = recipe<
       return buildFullSchema() as JSONSchema;
     });
 
-    // ===== PERFORMANCE OPTIMIZATION =====
-    // Previously, scanExtractableSources() was called in 9+ separate computed() blocks,
-    // causing O(n*m) recomputations where n=computed blocks, m=subCharms.
-    // Now we compute the expensive scan ONCE and derive everything else from it.
+    // ===== TRANSFORMER BUG WORKAROUND =====
+    // The TypeScript transformer has a bug where .map()/.filter()/.some() called on
+    // a computed variable aren't properly transformed to their reactive equivalents.
+    // See: packages/ts-transformers/test/fixtures/pending/computed-var-then-map.issue.md
     //
-    // Key insight: scanExtractableSources() accesses Cell values via .get() inside,
-    // which creates reactive dependencies. Calling it 9 times means 9x the dependencies.
-    
-    // Step 1: Compute raw sources ONCE - this is the expensive operation that
-    // iterates through subCharms and accesses their Cell values
-    const rawSources = computed((): ExtractableSource[] => {
-      const subCharms = parentSubCharms.get() || [];
-      return scanExtractableSources(subCharms);
-    });
+    // WORKAROUND: Each computed block that needs source data calls scanExtractableSources()
+    // directly and uses for-loops instead of array methods. This is less elegant but
+    // avoids the "mapWithPattern is not a function" runtime errors.
 
-    // Step 2: All source-related values derive from rawSources (cheap array ops)
-    // This bundles all source-related state to minimize reactive graph size
+    // Extractable sources with selection state
     const extractableSources = computed((): ExtractableSource[] => {
-      const sources = rawSources;
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
       const selectionsMap = sourceSelections.get() || {};
-      // Add selection state to each source
+      // Add selection state to each source using for-loop (avoids transformer bug)
       // Non-empty sources are selected by default (undefined !== false is true)
       // Empty sources are never selected
-      return sources.map((source: ExtractableSource) => ({
-        ...source,
-        selected: source.isEmpty
-          ? false
-          : selectionsMap[source.index] !== false,
-      }));
+      const result: ExtractableSource[] = [];
+      for (const source of sources) {
+        result.push({
+          ...source,
+          selected: source.isEmpty
+            ? false
+            : selectionsMap[source.index] !== false,
+        });
+      }
+      return result;
     });
 
-    // Derive hasSelectedSources from rawSources (no re-scan)
+    // Check if any sources are selected
     const hasSelectedSources = computed(() => {
-      const sources = rawSources;
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
       const selectionsMap = sourceSelections.get() || {};
       if (sources.length === 0) return false;
-      return sources.some((s: ExtractableSource) =>
-        selectionsMap[s.index] !== false
-      );
+      // Use for-loop to check if any source is selected (avoids transformer bug with .some())
+      for (const s of sources) {
+        if (selectionsMap[s.index] !== false) return true;
+      }
+      return false;
     });
 
-    // Derive selectedSourceCount from rawSources (no re-scan)
+    // Count of selected sources
     const selectedSourceCount = computed(() => {
-      const sources = rawSources;
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
       const selectionsMap = sourceSelections.get() || {};
-      return sources.filter((s: ExtractableSource) =>
-        selectionsMap[s.index] !== false
-      ).length;
+      // Use for-loop to count (avoids transformer bug with .filter())
+      let count = 0;
+      for (const s of sources) {
+        if (selectionsMap[s.index] !== false) count++;
+      }
+      return count;
     });
 
-    // Derive photoSources from rawSources (no re-scan)
+    // Selected photo sources that need OCR
     const photoSources = computed(() => {
-      const sources = rawSources;
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
       const selectionsMap = sourceSelections.get() || {};
-      return sources.filter(
-        (s: ExtractableSource) =>
-          s.type === "photo" && s.requiresOCR &&
-          selectionsMap[s.index] !== false,
-      );
+      // Use for-loop to filter (avoids transformer bug with .filter())
+      const result: ExtractableSource[] = [];
+      for (const s of sources) {
+        if (s.type === "photo" && s.requiresOCR && selectionsMap[s.index] !== false) {
+          result.push(s);
+        }
+      }
+      return result;
     });
 
 
@@ -1373,13 +1382,16 @@ ${extractedSummary.join("\n")}`;
     });
 
     // Count sources selected for trash (excluding Notes - Notes is never trashed)
-    // Derives from rawSources (no re-scan)
     const trashCount = computed(() => {
-      const sources = rawSources;
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
       const trashMap = trashSelections.get() || {};
-      return sources.filter((s: ExtractableSource) =>
-        s.type !== "notes" && trashMap[s.index] === true
-      ).length;
+      // Use for-loop to count (avoids transformer bug with .filter())
+      let count = 0;
+      for (const s of sources) {
+        if (s.type !== "notes" && trashMap[s.index] === true) count++;
+      }
+      return count;
     });
 
     // Phase-related computed values (defined at statement level for stable node identity)
@@ -1389,14 +1401,20 @@ ${extractedSummary.join("\n")}`;
     const isErrorPhase = computed(() => currentPhase === "error");
     const isNoResultsPhase = computed(() => currentPhase === "no-results");
     // True when there are no source modules at all (Notes, Photo, Text Import)
-    // Derives from rawSources (no re-scan)
-    const hasNoSourceModules = computed(() => rawSources.length === 0);
+    const hasNoSourceModules = computed(() => {
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
+      return sources.length === 0;
+    });
     // True when all sources are empty (modules exist but have no content)
-    // Derives from rawSources (no re-scan)
     const hasNoUsableSources = computed(() => {
-      const sources = rawSources;
-      // Only count non-empty sources - empty ones are shown but not usable
-      return sources.filter((s: ExtractableSource) => !s.isEmpty).length === 0;
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
+      // Use for-loop to check (avoids transformer bug with .filter())
+      for (const s of sources) {
+        if (!s.isEmpty) return false;
+      }
+      return true;
     });
     // Dereference computed values properly to avoid comparing Cell objects to primitives
     const isSingleSource = computed(() => Number(selectedSourceCount) === 1);
@@ -1416,11 +1434,11 @@ ${extractedSummary.join("\n")}`;
     const hasTrashItems = computed(() => Number(trashCount) > 0);
 
     // Pre-computed trash selection state map
-    // Derives from rawSources (no re-scan)
     const trashCheckStates = computed(() => {
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
       const selectionsMap = trashSelections.get() || {};
       const result: Record<number, boolean> = {};
-      const sources = rawSources;
       for (const source of sources) {
         if (source.type !== "notes") {
           result[source.index] = selectionsMap[source.index] === true;
@@ -1445,10 +1463,15 @@ ${extractedSummary.join("\n")}`;
       const enabled = typeof rawEnabled === "boolean" ? rawEnabled : true;
       return !enabled;
     });
-    // Derives from rawSources (no re-scan)
-    const hasTrashableSources = computed(() =>
-      rawSources.filter((s: ExtractableSource) => s.type !== "notes").length > 0
-    );
+    const hasTrashableSources = computed(() => {
+      const subCharms = parentSubCharms.get() || [];
+      const sources = scanExtractableSources(subCharms);
+      // Use for-loop to check (avoids transformer bug with .filter())
+      for (const s of sources) {
+        if (s.type !== "notes") return true;
+      }
+      return false;
+    });
     const cleanupFailed = computed(() => {
       const status = cleanupApplyStatus.get();
       return status === "failed";
