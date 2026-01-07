@@ -351,7 +351,9 @@ const BattleshipLobby = pattern<LobbyInput, LobbyOutput>(
                     >
                       Rejoin Game
                     </button>
-                  ) : null}
+                  ) : (
+                    <></>
+                  )}
                 </div>
               ) : (
                 <>
@@ -470,7 +472,9 @@ const BattleshipLobby = pattern<LobbyInput, LobbyOutput>(
                     >
                       Rejoin Game
                     </button>
-                  ) : null}
+                  ) : (
+                    <></>
+                  )}
                 </div>
               ) : (
                 <>
