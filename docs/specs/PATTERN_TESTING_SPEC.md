@@ -722,17 +722,57 @@ it("only one item highlighted at a time", async () => {
 
 ---
 
-## Open Questions
+## Design Decisions
 
-1. **Schema validation testing** - Should the harness automatically validate cell values against schemas? Or is that opt-in?
+### Schema validation testing
+**Opt-in.** The harness will not automatically validate cell values against schemas by default. Pattern authors can opt-in via a harness option if needed:
+```typescript
+const harness = await createTestHarness({ validateSchemas: true });
+```
 
-2. **Snapshot testing** - Should we support snapshot comparisons for computed output structures?
+### Snapshot testing
+**Deferred.** Not included in MVP. Snapshot testing can create brittle tests and computed values are usually better tested with explicit assertions. Can be added in Phase 3+ based on user demand.
 
-3. **Test isolation** - Should each `it()` block get a fresh harness, or can tests share state within a `describe()` block?
+### Test isolation
+**Fresh harness per `it()` block via `beforeEach`/`afterEach`.** Tests can share the harness *variable declaration* within a `describe()` block, but each test gets a fresh runtime:
+```typescript
+describe("counter", () => {
+  let harness: TestHarness;
 
-4. **Handler typing** - The `sendEvent()` API needs to handle both bound and unbound handlers. What's the cleanest ergonomics?
+  beforeEach(async () => {
+    harness = await createTestHarness(); // Fresh per test
+  });
 
-5. **Multi-file patterns** - How should tests for `schemas.tsx` (shared types) work? They don't have a pattern to instantiate.
+  afterEach(async () => {
+    await harness.dispose(); // Clean up
+  });
+
+  it("test 1", ...); // Gets fresh harness
+  it("test 2", ...); // Gets fresh harness
+});
+```
+
+### Handler testing
+**Use native `.send()` API.** Handlers must be returned from the pattern body to be testable. See Level 3 examples for details.
+
+### Multi-file patterns (schemas.tsx)
+**The harness is for patterns, not utilities.** Files like `schemas.tsx` typically contain:
+
+| Content | How to Test |
+|---------|-------------|
+| Type definitions (interfaces) | No tests needed - TypeScript validates |
+| Utility functions | Standard unit tests (no harness) |
+| Shared constants | Standard unit tests (no harness) |
+
+Example for utility functions in schemas:
+```typescript
+// schemas.test.ts - no harness needed
+import { formatCurrency, validateExpense } from "./schemas.tsx";
+
+it("formatCurrency handles decimals", () => {
+  expect(formatCurrency(10.5)).toBe("$10.50");
+});
+```
 
 ---
 
