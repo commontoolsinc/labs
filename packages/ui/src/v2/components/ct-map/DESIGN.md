@@ -381,3 +381,34 @@ packages/ui/src/v2/components/ct-map/
 - `@types/leaflet` - TypeScript types
 
 Leaflet CSS must be injected into the Shadow DOM for proper rendering.
+
+## Bundle Size Impact
+
+### Current State
+
+- **Leaflet is imported as a full bundle (~40KB gzipped)**. The library does not
+  support tree-shaking due to its module structure and internal dependencies.
+- The component is **not lazy-loaded**. Leaflet is bundled with the UI package
+  and loaded when the UI package is imported, regardless of whether `ct-map` is
+  actually used on the page.
+
+### Why Tree-Shaking Doesn't Work
+
+Leaflet's architecture predates ES modules and uses a class-based structure
+where features are tightly coupled. Even if you only need markers, you get the
+full map engine, all layer types, and event handling. The library exports a
+single `L` namespace object rather than independent ES modules.
+
+### Future Considerations
+
+1. **Dynamic import**: Convert to `const L = await import('leaflet')` in
+   `firstUpdated()` to defer loading until the component is actually rendered.
+   This would remove Leaflet from the initial bundle entirely.
+2. **Alternative libraries**: Lighter alternatives like MapLibre GL JS or
+   deck.gl could be evaluated, though they have different trade-offs (WebGL
+   requirements, tile format support).
+3. **Leaflet subset builds**: Community forks like `leaflet-headless` exist for
+   server-side use but aren't suitable for interactive maps.
+
+For now, the ~40KB cost is acceptable given Leaflet's reliability and
+zero-API-key requirement with OpenStreetMap tiles.
