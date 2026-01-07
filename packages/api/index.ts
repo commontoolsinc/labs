@@ -353,6 +353,7 @@ export type WrapOrPreserve<T, Wrap extends HKT> = [T] extends [Cell<any>] ? T
   : [T] extends [ComparableCell<any>] ? T
   : [T] extends [ReadonlyCell<any>] ? T
   : [T] extends [WriteonlyCell<any>] ? T
+  : [T] extends [OpaqueCell<any>] ? T
   : Apply<Wrap, T>;
 
 /**
