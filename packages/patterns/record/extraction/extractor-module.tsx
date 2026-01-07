@@ -1395,14 +1395,16 @@ export const ExtractorModule = recipe<
 
       if (!enabled) return combinedSnapshot;
 
-      // Use extraction result's `notes` field directly
-      // The extraction schema includes a `notes` field (from Notes module's fieldMapping)
-      // which contains what should STAY in Notes after extraction
+      // Use extraction result's notes content directly
+      // The extraction schema includes both `content` (primary) and `notes` (alias) fields
+      // from Notes module's fieldMapping: ["content", "notes"]
+      // The LLM may use either field name, so check both
       if (!extraction.result) return combinedSnapshot;
       const result = extraction.result as Record<string, unknown>;
-      const notesValue = result.notes;
+      // Check both `notes` (alias) and `content` (primary) - LLM may use either
+      const notesValue = result.notes ?? result.content;
 
-      // If extraction didn't produce a notes field, keep original content
+      // If extraction didn't produce notes content, keep original
       if (notesValue === null || notesValue === undefined) return combinedSnapshot;
 
       // Validate result - should be string
