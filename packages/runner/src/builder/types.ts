@@ -85,7 +85,6 @@ export type {
   Cell,
   CellKind,
   CellTypeConstructor,
-  FocusResultType,
   Handler,
   HandlerFactory,
   HKT,

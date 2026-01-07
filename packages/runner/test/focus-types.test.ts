@@ -1,12 +1,12 @@
 /**
- * Type-level tests for Cell.focus()
+ * Type-level tests for Cell.key() with multiple keys
  *
- * These tests verify that focus() has the same type inference as chaining .key() calls.
+ * These tests verify that key() correctly handles multiple keys.
  * If the types are incorrect, these tests will fail to compile.
  */
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { Cell, FocusResultType, AsCell } from "../src/builder/types.ts";
+import type { Cell, KeyResultType, AsCell } from "../src/builder/types.ts";
 
 // ============================================================================
 // Type-level assertions (compile-time checks)
@@ -45,26 +45,26 @@ type User = {
 };
 
 // ============================================================================
-// FocusResultType type tests
+// KeyResultType type tests
 // ============================================================================
 
 // Empty keys should return the original type
 type _Test1 = MustBeTrue<
-  AssertEqual<FocusResultType<User, [], AsCell>, Cell<User>>
+  AssertEqual<KeyResultType<User, [], AsCell>, Cell<User>>
 >;
 
-// Single key should match KeyResultType behavior
+// Single key
 type _Test2 = MustBeTrue<
-  AssertEqual<FocusResultType<User, ["name"], AsCell>, Cell<string>>
+  AssertEqual<KeyResultType<User, ["name"], AsCell>, Cell<string>>
 >;
 
 type _Test3 = MustBeTrue<
-  AssertEqual<FocusResultType<User, ["age"], AsCell>, Cell<number>>
+  AssertEqual<KeyResultType<User, ["age"], AsCell>, Cell<number>>
 >;
 
 type _Test4 = MustBeTrue<
   AssertEqual<
-    FocusResultType<User, ["profile"], AsCell>,
+    KeyResultType<User, ["profile"], AsCell>,
     Cell<User["profile"]>
   >
 >;
@@ -72,14 +72,14 @@ type _Test4 = MustBeTrue<
 // Two keys
 type _Test5 = MustBeTrue<
   AssertEqual<
-    FocusResultType<User, ["profile", "bio"], AsCell>,
+    KeyResultType<User, ["profile", "bio"], AsCell>,
     Cell<string>
   >
 >;
 
 type _Test6 = MustBeTrue<
   AssertEqual<
-    FocusResultType<User, ["profile", "settings"], AsCell>,
+    KeyResultType<User, ["profile", "settings"], AsCell>,
     Cell<User["profile"]["settings"]>
   >
 >;
@@ -87,14 +87,14 @@ type _Test6 = MustBeTrue<
 // Three keys
 type _Test7 = MustBeTrue<
   AssertEqual<
-    FocusResultType<User, ["profile", "settings", "theme"], AsCell>,
+    KeyResultType<User, ["profile", "settings", "theme"], AsCell>,
     Cell<"light" | "dark">
   >
 >;
 
 type _Test8 = MustBeTrue<
   AssertEqual<
-    FocusResultType<User, ["profile", "settings", "notifications"], AsCell>,
+    KeyResultType<User, ["profile", "settings", "notifications"], AsCell>,
     Cell<boolean>
   >
 >;
@@ -102,14 +102,14 @@ type _Test8 = MustBeTrue<
 // Array access
 type _Test9 = MustBeTrue<
   AssertEqual<
-    FocusResultType<User, ["posts", 0], AsCell>,
+    KeyResultType<User, ["posts", 0], AsCell>,
     Cell<User["posts"][0]>
   >
 >;
 
 type _Test10 = MustBeTrue<
   AssertEqual<
-    FocusResultType<User, ["posts", 0, "title"], AsCell>,
+    KeyResultType<User, ["posts", 0, "title"], AsCell>,
     Cell<string>
   >
 >;
@@ -117,14 +117,14 @@ type _Test10 = MustBeTrue<
 // Unknown keys should fall back to Cell<any>
 type _Test11 = MustBeTrue<
   AssertEqual<
-    FocusResultType<User, ["unknownKey"], AsCell>,
+    KeyResultType<User, ["unknownKey"], AsCell>,
     Cell<any>
   >
 >;
 
 type _Test12 = MustBeTrue<
   AssertEqual<
-    FocusResultType<User, ["profile", "unknownKey"], AsCell>,
+    KeyResultType<User, ["profile", "unknownKey"], AsCell>,
     Cell<any>
   >
 >;
@@ -133,70 +133,43 @@ type _Test12 = MustBeTrue<
 // Runtime tests (behavior verification)
 // ============================================================================
 
-describe("Cell.focus() types", () => {
+describe("Cell.key() with multiple keys", () => {
   it("compiles with correct types - this test verifies the type assertions above", () => {
     // If this file compiles, the type tests pass
     // The type assertions above use MustBeTrue which would cause compile errors if wrong
     expect(true).toBe(true);
   });
 
-  it("focus() with no keys should have same type as the cell", () => {
+  it("key() with no keys should have same type as the cell", () => {
     // This is a compile-time check - if types are wrong, this won't compile
-    const checkType = <T>(_cell: Cell<T>, _focused: Cell<T>) => {};
+    const checkType = <T>(_cell: Cell<T>, _keyed: Cell<T>) => {};
     const _useCheckType = (cell: Cell<User>) => {
-      // @ts-expect-error - focus() with no args returns Cell<User>, not void
-      const focused: void = cell.focus();
+      // @ts-expect-error - key() with no args returns Cell<User>, not void
+      const keyed: void = cell.key();
       // This should compile fine:
-      checkType(cell, cell.focus());
+      checkType(cell, cell.key());
     };
     expect(true).toBe(true);
   });
 
-  it("focus() with one key matches key() type", () => {
-    const checkSameType = <T>(_a: T, _b: T) => {};
+  it("key() with multiple keys works", () => {
     const _useCheckType = (cell: Cell<User>) => {
-      // These should have the same type
-      checkSameType(cell.key("name"), cell.focus("name"));
-      checkSameType(cell.key("profile"), cell.focus("profile"));
-      checkSameType(cell.key("posts"), cell.focus("posts"));
-    };
-    expect(true).toBe(true);
-  });
+      // Single key
+      const _name: Cell<string> = cell.key("name");
 
-  it("focus() with multiple keys matches chained key() type", () => {
-    const checkSameType = <T>(_a: T, _b: T) => {};
-    const _useCheckType = (cell: Cell<User>) => {
       // Two keys
-      checkSameType(
-        cell.key("profile").key("bio"),
-        cell.focus("profile", "bio"),
-      );
+      const _bio: Cell<string> = cell.key("profile", "bio");
 
       // Three keys
-      checkSameType(
-        cell.key("profile").key("settings").key("theme"),
-        cell.focus("profile", "settings", "theme"),
-      );
-
-      // Array access
-      checkSameType(
-        cell.key("posts").key(0).key("title"),
-        cell.focus("posts", 0, "title"),
-      );
-    };
-    expect(true).toBe(true);
-  });
-
-  it("focus() result can be used with Cell methods", () => {
-    const _useCheckType = (cell: Cell<User>) => {
-      // These should all compile and have correct return types
-      const _name: Cell<string> = cell.focus("name");
-      const _theme: Cell<"light" | "dark"> = cell.focus(
+      const _theme: Cell<"light" | "dark"> = cell.key(
         "profile",
         "settings",
         "theme",
       );
-      const _post: Cell<User["posts"][0]> = cell.focus("posts", 0);
+
+      // Array access
+      const _post: Cell<User["posts"][0]> = cell.key("posts", 0);
+      const _title: Cell<string> = cell.key("posts", 0, "title");
     };
     expect(true).toBe(true);
   });

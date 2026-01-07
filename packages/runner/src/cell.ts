@@ -10,7 +10,6 @@ import {
   type Cell,
   type CellKind,
   type CellTypeConstructor,
-  type FocusResultType,
   type Frame,
   type HKT,
   type ICell,
@@ -274,7 +273,6 @@ const cellMethods = new Set<keyof ICell<unknown>>([
   "equals",
   "equalLinks",
   "key",
-  "focus",
   "map",
   "mapWithPattern",
   "toJSON",
@@ -946,14 +944,16 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   /**
-   * Navigate to a nested property by chaining multiple keys.
-   * Equivalent to chaining .key() calls: cell.focus("a", "b") === cell.key("a").key("b")
+   * Navigate to nested properties by one or more keys.
    *
-   * This is the primary implementation - key() delegates to this method.
+   * @example
+   * cell.key("user")                      // Cell<User>
+   * cell.key("user", "profile")           // Cell<Profile>
+   * cell.key("user", "profile", "name")   // Cell<string>
    */
-  focus<Keys extends readonly PropertyKey[]>(
+  key<Keys extends readonly PropertyKey[]>(
     ...keys: Keys
-  ): FocusResultType<T, Keys, AsCell> {
+  ): KeyResultType<T, Keys, AsCell> {
     let currentLink = this._link;
 
     for (const key of keys) {
@@ -986,13 +986,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       this.synced,
       this._causeContainer,
       this._kind,
-    ) as unknown as FocusResultType<T, Keys, AsCell>;
-  }
-
-  key<K extends PropertyKey>(
-    valueKey: K,
-  ): KeyResultType<T, K, AsCell> {
-    return this.focus(valueKey) as unknown as KeyResultType<T, K, AsCell>;
+    ) as unknown as KeyResultType<T, Keys, AsCell>;
   }
 
   asSchema<S extends JSONSchema = JSONSchema>(
