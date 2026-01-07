@@ -379,6 +379,15 @@ const bindProps = (
         });
         addCancel(cancel);
       }
+    } else if (isEventProp(propKey) && typeof propValue === "function") {
+      // Handle function event handlers (e.g., @ct-click={(e) => ...})
+      const key = cleanEventProp(propKey);
+      if (key != null) {
+        const cancel = listen(element, key, (event) => {
+          propValue(event);
+        });
+        addCancel(cancel);
+      }
     } else {
       setProperty(element, propKey, propValue);
     }
@@ -386,9 +395,14 @@ const bindProps = (
   return cancel;
 };
 
-const isEventProp = (key: string) => key.startsWith("on");
+const isEventProp = (key: string) =>
+  key.startsWith("on") || key.startsWith("@");
 
 const cleanEventProp = (key: string) => {
+  if (key.startsWith("@")) {
+    // @ct-click -> ct-click (remove @ prefix)
+    return key.slice(1);
+  }
   if (!key.startsWith("on")) {
     return null;
   }

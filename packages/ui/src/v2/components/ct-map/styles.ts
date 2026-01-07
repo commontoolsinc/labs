@@ -103,7 +103,7 @@ export const styles = css`
     visibility: hidden;
   }
   .leaflet-tile-loaded {
-    visibility: inherit;
+    visibility: visible;
   }
   .leaflet-zoom-box {
     width: 0;
@@ -849,5 +849,33 @@ export const styles = css`
         .leaflet-container:focus {
           outline: 2px solid var(--ring, #3b82f6);
           outline-offset: 2px;
+        }
+
+        /* ================================================
+        * Custom Marker Icon Styles
+        * Styles for divIcon-based markers (emoji and default)
+        * ================================================ */
+
+        /* Default marker icon (SVG pin) */
+        .ct-map-default-marker {
+          background: transparent !important;
+          border: none !important;
+        }
+
+        .ct-map-default-marker svg {
+          display: block;
+          filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.3));
+        }
+
+        /* Emoji marker icon */
+        .ct-map-emoji-marker {
+          background: transparent !important;
+          border: none !important;
+        }
+
+        .ct-map-emoji-marker .emoji-marker {
+          font-size: 24px;
+          line-height: 1;
+          filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.3));
         }
       `;

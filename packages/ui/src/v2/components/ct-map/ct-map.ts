@@ -238,9 +238,10 @@ export class CTMap extends BaseElement {
       zoomControl: this.interactive,
     });
 
-    // Add tile layer
+    // Add tile layer with crossOrigin for CORS compatibility
     L.tileLayer(TILE_URL, {
       attribution: TILE_ATTRIBUTION,
+      crossOrigin: true,
     }).addTo(this._map);
 
     // Create layer groups
@@ -250,6 +251,12 @@ export class CTMap extends BaseElement {
 
     // Set up event handlers
     this._setupMapEventHandlers();
+
+    // Invalidate size after initialization to ensure proper tile loading
+    // This is necessary when the map is rendered in Shadow DOM
+    requestAnimationFrame(() => {
+      this._map?.invalidateSize();
+    });
   }
 
   private _setupMapEventHandlers(): void {
@@ -517,25 +524,34 @@ export class CTMap extends BaseElement {
     markers.forEach((marker, index) => {
       const { position, title, description, icon, popup, draggable } = marker;
 
-      // Create marker icon
-      let markerIcon: L.Icon | L.DivIcon | undefined;
-      if (icon) {
-        // Check if it's an emoji (simple heuristic)
-        if (this._isEmoji(icon)) {
-          // Create a span element safely to prevent XSS
-          const span = document.createElement('span');
-          span.className = 'emoji-marker';
-          span.textContent = icon; // Safe - escapes HTML
+      // Create marker icon - always use divIcon to avoid Leaflet default icon issues in Shadow DOM
+      let markerIcon: L.DivIcon;
+      if (icon && this._isEmoji(icon)) {
+        // Create a span element safely to prevent XSS
+        const span = document.createElement("span");
+        span.className = "emoji-marker";
+        span.textContent = icon; // Safe - escapes HTML
 
-          markerIcon = L.divIcon({
-            html: span.outerHTML,
-            className: "ct-map-emoji-marker",
-            iconSize: [32, 32],
-            iconAnchor: [16, 32],
-            popupAnchor: [0, -32],
-          });
-        }
-        // TODO: Handle URL icons in V2
+        markerIcon = L.divIcon({
+          html: span.outerHTML,
+          className: "ct-map-emoji-marker",
+          iconSize: [32, 32],
+          iconAnchor: [16, 32],
+          popupAnchor: [0, -32],
+        });
+      } else {
+        // Default marker icon - SVG pin that works in Shadow DOM
+        // (Leaflet's default L.Icon.Default fails in Shadow DOM due to image path resolution)
+        markerIcon = L.divIcon({
+          html: `<svg width="25" height="41" viewBox="0 0 25 41" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12.5 0C5.6 0 0 5.6 0 12.5c0 2.4.7 4.6 1.9 6.5L12.5 41l10.6-22c1.2-1.9 1.9-4.1 1.9-6.5C25 5.6 19.4 0 12.5 0z" fill="#3b82f6"/>
+            <circle cx="12.5" cy="12.5" r="5" fill="white"/>
+          </svg>`,
+          className: "ct-map-default-marker",
+          iconSize: [25, 41],
+          iconAnchor: [12, 41],
+          popupAnchor: [0, -41],
+        });
       }
 
       // Create Leaflet marker
