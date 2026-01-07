@@ -206,8 +206,11 @@ function normalizeNullString(value: unknown): unknown {
 
 /**
  * Get the primary field name for a module type.
- * fieldMapping arrays have the primary field first, followed by aliases.
- * E.g., notes has ["content", "notes"] so "notes" maps to "content".
+ * fieldMapping arrays list related fields; only fields NOT in the schema
+ * are treated as aliases for the first entry.
+ * E.g., notes has ["content", "notes"] where only "content" is in schema,
+ * so "notes" maps to "content". But social has ["platform", "handle", "profileUrl"]
+ * where all three are in schema, so each is used directly.
  */
 function getPrimaryFieldName(
   fieldName: string,
@@ -218,7 +221,12 @@ function getPrimaryFieldName(
     return fieldName; // No mapping, use as-is
   }
 
-  // If the field name is in the mapping, return the primary (first) field
+  // If field exists in schema, use it directly (not an alias)
+  if (def.schema && def.schema[fieldName]) {
+    return fieldName;
+  }
+
+  // Only treat as alias if NOT in schema but IS in fieldMapping
   if (def.fieldMapping.includes(fieldName)) {
     return def.fieldMapping[0];
   }
