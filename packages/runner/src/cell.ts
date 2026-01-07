@@ -89,42 +89,6 @@ type SinkOptions = {
   changeGroup?: ChangeGroup;
 };
 
-/**
- * Deeply traverse a value to access all properties.
- * This is used by pull() to ensure all nested values are read,
- * which registers them as dependencies for pull-based scheduling.
- * Works with query result proxies which trigger reads on property access.
- */
-function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
-  if (value === null || value === undefined) return;
-  if (typeof value !== "object") return;
-
-  // Avoid infinite loops with circular references
-  if (seen.has(value)) return;
-  seen.add(value);
-
-  try {
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        deepTraverse(item, seen);
-      }
-    } else {
-      for (const key in value) {
-        if (Object.prototype.hasOwnProperty.call(value, key)) {
-          try {
-            deepTraverse((value as Record<string, unknown>)[key], seen);
-          } catch {
-            // Ignore errors from accessing individual properties (e.g., link cycles)
-          }
-        }
-      }
-    }
-  } catch {
-    // Ignore errors from traversal (e.g., link cycles)
-    // We've already registered the dependencies we can access
-  }
-}
-
 // Shared map factory instance for all cells
 let mapFactory: NodeFactory<any, any> | undefined;
 
@@ -1562,6 +1526,114 @@ function subscribeToReferencedDocs<T>(
 }
 
 /**
+ * Deeply traverse a value to access all properties.
+ * This is used by pull() to ensure all nested values are read,
+ * which registers them as dependencies for pull-based scheduling.
+ * Works with query result proxies which trigger reads on property access.
+ */
+function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
+  if (value === null || value === undefined) return;
+  if (typeof value !== "object") return;
+
+  // Avoid infinite loops with circular references
+  if (seen.has(value)) return;
+  seen.add(value);
+
+  try {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        deepTraverse(item, seen);
+      }
+    } else {
+      for (const key in value) {
+        if (Object.prototype.hasOwnProperty.call(value, key)) {
+          try {
+            deepTraverse((value as Record<string, unknown>)[key], seen);
+          } catch {
+            // Ignore errors from accessing individual properties (e.g., link cycles)
+          }
+        }
+      }
+    }
+  } catch {
+    // Ignore errors from traversal (e.g., link cycles)
+    // We've already registered the dependencies we can access
+  }
+}
+
+/**
+ * Validates that a value contains only static data (no cells or cell-like objects)
+ * and has no circular references. Used by Cell.of() to ensure only serializable
+ * static data is passed.
+ *
+ * Note: Shared references (same object at multiple paths) are allowed.
+ * Only true cycles (object referencing an ancestor) are rejected.
+ *
+ * @param value - The value to validate
+ * @throws Error if value contains cells or has circular references
+ */
+function validateStaticData(value: unknown): void {
+  // Track ancestors in current path (for cycle detection)
+  // Shared references are fine - only cycles back to ancestors are errors
+  const ancestors = new Set<object>();
+
+  function traverse(val: unknown, path: string[]): void {
+    // Primitives are always fine
+    if (val === null || val === undefined) return;
+    if (typeof val !== "object" && typeof val !== "function") return;
+
+    const obj = val as object;
+
+    // Check for cells and cell-like objects first (before cycle check)
+    if (isCell(obj)) {
+      throw new Error(
+        `Cell.of() only accepts static data, but found a reactive value (Cell) at path '${
+          path.join(".")
+        }'.\n` +
+          "help: use Cell references as handler parameters or in computed() closures instead of embedding them in Cell.of() values",
+      );
+    }
+
+    if (isCellResultForDereferencing(obj)) {
+      throw new Error(
+        `Cell.of() only accepts static data, but found a reactive value (CellResult) at path '${
+          path.join(".")
+        }'.\n` +
+          "help: use .get() to extract the value first, or pass Cell references as handler parameters",
+      );
+    }
+
+    // Check for cycles - only ancestors in current path, not all seen objects
+    if (ancestors.has(obj)) {
+      throw new Error(
+        `Cell.of() does not accept circular references. Cycle detected at path '${
+          path.join(".")
+        }'.\n` +
+          "help: restructure your data to avoid circular references",
+      );
+    }
+
+    ancestors.add(obj);
+
+    // Traverse arrays and objects
+    if (Array.isArray(obj)) {
+      for (let i = 0; i < obj.length; i++) {
+        traverse(obj[i], [...path, String(i)]);
+      }
+    } else {
+      for (const key of Object.keys(obj)) {
+        traverse((obj as Record<string, unknown>)[key], [...path, key]);
+      }
+    }
+
+    // Remove from ancestors when backtracking (shared refs at other paths are ok)
+    ancestors.delete(obj);
+  }
+
+  traverse(value, []);
+}
+
+/**
  * Recursively adds IDs elements in arrays, unless they are already a link.
  *
  * This ensures that mutable arrays only consist of links to documents, at least
@@ -1739,6 +1811,11 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
         throw new Error(
           "Can't invoke Cell.of() outside of a recipe/handler/lift context",
         );
+      }
+
+      // Validate that value contains only static data (no cells or cycles)
+      if (value !== undefined) {
+        validateStaticData(value);
       }
 
       // Convert schema to object form and merge default value if value is defined
