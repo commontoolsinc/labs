@@ -34,8 +34,12 @@ export const test = new Command()
     let stat: Deno.FileInfo;
     try {
       stat = await Deno.stat(fullPath);
-    } catch {
-      console.error(`Error: Path not found: ${fullPath}`);
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        console.error(`Error: Path not found: ${fullPath}`);
+      } else {
+        console.error(`Error accessing path ${fullPath}:`, error);
+      }
       Deno.exit(1);
     }
 
