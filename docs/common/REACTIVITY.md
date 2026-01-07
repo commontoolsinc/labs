@@ -74,6 +74,38 @@ Think of `Writable<>` as a permission declaration:
 | Can pass to `computed()` | Can mutate directly |
 | Can use in JSX | Everything read-only can do, plus mutation |
 
+### Access Patterns Are Type-Based
+
+How you access a value depends on its **type**, not where you're accessing it:
+
+| Type | How to access | Created by |
+|------|---------------|------------|
+| `Writable<T>` | `.get()` to read, `.set()` to write | `Cell.of()`, `Writable<>` in type signature |
+| `OpaqueRef<T>` | Direct property access | Pattern inputs without `Writable<>`, items in `.map()` |
+
+**Important:** `Writable<T>` always requires `.get()`—this never changes regardless of context.
+
+`OpaqueRef<T>` property access works anywhere using accessors (e.g., `user.name`). However, to **call methods or perform computation** on an OpaqueRef value, you must do so inside a `computed()` that captures it from the enclosing scope:
+
+```typescript
+export default pattern<{ user: { name: string } }>(({ user }) => {
+  // ✅ Property access on OpaqueRef works anywhere
+  const nameDisplay = user.name;  // Fine in pattern body, JSX, etc.
+
+  // ✅ Computation on OpaqueRef must be inside computed() that captures it
+  const upperName = computed(() => user.name.toUpperCase());
+
+  // ❌ Can't call methods on OpaqueRef outside computed()
+  // const broken = user.name.toUpperCase();  // Won't work
+
+  return { [UI]: <div>{user.name} / {upperName}</div> };
+});
+
+// Writable<T> always needs .get(), regardless of context
+const localCell = Cell.of("hello");
+const upper = computed(() => localCell.get().toUpperCase());
+```
+
 ## Accessing Reactive Values
 
 Different reactive types have different access patterns:
@@ -300,14 +332,17 @@ const removeItem = (items: Writable<Item[]>, item: Writable<Item>) => {
 ### Basic Usage
 
 ```typescript
+// With Cell.of() - use .get() to access the value
 const firstName = Cell.of("Alice");
 const lastName = Cell.of("Smith");
+const fullName = computed(() => `${firstName.get()} ${lastName.get()}`);
 
-// Automatically updates when firstName or lastName changes
-const fullName = computed(() => `${firstName} ${lastName}`);
-
-// Use in JSX
-<div>Hello, {fullName}!</div>
+// With pattern inputs (no Cell<> in type) - direct access works
+// because pattern inputs are OpaqueRef, not Cell
+export default pattern<{ user: { first: string; last: string } }>(({ user }) => {
+  const greeting = computed(() => `Hello, ${user.first} ${user.last}!`);
+  return { [UI]: <div>{greeting}</div> };
+});
 ```
 
 ### Never Nest computed()
@@ -329,16 +364,14 @@ Use `computed()` **outside of JSX** for reactive transformations:
 
 ```typescript
 // ✅ Use computed() outside JSX
+// (assuming items, searchQuery, groupedItems are pattern inputs - OpaqueRef)
 const filteredItems = computed(() => {
-  const query = searchQuery.toLowerCase();
-  return items.filter(item => item.title.toLowerCase().includes(query));
+  return items.filter(item => item.title.toLowerCase().includes(searchQuery.toLowerCase()));
 });
 
 const itemCount = computed(() => items.length);
 
-const categories = computed(() => {
-  return Object.keys(groupedItems).sort();
-});
+const categories = computed(() => Object.keys(groupedItems).sort());
 
 // Then use the computed values in JSX
 return {
@@ -533,7 +566,7 @@ const increment = handler<never, { count: Writable<number> }>(
 );
 ```
 
-**Remember:** Whether a cell was passed in as an input or created locally with `Cell.of()`, if the type is `Writable<T>`, you use `.get()` to read its value.
+**Remember:** Whether a cell was passed in as an input or created locally with `Cell.of()`, if the type is `Writable<T>`, you use `.get()` to read its value. This is true everywhere—in `computed()`, handlers, JSX, or any other context. Access patterns are determined by the **type**, not the calling context.
 
 ### 5. In computed() Functions
 
@@ -555,9 +588,10 @@ const summary = computed(() => {
 ```typescript
 const searchQuery = Cell.of("");
 
-// Reactive filtered list
+// searchQuery is Cell<string>, so use .get()
+// items is a pattern input (OpaqueRef), so direct access works
 const filteredItems = computed(() => {
-  const query = searchQuery.toLowerCase();
+  const query = searchQuery.get().toLowerCase();
   return items.filter(item =>
     item.title.toLowerCase().includes(query)
   );
