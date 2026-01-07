@@ -600,20 +600,38 @@ export class CTMap extends BaseElement {
   private _renderMarkers(markers: MapMarker[]): void {
     if (!this._markerLayer) return;
 
-    markers.forEach((marker, index) => {
+    // Use traditional for loop to avoid reactive proxy forEach issues
+    // (reactive proxies can throw when iterating over partially loaded data)
+    const length = markers.length;
+    for (let i = 0; i < length; i++) {
+      const marker = markers[i];
+      const index = i;
+
       // Skip markers without valid position data
-      if (
-        !marker?.position || typeof marker.position.lat !== "number" ||
-        typeof marker.position.lng !== "number"
-      ) {
-        console.warn(
-          `ct-map: Skipping marker at index ${index} - invalid position:`,
-          marker?.position,
-        );
-        return;
+      // Check each property access separately to avoid proxy iteration issues
+      if (!marker) {
+        continue;
       }
 
-      const { position, title, description, icon, popup, draggable } = marker;
+      const position = marker.position;
+      if (!position) {
+        console.warn(
+          `ct-map: Skipping marker at index ${index} - missing position`,
+        );
+        continue;
+      }
+
+      const lat = position.lat;
+      const lng = position.lng;
+      if (typeof lat !== "number" || typeof lng !== "number") {
+        console.warn(
+          `ct-map: Skipping marker at index ${index} - invalid position:`,
+          { lat, lng },
+        );
+        continue;
+      }
+
+      const { title, description, icon, popup, draggable } = marker;
 
       // Create marker icon - always use divIcon to avoid Leaflet default icon issues in Shadow DOM
       let markerIcon: L.DivIcon;
@@ -646,8 +664,8 @@ export class CTMap extends BaseElement {
         });
       }
 
-      // Create Leaflet marker
-      const leafletMarker = L.marker([position.lat, position.lng], {
+      // Create Leaflet marker (use validated lat/lng from above)
+      const leafletMarker = L.marker([lat, lng], {
         icon: markerIcon,
         draggable: draggable || false,
       });
@@ -671,7 +689,8 @@ export class CTMap extends BaseElement {
 
       // Drag handlers
       if (draggable) {
-        let oldPosition: LatLng = { ...position };
+        // Use validated lat/lng instead of spreading reactive proxy
+        let oldPosition: LatLng = { lat, lng };
 
         // Capture position at drag start (not creation time)
         leafletMarker.on("dragstart", () => {
@@ -698,30 +717,46 @@ export class CTMap extends BaseElement {
       // Add to layer and track
       leafletMarker.addTo(this._markerLayer!);
       this._leafletMarkers.push(leafletMarker);
-    });
+    }
   }
 
   private _renderCircles(circles: MapCircle[]): void {
     if (!this._circleLayer) return;
 
-    circles.forEach((circle, index) => {
+    // Use traditional for loop to avoid reactive proxy forEach issues
+    const length = circles.length;
+    for (let i = 0; i < length; i++) {
+      const circle = circles[i];
+      const index = i;
+
       // Skip circles without valid center data
-      if (
-        !circle?.center || typeof circle.center.lat !== "number" ||
-        typeof circle.center.lng !== "number"
-      ) {
-        console.warn(
-          `ct-map: Skipping circle at index ${index} - invalid center:`,
-          circle?.center,
-        );
-        return;
+      // Check each property access separately to avoid proxy iteration issues
+      if (!circle) {
+        continue;
       }
 
-      const { center, radius, color, fillOpacity, strokeWidth, popup, title } =
-        circle;
+      const center = circle.center;
+      if (!center) {
+        console.warn(
+          `ct-map: Skipping circle at index ${index} - missing center`,
+        );
+        continue;
+      }
 
-      // Create Leaflet circle
-      const leafletCircle = L.circle([center.lat, center.lng], {
+      const lat = center.lat;
+      const lng = center.lng;
+      if (typeof lat !== "number" || typeof lng !== "number") {
+        console.warn(
+          `ct-map: Skipping circle at index ${index} - invalid center:`,
+          { lat, lng },
+        );
+        continue;
+      }
+
+      const { radius, color, fillOpacity, strokeWidth, popup, title } = circle;
+
+      // Create Leaflet circle (use validated lat/lng from above)
+      const leafletCircle = L.circle([lat, lng], {
         radius,
         color: color || "#3b82f6",
         fillColor: color || "#3b82f6",
@@ -749,34 +784,52 @@ export class CTMap extends BaseElement {
       // Add to layer and track
       leafletCircle.addTo(this._circleLayer!);
       this._leafletCircles.push(leafletCircle);
-    });
+    }
   }
 
   private _renderPolylines(polylines: MapPolyline[]): void {
     if (!this._polylineLayer) return;
 
-    polylines.forEach((polyline, index) => {
+    // Use traditional for loop to avoid reactive proxy forEach issues
+    const length = polylines.length;
+    for (let i = 0; i < length; i++) {
+      const polyline = polylines[i];
+      const index = i;
+
       // Skip polylines without valid points array
-      if (!polyline?.points || !Array.isArray(polyline.points)) {
-        console.warn(
-          `ct-map: Skipping polyline at index ${index} - invalid points:`,
-          polyline?.points,
-        );
-        return;
+      if (!polyline) {
+        continue;
       }
 
-      const { points, color, strokeWidth, dashArray } = polyline;
+      const points = polyline.points;
+      if (!points || !Array.isArray(points)) {
+        console.warn(
+          `ct-map: Skipping polyline at index ${index} - invalid points:`,
+          points,
+        );
+        continue;
+      }
+
+      const { color, strokeWidth, dashArray } = polyline;
 
       // Convert to Leaflet format, filtering out invalid points
-      const latLngs: L.LatLngExpression[] = points
-        .filter((p) =>
-          p && typeof p.lat === "number" && typeof p.lng === "number"
-        )
-        .map((p) => [p.lat, p.lng]);
+      // Use traditional for loop to avoid reactive proxy issues
+      const latLngs: L.LatLngExpression[] = [];
+      const pointsLength = points.length;
+      for (let j = 0; j < pointsLength; j++) {
+        const p = points[j];
+        if (p) {
+          const pLat = p.lat;
+          const pLng = p.lng;
+          if (typeof pLat === "number" && typeof pLng === "number") {
+            latLngs.push([pLat, pLng]);
+          }
+        }
+      }
 
       // Skip if no valid points remain
       if (latLngs.length === 0) {
-        return;
+        continue;
       }
 
       // Create Leaflet polyline
@@ -790,7 +843,7 @@ export class CTMap extends BaseElement {
 
       // Add to layer
       leafletPolyline.addTo(this._polylineLayer!);
-    });
+    }
   }
 
   // === Popup Rendering ===
@@ -846,45 +899,67 @@ export class CTMap extends BaseElement {
     const allPoints: L.LatLng[] = [];
 
     // Collect all marker positions
+    // Use traditional for loops to avoid reactive proxy forEach issues
     if (value.markers) {
-      value.markers.forEach((m) => {
-        // Skip markers without valid position
-        if (
-          m?.position && typeof m.position.lat === "number" &&
-          typeof m.position.lng === "number"
-        ) {
-          allPoints.push(L.latLng(m.position.lat, m.position.lng));
+      const markers = value.markers;
+      const markersLength = markers.length;
+      for (let i = 0; i < markersLength; i++) {
+        const m = markers[i];
+        if (m) {
+          const position = m.position;
+          if (position) {
+            const lat = position.lat;
+            const lng = position.lng;
+            if (typeof lat === "number" && typeof lng === "number") {
+              allPoints.push(L.latLng(lat, lng));
+            }
+          }
         }
-      });
+      }
     }
 
     // Collect all circle centers (could also use circle bounds)
     if (value.circles) {
-      value.circles.forEach((c) => {
-        // Skip circles without valid center
-        if (
-          c?.center && typeof c.center.lat === "number" &&
-          typeof c.center.lng === "number"
-        ) {
-          allPoints.push(L.latLng(c.center.lat, c.center.lng));
+      const circles = value.circles;
+      const circlesLength = circles.length;
+      for (let i = 0; i < circlesLength; i++) {
+        const c = circles[i];
+        if (c) {
+          const center = c.center;
+          if (center) {
+            const lat = center.lat;
+            const lng = center.lng;
+            if (typeof lat === "number" && typeof lng === "number") {
+              allPoints.push(L.latLng(lat, lng));
+            }
+          }
         }
-      });
+      }
     }
 
     // Collect all polyline points
     if (value.polylines) {
-      value.polylines.forEach((p) => {
-        if (p?.points) {
-          p.points.forEach((pt) => {
-            // Skip points without valid coordinates
-            if (
-              pt && typeof pt.lat === "number" && typeof pt.lng === "number"
-            ) {
-              allPoints.push(L.latLng(pt.lat, pt.lng));
+      const polylines = value.polylines;
+      const polylinesLength = polylines.length;
+      for (let i = 0; i < polylinesLength; i++) {
+        const p = polylines[i];
+        if (p) {
+          const points = p.points;
+          if (points) {
+            const pointsLength = points.length;
+            for (let j = 0; j < pointsLength; j++) {
+              const pt = points[j];
+              if (pt) {
+                const lat = pt.lat;
+                const lng = pt.lng;
+                if (typeof lat === "number" && typeof lng === "number") {
+                  allPoints.push(L.latLng(lat, lng));
+                }
+              }
             }
-          });
+          }
         }
-      });
+      }
     }
 
     // Fit bounds if we have points
