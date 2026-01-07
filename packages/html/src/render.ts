@@ -266,7 +266,12 @@ const bindChildren = (
       return newRendered.cancel;
     });
 
-    return { node: currentNode!, cancel };
+    // If effect callback wasn't called synchronously (e.g., Stream cells),
+    // provide a placeholder node that will be replaced when the value arrives
+    return {
+      node: currentNode ?? document.createTextNode(""),
+      cancel,
+    };
   };
 
   // When the children array changes, diff its flattened values against what we previously rendered.

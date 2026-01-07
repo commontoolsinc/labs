@@ -79,6 +79,7 @@ export * from "./components/ct-list/index.ts";
 export * from "./components/ct-list-item/index.ts";
 export * from "./components/ct-loader/index.ts";
 export * from "./components/ct-location/index.ts";
+export * from "./components/ct-map/index.ts";
 export * from "./components/ct-markdown/index.ts";
 export * from "./components/ct-tags/index.ts";
 export * from "./components/ct-table/index.ts";
