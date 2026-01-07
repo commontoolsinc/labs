@@ -190,6 +190,8 @@ CTS provides:
 
 ## Default<T, Value>
 
+**Use `Default<>` for any field that will be displayed in UI or used in computations.** Without a default, fields are `undefined` at runtime until data is explicitly set—causing errors like `Cannot read properties of undefined` when your pattern tries to render or compute.
+
 Specify default values in schemas:
 
 ```typescript
