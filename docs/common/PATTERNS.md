@@ -288,8 +288,8 @@ return {
 |------|-----|
 | Toggle checkbox | `$checked` (bidirectional) |
 | Edit text | `$value` (bidirectional) |
-| Add/remove from array | Inline handler |
-| Complex/reusable logic | `handler()` |
+| Add/remove from array | `action()` |
+| Complex/reusable logic | `action()` |
 | Transform data | `computed()` |
 | Filter/sort lists | `computed()` |
 | Cross-charm mutation | `Stream.send()` |
@@ -303,47 +303,35 @@ return {
 | `items: Writable<Item[]>` | Read + write (will mutate) |
 | `items: Default<Item[], []>` | Optional with default |
 
-### Handler Type Signatures
+### Writing Handlers with action()
+
+The simplest way to write handlers is with `action()` inside the pattern body:
 
 ```typescript
-const myHandler = handler<EventType, StateType>((event, state) => { ... });
-//                        ^^^^^^^^^  ^^^^^^^^^
-//                        1st param  2nd param (passed at invocation)
-```
+export default pattern<{ count: Cell<number> }>(({ count }) => {
+  // Define action inside pattern body - closures are handled automatically
+  const increment = action(() => count.set(count.get() + 1));
+  const addAmount = action((e: { amount: number }) => count.set(count.get() + e.amount));
 
-**The state type defines what you pass when invoking:**
-
-```typescript
-// Handler with mixed primitives and Cells
-const fireShot = handler<
-  unknown,  // event type (often unused for UI handlers)
-  { row: number; col: number; game: Cell<GameState> }
->((_, { row, col, game }) => {
-  const state = game.get();
-  // row and col are plain numbers, game is a Cell
+  return {
+    [UI]: (
+      <div>
+        <ct-button onClick={increment}>+1</ct-button>
+        <ct-button onClick={addAmount}>Add 10</ct-button>
+      </div>
+    ),
+    increment,  // Export for cross-charm access
+  };
 });
-
-// Invocation - pass values matching state type
-<div onClick={fireShot({ row: 3, col: 5, game })} />
 ```
 
-**Type annotations are required** - without them, handler parameters become `any`.
+**Key points:**
+- Define `action()` inside the pattern body, not at module scope
+- Close over any pattern values you need (cells, other actions)
+- Event parameter is optional - omit it for void actions
+- Invoke directly in JSX: `onClick={myAction}`
 
-### action() - Simplified Handlers
-
-For inline handlers where all data is in scope at definition time:
-
-```typescript
-// action - data bound at definition (closes over count)
-action(() => count.set(count.get() + 1))
-
-// handler - data bound at invocation (row, col passed per-call)
-handler<unknown, { row: number; col: number; game: Cell<Game> }>(...)
-```
-
-Use `handler()` when you need to pass data at invocation time (e.g., loop variables). Use `action()` for simple inline mutations where everything needed is already in scope.
-
-<!-- TODO: Expand action() documentation -->
+Use `handler()` only when you need explicit control over state binding (rare).
 
 ---
 
