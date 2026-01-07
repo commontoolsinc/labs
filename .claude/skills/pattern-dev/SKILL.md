@@ -247,11 +247,11 @@ See `PATTERNS.md` for handler patterns, `TYPES_AND_SCHEMAS.md` for Stream typing
 
 ### Reactive Transformations
 
-**Use `computed()` by default** - it handles closures automatically:
+**Use `computed()` by default** - it handles closures and reactive tracking automatically:
 
 ```typescript
 const filteredItems = computed(() => items.filter(item => !item.done));
-const totalAmount = computed(() => expenses.get().reduce((sum, e) => sum + e.amount, 0));
+const totalAmount = computed(() => expenses.reduce((sum, e) => sum + e.amount, 0));
 ```
 
 **Key rules:**
