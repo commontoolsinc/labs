@@ -1196,74 +1196,91 @@ export const ExtractorModule = recipe<
     // The TypeScript transformer has a bug where .map()/.filter()/.some() called on
     // a computed variable aren't properly transformed to their reactive equivalents.
     // See: packages/ts-transformers/test/fixtures/pending/computed-var-then-map.issue.md
+    // GitHub Issue: https://github.com/commontoolsinc/labs/issues/2442
     //
-    // WORKAROUND: Each computed block that needs source data calls scanExtractableSources()
-    // directly and uses for-loops instead of array methods. This is less elegant but
-    // avoids the "mapWithPattern is not a function" runtime errors.
+    // WORKAROUND: Compute ALL source-derived data in a SINGLE computed block, then
+    // expose individual values as simple property accesses. This avoids calling
+    // scanExtractableSources() 10+ times in separate computed blocks.
+    //
+    // PERFORMANCE IMPACT: Before this fix, extraction took 2+ minutes with 113% CPU
+    // due to O(n * 10) reactive operations. Now it's O(n) with a single scan.
 
-    // Extractable sources with selection state
-    const extractableSources = computed((): ExtractableSource[] => {
+    // Single computed that derives ALL source-related data
+    const sourceData = computed(() => {
       const subCharms = parentSubCharms.get() || [];
       const sources = scanExtractableSources(subCharms);
       const selectionsMap = sourceSelections.get() || {};
-      // Add selection state to each source using for-loop (avoids transformer bug)
-      // Non-empty sources are selected by default (undefined !== false is true)
-      // Empty sources are never selected
-      const result: ExtractableSource[] = [];
+      const trashMap = trashSelections.get() || {};
+
+      // Build all derived data in a single pass
+      const extractableSources: ExtractableSource[] = [];
+      const photoSources: ExtractableSource[] = [];
+      const trashCheckStates: Record<number, boolean> = {};
+      let selectedCount = 0;
+      let trashCount = 0;
+      let hasAnyNonEmpty = false;
+      let hasTrashable = false;
+
       for (const source of sources) {
-        result.push({
+        // Build extractable sources with selection state
+        const isSelected = source.isEmpty
+          ? false
+          : selectionsMap[source.index] !== false;
+        extractableSources.push({
           ...source,
-          selected: source.isEmpty
-            ? false
-            : selectionsMap[source.index] !== false,
+          selected: isSelected,
         });
-      }
-      return result;
-    });
 
-    // Check if any sources are selected
-    const hasSelectedSources = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
-      const selectionsMap = sourceSelections.get() || {};
-      if (sources.length === 0) return false;
-      // Use for-loop to check if any source is selected (avoids transformer bug with .some())
-      for (const s of sources) {
-        if (selectionsMap[s.index] !== false) return true;
-      }
-      return false;
-    });
+        // Count selected sources
+        if (isSelected) {
+          selectedCount++;
+        }
 
-    // Count of selected sources
-    const selectedSourceCount = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
-      const selectionsMap = sourceSelections.get() || {};
-      // Use for-loop to count (avoids transformer bug with .filter())
-      let count = 0;
-      for (const s of sources) {
-        if (selectionsMap[s.index] !== false) count++;
-      }
-      return count;
-    });
+        // Check for non-empty sources
+        if (!source.isEmpty) {
+          hasAnyNonEmpty = true;
+        }
 
-    // Selected photo sources that need OCR
-    const photoSources = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
-      const selectionsMap = sourceSelections.get() || {};
-      // Use for-loop to filter (avoids transformer bug with .filter())
-      const result: ExtractableSource[] = [];
-      for (const s of sources) {
+        // Build photo sources for OCR
         if (
-          s.type === "photo" && s.requiresOCR &&
-          selectionsMap[s.index] !== false
+          source.type === "photo" && source.requiresOCR &&
+          selectionsMap[source.index] !== false
         ) {
-          result.push(s);
+          photoSources.push(source);
+        }
+
+        // Build trash check states and count (excluding Notes)
+        if (source.type !== "notes") {
+          hasTrashable = true;
+          trashCheckStates[source.index] = trashMap[source.index] === true;
+          if (trashMap[source.index] === true) {
+            trashCount++;
+          }
         }
       }
-      return result;
+
+      return {
+        sources: extractableSources,
+        photoSources,
+        trashCheckStates,
+        selectedCount,
+        trashCount,
+        hasNoSourceModules: sources.length === 0,
+        hasNoUsableSources: sources.length > 0 && !hasAnyNonEmpty,
+        hasSelectedSources: selectedCount > 0,
+        hasTrashableSources: hasTrashable,
+      };
     });
+
+    // Individual accessors for UI bindings (simple property access, no array methods needed)
+    const extractableSources = computed(
+      (): ExtractableSource[] => sourceData.sources,
+    );
+    const hasSelectedSources = computed(() => sourceData.hasSelectedSources);
+    const selectedSourceCount = computed(() => sourceData.selectedCount);
+    const photoSources = computed((): ExtractableSource[] =>
+      sourceData.photoSources
+    );
 
     // Build OCR calls for all selected photos using .map() on computed Cell
     // Each photo gets its own generateText call (framework caches per-item)
@@ -1472,17 +1489,8 @@ export const ExtractorModule = recipe<
     });
 
     // Count sources selected for trash (excluding Notes - Notes is never trashed)
-    const trashCount = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
-      const trashMap = trashSelections.get() || {};
-      // Use for-loop to count (avoids transformer bug with .filter())
-      let count = 0;
-      for (const s of sources) {
-        if (s.type !== "notes" && trashMap[s.index] === true) count++;
-      }
-      return count;
-    });
+    // Uses centralized sourceData to avoid redundant scanExtractableSources() calls
+    const trashCount = computed(() => sourceData.trashCount);
 
     // Phase-related computed values (defined at statement level for stable node identity)
     const isPreviewPhase = computed(() => currentPhase === "preview");
@@ -1491,21 +1499,11 @@ export const ExtractorModule = recipe<
     const isErrorPhase = computed(() => currentPhase === "error");
     const isNoResultsPhase = computed(() => currentPhase === "no-results");
     // True when there are no source modules at all (Notes, Photo, Text Import)
-    const hasNoSourceModules = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
-      return sources.length === 0;
-    });
+    // Uses centralized sourceData to avoid redundant scanExtractableSources() calls
+    const hasNoSourceModules = computed(() => sourceData.hasNoSourceModules);
     // True when all sources are empty (modules exist but have no content)
-    const hasNoUsableSources = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
-      // Use for-loop to check (avoids transformer bug with .filter())
-      for (const s of sources) {
-        if (!s.isEmpty) return false;
-      }
-      return true;
-    });
+    // Uses centralized sourceData to avoid redundant scanExtractableSources() calls
+    const hasNoUsableSources = computed(() => sourceData.hasNoUsableSources);
     // Dereference computed values properly to avoid comparing Cell objects to primitives
     const isSingleSource = computed(() => Number(selectedSourceCount) === 1);
     const extractButtonDisabled = computed(() =>
@@ -1524,18 +1522,8 @@ export const ExtractorModule = recipe<
     const hasTrashItems = computed(() => Number(trashCount) > 0);
 
     // Pre-computed trash selection state map
-    const trashCheckStates = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
-      const selectionsMap = trashSelections.get() || {};
-      const result: Record<number, boolean> = {};
-      for (const source of sources) {
-        if (source.type !== "notes") {
-          result[source.index] = selectionsMap[source.index] === true;
-        }
-      }
-      return result;
-    });
+    // Uses centralized sourceData to avoid redundant scanExtractableSources() calls
+    const trashCheckStates = computed(() => sourceData.trashCheckStates);
 
     // Preview phase computed values
     const hasNotesSnapshot = computed(() => {
@@ -1567,15 +1555,8 @@ export const ExtractorModule = recipe<
         ? rawSnapshot as Record<string, string>
         : {};
     });
-    const hasTrashableSources = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
-      // Use for-loop to check (avoids transformer bug with .filter())
-      for (const s of sources) {
-        if (s.type !== "notes") return true;
-      }
-      return false;
-    });
+    // Uses centralized sourceData to avoid redundant scanExtractableSources() calls
+    const hasTrashableSources = computed(() => sourceData.hasTrashableSources);
     const cleanupFailed = computed(() => {
       const status = cleanupApplyStatus.get();
       return status === "failed";
