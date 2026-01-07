@@ -548,7 +548,9 @@ const BattleshipRoom = pattern<GameInput, GameOutput>(
               </h3>
               <div style={gridContainerStyle}>
                 <div style={headerCellStyle} />
-                {COLS.map((c, i) => <div key={i} style={headerCellStyle}>{c}</div>)}
+                {COLS.map((c, i) => (
+                  <div key={i} style={headerCellStyle}>{c}</div>
+                ))}
                 {ROWS.map((rowIdx) => (
                   <div
                     style={{
@@ -582,7 +584,9 @@ const BattleshipRoom = pattern<GameInput, GameOutput>(
               </h3>
               <div style={gridContainerStyle}>
                 <div style={headerCellStyle} />
-                {COLS.map((c, i) => <div key={i} style={headerCellStyle}>{c}</div>)}
+                {COLS.map((c, i) => (
+                  <div key={i} style={headerCellStyle}>{c}</div>
+                ))}
                 {ROWS.map((rowIdx) => (
                   <div
                     style={{
