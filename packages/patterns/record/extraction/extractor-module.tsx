@@ -32,6 +32,7 @@ import {
   buildExtractionSchema as buildFullSchema,
   createSubCharm,
   getFieldToTypeMapping as getFullFieldMapping,
+  SUB_CHARM_REGISTRY,
 } from "../registry.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "../types.ts";
 import type {
@@ -48,6 +49,8 @@ interface ExtractorModuleInput {
   // Parent's Cells - passed as INPUT so they survive serialization
   parentSubCharms: Cell<SubCharmEntry[]>;
   parentTrashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+  // Parent Record's title Cell - for extracting names to Record title
+  parentTitle: Cell<string>;
   // Source selection state (index -> selected, default true)
   sourceSelections: Cell<
     Default<Record<number, boolean>, Record<number, never>>
@@ -106,10 +109,11 @@ const EXTRACTION_SYSTEM_PROMPT =
   - name: the restriction (e.g., "nightshades", "peanuts", "vegetarian", "gluten")
   - level: severity - "absolute" (allergy/no exceptions), "strict" (strong avoidance), "prefer" (try to avoid), "flexible" (if convenient)
   - Examples: [{"name": "peanuts", "level": "absolute"}, {"name": "dairy", "level": "prefer"}]
-  - Use "absolute" for allergies, anaphylaxis, or words like "extremely", "severely", "deadly"
-  - Use "strict" for strong avoidance or "very" modifiers
-  - Use "prefer" for general avoidance or intolerances
-  - Use "flexible" for mild preferences
+  - Use "absolute" for ANY allergy (the word "allergic" or "allergy" always means absolute - it's a medical safety issue)
+  - Use "absolute" for anaphylaxis, or intensity words like "extremely", "severely", "deadly", "deathly"
+  - Use "strict" for strong avoidance without allergy mentioned (e.g., "very strict vegetarian", "strongly avoid gluten")
+  - Use "prefer" for general avoidance or mild intolerances
+  - Use "flexible" for slight preferences
 
 === What TO Extract (structured data only) ===
 - Email addresses, phone numbers, physical addresses
@@ -171,6 +175,28 @@ Extracted: [name: John Doe, email: john@example.com, phone: 555-1234]
 Output: (empty string, since all content was extracted)`;
 
 // ===== Helper Functions =====
+
+/**
+ * Get the primary field name for a module type.
+ * fieldMapping arrays have the primary field first, followed by aliases.
+ * E.g., notes has ["content", "notes"] so "notes" maps to "content".
+ */
+function getPrimaryFieldName(
+  fieldName: string,
+  moduleType: string,
+): string {
+  const def = SUB_CHARM_REGISTRY[moduleType];
+  if (!def?.fieldMapping || def.fieldMapping.length === 0) {
+    return fieldName; // No mapping, use as-is
+  }
+
+  // If the field name is in the mapping, return the primary (first) field
+  if (def.fieldMapping.includes(fieldName)) {
+    return def.fieldMapping[0];
+  }
+
+  return fieldName; // Not in mapping, use as-is
+}
 
 // Anthropic Vision API limit is approximately 5MB for base64 images
 // Base64 encoding increases size by ~33%, so limit raw data size
@@ -310,10 +336,12 @@ function getFieldSchema(
 
 /**
  * Build extraction preview from raw LLM result and existing modules
+ * @param currentTitle - Current Record title (for "record-title" pseudo-type)
  */
 function buildPreview(
   extracted: Record<string, unknown>,
   subCharms: readonly SubCharmEntry[],
+  currentTitle?: string,
 ): ExtractionPreview {
   // Use FULL field-to-type mapping from registry - enables creating new modules
   const fieldToType = getFullFieldMapping();
@@ -326,6 +354,25 @@ function buildPreview(
 
     const moduleType = fieldToType[fieldName];
     if (!moduleType) continue;
+
+    // Special handling for "record-title" pseudo-type (name -> Record title)
+    if (moduleType === "record-title") {
+      // Compare against current Record title
+      if (currentTitle === extractedValue) continue;
+
+      const field: ExtractedField = {
+        fieldName: "name",
+        targetModule: "record-title",
+        extractedValue,
+        currentValue: currentTitle || undefined,
+      };
+
+      fields.push(field);
+
+      if (!byModule["record-title"]) byModule["record-title"] = [];
+      byModule["record-title"].push(field);
+      continue;
+    }
 
     // Find existing module of this type
     const entry = subCharms.find((e) => e?.type === moduleType);
@@ -642,6 +689,7 @@ const applySelected = handler<
   {
     parentSubCharmsCell: Cell<SubCharmEntry[]>;
     parentTrashedSubCharmsCell: Cell<TrashedSubCharmEntry[]>;
+    parentTitleCell: Cell<string>;
     extractionResultValue: Record<string, unknown> | null;
     selectionsCell: Cell<
       Default<Record<string, boolean>, Record<string, never>>
@@ -662,6 +710,7 @@ const applySelected = handler<
     {
       parentSubCharmsCell,
       parentTrashedSubCharmsCell,
+      parentTitleCell,
       extractionResultValue,
       selectionsCell,
       trashSelectionsCell,
@@ -688,7 +737,8 @@ const applySelected = handler<
       const extractionResult = extractionResultValue;
       if (!extractionResult) return;
 
-      const previewData = buildPreview(extractionResult, subCharmsData);
+      const currentTitle = parentTitleCell.get() || "";
+      const previewData = buildPreview(extractionResult, subCharmsData, currentTitle);
       const sourcesData = scanExtractableSources(subCharmsData);
 
       if (!previewData || !previewData.fields) return;
@@ -722,16 +772,56 @@ const applySelected = handler<
 
       // Process each module type
       for (const [moduleType, fields] of Object.entries(fieldsByModule)) {
+        // Special handling for "record-title" pseudo-type (name -> Record title)
+        if (moduleType === "record-title") {
+          for (const field of fields) {
+            if (
+              field.fieldName === "name" &&
+              typeof field.extractedValue === "string"
+            ) {
+              try {
+                parentTitleCell.set(field.extractedValue);
+                anySuccess = true;
+                console.debug(
+                  `[Extract] Set Record title to: ${field.extractedValue}`,
+                );
+              } catch (e) {
+                console.warn("[Extract] Failed to set Record title:", e);
+              }
+            }
+          }
+          continue; // Skip normal module processing
+        }
+
         const existingIndex = current.findIndex((e) => e?.type === moduleType);
 
         if (existingIndex >= 0) {
           // Module exists - use Cell navigation to update fields
           for (const field of fields) {
-            // Validate extracted value against schema
+            // Get the primary field name (e.g., "notes" alias -> "content" primary)
+            const actualFieldName = getPrimaryFieldName(
+              field.fieldName,
+              moduleType,
+            );
+
+            // Skip Notes content extraction when cleanup is enabled
+            // The cleanup will handle setting the final Notes content (with extracted data removed)
+            // If we don't skip, both extraction and cleanup try to set notes.content with different values
+            if (
+              moduleType === "notes" && actualFieldName === "content" &&
+              cleanupEnabledValue
+            ) {
+              console.debug(
+                "[Extract] Skipping notes.content extraction - cleanup will handle it",
+              );
+              continue;
+            }
+
+            // Validate extracted value against schema (use actual field name)
             const fieldSchema = getFieldSchema(
               subCharms,
               moduleType,
-              field.fieldName,
+              actualFieldName,
             );
             const isValid = validateFieldValue(
               field.extractedValue,
@@ -743,7 +833,7 @@ const applySelected = handler<
                 ? "array"
                 : typeof field.extractedValue;
               console.warn(
-                `[Extract] Type mismatch for ${moduleType}.${field.fieldName}: ` +
+                `[Extract] Type mismatch for ${moduleType}.${actualFieldName}: ` +
                   `expected ${fieldSchema?.type}, got ${actualType}. ` +
                   `Value: ${
                     JSON.stringify(field.extractedValue)
@@ -755,14 +845,15 @@ const applySelected = handler<
             try {
               // Only write if validation passed
               // Cast needed: Cell.key() navigation loses type info for dynamic nested paths
+              // Use actualFieldName to write to the correct field (handles aliases)
               (parentSubCharmsCell as Cell<SubCharmEntry[]>).key(existingIndex)
                 .key("charm").key(
-                  field.fieldName,
+                  actualFieldName,
                 ).set(field.extractedValue);
               anySuccess = true;
             } catch (e) {
               console.warn(
-                `Failed to set ${moduleType}.${field.fieldName}:`,
+                `Failed to set ${moduleType}.${actualFieldName}:`,
                 e,
               );
             }
@@ -773,11 +864,17 @@ const applySelected = handler<
             // Build initial values object from extracted fields
             const initialValues: Record<string, unknown> = {};
             for (const field of fields) {
-              // Validate before adding to initialValues
+              // Get the primary field name (e.g., "notes" alias -> "content" primary)
+              const actualFieldName = getPrimaryFieldName(
+                field.fieldName,
+                moduleType,
+              );
+
+              // Validate before adding to initialValues (use actual field name)
               const fieldSchema = getFieldSchema(
                 subCharms,
                 moduleType,
-                field.fieldName,
+                actualFieldName,
               );
               const isValid = validateFieldValue(
                 field.extractedValue,
@@ -789,7 +886,7 @@ const applySelected = handler<
                   ? "array"
                   : typeof field.extractedValue;
                 console.warn(
-                  `[Extract] Type mismatch for new module ${moduleType}.${field.fieldName}: ` +
+                  `[Extract] Type mismatch for new module ${moduleType}.${actualFieldName}: ` +
                     `expected ${fieldSchema?.type}, got ${actualType}. ` +
                     `Value: ${
                       JSON.stringify(field.extractedValue)
@@ -798,7 +895,8 @@ const applySelected = handler<
                 continue; // Skip this field
               }
 
-              initialValues[field.fieldName] = field.extractedValue;
+              // Use actualFieldName to store in the correct field
+              initialValues[actualFieldName] = field.extractedValue;
             }
 
             // Only create module if we have at least one valid field
@@ -970,6 +1068,7 @@ export const ExtractorModule = recipe<
     {
       parentSubCharms,
       parentTrashedSubCharms,
+      parentTitle,
       sourceSelections,
       trashSelections,
       selections,
@@ -987,18 +1086,30 @@ export const ExtractorModule = recipe<
       return buildFullSchema() as JSONSchema;
     });
 
-    // Scan for extractable sources with selection state included
-    // Including selection state ON the source objects is more idiomatic than
-    // using a separate lookup table, and ensures proper reactive tracking
-    const extractableSources = computed((): ExtractableSource[] => {
+    // ===== PERFORMANCE OPTIMIZATION =====
+    // Previously, scanExtractableSources() was called in 9+ separate computed() blocks,
+    // causing O(n*m) recomputations where n=computed blocks, m=subCharms.
+    // Now we compute the expensive scan ONCE and derive everything else from it.
+    //
+    // Key insight: scanExtractableSources() accesses Cell values via .get() inside,
+    // which creates reactive dependencies. Calling it 9 times means 9x the dependencies.
+    
+    // Step 1: Compute raw sources ONCE - this is the expensive operation that
+    // iterates through subCharms and accesses their Cell values
+    const rawSources = computed((): ExtractableSource[] => {
       const subCharms = parentSubCharms.get() || [];
-      const selectionsMap = sourceSelections.get() || {};
-      const sources = scanExtractableSources(subCharms);
+      return scanExtractableSources(subCharms);
+    });
 
+    // Step 2: All source-related values derive from rawSources (cheap array ops)
+    // This bundles all source-related state to minimize reactive graph size
+    const extractableSources = computed((): ExtractableSource[] => {
+      const sources = rawSources;
+      const selectionsMap = sourceSelections.get() || {};
       // Add selection state to each source
       // Non-empty sources are selected by default (undefined !== false is true)
       // Empty sources are never selected
-      return sources.map((source) => ({
+      return sources.map((source: ExtractableSource) => ({
         ...source,
         selected: source.isEmpty
           ? false
@@ -1006,32 +1117,28 @@ export const ExtractorModule = recipe<
       }));
     });
 
-    // Check if any sources are selected
+    // Derive hasSelectedSources from rawSources (no re-scan)
     const hasSelectedSources = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
+      const sources = rawSources;
       const selectionsMap = sourceSelections.get() || {};
       if (sources.length === 0) return false;
-      // At least one source must not be explicitly deselected
       return sources.some((s: ExtractableSource) =>
         selectionsMap[s.index] !== false
       );
     });
 
-    // Count selected sources
+    // Derive selectedSourceCount from rawSources (no re-scan)
     const selectedSourceCount = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
+      const sources = rawSources;
       const selectionsMap = sourceSelections.get() || {};
       return sources.filter((s: ExtractableSource) =>
         selectionsMap[s.index] !== false
       ).length;
     });
 
-    // Build OCR prompts for selected photos
+    // Derive photoSources from rawSources (no re-scan)
     const photoSources = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
+      const sources = rawSources;
       const selectionsMap = sourceSelections.get() || {};
       return sources.filter(
         (s: ExtractableSource) =>
@@ -1039,6 +1146,7 @@ export const ExtractorModule = recipe<
           selectionsMap[s.index] !== false,
       );
     });
+
 
     // Build OCR calls for all selected photos using map pattern
     // Each photo gets its own generateText call (framework caches per-item)
@@ -1111,7 +1219,8 @@ export const ExtractorModule = recipe<
     const preview = computed((): ExtractionPreview | null => {
       if (!extraction.result) return null;
       const subCharms = parentSubCharms.get() || [];
-      const result = buildPreview(extraction.result, subCharms);
+      const currentTitle = parentTitle.get() || "";
+      const result = buildPreview(extraction.result, subCharms, currentTitle);
       return result;
     });
 
@@ -1146,12 +1255,17 @@ export const ExtractorModule = recipe<
     const previewText = computed(() => {
       if (!extraction.result) return "No fields extracted";
       const subCharms = parentSubCharms.get() || [];
-      const previewData = buildPreview(extraction.result, subCharms);
+      const currentTitle = parentTitle.get() || "";
+      const previewData = buildPreview(extraction.result, subCharms, currentTitle);
       if (!previewData?.fields?.length) return "No fields extracted";
       return previewData.fields.map((f: ExtractedField) => {
         const current = formatValue(f.currentValue);
         const extracted = formatValue(f.extractedValue);
-        return `${f.targetModule}.${f.fieldName}: ${current} -> ${extracted}`;
+        // Show "Record Title" for record-title pseudo-type instead of module name
+        const displayModule = f.targetModule === "record-title"
+          ? "Record Title"
+          : f.targetModule;
+        return `${displayModule}.${f.fieldName}: ${current} -> ${extracted}`;
       }).join("\n");
     });
 
@@ -1168,10 +1282,14 @@ export const ExtractorModule = recipe<
       if (!extraction.result) return undefined;
       if (!snapshot.trim()) return undefined;
 
-      // Build a summary of what was extracted
+      // Build a summary of what was extracted (excluding 'notes' field)
+      // The 'notes' field contains content that should STAY in notes, not be removed
+      // We only want to remove data that was extracted to OTHER fields (email, phone, etc.)
       const extractedSummary: string[] = [];
       const result = extraction.result as Record<string, unknown>;
       for (const [key, value] of Object.entries(result)) {
+        // Skip the 'notes' field - that content should remain in Notes
+        if (key === "notes") continue;
         if (value !== null && value !== undefined) {
           const formattedValue = Array.isArray(value)
             ? value.join(", ")
@@ -1252,9 +1370,9 @@ ${extractedSummary.join("\n")}`;
     });
 
     // Count sources selected for trash (excluding Notes - Notes is never trashed)
+    // Derives from rawSources (no re-scan)
     const trashCount = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
+      const sources = rawSources;
       const trashMap = trashSelections.get() || {};
       return sources.filter((s: ExtractableSource) =>
         s.type !== "notes" && trashMap[s.index] === true
@@ -1268,16 +1386,14 @@ ${extractedSummary.join("\n")}`;
     const isErrorPhase = computed(() => currentPhase === "error");
     const isNoResultsPhase = computed(() => currentPhase === "no-results");
     // True when there are no source modules at all (Notes, Photo, Text Import)
-    const hasNoSourceModules = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      return scanExtractableSources(subCharms).length === 0;
-    });
+    // Derives from rawSources (no re-scan)
+    const hasNoSourceModules = computed(() => rawSources.length === 0);
     // True when all sources are empty (modules exist but have no content)
+    // Derives from rawSources (no re-scan)
     const hasNoUsableSources = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
+      const sources = rawSources;
       // Only count non-empty sources - empty ones are shown but not usable
-      return sources.filter((s) => !s.isEmpty).length === 0;
+      return sources.filter((s: ExtractableSource) => !s.isEmpty).length === 0;
     });
     // Dereference computed values properly to avoid comparing Cell objects to primitives
     const isSingleSource = computed(() => Number(selectedSourceCount) === 1);
@@ -1297,14 +1413,11 @@ ${extractedSummary.join("\n")}`;
     const hasTrashItems = computed(() => Number(trashCount) > 0);
 
     // Pre-computed trash selection state map
-    // Note: sourceCheckStates was removed - selection state is now ON the source objects
-    // in extractableSources computed (more idiomatic pattern)
+    // Derives from rawSources (no re-scan)
     const trashCheckStates = computed(() => {
       const selectionsMap = trashSelections.get() || {};
       const result: Record<number, boolean> = {};
-      // Trash sources use same indexing as extractable sources
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
+      const sources = rawSources;
       for (const source of sources) {
         if (source.type !== "notes") {
           result[source.index] = selectionsMap[source.index] === true;
@@ -1329,12 +1442,10 @@ ${extractedSummary.join("\n")}`;
       const enabled = typeof rawEnabled === "boolean" ? rawEnabled : true;
       return !enabled;
     });
-    const hasTrashableSources = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
-      return sources.filter((s: ExtractableSource) => s.type !== "notes")
-        .length > 0;
-    });
+    // Derives from rawSources (no re-scan)
+    const hasTrashableSources = computed(() =>
+      rawSources.filter((s: ExtractableSource) => s.type !== "notes").length > 0
+    );
     const cleanupFailed = computed(() => {
       const status = cleanupApplyStatus.get();
       return status === "failed";
@@ -2036,6 +2147,7 @@ ${extractedSummary.join("\n")}`;
                   onClick={applySelected({
                     parentSubCharmsCell: parentSubCharms,
                     parentTrashedSubCharmsCell: parentTrashedSubCharms,
+                    parentTitleCell: parentTitle,
                     extractionResultValue: extraction.result as
                       | Record<string, unknown>
                       | null,

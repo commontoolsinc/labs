@@ -300,6 +300,11 @@ export function buildExtractionSchema(): {
 // Phase 2: Get field to sub-charm type mapping
 export function getFieldToTypeMapping(): Record<string, string> {
   const fieldToType: Record<string, string> = {};
+
+  // Special mapping for Record's title field
+  // "name" extracts to "record-title" pseudo-type, handled specially in applySelected
+  fieldToType["name"] = "record-title";
+
   for (const def of Object.values(SUB_CHARM_REGISTRY)) {
     if (def.fieldMapping) {
       for (const field of def.fieldMapping) {
