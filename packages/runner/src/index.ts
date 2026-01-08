@@ -31,8 +31,8 @@ export {
 export { convertCellsToLinks, isCell, isStream } from "./cell.ts";
 export {
   getCellOrThrow,
-  isCellResult as isQueryResult,
-  isCellResultForDereferencing as isQueryResultForDereferencing,
+  isCellResult,
+  isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
