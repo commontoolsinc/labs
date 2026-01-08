@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { lift, NAME, OpaqueRef, pattern, UI, Writable } from "commontools";
+import { lift, NAME, pattern, UI, Writable } from "commontools";
 
 export type MentionableCharm = {
   [NAME]?: string;
@@ -7,6 +7,7 @@ export type MentionableCharm = {
   isMentionable?: boolean;
   mentioned: MentionableCharm[];
   backlinks: MentionableCharm[];
+  mentionable?: MentionableCharm[] | { get?: () => MentionableCharm[] };
 };
 
 export type WriteableBacklinks = {
@@ -70,9 +71,7 @@ const computeMentionable = lift<
     // notebooks are hidden but should still be mentionable
     if (c.isMentionable === false) continue;
     out.push(c);
-    const exported = (c as unknown as {
-      mentionable?: MentionableCharm[] | { get?: () => MentionableCharm[] };
-    }).mentionable;
+    const exported = c.mentionable;
     if (Array.isArray(exported)) {
       for (const m of exported) if (m && m.isMentionable !== false) out.push(m);
     } else if (exported && typeof (exported as any).get === "function") {
@@ -86,7 +85,7 @@ const computeMentionable = lift<
 
 const BacklinksIndex = pattern<Input, Output>(({ allCharms }) => {
   computeIndex({
-    allCharms: allCharms as unknown as OpaqueRef<WriteableBacklinks[]>,
+    allCharms,
   });
 
   // Compute mentionable list from allCharms reactively
