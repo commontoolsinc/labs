@@ -1965,7 +1965,7 @@ export function toJSONValue(
   // Note: This function works by round-tripping through a JSON string, which
   // isn't particularly efficient.
 
-  const replacer = (key: string, value: any) => {
+  const replacer = (_key: string, value: any) => {
     if ((typeof value !== "object") || (value === null)) {
       return value;
     }
@@ -1985,8 +1985,8 @@ export function toJSONValue(
       };
     }
 
-    // TODO: Consider other library objects for special-case handling, such
-    // as `Map`, `Set`, and `RegExp`.
+    // TODO(@danfuzz): Consider other library objects for special-case handling,
+    // such as `Map`, `Set`, and `RegExp`.
 
     return value;
   };
