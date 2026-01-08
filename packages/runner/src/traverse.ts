@@ -1203,7 +1203,7 @@ export function combineSchema(
       ...linkSchema,
       ...parentSchema,
       properties: mergedSchemaProperties,
-      ...(required && { required} ),
+      ...(required && { required }),
     };
   } else if (
     (isObject(linkSchema) && linkSchema.type === "array") &&
@@ -1964,7 +1964,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       // default to true. However, if we provided the `properties` field, we
       // treat this specially, and don't invalidate the object, but also don't
       // descend down into that property.
-      // This behavior is delegated to the objectCreator, so we can have 
+      // This behavior is delegated to the objectCreator, so we can have
       // different handling in cell.get (validateAndTransform) and query.
       if (isObject(schemaProperties) && propSchema === undefined) {
         this.objectCreator.addOptionalProperty(filteredObj, propKey, propValue);
