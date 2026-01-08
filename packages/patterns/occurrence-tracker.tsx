@@ -11,6 +11,8 @@ import {
   computed,
   type Default,
   handler,
+  ifElse,
+  lift,
   NAME,
   recipe,
   UI,
@@ -21,7 +23,7 @@ import type { ModuleMetadata } from "./container-protocol.ts";
 export const MODULE_METADATA: ModuleMetadata = {
   type: "occurrence-tracker",
   label: "Occurrence Tracker",
-  icon: "\u{1F4CD}", // pushpin
+  icon: "📍", // pushpin
   allowMultiple: true,
   schema: {
     label: { type: "string", description: "What is being tracked" },
@@ -121,6 +123,12 @@ function calculateAverageFrequency(sorted: readonly Occurrence[]): number | null
   return totalMs / (sorted.length - 1);
 }
 
+// Lifted helper for frequency display
+const formatFrequencyFromList = lift((list: Occurrence[]): string => {
+  const sorted = getSortedOccurrences(list || []);
+  return formatFrequency(calculateAverageFrequency(sorted));
+});
+
 // ===== Handlers =====
 
 const recordNow = handler<unknown, { occurrences: Cell<Occurrence[]> }>(
@@ -148,25 +156,11 @@ export const OccurrenceTrackerModule = recipe<
   OccurrenceTrackerInput,
   OccurrenceTrackerInput
 >("OccurrenceTrackerModule", ({ label, occurrences }) => {
-  // Local UI state: track whether history is expanded
-  const historyOpen = Cell.of(false);
-
   // Computed: total count
   const totalCount = computed(() => (occurrences.get() || []).length);
 
-  // Computed: most recent occurrence
-  const lastOccurrence = computed(() => {
-    const list = occurrences.get() || [];
-    const sorted = getSortedOccurrences(list);
-    return sorted.length > 0 ? sorted[0] : null;
-  });
-
-  // Computed: average frequency
-  const averageFrequency = computed(() => {
-    const list = occurrences.get() || [];
-    const sorted = getSortedOccurrences(list);
-    return calculateAverageFrequency(sorted);
-  });
+  // Computed: has any occurrences
+  const hasOccurrences = computed(() => (occurrences.get() || []).length > 0);
 
   // Computed: display name for NAME
   const displayName = computed(() => {
@@ -269,15 +263,17 @@ export const OccurrenceTrackerModule = recipe<
           );
         })}
 
-        {/* Stats Section */}
+        {/* Stats Section - using component attributes for layout */}
         <ct-hstack
           gap="4"
-          style="justify-content: space-around; padding: 0.75rem; background: var(--ct-color-gray-50); border-radius: 8px;"
+          justify="around"
+          style={{
+            padding: "0.75rem",
+            background: "var(--ct-color-gray-50)",
+            borderRadius: "8px",
+          }}
         >
-          <ct-vstack
-            gap="0"
-            style="align-items: center;"
-          >
+          <ct-vstack gap="0" align="center">
             <span
               style={{
                 fontSize: "1.5rem",
@@ -295,21 +291,14 @@ export const OccurrenceTrackerModule = recipe<
               Total
             </span>
           </ct-vstack>
-          <ct-vstack
-            gap="0"
-            style="align-items: center;"
-          >
+          <ct-vstack gap="0" align="center">
             <span
               style={{
                 fontSize: "1rem",
                 fontWeight: "500",
               }}
             >
-              {computed(() => {
-                const list = occurrences.get() || [];
-                const sorted = getSortedOccurrences(list);
-                return formatFrequency(calculateAverageFrequency(sorted));
-              })}
+              {formatFrequencyFromList(occurrences)}
             </span>
             <span
               style={{
@@ -322,65 +311,62 @@ export const OccurrenceTrackerModule = recipe<
           </ct-vstack>
         </ct-hstack>
 
-        {/* Expandable History */}
-        {computed(() => {
-          const count = (occurrences.get() || []).length;
-          if (count === 0) return null;
-          return (
-            <details
-              open={historyOpen.get()}
-              onClick={() => {
-                // Toggle on next tick after native behavior
-                setTimeout(() => {
-                  historyOpen.set(!historyOpen.get());
-                }, 0);
-              }}
-              style="margin-top: 0.5rem;"
-            >
-              <summary style="cursor: pointer; font-size: 0.875rem; color: var(--ct-color-gray-600); padding: 0.5rem 0;">
-                History ({count})
-              </summary>
-              <ct-vstack gap="1" style="margin-top: 0.5rem; max-height: 400px; overflow-y: auto;">
-                {getSortedOccurrences(occurrences.get() || []).map((occ: Occurrence) => (
-                  <ct-hstack
-                    gap="2"
-                    style="padding: 0.5rem; background: var(--ct-color-gray-50); border-radius: 6px; align-items: center;"
+        {/* Expandable History - using ifElse to preserve details state */}
+        {ifElse(
+          hasOccurrences,
+          <details style={{ marginTop: "0.5rem" }}>
+            <summary style={{
+              cursor: "pointer",
+              fontSize: "0.875rem",
+              color: "var(--ct-color-gray-600)",
+              padding: "0.5rem 0",
+            }}>
+              History ({totalCount})
+            </summary>
+            <ct-vstack gap="1" style={{ marginTop: "0.5rem", maxHeight: "400px", overflowY: "auto" }}>
+              {occurrences.map((occ) => (
+                <ct-hstack
+                  gap="2"
+                  align="center"
+                  style={{
+                    padding: "0.5rem",
+                    background: "var(--ct-color-gray-50)",
+                    borderRadius: "6px",
+                  }}
+                >
+                  <ct-vstack gap="0" style={{ flex: "1" }}>
+                    <span style={{ fontSize: "0.875rem" }}>
+                      {lift((ts: string) => `${formatRelativeTime(ts)} · ${formatHistoryTime(ts)}`)(occ.timestamp)}
+                    </span>
+                    <ct-input
+                      $value={occ.note}
+                      placeholder="Add note..."
+                      style={{
+                        fontSize: "0.75rem",
+                        marginTop: "0.25rem",
+                        flex: "1",
+                      }}
+                    />
+                  </ct-vstack>
+                  <ct-button
+                    variant="ghost"
+                    onClick={deleteOccurrence({ occurrences, timestamp: occ.timestamp })}
+                    style={{
+                      padding: "0.25rem 0.5rem",
+                      fontSize: "1rem",
+                      color: "var(--ct-color-gray-400)",
+                      minWidth: "auto",
+                    }}
+                    title="Delete"
                   >
-                    <ct-vstack gap="0" style="flex: 1;">
-                      <span style="font-size: 0.875rem;">
-                        {formatRelativeTime(occ.timestamp)} ·{" "}
-                        {formatHistoryTime(occ.timestamp)}
-                      </span>
-                      <ct-input
-                        value={occ.note || ""}
-                        placeholder="Add note..."
-                        style="font-size: 0.75rem; margin-top: 0.25rem; flex: 1;"
-                        onct-input={(e: { detail?: { value?: string } }) => {
-                          const newNote = e.detail?.value?.trim() || "";
-                          const current = occurrences.get() || [];
-                          const idx = current.findIndex((o) => o.timestamp === occ.timestamp);
-                          if (idx >= 0) {
-                            const updated = [...current];
-                            updated[idx] = { ...updated[idx], note: newNote };
-                            occurrences.set(updated);
-                          }
-                        }}
-                      />
-                    </ct-vstack>
-                    <ct-button
-                      variant="ghost"
-                      onClick={deleteOccurrence({ occurrences, timestamp: occ.timestamp })}
-                      style="padding: 0.25rem 0.5rem; font-size: 1rem; color: var(--ct-color-gray-400); min-width: auto;"
-                      title="Delete"
-                    >
-                      ×
-                    </ct-button>
-                  </ct-hstack>
-                ))}
-              </ct-vstack>
-            </details>
-          );
-        })}
+                    ×
+                  </ct-button>
+                </ct-hstack>
+              ))}
+            </ct-vstack>
+          </details>,
+          null,
+        )}
       </ct-vstack>
     ),
     label,
