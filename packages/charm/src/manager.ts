@@ -927,7 +927,7 @@ export class CharmManager {
       ? await this.get<T>(charmOrId)
       : charmOrId;
     if (!charm) throw new Error("Charm not found");
-    this.runtime.start(charm);
+    await this.runtime.start(charm);
     await this.runtime.idle();
     await this.synced();
   }
