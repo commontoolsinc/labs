@@ -111,7 +111,8 @@ export default pattern<TestInput>(({ value }) => {
       <div style={{ padding: "20px", fontFamily: "monospace" }}>
         <h2>Superstition: Timing in computed() Only Measures Setup</h2>
         <p style={{ color: "#666", marginBottom: "20px" }}>
-          CLAIM: console.time() inside computed() doesn't capture reactive re-executions.
+          CLAIM: console.time() inside computed() doesn't capture reactive
+          re-executions.
         </p>
 
         {/* Current Value */}
@@ -128,7 +129,14 @@ export default pattern<TestInput>(({ value }) => {
           <div style={{ marginTop: "5px" }}>
             Computed result: {timedComputed}
           </div>
-          <div style={{ display: "flex", gap: "10px", marginTop: "10px", flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: "10px",
+              marginTop: "10px",
+              flexWrap: "wrap",
+            }}
+          >
             <ct-button onClick={triggerUpdate({ value })}>
               Trigger Update (+1)
             </ct-button>
@@ -159,10 +167,18 @@ export default pattern<TestInput>(({ value }) => {
               border: "2px solid #f44336",
             }}
           >
-            <h3 style={{ color: "#c62828", margin: "0 0 10px 0", fontSize: "14px" }}>
+            <h3
+              style={{
+                color: "#c62828",
+                margin: "0 0 10px 0",
+                fontSize: "14px",
+              }}
+            >
               WRONG: Timing
             </h3>
-            <div style={{ fontSize: "24px", fontWeight: "bold", color: "#c62828" }}>
+            <div
+              style={{ fontSize: "24px", fontWeight: "bold", color: "#c62828" }}
+            >
               {timingDisplay}ms
             </div>
             <p style={{ fontSize: "11px", color: "#666", marginTop: "10px" }}>
@@ -179,10 +195,18 @@ export default pattern<TestInput>(({ value }) => {
               border: "2px solid #4caf50",
             }}
           >
-            <h3 style={{ color: "#2e7d32", margin: "0 0 10px 0", fontSize: "14px" }}>
+            <h3
+              style={{
+                color: "#2e7d32",
+                margin: "0 0 10px 0",
+                fontSize: "14px",
+              }}
+            >
               CORRECT: Call Count
             </h3>
-            <div style={{ fontSize: "24px", fontWeight: "bold", color: "#2e7d32" }}>
+            <div
+              style={{ fontSize: "24px", fontWeight: "bold", color: "#2e7d32" }}
+            >
               {computedCountDisplay}
             </div>
             <p style={{ fontSize: "11px", color: "#666", marginTop: "10px" }}>
@@ -270,11 +294,18 @@ computed(() => {
           }}
         >
           <h3 style={{ margin: "0 0 10px 0" }}>Analysis</h3>
-          <div style={{ padding: "10px", backgroundColor: "#fffde7", borderRadius: "4px" }}>
+          <div
+            style={{
+              padding: "10px",
+              backgroundColor: "#fffde7",
+              borderRadius: "4px",
+            }}
+          >
             <strong>Expected Result:</strong>
             <ul style={{ margin: "5px 0 0 0", paddingLeft: "20px" }}>
               <li>
-                Timing value stays roughly constant (just measures one execution)
+                Timing value stays roughly constant (just measures one
+                execution)
               </li>
               <li>
                 Call count increases with each update
@@ -285,8 +316,9 @@ computed(() => {
             </ul>
           </div>
           <p style={{ marginTop: "10px", fontSize: "12px", color: "#666" }}>
-            <strong>Why:</strong> Reactive re-executions are scheduled via setTimeout(..., 0)
-            and go through the scheduler's execute() method. The timing inside your
+            <strong>Why:</strong>{" "}
+            Reactive re-executions are scheduled via setTimeout(..., 0) and go
+            through the scheduler's execute() method. The timing inside your
             computed body only captures when the closure actually runs, not the
             full reactive cycle overhead.
           </p>

@@ -125,7 +125,13 @@ export default pattern<TestInput>(({ isReady }) => {
           }}
         >
           <h3 style={{ margin: "0 0 10px 0" }}>Current State</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "20px",
+            }}
+          >
             <div>
               <strong>isReady:</strong>{" "}
               <span style={{ color: isReady ? "#2e7d32" : "#c62828" }}>
@@ -279,7 +285,14 @@ export default pattern<TestInput>(({ isReady }) => {
             <li>Click "Set Ready" - both should show "ready"</li>
             <li>Click "Set Data" - observe the difference:</li>
           </ol>
-          <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "#fffde7", borderRadius: "4px" }}>
+          <div
+            style={{
+              marginTop: "10px",
+              padding: "10px",
+              backgroundColor: "#fffde7",
+              borderRadius: "4px",
+            }}
+          >
             <strong>Expected Result:</strong>
             <ul style={{ margin: "5px 0 0 0", paddingLeft: "20px" }}>
               <li>

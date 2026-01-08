@@ -115,7 +115,9 @@ export default pattern<TestInput>(({ items }) => {
             >
               {items.map((item, idx: number) => (
                 <div key={idx} style={{ padding: "2px 0" }}>
-                  {computed(() => expensiveInline(String(item)))}
+                  {computed(() =>
+                    expensiveInline(String(item))
+                  )}
                 </div>
               ))}
             </div>
@@ -191,10 +193,20 @@ export default pattern<TestInput>(({ items }) => {
             <li>Click "Trigger Update" button</li>
             <li>Count "INLINE:" vs "PRECOMPUTED:" messages</li>
           </ol>
-          <div style={{ marginTop: "15px", padding: "10px", backgroundColor: "#fffde7", borderRadius: "4px" }}>
+          <div
+            style={{
+              marginTop: "15px",
+              padding: "10px",
+              backgroundColor: "#fffde7",
+              borderRadius: "4px",
+            }}
+          >
             <strong>Expected Result:</strong>
             <ul style={{ margin: "5px 0 0 0", paddingLeft: "20px" }}>
-              <li>If INLINE appears ~N times more than PRECOMPUTED → superstition TRUE</li>
+              <li>
+                If INLINE appears ~N times more than PRECOMPUTED → superstition
+                TRUE
+              </li>
               <li>If both appear same number of times → superstition FALSE</li>
             </ul>
           </div>

@@ -245,9 +245,19 @@ export default pattern<TestInput>(({ state }) => {
               BAD: Nested ifElse(computed())
             </h3>
             {nestedVersion}
-            <div style={{ marginTop: "15px", borderTop: "1px solid #ffcdd2", paddingTop: "10px" }}>
-              <div>Outer computed() calls: <strong>{nestedOuterDisplay}</strong></div>
-              <div>Inner computed() calls: <strong>{nestedInnerDisplay}</strong></div>
+            <div
+              style={{
+                marginTop: "15px",
+                borderTop: "1px solid #ffcdd2",
+                paddingTop: "10px",
+              }}
+            >
+              <div>
+                Outer computed() calls: <strong>{nestedOuterDisplay}</strong>
+              </div>
+              <div>
+                Inner computed() calls: <strong>{nestedInnerDisplay}</strong>
+              </div>
               <div style={{ color: "#c62828", fontWeight: "bold" }}>
                 Total: {computed(() => nestedComputedCount + nestedInnerCount)}
               </div>
@@ -267,8 +277,16 @@ export default pattern<TestInput>(({ state }) => {
               GOOD: Single derive()
             </h3>
             {singleVersion}
-            <div style={{ marginTop: "15px", borderTop: "1px solid #c8e6c9", paddingTop: "10px" }}>
-              <div>derive() calls: <strong>{singleDisplay}</strong></div>
+            <div
+              style={{
+                marginTop: "15px",
+                borderTop: "1px solid #c8e6c9",
+                paddingTop: "10px",
+              }}
+            >
+              <div>
+                derive() calls: <strong>{singleDisplay}</strong>
+              </div>
               <div style={{ color: "#2e7d32", fontWeight: "bold" }}>
                 Total: {singleDisplay}
               </div>
@@ -285,17 +303,25 @@ export default pattern<TestInput>(({ state }) => {
           }}
         >
           <h3 style={{ margin: "0 0 10px 0" }}>Analysis</h3>
-          <div style={{ padding: "10px", backgroundColor: "#fffde7", borderRadius: "4px" }}>
+          <div
+            style={{
+              padding: "10px",
+              backgroundColor: "#fffde7",
+              borderRadius: "4px",
+            }}
+          >
             <strong>Expected Result:</strong>
             <ul style={{ margin: "5px 0 0 0", paddingLeft: "20px" }}>
               <li>If nested total {">"} single total, superstition is TRUE</li>
               <li>The ratio shows the subscription cascade effect</li>
-              <li>Under rapid updates, nested may show significantly more calls</li>
+              <li>
+                Under rapid updates, nested may show significantly more calls
+              </li>
             </ul>
           </div>
           <p style={{ marginTop: "10px", fontSize: "12px", color: "#666" }}>
-            Note: Both approaches are semantically equivalent - they show the same UI.
-            The difference is in reactive efficiency.
+            Note: Both approaches are semantically equivalent - they show the
+            same UI. The difference is in reactive efficiency.
           </p>
         </div>
       </div>

@@ -44,7 +44,10 @@ const setUndefinedValue = handler<unknown, { cell: Cell<string | undefined> }>(
   },
 );
 
-const setActualValue = handler<unknown, { cell: Cell<string | null | undefined> }>(
+const setActualValue = handler<
+  unknown,
+  { cell: Cell<string | null | undefined> }
+>(
   (_event, { cell }) => {
     cell.set("Hello!");
   },
@@ -84,7 +87,9 @@ export default pattern(() => {
     if (value === null) return "primitive null";
     if (value === undefined) return "undefined";
     if (typeof value === "string") return "string";
-    if (typeof value === "object") return `object: ${JSON.stringify(value).slice(0, 50)}`;
+    if (typeof value === "object") {
+      return `object: ${JSON.stringify(value).slice(0, 50)}`;
+    }
     return typeof value;
   });
 
@@ -93,7 +98,9 @@ export default pattern(() => {
     if (value === null) return "primitive null";
     if (value === undefined) return "undefined";
     if (typeof value === "string") return "string";
-    if (typeof value === "object") return `object: ${JSON.stringify(value).slice(0, 50)}`;
+    if (typeof value === "object") {
+      return `object: ${JSON.stringify(value).slice(0, 50)}`;
+    }
     return typeof value;
   });
 
@@ -194,7 +201,14 @@ export default pattern(() => {
               </table>
             </div>
 
-            <div style={{ marginTop: "10px", display: "flex", gap: "5px", flexWrap: "wrap" }}>
+            <div
+              style={{
+                marginTop: "10px",
+                display: "flex",
+                gap: "5px",
+                flexWrap: "wrap",
+              }}
+            >
               <ct-button onClick={setNullValue({ cell: cellWithNull })}>
                 Set null
               </ct-button>
@@ -293,8 +307,17 @@ export default pattern(() => {
               </table>
             </div>
 
-            <div style={{ marginTop: "10px", display: "flex", gap: "5px", flexWrap: "wrap" }}>
-              <ct-button onClick={setUndefinedValue({ cell: cellWithUndefined })}>
+            <div
+              style={{
+                marginTop: "10px",
+                display: "flex",
+                gap: "5px",
+                flexWrap: "wrap",
+              }}
+            >
+              <ct-button
+                onClick={setUndefinedValue({ cell: cellWithUndefined })}
+              >
                 Set undefined
               </ct-button>
               <ct-button onClick={setActualValue({ cell: cellWithUndefined })}>
@@ -341,11 +364,18 @@ export default pattern(() => {
           }}
         >
           <h3 style={{ margin: "0 0 10px 0" }}>Analysis</h3>
-          <div style={{ padding: "10px", backgroundColor: "#fffde7", borderRadius: "4px" }}>
+          <div
+            style={{
+              padding: "10px",
+              backgroundColor: "#fffde7",
+              borderRadius: "4px",
+            }}
+          >
             <strong>Expected Result:</strong>
             <ul style={{ margin: "5px 0 0 0", paddingLeft: "20px" }}>
               <li>
-                If Cell.of(null).get() !== null is TRUE initially, superstition is TRUE
+                If Cell.of(null).get() !== null is TRUE initially, superstition
+                is TRUE
               </li>
               <li>
                 The typeof should show "object" instead of "primitive null"

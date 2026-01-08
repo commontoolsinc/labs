@@ -37,14 +37,17 @@ import {
 } from "commontools";
 
 interface TestInput {
-  items: Default<{ id: string; value: number }[], [{ id: "a", value: 1 }]>;
+  items: Default<{ id: string; value: number }[], [{ id: "a"; value: 1 }]>;
 }
 
 // Global counters
 let equalsEvalCount = 0;
 let referenceEvalCount = 0;
 
-const updateItems = handler<unknown, { items: Cell<{ id: string; value: number }[]> }>(
+const updateItems = handler<
+  unknown,
+  { items: Cell<{ id: string; value: number }[]> }
+>(
   (_event, { items }) => {
     const current = items.get() || [];
     // Update values but keep same structure
@@ -57,7 +60,10 @@ const updateItems = handler<unknown, { items: Cell<{ id: string; value: number }
   },
 );
 
-const addItem = handler<unknown, { items: Cell<{ id: string; value: number }[]> }>(
+const addItem = handler<
+  unknown,
+  { items: Cell<{ id: string; value: number }[]> }
+>(
   (_event, { items }) => {
     const current = items.get() || [];
     const newId = String.fromCharCode(97 + current.length); // a, b, c...
@@ -141,7 +147,8 @@ export default pattern<TestInput>(({ items }) => {
       <div style={{ padding: "20px", fontFamily: "monospace" }}>
         <h2>Superstition: Cell.equals() in lift() Creates Subscriptions</h2>
         <p style={{ color: "#666", marginBottom: "20px" }}>
-          CLAIM: Cell.equals() inside lift() creates hidden reactive subscriptions.
+          CLAIM: Cell.equals() inside lift() creates hidden reactive
+          subscriptions.
         </p>
 
         {/* Current State */}
@@ -162,7 +169,10 @@ export default pattern<TestInput>(({ items }) => {
               marginBottom: "10px",
             }}
           >
-            {(items || []).map((item: { id: string; value: number }, idx: number) => (
+            {(items || []).map((
+              item: { id: string; value: number },
+              idx: number,
+            ) => (
               <span
                 key={idx}
                 style={{
@@ -296,14 +306,22 @@ export default pattern<TestInput>(({ items }) => {
           }}
         >
           <h3 style={{ margin: "0 0 10px 0" }}>Analysis</h3>
-          <div style={{ padding: "10px", backgroundColor: "#fffde7", borderRadius: "4px" }}>
+          <div
+            style={{
+              padding: "10px",
+              backgroundColor: "#fffde7",
+              borderRadius: "4px",
+            }}
+          >
             <strong>Expected Result:</strong>
             <ul style={{ margin: "5px 0 0 0", paddingLeft: "20px" }}>
               <li>
-                If Cell.equals version has more evaluations, superstition is TRUE
+                If Cell.equals version has more evaluations, superstition is
+                TRUE
               </li>
               <li>
-                In severe cases (nested cells, cycles), Cell.equals can cause infinite loops
+                In severe cases (nested cells, cycles), Cell.equals can cause
+                infinite loops
               </li>
               <li>
                 The === version should have predictable evaluation counts
@@ -311,9 +329,9 @@ export default pattern<TestInput>(({ items }) => {
             </ul>
           </div>
           <p style={{ marginTop: "10px", fontSize: "12px", color: "#666" }}>
-            Note: This simplified test may not show the full severity.
-            Real infinite loops occur when Cell.equals reads nested cells that
-            form a cycle with the lift's output.
+            Note: This simplified test may not show the full severity. Real
+            infinite loops occur when Cell.equals reads nested cells that form a
+            cycle with the lift's output.
           </p>
         </div>
       </div>
