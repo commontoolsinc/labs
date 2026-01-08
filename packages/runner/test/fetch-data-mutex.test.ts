@@ -301,7 +301,7 @@ describe("fetch-data mutex mechanism", () => {
     globalThis.fetch = slowFetch;
   });
 
-  it.only("should handle fetch errors gracefully", async () => {
+  it("should handle fetch errors gracefully", async () => {
     // Mock fetch to return an error
     globalThis.fetch = async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -337,6 +337,10 @@ describe("fetch-data mutex mechanism", () => {
 
     // Should have an error
     expect(data.error).toBeDefined();
+    expect(data.error).toHaveProperty("@Error");
+    const errorInfo = (data.error as { "@Error": Record<string, unknown> })["@Error"];
+    expect(errorInfo.name).toBe("Error");
+    expect(errorInfo.message).toMatch(/HTTP 404/);
     expect(data.pending).toBe(false);
   });
 
