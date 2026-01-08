@@ -137,7 +137,11 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
       );
     },
     schema: {
-      content: { type: "string", description: "Free-form notes and content" },
+      content: {
+        type: "string",
+        description:
+          "IMPORTANT: Output the REMAINING text that should stay in Notes after extraction. Include any text that was NOT extracted into structured fields above (preferences, personality traits, conversational context, hobby mentions, etc). Return null ONLY if ALL content was extracted into structured fields.",
+      },
     },
     fieldMapping: ["content", "notes"],
     // Notes exports embeddedUI for streamlined container rendering
@@ -245,18 +249,66 @@ export function buildExtractionSchema(): {
   type: "object";
   properties: Record<string, unknown>;
 } {
-  const properties: Record<string, unknown> = {};
+  const properties: Record<string, unknown> = {
+    // Record's own title field - for extracting names/titles
+    // Use "name" as field since LLMs naturally extract person names to "name"
+    name: {
+      type: "string",
+      description:
+        "The primary name for this record - person's full name, recipe name, place name, project name, etc. This becomes the record's title.",
+    },
+  };
+
   for (const def of Object.values(SUB_CHARM_REGISTRY)) {
-    if (def.schema) {
-      Object.assign(properties, def.schema);
+    if (!def.schema) continue;
+
+    // Add primary schema fields
+    Object.assign(properties, def.schema);
+
+    // Add fieldMapping aliases to schema for LLM flexibility
+    // This allows LLMs to extract to natural field names like "email" instead of just "address"
+    if (def.fieldMapping && def.fieldMapping.length > 0) {
+      // First entry in fieldMapping is the primary field (already in schema)
+      const primaryField = def.fieldMapping[0];
+      const primarySchema = def.schema[primaryField];
+
+      // Add aliases (indices 1+) that reference the same type/format
+      for (let i = 1; i < def.fieldMapping.length; i++) {
+        const aliasField = def.fieldMapping[i];
+
+        // Skip if alias already exists in properties (avoid conflicts)
+        if (properties[aliasField]) continue;
+
+        // Create alias schema entry with clear description
+        if (primarySchema && typeof primarySchema === "object") {
+          properties[aliasField] = {
+            ...primarySchema,
+            description: `${
+              (primarySchema as { description?: string }).description || ""
+            } (alias for ${primaryField})`.trim(),
+          };
+        } else {
+          // Fallback if primary schema is malformed
+          properties[aliasField] = {
+            type: "string",
+            description: `Alias for ${primaryField} in ${def.type} module`,
+          };
+        }
+      }
     }
   }
+
   return { type: "object", properties };
 }
 
 // Phase 2: Get field to sub-charm type mapping
 export function getFieldToTypeMapping(): Record<string, string> {
   const fieldToType: Record<string, string> = {};
+
+  // Special mapping for Record's title field
+  // "name" extracts to "record-title" pseudo-type, handled specially in applySelected
+  fieldToType["name"] = "record-title";
+
   for (const def of Object.values(SUB_CHARM_REGISTRY)) {
     if (def.fieldMapping) {
       for (const field of def.fieldMapping) {

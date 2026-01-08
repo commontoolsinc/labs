@@ -18,7 +18,14 @@ export const MODULE_METADATA: ModuleMetadata = {
     birthDay: { type: "string", description: "Birth day (1-31)" },
     birthYear: { type: "string", description: "Birth year (YYYY)" },
   },
-  fieldMapping: ["birthMonth", "birthDay", "birthYear"],
+  fieldMapping: [
+    "birthMonth",
+    "birthDay",
+    "birthYear",
+    "birthday",
+    "dob",
+    "dateOfBirth",
+  ],
 };
 
 // ===== Autocomplete Items =====

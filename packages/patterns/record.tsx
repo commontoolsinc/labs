@@ -264,12 +264,13 @@ const closeExpanded = handler<
 
 // Add a new sub-charm
 // Note: Receives recordPatternJson to create Notes with correct wiki-link target
-// Note: Controller modules (extractor) also receive parent Cells
+// Note: Controller modules (extractor) also receive parent Cells and title
 const addSubCharm = handler<
   { detail: { value: string } },
   {
     subCharms: Cell<SubCharmEntry[]>;
     trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+    title: Cell<string>;
     selectedAddType: Cell<string>;
     recordPatternJson: string;
   }
@@ -278,6 +279,7 @@ const addSubCharm = handler<
   {
     subCharms: sc,
     trashedSubCharms: trash,
+    title,
     selectedAddType: sat,
     recordPatternJson,
   },
@@ -294,13 +296,14 @@ const addSubCharm = handler<
 
   // Special case: create Note (rendered via ct-render variant="embedded")
   // Pass recordPatternJson so [[wiki-links]] create Record charms instead of Note charms
-  // Special case: create ExtractorModule as controller with parent Cells
+  // Special case: create ExtractorModule as controller with parent Cells and title
   const charm = type === "notes"
     ? Note({ linkPattern: recordPatternJson })
     : type === "extractor"
     ? ExtractorModule({
       parentSubCharms: sc,
       parentTrashedSubCharms: trash,
+      parentTitle: title,
     } as any)
     : createSubCharm(type, initialValues);
 
@@ -582,10 +585,11 @@ const handleAddModule = handler<
   {
     subCharms: Cell<SubCharmEntry[]>;
     trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+    title: Cell<string>;
   }
 >((
   { type, initialData, result },
-  { subCharms: sc, trashedSubCharms: trash },
+  { subCharms: sc, trashedSubCharms: trash, title },
 ) => {
   if (!type) {
     if (result) {
@@ -627,10 +631,11 @@ const handleAddModule = handler<
     }
     return;
   } else if (type === "extractor") {
-    // ExtractorModule needs parent Cells
+    // ExtractorModule needs parent Cells and title
     charm = ExtractorModule({
       parentSubCharms: sc,
       parentTrashedSubCharms: trash,
+      parentTitle: title,
       // deno-lint-ignore no-explicit-any
     } as any);
   } else {
@@ -1147,6 +1152,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                 onct-change={addSubCharm({
                   subCharms,
                   trashedSubCharms,
+                  title,
                   selectedAddType,
                   recordPatternJson,
                 })}
@@ -2283,7 +2289,7 @@ const Record = pattern<RecordInput, RecordOutput>(
       // LLM-callable streams for Omnibot integration
       // Omnibot can invoke these via: invoke({ "@link": "/of:record-id/getSummary" }, {})
       getSummary: handleGetSummary({ title, subCharms }),
-      addModule: handleAddModule({ subCharms, trashedSubCharms }),
+      addModule: handleAddModule({ subCharms, trashedSubCharms, title }),
       updateModule: handleUpdateModule({ subCharms }),
       removeModule: handleRemoveModule({ subCharms, trashedSubCharms }),
       setTitle: handleSetTitle({ title }),

@@ -29,21 +29,29 @@ export const MODULE_METADATA: ModuleMetadata = {
   type: "dietary-restrictions",
   label: "Dietary Restrictions",
   icon: "\u{1F37D}\u{FE0F}", // 🍽️ plate with cutlery
+  // NOTE: For LLM extraction, we accept structured objects with name and level.
+  // The module also accepts plain strings for backwards compatibility,
+  // converting them to RestrictionEntry objects with default levels.
   schema: {
     restrictions: {
       type: "array",
       items: {
         type: "object",
         properties: {
-          name: { type: "string", description: "Restriction name" },
+          name: {
+            type: "string",
+            description:
+              "The restriction (e.g., 'nightshades', 'peanuts', 'vegetarian')",
+          },
           level: {
             type: "string",
             enum: ["flexible", "prefer", "strict", "absolute"],
-            description: "Restriction level",
+            description:
+              "Severity: flexible (if convenient), prefer (unless inconvenient), strict (strong preference), absolute (no exceptions/allergy)",
           },
         },
       },
-      description: "List of dietary restrictions",
+      description: "Dietary restrictions with severity levels",
     },
   },
   fieldMapping: ["restrictions", "dietary", "allergies", "diet"],
@@ -65,8 +73,12 @@ export interface RestrictionEntry {
   level: RestrictionLevel;
 }
 
+// Input accepts either string[] (from LLM extraction) or RestrictionEntry[] (from UI)
+// The module normalizes strings to RestrictionEntry objects internally
+export type RestrictionInput = string | RestrictionEntry;
+
 export interface DietaryRestrictionsInput {
-  restrictions: Default<RestrictionEntry[], []>;
+  restrictions: Default<RestrictionInput[], []>;
 }
 
 // ===== Restriction Categories =====
@@ -1059,6 +1071,59 @@ function getDefaultLevel(name: string): RestrictionLevel {
   return getGroup(name)?.defaultLevel || "prefer";
 }
 
+/**
+ * Normalize a single restriction item to RestrictionEntry format.
+ * Accepts both string (from LLM extraction) and RestrictionEntry (from UI).
+ * This enables the module to handle extraction data like ["nightshades", "dairy"]
+ * as well as existing data like [{ name: "dairy", level: "strict" }].
+ *
+ * IMPORTANT: When iterating over reactive arrays inside computed(), each item
+ * is a proxy object. `typeof item === "string"` returns false for proxies.
+ * We must check for object properties first, then coerce to string.
+ */
+function normalizeRestrictionItem(
+  item: string | RestrictionEntry | unknown,
+): RestrictionEntry {
+  // Skip null/undefined
+  if (item == null) {
+    return { name: "", level: "prefer" };
+  }
+
+  // Handle RestrictionEntry format (from UI or LLM structured extraction) - check first since
+  // proxies are objects, and we want to check for .name property explicitly
+  if (typeof item === "object" && item !== null) {
+    // Check if it has a 'name' property that is a non-empty string
+    const maybeEntry = item as { name?: unknown; level?: unknown };
+    if (
+      maybeEntry.name !== undefined &&
+      maybeEntry.name !== null &&
+      String(maybeEntry.name).trim() !== ""
+    ) {
+      const name = String(maybeEntry.name);
+      const level = (maybeEntry.level as RestrictionLevel) ||
+        getDefaultLevel(name);
+      return { name, level };
+    }
+    // Object without valid name property - coerce to string
+    // This handles proxy objects wrapping string values
+    const strValue = String(item);
+    if (strValue && strValue !== "[object Object]") {
+      return { name: strValue, level: getDefaultLevel(strValue) };
+    }
+    // Fallback for malformed objects
+    return { name: "", level: "prefer" };
+  }
+
+  // Handle primitive string format (backwards compatibility)
+  const strValue = String(item);
+  if (strValue && strValue.trim()) {
+    return { name: strValue, level: getDefaultLevel(strValue) };
+  }
+
+  // Fallback for empty strings or other edge cases
+  return { name: "", level: "prefer" };
+}
+
 // Build reverse index: member -> parent groups
 function buildParentIndex(): Map<string, string[]> {
   const index = new Map<string, string[]>();
@@ -1228,7 +1293,12 @@ const _addRestriction = handler<
   const name = input.get().trim();
   if (!name) return;
 
-  const current = restrictions.get() || [];
+  // Normalize to handle both string[] and RestrictionEntry[] from storage
+  // Filter out null items and empty names to match normalizedRestrictions computed
+  const current = (restrictions.get() || [])
+    .filter((item) => item != null)
+    .map(normalizeRestrictionItem)
+    .filter((entry) => entry.name && entry.name.trim() !== "");
   if (current.some((r) => r.name.toLowerCase() === name.toLowerCase())) {
     input.set("");
     return;
@@ -1245,7 +1315,12 @@ const removeRestriction = handler<
   unknown,
   { restrictions: Cell<RestrictionEntry[]>; index: number }
 >((_event, { restrictions, index }) => {
-  const current = restrictions.get() || [];
+  // Normalize to handle both string[] and RestrictionEntry[] from storage
+  // Filter out null items and empty names to match normalizedRestrictions computed
+  const current = (restrictions.get() || [])
+    .filter((item) => item != null)
+    .map(normalizeRestrictionItem)
+    .filter((entry) => entry.name && entry.name.trim() !== "");
   restrictions.set(current.toSpliced(index, 1));
 });
 
@@ -1261,7 +1336,12 @@ const cycleLevel = handler<
   unknown,
   { restrictions: Cell<RestrictionEntry[]>; index: number }
 >((_event, { restrictions, index }) => {
-  const current = restrictions.get() || [];
+  // Normalize to handle both string[] and RestrictionEntry[] from storage
+  // Filter out null items and empty names to match normalizedRestrictions computed
+  const current = (restrictions.get() || [])
+    .filter((item) => item != null)
+    .map(normalizeRestrictionItem)
+    .filter((entry) => entry.name && entry.name.trim() !== "");
   const entry = current[index];
   if (!entry) return;
 
@@ -1280,7 +1360,8 @@ const _selectSuggestion = handler<
     suggestion: string;
   }
 >((_event, { restrictions, input, selectedLevel, suggestion }) => {
-  const current = restrictions.get() || [];
+  // Normalize to handle both string[] and RestrictionEntry[] from storage
+  const current = (restrictions.get() || []).map(normalizeRestrictionItem);
   if (current.some((r) => r.name.toLowerCase() === suggestion.toLowerCase())) {
     input.set("");
     return;
@@ -1302,7 +1383,8 @@ const onSelectRestriction = handler<
   }
 >((event, { restrictions, selectedLevel }) => {
   const { value } = event.detail;
-  const current = restrictions.get() || [];
+  // Normalize to handle both string[] and RestrictionEntry[] from storage
+  const current = (restrictions.get() || []).map(normalizeRestrictionItem);
 
   // Don't add duplicates
   if (current.some((r) => r.name.toLowerCase() === value.toLowerCase())) {
@@ -1330,6 +1412,22 @@ export const DietaryRestrictionsModule = recipe<
 >("DietaryRestrictionsModule", ({ restrictions }) => {
   const selectedLevel = Cell.of<RestrictionLevel>("prefer");
 
+  // Normalize raw restrictions to RestrictionEntry[] format
+  // Handles both string[] (from LLM extraction) and RestrictionEntry[] (from UI)
+  const normalizedRestrictions = computed(() => {
+    // Inside computed(), access restrictions directly (framework auto-proxies)
+    // Cast to expected array type for iteration
+    const raw = (restrictions || []) as Array<string | RestrictionEntry>;
+
+    // Defensively filter out null/undefined items (can occur during hydration)
+    // Then normalize each item to RestrictionEntry format
+    // Finally filter out entries with empty names (can result from malformed data)
+    return raw
+      .filter((item) => item != null)
+      .map(normalizeRestrictionItem)
+      .filter((entry) => entry.name && entry.name.trim() !== "");
+  });
+
   // Cache for impliedItems to avoid recomputation when restrictions haven't changed
   let _cachedImpliedItems: Array<{
     name: string;
@@ -1342,10 +1440,15 @@ export const DietaryRestrictionsModule = recipe<
   // VERIFIED: This computed() only runs when restrictions change, not on autocomplete keypress.
   // Console instrumentation confirmed memoization works correctly (Dec 2025).
   const impliedItems = computed(() => {
-    const current = (restrictions || []) as RestrictionEntry[];
+    // Access the normalized array - normalizedRestrictions is already a computed OpaqueRef
+    const current = (normalizedRestrictions || []) as RestrictionEntry[];
 
     // Full hash to catch ALL item changes (including middle items)
-    const hash = current.map((e) => `${e.name}:${e.level}`).join("|");
+    // Defensive: handle potentially missing name/level
+    const hash = current
+      .filter((e) => e?.name)
+      .map((e) => `${e.name}:${e.level || "prefer"}`)
+      .join("|");
     if (hash === _lastRestrictionsHash) {
       return _cachedImpliedItems;
     }
@@ -1359,9 +1462,10 @@ export const DietaryRestrictionsModule = recipe<
     // Optimized loop with hoisted lookups
     for (let i = 0; i < current.length; i++) {
       const entry = current[i];
+      if (!entry?.name) continue; // Skip malformed entries
       const entryName = entry.name;
-      const entryLevel = entry.level;
-      const entryPriority = LEVEL_PRIORITY[entryLevel];
+      const entryLevel = entry.level || "prefer";
+      const entryPriority = LEVEL_PRIORITY[entryLevel] || 1;
 
       const group = getGroup(entryName);
       if (!group) continue; // Skip non-groups early
@@ -1389,7 +1493,7 @@ export const DietaryRestrictionsModule = recipe<
   });
 
   const displayText = computed(() => {
-    const count = (restrictions || []).length || 0;
+    const count = (normalizedRestrictions || []).length || 0;
     if (count === 0) return "None";
     return `${count} restriction${count !== 1 ? "s" : ""}`;
   });
@@ -1413,46 +1517,52 @@ export const DietaryRestrictionsModule = recipe<
             Your Restrictions
           </span>
           <ct-hstack gap="2" wrap>
-            {list.map((entry: RestrictionEntry, index: number) => {
-              const style = LEVEL_CONFIG[entry.level] || LEVEL_CONFIG.prefer;
-              const contextLabel = getContextualLabel(entry.name, entry.level);
+            {list
+              .filter(
+                (entry): entry is RestrictionEntry =>
+                  !!entry && typeof entry.name === "string" && !!entry.name,
+              )
+              .map((entry: RestrictionEntry, index: number) => {
+                const level = entry.level || "prefer";
+                const style = LEVEL_CONFIG[level] || LEVEL_CONFIG.prefer;
+                const contextLabel = getContextualLabel(entry.name, level);
 
-              return (
-                <span
-                  key={index}
-                  style={`display: inline-flex; align-items: center; gap: 6px; background: ${style.bg}; color: ${style.color}; border: 1px solid ${style.border}; border-radius: 20px; padding: 6px 12px; font-size: 14px; flex-shrink: 0; white-space: nowrap;`}
-                >
-                  <button
-                    type="button"
-                    onClick={cycleLevel({
-                      restrictions: restrictionsCell,
-                      index,
-                    })}
-                    title="Click to change severity level"
-                    style="background: none; border: none; cursor: pointer; padding: 0; font-size: 16px; line-height: 1;"
+                return (
+                  <span
+                    key={index}
+                    style={`display: inline-flex; align-items: center; gap: 6px; background: ${style.bg}; color: ${style.color}; border: 1px solid ${style.border}; border-radius: 20px; padding: 6px 12px; font-size: 14px; flex-shrink: 0; white-space: nowrap;`}
                   >
-                    {style.icon}
-                  </button>
-                  <span style="display: flex; flex-direction: column;">
-                    <span style="font-weight: 500;">{entry.name}</span>
-                    <span style="font-size: 10px; opacity: 0.8;">
-                      {contextLabel}
+                    <button
+                      type="button"
+                      onClick={cycleLevel({
+                        restrictions: restrictionsCell,
+                        index,
+                      })}
+                      title="Click to change severity level"
+                      style="background: none; border: none; cursor: pointer; padding: 0; font-size: 16px; line-height: 1;"
+                    >
+                      {style.icon}
+                    </button>
+                    <span style="display: flex; flex-direction: column;">
+                      <span style="font-weight: 500;">{entry.name}</span>
+                      <span style="font-size: 10px; opacity: 0.8;">
+                        {contextLabel}
+                      </span>
                     </span>
+                    <button
+                      type="button"
+                      onClick={removeRestriction({
+                        restrictions: restrictionsCell,
+                        index,
+                      })}
+                      style={`background: none; border: none; cursor: pointer; padding: 0; font-size: 16px; color: ${style.color}; line-height: 1; margin-left: 2px;`}
+                      title="Remove"
+                    >
+                      ×
+                    </button>
                   </span>
-                  <button
-                    type="button"
-                    onClick={removeRestriction({
-                      restrictions: restrictionsCell,
-                      index,
-                    })}
-                    style={`background: none; border: none; cursor: pointer; padding: 0; font-size: 16px; color: ${style.color}; line-height: 1; margin-left: 2px;`}
-                    title="Remove"
-                  >
-                    ×
-                  </button>
-                </span>
-              );
-            })}
+                );
+              })}
           </ct-hstack>
         </ct-vstack>
       );
@@ -1531,8 +1641,11 @@ export const DietaryRestrictionsModule = recipe<
           />
         </ct-hstack>
 
-        {/* Restrictions list - lift with both value and Cell for handlers */}
-        {restrictionsUI({ list: restrictions, restrictionsCell: restrictions })}
+        {/* Restrictions list - use normalized for display, raw Cell for handlers */}
+        {restrictionsUI({
+          list: normalizedRestrictions,
+          restrictionsCell: restrictions,
+        })}
 
         {/* Implied items - lift for display only */}
         {impliedUI(impliedItems)}
