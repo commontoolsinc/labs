@@ -1264,7 +1264,10 @@ export class Runner {
           const result = fn(argument);
 
           const postRun = (result: any) => {
-            if (containsOpaqueRef(result) || frame.opaqueRefs.size > 0) {
+            if (
+              validateAndCheckOpaqueRefs(result, name) ||
+              frame.opaqueRefs.size > 0
+            ) {
               const resultRecipe = recipeFromFrame(
                 "event handler result",
                 undefined,
@@ -1417,7 +1420,10 @@ export class Runner {
           const result = fn(argument);
 
           const postRun = (result: any) => {
-            if (containsOpaqueRef(result) || frame.opaqueRefs.size > 0) {
+            if (
+              validateAndCheckOpaqueRefs(result, name) ||
+              frame.opaqueRefs.size > 0
+            ) {
               const resultRecipe = recipeFromFrame(
                 "action result",
                 undefined,
@@ -1746,13 +1752,95 @@ function getSpellLink(recipeId: string): SigilLink {
   return { "/": { [LINK_V1_TAG]: { id: `of:${id}` } } };
 }
 
-function containsOpaqueRef(value: unknown): boolean {
+/**
+ * Validates an action result and checks if it contains opaque refs.
+ * Throws if result contains invalid types (Map, Set, functions, etc.).
+ * Returns true if the result contains any OpaqueRefs.
+ */
+export function validateAndCheckOpaqueRefs(
+  value: unknown,
+  actionName?: string,
+  path: string[] = [],
+): boolean {
+  // Allowed types
+  if (value === null || value === undefined) return false;
   if (isOpaqueRef(value)) return true;
   if (isCellLink(value)) return false;
-  if (isRecord(value)) {
-    return Object.values(value).some(containsOpaqueRef);
+
+  const formatError = (typeName: string, hint?: string) => {
+    const pathStr = path.length > 0 ? ` at path "${path.join(".")}"` : "";
+    const actionStr = actionName ? `\n  in action: ${actionName}` : "";
+    const hintStr = hint ? ` ${hint}` : "";
+    return `Action returned a ${typeName}${pathStr}.${actionStr}\nActions must return JSON-serializable values, OpaqueRefs, or Cells.${hintStr}`;
+  };
+
+  // Functions are not allowed
+  if (typeof value === "function") {
+    throw new Error(formatError("function"));
   }
-  return false;
+
+  // Symbols are not JSON-serializable
+  if (typeof value === "symbol") {
+    throw new Error(formatError("Symbol", "Consider removing this property."));
+  }
+
+  // BigInt is not JSON-serializable
+  if (typeof value === "bigint") {
+    throw new Error(
+      formatError("BigInt", "Consider converting to number or string."),
+    );
+  }
+
+  // NaN and Infinity are not JSON-serializable (they become null)
+  if (typeof value === "number") {
+    if (Number.isNaN(value)) {
+      throw new Error(
+        formatError("NaN", "Check your inputs or return null instead."),
+      );
+    }
+    if (!Number.isFinite(value)) {
+      throw new Error(
+        formatError("Infinity", "Check your inputs or return null instead."),
+      );
+    }
+    return false;
+  }
+
+  // Other primitives (string, boolean) are fine
+  if (typeof value !== "object") return false;
+
+  // From here, value is object (non-null)
+  const obj = value as object;
+
+  // Check for Map and Set before other object checks
+  if (obj instanceof Map) {
+    throw new Error(
+      formatError("Map", "Consider using a plain object instead."),
+    );
+  }
+
+  if (obj instanceof Set) {
+    throw new Error(formatError("Set", "Consider using an array instead."));
+  }
+
+  // Arrays - recurse
+  if (Array.isArray(obj)) {
+    return obj.some((item: unknown, index: number) =>
+      validateAndCheckOpaqueRefs(item, actionName, [...path, `[${index}]`])
+    );
+  }
+
+  // Reject non-plain objects (Date, RegExp, etc.)
+  const proto = Object.getPrototypeOf(obj);
+  if (proto !== null && proto !== Object.prototype) {
+    const typeName = obj.constructor?.name ?? "unknown type";
+    throw new Error(formatError(typeName));
+  }
+
+  // Plain object - recurse
+  return Object.entries(obj as Record<string, unknown>).some(
+    ([key, val]) => validateAndCheckOpaqueRefs(val, actionName, [...path, key]),
+  );
 }
 
 export function cellAwareDeepCopy<T = unknown>(value: T): Mutable<T> {
