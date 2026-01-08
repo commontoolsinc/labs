@@ -145,6 +145,14 @@ const markerDragHandler = handler<
   }
 });
 
+// Handler for selecting a marker on click
+const markerClickHandler = handler<
+  { detail: { index: number } },
+  { selectedStopIndex: Cell<number | null> }
+>(({ detail }, { selectedStopIndex }) => {
+  selectedStopIndex.set(detail?.index ?? null);
+});
+
 // Handler for removing a stop
 const removeStopHandler = handler<
   void,
@@ -313,9 +321,7 @@ export default pattern<Input, Output>(
                     stopCount: stopCount,
                   })}
                   onct-marker-drag-end={markerDragHandler({ stops })}
-                  onct-marker-click={(e: CustomEvent) => {
-                    selectedStopIndex.set(e.detail?.index ?? null);
-                  }}
+                  onct-marker-click={markerClickHandler({ selectedStopIndex })}
                 />
               </ct-card>
 
