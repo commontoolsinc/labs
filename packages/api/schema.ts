@@ -22,6 +22,7 @@ import type {
   Opaque,
   OpaqueRef,
   RecipeFactory,
+  SELF,
   Stream,
 } from "commontools";
 
@@ -326,7 +327,9 @@ declare module "commontools" {
   interface PatternFunction {
     <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
       fn: (
-        input: OpaqueRef<Required<Schema<IS>>>,
+        input: OpaqueRef<Required<Schema<IS>>> & {
+          [SELF]: OpaqueRef<Schema<OS>>;
+        },
       ) => Opaque<Schema<OS>>,
       argumentSchema: IS,
       resultSchema: OS,
@@ -338,19 +341,29 @@ declare module "commontools" {
   interface RecipeFunction {
     <S extends JSONSchema>(
       argumentSchema: S,
-      fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => any,
+      fn: (
+        input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
+          [SELF]: OpaqueRef<any>;
+        },
+      ) => any,
     ): RecipeFactory<SchemaWithoutCell<S>, ReturnType<typeof fn>>;
 
     <S extends JSONSchema, R>(
       argumentSchema: S,
-      fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => Opaque<R>,
+      fn: (
+        input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
+          [SELF]: OpaqueRef<R>;
+        },
+      ) => Opaque<R>,
     ): RecipeFactory<SchemaWithoutCell<S>, R>;
 
     <S extends JSONSchema, RS extends JSONSchema>(
       argumentSchema: S,
       resultSchema: RS,
       fn: (
-        input: OpaqueRef<Required<SchemaWithoutCell<S>>>,
+        input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
+          [SELF]: OpaqueRef<SchemaWithoutCell<RS>>;
+        },
       ) => Opaque<SchemaWithoutCell<RS>>,
     ): RecipeFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
   }
