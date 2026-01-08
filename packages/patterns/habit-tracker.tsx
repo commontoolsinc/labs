@@ -2,6 +2,7 @@
 import {
   computed,
   Default,
+  equals,
   ifElse,
   lift,
   NAME,
@@ -162,9 +163,7 @@ export default pattern<Input, Output>(({ habits, logs }) => {
                       variant="ghost"
                       onClick={() => {
                         const current = habits.get();
-                        const idx = current.findIndex((h) =>
-                          Writable.equals(habit, h)
-                        );
+                        const idx = current.findIndex((h) => equals(habit, h));
                         if (idx >= 0) {
                           habits.set(current.toSpliced(idx, 1));
                         }

@@ -15,6 +15,7 @@ import type {
   CompileAndRunFunction,
   ComputedFunction,
   DeriveFunction,
+  EqualsFunction,
   FetchDataFunction,
   FetchProgramFunction,
   GenerateObjectFunction,
@@ -260,6 +261,7 @@ export interface BuilderFunctionsAndConstants {
 
   // Cell creation
   cell: CellTypeConstructor<AsCell>["of"];
+  equals: EqualsFunction;
 
   // Cell constructors with static methods
   Cell: CellTypeConstructor<AsCell>;

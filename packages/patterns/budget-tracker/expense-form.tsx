@@ -10,6 +10,7 @@
  */
 import {
   computed,
+  equals,
   handler,
   NAME,
   pattern,
@@ -175,9 +176,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
                 variant="ghost"
                 onClick={() => {
                   const current = expenses.get();
-                  const index = current.findIndex((el) =>
-                    Writable.equals(expense, el)
-                  );
+                  const index = current.findIndex((el) => equals(expense, el));
                   if (index >= 0) {
                     expenses.set(current.toSpliced(index, 1));
                   }
@@ -255,9 +254,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
                 variant="ghost"
                 onClick={() => {
                   const current = budgets.get();
-                  const index = current.findIndex((b) =>
-                    Writable.equals(budget, b)
-                  );
+                  const index = current.findIndex((b) => equals(budget, b));
                   if (index >= 0) {
                     budgets.set(current.toSpliced(index, 1));
                   }

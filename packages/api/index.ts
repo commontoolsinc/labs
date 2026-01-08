@@ -1700,6 +1700,16 @@ export interface RecipeEnvironment {
 
 export type GetRecipeEnvironmentFunction = () => RecipeEnvironment;
 
+/**
+ * Compare two cells or values for equality after resolving, i.e. after
+ * following all links in case we have cells pointing to other cells.
+ * This is a standalone export of the equals function from Cell/Writable.
+ */
+export type EqualsFunction = (
+  a: AnyCell<any> | object,
+  b: AnyCell<any> | object,
+) => boolean;
+
 // Re-export all function types as values for destructuring imports
 // These will be implemented by the factory
 export declare const pattern: PatternFunction;
@@ -1730,6 +1740,7 @@ export declare const wish: WishFunction;
 export declare const createNodeFactory: CreateNodeFactoryFunction;
 /** @deprecated Use Cell.of(defaultValue?) instead */
 export declare const cell: CellTypeConstructor<AsCell>["of"];
+export declare const equals: EqualsFunction;
 export declare const byRef: ByRefFunction;
 export declare const getRecipeEnvironment: GetRecipeEnvironmentFunction;
 

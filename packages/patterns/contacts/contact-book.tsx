@@ -2,6 +2,7 @@
 import {
   computed,
   Default,
+  equals,
   ifElse,
   NAME,
   navigateTo,
@@ -120,7 +121,7 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
                       onClick={() => {
                         const current = contacts.get();
                         const idx = current.findIndex((c) =>
-                          Writable.equals(contact, c)
+                          equals(contact, c)
                         );
                         if (idx >= 0) {
                           contacts.set(current.toSpliced(idx, 1));

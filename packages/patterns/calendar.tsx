@@ -2,6 +2,7 @@
 import {
   computed,
   Default,
+  equals,
   ifElse,
   lift,
   NAME,
@@ -156,7 +157,7 @@ export default pattern<Input, Output>(({ events }) => {
                           onClick={() => {
                             const current = events.get();
                             const idx = current.findIndex((e) =>
-                              Writable.equals(event, e)
+                              equals(event, e)
                             );
                             if (idx >= 0) {
                               events.set(current.toSpliced(idx, 1));

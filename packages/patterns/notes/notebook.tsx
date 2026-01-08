@@ -2,6 +2,7 @@
 import {
   computed,
   type Default,
+  equals,
   handler,
   lift,
   NAME,
@@ -161,7 +162,7 @@ const removeFromNotebook = handler<
   { note: Writable<NoteCharm>; notes: Writable<NoteCharm[]> }
 >((_, { note, notes }) => {
   const notebookNotes = notes.get();
-  const index = notebookNotes.findIndex((n: any) => Writable.equals(n, note));
+  const index = notebookNotes.findIndex((n: any) => equals(n, note));
   if (index !== -1) {
     const copy = [...notebookNotes];
     copy.splice(index, 1);
@@ -180,9 +181,7 @@ const _handleCharmDrop = handler<
   const notesList = notes.get() ?? [];
 
   // Prevent duplicates using Writable.equals
-  const alreadyExists = notesList.some((n) =>
-    Writable.equals(sourceCell, n as any)
-  );
+  const alreadyExists = notesList.some((n) => equals(sourceCell, n as any));
   if (alreadyExists) return;
 
   // Hide from Pages list
@@ -209,9 +208,7 @@ const handleDropOntoCurrentNotebook = handler<
 
   // Check if dragged item is in the selection (from a sibling notebook drag)
   // For sibling notebooks, we check if the dragged cell matches any selected item
-  const draggedIndex = notesList.findIndex((n: any) =>
-    Writable.equals(sourceCell, n)
-  );
+  const draggedIndex = notesList.findIndex((n: any) => equals(sourceCell, n));
   const isDraggedInSelection = draggedIndex >= 0 &&
     selected.includes(draggedIndex);
 
@@ -256,7 +253,7 @@ const handleDropOntoCurrentNotebook = handler<
     // Add all to this notebook (deduplicated)
     for (const item of itemsToMove) {
       const alreadyExists = notesList.some((n) =>
-        Writable.equals(item as any, n as any)
+        equals(item as any, n as any)
       );
       if (!alreadyExists) {
         notes.push(item as any);
@@ -271,9 +268,7 @@ const handleDropOntoCurrentNotebook = handler<
     const sourceTitle = (sourceCell as any).key("title").get();
 
     // Prevent duplicates
-    const alreadyExists = notesList.some((n) =>
-      Writable.equals(sourceCell, n as any)
-    );
+    const alreadyExists = notesList.some((n) => equals(sourceCell, n as any));
     if (alreadyExists) return;
 
     // Remove from ALL other notebooks' notes arrays (move semantics)
@@ -286,7 +281,7 @@ const handleDropOntoCurrentNotebook = handler<
       // Find and remove by title or Writable.equals
       const filtered = nbNotes.filter((n: any) => {
         if (n?.title === sourceTitle) return false;
-        if (Writable.equals(sourceCell, n as any)) return false;
+        if (equals(sourceCell, n as any)) return false;
         return true;
       });
       if (filtered.length !== nbNotes.length) {
@@ -325,9 +320,7 @@ const handleDropOntoNotebook = handler<
   const selected = selectedNoteIndices.get();
 
   // Check if dragged item is in the selection
-  const draggedIndex = currentList.findIndex((n: any) =>
-    Writable.equals(sourceCell, n)
-  );
+  const draggedIndex = currentList.findIndex((n: any) => equals(sourceCell, n));
   const isDraggedInSelection = draggedIndex >= 0 &&
     selected.includes(draggedIndex);
 
@@ -359,7 +352,7 @@ const handleDropOntoNotebook = handler<
     // Add all to target (deduplicated)
     for (const item of itemsToMove) {
       const alreadyInTarget = targetNotesList.some((n) =>
-        Writable.equals(item as any, n as any)
+        equals(item as any, n as any)
       );
       if (!alreadyInTarget) {
         targetNotesCell.push(item);
@@ -395,13 +388,13 @@ const handleDropOntoNotebook = handler<
     // Single-item move (existing logic)
     // Prevent duplicates in target
     const alreadyInTarget = targetNotesList.some((n) =>
-      Writable.equals(sourceCell, n as any)
+      equals(sourceCell, n as any)
     );
     if (alreadyInTarget) return;
 
     // Remove from current notebook if present
     const indexInCurrent = currentList.findIndex((n: any) =>
-      Writable.equals(sourceCell, n)
+      equals(sourceCell, n)
     );
     if (indexInCurrent !== -1) {
       const copy = [...currentList];

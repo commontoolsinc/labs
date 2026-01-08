@@ -1,6 +1,7 @@
 /// <cts-enable />
 import {
   computed,
+  equals,
   handler,
   ifElse,
   lift,
@@ -75,9 +76,7 @@ const dropOntoNotebook = handler<
   const notesList = notesCell.get() ?? [];
 
   // Prevent duplicates using Writable.equals
-  const alreadyExists = notesList.some((n) =>
-    Writable.equals(sourceCell, n as any)
-  );
+  const alreadyExists = notesList.some((n) => equals(sourceCell, n as any));
   if (alreadyExists) return;
 
   // Hide from Patterns list

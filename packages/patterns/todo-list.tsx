@@ -1,5 +1,13 @@
 /// <cts-enable />
-import { Default, NAME, pattern, UI, wish, Writable } from "commontools";
+import {
+  Default,
+  equals,
+  NAME,
+  pattern,
+  UI,
+  wish,
+  Writable,
+} from "commontools";
 
 interface TodoItem {
   title: string;
@@ -67,9 +75,7 @@ export default pattern<Input, Output>(({ items }) => {
                   <ct-button
                     onClick={() => {
                       const current = items.get();
-                      const index = current.findIndex((el) =>
-                        Writable.equals(item, el)
-                      );
+                      const index = current.findIndex((el) => equals(item, el));
                       if (index >= 0) {
                         items.set(current.toSpliced(index, 1));
                       }

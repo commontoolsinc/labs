@@ -2,6 +2,7 @@
 import {
   computed,
   Default,
+  equals,
   ifElse,
   lift,
   NAME,
@@ -117,9 +118,7 @@ export default pattern<Input, Output>(({ items }) => {
                     variant="ghost"
                     onClick={() => {
                       const current = items.get();
-                      const idx = current.findIndex((i) =>
-                        Writable.equals(item, i)
-                      );
+                      const idx = current.findIndex((i) => equals(item, i));
                       if (idx >= 0) {
                         items.set(current.toSpliced(idx, 1));
                       }

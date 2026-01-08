@@ -2,6 +2,7 @@
 import {
   computed,
   Default,
+  equals,
   handler,
   ifElse,
   NAME,
@@ -33,7 +34,7 @@ const removeItem = handler<
 >(
   (_, { droppedItems, item }) => {
     const current = droppedItems.get();
-    const index = current.findIndex((el) => Writable.equals(item, el));
+    const index = current.findIndex((el) => equals(item, el));
     if (index >= 0) {
       droppedItems.set(current.toSpliced(index, 1));
     }

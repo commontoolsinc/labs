@@ -108,6 +108,7 @@ export const createBuilder = (): {
 
       // Cell creation
       cell: cellConstructorFactory<AsCell>("cell").of,
+      equals: cellConstructorFactory<AsCell>("cell").equals,
 
       // Cell constructors with static methods
       Cell: cellConstructorFactory<AsCell>("cell"),
