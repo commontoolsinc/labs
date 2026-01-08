@@ -11,13 +11,13 @@ to be updated to the current API.
 
 ## Deprecated APIs to Replace
 
-1. `cell()` → `Cell.of()`
+1. `cell()` → `Writable.of()`
 2. `derive()` → `computed()`
 3. `lift()` → `computed()` or refactor
 4. `handler()` for simple operations → inline handlers
-5. `.equals()` method → `Cell.equals(a, b)`
-6. Unnecessary `[ID]` usage → use `Cell.equals()` instead for finding/removing
-   items
+5. `.equals()` method → `Writable.equals(a, b)`
+6. Unnecessary `[ID]` usage → use `Writable.equals()` instead for
+   finding/removing items
 
 ## High Priority Files
 
@@ -61,7 +61,7 @@ to be updated to the current API.
 **Priority**: High (core functionality) **Location**:
 `packages/patterns/default-app.tsx`
 
-- **Line 28**: `cell()` → `Cell.of()`
+- **Line 28**: `cell()` → `Writable.of()`
   ```typescript
   const currentView = cell("home");
   ```
@@ -76,7 +76,7 @@ to be updated to the current API.
 **Priority**: High (core functionality) **Location**:
 `packages/patterns/omnibox-fab.tsx`
 
-- **Line 19**: `cell()` → `Cell.of()`
+- **Line 19**: `cell()` → `Writable.of()`
   ```typescript
   const isOpen = cell(false);
   ```
@@ -102,7 +102,7 @@ to be updated to the current API.
   const addTodo = handler<...>(...)
   ```
 
-- **Line 67**: `.equals()` → `Cell.equals()`
+- **Line 67**: `.equals()` → `Writable.equals()`
   ```typescript
   if (item.equals(todo)) {
   ```
@@ -111,7 +111,7 @@ to be updated to the current API.
 
 **Priority**: Medium **Location**: `packages/patterns/shopping-list.tsx`
 
-- **Line 18**: `cell()` → `Cell.of()`
+- **Line 18**: `cell()` → `Writable.of()`
   ```typescript
   const items = cell([]);
   ```
@@ -163,7 +163,7 @@ to be updated to the current API.
 
 **Priority**: Medium **Location**: `packages/patterns/markdown-editor.tsx`
 
-- **Line 15**: `cell()` → `Cell.of()`
+- **Line 15**: `cell()` → `Writable.of()`
   ```typescript
   const content = cell("");
   ```
@@ -196,7 +196,7 @@ to be updated to the current API.
 
 **Priority**: Medium **Location**: `packages/patterns/form-builder.tsx`
 
-- **Line 28**: `cell()` → `Cell.of()`
+- **Line 28**: `cell()` → `Writable.of()`
   ```typescript
   const fields = cell([]);
   ```
@@ -229,7 +229,7 @@ to be updated to the current API.
 
 **Priority**: Medium **Location**: `packages/patterns/notification-center.tsx`
 
-- **Line 22**: `cell()` → `Cell.of()`
+- **Line 22**: `cell()` → `Writable.of()`
   ```typescript
   const notifications = cell([]);
   ```
@@ -239,7 +239,7 @@ to be updated to the current API.
   const dismissNotification = handler<...>(...)
   ```
 
-- **Line 56**: `.equals()` → `Cell.equals()`
+- **Line 56**: `.equals()` → `Writable.equals()`
   ```typescript
   if (notif.equals(target)) {
   ```
@@ -248,7 +248,7 @@ to be updated to the current API.
 
 **Priority**: Medium **Location**: `packages/patterns/search-filter.tsx`
 
-- **Line 17**: `cell()` → `Cell.of()`
+- **Line 17**: `cell()` → `Writable.of()`
   ```typescript
   const query = cell("");
   ```
@@ -262,7 +262,7 @@ to be updated to the current API.
 
 **Priority**: Medium **Location**: `packages/patterns/settings-panel.tsx`
 
-- **Line 23**: `cell()` → `Cell.of()`
+- **Line 23**: `cell()` → `Writable.of()`
   ```typescript
   const settings = cell({});
   ```
@@ -290,7 +290,7 @@ to be updated to the current API.
 
 **Priority**: Medium **Location**: `packages/patterns/file-browser.tsx`
 
-- **Line 28**: `cell()` → `Cell.of()`
+- **Line 28**: `cell()` → `Writable.of()`
   ```typescript
   const currentPath = cell("/");
   ```
@@ -311,7 +311,7 @@ to be updated to the current API.
 
 **Priority**: Low (utility) **Location**: `packages/patterns/theme-switcher.tsx`
 
-- **Line 12**: `cell()` → `Cell.of()`
+- **Line 12**: `cell()` → `Writable.of()`
   ```typescript
   const theme = cell("light");
   ```
@@ -342,7 +342,7 @@ to be updated to the current API.
 
 - **Line 34**: `[ID]` usage - only needed if items are reordered
   (sorting/shuffling). If just adding/removing without reordering, use
-  `Cell.equals()` for finding items instead.
+  `Writable.equals()` for finding items instead.
   ```typescript
   [ID]: step.id
   ```
@@ -359,7 +359,7 @@ to be updated to the current API.
 
 - **Line 28**: `[ID]` usage - only needed if items are reordered
   (sorting/shuffling). If just adding/removing without reordering, use
-  `Cell.equals()` for finding items instead.
+  `Writable.equals()` for finding items instead.
   ```typescript
   [ID]: badge.id
   ```
@@ -381,15 +381,15 @@ Update utility components and less frequently used patterns.
 
 ## Update Checklist for Each File
 
-- [ ] Replace `cell()` with `Cell.of()`
+- [ ] Replace `cell()` with `Writable.of()`
 - [ ] Replace `derive()` with `computed()`
 - [ ] Replace `lift()` with `computed()` or refactor
 - [ ] Convert simple `handler()` calls to inline handlers
-- [ ] Update recipe input types to use `Cell<T>` for cells used in inline
+- [ ] Update recipe input types to use `Writable<T>` for cells used in inline
       handlers
-- [ ] Replace `.equals()` with `Cell.equals(a, b)`
+- [ ] Replace `.equals()` with `Writable.equals(a, b)`
 - [ ] Review `[ID]` usage - remove if only doing finding/removing (use
-      `Cell.equals()` instead). Keep only for item reordering scenarios.
+      `Writable.equals()` instead). Keep only for item reordering scenarios.
 - [ ] Test the updated pattern
 - [ ] Verify no TypeScript errors
 - [ ] Deploy and verify functionality
@@ -397,7 +397,7 @@ Update utility components and less frequently used patterns.
 ## Notes
 
 - When converting to inline handlers, remember to update the recipe input
-  interface to declare cells as `Cell<T>`
+  interface to declare cells as `Writable<T>`
 - For complex handlers with multiple operations or reusable logic, keep using
   `handler()` function
 - Use the decision hierarchy: bidirectional binding → inline handlers →

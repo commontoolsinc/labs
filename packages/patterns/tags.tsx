@@ -6,13 +6,13 @@
  * like Record. Provides add/remove tag functionality with chip display.
  */
 import {
-  Cell,
   computed,
   type Default,
   handler,
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
@@ -38,7 +38,7 @@ export interface TagsModuleInput {
 // Handler to add a new tag
 const addTag = handler<
   unknown,
-  { tags: Cell<string[]>; tagInput: Cell<string> }
+  { tags: Writable<string[]>; tagInput: Writable<string> }
 >((_event, { tags, tagInput }) => {
   const newTag = tagInput.get().trim();
   if (!newTag) return;
@@ -53,7 +53,7 @@ const addTag = handler<
 // Handler to remove a tag by index
 const removeTag = handler<
   unknown,
-  { tags: Cell<string[]>; index: number }
+  { tags: Writable<string[]>; index: number }
 >((_event, { tags, index }) => {
   const current = tags.get() || [];
   tags.set(current.toSpliced(index, 1));
@@ -63,7 +63,7 @@ const removeTag = handler<
 export const TagsModule = recipe<TagsModuleInput, TagsModuleInput>(
   "TagsModule",
   ({ tags }) => {
-    const tagInput = Cell.of<string>("");
+    const tagInput = Writable.of<string>("");
     const displayText = computed(() => {
       const count = (tags || []).length || 0;
       return count > 0 ? `${count} tag${count !== 1 ? "s" : ""}` : "No tags";

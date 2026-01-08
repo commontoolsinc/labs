@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   type Default,
   generateText,
@@ -13,6 +12,7 @@ import {
   UI,
   type VNode,
   wish,
+  Writable,
 } from "commontools";
 import NoteMd from "./note-md.tsx";
 
@@ -43,12 +43,12 @@ type NoteCharm = {
 };
 
 type Input = {
-  title?: Cell<Default<string, "Untitled Note">>;
-  content?: Cell<Default<string, "">>;
+  title?: Writable<Default<string, "Untitled Note">>;
+  content?: Writable<Default<string, "">>;
   isHidden?: Default<boolean, false>;
   noteId?: Default<string, "">;
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
-  linkPattern?: Cell<Default<string, "">>;
+  linkPattern?: Writable<Default<string, "">>;
 };
 
 /** Represents a small #note a user took to remember some text. */
@@ -68,7 +68,7 @@ type Output = {
 
 const _updateTitle = handler<
   { detail: { value: string } },
-  { title: Cell<string> }
+  { title: Writable<string> }
 >(
   (event, state) => {
     state.title.set(event.detail?.value ?? "");
@@ -77,7 +77,7 @@ const _updateTitle = handler<
 
 const _updateContent = handler<
   { detail: { value: string } },
-  { content: Cell<string> }
+  { content: Writable<string> }
 >(
   (event, state) => {
     state.content.set(event.detail?.value ?? "");
@@ -87,7 +87,7 @@ const _updateContent = handler<
 const handleCharmLinkClick = handler<
   {
     detail: {
-      charm: Cell<MentionableCharm>;
+      charm: Writable<MentionableCharm>;
     };
   },
   Record<string, never>
@@ -100,13 +100,13 @@ const handleNewBacklink = handler<
     detail: {
       text: string;
       charmId: any;
-      charm: Cell<MentionableCharm>;
+      charm: Writable<MentionableCharm>;
       navigate: boolean;
     };
   },
   {
-    mentionable: Cell<MentionableCharm[]>;
-    allCharms: Cell<MinimalCharm[]>;
+    mentionable: Writable<MentionableCharm[]>;
+    allCharms: Writable<MinimalCharm[]>;
   }
 >(({ detail }, { mentionable, allCharms }) => {
   console.log("new charm", detail.text, detail.charmId);
@@ -123,8 +123,8 @@ const handleNewBacklink = handler<
 
 /** This edits the content */
 const handleEditContent = handler<
-  { detail: { value: string }; result?: Cell<string> },
-  { content: Cell<string> }
+  { detail: { value: string }; result?: Writable<string> },
+  { content: Writable<string> }
 >(
   ({ detail, result }, { content }) => {
     content.set(detail.value);
@@ -132,7 +132,10 @@ const handleEditContent = handler<
   },
 );
 
-const handleCharmLinkClicked = handler<void, { charm: Cell<MentionableCharm> }>(
+const handleCharmLinkClicked = handler<
+  void,
+  { charm: Writable<MentionableCharm> }
+>(
   (_, { charm }) => {
     return navigateTo(charm);
   },
@@ -141,7 +144,7 @@ const handleCharmLinkClicked = handler<void, { charm: Cell<MentionableCharm> }>(
 // Handler to start editing title
 const startEditingTitle = handler<
   Record<string, never>,
-  { isEditingTitle: Cell<boolean> }
+  { isEditingTitle: Writable<boolean> }
 >((_, { isEditingTitle }) => {
   isEditingTitle.set(true);
 });
@@ -149,7 +152,7 @@ const startEditingTitle = handler<
 // Handler to stop editing title
 const stopEditingTitle = handler<
   Record<string, never>,
-  { isEditingTitle: Cell<boolean> }
+  { isEditingTitle: Writable<boolean> }
 >((_, { isEditingTitle }) => {
   isEditingTitle.set(false);
 });
@@ -157,7 +160,7 @@ const stopEditingTitle = handler<
 // Handler for keydown on title input (Enter to save)
 const handleTitleKeydown = handler<
   { key?: string },
-  { isEditingTitle: Cell<boolean> }
+  { isEditingTitle: Writable<boolean> }
 >((event, { isEditingTitle }) => {
   if (event?.key === "Enter") {
     isEditingTitle.set(false);
@@ -165,12 +168,12 @@ const handleTitleKeydown = handler<
 });
 
 // Toggle dropdown menu
-const toggleMenu = handler<void, { menuOpen: Cell<boolean> }>(
+const toggleMenu = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => menuOpen.set(!menuOpen.get()),
 );
 
 // Close dropdown menu
-const closeMenu = handler<void, { menuOpen: Cell<boolean> }>(
+const closeMenu = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => menuOpen.set(false),
 );
 
@@ -178,8 +181,8 @@ const closeMenu = handler<void, { menuOpen: Cell<boolean> }>(
 const createNewNote = handler<
   void,
   {
-    allCharms: Cell<MinimalCharm[]>;
-    parentNotebook: Cell<NotebookCharm | null>;
+    allCharms: Writable<MinimalCharm[]>;
+    parentNotebook: Writable<NotebookCharm | null>;
   }
 >((_, { allCharms, parentNotebook }) => {
   const notebook = parentNotebook?.get?.();
@@ -201,7 +204,7 @@ const createNewNote = handler<
     );
     if (nbIndex >= 0) {
       const notebookCell = allCharms.key(nbIndex);
-      const notesCell = notebookCell.key("notes") as Cell<NoteCharm[]>;
+      const notesCell = notebookCell.key("notes") as Writable<NoteCharm[]>;
       notesCell.push(note as unknown as NoteCharm);
     }
   }
@@ -212,21 +215,21 @@ const createNewNote = handler<
 // Menu: Navigate to a notebook
 const menuGoToNotebook = handler<
   void,
-  { menuOpen: Cell<boolean>; notebook: Cell<MinimalCharm> }
+  { menuOpen: Writable<boolean>; notebook: Writable<MinimalCharm> }
 >((_, { menuOpen, notebook }) => {
   menuOpen.set(false);
   return navigateTo(notebook);
 });
 
 // Navigate to parent notebook
-const goToParent = handler<void, { parent: Cell<NotebookCharm> }>(
+const goToParent = handler<void, { parent: Writable<NotebookCharm> }>(
   (_, { parent }) => navigateTo(parent),
 );
 
 // Menu: All Notes (find existing only - can't create due to circular imports)
 const menuAllNotebooks = handler<
   void,
-  { menuOpen: Cell<boolean>; allCharms: Cell<MinimalCharm[]> }
+  { menuOpen: Writable<boolean>; allCharms: Writable<MinimalCharm[]> }
 >((_, { menuOpen, allCharms }) => {
   menuOpen.set(false);
   const charms = allCharms.get();
@@ -248,13 +251,13 @@ const Note = pattern<Input, Output>(
       "#mentionable",
     );
     const recentCharms = wish<MinimalCharm[]>("#recent");
-    const mentioned = Cell.of<MentionableCharm[]>([]);
+    const mentioned = Writable.of<MentionableCharm[]>([]);
 
     // Dropdown menu state
-    const menuOpen = Cell.of(false);
+    const menuOpen = Writable.of(false);
 
     // State for inline title editing
-    const isEditingTitle = Cell.of<boolean>(false);
+    const isEditingTitle = Writable.of<boolean>(false);
 
     // Filter to find all notebooks (using 📓 prefix in NAME)
     const notebooks = computed(() =>
@@ -318,10 +321,10 @@ const Note = pattern<Input, Output>(
     });
 
     // populated in backlinks-index.tsx
-    const backlinks = Cell.of<MentionableCharm[]>([]);
+    const backlinks = Writable.of<MentionableCharm[]>([]);
 
     // Use provided linkPattern or default to creating new Notes
-    // linkPattern is a Cell<string> - access reactively, not as raw string
+    // linkPattern is a Writable<string> - access reactively, not as raw string
     const patternJson = computed(() => {
       // deno-lint-ignore no-explicit-any
       const lpValue = (linkPattern as any)?.get?.() ?? linkPattern;
@@ -351,10 +354,10 @@ const Note = pattern<Input, Output>(
     const goToViewer = handler<
       void,
       {
-        title: Cell<string>;
-        content: Cell<string>;
-        backlinks: Cell<MentionableCharm[]>;
-        noteId: Cell<string>;
+        title: Writable<string>;
+        content: Writable<string>;
+        backlinks: Writable<MentionableCharm[]>;
+        noteId: Writable<string>;
       }
     >((_, state) => {
       return navigateTo(

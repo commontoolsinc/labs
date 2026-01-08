@@ -31,7 +31,6 @@
  * 6. Verify BOTH values update identically
  */
 import {
-  Cell,
   computed,
   Default,
   derive,
@@ -39,6 +38,7 @@ import {
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 interface TestInput {
@@ -49,7 +49,7 @@ interface TestInput {
 
 const updateNames = handler<
   unknown,
-  { firstName: Cell<string>; lastName: Cell<string> }
+  { firstName: Writable<string>; lastName: Writable<string> }
 >((_event, { firstName, lastName }) => {
   const names = ["Alice", "Bob", "Charlie", "Diana"];
   const randomName = names[Math.floor(Math.random() * names.length)];

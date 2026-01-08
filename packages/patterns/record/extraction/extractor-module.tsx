@@ -16,7 +16,6 @@
  */
 
 import {
-  Cell,
   computed,
   type Default,
   generateObject,
@@ -27,6 +26,7 @@ import {
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 import {
   buildExtractionSchema as buildFullSchema,
@@ -48,38 +48,40 @@ import { getResultSchema, getSchemaForType } from "./schema-utils.ts";
 
 interface ExtractorModuleInput {
   // Parent's Cells - passed as INPUT so they survive serialization
-  parentSubCharms: Cell<SubCharmEntry[]>;
-  parentTrashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+  parentSubCharms: Writable<SubCharmEntry[]>;
+  parentTrashedSubCharms: Writable<TrashedSubCharmEntry[]>;
   // Parent Record's title Cell - for extracting names to Record title
-  parentTitle: Cell<string>;
+  parentTitle: Writable<string>;
   // Source selection state (index -> selected, default true)
-  sourceSelections: Cell<
+  sourceSelections: Writable<
     Default<Record<number, boolean>, Record<number, never>>
   >;
   // Trash selection state (index -> should trash, default false)
-  trashSelections: Cell<
+  trashSelections: Writable<
     Default<Record<number, boolean>, Record<number, never>>
   >;
   // Field selections for preview
-  selections: Cell<Default<Record<string, boolean>, Record<string, never>>>;
+  selections: Writable<Default<Record<string, boolean>, Record<string, never>>>;
   // Extraction phase
-  extractPhase: Cell<Default<"select" | "extracting" | "preview", "select">>;
+  extractPhase: Writable<
+    Default<"select" | "extracting" | "preview", "select">
+  >;
   // Combined content for extraction (built from sources)
-  extractionPrompt: Cell<Default<string, "">>;
+  extractionPrompt: Writable<Default<string, "">>;
   // Notes cleanup state
-  cleanupNotesEnabled: Cell<Default<boolean, true>>;
+  cleanupNotesEnabled: Writable<Default<boolean, true>>;
   // Snapshot of Notes content at extraction start (for cleanup comparison)
   // Map of subCharm index (as string) -> original content for ALL selected Notes modules
   // NOTE: Uses string keys to avoid Cell coercing numeric keys to array indices
-  notesContentSnapshot: Cell<
+  notesContentSnapshot: Writable<
     Default<Record<string, string>, Record<string, never>>
   >;
   // Cleanup application status tracking
-  cleanupApplyStatus: Cell<
+  cleanupApplyStatus: Writable<
     Default<"pending" | "success" | "failed" | "skipped", "pending">
   >;
   // Apply in progress guard (prevents double-click race condition)
-  applyInProgress: Cell<Default<boolean, false>>;
+  applyInProgress: Writable<Default<boolean, false>>;
 }
 
 interface ExtractorModuleOutput {
@@ -616,8 +618,8 @@ function scanExtractableSources(
 const dismiss = handler<
   unknown,
   {
-    parentSubCharms: Cell<SubCharmEntry[]>;
-    parentTrashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+    parentSubCharms: Writable<SubCharmEntry[]>;
+    parentTrashedSubCharms: Writable<TrashedSubCharmEntry[]>;
   }
 >((_event, { parentSubCharms, parentTrashedSubCharms }) => {
   const current = parentSubCharms.get() || [];
@@ -638,7 +640,7 @@ const toggleSourceHandler = handler<
   unknown,
   {
     index: number;
-    sourceSelectionsCell: Cell<
+    sourceSelectionsCell: Writable<
       Default<Record<number, boolean>, Record<number, never>>
     >;
   }
@@ -659,7 +661,7 @@ const toggleTrashHandler = handler<
   unknown,
   {
     index: number;
-    trashSelectionsCell: Cell<
+    trashSelectionsCell: Writable<
       Default<Record<number, boolean>, Record<number, never>>
     >;
   }
@@ -679,15 +681,15 @@ const toggleTrashHandler = handler<
 const startExtraction = handler<
   unknown,
   {
-    sourceSelectionsCell: Cell<
+    sourceSelectionsCell: Writable<
       Default<Record<number, boolean>, Record<number, never>>
     >;
-    parentSubCharmsCell: Cell<SubCharmEntry[]>;
-    extractionPromptCell: Cell<Default<string, "">>;
-    extractPhaseCell: Cell<
+    parentSubCharmsCell: Writable<SubCharmEntry[]>;
+    extractionPromptCell: Writable<Default<string, "">>;
+    extractPhaseCell: Writable<
       Default<"select" | "extracting" | "preview", "select">
     >;
-    notesContentSnapshotCell: Cell<
+    notesContentSnapshotCell: Writable<
       Default<Record<number, string>, Record<number, never>>
     >;
     // Read-only: computed() provides OpaqueRef, no Cell wrapper needed
@@ -727,7 +729,7 @@ const startExtraction = handler<
       if (source.type === "notes") {
         // Access charm content via .get() first to resolve links, then access properties
         // Cell.key() navigation doesn't work through link boundaries - charm is stored as a link
-        const entry = (parentSubCharmsCell as Cell<SubCharmEntry[]>)
+        const entry = (parentSubCharmsCell as Writable<SubCharmEntry[]>)
           .key(source.index)
           .get();
         const charm = entry?.charm as Record<string, unknown>;
@@ -746,7 +748,7 @@ const startExtraction = handler<
         }
       } else if (source.type === "text-import") {
         // Same pattern for text-import
-        const entry = (parentSubCharmsCell as Cell<SubCharmEntry[]>)
+        const entry = (parentSubCharmsCell as Writable<SubCharmEntry[]>)
           .key(source.index)
           .get();
         const charm = entry?.charm as Record<string, unknown>;
@@ -787,24 +789,24 @@ const startExtraction = handler<
 const applySelected = handler<
   unknown,
   {
-    parentSubCharmsCell: Cell<SubCharmEntry[]>;
-    parentTrashedSubCharmsCell: Cell<TrashedSubCharmEntry[]>;
-    parentTitleCell: Cell<string>;
+    parentSubCharmsCell: Writable<SubCharmEntry[]>;
+    parentTrashedSubCharmsCell: Writable<TrashedSubCharmEntry[]>;
+    parentTitleCell: Writable<string>;
     extractionResultValue: Record<string, unknown> | null;
-    selectionsCell: Cell<
+    selectionsCell: Writable<
       Default<Record<string, boolean>, Record<string, never>>
     >;
-    trashSelectionsCell: Cell<
+    trashSelectionsCell: Writable<
       Default<Record<number, boolean>, Record<number, never>>
     >;
     cleanupEnabledValue: boolean;
     cleanedNotesValue: string;
     // Dereferenced value from notesContentSnapshot Cell (map of Notes module index as string -> original content)
     notesSnapshotMapValue: Record<string, string>;
-    cleanupApplyStatusCell: Cell<
+    cleanupApplyStatusCell: Writable<
       Default<"pending" | "success" | "failed" | "skipped", "pending">
     >;
-    applyInProgressCell: Cell<Default<boolean, false>>;
+    applyInProgressCell: Writable<Default<boolean, false>>;
   }
 >(
   (
@@ -999,7 +1001,9 @@ const applySelected = handler<
               // Only write if validation passed
               // Cast needed: Cell.key() navigation loses type info for dynamic nested paths
               // Use actualFieldName to write to the correct field (handles aliases)
-              (parentSubCharmsCell as Cell<SubCharmEntry[]>).key(existingIndex)
+              (parentSubCharmsCell as Writable<SubCharmEntry[]>).key(
+                existingIndex,
+              )
                 .key("charm").key(
                   actualFieldName,
                 ).set(field.extractedValue);
@@ -1092,7 +1096,7 @@ const applySelected = handler<
       //
       // The correct CommonTools pattern for cross-charm mutations is Stream.send() (see docs/common/PATTERNS.md).
       // Direct Cell.set() on another charm's cells throws WriteIsolationError. However, Stream handlers
-      // can be "lost" when accessing charms through reactive proxies in Cell<SubCharmEntry[]>.
+      // can be "lost" when accessing charms through reactive proxies in Writable<SubCharmEntry[]>.
       //
       // APPROACH 1: editContent.send() - Stream Handler (PREFERRED)
       //   - Uses the Notes pattern's exposed Stream<{ detail: { value: string } }> handler
@@ -1170,7 +1174,9 @@ const applySelected = handler<
             if (!thisCleanupSucceeded) {
               try {
                 // Cast needed: Cell.key() navigation loses type info for dynamic nested paths
-                (parentSubCharmsCell as Cell<SubCharmEntry[]>).key(notesIndex)
+                (parentSubCharmsCell as Writable<SubCharmEntry[]>).key(
+                  notesIndex,
+                )
                   .key("charm").key(
                     "content",
                   ).set(cleanedNotesValue);

@@ -7,7 +7,6 @@
  * Works standalone or embedded in Record containers.
  */
 import {
-  Cell,
   computed,
   type Default,
   handler,
@@ -16,6 +15,7 @@ import {
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
@@ -50,7 +50,7 @@ interface Occurrence {
 
 export interface OccurrenceTrackerInput {
   label: Default<string, "">;
-  occurrences: Cell<Default<Occurrence[], []>>;
+  occurrences: Writable<Default<Occurrence[], []>>;
 }
 
 // ===== Helper Functions =====
@@ -137,7 +137,7 @@ const formatFrequencyFromList = lift((list: Occurrence[]): string => {
 // in handlers. When a handler-compatible time service is available (e.g., clock builtin
 // or transaction timestamp), update these handlers to use it instead.
 
-const recordNow = handler<unknown, { occurrences: Cell<Occurrence[]> }>(
+const recordNow = handler<unknown, { occurrences: Writable<Occurrence[]> }>(
   (_, { occurrences }) => {
     occurrences.push({
       timestamp: new Date().toISOString(),
@@ -148,7 +148,7 @@ const recordNow = handler<unknown, { occurrences: Cell<Occurrence[]> }>(
 
 const deleteOccurrence = handler<
   unknown,
-  { occurrences: Cell<Occurrence[]>; timestamp: string }
+  { occurrences: Writable<Occurrence[]>; timestamp: string }
 >((_, { occurrences, timestamp }) => {
   const current = occurrences.get() || [];
   const index = current.findIndex((o) => o.timestamp === timestamp);
@@ -160,8 +160,8 @@ const deleteOccurrence = handler<
 // ===== LLM-Callable Handlers =====
 
 const handleRecordNow = handler<
-  { note?: string; result?: Cell<unknown> },
-  { occurrences: Cell<Occurrence[]>; label: string }
+  { note?: string; result?: Writable<unknown> },
+  { occurrences: Writable<Occurrence[]>; label: string }
 >(({ note, result }, { occurrences, label }) => {
   const timestamp = new Date().toISOString();
 
@@ -184,8 +184,8 @@ const handleRecordNow = handler<
 });
 
 const handleGetStats = handler<
-  { result?: Cell<unknown> },
-  { occurrences: Cell<Occurrence[]>; label: string }
+  { result?: Writable<unknown> },
+  { occurrences: Writable<Occurrence[]>; label: string }
 >(({ result }, { occurrences, label }) => {
   const list = occurrences.get() || [];
   const sorted = getSortedOccurrences(list);
@@ -215,8 +215,8 @@ const handleGetStats = handler<
 });
 
 const handleGetOccurrences = handler<
-  { limit?: number; result?: Cell<unknown> },
-  { occurrences: Cell<Occurrence[]>; label: string }
+  { limit?: number; result?: Writable<unknown> },
+  { occurrences: Writable<Occurrence[]>; label: string }
 >(({ limit, result }, { occurrences, label }) => {
   const list = occurrences.get() || [];
   const sorted = getSortedOccurrences(list);
@@ -239,8 +239,8 @@ const handleGetOccurrences = handler<
 });
 
 const handleDeleteOccurrence = handler<
-  { timestamp: string; result?: Cell<unknown> },
-  { occurrences: Cell<Occurrence[]> }
+  { timestamp: string; result?: Writable<unknown> },
+  { occurrences: Writable<Occurrence[]> }
 >(({ timestamp, result }, { occurrences }) => {
   if (!timestamp) {
     if (result) {

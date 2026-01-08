@@ -1,12 +1,12 @@
 /// <cts-enable />
-import { Cell, NAME, pattern, UI } from "commontools";
+import { NAME, pattern, UI, Writable } from "commontools";
 import FavoritesManager from "./favorites-manager.tsx";
 import Journal from "./journal.tsx";
 
 export default pattern((_) => {
   const favorites = FavoritesManager({});
   const journal = Journal({});
-  const activeTab = Cell.of("journal");
+  const activeTab = Writable.of("journal");
 
   return {
     [NAME]: `Home`,

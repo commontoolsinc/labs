@@ -1,20 +1,20 @@
 <!-- @reviewed 2025-12-10 docs-rationalization -->
 
-# Cells and Reactivity Guide
+# Reactivity Guide
 
 This guide explains CommonTools' reactive system: how cells work, when reactivity is automatic, and how to work with reactive data effectively.
 
-## Core Principle: Cell\<\> is About Write Access, Not Reactivity
+## Core Principle: Writable\<\> is About Write Access, Not Reactivity
 
-**The most important thing to understand:** Everything in CommonTools is reactive by default. The `Cell<>` wrapper in type signatures doesn't enable reactivity—it indicates **write intent**.
+**The most important thing to understand:** Everything in CommonTools is reactive by default. The `Writable<>` wrapper in type signatures doesn't enable reactivity—it indicates **write intent**.
 
 ### The Rule
 
-- **Use `Cell<T>`** in signatures ONLY when you need write access (`.set()`, `.update()`, `.push()`, `.key()`)
-- **Omit `Cell<>`** for read-only access - the framework automatically provides reactive values
+- **Use `Writable<T>`** in signatures ONLY when you need write access (`.set()`, `.update()`, `.push()`, `.key()`)
+- **Omit `Writable<>`** for read-only access - the framework automatically provides reactive values
 
 ```typescript
-// ✅ Read-only - No Cell<> needed (still reactive!)
+// ✅ Read-only - No Writable<> needed (still reactive!)
 interface ReadOnlyInput {
   count: number;        // Just display it
   items: Item[];        // Just map/display
@@ -33,11 +33,11 @@ export default pattern<ReadOnlyInput>(({ count, items, userName }) => {
   };
 });
 
-// ✅ Write access - Cell<> required
+// ✅ Write access - Writable<> required
 interface WritableInput {
-  count: Cell<number>;  // Will call count.set()
-  items: Cell<Item[]>;  // Will call items.push()
-  title: Cell<string>;  // Will call title.set()
+  count: Writable<number>;  // Will call count.set()
+  items: Writable<Item[]>;  // Will call items.push()
+  title: Writable<string>;  // Will call title.set()
 }
 
 export default pattern<WritableInput>(({ count, items, title }) => {
@@ -65,20 +65,99 @@ export default pattern<WritableInput>(({ count, items, title }) => {
 
 ### Mental Model
 
-Think of `Cell<>` as a permission declaration:
+Think of `Writable<>` as a permission declaration:
 
-| Without Cell<> | With Cell<> |
-|----------------|-------------|
+| Without Writable<> | With Writable<> |
+|--------------------|-----------------|
 | "I will only read this value" | "I need to write to this value" |
 | Still reactive for display | Can call `.set()`, `.update()`, `.push()` |
 | Can pass to `computed()` | Can mutate directly |
 | Can use in JSX | Everything read-only can do, plus mutation |
 
-## Cell Basics
+## Accessing Reactive Values
 
-### Creating Cells with Cell.of()
+Different reactive types have different access patterns:
 
-Use `Cell.of()` to create NEW reactive cells in your pattern body or return values.
+| Type | How to access | Example |
+|------|---------------|---------|
+| Pattern inputs (no `Writable<>`) | Access directly | `items.filter(...)` |
+| Pattern inputs with `Writable<>` | Use `.get()` to read | `items.get().filter(...)` |
+| `Writable<>` with `.map()` | Exception: `.map()` works directly | `items.map(item => ...)` |
+| `computed()` results | Access directly - no `.get()` | `filteredItems.length` |
+| `lift()` results | Access directly - no `.get()` | `formattedDate` |
+| Values inside `.map()` | Properties are reactive, use `lift()` for object indexing | See below |
+
+### Pattern Input Access Patterns
+
+Pattern inputs follow the same rules—`Writable<>` needs `.get()`, everything else is accessed directly:
+
+```typescript
+interface Input {
+  // Read-only inputs - access directly
+  title: string;
+  items: Item[];
+
+  // Writable inputs - use .get() to read
+  count: Writable<number>;
+  todos: Writable<Todo[]>;
+}
+
+export default pattern<Input>(({ title, items, count, todos }) => {
+  // Read-only inputs: access directly (like computed/lift results)
+  const upperTitle = computed(() => title.toUpperCase());
+  const activeItems = computed(() => items.filter(item => !item.done));
+
+  // Writable inputs: use .get() to read the value
+  const doubled = computed(() => count.get() * 2);
+  const completedCount = computed(() => todos.get().filter(t => t.done).length);
+
+  // Exception: .map() works directly on Writable<T[]>
+  // The callback receives items that follow the same rules as pattern inputs
+  const todoTitles = todos.map(todo => todo.title);  // No .get() needed
+
+  return {
+    [UI]: (
+      <div>
+        <h1>{title}</h1>
+        <p>Count: {count}</p>
+        {items.map(i => <div>{i.name}</div>)}
+        {todos.map(todo => <div>{todo.title}</div>)}  {/* .map() on Writable works */}
+      </div>
+    ),
+  };
+});
+```
+
+**The rule:** If you declared it with `Writable<T>`, use `.get()` to read—except `.map()` which works directly. Inside `.map()` callbacks, items follow the same access rules as pattern inputs.
+
+### Using Reactive Values to Index Objects in `.map()`
+
+When iterating with `.map()`, each item's properties are reactive. To use a reactive value as an index into a plain object (like a lookup table), use `lift()`:
+
+```typescript
+const STYLES = {
+  pending: { bgColor: "#fef3c7", color: "#92400e" },
+  active: { bgColor: "#dbeafe", color: "#1e40af" },
+  complete: { bgColor: "#dcfce7", color: "#166534" },
+};
+
+// Create lifted helpers for each property you need
+const getStyleBgColor = lift((status: Status): string => STYLES[status].bgColor);
+const getStyleColor = lift((status: Status): string => STYLES[status].color);
+
+// Use the lifted functions in .map()
+items.map((item) => (
+  <div style={{ backgroundColor: getStyleBgColor(item.status), color: getStyleColor(item.status) }}>
+    {item.title}
+  </div>
+));
+```
+
+## Writable Basics
+
+### Creating Writable Cells with Cell.of()
+
+Use `Cell.of()` to create NEW writable cells in your pattern body or return values.
 
 This is rare. Generally prefer to add additional input parameters instead of
 creating internal cells.
@@ -90,7 +169,7 @@ creating internal cells.
 
 **When NOT to use Cell.of():**
 
-- Input parameters (they're already cells if declared with `Cell<>`)
+- Input parameters (they're already writable if declared with `Writable<>`)
 - Values you won't mutate
 
 ```typescript
@@ -132,15 +211,15 @@ return {
 };
 ```
 
-### Cell Methods
+### Writable Methods
 
-When you have `Cell<>` in your signature (write access), you can use these methods in handlers or inline event handlers:
+When you have `Writable<>` in your signature (write access), you can use these methods in handlers or inline event handlers:
 
 ```typescript
-// In a handler - this is where you typically use cell methods
+// In a handler - this is where you typically use writable methods
 const updateData = handler<
   { detail: { value: string } },
-  { count: Cell<number>; user: Cell<User>; items: Cell<Item[]> }
+  { count: Writable<number>; user: Writable<User>; items: Writable<Item[]> }
 >(({ detail }, { count, user, items }) => {
   // Read current value
   const currentCount = count.get();
@@ -203,7 +282,7 @@ const isSame = Cell.equals(value1, value2);
 const isSame = Cell.equals(cell, value);
 
 // Useful in array operations
-const removeItem = (items: Cell<Item[]>, item: Cell<Item>) => {
+const removeItem = (items: Writable<Item[]>, item: Writable<Item>) => {
   const currentItems = items.get();
   const index = currentItems.findIndex(el => Cell.equals(item, el));
   if (index >= 0) {
@@ -233,7 +312,7 @@ const fullName = computed(() => `${firstName} ${lastName}`);
 
 ### Never Nest computed()
 
-There is never a reason to nest `computed()` calls. The inner `computed()` returns an `OpaqueRef`, not a value, which breaks reactivity:
+There is never a reason to nest `computed()` calls. The inner `computed()` returns a cell reference, not a value, which breaks reactivity:
 
 ```typescript
 // ❌ WRONG - never nest computed()
@@ -420,10 +499,10 @@ Reactivity is completely automatic:
 
 ### 3. In Inline Handlers
 
-When working with `Cell<T>` types (whether passed as inputs or created with `Cell.of()`), you need to explicitly get/set values:
+When working with `Writable<T>` types (whether passed as inputs or created with `Cell.of()`), you need to explicitly get/set values:
 
 ```typescript
-// ✅ Use .get() to read, .set() to write when you have Cell<T>
+// ✅ Use .get() to read, .set() to write when you have Writable<T>
 <ct-button onClick={() => {
   const current = count.get();  // Read current value
   count.set(current + 1);       // Write new value
@@ -431,7 +510,7 @@ When working with `Cell<T>` types (whether passed as inputs or created with `Cel
   Increment
 </ct-button>
 
-// ✅ For arrays - if items is Cell<T[]>
+// ✅ For arrays - if items is Writable<T[]>
 <ct-button onClick={() => {
   items.push({ title: "New", done: false });
 }}>
@@ -439,22 +518,22 @@ When working with `Cell<T>` types (whether passed as inputs or created with `Cel
 </ct-button>
 ```
 
-**Key point:** If the type is `Cell<T>` (whether from a pattern input parameter or created locally with `Cell.of()`), you need `.get()` to unwrap the value. The method of creation doesn't matter - what matters is the type.
+**Key point:** If the type is `Writable<T>` (whether from a pattern input parameter or created locally with `Cell.of()`), you need `.get()` to unwrap the value. The method of creation doesn't matter - what matters is the type.
 
 ### 4. In handler() Functions
 
-Same as inline handlers—when the type is `Cell<T>`, use explicit get/set:
+Same as inline handlers—when the type is `Writable<T>`, use explicit get/set:
 
 ```typescript
-const increment = handler<never, { count: Cell<number> }>(
+const increment = handler<never, { count: Writable<number> }>(
   (_, { count }) => {
-    // count is Cell<number>, so .get() is required
+    // count is Writable<number>, so .get() is required
     count.set(count.get() + 1);
   }
 );
 ```
 
-**Remember:** Whether a cell was passed in as an input or created locally with `Cell.of()`, if the type is `Cell<T>`, you use `.get()` to read its value.
+**Remember:** Whether a cell was passed in as an input or created locally with `Cell.of()`, if the type is `Writable<T>`, you use `.get()` to read its value.
 
 ### 5. In computed() Functions
 
@@ -768,8 +847,8 @@ const activeItems = computed(() => items.filter(item => !item.done));
 
 **Key Takeaways:**
 
-1. **Cell<> = Write Permission** - Only use in signatures when you need `.set()`, `.update()`, `.push()`
-2. **Everything is Reactive** - Whether you use `Cell<>` or not, values update automatically
+1. **Writable<> = Write Permission** - Only use in signatures when you need `.set()`, `.update()`, `.push()`
+2. **Everything is Reactive** - Whether you use `Writable<>` or not, values update automatically
 3. **computed() Outside JSX** - Use for data transformations; inside JSX, reactivity is automatic
 4. **Direct Property Access** - Works fine on computed objects
 5. **Get/Set in Handlers** - Use `.get()` to read, `.set()` to write inside handlers

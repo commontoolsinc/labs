@@ -43,7 +43,7 @@ export const h: HFunction = Object.assign(
         } else if (!isCell(value) && !isCellResult(value)) {
           throw new Error(
             `Bidirectionally bound property ${key} is not reactive\n` +
-              "Use pattern parameter or create a cell using Cell.of()",
+              "Use pattern parameter or create a cell using Writable.of()",
           );
         }
       });

@@ -1,12 +1,12 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   type Default,
   handler,
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 // Type definition for transcription data (from ct-voice-input component)
@@ -25,7 +25,7 @@ interface TranscriptionData {
 }
 
 type Input = {
-  title?: Cell<Default<string, "Voice Note">>;
+  title?: Writable<Default<string, "Voice Note">>;
 };
 
 type Output = {
@@ -35,7 +35,7 @@ type Output = {
 
 const handleTranscriptionComplete = handler<
   { detail: { transcription: TranscriptionData } },
-  { notes: Cell<TranscriptionData[]> }
+  { notes: Writable<TranscriptionData[]> }
 >(({ detail }, { notes }) => {
   // Add the transcription to our notes list
   notes.push(detail.transcription);
@@ -43,7 +43,7 @@ const handleTranscriptionComplete = handler<
 
 const handleDeleteNote = handler<
   undefined,
-  { noteId: string; notes: Cell<TranscriptionData[]> }
+  { noteId: string; notes: Writable<TranscriptionData[]> }
 >((_, { noteId, notes }) => {
   const currentNotes = notes.get();
   const filtered = currentNotes.filter((note) => note.id !== noteId);
@@ -51,8 +51,8 @@ const handleDeleteNote = handler<
 });
 
 const VoiceNote = pattern<Input, Output>(({ title }) => {
-  const transcription = Cell.of<TranscriptionData | null>(null);
-  const notes = Cell.of<TranscriptionData[]>([]);
+  const transcription = Writable.of<TranscriptionData | null>(null);
+  const notes = Writable.of<TranscriptionData[]>([]);
 
   // Computed values for type-safe JSX access
   const hasTranscription = computed(() => transcription.get() !== null);

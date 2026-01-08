@@ -37,8 +37,8 @@ If you are developing patterns, use Claude Skills (pattern-dev) to do the work.
 
 **Core concepts:**
 
-- `docs/common/CELLS_AND_REACTIVITY.md` - Cell system, computed(), reactivity
-  mental models (when Cell<> is needed for write access)
+- `docs/common/REACTIVITY.md` - Cell system, computed(), reactivity mental
+  models (when Writable<> is needed for write access)
 - `docs/common/TYPES_AND_SCHEMAS.md` - Type system, Cell<> vs OpaqueRef<>,
   Default<>, when to use [ID]
 

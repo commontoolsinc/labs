@@ -1,11 +1,11 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   type Default,
   pattern,
   UI,
   type WishState,
+  Writable,
 } from "commontools";
 
 // Copy of the original with less fancy types, since we ran into limits of the
@@ -19,11 +19,11 @@ export type WishParams = {
 };
 
 export default pattern<
-  WishParams & { candidates: Default<Cell<never>[], []> },
+  WishParams & { candidates: Default<Writable<never>[], []> },
   WishState<never>
 >(
   ({ query: _query, context: _context, candidates }) => {
-    const selectedIndex = Cell.of(0);
+    const selectedIndex = Writable.of(0);
     const result = computed(() => {
       if (candidates.length === 0) return undefined;
       const idx = Math.min(selectedIndex.get(), candidates.length - 1);

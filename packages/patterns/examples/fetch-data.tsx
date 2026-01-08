@@ -1,12 +1,12 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   Default,
   fetchData,
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 type GithubResponse = {
@@ -151,7 +151,7 @@ function parseUrl(url: string): { org: string; user: string } {
 }
 
 export default pattern<
-  { repoUrl: Cell<Default<string, "https://github.com/vercel/next.js">> }
+  { repoUrl: Writable<Default<string, "https://github.com/vercel/next.js">> }
 >((state) => {
   // Parse URL and create API endpoint
   const output = computed(() => parseUrl(state.repoUrl.get()));

@@ -9,7 +9,6 @@
  * Array position determines ordering (simple and effective).
  */
 import {
-  Cell,
   computed,
   Default,
   handler,
@@ -17,6 +16,7 @@ import {
   pattern,
   Stream,
   UI,
+  Writable,
 } from "commontools";
 
 // ============ HELPERS ============
@@ -52,7 +52,7 @@ interface Column {
 // ============ INPUT/OUTPUT ============
 
 interface State {
-  columns: Cell<
+  columns: Writable<
     Default<
       Column[],
       [
@@ -82,7 +82,7 @@ interface Output {
 
 const addCardHandler = handler<
   { columnId: string; title: string; description?: string },
-  { columns: Cell<Column[]> }
+  { columns: Writable<Column[]> }
 >(({ columnId, title, description }, { columns }) => {
   if (!title?.trim()) return;
 
@@ -106,7 +106,7 @@ const addCardHandler = handler<
 
 const removeCardHandler = handler<
   { columnId: string; cardId: string },
-  { columns: Cell<Column[]> }
+  { columns: Writable<Column[]> }
 >(({ columnId, cardId }, { columns }) => {
   const cols = columns.get();
   const colIndex = cols.findIndex((c) => c.id === columnId);
@@ -123,7 +123,7 @@ const removeCardHandler = handler<
 
 const moveCardHandler = handler<
   { cardId: string; fromColumnId: string; toColumnId: string },
-  { columns: Cell<Column[]> }
+  { columns: Writable<Column[]> }
 >(({ cardId, fromColumnId, toColumnId }, { columns }) => {
   if (fromColumnId === toColumnId) return;
 
@@ -150,7 +150,7 @@ const moveCardHandler = handler<
 
 const addColumnHandler = handler<
   { title: string },
-  { columns: Cell<Column[]> }
+  { columns: Writable<Column[]> }
 >(({ title }, { columns }) => {
   if (!title?.trim()) return;
 
@@ -165,7 +165,7 @@ const addColumnHandler = handler<
 
 const removeColumnHandler = handler<
   { columnId: string },
-  { columns: Cell<Column[]> }
+  { columns: Writable<Column[]> }
 >(({ columnId }, { columns }) => {
   const cols = columns.get();
   const index = cols.findIndex((c) => c.id === columnId);
@@ -187,13 +187,13 @@ export default pattern<State>(({ columns }) => {
 
   // ============ LOCAL UI STATE ============
 
-  const newColumnTitle = Cell.of("");
+  const newColumnTitle = Writable.of("");
 
   // Editing state (for future use - click handlers set these but no edit UI yet)
-  const editingCardId = Cell.of<string | null>(null);
-  const editingCardTitle = Cell.of("");
-  const editingColumnId = Cell.of<string | null>(null);
-  const editingColumnTitle = Cell.of("");
+  const editingCardId = Writable.of<string | null>(null);
+  const editingCardTitle = Writable.of("");
+  const editingColumnId = Writable.of<string | null>(null);
+  const editingColumnTitle = Writable.of("");
 
   // ============ COMPUTED DERIVATIONS ============
 

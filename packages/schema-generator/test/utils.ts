@@ -16,6 +16,7 @@ declare interface BrandedCell<T, Brand extends string = "cell"> {
 declare interface OpaqueCell<T> extends BrandedCell<T, "opaque"> {}
 declare interface OpaqueRef<T> extends OpaqueCell<T> {}
 declare interface Cell<T> extends BrandedCell<T, "cell"> {}
+declare type Writable<T> = Cell<T>; // Alias for Cell with clearer write-access semantics
 declare interface Stream<T> extends BrandedCell<T, "stream"> {}
 declare interface ComparableCell<T> extends BrandedCell<T, "comparable"> {}
 declare interface ReadonlyCell<T> extends BrandedCell<T, "readonly"> {}

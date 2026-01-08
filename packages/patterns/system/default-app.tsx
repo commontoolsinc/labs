@@ -1,7 +1,7 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
+  equals,
   handler,
   ifElse,
   lift,
@@ -10,6 +10,7 @@ import {
   pattern,
   UI,
   wish,
+  Writable,
 } from "commontools";
 
 import { default as Note } from "../notes/note.tsx";
@@ -41,7 +42,7 @@ interface CharmsListOutput {
 
 const _visit = handler<
   Record<string, never>,
-  { charm: Cell<MinimalCharm> }
+  { charm: Writable<MinimalCharm> }
 >((_, state) => {
   return navigateTo(state.charm);
 }, { proxy: true });
@@ -49,8 +50,8 @@ const _visit = handler<
 const removeCharm = handler<
   Record<string, never>,
   {
-    charm: Cell<MinimalCharm>;
-    allCharms: Cell<MinimalCharm[]>;
+    charm: Writable<MinimalCharm>;
+    allCharms: Writable<MinimalCharm[]>;
   }
 >((_, state) => {
   const allCharmsValue = state.allCharms.get();
@@ -67,17 +68,15 @@ const removeCharm = handler<
 
 // Handler for dropping a note onto a notebook row
 const dropOntoNotebook = handler<
-  { detail: { sourceCell: Cell<unknown> } },
-  { notebook: Cell<{ notes?: unknown[] }> }
+  { detail: { sourceCell: Writable<unknown> } },
+  { notebook: Writable<{ notes?: unknown[] }> }
 >((event, { notebook }) => {
   const sourceCell = event.detail.sourceCell;
   const notesCell = notebook.key("notes");
   const notesList = notesCell.get() ?? [];
 
-  // Prevent duplicates using Cell.equals
-  const alreadyExists = notesList.some((n) =>
-    Cell.equals(sourceCell, n as any)
-  );
+  // Prevent duplicates using Writable.equals
+  const alreadyExists = notesList.some((n) => equals(sourceCell, n as any));
   if (alreadyExists) return;
 
   // Hide from Patterns list
@@ -87,24 +86,24 @@ const dropOntoNotebook = handler<
   notesCell.push(sourceCell);
 });
 
-const toggleFab = handler<any, { fabExpanded: Cell<boolean> }>(
+const toggleFab = handler<any, { fabExpanded: Writable<boolean> }>(
   (_, { fabExpanded }) => {
     fabExpanded.set(!fabExpanded.get());
   },
 );
 
 // Toggle dropdown menu
-const toggleMenu = handler<void, { menuOpen: Cell<boolean> }>(
+const toggleMenu = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => menuOpen.set(!menuOpen.get()),
 );
 
 // Close dropdown menu (for backdrop click)
-const closeMenu = handler<void, { menuOpen: Cell<boolean> }>(
+const closeMenu = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => menuOpen.set(false),
 );
 
 // Menu: New Note
-const menuNewNote = handler<void, { menuOpen: Cell<boolean> }>(
+const menuNewNote = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => {
     menuOpen.set(false);
     return navigateTo(Note({
@@ -116,7 +115,7 @@ const menuNewNote = handler<void, { menuOpen: Cell<boolean> }>(
 );
 
 // Menu: New Notebook
-const menuNewNotebook = handler<void, { menuOpen: Cell<boolean> }>(
+const menuNewNotebook = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => {
     menuOpen.set(false);
     return navigateTo(Notebook({ title: "New Notebook" }));
@@ -124,7 +123,7 @@ const menuNewNotebook = handler<void, { menuOpen: Cell<boolean> }>(
 );
 
 // Helper to find existing All Notes charm
-const findAllNotebooksCharm = (allCharms: Cell<MinimalCharm[]>) => {
+const findAllNotebooksCharm = (allCharms: Writable<MinimalCharm[]>) => {
   const charms = allCharms.get();
   return charms.find((charm: any) => {
     const name = charm?.[NAME];
@@ -135,7 +134,7 @@ const findAllNotebooksCharm = (allCharms: Cell<MinimalCharm[]>) => {
 // Menu: All Notes
 const menuAllNotebooks = handler<
   void,
-  { menuOpen: Cell<boolean>; allCharms: Cell<MinimalCharm[]> }
+  { menuOpen: Writable<boolean>; allCharms: Writable<MinimalCharm[]> }
 >((_, { menuOpen, allCharms }) => {
   menuOpen.set(false);
   const existing = findAllNotebooksCharm(allCharms);
@@ -149,7 +148,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
   const { allCharms } = wish<{ allCharms: MentionableCharm[] }>("/");
 
   // Dropdown menu state
-  const menuOpen = Cell.of(false);
+  const menuOpen = Writable.of(false);
 
   // Filter out hidden charms and charms without resolved NAME
   // (prevents transient hash-only pills during reactive updates)
@@ -165,7 +164,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
   const index = BacklinksIndex({ allCharms });
 
   const fab = OmniboxFAB({
-    mentionable: index.mentionable as unknown as Cell<MentionableCharm[]>,
+    mentionable: index.mentionable as unknown as Writable<MentionableCharm[]>,
   });
 
   return {

@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell,
   compileAndRun,
   Default,
   handler,
@@ -9,18 +8,19 @@ import {
   navigateTo,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 type Input = {
   code: Default<
     string,
-    '/// <cts-enable />\nimport { Cell, computed, Default, handler, NAME, pattern, UI } from "commontools";\n\ninterface Input {\n  value: Default<number, 0>;\n}\n\nconst increment = handler<unknown, { value: Cell<number> }>((_, state) => {\n  state.value.set(state.value.get() + 1);\n});\n\nconst decrement = handler<unknown, { value: Cell<number> }>((_, state) => {\n  state.value.set(state.value.get() - 1);\n});\n\nexport default pattern<Input>(({ value }) => {\n  return {\n    [NAME]: computed(() => `Simple counter: ${value}`),\n    [UI]: (\n      <div>\n        <ct-button onClick={decrement({ value })}>-</ct-button>\n        <b>{value}</b>\n        <ct-button onClick={increment({ value })}>+</ct-button>\n      </div>\n    ),\n    value,\n  };\n});\n'
+    '/// <cts-enable />\nimport { computed, Default, handler, NAME, pattern, UI } from "commontools";\n\ninterface Input {\n  value: Default<number, 0>;\n}\n\nconst increment = handler<unknown, { value: Writable<number> }>((_, state) => {\n  state.value.set(state.value.get() + 1);\n});\n\nconst decrement = handler<unknown, { value: Writable<number> }>((_, state) => {\n  state.value.set(state.value.get() - 1);\n});\n\nexport default pattern<Input>(({ value }) => {\n  return {\n    [NAME]: computed(() => `Simple counter: ${value}`),\n    [UI]: (\n      <div>\n        <ct-button onClick={decrement({ value })}>-</ct-button>\n        <b>{value}</b>\n        <ct-button onClick={increment({ value })}>+</ct-button>\n      </div>\n    ),\n    value,\n  };\n});\n'
   >;
 };
 
 const updateCode = handler<
   { detail: { value: string } },
-  { code: Cell<string> }
+  { code: Writable<string> }
 >(
   (event, state) => {
     state.code.set(event.detail?.value ?? "");
@@ -29,7 +29,7 @@ const updateCode = handler<
 
 const visit = handler<
   unknown,
-  { result: Cell<any> }
+  { result: Writable<any> }
 >(
   (_, { result }) => {
     console.log("visit: navigating to compiled result", result);
@@ -39,7 +39,7 @@ const visit = handler<
 
 const handleEditContent = handler<
   { code: string },
-  { code: Cell<string> }
+  { code: Writable<string> }
 >(
   (event, { code }) => {
     code.set(event.code);

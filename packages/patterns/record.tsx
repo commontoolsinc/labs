@@ -13,7 +13,6 @@
  */
 
 import {
-  Cell,
   computed,
   type Default,
   handler,
@@ -24,6 +23,7 @@ import {
   str,
   toSchema,
   UI,
+  Writable,
 } from "commontools";
 import {
   createSubCharm,
@@ -109,8 +109,8 @@ const storeInitialCharms = lift(
     notesSchema: unknown;
     typePickerCharm: unknown;
     typePickerSchema: unknown;
-    subCharms: Cell<SubCharmEntry[]>;
-    isInitialized: Cell<boolean>;
+    subCharms: Writable<SubCharmEntry[]>;
+    isInitialized: Writable<boolean>;
   }>(),
   undefined,
   ({
@@ -143,9 +143,9 @@ const storeInitialCharms = lift(
 const initializeRecord = lift(
   toSchema<{
     currentCharms: SubCharmEntry[]; // Unwrapped value, not Cell
-    subCharms: Cell<SubCharmEntry[]>;
-    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
-    isInitialized: Cell<boolean>;
+    subCharms: Writable<SubCharmEntry[]>;
+    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
+    isInitialized: Writable<boolean>;
     recordPatternJson: string; // Computed that returns Record JSON string
   }>(),
   undefined,
@@ -166,7 +166,7 @@ const initializeRecord = lift(
       // Build ContainerCoordinationContext for TypePicker
       const context: ContainerCoordinationContext<SubCharmEntry> = {
         entries: subCharms,
-        trashedEntries: trashedSubCharms as Cell<
+        trashedEntries: trashedSubCharms as Writable<
           (SubCharmEntry & { trashedAt: string })[]
         >,
         createModule: (type: string) => {
@@ -213,7 +213,7 @@ const moduleHasSettings = lift(
 // Toggle pin state for a sub-charm - uses entry reference, not index
 const togglePin = handler<
   unknown,
-  { subCharms: Cell<SubCharmEntry[]>; index: number }
+  { subCharms: Writable<SubCharmEntry[]>; index: number }
 >((_event, { subCharms: sc, index }) => {
   const current = sc.get() || [];
   const entry = current[index];
@@ -227,7 +227,7 @@ const togglePin = handler<
 // Toggle collapsed state for a sub-charm - uses index for reliable lookup
 const toggleCollapsed = handler<
   unknown,
-  { subCharms: Cell<SubCharmEntry[]>; index: number }
+  { subCharms: Writable<SubCharmEntry[]>; index: number }
 >((_event, { subCharms: sc, index }) => {
   const current = sc.get() || [];
   const entry = current[index];
@@ -242,7 +242,7 @@ const toggleCollapsed = handler<
 // Simple index-based approach: tracks which index is expanded (ephemeral UI state)
 const toggleExpanded = handler<
   unknown,
-  { expandedIndex: Cell<number | undefined>; index: number }
+  { expandedIndex: Writable<number | undefined>; index: number }
 >((_event, { expandedIndex, index }) => {
   const current = expandedIndex.get();
   if (current === index) {
@@ -257,7 +257,7 @@ const toggleExpanded = handler<
 // Close expanded module (used by Escape key and backdrop click)
 const closeExpanded = handler<
   unknown,
-  { expandedIndex: Cell<number | undefined> }
+  { expandedIndex: Writable<number | undefined> }
 >((_event, { expandedIndex }) => {
   expandedIndex.set(undefined);
 });
@@ -268,10 +268,10 @@ const closeExpanded = handler<
 const addSubCharm = handler<
   { detail: { value: string } },
   {
-    subCharms: Cell<SubCharmEntry[]>;
-    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
-    title: Cell<string>;
-    selectedAddType: Cell<string>;
+    subCharms: Writable<SubCharmEntry[]>;
+    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
+    title: Writable<string>;
+    selectedAddType: Writable<string>;
     recordPatternJson: string;
   }
 >((
@@ -324,10 +324,10 @@ const addSubCharm = handler<
 const trashSubCharm = handler<
   unknown,
   {
-    subCharms: Cell<SubCharmEntry[]>;
-    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
-    expandedIndex: Cell<number | undefined>;
-    settingsModuleIndex: Cell<number | undefined>;
+    subCharms: Writable<SubCharmEntry[]>;
+    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
+    expandedIndex: Writable<number | undefined>;
+    settingsModuleIndex: Writable<number | undefined>;
     index: number;
   }
 >((
@@ -381,8 +381,8 @@ const trashSubCharm = handler<
 const restoreSubCharm = handler<
   unknown,
   {
-    subCharms: Cell<SubCharmEntry[]>;
-    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+    subCharms: Writable<SubCharmEntry[]>;
+    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
     trashIndex: number;
   }
 >((_event, { subCharms: sc, trashedSubCharms: trash, trashIndex }) => {
@@ -404,7 +404,7 @@ const restoreSubCharm = handler<
 const permanentlyDelete = handler<
   unknown,
   {
-    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
     trashIndex: number;
   }
 >((_event, { trashedSubCharms: trash, trashIndex }) => {
@@ -419,7 +419,7 @@ const permanentlyDelete = handler<
 // Empty all trash
 const emptyTrash = handler<
   unknown,
-  { trashedSubCharms: Cell<TrashedSubCharmEntry[]> }
+  { trashedSubCharms: Writable<TrashedSubCharmEntry[]> }
 >((_event, { trashedSubCharms: trash }) => {
   trash.set([]);
 });
@@ -428,9 +428,9 @@ const emptyTrash = handler<
 const openNoteEditor = handler<
   unknown,
   {
-    subCharms: Cell<SubCharmEntry[]>;
-    editingNoteIndex: Cell<number | undefined>;
-    editingNoteText: Cell<string | undefined>;
+    subCharms: Writable<SubCharmEntry[]>;
+    editingNoteIndex: Writable<number | undefined>;
+    editingNoteText: Writable<string | undefined>;
     index: number;
   }
 >((_event, { subCharms, editingNoteIndex, editingNoteText, index }) => {
@@ -445,9 +445,9 @@ const openNoteEditor = handler<
 const saveNote = handler<
   unknown,
   {
-    subCharms: Cell<SubCharmEntry[]>;
-    editingNoteIndex: Cell<number | undefined>;
-    editingNoteText: Cell<string | undefined>;
+    subCharms: Writable<SubCharmEntry[]>;
+    editingNoteIndex: Writable<number | undefined>;
+    editingNoteText: Writable<string | undefined>;
   }
 >((_event, { subCharms: sc, editingNoteIndex, editingNoteText }) => {
   const index = editingNoteIndex.get();
@@ -473,8 +473,8 @@ const saveNote = handler<
 const closeNoteEditor = handler<
   unknown,
   {
-    editingNoteIndex: Cell<number | undefined>;
-    editingNoteText: Cell<string | undefined>;
+    editingNoteIndex: Writable<number | undefined>;
+    editingNoteText: Writable<string | undefined>;
   }
 >((_event, { editingNoteIndex, editingNoteText }) => {
   editingNoteIndex.set(undefined);
@@ -485,7 +485,7 @@ const closeNoteEditor = handler<
 const openSettings = handler<
   unknown,
   {
-    settingsModuleIndex: Cell<number | undefined>;
+    settingsModuleIndex: Writable<number | undefined>;
     index: number;
   }
 >((_event, { settingsModuleIndex, index }) => {
@@ -495,13 +495,13 @@ const openSettings = handler<
 // Close the settings modal
 const closeSettings = handler<
   unknown,
-  { settingsModuleIndex: Cell<number | undefined> }
+  { settingsModuleIndex: Writable<number | undefined> }
 >((_event, { settingsModuleIndex }) => {
   settingsModuleIndex.set(undefined);
 });
 
 // Toggle trash section expanded/collapsed
-const toggleTrashExpanded = handler<unknown, { expanded: Cell<boolean> }>(
+const toggleTrashExpanded = handler<unknown, { expanded: Writable<boolean> }>(
   (_event, { expanded }) => expanded.set(!expanded.get()),
 );
 
@@ -513,10 +513,10 @@ const toggleTrashExpanded = handler<unknown, { expanded: Cell<boolean> }>(
 // Get a structured summary of all modules in this record
 // Returns module types, their data, and schemas for LLM context
 const handleGetSummary = handler<
-  { result?: Cell<unknown> },
+  { result?: Writable<unknown> },
   {
-    title: Cell<string>;
-    subCharms: Cell<SubCharmEntry[]>;
+    title: Writable<string>;
+    subCharms: Writable<SubCharmEntry[]>;
   }
 >(({ result }, { title, subCharms }) => {
   const modules = subCharms.get() || [];
@@ -583,12 +583,12 @@ const handleAddModule = handler<
   {
     type: string;
     initialData?: Record<string, unknown>;
-    result?: Cell<unknown>;
+    result?: Writable<unknown>;
   },
   {
-    subCharms: Cell<SubCharmEntry[]>;
-    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
-    title: Cell<string>;
+    subCharms: Writable<SubCharmEntry[]>;
+    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
+    title: Writable<string>;
   }
 >((
   { type, initialData, result },
@@ -671,8 +671,8 @@ const handleAddModule = handler<
 // field: field name to update
 // value: new value
 const handleUpdateModule = handler<
-  { index: number; field: string; value: unknown; result?: Cell<unknown> },
-  { subCharms: Cell<SubCharmEntry[]> }
+  { index: number; field: string; value: unknown; result?: Writable<unknown> },
+  { subCharms: Writable<SubCharmEntry[]> }
 >(({ index, field, value, result }, { subCharms: sc }) => {
   const current = sc.get() || [];
 
@@ -735,10 +735,10 @@ const handleUpdateModule = handler<
 
 // Remove a module (move to trash)
 const handleRemoveModule = handler<
-  { index: number; result?: Cell<unknown> },
+  { index: number; result?: Writable<unknown> },
   {
-    subCharms: Cell<SubCharmEntry[]>;
-    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+    subCharms: Writable<SubCharmEntry[]>;
+    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
   }
 >(({ index, result }, { subCharms: sc, trashedSubCharms: trash }) => {
   const current = sc.get() || [];
@@ -778,8 +778,8 @@ const handleRemoveModule = handler<
 
 // Set the record title
 const handleSetTitle = handler<
-  { newTitle: string; result?: Cell<unknown> },
-  { title: Cell<string> }
+  { newTitle: string; result?: Writable<unknown> },
+  { title: Writable<string> }
 >(({ newTitle, result }, { title }) => {
   if (newTitle === undefined || newTitle === null) {
     if (result) {
@@ -793,7 +793,7 @@ const handleSetTitle = handler<
 
 // List available module types that can be added
 const handleListModuleTypes = handler<
-  { result?: Cell<unknown> },
+  { result?: Writable<unknown> },
   Record<string, never>
 >(({ result }) => {
   const types = getAddableTypes().map((def) => ({
@@ -809,7 +809,7 @@ const handleListModuleTypes = handler<
 // Used by '+' button in module headers for email/phone/address
 const createSibling = handler<
   unknown,
-  { subCharms: Cell<SubCharmEntry[]>; index: number }
+  { subCharms: Writable<SubCharmEntry[]>; index: number }
 >((_event, { subCharms: sc, index }) => {
   const current = sc.get() || [];
   const entry = current[index];
@@ -837,8 +837,8 @@ const createSibling = handler<
 const Record = pattern<RecordInput, RecordOutput>(
   ({ title, subCharms, trashedSubCharms }) => {
     // Local state
-    const selectedAddType = Cell.of<string>("");
-    const trashExpanded = Cell.of(false);
+    const selectedAddType = Writable.of<string>("");
+    const trashExpanded = Writable.of(false);
 
     // Note editor modal state
     // NOTE: In the future, this should use a <ct-modal> component instead of inline implementation.
@@ -847,18 +847,18 @@ const Record = pattern<RecordInput, RecordOutput>(
     //     <content />
     //   </ct-modal>
     // With features: backdrop blur, escape key, focus trap, centered positioning, animations
-    // IMPORTANT: Don't use Cell.of(null) - it creates a cell pointing to null, not primitive null.
-    // Use Cell.of() without argument so .get() returns undefined (falsy) initially.
+    // IMPORTANT: Don't use Writable.of(null) - it creates a cell pointing to null, not primitive null.
+    // Use Writable.of() without argument so .get() returns undefined (falsy) initially.
     // We store the INDEX instead of the entry to decouple modal state from array updates.
-    const editingNoteIndex = Cell.of<number | undefined>();
-    const editingNoteText = Cell.of<string>();
+    const editingNoteIndex = Writable.of<number | undefined>();
+    const editingNoteText = Writable.of<string>();
 
     // Expanded (maximized) module state - ephemeral, not persisted
     // Simple index-based tracking - just stores which index is expanded
-    const expandedIndex = Cell.of<number | undefined>();
+    const expandedIndex = Writable.of<number | undefined>();
 
     // Settings modal state - tracks which module's settings are being edited
-    const settingsModuleIndex = Cell.of<number | undefined>();
+    const settingsModuleIndex = Writable.of<number | undefined>();
 
     // Create Record pattern JSON for wiki-links in Notes
     // Using computed() defers evaluation until render time, avoiding circular dependency
@@ -866,7 +866,7 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // ===== Auto-initialize Notes + TypePicker =====
     // Capture return value to force lift execution (fixes wiki-link creation)
-    const isInitialized = Cell.of(false);
+    const isInitialized = Writable.of(false);
     const _initialized = initializeRecord({
       currentCharms: subCharms,
       subCharms,

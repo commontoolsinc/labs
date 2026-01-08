@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, handler, NAME } from "commontools";
+import { handler, NAME, Writable } from "commontools";
 import { MentionableCharm } from "./backlinks-index.tsx";
 
 /**
@@ -34,9 +34,9 @@ function parsePath(path: string): {
  * Find a charm by name from the mentionable list
  */
 function findCharmByName(
-  mentionable: Cell<MentionableCharm[]>,
+  mentionable: Writable<MentionableCharm[]>,
   name: string,
-): Cell<MentionableCharm> | undefined {
+): Writable<MentionableCharm> | undefined {
   for (let i = 0; i < mentionable.get().length; i++) {
     const c = mentionable.key(i);
     if (c.get()[NAME] === name) {
@@ -51,9 +51,9 @@ function findCharmByName(
  * Navigate through a path of keys/indices on a cell
  */
 function navigateToCell(
-  cell: Cell<any>,
+  cell: Writable<any>,
   path: readonly (string | number)[],
-): Cell<any> {
+): Writable<any> {
   let current = cell;
   for (const segment of path) {
     current = current.key(segment);
@@ -72,7 +72,7 @@ function navigateToCell(
  */
 export const linkTool = handler<
   { source: string; target: string },
-  { mentionable: Cell<MentionableCharm[]> }
+  { mentionable: Writable<MentionableCharm[]> }
 >(({ source, target }, { mentionable }) => {
   const sourceParsed = parsePath(source);
   const targetParsed = parsePath(target);
@@ -105,7 +105,7 @@ export const linkTool = handler<
   }
 
   // Navigate to source cell
-  let sourceCell: Cell<any> = sourceCharm;
+  let sourceCell: Writable<any> = sourceCharm;
   if (sourceParsed.cellType === "input") {
     const argCell = sourceCharm.resolveAsCell().getArgumentCell();
     if (!argCell) throw new Error("Source charm has no argument cell");
@@ -114,7 +114,7 @@ export const linkTool = handler<
   sourceCell = navigateToCell(sourceCell, sourceParsed.path);
 
   // Navigate to target cell
-  let targetCell: Cell<any> = targetCharm;
+  let targetCell: Writable<any> = targetCharm;
   if (targetParsed.cellType === "input" || targetParsed.path.length > 0) {
     // For any path or explicit "input", navigate to argument cell
     const argCell = targetCharm.resolveAsCell().getArgumentCell();

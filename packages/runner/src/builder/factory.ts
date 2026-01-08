@@ -108,9 +108,11 @@ export const createBuilder = (): {
 
       // Cell creation
       cell: cellConstructorFactory<AsCell>("cell").of,
+      equals: cellConstructorFactory<AsCell>("cell").equals,
 
       // Cell constructors with static methods
       Cell: cellConstructorFactory<AsCell>("cell"),
+      Writable: cellConstructorFactory<AsCell>("cell"), // Alias for Cell with clearer semantics
       OpaqueCell: cellConstructorFactory<AsOpaqueCell>("opaque"),
       Stream: cellConstructorFactory<AsStream>("stream"),
       ComparableCell: cellConstructorFactory<AsComparableCell>("comparable"),

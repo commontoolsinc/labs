@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   handler,
   ifElse,
@@ -11,6 +10,7 @@ import {
   UI,
   when,
   wish,
+  Writable,
 } from "commontools";
 import Chatbot from "../chatbot.tsx";
 import {
@@ -24,14 +24,14 @@ import {
 import { MentionableCharm } from "./backlinks-index.tsx";
 
 interface OmniboxFABInput {
-  mentionable: Cell<MentionableCharm[]>;
+  mentionable: Writable<MentionableCharm[]>;
 }
 
-const toggle = handler<any, { value: Cell<boolean> }>((_, { value }) => {
+const toggle = handler<any, { value: Writable<boolean> }>((_, { value }) => {
   value.set(!value.get());
 });
 
-const closeFab = handler<any, { fabExpanded: Cell<boolean> }>(
+const closeFab = handler<any, { fabExpanded: Writable<boolean> }>(
   (_, { fabExpanded }) => {
     fabExpanded.set(false);
   },
@@ -39,7 +39,7 @@ const closeFab = handler<any, { fabExpanded: Cell<boolean> }>(
 
 const dismissPeek = handler<
   any,
-  { peekDismissedIndex: Cell<number>; assistantMessageCount: number }
+  { peekDismissedIndex: Writable<number>; assistantMessageCount: number }
 >((_, { peekDismissedIndex, assistantMessageCount }) => {
   // Store the current assistant message count so we know which message was dismissed
   peekDismissedIndex.set(assistantMessageCount);
@@ -82,9 +82,9 @@ export default pattern<OmniboxFABInput>(
       },
     });
 
-    const fabExpanded = Cell.of(false);
-    const showHistory = Cell.of(false);
-    const peekDismissedIndex = Cell.of(-1); // Track which message index was dismissed
+    const fabExpanded = Writable.of(false);
+    const showHistory = Writable.of(false);
+    const peekDismissedIndex = Writable.of(-1); // Track which message index was dismissed
 
     // Derive assistant message count for dismiss tracking
     const assistantMessageCount = computed(() => {

@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   type Default,
   handler,
@@ -10,6 +9,7 @@ import {
   pattern,
   UI,
   wish,
+  Writable,
 } from "commontools";
 
 import Note from "./note.tsx";
@@ -444,10 +444,10 @@ function topologicalSortNotebooks(notebooks: ParsedNotebook[]): number[] {
 // 6. Inject entity IDs into mention links
 function performImport(
   parsed: ParsedNote[],
-  allCharms: Cell<NoteCharm[]>,
-  notebooks: Cell<NotebookCharm[]>,
+  allCharms: Writable<NoteCharm[]>,
+  notebooks: Writable<NotebookCharm[]>,
   skipTitles: Set<string>, // Titles to skip (duplicates user chose not to import)
-  _importStatus?: Cell<string>, // Unused - kept for API compatibility
+  _importStatus?: Writable<string>, // Unused - kept for API compatibility
   onComplete?: () => void, // Callback when import is done
   rawMarkdown?: string, // Original markdown for v2 notebook parsing
 ) {
@@ -500,7 +500,7 @@ function performImport(
     title: string;
     noteId: string;
     index: number;
-    contentCell: Cell<string>;
+    contentCell: Writable<string>;
     originalContent: string;
   }> = [];
   // Map noteId → created note charm for linking
@@ -515,7 +515,7 @@ function performImport(
   parsed.forEach((noteData) => {
     if (skipTitles.has(noteData.title)) return;
 
-    const contentCell = Cell.of(noteData.content);
+    const contentCell = Writable.of(noteData.content);
     const noteIdToUse = noteData.noteId || generateId();
 
     // Determine isHidden:
@@ -736,18 +736,18 @@ function performImport(
 const handleImportFileUpload = handler<
   { detail: { files: Array<{ url: string; name: string }> } },
   {
-    importMarkdown: Cell<string>;
-    notes: Cell<NoteCharm[]>;
-    allCharms: Cell<NoteCharm[]>;
-    notebooks: Cell<NotebookCharm[]>;
-    showDuplicateModal: Cell<boolean>;
-    detectedDuplicates: Cell<DetectedDuplicate[]>;
-    pendingImportData: Cell<string>;
-    showImportModal: Cell<boolean>;
-    showImportProgressModal: Cell<boolean>;
-    importProgressMessage: Cell<string>;
-    importComplete: Cell<boolean>;
-    showPasteSection?: Cell<boolean>;
+    importMarkdown: Writable<string>;
+    notes: Writable<NoteCharm[]>;
+    allCharms: Writable<NoteCharm[]>;
+    notebooks: Writable<NotebookCharm[]>;
+    showDuplicateModal: Writable<boolean>;
+    detectedDuplicates: Writable<DetectedDuplicate[]>;
+    pendingImportData: Writable<string>;
+    showImportModal: Writable<boolean>;
+    showImportProgressModal: Writable<boolean>;
+    importProgressMessage: Writable<string>;
+    importComplete: Writable<boolean>;
+    showPasteSection?: Writable<boolean>;
   }
 >(({ detail }, state) => {
   const files = detail?.files ?? [];
@@ -847,19 +847,19 @@ const handleImportFileUpload = handler<
 const analyzeImport = handler<
   Record<string, never>,
   {
-    importMarkdown: Cell<string>;
-    notes: Cell<NoteCharm[]>;
-    allCharms: Cell<NoteCharm[]>;
-    notebooks: Cell<NotebookCharm[]>;
-    showDuplicateModal: Cell<boolean>;
-    detectedDuplicates: Cell<DetectedDuplicate[]>;
-    pendingImportData: Cell<string>;
-    showImportModal?: Cell<boolean>;
-    importStatus?: Cell<string>;
-    showImportProgressModal?: Cell<boolean>;
-    importProgressMessage?: Cell<string>;
-    importComplete?: Cell<boolean>;
-    showPasteSection?: Cell<boolean>;
+    importMarkdown: Writable<string>;
+    notes: Writable<NoteCharm[]>;
+    allCharms: Writable<NoteCharm[]>;
+    notebooks: Writable<NotebookCharm[]>;
+    showDuplicateModal: Writable<boolean>;
+    detectedDuplicates: Writable<DetectedDuplicate[]>;
+    pendingImportData: Writable<string>;
+    showImportModal?: Writable<boolean>;
+    importStatus?: Writable<string>;
+    showImportProgressModal?: Writable<boolean>;
+    importProgressMessage?: Writable<string>;
+    importComplete?: Writable<boolean>;
+    showPasteSection?: Writable<boolean>;
   }
 >((_, state) => {
   const {
@@ -964,16 +964,16 @@ const analyzeImport = handler<
 const importSkipDuplicates = handler<
   Record<string, never>,
   {
-    pendingImportData: Cell<string>;
-    allCharms: Cell<NoteCharm[]>;
-    notebooks: Cell<NotebookCharm[]>;
-    detectedDuplicates: Cell<DetectedDuplicate[]>;
-    showDuplicateModal: Cell<boolean>;
-    importMarkdown: Cell<string>;
-    importStatus?: Cell<string>;
-    showImportProgressModal?: Cell<boolean>;
-    importProgressMessage?: Cell<string>;
-    importComplete?: Cell<boolean>;
+    pendingImportData: Writable<string>;
+    allCharms: Writable<NoteCharm[]>;
+    notebooks: Writable<NotebookCharm[]>;
+    detectedDuplicates: Writable<DetectedDuplicate[]>;
+    showDuplicateModal: Writable<boolean>;
+    importMarkdown: Writable<string>;
+    importStatus?: Writable<string>;
+    showImportProgressModal?: Writable<boolean>;
+    importProgressMessage?: Writable<string>;
+    importComplete?: Writable<boolean>;
   }
 >((_, state) => {
   const markdown = state.pendingImportData.get();
@@ -1016,16 +1016,16 @@ const importSkipDuplicates = handler<
 const importAllAsCopies = handler<
   Record<string, never>,
   {
-    pendingImportData: Cell<string>;
-    allCharms: Cell<NoteCharm[]>;
-    notebooks: Cell<NotebookCharm[]>;
-    showDuplicateModal: Cell<boolean>;
-    detectedDuplicates: Cell<DetectedDuplicate[]>;
-    importMarkdown: Cell<string>;
-    importStatus?: Cell<string>;
-    showImportProgressModal?: Cell<boolean>;
-    importProgressMessage?: Cell<string>;
-    importComplete?: Cell<boolean>;
+    pendingImportData: Writable<string>;
+    allCharms: Writable<NoteCharm[]>;
+    notebooks: Writable<NotebookCharm[]>;
+    showDuplicateModal: Writable<boolean>;
+    detectedDuplicates: Writable<DetectedDuplicate[]>;
+    importMarkdown: Writable<string>;
+    importStatus?: Writable<string>;
+    showImportProgressModal?: Writable<boolean>;
+    importProgressMessage?: Writable<string>;
+    importComplete?: Writable<boolean>;
   }
 >((_, state) => {
   const markdown = state.pendingImportData.get();
@@ -1063,9 +1063,9 @@ const importAllAsCopies = handler<
 const cancelImport = handler<
   Record<string, never>,
   {
-    showDuplicateModal: Cell<boolean>;
-    detectedDuplicates: Cell<DetectedDuplicate[]>;
-    pendingImportData: Cell<string>;
+    showDuplicateModal: Writable<boolean>;
+    detectedDuplicates: Writable<DetectedDuplicate[]>;
+    pendingImportData: Writable<string>;
   }
 >((_, state) => {
   state.showDuplicateModal.set(false);
@@ -1076,7 +1076,7 @@ const cancelImport = handler<
 // Handler to hide paste section when Upload File button is clicked
 const hidePasteSection = handler<
   Record<string, never>,
-  { showPasteSection: Cell<boolean> }
+  { showPasteSection: Writable<boolean> }
 >((_, { showPasteSection }) => {
   showPasteSection.set(false);
 });
@@ -1085,10 +1085,10 @@ const hidePasteSection = handler<
 const _importNotes = handler<
   Record<string, never>,
   {
-    importMarkdown: Cell<string>;
-    allCharms: Cell<NoteCharm[]>;
-    notebooks: Cell<NotebookCharm[]>;
-    importStatus?: Cell<string>;
+    importMarkdown: Writable<string>;
+    allCharms: Writable<NoteCharm[]>;
+    notebooks: Writable<NotebookCharm[]>;
+    importStatus?: Writable<string>;
   }
 >((_, { importMarkdown, allCharms, notebooks, importStatus }) => {
   const markdown = importMarkdown.get();
@@ -1112,7 +1112,7 @@ const _importNotes = handler<
 // Handler to toggle note visibility in default-app listing
 const toggleNoteVisibility = handler<
   Record<string, never>,
-  { note: Cell<NoteCharm> }
+  { note: Writable<NoteCharm> }
 >((_, { note }) => {
   const isHiddenCell = note.key("isHidden");
   const current = isHiddenCell.get() ?? false;
@@ -1123,7 +1123,7 @@ const toggleNoteVisibility = handler<
 // If any are visible, hide all; if all hidden, show all
 const toggleAllNotesVisibility = handler<
   Record<string, never>,
-  { notes: Cell<NoteCharm[]> }
+  { notes: Writable<NoteCharm[]> }
 >((_, { notes }) => {
   const notesList = notes.get();
   if (notesList.length === 0) return;
@@ -1144,7 +1144,7 @@ const toggleAllNotesVisibility = handler<
 // Handler to toggle notebook visibility in default-app listing
 const toggleNotebookVisibility = handler<
   Record<string, never>,
-  { notebook: Cell<NotebookCharm> }
+  { notebook: Writable<NotebookCharm> }
 >((_, { notebook }) => {
   const isHiddenCell = notebook.key("isHidden");
   const current = isHiddenCell.get() ?? false;
@@ -1155,7 +1155,7 @@ const toggleNotebookVisibility = handler<
 // If any are visible, hide all; if all hidden, show all
 const toggleAllNotebooksVisibility = handler<
   Record<string, never>,
-  { notebooks: Cell<NotebookCharm[]> }
+  { notebooks: Writable<NotebookCharm[]> }
 >((_, { notebooks }) => {
   const notebooksList = notebooks.get();
   if (notebooksList.length === 0) return;
@@ -1178,8 +1178,8 @@ const _toggleSelection = handler<
   { shiftKey?: boolean },
   {
     index: number;
-    selectedIndices: Cell<number[]>;
-    lastSelectedIndex: Cell<number>;
+    selectedIndices: Writable<number[]>;
+    lastSelectedIndex: Writable<number>;
   }
 >((event, { index, selectedIndices, lastSelectedIndex }) => {
   const current = selectedIndices.get();
@@ -1210,14 +1210,14 @@ const _toggleSelection = handler<
 });
 
 // Handler to navigate to a notebook
-const goToNotebook = handler<void, { notebook: Cell<NotebookCharm> }>(
+const goToNotebook = handler<void, { notebook: Writable<NotebookCharm> }>(
   (_, { notebook }) => navigateTo(notebook),
 );
 
 // Handler to select all notes
 const selectAll = handler<
   Record<string, never>,
-  { notes: Cell<NoteCharm[]>; selectedIndices: Cell<number[]> }
+  { notes: Writable<NoteCharm[]>; selectedIndices: Writable<number[]> }
 >((_, { notes, selectedIndices }) => {
   const notesList = notes.get();
   selectedIndices.set(notesList.map((_, i) => i));
@@ -1226,7 +1226,7 @@ const selectAll = handler<
 // Handler to deselect all notes
 const deselectAll = handler<
   Record<string, never>,
-  { selectedIndices: Cell<number[]> }
+  { selectedIndices: Writable<number[]> }
 >((_, { selectedIndices }) => {
   selectedIndices.set([]);
 });
@@ -1234,7 +1234,7 @@ const deselectAll = handler<
 // Handler to toggle visibility of all selected notes via switch
 const _toggleSelectedVisibility = handler<
   { detail: { checked: boolean } },
-  { notes: Cell<NoteCharm[]>; selectedIndices: Cell<number[]> }
+  { notes: Writable<NoteCharm[]>; selectedIndices: Writable<number[]> }
 >((event, { notes, selectedIndices }) => {
   const selected = selectedIndices.get();
   const makeVisible = event.detail?.checked ?? false;
@@ -1250,7 +1250,7 @@ const _toggleSelectedVisibility = handler<
 // Handler to show the standalone "New Notebook" modal
 const showStandaloneNotebookModal = handler<
   void,
-  { showStandaloneNotebookPrompt: Cell<boolean> }
+  { showStandaloneNotebookPrompt: Writable<boolean> }
 >((_, { showStandaloneNotebookPrompt }) =>
   showStandaloneNotebookPrompt.set(true)
 );
@@ -1259,9 +1259,9 @@ const showStandaloneNotebookModal = handler<
 const createStandaloneNotebookAndOpen = handler<
   void,
   {
-    standaloneNotebookTitle: Cell<string>;
-    showStandaloneNotebookPrompt: Cell<boolean>;
-    allCharms: Cell<NoteCharm[]>;
+    standaloneNotebookTitle: Writable<string>;
+    showStandaloneNotebookPrompt: Writable<boolean>;
+    allCharms: Writable<NoteCharm[]>;
   }
 >((_, { standaloneNotebookTitle, showStandaloneNotebookPrompt, allCharms }) => {
   const title = standaloneNotebookTitle.get().trim() || "New Notebook";
@@ -1276,8 +1276,8 @@ const createStandaloneNotebookAndOpen = handler<
 const createStandaloneNotebookAndContinue = handler<
   void,
   {
-    standaloneNotebookTitle: Cell<string>;
-    allCharms: Cell<NoteCharm[]>;
+    standaloneNotebookTitle: Writable<string>;
+    allCharms: Writable<NoteCharm[]>;
   }
 >((_, { standaloneNotebookTitle, allCharms }) => {
   const title = standaloneNotebookTitle.get().trim() || "New Notebook";
@@ -1291,8 +1291,8 @@ const createStandaloneNotebookAndContinue = handler<
 const cancelStandaloneNotebookPrompt = handler<
   void,
   {
-    showStandaloneNotebookPrompt: Cell<boolean>;
-    standaloneNotebookTitle: Cell<string>;
+    showStandaloneNotebookPrompt: Writable<boolean>;
+    standaloneNotebookTitle: Writable<string>;
   }
 >((_, { showStandaloneNotebookPrompt, standaloneNotebookTitle }) => {
   showStandaloneNotebookPrompt.set(false);
@@ -1302,7 +1302,7 @@ const cancelStandaloneNotebookPrompt = handler<
 // Handler to create a new notebook (without navigating) - kept for potential future use
 const _createNotebook = handler<
   Record<string, never>,
-  { allCharms: Cell<NoteCharm[]> }
+  { allCharms: Writable<NoteCharm[]> }
 >((_, { allCharms }) => {
   const nb = Notebook({ title: "New Notebook" });
   allCharms.push(nb as unknown as NoteCharm);
@@ -1311,7 +1311,7 @@ const _createNotebook = handler<
 // Handler to create a new note (without navigating)
 const createNote = handler<
   Record<string, never>,
-  { allCharms: Cell<NoteCharm[]> }
+  { allCharms: Writable<NoteCharm[]> }
 >((_, { allCharms }) => {
   const note = Note({
     title: "New Note",
@@ -1324,16 +1324,16 @@ const createNote = handler<
 // Helper to perform the actual add-to-notebook operation
 function performAddToNotebook(
   notesToAdd: { note: NoteCharm; idx: number }[],
-  notebookCell: Cell<NotebookCharm>,
-  notes: Cell<NoteCharm[]>,
-  selectedIndices: Cell<number[]>,
-  selectedNotebook: Cell<string>,
+  notebookCell: Writable<NotebookCharm>,
+  notes: Writable<NoteCharm[]>,
+  selectedIndices: Writable<number[]>,
+  selectedNotebook: Writable<string>,
 ) {
   const notebookNotes = notebookCell.key("notes");
 
   for (const { note, idx } of notesToAdd) {
     // Add to notebook
-    (notebookNotes as Cell<NoteCharm[] | undefined>).push(note);
+    (notebookNotes as Writable<NoteCharm[] | undefined>).push(note);
     // Hide from main listing
     notes.key(idx).key("isHidden").set(true);
   }
@@ -1346,16 +1346,16 @@ function performAddToNotebook(
 const addToNotebook = handler<
   { target?: { value: string }; detail?: { value: string } },
   {
-    notebooks: Cell<NotebookCharm[]>;
-    notes: Cell<NoteCharm[]>;
-    selectedIndices: Cell<number[]>;
-    selectedNotebook: Cell<string>;
-    showNewNotebookPrompt: Cell<boolean>;
-    pendingNotebookAction: Cell<"add" | "move" | "">;
-    showNotebookDuplicateModal: Cell<boolean>;
-    notebookDuplicates: Cell<NotebookDuplicate[]>;
-    pendingAddNotebookIndex: Cell<number>;
-    nonDuplicateNotes: Cell<{ note: NoteCharm; idx: number }[]>;
+    notebooks: Writable<NotebookCharm[]>;
+    notes: Writable<NoteCharm[]>;
+    selectedIndices: Writable<number[]>;
+    selectedNotebook: Writable<string>;
+    showNewNotebookPrompt: Writable<boolean>;
+    pendingNotebookAction: Writable<"add" | "move" | "">;
+    showNotebookDuplicateModal: Writable<boolean>;
+    notebookDuplicates: Writable<NotebookDuplicate[]>;
+    pendingAddNotebookIndex: Writable<number>;
+    nonDuplicateNotes: Writable<{ note: NoteCharm; idx: number }[]>;
   }
 >((
   event,
@@ -1445,14 +1445,14 @@ const addToNotebook = handler<
 const addSkipDuplicates = handler<
   Record<string, never>,
   {
-    notebooks: Cell<NotebookCharm[]>;
-    notes: Cell<NoteCharm[]>;
-    selectedIndices: Cell<number[]>;
-    selectedNotebook: Cell<string>;
-    showNotebookDuplicateModal: Cell<boolean>;
-    notebookDuplicates: Cell<NotebookDuplicate[]>;
-    pendingAddNotebookIndex: Cell<number>;
-    nonDuplicateNotes: Cell<{ note: NoteCharm; idx: number }[]>;
+    notebooks: Writable<NotebookCharm[]>;
+    notes: Writable<NoteCharm[]>;
+    selectedIndices: Writable<number[]>;
+    selectedNotebook: Writable<string>;
+    showNotebookDuplicateModal: Writable<boolean>;
+    notebookDuplicates: Writable<NotebookDuplicate[]>;
+    pendingAddNotebookIndex: Writable<number>;
+    nonDuplicateNotes: Writable<{ note: NoteCharm; idx: number }[]>;
   }
 >((_, state) => {
   const notebookCell = state.notebooks.key(state.pendingAddNotebookIndex.get());
@@ -1477,14 +1477,14 @@ const addSkipDuplicates = handler<
 const addIncludingDuplicates = handler<
   Record<string, never>,
   {
-    notebooks: Cell<NotebookCharm[]>;
-    notes: Cell<NoteCharm[]>;
-    selectedIndices: Cell<number[]>;
-    selectedNotebook: Cell<string>;
-    showNotebookDuplicateModal: Cell<boolean>;
-    notebookDuplicates: Cell<NotebookDuplicate[]>;
-    pendingAddNotebookIndex: Cell<number>;
-    nonDuplicateNotes: Cell<{ note: NoteCharm; idx: number }[]>;
+    notebooks: Writable<NotebookCharm[]>;
+    notes: Writable<NoteCharm[]>;
+    selectedIndices: Writable<number[]>;
+    selectedNotebook: Writable<string>;
+    showNotebookDuplicateModal: Writable<boolean>;
+    notebookDuplicates: Writable<NotebookDuplicate[]>;
+    pendingAddNotebookIndex: Writable<number>;
+    nonDuplicateNotes: Writable<{ note: NoteCharm; idx: number }[]>;
   }
 >((_, state) => {
   const notebookCell = state.notebooks.key(state.pendingAddNotebookIndex.get());
@@ -1520,12 +1520,12 @@ const addIncludingDuplicates = handler<
 const cancelAddToNotebook = handler<
   Record<string, never>,
   {
-    showNotebookDuplicateModal: Cell<boolean>;
-    notebookDuplicates: Cell<NotebookDuplicate[]>;
-    pendingAddNotebookIndex: Cell<number>;
-    nonDuplicateNotes: Cell<{ note: NoteCharm; idx: number }[]>;
-    selectedIndices: Cell<number[]>;
-    selectedNotebook: Cell<string>;
+    showNotebookDuplicateModal: Writable<boolean>;
+    notebookDuplicates: Writable<NotebookDuplicate[]>;
+    pendingAddNotebookIndex: Writable<number>;
+    nonDuplicateNotes: Writable<{ note: NoteCharm; idx: number }[]>;
+    selectedIndices: Writable<number[]>;
+    selectedNotebook: Writable<string>;
   }
 >((_, state) => {
   state.showNotebookDuplicateModal.set(false);
@@ -1540,9 +1540,9 @@ const cancelAddToNotebook = handler<
 const duplicateSelectedNotes = handler<
   Record<string, never>,
   {
-    notes: Cell<NoteCharm[]>;
-    selectedIndices: Cell<number[]>;
-    allCharms: Cell<NoteCharm[]>;
+    notes: Writable<NoteCharm[]>;
+    selectedIndices: Writable<number[]>;
+    allCharms: Writable<NoteCharm[]>;
   }
 >((_, { notes, selectedIndices, allCharms }) => {
   const selected = selectedIndices.get();
@@ -1568,10 +1568,10 @@ const duplicateSelectedNotes = handler<
 const deleteSelectedNotes = handler<
   Record<string, never>,
   {
-    notes: Cell<NoteCharm[]>;
-    selectedIndices: Cell<number[]>;
-    allCharms: Cell<NoteCharm[]>;
-    notebooks: Cell<NotebookCharm[]>;
+    notes: Writable<NoteCharm[]>;
+    selectedIndices: Writable<number[]>;
+    allCharms: Writable<NoteCharm[]>;
+    notebooks: Writable<NotebookCharm[]>;
   }
 >((_, { notes, selectedIndices, allCharms, notebooks }) => {
   const selected = selectedIndices.get();
@@ -1625,12 +1625,12 @@ const deleteSelectedNotes = handler<
 const moveToNotebook = handler<
   { target?: { value: string }; detail?: { value: string } },
   {
-    notebooks: Cell<NotebookCharm[]>;
-    notes: Cell<NoteCharm[]>;
-    selectedIndices: Cell<number[]>;
-    selectedMoveNotebook: Cell<string>;
-    showNewNotebookPrompt: Cell<boolean>;
-    pendingNotebookAction: Cell<"add" | "move" | "">;
+    notebooks: Writable<NotebookCharm[]>;
+    notes: Writable<NoteCharm[]>;
+    selectedIndices: Writable<number[]>;
+    selectedMoveNotebook: Writable<string>;
+    showNewNotebookPrompt: Writable<boolean>;
+    pendingNotebookAction: Writable<"add" | "move" | "">;
   }
 >((
   event,
@@ -1710,7 +1710,7 @@ const moveToNotebook = handler<
 
   // Add all items to target notebook
   for (const item of itemsToMove) {
-    (targetNotebookNotes as Cell<NoteCharm[] | undefined>).push(item);
+    (targetNotebookNotes as Writable<NoteCharm[] | undefined>).push(item);
   }
 
   selectedIndices.set([]);
@@ -1720,7 +1720,10 @@ const moveToNotebook = handler<
 // Handler to select all notebooks
 const selectAllNotebooks = handler<
   Record<string, never>,
-  { notebooks: Cell<NotebookCharm[]>; selectedNotebookIndices: Cell<number[]> }
+  {
+    notebooks: Writable<NotebookCharm[]>;
+    selectedNotebookIndices: Writable<number[]>;
+  }
 >((_, { notebooks, selectedNotebookIndices }) => {
   const nbList = notebooks.get();
   selectedNotebookIndices.set(nbList.map((_, i) => i));
@@ -1729,7 +1732,7 @@ const selectAllNotebooks = handler<
 // Handler to deselect all notebooks
 const deselectAllNotebooks = handler<
   Record<string, never>,
-  { selectedNotebookIndices: Cell<number[]> }
+  { selectedNotebookIndices: Writable<number[]> }
 >((_, { selectedNotebookIndices }) => {
   selectedNotebookIndices.set([]);
 });
@@ -1738,8 +1741,8 @@ const deselectAllNotebooks = handler<
 const confirmDeleteNotebooks = handler<
   Record<string, never>,
   {
-    selectedNotebookIndices: Cell<number[]>;
-    showDeleteNotebookModal: Cell<boolean>;
+    selectedNotebookIndices: Writable<number[]>;
+    showDeleteNotebookModal: Writable<boolean>;
   }
 >((_, { selectedNotebookIndices, showDeleteNotebookModal }) => {
   if (selectedNotebookIndices.get().length > 0) {
@@ -1751,10 +1754,10 @@ const confirmDeleteNotebooks = handler<
 const deleteNotebooksOnly = handler<
   Record<string, never>,
   {
-    notebooks: Cell<NotebookCharm[]>;
-    selectedNotebookIndices: Cell<number[]>;
-    allCharms: Cell<NoteCharm[]>;
-    showDeleteNotebookModal: Cell<boolean>;
+    notebooks: Writable<NotebookCharm[]>;
+    selectedNotebookIndices: Writable<number[]>;
+    allCharms: Writable<NoteCharm[]>;
+    showDeleteNotebookModal: Writable<boolean>;
   }
 >((
   _,
@@ -1820,10 +1823,10 @@ const deleteNotebooksOnly = handler<
 const deleteNotebooksAndNotes = handler<
   Record<string, never>,
   {
-    notebooks: Cell<NotebookCharm[]>;
-    selectedNotebookIndices: Cell<number[]>;
-    allCharms: Cell<NoteCharm[]>;
-    showDeleteNotebookModal: Cell<boolean>;
+    notebooks: Writable<NotebookCharm[]>;
+    selectedNotebookIndices: Writable<number[]>;
+    allCharms: Writable<NoteCharm[]>;
+    showDeleteNotebookModal: Writable<boolean>;
   }
 >((
   _,
@@ -1887,7 +1890,7 @@ const deleteNotebooksAndNotes = handler<
 const cancelDeleteNotebooks = handler<
   Record<string, never>,
   {
-    showDeleteNotebookModal: Cell<boolean>;
+    showDeleteNotebookModal: Writable<boolean>;
   }
 >((_, { showDeleteNotebookModal }) => {
   showDeleteNotebookModal.set(false);
@@ -1897,9 +1900,9 @@ const cancelDeleteNotebooks = handler<
 const cloneSelectedNotebooks = handler<
   Record<string, never>,
   {
-    notebooks: Cell<NotebookCharm[]>;
-    selectedNotebookIndices: Cell<number[]>;
-    allCharms: Cell<NoteCharm[]>;
+    notebooks: Writable<NotebookCharm[]>;
+    selectedNotebookIndices: Writable<number[]>;
+    allCharms: Writable<NoteCharm[]>;
   }
 >((_, { notebooks, selectedNotebookIndices, allCharms }) => {
   const selected = selectedNotebookIndices.get();
@@ -1932,9 +1935,9 @@ const cloneSelectedNotebooks = handler<
 const duplicateSelectedNotebooks = handler<
   Record<string, never>,
   {
-    notebooks: Cell<NotebookCharm[]>;
-    selectedNotebookIndices: Cell<number[]>;
-    allCharms: Cell<NoteCharm[]>;
+    notebooks: Writable<NotebookCharm[]>;
+    selectedNotebookIndices: Writable<number[]>;
+    allCharms: Writable<NoteCharm[]>;
   }
 >((_, { notebooks, selectedNotebookIndices, allCharms }) => {
   const selected = selectedNotebookIndices.get();
@@ -1982,10 +1985,10 @@ const duplicateSelectedNotebooks = handler<
 const exportSelectedNotebooks = handler<
   Record<string, never>,
   {
-    notebooks: Cell<NotebookCharm[]>;
-    selectedNotebookIndices: Cell<number[]>;
-    showExportNotebooksModal: Cell<boolean>;
-    exportNotebooksMarkdown: Cell<string>;
+    notebooks: Writable<NotebookCharm[]>;
+    selectedNotebookIndices: Writable<number[]>;
+    showExportNotebooksModal: Writable<boolean>;
+    exportNotebooksMarkdown: Writable<string>;
   }
 >((
   _,
@@ -2043,9 +2046,9 @@ const exportSelectedNotebooks = handler<
 const closeExportNotebooksModal = handler<
   Record<string, never>,
   {
-    showExportNotebooksModal: Cell<boolean>;
-    exportNotebooksMarkdown: Cell<string>;
-    selectedNotebookIndices: Cell<number[]>;
+    showExportNotebooksModal: Writable<boolean>;
+    exportNotebooksMarkdown: Writable<string>;
+    selectedNotebookIndices: Writable<number[]>;
   }
 >((
   _,
@@ -2065,8 +2068,8 @@ const toggleNotebookCheckbox = handler<
   { shiftKey?: boolean },
   {
     index: number;
-    selectedNotebookIndices: Cell<number[]>;
-    lastSelectedNotebookIndex: Cell<number>;
+    selectedNotebookIndices: Writable<number[]>;
+    lastSelectedNotebookIndex: Writable<number>;
   }
 >((event, { index, selectedNotebookIndices, lastSelectedNotebookIndex }) => {
   const current = selectedNotebookIndices.get();
@@ -2096,8 +2099,8 @@ const toggleNoteCheckbox = handler<
   { shiftKey?: boolean },
   {
     index: number;
-    selectedIndices: Cell<number[]>;
-    lastSelectedIndex: Cell<number>;
+    selectedIndices: Writable<number[]>;
+    lastSelectedIndex: Writable<number>;
   }
 >((event, { index, selectedIndices, lastSelectedIndex }) => {
   const current = selectedIndices.get();
@@ -2126,13 +2129,13 @@ const toggleNoteCheckbox = handler<
 const createNotebookFromPrompt = handler<
   void,
   {
-    newNotebookName: Cell<string>;
-    showNewNotebookPrompt: Cell<boolean>;
-    pendingNotebookAction: Cell<"add" | "move" | "">;
-    selectedIndices: Cell<number[]>;
-    notes: Cell<NoteCharm[]>;
-    allCharms: Cell<NoteCharm[]>;
-    notebooks: Cell<NotebookCharm[]>;
+    newNotebookName: Writable<string>;
+    showNewNotebookPrompt: Writable<boolean>;
+    pendingNotebookAction: Writable<"add" | "move" | "">;
+    selectedIndices: Writable<number[]>;
+    notes: Writable<NoteCharm[]>;
+    allCharms: Writable<NoteCharm[]>;
+    notebooks: Writable<NotebookCharm[]>;
   }
 >((_, state) => {
   const {
@@ -2209,11 +2212,11 @@ const createNotebookFromPrompt = handler<
 const cancelNewNotebookPrompt = handler<
   void,
   {
-    showNewNotebookPrompt: Cell<boolean>;
-    newNotebookName: Cell<string>;
-    pendingNotebookAction: Cell<"add" | "move" | "">;
-    selectedNotebook: Cell<string>;
-    selectedMoveNotebook: Cell<string>;
+    showNewNotebookPrompt: Writable<boolean>;
+    newNotebookName: Writable<string>;
+    pendingNotebookAction: Writable<"add" | "move" | "">;
+    selectedNotebook: Writable<string>;
+    selectedMoveNotebook: Writable<string>;
   }
 >((_, state) => {
   state.showNewNotebookPrompt.set(false);
@@ -2227,10 +2230,10 @@ const cancelNewNotebookPrompt = handler<
 const openExportAllModal = handler<
   void,
   {
-    showExportAllModal: Cell<boolean>;
-    allCharms: Cell<NoteCharm[]>;
-    notebooks: Cell<NotebookCharm[]>;
-    exportedMarkdown: Cell<string>;
+    showExportAllModal: Writable<boolean>;
+    allCharms: Writable<NoteCharm[]>;
+    notebooks: Writable<NotebookCharm[]>;
+    exportedMarkdown: Writable<string>;
   }
 >((_, { showExportAllModal, allCharms, notebooks, exportedMarkdown }) => {
   // Compute export ONLY when modal opens (lazy evaluation)
@@ -2249,7 +2252,7 @@ const openExportAllModal = handler<
 // Handler to close Export All modal
 const closeExportAllModal = handler<
   void,
-  { showExportAllModal: Cell<boolean> }
+  { showExportAllModal: Writable<boolean> }
 >((_, { showExportAllModal }) => {
   showExportAllModal.set(false);
 });
@@ -2257,7 +2260,7 @@ const closeExportAllModal = handler<
 // Handler to open Import modal
 const openImportModal = handler<
   void,
-  { showImportModal: Cell<boolean> }
+  { showImportModal: Writable<boolean> }
 >((_, { showImportModal }) => {
   showImportModal.set(true);
 });
@@ -2266,9 +2269,9 @@ const openImportModal = handler<
 const closeImportModal = handler<
   void,
   {
-    showImportModal: Cell<boolean>;
-    importMarkdown: Cell<string>;
-    showPasteSection?: Cell<boolean>;
+    showImportModal: Writable<boolean>;
+    importMarkdown: Writable<string>;
+    showPasteSection?: Writable<boolean>;
   }
 >((_, { showImportModal, importMarkdown, showPasteSection }) => {
   showImportModal.set(false);
@@ -2328,18 +2331,18 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
   );
 
   // Selection state for notes multi-select
-  const selectedIndices = Cell.of<number[]>([]);
-  const selectedNotebook = Cell.of<string>("");
-  const selectedMoveNotebook = Cell.of<string>("");
-  const lastSelectedIndex = Cell.of<number>(-1); // For shift-click range selection
+  const selectedIndices = Writable.of<number[]>([]);
+  const selectedNotebook = Writable.of<string>("");
+  const selectedMoveNotebook = Writable.of<string>("");
+  const lastSelectedIndex = Writable.of<number>(-1); // For shift-click range selection
 
   // Computed helper for notes selection count
   const selectedCount = computed(() => selectedIndices.get().length);
   const hasSelection = computed(() => selectedIndices.get().length > 0);
 
   // Selection state for notebooks multi-select
-  const selectedNotebookIndices = Cell.of<number[]>([]);
-  const lastSelectedNotebookIndex = Cell.of<number>(-1);
+  const selectedNotebookIndices = Writable.of<number[]>([]);
+  const lastSelectedNotebookIndex = Writable.of<number>(-1);
 
   // Computed helper for notebooks selection count
   const selectedNotebookCount = computed(() =>
@@ -2350,45 +2353,45 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
   );
 
   // State for "New Notebook" prompt modal (for add/move to notebook flows)
-  const showNewNotebookPrompt = Cell.of<boolean>(false);
-  const newNotebookName = Cell.of<string>("");
-  const pendingNotebookAction = Cell.of<"add" | "move" | "">(""); // Track which action triggered the modal
+  const showNewNotebookPrompt = Writable.of<boolean>(false);
+  const newNotebookName = Writable.of<string>("");
+  const pendingNotebookAction = Writable.of<"add" | "move" | "">(""); // Track which action triggered the modal
 
   // State for standalone "New Notebook" modal (from New button)
-  const showStandaloneNotebookPrompt = Cell.of<boolean>(false);
-  const standaloneNotebookTitle = Cell.of<string>("");
+  const showStandaloneNotebookPrompt = Writable.of<boolean>(false);
+  const standaloneNotebookTitle = Writable.of<string>("");
 
   // State for duplicate detection modal during import
-  const showDuplicateModal = Cell.of<boolean>(false);
-  const detectedDuplicates = Cell.of<DetectedDuplicate[]>([]);
-  const pendingImportData = Cell.of<string>("");
+  const showDuplicateModal = Writable.of<boolean>(false);
+  const detectedDuplicates = Writable.of<DetectedDuplicate[]>([]);
+  const pendingImportData = Writable.of<string>("");
 
   // State for duplicate detection modal when adding notes to notebook
-  const showNotebookDuplicateModal = Cell.of<boolean>(false);
-  const notebookDuplicates = Cell.of<NotebookDuplicate[]>([]);
-  const pendingAddNotebookIndex = Cell.of<number>(-1);
-  const nonDuplicateNotes = Cell.of<{ note: NoteCharm; idx: number }[]>([]);
+  const showNotebookDuplicateModal = Writable.of<boolean>(false);
+  const notebookDuplicates = Writable.of<NotebookDuplicate[]>([]);
+  const pendingAddNotebookIndex = Writable.of<number>(-1);
+  const nonDuplicateNotes = Writable.of<{ note: NoteCharm; idx: number }[]>([]);
 
   // State for delete notebook confirmation modal
-  const showDeleteNotebookModal = Cell.of<boolean>(false);
+  const showDeleteNotebookModal = Writable.of<boolean>(false);
 
   // State for export notebooks modal
-  const showExportNotebooksModal = Cell.of<boolean>(false);
-  const exportNotebooksMarkdown = Cell.of<string>("");
+  const showExportNotebooksModal = Writable.of<boolean>(false);
+  const exportNotebooksMarkdown = Writable.of<string>("");
 
   // State for Export All modal
-  const showExportAllModal = Cell.of<boolean>(false);
+  const showExportAllModal = Writable.of<boolean>(false);
 
   // State for Import modal
-  const showImportModal = Cell.of<boolean>(false);
-  const importStatus = Cell.of<string>(""); // Status message during import
+  const showImportModal = Writable.of<boolean>(false);
+  const importStatus = Writable.of<string>(""); // Status message during import
 
   // State for Import progress modal (super modal in front of others)
-  const showImportProgressModal = Cell.of<boolean>(false);
-  const importProgressMessage = Cell.of<string>("Importing notes...");
-  const importComplete = Cell.of<boolean>(false);
+  const showImportProgressModal = Writable.of<boolean>(false);
+  const importProgressMessage = Writable.of<string>("Importing notes...");
+  const importComplete = Writable.of<boolean>(false);
   // State to hide paste section when Upload File button is clicked
-  const showPasteSection = Cell.of<boolean>(true);
+  const showPasteSection = Writable.of<boolean>(true);
 
   // Computed items for ct-select dropdowns (notebooks + "New Notebook...")
   // ct-select has proper bidirectional DOM sync, unlike native <select>
@@ -2558,7 +2561,7 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
   )({ n: notebooks });
 
   // exportedMarkdown is computed on-demand when Export All modal opens (lazy for performance)
-  const exportedMarkdown = Cell.of<string>("");
+  const exportedMarkdown = Writable.of<string>("");
 
   return {
     [NAME]: computed(() => `All Notes (${noteCount} notes)`),

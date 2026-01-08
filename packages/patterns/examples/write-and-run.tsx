@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell,
   compileAndRun,
   computed,
   Default,
@@ -11,21 +10,22 @@ import {
   navigateTo,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 // Template for the AI to reference
 const TEMPLATE = `/// <cts-enable />
-import { Cell, computed, handler, Default, NAME, pattern, UI } from "commontools";
+import { computed, handler, Default, NAME, pattern, UI } from "commontools";
 
 interface Input {
   value: Default<number, 0>;
 }
 
-const increment = handler<unknown, { value: Cell<number> }>(
+const increment = handler<unknown, { value: Writable<number> }>(
   (_, { value }) => value.set(value.get() + 1)
 );
 
-const decrement = handler<unknown, { value: Cell<number> }>(
+const decrement = handler<unknown, { value: Writable<number> }>(
   (_, { value }) => value.set(value.get() - 1)
 );
 
@@ -48,9 +48,9 @@ const SYSTEM_PROMPT =
 
 IMPORTANT RULES:
 1. Start with: /// <cts-enable />
-2. Import from "commontools": Cell, Default, computed, handler, NAME, pattern, UI, ifElse
+2. Import from "commontools": Writable, Default, computed, handler, NAME, pattern, UI, ifElse
 3. Use the pattern<Input>() or pattern<Input, Output>() API
-4. For arrays that need mutation, use Cell<T[]> in the interface
+4. For arrays that need mutation, use Writable<T[]> in the interface
 5. Use $checked, $value for bidirectional binding on ct-checkbox, ct-input
 6. Use inline handlers for simple operations, handler() for complex ones
 7. Always return [NAME] and [UI] from the pattern
@@ -66,12 +66,12 @@ interface Input {
 }
 
 interface Output {
-  prompt: Cell<string>;
+  prompt: Writable<string>;
 }
 
 const updatePrompt = handler<
   { detail: { message: string } },
-  { prompt: Cell<string> }
+  { prompt: Writable<string> }
 >((event, { prompt }) => {
   const newPrompt = event.detail?.message?.trim();
   if (newPrompt) {
@@ -79,7 +79,7 @@ const updatePrompt = handler<
   }
 });
 
-const visit = handler<unknown, { result: Cell<any> }>((_, { result }) => {
+const visit = handler<unknown, { result: Writable<any> }>((_, { result }) => {
   return navigateTo(result);
 });
 

@@ -11,7 +11,6 @@
  */
 
 import {
-  Cell,
   computed,
   Default,
   handler,
@@ -19,6 +18,7 @@ import {
   navigateTo,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 import BattleshipRoom from "./battleship-room.tsx";
@@ -37,10 +37,10 @@ import {
 
 interface LobbyInput {
   gameName: Default<string, "Battleship">;
-  player1Json: Cell<Default<string, "null">>;
-  player2Json: Cell<Default<string, "null">>;
-  shotsJson: Cell<Default<string, "{}">>;
-  gameStateJson: Cell<Default<string, "{}">>;
+  player1Json: Writable<Default<string, "null">>;
+  player2Json: Writable<Default<string, "null">>;
+  shotsJson: Writable<Default<string, "{}">>;
+  gameStateJson: Writable<Default<string, "{}">>;
 }
 
 interface LobbyOutput {
@@ -54,10 +54,10 @@ interface LobbyOutput {
 // Module-level function for navigation (pattern from Scrabble)
 let createGameAndNavigate: (
   gameName: string,
-  player1Json: Cell<string>,
-  player2Json: Cell<string>,
-  shotsJson: Cell<string>,
-  gameStateJson: Cell<string>,
+  player1Json: Writable<string>,
+  player2Json: Writable<string>,
+  shotsJson: Writable<string>,
+  gameStateJson: Writable<string>,
   myName: string,
   myPlayerNumber: 1 | 2,
 ) => unknown = null as any;
@@ -67,12 +67,12 @@ const joinAsPlayer = handler<
   unknown,
   {
     gameName: string;
-    nameInput: Cell<string>;
+    nameInput: Writable<string>;
     playerSlot: 1 | 2;
-    player1Json: Cell<string>;
-    player2Json: Cell<string>;
-    shotsJson: Cell<string>;
-    gameStateJson: Cell<string>;
+    player1Json: Writable<string>;
+    player2Json: Writable<string>;
+    shotsJson: Writable<string>;
+    gameStateJson: Writable<string>;
   }
 >(
   (
@@ -160,10 +160,10 @@ const rejoinGame = handler<
   {
     gameName: string;
     playerSlot: 1 | 2;
-    player1Json: Cell<string>;
-    player2Json: Cell<string>;
-    shotsJson: Cell<string>;
-    gameStateJson: Cell<string>;
+    player1Json: Writable<string>;
+    player2Json: Writable<string>;
+    shotsJson: Writable<string>;
+    gameStateJson: Writable<string>;
   }
 >(
   (
@@ -200,10 +200,10 @@ const rejoinGame = handler<
 const resetLobby = handler<
   unknown,
   {
-    player1Json: Cell<string>;
-    player2Json: Cell<string>;
-    shotsJson: Cell<string>;
-    gameStateJson: Cell<string>;
+    player1Json: Writable<string>;
+    player2Json: Writable<string>;
+    shotsJson: Writable<string>;
+    gameStateJson: Writable<string>;
   }
 >((_event, { player1Json, player2Json, shotsJson, gameStateJson }) => {
   console.log("[resetLobby] Resetting all game state...");
@@ -217,8 +217,8 @@ const resetLobby = handler<
 const BattleshipLobby = pattern<LobbyInput, LobbyOutput>(
   ({ gameName, player1Json, player2Json, shotsJson, gameStateJson }) => {
     // Separate name inputs for each player slot
-    const player1NameInput = Cell.of("");
-    const player2NameInput = Cell.of("");
+    const player1NameInput = Writable.of("");
+    const player2NameInput = Writable.of("");
 
     // Derive player data reactively
     const player1 = computed(() => parsePlayerJson(player1Json.get()));
@@ -574,10 +574,10 @@ const BattleshipLobby = pattern<LobbyInput, LobbyOutput>(
 // Navigation function setup
 createGameAndNavigate = (
   gameName: string,
-  player1Json: Cell<string>,
-  player2Json: Cell<string>,
-  shotsJson: Cell<string>,
-  gameStateJson: Cell<string>,
+  player1Json: Writable<string>,
+  player2Json: Writable<string>,
+  shotsJson: Writable<string>,
+  gameStateJson: Writable<string>,
   myName: string,
   myPlayerNumber: 1 | 2,
 ) => {

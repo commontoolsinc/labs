@@ -1,14 +1,15 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   Default,
+  equals,
   ifElse,
   lift,
   NAME,
   navigateTo,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 import ReadingItemDetail, {
@@ -18,7 +19,7 @@ import ReadingItemDetail, {
 } from "./reading-item-detail.tsx";
 
 interface Input {
-  items: Cell<Default<ReadingItem[], []>>;
+  items: Writable<Default<ReadingItem[], []>>;
 }
 
 interface Output {
@@ -49,11 +50,11 @@ const renderStars = lift((rating: number | null): string => {
 });
 
 export default pattern<Input, Output>(({ items }) => {
-  const filterStatus = Cell.of<ItemStatus | "all">("all");
+  const filterStatus = Writable.of<ItemStatus | "all">("all");
 
-  const newTitle = Cell.of("");
-  const newAuthor = Cell.of("");
-  const newType = Cell.of<ItemType>("article");
+  const newTitle = Writable.of("");
+  const newAuthor = Writable.of("");
+  const newType = Writable.of<ItemType>("article");
 
   const totalCount = computed(() => items.get().length);
   const filteredItems = filterByStatus({ items, status: filterStatus });
@@ -117,9 +118,7 @@ export default pattern<Input, Output>(({ items }) => {
                     variant="ghost"
                     onClick={() => {
                       const current = items.get();
-                      const idx = current.findIndex((i) =>
-                        Cell.equals(item, i)
-                      );
+                      const idx = current.findIndex((i) => equals(item, i));
                       if (idx >= 0) {
                         items.set(current.toSpliced(idx, 1));
                       }

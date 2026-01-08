@@ -11,7 +11,6 @@
  * - Always available: Schema included in extraction even without existing instances
  */
 import {
-  Cell,
   computed,
   type Default,
   handler,
@@ -19,6 +18,7 @@ import {
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
@@ -106,7 +106,7 @@ interface CustomFieldModuleOutput {
 // Handler to toggle boolean value
 const toggleBoolean = handler<
   unknown,
-  { value: Cell<string> }
+  { value: Writable<string> }
 >((_event, { value }) => {
   const current = (value.get() || "").toLowerCase();
   const isTrue = current === "true" || current === "yes" || current === "1";
@@ -246,7 +246,7 @@ export const CustomFieldModule = recipe<
                 type="checkbox"
                 checked={isChecked}
                 onClick={toggleBoolean({
-                  value: value as unknown as Cell<string>,
+                  value: value as unknown as Writable<string>,
                 })}
                 style={{ width: "18px", height: "18px" }}
               />

@@ -734,6 +734,14 @@ export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}
 export declare const Cell: CellTypeConstructor<AsCell>;
 
 /**
+ * Writable<T> is an alias for Cell<T> that better expresses the semantic meaning.
+ * In patterns, requesting data as Writable<T> means "I need write access" -
+ * all data in patterns is reactive by default, whether wrapped or not.
+ */
+export type Writable<T = unknown> = Cell<T>;
+export declare const Writable: CellTypeConstructor<AsCell>;
+
+/**
  * Stream-only cell - can only send events, not read or write.
  * Has .send() only
  * Does NOT have .key()/.equals()/.get()/.set()/.resolveAsCell()
@@ -1692,6 +1700,16 @@ export interface RecipeEnvironment {
 
 export type GetRecipeEnvironmentFunction = () => RecipeEnvironment;
 
+/**
+ * Compare two cells or values for equality after resolving, i.e. after
+ * following all links in case we have cells pointing to other cells.
+ * This is a standalone export of the equals function from Cell/Writable.
+ */
+export type EqualsFunction = (
+  a: AnyCell<any> | object,
+  b: AnyCell<any> | object,
+) => boolean;
+
 // Re-export all function types as values for destructuring imports
 // These will be implemented by the factory
 export declare const pattern: PatternFunction;
@@ -1722,6 +1740,7 @@ export declare const wish: WishFunction;
 export declare const createNodeFactory: CreateNodeFactoryFunction;
 /** @deprecated Use Cell.of(defaultValue?) instead */
 export declare const cell: CellTypeConstructor<AsCell>["of"];
+export declare const equals: EqualsFunction;
 export declare const byRef: ByRefFunction;
 export declare const getRecipeEnvironment: GetRecipeEnvironmentFunction;
 

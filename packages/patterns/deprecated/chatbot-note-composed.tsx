@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   BuiltInLLMMessage,
-  Cell,
   Default,
   handler,
   NAME,
@@ -9,6 +8,7 @@ import {
   OpaqueRef,
   pattern,
   wish,
+  Writable,
 } from "commontools";
 
 import Chat from "../chatbot.tsx";
@@ -29,8 +29,8 @@ import {
 import { type MentionableCharm } from "../system/backlinks-index.tsx";
 
 type ChatbotNoteInput = {
-  title?: Cell<Default<string, "LLM Test">>;
-  messages?: Cell<Default<Array<BuiltInLLMMessage>, []>>;
+  title?: Writable<Default<string, "LLM Test">>;
+  messages?: Writable<Default<Array<BuiltInLLMMessage>, []>>;
 };
 
 type ChatbotNoteResult = {
@@ -47,9 +47,9 @@ const newNote = handler<
     title: string;
     content?: string;
     /** A cell to store the result message indicating success or error */
-    result: Cell<string>;
+    result: Writable<string>;
   },
-  { allCharms: Cell<MentionableCharm[]>; index: any }
+  { allCharms: Writable<MentionableCharm[]>; index: any }
 >(
   (args, _) => {
     try {
@@ -75,7 +75,7 @@ const newNote = handler<
 const listMentionable = handler<
   {
     /** A cell to store the result text */
-    result: Cell<string>;
+    result: Writable<string>;
   },
   { mentionable: MentionableCharm[] }
 >(
@@ -93,7 +93,7 @@ const readContentByIndex = handler<
   {
     /** A cell to store the result text */
     index: number;
-    result: Cell<string>;
+    result: Writable<string>;
   },
   { allNotes: Note[] }
 >(
@@ -116,9 +116,9 @@ const editContentByIndex = handler<
     /** The new text content of the note */
     body: string;
     /** A cell to store the result message indicating success or error */
-    result: Cell<string>;
+    result: Writable<string>;
   },
-  { allNotes: Cell<Note[]> }
+  { allNotes: Writable<Note[]> }
 >(
   (args, state) => {
     try {
@@ -141,9 +141,9 @@ const navigateToNote = handler<
     /** The index of the note to navigate to */
     index: number;
     /** A cell to store the result message indicating success or error */
-    result: Cell<string>;
+    result: Writable<string>;
   },
-  { allCharms: Cell<MentionableCharm[]> }
+  { allCharms: Writable<MentionableCharm[]> }
 >(
   (args, state) => {
     try {
@@ -177,7 +177,7 @@ export default pattern<ChatbotNoteInput, ChatbotNoteResult>(
       "#mentionable",
     );
 
-    const list = Cell.of<ListItem[]>([]);
+    const list = Writable.of<ListItem[]>([]);
 
     const tools = {
       searchWeb: {

@@ -14,7 +14,7 @@ export const Counter = pattern<RecipeState>((state) => {
       <div>
         {
           /* Even though we could end up passing extra data to decrement, our schema prevents that actually reaching the handler.
-          In fact, we are passing `value` as an OpaqueRef<number> here but it becomes a Cell<number> at invocation time */
+          In fact, we are passing `value` as an OpaqueRef<number> here but it becomes a Writable<number> at invocation time */
         }
         <ct-button onClick={decrement(state)}>
           dec to {previous(state.value)}

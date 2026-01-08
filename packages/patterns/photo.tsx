@@ -7,7 +7,6 @@
  * Demonstrates the settingsUI pattern for module configuration.
  */
 import {
-  Cell,
   type Default,
   handler,
   ifElse,
@@ -17,6 +16,7 @@ import {
   recipe,
   str,
   UI,
+  Writable,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
@@ -57,7 +57,7 @@ interface PhotoModuleOutput {
 // Handler to clear the photo
 const clearPhoto = handler<
   unknown,
-  { images: Cell<ImageData[]> }
+  { images: Writable<ImageData[]> }
 >((_event, { images }) => {
   images.set([]);
 });
@@ -68,9 +68,9 @@ export const PhotoModule = recipe<PhotoModuleInput, PhotoModuleOutput>(
   ({ image: inputImage, label }) => {
     // We use an array internally for ct-image-input compatibility
     // but the module only supports a single image
-    // NOTE: Cell.of must use empty array to avoid TypeScript OOM (CT-1148)
-    // Using input params in Cell.of() causes deep type inference explosion
-    const images = Cell.of<ImageData[]>([]);
+    // NOTE: Writable.of must use empty array to avoid TypeScript OOM (CT-1148)
+    // Using input params in Writable.of() causes deep type inference explosion
+    const images = Writable.of<ImageData[]>([]);
 
     // Sync image Cell with images array (first element)
     // Also handles initialization from inputImage for import/restore
