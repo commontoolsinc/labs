@@ -1352,6 +1352,17 @@ export const ExtractorModule = recipe<
       model: "anthropic:claude-haiku-4-5",
     });
 
+    // Computed to dereference extraction.result for passing to handlers
+    // extraction.result is a reactive property that doesn't auto-dereference when passed directly
+    // This ensures the handler receives the actual value, not a reactive proxy
+    const extractionResultValue = computed(
+      (): Record<string, unknown> | null => {
+        const result = extraction.result;
+        if (!result || typeof result !== "object") return null;
+        return result as Record<string, unknown>;
+      },
+    );
+
     // Build preview from extraction result
     const preview = computed((): ExtractionPreview | null => {
       if (!extraction.result) return null;
@@ -2270,9 +2281,9 @@ export const ExtractorModule = recipe<
                     parentSubCharmsCell: parentSubCharms,
                     parentTrashedSubCharmsCell: parentTrashedSubCharms,
                     parentTitleCell: parentTitle,
-                    extractionResultValue: extraction.result as
-                      | Record<string, unknown>
-                      | null,
+                    // Pass computed that dereferences extraction.result (reactive properties
+                    // don't auto-dereference when passed directly to handlers)
+                    extractionResultValue: extractionResultValue,
                     selectionsCell: selections,
                     trashSelectionsCell: trashSelections,
                     cleanupEnabledValue: (() => {
