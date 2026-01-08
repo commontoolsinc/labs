@@ -30,8 +30,8 @@ type ImageChatOutput = {
 
 export default pattern<ImageChatInput, ImageChatOutput>(
   ({ systemPrompt, model }) => {
-    const images = Cell.of<ImageData[]>([]);
-    const prompt = Cell.of<string>("");
+    const images = Writable.of<ImageData[]>([]);
+    const prompt = Writable.of<string>("");
 
     // Build content parts array with text and images
     const contentParts = computed(() => {

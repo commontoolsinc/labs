@@ -1410,7 +1410,7 @@ export const DietaryRestrictionsModule = recipe<
   DietaryRestrictionsInput,
   DietaryRestrictionsInput
 >("DietaryRestrictionsModule", ({ restrictions }) => {
-  const selectedLevel = Cell.of<RestrictionLevel>("prefer");
+  const selectedLevel = Writable.of<RestrictionLevel>("prefer");
 
   // Normalize raw restrictions to RestrictionEntry[] format
   // Handles both string[] (from LLM extraction) and RestrictionEntry[] (from UI)

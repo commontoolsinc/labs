@@ -1555,11 +1555,11 @@ export default recipe<Input, Output>(
   ) => {
     // OPTIMIZATION v508: Use cached today instead of new Date() in hot path
     const today = getTodayISO();
-    const currentDate = Cell.of<string>(today);
+    const currentDate = Writable.of<string>(today);
 
     // OPTIMIZATION v508: Separate viewedYearMonth from currentDate
     // This allows day selection within month without recomputing grid
-    const viewedYearMonth = Cell.of<string>(today.substring(0, 7));
+    const viewedYearMonth = Writable.of<string>(today.substring(0, 7));
 
     // OPTIMIZATION v508: Consolidated date parsing - single derivation for all date info
     // Eliminates redundant Date object creations in currentDateInfo, _yearItems, _currentMonthIndex
@@ -2868,7 +2868,7 @@ export default recipe<Input, Output>(
     // Filter out empty entries for display - unwrap notes to plain objects
 
     // Settings UI state
-    const showSettings = Cell.of<boolean>(false);
+    const showSettings = Writable.of<boolean>(false);
 
     // Handler to toggle settings
     const toggleSettings = handler<never, { showSettings: Writable<boolean> }>(
@@ -3289,40 +3289,42 @@ export default recipe<Input, Output>(
     });
 
     // Schedule modal state
-    const scheduleModalState = Cell.of<{ noteId: string; date: string } | null>(
+    const scheduleModalState = Writable.of<
+      { noteId: string; date: string } | null
+    >(
       null,
     );
 
     // Track which note is being edited inline (empty string = none)
-    const editingNoteId = Cell.of<string>("");
+    const editingNoteId = Writable.of<string>("");
 
     // Track if this is a new event (text was empty when modal opened)
-    const isNewEventCell = Cell.of<boolean>(false);
+    const isNewEventCell = Writable.of<boolean>(false);
 
     // Schedule form cells (for modal editing)
-    const scheduleTimeCell = Cell.of<string>("");
-    const scheduleTextCell = Cell.of<string>(""); // Note text in modal
-    const scheduleStartDateCell = Cell.of<string>(""); // Start date for the event
-    const scheduleHourCell = Cell.of<string>("12");
-    const scheduleMinuteCell = Cell.of<string>("00");
-    const schedulePeriodCell = Cell.of<string>("AM");
-    const scheduleDurationCell = Cell.of<string>("none"); // Duration selector
-    const scheduleNotifEnabledCell = Cell.of<boolean>(false);
-    const scheduleNotifValueCell = Cell.of<number>(1);
-    const scheduleNotifUnitCell = Cell.of<string>("minute");
+    const scheduleTimeCell = Writable.of<string>("");
+    const scheduleTextCell = Writable.of<string>(""); // Note text in modal
+    const scheduleStartDateCell = Writable.of<string>(""); // Start date for the event
+    const scheduleHourCell = Writable.of<string>("12");
+    const scheduleMinuteCell = Writable.of<string>("00");
+    const schedulePeriodCell = Writable.of<string>("AM");
+    const scheduleDurationCell = Writable.of<string>("none"); // Duration selector
+    const scheduleNotifEnabledCell = Writable.of<boolean>(false);
+    const scheduleNotifValueCell = Writable.of<number>(1);
+    const scheduleNotifUnitCell = Writable.of<string>("minute");
 
     // Recurring event cells
-    const scheduleRepeatCell = Cell.of<string>("none"); // 'none', 'daily', 'weekly', 'monthly'
-    const scheduleRepeatDaysCell = Cell.of<string[]>([]); // ['MO', 'WE', 'FR']
-    const scheduleMonthlyPatternCell = Cell.of<string>("dayOfMonth"); // 'dayOfMonth' (e.g., 15th) or 'weekdayOfMonth' (e.g., first Friday)
-    const scheduleRepeatEndsCell = Cell.of<string>("never"); // 'never', 'on', 'after'
-    const scheduleRepeatUntilCell = Cell.of<string>(""); // ISO date for 'on'
-    const scheduleRepeatCountCell = Cell.of<number>(10); // count for 'after'
-    const scheduleEditScopeCell = Cell.of<string>("all"); // 'this', 'future', 'all' - scope of changes when editing recurring event
-    const scheduleConfirmingScopeCell = Cell.of<boolean>(false); // True when showing scope confirmation after Save clicked
-    const scheduleOriginalWeeklyDaysCell = Cell.of<string[]>([]); // Tracks original BYDAY values when opening a weekly recurring event
-    const deletionConfirmingScopeCell = Cell.of<boolean>(false); // True when showing scope confirmation for deletion
-    const deletionPendingCell = Cell.of<
+    const scheduleRepeatCell = Writable.of<string>("none"); // 'none', 'daily', 'weekly', 'monthly'
+    const scheduleRepeatDaysCell = Writable.of<string[]>([]); // ['MO', 'WE', 'FR']
+    const scheduleMonthlyPatternCell = Writable.of<string>("dayOfMonth"); // 'dayOfMonth' (e.g., 15th) or 'weekdayOfMonth' (e.g., first Friday)
+    const scheduleRepeatEndsCell = Writable.of<string>("never"); // 'never', 'on', 'after'
+    const scheduleRepeatUntilCell = Writable.of<string>(""); // ISO date for 'on'
+    const scheduleRepeatCountCell = Writable.of<number>(10); // count for 'after'
+    const scheduleEditScopeCell = Writable.of<string>("all"); // 'this', 'future', 'all' - scope of changes when editing recurring event
+    const scheduleConfirmingScopeCell = Writable.of<boolean>(false); // True when showing scope confirmation after Save clicked
+    const scheduleOriginalWeeklyDaysCell = Writable.of<string[]>([]); // Tracks original BYDAY values when opening a weekly recurring event
+    const deletionConfirmingScopeCell = Writable.of<boolean>(false); // True when showing scope confirmation for deletion
+    const deletionPendingCell = Writable.of<
       { noteId: string; date: string } | null
     >(
       null,
@@ -3367,8 +3369,8 @@ export default recipe<Input, Output>(
     );
 
     // Recurrence ambiguity confirmation (for patterns like "Monday meeting")
-    const _recurrenceAmbiguityCell = Cell.of<boolean>(false); // True when showing ambiguity dialog
-    const _recurrencePendingCell = Cell.of<
+    const _recurrenceAmbiguityCell = Writable.of<boolean>(false); // True when showing ambiguity dialog
+    const _recurrencePendingCell = Writable.of<
       {
         text: string;
         date: string;

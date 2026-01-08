@@ -51,8 +51,8 @@ const handleDeleteNote = handler<
 });
 
 const VoiceNote = pattern<Input, Output>(({ title }) => {
-  const transcription = Cell.of<TranscriptionData | null>(null);
-  const notes = Cell.of<TranscriptionData[]>([]);
+  const transcription = Writable.of<TranscriptionData | null>(null);
+  const notes = Writable.of<TranscriptionData[]>([]);
 
   // Computed values for type-safe JSX access
   const hasTranscription = computed(() => transcription.get() !== null);

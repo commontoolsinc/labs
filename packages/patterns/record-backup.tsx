@@ -615,7 +615,7 @@ export default pattern<Input, Output>(({ importJson }) => {
   const recordCount = countRecords({ exportData });
 
   // Import result state
-  const importResult = Cell.of<ImportResult | null>(null);
+  const importResult = Writable.of<ImportResult | null>(null);
 
   // Computed values for import result display using lift
   const hasImportResult = lift(

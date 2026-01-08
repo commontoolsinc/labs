@@ -57,8 +57,8 @@ const toggle = handler<
 
 export default pattern<Input, Output>(({ condition, toggleCount }) => {
   // Internal cells for tracking eval counts - NOT pattern inputs
-  const trueBranchEvalCount = Cell.of(0);
-  const falseBranchEvalCount = Cell.of(0);
+  const trueBranchEvalCount = Writable.of(0);
+  const falseBranchEvalCount = Writable.of(0);
 
   // TRUE BRANCH: Increment internal counter each time this computed runs
   // Close over condition to create reactive dependency

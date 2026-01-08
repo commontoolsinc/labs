@@ -164,7 +164,7 @@ const joinChat = handler<
 export default pattern<LobbyInput, LobbyOutput>(
   ({ chatName, messages, users, sessionId }) => {
     // Name input for new users
-    const nameInput = Cell.of("");
+    const nameInput = Writable.of("");
 
     // Note: Use direct property access to avoid transformer bug
     // with || [] fallback (see computed-var-then-map.issue.md)

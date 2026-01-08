@@ -101,8 +101,8 @@ interface Card {
 
 // Board-level label definitions
 interface State {
-  columns: Cell<Column[]>;
-  availableLabels: Cell<
+  columns: Writable<Column[]>;
+  availableLabels: Writable<
     Default<Label[], [
       { id: "bug"; name: "Bug"; color: "#ef4444" },
       { id: "feature"; name: "Feature"; color: "#3b82f6" },
@@ -169,7 +169,7 @@ then implement Option A or B for true DnD.
 **State for DnD:**
 
 ```typescript
-const dragState = Cell.of<
+const dragState = Writable.of<
   {
     cardId: string | null;
     fromColumnId: string | null;
@@ -286,7 +286,7 @@ kanban-board/
 
 For complex features like DnD and multi-select:
 
-- Keep UI state (dragging, editing, selected) in local `Cell.of()`
+- Keep UI state (dragging, editing, selected) in local `Writable.of()`
 - Keep data state (cards, columns) in pattern inputs
 - Use handlers for data mutations, inline handlers for UI state
 
@@ -338,14 +338,15 @@ For boards with many cards (100+):
 
 **Bugs Fixed (2024-12-19):**
 
-- `Cell.equals(c, column)` doesn't work for comparing OpaqueRef to plain objects
+- `Writable.equals(c, column)` doesn't work for comparing OpaqueRef to plain
+  objects
 - Fix: Use `c.id === column.id` for lookups in inline handlers
-- Local `Cell.of()` state can get corrupted with `setsrc` iterations; fresh
+- Local `Writable.of()` state can get corrupted with `setsrc` iterations; fresh
   deploys are cleaner
 
 **Patterns Learned:**
 
 - Define handlers with `handler()` for CLI compatibility
-- Use string ID comparison in inline handlers, not `Cell.equals()` across
+- Use string ID comparison in inline handlers, not `Writable.equals()` across
   contexts
-- `computed()` requires `.get()` when iterating over `Cell<T[]>`
+- `computed()` requires `.get()` when iterating over `Writable<T[]>`

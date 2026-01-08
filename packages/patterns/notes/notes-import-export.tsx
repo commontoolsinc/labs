@@ -515,7 +515,7 @@ function performImport(
   parsed.forEach((noteData) => {
     if (skipTitles.has(noteData.title)) return;
 
-    const contentCell = Cell.of(noteData.content);
+    const contentCell = Writable.of(noteData.content);
     const noteIdToUse = noteData.noteId || generateId();
 
     // Determine isHidden:
@@ -2331,18 +2331,18 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
   );
 
   // Selection state for notes multi-select
-  const selectedIndices = Cell.of<number[]>([]);
-  const selectedNotebook = Cell.of<string>("");
-  const selectedMoveNotebook = Cell.of<string>("");
-  const lastSelectedIndex = Cell.of<number>(-1); // For shift-click range selection
+  const selectedIndices = Writable.of<number[]>([]);
+  const selectedNotebook = Writable.of<string>("");
+  const selectedMoveNotebook = Writable.of<string>("");
+  const lastSelectedIndex = Writable.of<number>(-1); // For shift-click range selection
 
   // Computed helper for notes selection count
   const selectedCount = computed(() => selectedIndices.get().length);
   const hasSelection = computed(() => selectedIndices.get().length > 0);
 
   // Selection state for notebooks multi-select
-  const selectedNotebookIndices = Cell.of<number[]>([]);
-  const lastSelectedNotebookIndex = Cell.of<number>(-1);
+  const selectedNotebookIndices = Writable.of<number[]>([]);
+  const lastSelectedNotebookIndex = Writable.of<number>(-1);
 
   // Computed helper for notebooks selection count
   const selectedNotebookCount = computed(() =>
@@ -2353,45 +2353,45 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
   );
 
   // State for "New Notebook" prompt modal (for add/move to notebook flows)
-  const showNewNotebookPrompt = Cell.of<boolean>(false);
-  const newNotebookName = Cell.of<string>("");
-  const pendingNotebookAction = Cell.of<"add" | "move" | "">(""); // Track which action triggered the modal
+  const showNewNotebookPrompt = Writable.of<boolean>(false);
+  const newNotebookName = Writable.of<string>("");
+  const pendingNotebookAction = Writable.of<"add" | "move" | "">(""); // Track which action triggered the modal
 
   // State for standalone "New Notebook" modal (from New button)
-  const showStandaloneNotebookPrompt = Cell.of<boolean>(false);
-  const standaloneNotebookTitle = Cell.of<string>("");
+  const showStandaloneNotebookPrompt = Writable.of<boolean>(false);
+  const standaloneNotebookTitle = Writable.of<string>("");
 
   // State for duplicate detection modal during import
-  const showDuplicateModal = Cell.of<boolean>(false);
-  const detectedDuplicates = Cell.of<DetectedDuplicate[]>([]);
-  const pendingImportData = Cell.of<string>("");
+  const showDuplicateModal = Writable.of<boolean>(false);
+  const detectedDuplicates = Writable.of<DetectedDuplicate[]>([]);
+  const pendingImportData = Writable.of<string>("");
 
   // State for duplicate detection modal when adding notes to notebook
-  const showNotebookDuplicateModal = Cell.of<boolean>(false);
-  const notebookDuplicates = Cell.of<NotebookDuplicate[]>([]);
-  const pendingAddNotebookIndex = Cell.of<number>(-1);
-  const nonDuplicateNotes = Cell.of<{ note: NoteCharm; idx: number }[]>([]);
+  const showNotebookDuplicateModal = Writable.of<boolean>(false);
+  const notebookDuplicates = Writable.of<NotebookDuplicate[]>([]);
+  const pendingAddNotebookIndex = Writable.of<number>(-1);
+  const nonDuplicateNotes = Writable.of<{ note: NoteCharm; idx: number }[]>([]);
 
   // State for delete notebook confirmation modal
-  const showDeleteNotebookModal = Cell.of<boolean>(false);
+  const showDeleteNotebookModal = Writable.of<boolean>(false);
 
   // State for export notebooks modal
-  const showExportNotebooksModal = Cell.of<boolean>(false);
-  const exportNotebooksMarkdown = Cell.of<string>("");
+  const showExportNotebooksModal = Writable.of<boolean>(false);
+  const exportNotebooksMarkdown = Writable.of<string>("");
 
   // State for Export All modal
-  const showExportAllModal = Cell.of<boolean>(false);
+  const showExportAllModal = Writable.of<boolean>(false);
 
   // State for Import modal
-  const showImportModal = Cell.of<boolean>(false);
-  const importStatus = Cell.of<string>(""); // Status message during import
+  const showImportModal = Writable.of<boolean>(false);
+  const importStatus = Writable.of<string>(""); // Status message during import
 
   // State for Import progress modal (super modal in front of others)
-  const showImportProgressModal = Cell.of<boolean>(false);
-  const importProgressMessage = Cell.of<string>("Importing notes...");
-  const importComplete = Cell.of<boolean>(false);
+  const showImportProgressModal = Writable.of<boolean>(false);
+  const importProgressMessage = Writable.of<string>("Importing notes...");
+  const importComplete = Writable.of<boolean>(false);
   // State to hide paste section when Upload File button is clicked
-  const showPasteSection = Cell.of<boolean>(true);
+  const showPasteSection = Writable.of<boolean>(true);
 
   // Computed items for ct-select dropdowns (notebooks + "New Notebook...")
   // ct-select has proper bidirectional DOM sync, unlike native <select>
@@ -2561,7 +2561,7 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
   )({ n: notebooks });
 
   // exportedMarkdown is computed on-demand when Export All modal opens (lazy for performance)
-  const exportedMarkdown = Cell.of<string>("");
+  const exportedMarkdown = Writable.of<string>("");
 
   return {
     [NAME]: computed(() => `All Notes (${noteCount} notes)`),

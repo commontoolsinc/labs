@@ -212,10 +212,10 @@ const toggleReaction = handler<
 
 export default pattern<RoomInput, RoomOutput>(
   ({ messages, users, myName, mySessionId, currentSessionId }) => {
-    const contentInput = Cell.of("");
-    const avatarImages = Cell.of<ImageData[]>([]);
-    const chatImages = Cell.of<ImageData[]>([]);
-    const emojiPickerMessageId = Cell.of<string>("");
+    const contentInput = Writable.of("");
+    const avatarImages = Writable.of<ImageData[]>([]);
+    const chatImages = Writable.of<ImageData[]>([]);
+    const emojiPickerMessageId = Writable.of<string>("");
 
     const userList = computed(
       () => (users.get() || []).filter((user: User) => user && user.name),

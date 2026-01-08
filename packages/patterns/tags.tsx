@@ -63,7 +63,7 @@ const removeTag = handler<
 export const TagsModule = recipe<TagsModuleInput, TagsModuleInput>(
   "TagsModule",
   ({ tags }) => {
-    const tagInput = Cell.of<string>("");
+    const tagInput = Writable.of<string>("");
     const displayText = computed(() => {
       const count = (tags || []).length || 0;
       return count > 0 ? `${count} tag${count !== 1 ? "s" : ""}` : "No tags";

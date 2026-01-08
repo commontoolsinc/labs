@@ -1221,7 +1221,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
       }
     }
 
-    const message = Cell.of("");
+    const message = Writable.of("");
 
     return {
       [NAME]: computed(() => `Scrabble: ${myName}`),

@@ -68,7 +68,7 @@ export default pattern<Input, Output>(({ items }) => {
                     onClick={() => {
                       const current = items.get();
                       const index = current.findIndex((el) =>
-                        Cell.equals(item, el)
+                        Writable.equals(item, el)
                       );
                       if (index >= 0) {
                         items.set(current.toSpliced(index, 1));

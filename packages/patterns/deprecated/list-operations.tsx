@@ -21,7 +21,7 @@ interface Item {
 }
 
 interface ListInput {
-  items: Cell<Default<Item[], []>>;
+  items: Writable<Default<Item[], []>>;
 }
 
 interface ListOutput extends ListInput {}

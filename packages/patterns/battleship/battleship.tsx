@@ -1,12 +1,12 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   derive,
   handler,
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 // =============================================================================
@@ -179,11 +179,11 @@ function createInitialState(): GameState {
 type Input = Record<string, never>;
 
 interface Output {
-  game: Cell<GameState>;
+  game: Writable<GameState>;
 }
 
 export default pattern<Input, Output>((_input) => {
-  const game = Cell.of<GameState>(createInitialState());
+  const game = Writable.of<GameState>(createInitialState());
 
   // ---------------------------------------------------------------------------
   // Handlers
@@ -191,7 +191,7 @@ export default pattern<Input, Output>((_input) => {
 
   const fireShot = handler<
     unknown,
-    { row: number; col: number; game: Cell<GameState> }
+    { row: number; col: number; game: Writable<GameState> }
   >((_, { row, col, game }) => {
     const state = game.get();
 
@@ -264,7 +264,7 @@ export default pattern<Input, Output>((_input) => {
     }
   });
 
-  const passDevice = handler<unknown, { game: Cell<GameState> }>(
+  const passDevice = handler<unknown, { game: Writable<GameState> }>(
     (_, { game }) => {
       const state = game.get();
       if (state.phase === "finished") return;
@@ -278,7 +278,7 @@ export default pattern<Input, Output>((_input) => {
     },
   );
 
-  const playerReady = handler<unknown, { game: Cell<GameState> }>(
+  const playerReady = handler<unknown, { game: Writable<GameState> }>(
     (_, { game }) => {
       const state = game.get();
       if (state.phase === "finished") return;
@@ -294,7 +294,7 @@ export default pattern<Input, Output>((_input) => {
     },
   );
 
-  const resetGame = handler<unknown, { game: Cell<GameState> }>(
+  const resetGame = handler<unknown, { game: Writable<GameState> }>(
     (_, { game }) => {
       game.set(createInitialState());
     },

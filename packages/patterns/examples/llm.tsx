@@ -31,7 +31,7 @@ const askQuestion = handler<
 });
 
 export default recipe<LLMTestInput>(({ title }) => {
-  const question = Cell.of("");
+  const question = Writable.of("");
 
   const llmResponse = generateText({
     system:

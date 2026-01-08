@@ -34,7 +34,7 @@ type Output = {
 const VoiceNoteSimple = recipe<Input, Output>(
   "Voice Note Simple",
   ({ title }) => {
-    const transcription = Cell.of<TranscriptionData | null>(null);
+    const transcription = Writable.of<TranscriptionData | null>(null);
     const hasTranscription = computed(() => transcription.get() !== null);
     const transcriptionText = computed(() => transcription.get()?.text || "");
     const transcriptionDuration = computed(

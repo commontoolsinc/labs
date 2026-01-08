@@ -129,7 +129,7 @@ properties made it through.
 The current code uses manual `===` reference comparison which is fragile. Use
 the framework's idiomatic patterns:
 
-1. **Use `Cell.equals()` for identity comparison** - Uses `areLinksSame()`
+1. **Use `Writable.equals()` for identity comparison** - Uses `areLinksSame()`
    internally for proper identity comparison (resolves aliases)
 2. **Use `Cell.remove()` for removal** - Uses `areLinksSame()` internally
 3. **No `insertAt()` exists** - Must use `get()` + manipulation + `set()` for
@@ -141,9 +141,9 @@ the framework's idiomatic patterns:
 
 ```typescript
 const insertAtPosition = handler<
-  { detail: { sourceCell: Cell<SubCharmEntry> } },
+  { detail: { sourceCell: Writable<SubCharmEntry> } },
   {
-    subCharms: Cell<SubCharmEntry[]>;
+    subCharms: Writable<SubCharmEntry[]>;
     insertAfterEntry: SubCharmEntry | null; // null = insert at start
     targetPinned: boolean;
   }
@@ -153,10 +153,10 @@ const insertAtPosition = handler<
 
   const current = subCharms.get() || [];
 
-  // Find the ACTUAL entry in current array using Cell.equals() for proper link identity
+  // Find the ACTUAL entry in current array using Writable.equals() for proper link identity
   // This ensures we have complete, fresh data even if sourceCell is stale from multi-tab conflicts
   const fromIndex = current.findIndex((e) =>
-    e?.charm && sourceCell.equals(e.charm)
+    e?.charm && sourceWritable.equals(e.charm)
   );
   if (fromIndex === -1) return; // Entry not found (removed by another tab), bail
 
@@ -174,14 +174,14 @@ const insertAtPosition = handler<
     ...current.slice(fromIndex + 1),
   ];
 
-  // Find insertion index using Cell.equals() for proper identity comparison
+  // Find insertion index using Writable.equals() for proper identity comparison
   let insertIndex: number;
   if (insertAfterEntry === null) {
     insertIndex = 0;
   } else {
     const afterIndex = withoutDragged.findIndex((e) =>
       e?.charm && insertAfterEntry?.charm &&
-      (e.charm as Cell<unknown>).equals(insertAfterEntry.charm)
+      (e.charm as Writable<unknown>).equals(insertAfterEntry.charm)
     );
     insertIndex = afterIndex >= 0 ? afterIndex + 1 : withoutDragged.length;
   }
@@ -199,21 +199,21 @@ const insertAtPosition = handler<
 
 ### Key Changes from Original
 
-| Original                                            | Fixed                                                       |
-| --------------------------------------------------- | ----------------------------------------------------------- |
-| `e?.charm === draggedEntry?.charm`                  | `sourceCell.equals(e.charm)`                                |
-| `e?.charm === insertAfterEntry?.charm`              | `(e.charm as Cell<unknown>).equals(insertAfterEntry.charm)` |
-| Spread `draggedEntry` (from stale sourceCell.get()) | Spread `actualEntry` (fresh from current array)             |
+| Original                                            | Fixed                                                           |
+| --------------------------------------------------- | --------------------------------------------------------------- |
+| `e?.charm === draggedEntry?.charm`                  | `sourceWritable.equals(e.charm)`                                |
+| `e?.charm === insertAfterEntry?.charm`              | `(e.charm as Writable<unknown>).equals(insertAfterEntry.charm)` |
+| Spread `draggedEntry` (from stale sourceCell.get()) | Spread `actualEntry` (fresh from current array)                 |
 
 ### Why We Think This Fix Should Work (UNTESTED)
 
 **Note: This fix has NOT been tested yet.** The reasoning below is theoretical
 based on our understanding of the framework.
 
-1. **`Cell.equals()` handles link aliases**: The framework may create different
-   Cell references that point to the same underlying data. `===` comparison
-   fails, but `Cell.equals()` uses `areLinksSame()` which properly resolves
-   aliases.
+1. **`Writable.equals()` handles link aliases**: The framework may create
+   different Cell references that point to the same underlying data. `===`
+   comparison fails, but `Writable.equals()` uses `areLinksSame()` which
+   properly resolves aliases.
 
 2. **Fresh data from current array**: Instead of using `sourceCell.get()` which
    may return stale data from before a conflict retry, we find the entry in the
@@ -261,7 +261,7 @@ Location: Around line 654-659 in record.tsx
 **`/patterns/jkomoros/record/record.tsx`**
 
 1. **insertAtPosition handler** (lines ~277-315): Replace with idiomatic
-   Cell.equals() version above
+   Writable.equals() version above
 2. **Empty rail drop zone** (lines ~654-659): Add flex: 1 styling
 
 ---
@@ -287,7 +287,7 @@ identity:
 // From labs/packages/patterns/card-piles.tsx
 const moveToPile1 = handler<
   { detail: { sourceCell: Cell } },
-  { pile1: Cell<Card[]>; pile2: Cell<Card[]> }
+  { pile1: Writable<Card[]>; pile2: Writable<Card[]> }
 >((event, { pile1, pile2 }) => {
   const sourceCard = event.detail?.sourceCell?.get() as Card;
   if (!sourceCard) return;
@@ -304,8 +304,9 @@ const moveToPile1 = handler<
 });
 ```
 
-Note: card-piles uses value comparison (rank + suit) rather than Cell.equals()
-because cards are simple value objects, not Cells containing links.
+Note: card-piles uses value comparison (rank + suit) rather than
+Writable.equals() because cards are simple value objects, not Cells containing
+links.
 
 ---
 
@@ -314,7 +315,7 @@ because cards are simple value objects, not Cells containing links.
 This could become a community doc about:
 
 - Multi-tab conflict resolution patterns
-- When to use Cell.equals() vs === comparison
+- When to use Writable.equals() vs === comparison
 - Preserving data integrity during array mutations
 
 ---

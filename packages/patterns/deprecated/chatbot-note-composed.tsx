@@ -177,7 +177,7 @@ export default pattern<ChatbotNoteInput, ChatbotNoteResult>(
       "#mentionable",
     );
 
-    const list = Cell.of<ListItem[]>([]);
+    const list = Writable.of<ListItem[]>([]);
 
     const tools = {
       searchWeb: {

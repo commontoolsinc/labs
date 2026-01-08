@@ -151,7 +151,7 @@ const listRecent = pattern<
 
 export default pattern<ChatInput, ChatOutput>(
   ({ messages, tools, theme, system }) => {
-    const model = Cell.of<string>("anthropic:claude-sonnet-4-5");
+    const model = Writable.of<string>("anthropic:claude-sonnet-4-5");
     const mentionable = wish<MentionableCharm[]>("#mentionable");
     const recentCharms = wish<MentionableCharm[]>("#recent");
 

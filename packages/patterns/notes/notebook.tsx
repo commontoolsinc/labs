@@ -161,7 +161,7 @@ const removeFromNotebook = handler<
   { note: Writable<NoteCharm>; notes: Writable<NoteCharm[]> }
 >((_, { note, notes }) => {
   const notebookNotes = notes.get();
-  const index = notebookNotes.findIndex((n: any) => Cell.equals(n, note));
+  const index = notebookNotes.findIndex((n: any) => Writable.equals(n, note));
   if (index !== -1) {
     const copy = [...notebookNotes];
     copy.splice(index, 1);
@@ -179,9 +179,9 @@ const _handleCharmDrop = handler<
   const sourceCell = event.detail.sourceCell;
   const notesList = notes.get() ?? [];
 
-  // Prevent duplicates using Cell.equals
+  // Prevent duplicates using Writable.equals
   const alreadyExists = notesList.some((n) =>
-    Cell.equals(sourceCell, n as any)
+    Writable.equals(sourceCell, n as any)
   );
   if (alreadyExists) return;
 
@@ -210,7 +210,7 @@ const handleDropOntoCurrentNotebook = handler<
   // Check if dragged item is in the selection (from a sibling notebook drag)
   // For sibling notebooks, we check if the dragged cell matches any selected item
   const draggedIndex = notesList.findIndex((n: any) =>
-    Cell.equals(sourceCell, n)
+    Writable.equals(sourceCell, n)
   );
   const isDraggedInSelection = draggedIndex >= 0 &&
     selected.includes(draggedIndex);
@@ -256,7 +256,7 @@ const handleDropOntoCurrentNotebook = handler<
     // Add all to this notebook (deduplicated)
     for (const item of itemsToMove) {
       const alreadyExists = notesList.some((n) =>
-        Cell.equals(item as any, n as any)
+        Writable.equals(item as any, n as any)
       );
       if (!alreadyExists) {
         notes.push(item as any);
@@ -272,7 +272,7 @@ const handleDropOntoCurrentNotebook = handler<
 
     // Prevent duplicates
     const alreadyExists = notesList.some((n) =>
-      Cell.equals(sourceCell, n as any)
+      Writable.equals(sourceCell, n as any)
     );
     if (alreadyExists) return;
 
@@ -283,10 +283,10 @@ const handleDropOntoCurrentNotebook = handler<
       const nbNotesCell = nbCell.key("notes");
       const nbNotes = (nbNotesCell.get() as unknown[]) ?? [];
 
-      // Find and remove by title or Cell.equals
+      // Find and remove by title or Writable.equals
       const filtered = nbNotes.filter((n: any) => {
         if (n?.title === sourceTitle) return false;
-        if (Cell.equals(sourceCell, n as any)) return false;
+        if (Writable.equals(sourceCell, n as any)) return false;
         return true;
       });
       if (filtered.length !== nbNotes.length) {
@@ -326,7 +326,7 @@ const handleDropOntoNotebook = handler<
 
   // Check if dragged item is in the selection
   const draggedIndex = currentList.findIndex((n: any) =>
-    Cell.equals(sourceCell, n)
+    Writable.equals(sourceCell, n)
   );
   const isDraggedInSelection = draggedIndex >= 0 &&
     selected.includes(draggedIndex);
@@ -359,7 +359,7 @@ const handleDropOntoNotebook = handler<
     // Add all to target (deduplicated)
     for (const item of itemsToMove) {
       const alreadyInTarget = targetNotesList.some((n) =>
-        Cell.equals(item as any, n as any)
+        Writable.equals(item as any, n as any)
       );
       if (!alreadyInTarget) {
         targetNotesCell.push(item);
@@ -395,13 +395,13 @@ const handleDropOntoNotebook = handler<
     // Single-item move (existing logic)
     // Prevent duplicates in target
     const alreadyInTarget = targetNotesList.some((n) =>
-      Cell.equals(sourceCell, n as any)
+      Writable.equals(sourceCell, n as any)
     );
     if (alreadyInTarget) return;
 
     // Remove from current notebook if present
     const indexInCurrent = currentList.findIndex((n: any) =>
-      Cell.equals(sourceCell, n)
+      Writable.equals(sourceCell, n)
     );
     if (indexInCurrent !== -1) {
       const copy = [...currentList];
@@ -1077,39 +1077,39 @@ const Notebook = pattern<Input, Output>(
     });
 
     // Selection state for multi-select
-    const selectedNoteIndices = Cell.of<number[]>([]);
-    const lastSelectedNoteIndex = Cell.of<number>(-1);
-    const selectedAddNotebook = Cell.of<string>("");
-    const selectedMoveNotebook = Cell.of<string>("");
+    const selectedNoteIndices = Writable.of<number[]>([]);
+    const lastSelectedNoteIndex = Writable.of<number>(-1);
+    const selectedAddNotebook = Writable.of<string>("");
+    const selectedMoveNotebook = Writable.of<string>("");
 
     // Computed helpers for selection
     const selectedCount = computed(() => selectedNoteIndices.get().length);
     const hasSelection = computed(() => selectedNoteIndices.get().length > 0);
 
     // State for "New Notebook" prompt modal
-    const showNewNotebookPrompt = Cell.of<boolean>(false);
-    const newNotebookName = Cell.of<string>("");
-    const pendingNotebookAction = Cell.of<"add" | "move" | "">(""); // Track which action triggered the modal
+    const showNewNotebookPrompt = Writable.of<boolean>(false);
+    const newNotebookName = Writable.of<string>("");
+    const pendingNotebookAction = Writable.of<"add" | "move" | "">(""); // Track which action triggered the modal
 
     // State for "New Note" prompt modal
-    const showNewNotePrompt = Cell.of<boolean>(false);
-    const newNoteTitle = Cell.of<string>("");
-    const usedCreateAnotherNote = Cell.of<boolean>(false); // Track if "Create Another" was used
+    const showNewNotePrompt = Writable.of<boolean>(false);
+    const newNoteTitle = Writable.of<string>("");
+    const usedCreateAnotherNote = Writable.of<boolean>(false); // Track if "Create Another" was used
 
     // State for "New Nested Notebook" prompt modal (from dropdown menu)
-    const showNewNestedNotebookPrompt = Cell.of<boolean>(false);
-    const newNestedNotebookTitle = Cell.of<string>("");
+    const showNewNestedNotebookPrompt = Writable.of<boolean>(false);
+    const newNestedNotebookTitle = Writable.of<string>("");
 
-    const usedCreateAnotherNotebook = Cell.of<boolean>(false); // Track if "Create Another" was used
+    const usedCreateAnotherNotebook = Writable.of<boolean>(false); // Track if "Create Another" was used
 
     // Backlinks - populated by backlinks-index.tsx
-    const backlinks = Cell.of<MentionableCharm[]>([]);
+    const backlinks = Writable.of<MentionableCharm[]>([]);
 
     // State for inline title editing
-    const isEditingTitle = Cell.of<boolean>(false);
+    const isEditingTitle = Writable.of<boolean>(false);
 
     // State for expanded note previews (tracks which note indices have full content shown)
-    const _expandedPreviews = Cell.of<number[]>([]);
+    const _expandedPreviews = Writable.of<number[]>([]);
 
     // Filter to find all notebooks (using 📓 prefix in NAME)
     const notebooks = computed(() =>

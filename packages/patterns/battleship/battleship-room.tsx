@@ -12,7 +12,6 @@
  */
 
 import {
-  Cell,
   computed,
   Default,
   derive,
@@ -21,6 +20,7 @@ import {
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 import {
@@ -48,10 +48,10 @@ import {
 
 interface GameInput {
   gameName: Default<string, "Battleship">;
-  player1Json: Cell<Default<string, "null">>;
-  player2Json: Cell<Default<string, "null">>;
-  shotsJson: Cell<Default<string, "{}">>;
-  gameStateJson: Cell<Default<string, "{}">>;
+  player1Json: Writable<Default<string, "null">>;
+  player2Json: Writable<Default<string, "null">>;
+  shotsJson: Writable<Default<string, "{}">>;
+  gameStateJson: Writable<Default<string, "{}">>;
   myName: Default<string, "">;
   myPlayerNumber: Default<number, 1>;
 }
@@ -71,10 +71,10 @@ const fireShot = handler<
     row: number;
     col: number;
     myPlayerNumber: number;
-    player1Json: Cell<string>;
-    player2Json: Cell<string>;
-    shotsJson: Cell<string>;
-    gameStateJson: Cell<string>;
+    player1Json: Writable<string>;
+    player2Json: Writable<string>;
+    shotsJson: Writable<string>;
+    gameStateJson: Writable<string>;
   }
 >(
   (

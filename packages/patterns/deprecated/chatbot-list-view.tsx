@@ -127,7 +127,7 @@ const populateChatList = lift(
     { charmsList, allCharms, selectedCharm },
   ) => {
     if (charmsList.length === 0) {
-      const isInitialized = Cell.of(false);
+      const isInitialized = Writable.of(false);
       return storeCharm({
         charm: Chat({
           title: "New Chat",
@@ -153,7 +153,7 @@ const createChatRecipe = handler<
   }
 >(
   (_, { selectedCharm, charmsList, allCharms }) => {
-    const isInitialized = Cell.of(false);
+    const isInitialized = Writable.of(false);
 
     const charm = Chat({
       title: "New Chat",
@@ -257,9 +257,9 @@ export default pattern<Input, Output>(
     const localMentionable = extractLocalMentionable({ list: charmsList });
 
     const localTheme = theme ?? {
-      accentColor: Cell.of("#3b82f6"),
-      fontFace: Cell.of("system-ui, -apple-system, sans-serif"),
-      borderRadius: Cell.of("0.5rem"),
+      accentColor: Writable.of("#3b82f6"),
+      fontFace: Writable.of("system-ui, -apple-system, sans-serif"),
+      borderRadius: Writable.of("0.5rem"),
     };
 
     return {

@@ -16,7 +16,6 @@
  * TODO: Consider adding to "place" template or creating "trip" template
  */
 import {
-  Cell,
   computed,
   type Default,
   handler,
@@ -25,6 +24,7 @@ import {
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
@@ -96,7 +96,7 @@ export interface LocationTrackModuleInput {
  */
 const handleLocationUpdate = handler<
   { detail: { location: LocationPoint } },
-  { locations: Cell<LocationPoint[]> }
+  { locations: Writable<LocationPoint[]> }
 >(({ detail }, { locations }) => {
   const newPoint = detail.location;
   // Validate required fields exist
@@ -115,7 +115,7 @@ const handleLocationUpdate = handler<
  */
 const clearLocations = handler<
   unknown,
-  { locations: Cell<LocationPoint[]> }
+  { locations: Writable<LocationPoint[]> }
 >((_event, { locations }) => {
   locations.set([]);
 });
@@ -125,7 +125,7 @@ const clearLocations = handler<
  */
 const removeLocation = handler<
   unknown,
-  { locations: Cell<LocationPoint[]>; index: number }
+  { locations: Writable<LocationPoint[]>; index: number }
 >((_event, { locations, index }) => {
   const current = locations.get() || [];
   locations.set(current.toSpliced(index, 1));
@@ -171,8 +171,8 @@ export const LocationTrackModule = recipe<
   LocationTrackModuleInput,
   LocationTrackModuleInput
 >("LocationTrackModule", ({ locations, label }) => {
-  // Local cell for ct-location binding (not stored)
-  const currentCapture = Cell.of<LocationPoint | null>(null);
+  // Local writable cell for ct-location binding (not stored)
+  const currentCapture = Writable.of<LocationPoint | null>(null);
 
   // Computed display text
   const displayText = computed(() => {

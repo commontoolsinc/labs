@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, NAME, pattern, UI } from "commontools";
+import { Default, NAME, pattern, UI, Writable } from "commontools";
 import Suggestion from "../system/suggestion.tsx";
 
 export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
@@ -13,7 +13,7 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
       situation: "gimme note with the attached content",
       context: {
         content: "This is the expected content",
-        value: Cell.of(0),
+        value: Writable.of(0),
       },
     });
 

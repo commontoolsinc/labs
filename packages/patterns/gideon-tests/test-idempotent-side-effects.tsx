@@ -56,11 +56,11 @@ const incrementTrigger = handler<unknown, { triggerCount: Writable<number> }>(
 
 export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
   // Shared state for tracking
-  const nonIdempotentArray = Cell.of<unknown[]>([]);
-  const nonIdempotentCounter = Cell.of(0);
+  const nonIdempotentArray = Writable.of<unknown[]>([]);
+  const nonIdempotentCounter = Writable.of(0);
 
-  const idempotentMap = Cell.of<Record<string, unknown>>({});
-  const idempotentCounter = Cell.of(0);
+  const idempotentMap = Writable.of<Record<string, unknown>>({});
+  const idempotentCounter = Writable.of(0);
 
   // Computed values for conditional rendering
   const isThrashing = computed(() => nonIdempotentCounter.get() > 10);

@@ -1,10 +1,10 @@
 /// <cts-enable />
 /**
- * TEST PATTERN: Cell.equals() vs Manual IDs
+ * TEST PATTERN: Writable.equals() vs Manual IDs
  *
  * WHAT THIS TESTS:
  * This pattern demonstrates that the framework tracks object identity internally,
- * and manual ID generation is unnecessary. Using Cell.equals() for item comparison
+ * and manual ID generation is unnecessary. Using Writable.equals() for item comparison
  * is the recommended approach.
  *
  * MANUAL VERIFICATION STEPS:
@@ -22,7 +22,7 @@
  * WHAT CONFIRMS IT WORKS:
  * - Items can be selected/deselected by clicking
  * - Selection highlighting follows the correct item even after list changes
- * - Items can be removed using Cell.equals() to find them
+ * - Items can be removed using Writable.equals() to find them
  * - No manual ID generation is needed for any of this to work
  * - The pattern uses object references (cells) instead of string IDs
  */
@@ -77,10 +77,10 @@ const selectItem = handler<
     const targetItem = items.get()[index];
     if (!targetItem) return;
 
-    // Use Cell.equals() to check if this item is already selected
-    // This tests the core claim: Cell.equals() can identify items
+    // Use Writable.equals() to check if this item is already selected
+    // This tests the core claim: Writable.equals() can identify items
     // without needing manual IDs
-    if (current && Cell.equals(current, targetItem)) {
+    if (current && Writable.equals(current, targetItem)) {
       // Deselect if clicking the same item
       selectedItem.set(null);
     } else {
@@ -100,8 +100,8 @@ const removeSelected = handler<
     if (!selected) return;
 
     const current = items.get();
-    // Use Cell.equals() to find the item in the array
-    const index = current.findIndex((el) => Cell.equals(selected, el));
+    // Use Writable.equals() to find the item in the array
+    const index = current.findIndex((el) => Writable.equals(selected, el));
     if (index >= 0) {
       items.set(current.toSpliced(index, 1));
       selectedItem.set(null);
@@ -126,17 +126,17 @@ export default pattern<TestCellEqualsInput, TestCellEqualsOutput>(
       return items.get().map((item, index) => ({
         item,
         index,
-        isSelected: selected !== null && Cell.equals(selected, item),
+        isSelected: selected !== null && Writable.equals(selected, item),
       }));
     });
 
     return {
-      [NAME]: "Test Cell.equals()",
+      [NAME]: "Test Writable.equals()",
       [UI]: (
         <div style={{ padding: "1rem" }}>
-          <h2>Cell.equals() Test Pattern</h2>
+          <h2>Writable.equals() Test Pattern</h2>
           <p style={{ color: "#666", fontSize: "0.9rem" }}>
-            This pattern demonstrates using Cell.equals() for item
+            This pattern demonstrates using Writable.equals() for item
             identification instead of manual ID generation.
           </p>
 

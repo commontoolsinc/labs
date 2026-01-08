@@ -86,8 +86,8 @@ const calcStreak = lift((args: { logs: HabitLog[]; name: string }): number => {
 
 export default pattern<Input, Output>(({ habits, logs }) => {
   const todayDate = getTodayDate();
-  const newHabitName = Cell.of("");
-  const newHabitIcon = Cell.of("✓");
+  const newHabitName = Writable.of("");
+  const newHabitIcon = Writable.of("✓");
 
   const habitCount = computed(() => habits.get().length);
 
@@ -163,7 +163,7 @@ export default pattern<Input, Output>(({ habits, logs }) => {
                       onClick={() => {
                         const current = habits.get();
                         const idx = current.findIndex((h) =>
-                          Cell.equals(habit, h)
+                          Writable.equals(habit, h)
                         );
                         if (idx >= 0) {
                           habits.set(current.toSpliced(idx, 1));

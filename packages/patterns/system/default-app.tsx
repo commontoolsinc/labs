@@ -74,9 +74,9 @@ const dropOntoNotebook = handler<
   const notesCell = notebook.key("notes");
   const notesList = notesCell.get() ?? [];
 
-  // Prevent duplicates using Cell.equals
+  // Prevent duplicates using Writable.equals
   const alreadyExists = notesList.some((n) =>
-    Cell.equals(sourceCell, n as any)
+    Writable.equals(sourceCell, n as any)
   );
   if (alreadyExists) return;
 
@@ -149,7 +149,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
   const { allCharms } = wish<{ allCharms: MentionableCharm[] }>("/");
 
   // Dropdown menu state
-  const menuOpen = Cell.of(false);
+  const menuOpen = Writable.of(false);
 
   // Filter out hidden charms and charms without resolved NAME
   // (prevents transient hash-only pills during reactive updates)

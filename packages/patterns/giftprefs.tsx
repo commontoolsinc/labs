@@ -117,8 +117,8 @@ export const GiftPrefsModule = recipe<
 >(
   "GiftPrefsModule",
   ({ giftTier, favorites, avoid }) => {
-    const favoriteInput = Cell.of<string>("");
-    const avoidInput = Cell.of<string>("");
+    const favoriteInput = Writable.of<string>("");
+    const avoidInput = Writable.of<string>("");
 
     const displayText = computed(() => {
       const opt = TIER_OPTIONS.find((o) => o.value === giftTier);

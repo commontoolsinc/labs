@@ -251,13 +251,13 @@ const Note = pattern<Input, Output>(
       "#mentionable",
     );
     const recentCharms = wish<MinimalCharm[]>("#recent");
-    const mentioned = Cell.of<MentionableCharm[]>([]);
+    const mentioned = Writable.of<MentionableCharm[]>([]);
 
     // Dropdown menu state
-    const menuOpen = Cell.of(false);
+    const menuOpen = Writable.of(false);
 
     // State for inline title editing
-    const isEditingTitle = Cell.of<boolean>(false);
+    const isEditingTitle = Writable.of<boolean>(false);
 
     // Filter to find all notebooks (using 📓 prefix in NAME)
     const notebooks = computed(() =>
@@ -321,7 +321,7 @@ const Note = pattern<Input, Output>(
     });
 
     // populated in backlinks-index.tsx
-    const backlinks = Cell.of<MentionableCharm[]>([]);
+    const backlinks = Writable.of<MentionableCharm[]>([]);
 
     // Use provided linkPattern or default to creating new Notes
     // linkPattern is a Writable<string> - access reactively, not as raw string

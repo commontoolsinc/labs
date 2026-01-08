@@ -257,8 +257,8 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
     },
   ) => {
     // Separate name inputs for each player slot
-    const player1NameInput = Cell.of("");
-    const player2NameInput = Cell.of("");
+    const player1NameInput = Writable.of("");
+    const player2NameInput = Writable.of("");
 
     // Derive player data reactively from playersJson
     const player1 = computed(() => {

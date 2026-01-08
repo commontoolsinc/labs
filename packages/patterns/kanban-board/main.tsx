@@ -187,13 +187,13 @@ export default pattern<State>(({ columns }) => {
 
   // ============ LOCAL UI STATE ============
 
-  const newColumnTitle = Cell.of("");
+  const newColumnTitle = Writable.of("");
 
   // Editing state (for future use - click handlers set these but no edit UI yet)
-  const editingCardId = Cell.of<string | null>(null);
-  const editingCardTitle = Cell.of("");
-  const editingColumnId = Cell.of<string | null>(null);
-  const editingColumnTitle = Cell.of("");
+  const editingCardId = Writable.of<string | null>(null);
+  const editingCardTitle = Writable.of("");
+  const editingColumnId = Writable.of<string | null>(null);
+  const editingColumnTitle = Writable.of("");
 
   // ============ COMPUTED DERIVATIONS ============
 

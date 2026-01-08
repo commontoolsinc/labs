@@ -59,7 +59,7 @@ const addCharmAndNavigate = lift(
 const createSimpleRecipe = handler<unknown, { cellRef: Writable<Charm[]> }>(
   (_, { cellRef }) => {
     // Create isInitialized cell for this charm addition
-    const isInitialized = Cell.of(false);
+    const isInitialized = Writable.of(false);
 
     // Create a random 5-digit ID
     const randomId = Math.floor(10000 + Math.random() * 90000).toString();

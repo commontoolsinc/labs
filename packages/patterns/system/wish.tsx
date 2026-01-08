@@ -23,7 +23,7 @@ export default pattern<
   WishState<never>
 >(
   ({ query: _query, context: _context, candidates }) => {
-    const selectedIndex = Cell.of(0);
+    const selectedIndex = Writable.of(0);
     const result = computed(() => {
       if (candidates.length === 0) return undefined;
       const idx = Math.min(selectedIndex.get(), candidates.length - 1);

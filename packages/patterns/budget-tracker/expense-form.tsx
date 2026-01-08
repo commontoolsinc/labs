@@ -96,13 +96,13 @@ export default pattern<Input>(({ expenses, budgets }) => {
   const todayDate = getTodayDate();
 
   // Local state for form inputs
-  const newDescription = Cell.of("");
-  const newAmount = Cell.of("");
-  const newCategory = Cell.of("Other");
+  const newDescription = Writable.of("");
+  const newAmount = Writable.of("");
+  const newCategory = Writable.of("Other");
 
   // Budget form inputs
-  const budgetCategory = Cell.of("");
-  const budgetLimit = Cell.of("");
+  const budgetCategory = Writable.of("");
+  const budgetLimit = Writable.of("");
 
   // Counts for display
   const expenseCount = computed(() => expenses.get().length);
@@ -176,7 +176,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
                 onClick={() => {
                   const current = expenses.get();
                   const index = current.findIndex((el) =>
-                    Cell.equals(expense, el)
+                    Writable.equals(expense, el)
                   );
                   if (index >= 0) {
                     expenses.set(current.toSpliced(index, 1));
@@ -256,7 +256,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
                 onClick={() => {
                   const current = budgets.get();
                   const index = current.findIndex((b) =>
-                    Cell.equals(budget, b)
+                    Writable.equals(budget, b)
                   );
                   if (index >= 0) {
                     budgets.set(current.toSpliced(index, 1));

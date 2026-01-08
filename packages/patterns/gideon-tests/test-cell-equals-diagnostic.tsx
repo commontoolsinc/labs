@@ -93,10 +93,10 @@ const clearLog = handler<unknown, { log: Writable<string[]> }>(
 export default pattern<DiagInput, DiagInput>(
   ({ items, selectedItem, log }) => {
     return {
-      [NAME]: "Cell.equals Diagnostic",
+      [NAME]: "Writable.equals Diagnostic",
       [UI]: (
         <div style={{ padding: "1rem", fontFamily: "monospace" }}>
-          <h2>Cell.equals() Diagnostic</h2>
+          <h2>Writable.equals() Diagnostic</h2>
 
           <div
             style={{

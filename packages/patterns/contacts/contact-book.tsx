@@ -29,10 +29,10 @@ interface Output {
 }
 
 export default pattern<Input, Output>(({ contacts, relationships }) => {
-  const searchQuery = Cell.of("");
-  const newRelationFrom = Cell.of("");
-  const newRelationTo = Cell.of("");
-  const newRelationLabel = Cell.of("");
+  const searchQuery = Writable.of("");
+  const newRelationFrom = Writable.of("");
+  const newRelationTo = Writable.of("");
+  const newRelationLabel = Writable.of("");
 
   const contactCount = computed(() => contacts.get().length);
 
@@ -120,7 +120,7 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
                       onClick={() => {
                         const current = contacts.get();
                         const idx = current.findIndex((c) =>
-                          Cell.equals(contact, c)
+                          Writable.equals(contact, c)
                         );
                         if (idx >= 0) {
                           contacts.set(current.toSpliced(idx, 1));

@@ -300,15 +300,15 @@ export function SmartTextInput(
   // ===== Internal State =====
 
   // Preview state (for file upload or OCR result)
-  const previewText = Cell.of<string | null>(null);
-  const previewSource = Cell.of<"file" | "image" | null>(null);
-  const previewFileName = Cell.of<string | null>(null);
+  const previewText = Writable.of<string | null>(null);
+  const previewSource = Writable.of<"file" | "image" | null>(null);
+  const previewFileName = Writable.of<string | null>(null);
 
   // File error state (for user feedback)
-  const fileError = Cell.of<string | null>(null);
+  const fileError = Writable.of<string | null>(null);
 
   // Image array for ct-image-input binding
-  const imageArray = Cell.of<ImageData[]>([]);
+  const imageArray = Writable.of<ImageData[]>([]);
 
   // ===== OCR Processing =====
 

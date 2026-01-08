@@ -13,7 +13,6 @@
  */
 
 import {
-  Cell,
   computed,
   type Default,
   handler,
@@ -838,8 +837,8 @@ const createSibling = handler<
 const Record = pattern<RecordInput, RecordOutput>(
   ({ title, subCharms, trashedSubCharms }) => {
     // Local state
-    const selectedAddType = Cell.of<string>("");
-    const trashExpanded = Cell.of(false);
+    const selectedAddType = Writable.of<string>("");
+    const trashExpanded = Writable.of(false);
 
     // Note editor modal state
     // NOTE: In the future, this should use a <ct-modal> component instead of inline implementation.
@@ -848,18 +847,18 @@ const Record = pattern<RecordInput, RecordOutput>(
     //     <content />
     //   </ct-modal>
     // With features: backdrop blur, escape key, focus trap, centered positioning, animations
-    // IMPORTANT: Don't use Cell.of(null) - it creates a cell pointing to null, not primitive null.
-    // Use Cell.of() without argument so .get() returns undefined (falsy) initially.
+    // IMPORTANT: Don't use Writable.of(null) - it creates a cell pointing to null, not primitive null.
+    // Use Writable.of() without argument so .get() returns undefined (falsy) initially.
     // We store the INDEX instead of the entry to decouple modal state from array updates.
-    const editingNoteIndex = Cell.of<number | undefined>();
-    const editingNoteText = Cell.of<string>();
+    const editingNoteIndex = Writable.of<number | undefined>();
+    const editingNoteText = Writable.of<string>();
 
     // Expanded (maximized) module state - ephemeral, not persisted
     // Simple index-based tracking - just stores which index is expanded
-    const expandedIndex = Cell.of<number | undefined>();
+    const expandedIndex = Writable.of<number | undefined>();
 
     // Settings modal state - tracks which module's settings are being edited
-    const settingsModuleIndex = Cell.of<number | undefined>();
+    const settingsModuleIndex = Writable.of<number | undefined>();
 
     // Create Record pattern JSON for wiki-links in Notes
     // Using computed() defers evaluation until render time, avoiding circular dependency
@@ -867,7 +866,7 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // ===== Auto-initialize Notes + TypePicker =====
     // Capture return value to force lift execution (fixes wiki-link creation)
-    const isInitialized = Cell.of(false);
+    const isInitialized = Writable.of(false);
     const _initialized = initializeRecord({
       currentCharms: subCharms,
       subCharms,

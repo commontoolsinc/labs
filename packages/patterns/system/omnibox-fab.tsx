@@ -82,9 +82,9 @@ export default pattern<OmniboxFABInput>(
       },
     });
 
-    const fabExpanded = Cell.of(false);
-    const showHistory = Cell.of(false);
-    const peekDismissedIndex = Cell.of(-1); // Track which message index was dismissed
+    const fabExpanded = Writable.of(false);
+    const showHistory = Writable.of(false);
+    const peekDismissedIndex = Writable.of(-1); // Track which message index was dismissed
 
     // Derive assistant message count for dismiss tracking
     const assistantMessageCount = computed(() => {

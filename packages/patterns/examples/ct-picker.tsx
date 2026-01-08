@@ -1,6 +1,6 @@
 /// <cts-enable />
 
-import { computed, NAME, recipe, UI } from "commontools";
+import { computed, NAME, recipe, UI, Writable } from "commontools";
 import Counter from "../counter.tsx";
 import Note from "../notes/note.tsx";
 
@@ -27,7 +27,7 @@ export default recipe<Input, Result>(
     });
     const counterC = Counter({ value: 30 });
 
-    const selectedIndex = Cell.of(0);
+    const selectedIndex = Writable.of(0);
     const items = [counterA, counterB, counterC];
     const selection = computed(() => items[selectedIndex.get()]);
 
