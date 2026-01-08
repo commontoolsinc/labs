@@ -128,13 +128,13 @@ Return a JSON object with a "recommendations" array. Each recommendation represe
 }
 
 === CONFIDENCE SCORING ===
-- 90-100 (HIGH): Explicit, unambiguous data. Clear labels like "Email:", "Phone:", exact formats.
-- 50-89 (MEDIUM): Likely correct but some inference needed. Unlabeled but recognizable patterns.
+- 80-100 (HIGH): Explicit, unambiguous data. Clear labels like "Email:", "Phone:", exact formats.
+- 50-79 (MEDIUM): Likely correct but some inference needed. Unlabeled but recognizable patterns.
 - 0-49 (LOW): Uncertain extraction. Context-dependent, ambiguous, or partial data.
 
 Examples:
 - "Email: john@example.com" → score: 95 (explicit label + valid format)
-- "john@example.com" (no label) → score: 75 (valid format but no label)
+- "john@example.com" (no label) → score: 70 (valid format but no label)
 - "reach me at john at example dot com" → score: 40 (requires interpretation)
 
 === FIELD PATTERNS ===
