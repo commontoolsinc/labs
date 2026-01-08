@@ -151,6 +151,125 @@ const deleteOccurrence = handler<
   }
 });
 
+
+// ===== LLM-Callable Handlers =====
+
+const handleRecordNow = handler<
+  { note?: string; result?: Cell<unknown> },
+  { occurrences: Cell<Occurrence[]>; label: string }
+>(({ note, result }, { occurrences, label }) => {
+  const timestamp = new Date().toISOString();
+
+  occurrences.push({
+    timestamp,
+    note: note?.trim() || "",
+  });
+
+  const totalCount = (occurrences.get() || []).length;
+
+  if (result) {
+    result.set({
+      success: true,
+      timestamp,
+      totalCount,
+      label: label || "Occurrences",
+      message: `Recorded occurrence${note ? ` with note: "${note}"` : ""}`,
+    });
+  }
+});
+
+const handleGetStats = handler<
+  { result?: Cell<unknown> },
+  { occurrences: Cell<Occurrence[]>; label: string }
+>(({ result }, { occurrences, label }) => {
+  const list = occurrences.get() || [];
+  const sorted = getSortedOccurrences(list);
+  const totalCount = list.length;
+  const lastOcc = sorted.length > 0 ? sorted[0] : null;
+  const avgMs = calculateAverageFrequency(sorted);
+
+  if (result) {
+    result.set({
+      label: label || "Occurrences",
+      totalCount,
+      lastOccurrence: lastOcc
+        ? {
+            timestamp: lastOcc.timestamp,
+            relativeTime: formatRelativeTime(lastOcc.timestamp),
+            note: lastOcc.note || null,
+          }
+        : null,
+      averageFrequency:
+        avgMs !== null
+          ? {
+              milliseconds: avgMs,
+              humanReadable: formatFrequency(avgMs),
+            }
+          : null,
+    });
+  }
+});
+
+const handleGetOccurrences = handler<
+  { limit?: number; result?: Cell<unknown> },
+  { occurrences: Cell<Occurrence[]>; label: string }
+>(({ limit, result }, { occurrences, label }) => {
+  const list = occurrences.get() || [];
+  const sorted = getSortedOccurrences(list);
+  const limitedList = limit && limit > 0 ? sorted.slice(0, limit) : sorted;
+
+  if (result) {
+    result.set({
+      label: label || "Occurrences",
+      totalCount: list.length,
+      returnedCount: limitedList.length,
+      occurrences: limitedList.map((occ, index) => ({
+        index,
+        timestamp: occ.timestamp,
+        relativeTime: formatRelativeTime(occ.timestamp),
+        absoluteTime: formatHistoryTime(occ.timestamp),
+        note: occ.note || null,
+      })),
+    });
+  }
+});
+
+const handleDeleteOccurrence = handler<
+  { timestamp: string; result?: Cell<unknown> },
+  { occurrences: Cell<Occurrence[]> }
+>(({ timestamp, result }, { occurrences }) => {
+  if (!timestamp) {
+    if (result) {
+      result.set({ success: false, error: "timestamp parameter is required" });
+    }
+    return;
+  }
+
+  const current = occurrences.get() || [];
+  const index = current.findIndex((o) => o.timestamp === timestamp);
+
+  if (index < 0) {
+    if (result) {
+      result.set({
+        success: false,
+        error: `No occurrence found with timestamp: ${timestamp}`,
+        remainingCount: current.length,
+      });
+    }
+    return;
+  }
+
+  occurrences.set(current.toSpliced(index, 1));
+
+  if (result) {
+    result.set({
+      success: true,
+      deletedTimestamp: timestamp,
+      remainingCount: current.length - 1,
+    });
+  }
+});
+
 // ===== The Pattern =====
 export const OccurrenceTrackerModule = recipe<
   OccurrenceTrackerInput,
@@ -371,6 +490,11 @@ export const OccurrenceTrackerModule = recipe<
     ),
     label,
     occurrences,
+    // LLM-callable handlers for Omnibot
+    recordNow: handleRecordNow({ occurrences, label }),
+    getStats: handleGetStats({ occurrences, label }),
+    getOccurrences: handleGetOccurrences({ occurrences, label }),
+    deleteOccurrence: handleDeleteOccurrence({ occurrences }),
   };
 });
 
