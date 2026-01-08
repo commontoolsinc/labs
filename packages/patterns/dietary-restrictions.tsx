@@ -1294,7 +1294,11 @@ const _addRestriction = handler<
   if (!name) return;
 
   // Normalize to handle both string[] and RestrictionEntry[] from storage
-  const current = (restrictions.get() || []).map(normalizeRestrictionItem);
+  // Filter out null items and empty names to match normalizedRestrictions computed
+  const current = (restrictions.get() || [])
+    .filter((item) => item != null)
+    .map(normalizeRestrictionItem)
+    .filter((entry) => entry.name && entry.name.trim() !== "");
   if (current.some((r) => r.name.toLowerCase() === name.toLowerCase())) {
     input.set("");
     return;
@@ -1312,7 +1316,11 @@ const removeRestriction = handler<
   { restrictions: Cell<RestrictionEntry[]>; index: number }
 >((_event, { restrictions, index }) => {
   // Normalize to handle both string[] and RestrictionEntry[] from storage
-  const current = (restrictions.get() || []).map(normalizeRestrictionItem);
+  // Filter out null items and empty names to match normalizedRestrictions computed
+  const current = (restrictions.get() || [])
+    .filter((item) => item != null)
+    .map(normalizeRestrictionItem)
+    .filter((entry) => entry.name && entry.name.trim() !== "");
   restrictions.set(current.toSpliced(index, 1));
 });
 
@@ -1329,7 +1337,11 @@ const cycleLevel = handler<
   { restrictions: Cell<RestrictionEntry[]>; index: number }
 >((_event, { restrictions, index }) => {
   // Normalize to handle both string[] and RestrictionEntry[] from storage
-  const current = (restrictions.get() || []).map(normalizeRestrictionItem);
+  // Filter out null items and empty names to match normalizedRestrictions computed
+  const current = (restrictions.get() || [])
+    .filter((item) => item != null)
+    .map(normalizeRestrictionItem)
+    .filter((entry) => entry.name && entry.name.trim() !== "");
   const entry = current[index];
   if (!entry) return;
 

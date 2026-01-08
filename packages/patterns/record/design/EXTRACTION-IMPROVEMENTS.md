@@ -370,10 +370,12 @@ interface ExtractionRecommendation {
 
 ## References
 
-- `/Users/alex/Code/community-patterns/community-docs/superstitions/2025-12-18-llm-extraction-schema-selection-not-combined.md`
-- `/Users/alex/Code/community-patterns/community-docs/superstitions/2025-11-29-llm-generateObject-returns-string-null.md`
-- `/Users/alex/Code/community-patterns/community-docs/folk_wisdom/llm.md`
-- `/Users/alex/Code/community-patterns/patterns/jkomoros/hotel-membership-gmail-agent.tsx`
+- `community-docs/superstitions/2025-12-18-llm-extraction-schema-selection-not-combined.md`
+  (community-patterns repo)
+- `community-docs/superstitions/2025-11-29-llm-generateObject-returns-string-null.md`
+  (community-patterns repo)
+- `community-docs/folk_wisdom/llm.md` (community-patterns repo)
+- `patterns/jkomoros/hotel-membership-gmail-agent.tsx` (community-patterns repo)
 
 ---
 
