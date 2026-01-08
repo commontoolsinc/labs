@@ -1917,9 +1917,12 @@ export const ExtractorModule = recipe<
           pending?: boolean;
           error?: unknown;
           result?: unknown;
-        };
+        } | undefined;
 
-        if (extraction.pending) {
+        // Defensive check - extraction might be undefined during initialization
+        if (!extraction) {
+          status = "pending";
+        } else if (extraction.pending) {
           status = "extracting";
         } else if (extraction.error) {
           status = "error";
