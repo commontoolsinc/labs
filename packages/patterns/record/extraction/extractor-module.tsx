@@ -29,7 +29,6 @@ import {
   Writable,
 } from "commontools";
 import {
-  buildExtractionSchema as buildFullSchema,
   createSubCharm,
   getDefinition,
   getFieldToTypeMapping as getFullFieldMapping,
@@ -37,7 +36,6 @@ import {
 } from "../registry.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "../types.ts";
 import type {
-  ConfidenceLevel,
   ExtractableSource,
   ExtractedField,
   ExtractionPreview,
@@ -206,7 +204,9 @@ If no text is visible, return an empty string.`;
  * Instead of a flat field extraction, the LLM returns an array of recommendations
  * with confidence scores and explanations.
  */
-const RECOMMENDATIONS_SCHEMA: JSONSchema = {
+// Use `as const` for schema literal to satisfy generateObject's type expectations.
+// Do NOT annotate with JSONSchema - that type is incompatible with generateObject's schema param.
+const RECOMMENDATIONS_SCHEMA = {
   type: "object",
   properties: {
     recommendations: {
@@ -222,11 +222,13 @@ const RECOMMENDATIONS_SCHEMA: JSONSchema = {
           },
           score: {
             type: "number",
-            description: "Confidence score 0-100. High: 90-100, Medium: 50-89, Low: 0-49",
+            description:
+              "Confidence score 0-100. High: 90-100, Medium: 50-89, Low: 0-49",
           },
           explanation: {
             type: "string",
-            description: "Brief explanation of why this was extracted and confidence level",
+            description:
+              "Brief explanation of why this was extracted and confidence level",
           },
           extractedData: {
             type: "object",
@@ -235,7 +237,8 @@ const RECOMMENDATIONS_SCHEMA: JSONSchema = {
           },
           sourceExcerpt: {
             type: "string",
-            description: "The text snippet from the source that led to this extraction",
+            description:
+              "The text snippet from the source that led to this extraction",
           },
         },
         required: ["type", "score", "explanation", "extractedData"],
@@ -243,7 +246,7 @@ const RECOMMENDATIONS_SCHEMA: JSONSchema = {
     },
   },
   required: ["recommendations"],
-};
+} as const;
 
 // NOTES_CLEANUP via extraction result:
 // =====================================
@@ -401,7 +404,8 @@ function mergeExtractionResults(
   const sorted = [...sourceExtractions]
     .filter((s) => s.status === "complete" && s.extractedFields !== null)
     .sort(
-      (a, b) => SOURCE_PRECEDENCE[a.sourceType] - SOURCE_PRECEDENCE[b.sourceType],
+      (a, b) =>
+        SOURCE_PRECEDENCE[a.sourceType] - SOURCE_PRECEDENCE[b.sourceType],
     );
 
   const merged: Record<string, unknown> = {};
@@ -990,7 +994,7 @@ const toggleFieldHandler = handler<
   unknown,
   {
     fieldKey: string;
-    selectionsCell: Cell<
+    selectionsCell: Writable<
       Default<Record<string, boolean>, Record<string, never>>
     >;
     defaultSelected: boolean;
@@ -1021,7 +1025,6 @@ const startExtraction = handler<
       Default<Record<number, boolean>, Record<number, never>>
     >;
     parentSubCharmsCell: Writable<SubCharmEntry[]>;
-    extractionPromptCell: Writable<Default<string, "">>;
     extractPhaseCell: Writable<
       Default<"select" | "extracting" | "preview", "select">
     >;
@@ -1072,25 +1075,9 @@ const startExtraction = handler<
           // Store snapshot for this Notes module (keyed by index as string to avoid Cell array coercion)
           notesSnapshots[String(source.index)] = content;
         }
-      } else if (source.type === "text-import") {
-        // Same pattern for text-import
-        const entry = (parentSubCharmsCell as Writable<SubCharmEntry[]>)
-          .key(source.index)
-          .get();
-        const charm = entry?.charm as Record<string, unknown>;
-        const liveContent = getCellValue<unknown>(charm?.content);
-        const content = typeof liveContent === "string" ? liveContent : "";
-
-        if (content.trim()) {
-          parts.push(`--- ${source.label} ---\n${content}`);
-        }
-      } else if (source.type === "photo") {
-        // Include OCR text for photos
-        const ocrText = ocrResultsMap[source.index];
-        if (ocrText && ocrText.trim()) {
-          parts.push(`--- ${source.label} (OCR) ---\n${ocrText}`);
-        }
       }
+      // Note: text-import and photo sources don't need special handling here
+      // Per-source extraction architecture builds prompts reactively for each source
     }
 
     if (hasSelectedSources) {
@@ -1583,7 +1570,11 @@ const applySelected = handler<
           }
         } else if (moduleType !== "notes") {
           // Module doesn't exist - use helper to create it with initial values
-          const newEntry = createModuleWithFields(moduleType, fields, subCharms);
+          const newEntry = createModuleWithFields(
+            moduleType,
+            fields,
+            subCharms,
+          );
           if (newEntry) {
             newEntries.push(newEntry);
             anySuccess = true;
@@ -1664,12 +1655,6 @@ export const ExtractorModule = recipe<
       errorDetailsExpanded,
     },
   ) => {
-    // Use FULL registry schema - enables extraction to create new modules
-    // This includes all available module types, not just existing ones
-    const extractSchema = computed(() => {
-      return buildFullSchema() as JSONSchema;
-    });
-
     // ===== TRANSFORMER BUG WORKAROUND =====
     // The TypeScript transformer has a bug where .map()/.filter()/.some() called on
     // a computed variable aren't properly transformed to their reactive equivalents.
@@ -1801,8 +1786,8 @@ export const ExtractorModule = recipe<
       const calls = ocrCalls;
       if (!calls || calls.length === 0) return false;
       return calls.some(
-        (call: { index: number; ocr: { pending: boolean } }) =>
-          call.ocr.pending,
+        (call: { index: number; ocr?: { pending?: boolean } }) =>
+          call.ocr?.pending,
       );
     });
 
@@ -1814,11 +1799,32 @@ export const ExtractorModule = recipe<
       if (!calls || calls.length === 0) return results;
 
       for (const call of calls) {
-        if (call.ocr.result) {
+        if (call.ocr?.result) {
           results[call.index] = call.ocr.result as string;
         }
       }
       return results;
+    });
+
+    // Get OCR errors as a map (index -> error message)
+    const ocrErrors = computed((): Record<number, string> => {
+      const calls = ocrCalls;
+      const errors: Record<number, string> = {};
+      if (!calls || calls.length === 0) return errors;
+
+      for (const call of calls) {
+        const error = call.ocr?.error as { message?: string } | undefined;
+        if (error) {
+          errors[call.index] = String(error.message || error);
+        }
+      }
+      return errors;
+    });
+
+    // Check if any OCR failed
+    const hasOcrErrors = computed(() => {
+      const errors = ocrErrors;
+      return Object.keys(errors).length > 0;
     });
 
     // ===== PER-SOURCE EXTRACTION ARCHITECTURE =====
@@ -1838,56 +1844,85 @@ export const ExtractorModule = recipe<
       return sources.filter((s: ExtractableSource) => s.selected && !s.isEmpty);
     });
 
-    // Build per-source extraction calls using .map() pattern (like OCR calls)
-    // Each source gets its own generateObject() call with source-specific prompt
-    const perSourceExtractions = selectedSourcesForExtraction.map(
-      (source: ExtractableSource) => {
-        // Build prompt for this source
-        const prompt = computed((): string | undefined => {
-          const phase = extractPhase.get() || "select";
-          if (phase !== "extracting") return undefined;
+    // ===== SINGLE COMBINED EXTRACTION =====
+    // Build a single combined prompt from all sources to avoid the complexity
+    // of per-source extraction with .map() which can cause reactive issues.
+    // This is simpler and avoids the problem of creating computed() nodes
+    // inside .map() callbacks.
+    const combinedExtractionPrompt = computed((): string | undefined => {
+      const phase = extractPhase.get() || "select";
+      if (phase !== "extracting") return undefined;
 
-          if (source.type === "photo") {
-            // For photos, use OCR result
-            const ocrMap = ocrResults;
-            const ocrText = ocrMap[source.index];
-            if (!ocrText || !ocrText.trim()) return undefined;
-            return `--- ${source.label} (OCR) ---\n${ocrText}`;
-          } else {
-            // For notes/text-import, read live content via Cell navigation
-            const entry = (parentSubCharms as Cell<SubCharmEntry[]>)
-              .key(source.index)
-              .get();
-            const charm = entry?.charm as Record<string, unknown>;
-            const liveContent = getCellValue<unknown>(charm?.content);
-            const content = typeof liveContent === "string" ? liveContent : "";
+      const sources = selectedSourcesForExtraction;
+      const ocrMap = ocrResults;
+      const promptParts: string[] = [];
 
-            if (!content.trim()) return undefined;
-            return `--- ${source.label} ---\n${content}`;
+      for (const source of sources) {
+        if (source.type === "photo") {
+          // For photos, use OCR result
+          const ocrText = ocrMap[source.index];
+          if (ocrText && ocrText.trim()) {
+            promptParts.push(`--- ${source.label} (OCR) ---\n${ocrText}`);
           }
-        });
+        } else {
+          // Use content from source object directly
+          const content = source.content || "";
+          if (content.trim()) {
+            promptParts.push(`--- ${source.label} ---\n${content}`);
+          }
+        }
+      }
 
-        // Create extraction call for this source using recommendations schema
-        // Wrap schema in computed() to satisfy OpaqueCell type requirement
-        const recommendationsSchemaCell = computed(() => RECOMMENDATIONS_SCHEMA);
-        const extraction = generateObject({
-          system: EXTRACTION_SYSTEM_PROMPT,
-          prompt,
-          schema: recommendationsSchemaCell,
-          model: "anthropic:claude-haiku-4-5",
-        });
+      if (promptParts.length === 0) return undefined;
+      return promptParts.join("\n\n");
+    });
 
-        return {
+    // Single extraction call for all sources combined
+    const singleExtraction = generateObject({
+      system: EXTRACTION_SYSTEM_PROMPT,
+      prompt: combinedExtractionPrompt,
+      schema: RECOMMENDATIONS_SCHEMA,
+      model: "anthropic:claude-haiku-4-5",
+    });
+
+    // Build a synthetic perSourceExtractions array for compatibility with existing code
+    // This wraps the single extraction result as if it came from multiple sources
+    // NOTE: Use for loop instead of .map() to avoid transformer issues inside computed()
+    const perSourceExtractions = computed(() => {
+      const sources = selectedSourcesForExtraction;
+      if (!sources || sources.length === 0) return [];
+
+      // All sources share the same extraction result
+      const result: Array<{
+        sourceIndex: number;
+        sourceType: "notes" | "text-import" | "photo";
+        sourceLabel: string;
+        extraction: typeof singleExtraction;
+      }> = [];
+
+      for (const source of sources) {
+        result.push({
           sourceIndex: source.index,
           sourceType: source.type,
           sourceLabel: source.label,
-          extraction,
-        };
-      },
-    );
+          extraction: singleExtraction,
+        });
+      }
+
+      return result;
+    });
+
+    // ===== EXTRACTION STATE TRACKING =====
+    // Access reactive properties directly inside computed() to establish proper subscriptions.
+    // This follows the same pattern as ocrPending and ocrResults which access call.ocr?.pending
+    // and call.ocr?.result directly inside computed().
+    //
+    // IMPORTANT: Do NOT use intermediate .map() arrays outside computed() - they create
+    // non-reactive plain arrays that don't update when the underlying reactive properties change.
 
     // Build SourceExtraction array with status from per-source calls
     // Also collect field metadata (confidence, explanation) for preview
+    // Access extraction.pending, extraction.result, extraction.error directly to establish subscriptions
     const sourceExtractionsWithMetadata = computed((): {
       extractions: SourceExtraction[];
       allFieldMetadata: Record<
@@ -1896,41 +1931,50 @@ export const ExtractorModule = recipe<
       >;
     } => {
       const calls = perSourceExtractions;
+
       if (!calls || calls.length === 0) {
         return { extractions: [], allFieldMetadata: {} };
       }
 
-      const results: SourceExtraction[] = [];
+      const extractionList: SourceExtraction[] = [];
       const allFieldMetadata: Record<
         string,
         { confidence: number; explanation: string; sourceExcerpt?: string }
       > = {};
 
-      for (const call of calls) {
+      for (let i = 0; i < calls.length; i++) {
+        const call = calls[i];
         let status: SourceExtractionStatus = "pending";
         let extractedFields: Record<string, unknown> | null = null;
         let error: string | undefined;
         let fieldCount = 0;
 
-        // Access extraction state - properties auto-dereference in computed()
-        const extraction = call.extraction as {
-          pending?: boolean;
-          error?: unknown;
-          result?: unknown;
-        } | undefined;
+        // Access extraction state directly from the call object (reactive)
+        // This establishes proper reactive subscriptions, just like ocrPending/ocrResults do
+        const isPending = call.extraction?.pending;
+        const extractionResult = call.extraction?.result;
+        const extractionError = call.extraction?.error;
 
-        // Defensive check - extraction might be undefined during initialization
-        if (!extraction) {
+        // Determine status based on extraction state
+        if (isPending === undefined && !extractionResult && !extractionError) {
+          // Extraction not initialized yet
           status = "pending";
-        } else if (extraction.pending) {
+        } else if (isPending) {
           status = "extracting";
-        } else if (extraction.error) {
+        } else if (extractionError) {
           status = "error";
-          const errorObj = extraction.error as { message?: string };
-          error = String(errorObj.message || extraction.error);
-        } else if (extraction.result) {
+          const errorObj = extractionError as { message?: string };
+          error = String(errorObj.message || extractionError);
+        } else if (
+          !isPending && !extractionResult && !extractionError
+        ) {
+          // No pending, no result, no error = extraction hasn't started (prompt undefined)
+          // This happens when waiting for OCR or content is empty
+          // Mark as pending so UI shows loading state
+          status = "pending";
+        } else if (extractionResult) {
           status = "complete";
-          const result = extraction.result;
+          const result = extractionResult;
 
           // Check if result is in recommendations format
           if (isRecommendationsResult(result)) {
@@ -1957,7 +2001,7 @@ export const ExtractorModule = recipe<
           ).length;
         }
 
-        results.push({
+        extractionList.push({
           sourceIndex: call.sourceIndex as number,
           sourceType: call.sourceType as "notes" | "text-import" | "photo",
           sourceLabel: call.sourceLabel as string,
@@ -1968,7 +2012,7 @@ export const ExtractorModule = recipe<
         });
       }
 
-      return { extractions: results, allFieldMetadata };
+      return { extractions: extractionList, allFieldMetadata };
     });
 
     // Accessor for just the extractions array
@@ -1994,43 +2038,24 @@ export const ExtractorModule = recipe<
       );
     });
 
-    const allSourcesComplete = computed((): boolean => {
-      const extractions = sourceExtractions;
-      if (!extractions || extractions.length === 0) return false;
-      return extractions.every(
-        (e: SourceExtraction) =>
-          e.status === "complete" || e.status === "error" ||
-          e.status === "skipped",
-      );
-    });
-
-    const sourceStatusMap = computed((): Record<number, SourceExtractionStatus> => {
-      const extractions = sourceExtractions;
-      const map: Record<number, SourceExtractionStatus> = {};
-      if (!extractions) return map;
-
-      for (const ext of extractions) {
-        map[ext.sourceIndex] = ext.status;
-      }
-      return map;
-    });
-
     // Merge all per-source extraction results using precedence
-    const mergedExtractionResult = computed((): Record<string, unknown> | null => {
-      const extractions = sourceExtractions;
-      if (!extractions || extractions.length === 0) return null;
+    const mergedExtractionResult = computed(
+      (): Record<string, unknown> | null => {
+        const extractions = sourceExtractions;
+        if (!extractions || extractions.length === 0) return null;
 
-      // Wait until all sources are complete
-      const allComplete = extractions.every(
-        (e: SourceExtraction) =>
-          e.status === "complete" || e.status === "error" ||
-          e.status === "skipped",
-      );
-      if (!allComplete) return null;
+        // Wait until all sources are complete
+        const allComplete = extractions.every(
+          (e: SourceExtraction) =>
+            e.status === "complete" || e.status === "error" ||
+            e.status === "skipped",
+        );
+        if (!allComplete) return null;
 
-      // Merge using precedence rules
-      return mergeExtractionResults(extractions);
-    });
+        // Merge using precedence rules
+        return mergeExtractionResults(extractions);
+      },
+    );
 
     // Check if any per-source extraction has an error
     const anyExtractionError = computed((): boolean => {
@@ -2049,15 +2074,7 @@ export const ExtractorModule = recipe<
       return errorSource?.error || null;
     });
 
-    // Legacy compatibility: create extraction-like object from merged results
-    // This maintains compatibility with existing preview/apply code
-    const extraction = {
-      pending: anySourcePending,
-      error: computed(() => anyExtractionError ? firstExtractionError : null),
-      result: mergedExtractionResult,
-    };
-
-    // Computed to dereference extraction.result for passing to handlers
+    // Computed to dereference extraction result for passing to handlers
     // extraction.result is a reactive property that doesn't auto-dereference when passed directly
     // This ensures the handler receives the actual value, not a reactive proxy
     const extractionResultValue = computed(
@@ -2120,44 +2137,6 @@ export const ExtractorModule = recipe<
         return "extracting";
       }
       return phase;
-    });
-
-    // Format extracted fields as text for preview display
-    const previewText = computed(() => {
-      if (!mergedExtractionResult) return "No fields extracted";
-      const subCharms = parentSubCharms.get() || [];
-      const currentTitle = parentTitle.get() || "";
-      const metadata = extractionFieldMetadata;
-      const previewData = buildPreview(
-        mergedExtractionResult,
-        subCharms,
-        currentTitle,
-        metadata,
-      );
-      if (!previewData?.fields?.length) return "No fields extracted";
-      return previewData.fields.map((f: ExtractedField) => {
-        const current = formatValue(f.currentValue);
-        const extracted = formatValue(f.extractedValue);
-        // Show "Record Title" for record-title pseudo-type instead of module name
-        const displayModule = f.targetModule === "record-title"
-          ? "Record Title"
-          : f.targetModule;
-        // Add validation indicator if there's an issue
-        const validationIndicator = f.validationIssue
-          ? f.validationIssue.severity === "error"
-            ? " [ERROR]"
-            : " [WARNING]"
-          : "";
-        // Add confidence indicator if available
-        const confidenceIndicator = f.confidenceLevel
-          ? f.confidenceLevel === "high"
-            ? " [HIGH]"
-            : f.confidenceLevel === "medium"
-              ? " [MED]"
-              : " [LOW]"
-          : "";
-        return `${displayModule}.${f.fieldName}: ${current} -> ${extracted}${validationIndicator}${confidenceIndicator}`;
-      }).join("\n");
     });
 
     // Validation summary computed values
@@ -2314,7 +2293,9 @@ export const ExtractorModule = recipe<
     });
 
     // Check if error details are expanded
-    const showErrorDetails = computed(() => errorDetailsExpanded.get() === true);
+    const showErrorDetails = computed(() =>
+      errorDetailsExpanded.get() === true
+    );
 
     // True when there are no source modules at all (Notes, Photo, Text Import)
     // Uses centralized sourceData to avoid redundant scanExtractableSources() calls
@@ -2642,6 +2623,31 @@ export const ExtractorModule = recipe<
                     null,
                   )}
 
+                  {/* OCR error indicator */}
+                  {ifElse(
+                    hasOcrErrors,
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        padding: "8px",
+                        background: "#fef2f2",
+                        borderRadius: "6px",
+                        fontSize: "13px",
+                        color: "#dc2626",
+                        border: "1px solid #fecaca",
+                      }}
+                    >
+                      <span style={{ fontSize: "16px" }}>⚠️</span>
+                      <span>
+                        OCR failed for some photos. Extraction will continue
+                        with available text.
+                      </span>
+                    </div>,
+                    null,
+                  )}
+
                   {/* Extract button */}
                   <div
                     style={{
@@ -2858,31 +2864,31 @@ export const ExtractorModule = recipe<
                   const confidenceBg = f.confidenceLevel === "high"
                     ? "#dcfce7"
                     : f.confidenceLevel === "medium"
-                      ? "#fef9c3"
-                      : f.confidenceLevel === "low"
-                        ? "#fee2e2"
-                        : "transparent";
+                    ? "#fef9c3"
+                    : f.confidenceLevel === "low"
+                    ? "#fee2e2"
+                    : "transparent";
                   const confidenceColor = f.confidenceLevel === "high"
                     ? "#166534"
                     : f.confidenceLevel === "medium"
-                      ? "#854d0e"
-                      : f.confidenceLevel === "low"
-                        ? "#991b1b"
-                        : "#9ca3af";
+                    ? "#854d0e"
+                    : f.confidenceLevel === "low"
+                    ? "#991b1b"
+                    : "#9ca3af";
                   const confidenceIcon = f.confidenceLevel === "high"
                     ? "\u2713"
                     : f.confidenceLevel === "medium"
-                      ? "\u25CF"
-                      : f.confidenceLevel === "low"
-                        ? "\u26A0"
-                        : "";
+                    ? "\u25CF"
+                    : f.confidenceLevel === "low"
+                    ? "\u26A0"
+                    : "";
                   const confidenceLabel = f.confidenceLevel === "high"
                     ? "High"
                     : f.confidenceLevel === "medium"
-                      ? "Med"
-                      : f.confidenceLevel === "low"
-                        ? "Low"
-                        : "";
+                    ? "Med"
+                    : f.confidenceLevel === "low"
+                    ? "Low"
+                    : "";
                   const hasConfidence = f.confidenceLevel !== undefined;
 
                   return (
@@ -2952,10 +2958,9 @@ export const ExtractorModule = recipe<
                                   f.validationIssue?.severity === "error"
                                     ? "#fee2e2"
                                     : "#fef3c7",
-                                color:
-                                  f.validationIssue?.severity === "error"
-                                    ? "#991b1b"
-                                    : "#92400e",
+                                color: f.validationIssue?.severity === "error"
+                                  ? "#991b1b"
+                                  : "#92400e",
                               }}
                             >
                               {f.validationIssue?.message}

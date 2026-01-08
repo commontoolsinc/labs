@@ -7,7 +7,6 @@
  * use as extraction sources.
  */
 import {
-  Cell,
   type Default,
   handler,
   ifElse,
@@ -16,6 +15,7 @@ import {
   recipe,
   str,
   UI,
+  Writable,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
@@ -89,7 +89,7 @@ interface FileUploadEvent {
 // Handler for file upload
 const handleFileUpload = handler<
   FileUploadEvent,
-  { content: Cell<string>; filename: Cell<string> }
+  { content: Writable<string>; filename: Writable<string> }
 >(({ detail }, state) => {
   const file = detail?.files?.[0];
   if (!file) return;
@@ -104,7 +104,7 @@ const handleFileUpload = handler<
 // Handler to clear the file
 const clearFile = handler<
   unknown,
-  { content: Cell<string>; filename: Cell<string> }
+  { content: Writable<string>; filename: Writable<string> }
 >((_event, state) => {
   state.content.set("");
   state.filename.set("");

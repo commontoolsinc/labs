@@ -10,13 +10,13 @@ best practices.
 
 ## Summary
 
-| Improvement              | Complexity | Impact | Priority | Status      |
-| ------------------------ | ---------- | ------ | -------- | ----------- |
-| Prompt Improvements      | S          | High   | 1        | ✅ Done     |
-| Validation Improvements  | M          | High   | 2        | ✅ Done     |
-| Confidence Scoring       | M          | High   | 3        | ✅ Done     |
-| Per-Source Extraction    | M          | Medium | 4        | ✅ Done     |
-| Schema Selection Pattern | M          | Medium | 5        | ✅ Done     |
+| Improvement              | Complexity | Impact | Priority | Status     |
+| ------------------------ | ---------- | ------ | -------- | ---------- |
+| Prompt Improvements      | S          | High   | 1        | ✅ Done    |
+| Validation Improvements  | M          | High   | 2        | ✅ Done    |
+| Confidence Scoring       | M          | High   | 3        | ✅ Done    |
+| Per-Source Extraction    | M          | Medium | 4        | ⚠️ Revised |
+| Schema Selection Pattern | M          | Medium | 5        | ✅ Done    |
 
 ---
 
@@ -204,67 +204,94 @@ Instead of `{ email: { type: "string" } }`, use:
 ## 4. Per-Source Extraction
 
 **Complexity:** Medium (6-7 hours) **Impact:** Medium - performance and caching
+**Status:** Revised - using combined extraction instead
 
-### Problem
+### Original Problem
 
 Current approach combines all sources into single LLM call. Changing one source
 re-extracts everything. No per-source caching.
 
-### Solution
+### Attempted Solution
 
 Use "dumb map approach" from folk wisdom - one `generateObject()` per source:
 
 ```typescript
-// Current: Single combined call
-const extraction = generateObject({
-  prompt: combinedContent, // All sources concatenated
-  schema,
-  model,
-});
-
-// Proposed: Per-source calls
+// Attempted: Per-source calls with .map()
 const sourceExtractions = selectedSources.map((source) => ({
   sourceIndex: source.index,
   sourceType: source.type,
   extraction: generateObject({
-    prompt: source.content, // Each source independently
+    prompt: computed(() => source.content), // Per-source prompt
     schema,
     model,
   }),
 }));
-
-// Merge results with precedence
-const mergedExtraction = computed(() =>
-  mergeExtractionResults(sourceExtractions)
-);
 ```
 
-#### Benefits
+### Why It Didn't Work
 
-- Changing one source only re-extracts that source
-- Framework caches per-source extractions
-- Incremental progress UI (see each source complete)
-- Easier debugging (which source had issues?)
+Creating `computed()` inside `.map()` callbacks caused infinite reactive loops.
+The issue was specific to this case because:
 
-#### Merge Precedence
+1. `selectedSourcesForExtraction` depends on `extractPhase` (volatile state)
+2. When `generateObject()` completes, state changes propagate back
+3. This triggers re-evaluation of the `.map()`, creating new computed nodes
+4. New nodes invalidate subscriptions, causing another evaluation loop
 
-photos > text-import > notes (later sources override earlier for same field)
+**Note:** OCR in the same file successfully uses `.map()` + `computed()` because
+`photoSources` is stable (photos don't change during extraction flow).
 
-#### UI Additions
+See:
+`community-docs/superstitions/2026-01-08-computed-inside-map-callback-infinite-loop.md`
 
-Per-source status display:
+### Current Implementation: Combined Extraction
 
+Instead of per-source extraction, we use a single combined prompt:
+
+```typescript
+// Build single prompt from all sources
+const combinedExtractionPrompt = computed(() => {
+  const promptParts: string[] = [];
+  for (const source of selectedSources) {
+    if (source.type === "photo") {
+      promptParts.push(
+        `--- ${source.label} (OCR) ---\n${ocrResults[source.index]}`,
+      );
+    } else {
+      promptParts.push(`--- ${source.label} ---\n${source.content}`);
+    }
+  }
+  return promptParts.join("\n\n");
+});
+
+// Single extraction call
+const singleExtraction = generateObject({
+  prompt: combinedExtractionPrompt,
+  schema: RECOMMENDATIONS_SCHEMA,
+  model: "anthropic:claude-haiku-4-5",
+});
 ```
-📝 Notes         ✓ 3 fields
-📄 Text Import   ⏳ extracting...
-📷 Photo (OCR)   ✓ 2 fields
-```
 
-### Files to Modify
+### Trade-offs
 
-- `extraction/types.ts` - Add SourceExtraction interface
-- `extraction/extractor-module.tsx` - Replace single call with map, add merge
-  logic, add per-source UI
+**Lost benefits:**
+
+- No per-source caching (changing one source re-extracts all)
+- No incremental progress (can't see each source complete)
+
+**Gained benefits:**
+
+- Works reliably (no infinite loops)
+- Simpler code
+- Single LLM call is often faster than multiple small calls
+- LLM can cross-reference data between sources in combined context
+
+### Files Modified
+
+- `extraction/types.ts` - Added SourceExtraction interface (still used for
+  status)
+- `extraction/extractor-module.tsx` - Uses combined extraction with synthetic
+  per-source array for UI compatibility
 
 ---
 
@@ -381,6 +408,8 @@ interface ExtractionRecommendation {
 
 ## Changelog
 
+- 2026-01-08: Per-source extraction revised - changed to combined extraction due
+  to infinite loop issues with `.map()` + `computed()`. Documented trade-offs.
 - 2026-01-08: All improvements completed - per-source extraction and schema
   selection pattern with confidence scoring implemented
 - 2026-01-08: v2 improvements completed (prompts, validation, error messages,
