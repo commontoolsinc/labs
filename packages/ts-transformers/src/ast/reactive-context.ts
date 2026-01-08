@@ -167,6 +167,7 @@ function isStandaloneFunctionDefinition(
  * - computed, action, derive, lift, handler callbacks
  * - inline JSX event handlers
  * - standalone function definitions (we can't know where they're called from)
+ * - JSX expressions (handled by OpaqueRefJSXTransformer)
  */
 export function isInsideSafeWrapper(
   node: ts.Node,
@@ -175,6 +176,12 @@ export function isInsideSafeWrapper(
   let current: ts.Node | undefined = node.parent;
 
   while (current) {
+    // Check for JSX expressions - these are handled by OpaqueRefJSXTransformer
+    // which rewrites opaque access to use derive()
+    if (ts.isJsxExpression(current)) {
+      return true;
+    }
+
     // Check for function declarations (always standalone)
     if (ts.isFunctionDeclaration(current)) {
       if (isStandaloneFunctionDefinition(current)) {

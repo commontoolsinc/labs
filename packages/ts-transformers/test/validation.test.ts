@@ -177,6 +177,49 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
       );
     },
   );
+
+  await t.step(
+    "allows optional chaining inside JSX expressions",
+    async () => {
+      const source = `/// <cts-enable />
+      import { recipe, h } from "commontools";
+
+      interface Item { name?: string; nested?: { value: number } }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        return <div>{item?.name} - {item?.nested?.value}</div>;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Optional chaining inside JSX should be allowed (OpaqueRefJSXTransformer handles it)",
+      );
+    },
+  );
+
+  await t.step("allows .get() calls inside JSX expressions", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, Cell, h } from "commontools";
+
+      export default recipe<{ count: Cell<number> }>("test", ({ count }) => {
+        return <div>Count: {count.get()}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      ".get() inside JSX should be allowed (OpaqueRefJSXTransformer handles it)",
+    );
+  });
 });
 
 Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
