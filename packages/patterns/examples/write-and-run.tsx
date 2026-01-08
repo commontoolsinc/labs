@@ -48,7 +48,7 @@ const SYSTEM_PROMPT =
 
 IMPORTANT RULES:
 1. Start with: /// <cts-enable />
-2. Import from "commontools": Cell, Default, computed, handler, NAME, pattern, UI, ifElse
+2. Import from "commontools": Writable, Default, computed, handler, NAME, pattern, UI, ifElse
 3. Use the pattern<Input>() or pattern<Input, Output>() API
 4. For arrays that need mutation, use Writable<T[]> in the interface
 5. Use $checked, $value for bidirectional binding on ct-checkbox, ct-input
