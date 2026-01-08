@@ -106,18 +106,18 @@ function formatFrequency(avgMs: number | null): string {
 
 function getSortedOccurrences(list: readonly Occurrence[]): Occurrence[] {
   return [...list].sort(
-    (a, b) =>
-      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
   );
 }
 
-function calculateAverageFrequency(sorted: readonly Occurrence[]): number | null {
+function calculateAverageFrequency(
+  sorted: readonly Occurrence[],
+): number | null {
   if (sorted.length < 2) return null;
 
   let totalMs = 0;
   for (let i = 0; i < sorted.length - 1; i++) {
-    totalMs +=
-      new Date(sorted[i].timestamp).getTime() -
+    totalMs += new Date(sorted[i].timestamp).getTime() -
       new Date(sorted[i + 1].timestamp).getTime();
   }
   return totalMs / (sorted.length - 1);
@@ -156,7 +156,6 @@ const deleteOccurrence = handler<
     occurrences.set(current.toSpliced(index, 1));
   }
 });
-
 
 // ===== LLM-Callable Handlers =====
 
@@ -200,18 +199,17 @@ const handleGetStats = handler<
       totalCount,
       lastOccurrence: lastOcc
         ? {
-            timestamp: lastOcc.timestamp,
-            relativeTime: formatRelativeTime(lastOcc.timestamp),
-            note: lastOcc.note || null,
-          }
+          timestamp: lastOcc.timestamp,
+          relativeTime: formatRelativeTime(lastOcc.timestamp),
+          note: lastOcc.note || null,
+        }
         : null,
-      averageFrequency:
-        avgMs !== null
-          ? {
-              milliseconds: avgMs,
-              humanReadable: formatFrequency(avgMs),
-            }
-          : null,
+      averageFrequency: avgMs !== null
+        ? {
+          milliseconds: avgMs,
+          humanReadable: formatFrequency(avgMs),
+        }
+        : null,
     });
   }
 });
@@ -440,15 +438,24 @@ export const OccurrenceTrackerModule = recipe<
         {ifElse(
           hasOccurrences,
           <details style={{ marginTop: "0.5rem" }}>
-            <summary style={{
-              cursor: "pointer",
-              fontSize: "0.875rem",
-              color: "var(--ct-color-gray-600)",
-              padding: "0.5rem 0",
-            }}>
+            <summary
+              style={{
+                cursor: "pointer",
+                fontSize: "0.875rem",
+                color: "var(--ct-color-gray-600)",
+                padding: "0.5rem 0",
+              }}
+            >
               History ({totalCount})
             </summary>
-            <ct-vstack gap="1" style={{ marginTop: "0.5rem", maxHeight: "400px", overflowY: "auto" }}>
+            <ct-vstack
+              gap="1"
+              style={{
+                marginTop: "0.5rem",
+                maxHeight: "400px",
+                overflowY: "auto",
+              }}
+            >
               {occurrences.map((occ) => (
                 <ct-hstack
                   gap="2"
@@ -461,7 +468,9 @@ export const OccurrenceTrackerModule = recipe<
                 >
                   <ct-vstack gap="0" style={{ flex: "1" }}>
                     <span style={{ fontSize: "0.875rem" }}>
-                      {lift((ts: string) => `${formatRelativeTime(ts)} · ${formatHistoryTime(ts)}`)(occ.timestamp)}
+                      {lift((ts: string) =>
+                        `${formatRelativeTime(ts)} · ${formatHistoryTime(ts)}`
+                      )(occ.timestamp)}
                     </span>
                     <ct-input
                       $value={occ.note}
@@ -475,7 +484,10 @@ export const OccurrenceTrackerModule = recipe<
                   </ct-vstack>
                   <ct-button
                     variant="ghost"
-                    onClick={deleteOccurrence({ occurrences, timestamp: occ.timestamp })}
+                    onClick={deleteOccurrence({
+                      occurrences,
+                      timestamp: occ.timestamp,
+                    })}
                     style={{
                       padding: "0.25rem 0.5rem",
                       fontSize: "1rem",
