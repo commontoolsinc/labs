@@ -100,10 +100,6 @@ export abstract class Transformer {
 
       const transformed = this.transform(context);
 
-      // Diagnostics are collected in the shared diagnosticsCollector (if provided)
-      // and can be accessed via pipeline.getDiagnostics() after transformation.
-      // We no longer throw here - consumers decide how to handle diagnostics.
-
       return transformed;
     };
   }

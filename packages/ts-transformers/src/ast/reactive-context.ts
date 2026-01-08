@@ -40,10 +40,13 @@ export const RESTRICTED_CONTEXT_BUILDERS = new Set([
 
 /**
  * Builder names that are "safe wrappers" where reading opaques IS allowed.
+ * Note: derive is handled separately via callKind.kind === "derive" since it
+ * has its own call kind, but is also a safe wrapper.
  */
 export const SAFE_WRAPPER_BUILDERS = new Set([
   "computed",
   "action",
+  "derive",
   "lift",
   "handler",
 ]);
