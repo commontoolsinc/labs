@@ -1814,7 +1814,9 @@ export function validateAndCheckOpaqueRefs(
 
   // Check for Map and Set before other object checks
   if (obj instanceof Map) {
-    throw new Error(formatError("Map", "Consider using a plain object instead."));
+    throw new Error(
+      formatError("Map", "Consider using a plain object instead."),
+    );
   }
 
   if (obj instanceof Set) {

@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { validateAndCheckOpaqueRefs } from "../src/runner.ts";
+import { isOpaqueRefMarker } from "../src/builder/types.ts";
 
 describe("validateAndCheckOpaqueRefs", () => {
   describe("valid values", () => {
@@ -167,9 +168,23 @@ describe("validateAndCheckOpaqueRefs", () => {
   });
 
   describe("opaque ref detection", () => {
-    it("returns true when result contains opaque ref", () => {
-      // We can't easily create an opaque ref in tests without more setup,
-      // so this test is a placeholder for integration testing
+    it("returns true for opaque ref at top level", () => {
+      const opaqueRef = { [isOpaqueRefMarker]: true };
+      expect(validateAndCheckOpaqueRefs(opaqueRef)).toBe(true);
+    });
+
+    it("returns true when opaque ref is nested in object", () => {
+      const opaqueRef = { [isOpaqueRefMarker]: true };
+      expect(validateAndCheckOpaqueRefs({ data: opaqueRef })).toBe(true);
+    });
+
+    it("returns true when opaque ref is in array", () => {
+      const opaqueRef = { [isOpaqueRefMarker]: true };
+      expect(validateAndCheckOpaqueRefs([1, opaqueRef, 3])).toBe(true);
+    });
+
+    it("returns false when no opaque refs present", () => {
+      expect(validateAndCheckOpaqueRefs({ a: 1, b: "hello" })).toBe(false);
     });
   });
 });
