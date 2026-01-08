@@ -63,8 +63,11 @@ function decodeBase64ToText(dataUrl: string): string {
   const base64Data = dataUrl.slice(commaIndex + 1);
 
   try {
-    // Decode base64 to text
-    return atob(base64Data);
+    // Decode base64 to binary string, then convert to UTF-8
+    // Using TextDecoder properly handles multi-byte UTF-8 sequences
+    const binaryString = atob(base64Data);
+    const bytes = Uint8Array.from(binaryString, (c) => c.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
   } catch {
     // If decoding fails, return the raw data
     return base64Data;

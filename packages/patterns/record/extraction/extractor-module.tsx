@@ -1582,11 +1582,15 @@ const applySelected = handler<
         }
       }
 
-      // Only proceed with trashing if at least one update succeeded OR cleanup is pending
+      // Only proceed with trashing if at least one update succeeded OR cleanup will change content
       // Notes cleanup counts as a "success" because the extraction worked - we have cleaned content to apply
+      const combinedSnapshot = Object.values(notesSnapshotMapValue || {}).join(
+        "\n\n---\n\n",
+      );
       const cleanupWillApply = cleanupEnabledValue &&
         cleanedNotesValue !== undefined &&
-        Object.keys(notesSnapshotMapValue || {}).length > 0;
+        Object.keys(notesSnapshotMapValue || {}).length > 0 &&
+        cleanedNotesValue !== combinedSnapshot;
 
       if (!anySuccess && !cleanupWillApply) {
         console.warn(
