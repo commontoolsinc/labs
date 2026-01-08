@@ -8,9 +8,11 @@ const COMMONTOOLS_TYPES = {
       export interface Cell<T> {
         get(): T;
         set(value: T): void;
+        map<U>(fn: (value: T) => U): Cell<U>;
       }
       export interface OpaqueRef<T> {
         readonly __opaque: T;
+        map<U>(fn: (value: T) => U): OpaqueRef<U>;
       }
       export interface OpaqueCell<T> extends Cell<T> {
         readonly __opaque: T;
@@ -22,6 +24,8 @@ const COMMONTOOLS_TYPES = {
       export function action<T>(fn: () => T): any;
       export function computed<T>(fn: () => T): T;
       export function derive<T, U>(cell: Cell<T>, fn: (value: T) => U): U;
+      export function lift<T>(fn: () => T): T;
+      export function h(tag: string, props?: any, ...children: any[]): any;
     }
   `,
 };
@@ -126,12 +130,12 @@ Deno.test("Cast Validation", async (t) => {
   });
 });
 
-Deno.test("Pattern Context Validation", async (t) => {
+Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
   await t.step(
     "allows property access in JSX (transformer handles it)",
     async () => {
-      const source = `
-      import { recipe, OpaqueRef } from "commontools";
+      const source = `/// <cts-enable />
+      import { recipe, h } from "commontools";
 
       interface Item { name: string; price: number; }
 
@@ -143,14 +147,15 @@ Deno.test("Pattern Context Validation", async (t) => {
         types: COMMONTOOLS_TYPES,
       });
       const errors = getErrors(diagnostics);
-      // Property access in JSX should be allowed (transformer rewrites these)
       assertEquals(errors.length, 0, "JSX property access should be allowed");
     },
   );
 
-  await t.step("allows passing property to function", async () => {
-    const source = `
-      import { recipe, OpaqueRef } from "commontools";
+  await t.step(
+    "allows passing property to function (pass-through)",
+    async () => {
+      const source = `/// <cts-enable />
+      import { recipe, h } from "commontools";
 
       interface Item { name: string; }
 
@@ -161,15 +166,133 @@ Deno.test("Pattern Context Validation", async (t) => {
         return <div>{formatted}</div>;
       });
     `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Property pass-through to function should be allowed",
+      );
+    },
+  );
+});
+
+Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
+  await t.step("allows reading opaques inside computed()", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, computed, h } from "commontools";
+
+      interface Item { name: string; price: number; }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        const isExpensive = computed(() => item.price > 100);
+        return <div>{isExpensive}</div>;
+      });
+    `;
     const { diagnostics } = await validateSource(source, {
       types: COMMONTOOLS_TYPES,
     });
-    // Passing to function is a pass-through, not computation
     const errors = getErrors(diagnostics);
     assertEquals(
       errors.length,
       0,
-      "Property pass-through to function should be allowed",
+      "Reading opaques inside computed() should be allowed",
+    );
+  });
+
+  await t.step("allows reading opaques inside action()", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, action, h } from "commontools";
+
+      interface Item { name: string; price: number; }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        const logPrice = action(() => {
+          console.log(item.price > 100 ? "expensive" : "cheap");
+        });
+        return <div onClick={logPrice}>Click</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      "Reading opaques inside action() should be allowed",
+    );
+  });
+
+  await t.step("allows reading opaques inside derive()", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, derive, Cell, h } from "commontools";
+
+      interface Item { name: string; price: number; }
+
+      export default recipe<{ item: Item, discount: Cell<number> }>("test", ({ item, discount }) => {
+        const finalPrice = derive(discount, (d) => item.price * (1 - d));
+        return <div>{finalPrice}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      "Reading opaques inside derive() should be allowed",
+    );
+  });
+
+  await t.step("allows reading opaques inside lift()", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, lift, h } from "commontools";
+
+      interface Item { name: string; price: number; }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        const doubled = lift(() => item.price * 2);
+        return <div>{doubled}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      "Reading opaques inside lift() should be allowed",
+    );
+  });
+
+  await t.step("allows reading opaques inside handler()", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, handler, h } from "commontools";
+
+      interface Item { name: string; price: number; }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        const onClick = handler((e: MouseEvent) => {
+          if (item.price > 100) {
+            console.log("expensive!");
+          }
+        });
+        return <div onClick={onClick}>Click</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      "Reading opaques inside handler() should be allowed",
     );
   });
 });

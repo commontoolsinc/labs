@@ -1,32 +1,33 @@
 /**
  * Pattern Context Validation Transformer
  *
- * Validates code within pattern contexts (recipe, pattern, handler, action, .map)
- * to catch common reactive programming mistakes:
+ * Validates code within pattern contexts (recipe, pattern, .map on cells/opaques)
+ * to catch common reactive programming mistakes.
  *
+ * Rules:
+ * - Reading from opaques is NOT allowed in:
+ *   - recipe/pattern body (top-level reactive context)
+ *   - map functions bound to opaques/cells (mapWithPattern)
+ *
+ * - Reading from opaques IS allowed in:
+ *   - computed()
+ *   - action()
+ *   - derive()
+ *   - lift()
+ *   - handler()
+ *   - JSX expressions (handled by OpaqueRefJSXTransformer)
+ *
+ * Errors reported:
  * - Property access used in computation: ERROR (must wrap in computed())
  * - Optional chaining (?.): ERROR (not allowed in reactive context)
  * - Calling .get() on cells: ERROR (must wrap in computed())
- *
- * JSX expressions are exempt as they are handled by OpaqueRefJSXTransformer.
  */
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
-import { detectCallKind } from "../ast/call-kind.ts";
-import { createDataFlowAnalyzer } from "../ast/dataflow.ts";
-
-/**
- * Builder names that establish a pattern context
- */
-const PATTERN_CONTEXT_BUILDERS = new Set([
-  "recipe",
-  "pattern",
-  "handler",
-  "action",
-  "lift",
-  "computed",
-  "render",
-]);
+import {
+  createDataFlowAnalyzer,
+  isInRestrictedReactiveContext,
+} from "../ast/mod.ts";
 
 export class PatternContextValidationTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
@@ -39,9 +40,9 @@ export class PatternContextValidationTransformer extends Transformer {
         return ts.visitEachChild(node, visit, context.tsContext);
       }
 
-      // Check for optional chaining in pattern context
+      // Check for optional chaining in reactive context
       if (ts.isPropertyAccessExpression(node) && node.questionDotToken) {
-        if (this.isInsidePatternContext(node, checker)) {
+        if (isInRestrictedReactiveContext(node, checker)) {
           context.reportDiagnostic({
             severity: "error",
             type: "pattern-context:optional-chaining",
@@ -53,22 +54,20 @@ export class PatternContextValidationTransformer extends Transformer {
         }
       }
 
-      // Check for .get() calls in pattern context
+      // Check for .get() calls in reactive context
       if (ts.isCallExpression(node)) {
         if (
-          this.isGetCall(node) && this.isInsidePatternContext(node, checker)
+          this.isGetCall(node) &&
+          isInRestrictedReactiveContext(node, checker)
         ) {
-          // Skip if already inside computed()
-          if (!this.isDirectlyInsideComputed(node, checker)) {
-            context.reportDiagnostic({
-              severity: "error",
-              type: "pattern-context:get-call",
-              message:
-                `Calling .get() on a cell is not allowed in reactive context. ` +
-                `Wrap the computation in computed(() => myCell.get()) instead.`,
-              node,
-            });
-          }
+          context.reportDiagnostic({
+            severity: "error",
+            type: "pattern-context:get-call",
+            message:
+              `Calling .get() on a cell is not allowed in reactive context. ` +
+              `Wrap the computation in computed(() => myCell.get()) instead.`,
+            node,
+          });
         }
       }
 
@@ -82,82 +81,6 @@ export class PatternContextValidationTransformer extends Transformer {
     };
 
     return ts.visitNode(context.sourceFile, visit) as ts.SourceFile;
-  }
-
-  /**
-   * Checks if a node is inside a pattern context (recipe, pattern, handler, etc.)
-   */
-  private isInsidePatternContext(
-    node: ts.Node,
-    checker: ts.TypeChecker,
-  ): boolean {
-    let current: ts.Node | undefined = node.parent;
-
-    while (current) {
-      // Check if we're inside an arrow function or function expression
-      if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
-        const functionParent = current.parent;
-        if (functionParent && ts.isCallExpression(functionParent)) {
-          // Check if this function is an argument to a pattern-establishing call
-          if (functionParent.arguments.includes(current as ts.Expression)) {
-            const callKind = detectCallKind(functionParent, checker);
-            if (callKind) {
-              if (
-                callKind.kind === "builder" &&
-                PATTERN_CONTEXT_BUILDERS.has(callKind.builderName)
-              ) {
-                return true;
-              }
-              if (callKind.kind === "array-map") {
-                return true;
-              }
-              if (callKind.kind === "derive") {
-                return true;
-              }
-            }
-          }
-        }
-      }
-      current = current.parent;
-    }
-
-    return false;
-  }
-
-  /**
-   * Checks if we're directly inside a computed() call (not nested in other callbacks)
-   */
-  private isDirectlyInsideComputed(
-    node: ts.Node,
-    checker: ts.TypeChecker,
-  ): boolean {
-    let current: ts.Node | undefined = node.parent;
-
-    while (current) {
-      if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
-        const functionParent = current.parent;
-        if (functionParent && ts.isCallExpression(functionParent)) {
-          if (functionParent.arguments.includes(current as ts.Expression)) {
-            const callKind = detectCallKind(functionParent, checker);
-            if (
-              callKind?.kind === "builder" &&
-              callKind.builderName === "computed"
-            ) {
-              return true;
-            }
-            // If we hit any other builder, we're not directly inside computed
-            if (
-              callKind?.kind === "builder" || callKind?.kind === "array-map"
-            ) {
-              return false;
-            }
-          }
-        }
-      }
-      current = current.parent;
-    }
-
-    return false;
   }
 
   /**
@@ -194,18 +117,13 @@ export class PatternContextValidationTransformer extends Transformer {
     checker: ts.TypeChecker,
     analyze: ReturnType<typeof createDataFlowAnalyzer>,
   ): void {
-    // Skip if not in pattern context
-    if (!this.isInsidePatternContext(node, checker)) {
+    // Skip if not in restricted reactive context
+    if (!isInRestrictedReactiveContext(node, checker)) {
       return;
     }
 
     // Skip if inside JSX
     if (this.isInsideJsx(node)) {
-      return;
-    }
-
-    // Skip if already inside computed()
-    if (this.isDirectlyInsideComputed(node, checker)) {
       return;
     }
 
