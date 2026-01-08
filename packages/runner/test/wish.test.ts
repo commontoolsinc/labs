@@ -7,6 +7,7 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { ALL_CHARMS_ID } from "../src/builtins/well-known.ts";
 import { UI } from "../src/builder/types.ts";
+import { parseWishTarget } from "../src/builtins/wish.ts";
 
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
@@ -1137,5 +1138,53 @@ describe("wish built-in", () => {
         expect("count" in charmData || "increment" in charmData).toBe(true);
       }
     });
+  });
+});
+
+describe("parseWishTarget", () => {
+  it("parses absolute paths starting with /", () => {
+    const result = parseWishTarget("/allCharms");
+    expect(result).toEqual({ key: "/", path: ["allCharms"] });
+  });
+
+  it("parses nested absolute paths", () => {
+    const result = parseWishTarget("/allCharms/0/title");
+    expect(result).toEqual({ key: "/", path: ["allCharms", "0", "title"] });
+  });
+
+  it("parses hash tag targets", () => {
+    const result = parseWishTarget("#favorites");
+    expect(result).toEqual({ key: "#favorites", path: [] });
+  });
+
+  it("parses hash tag targets with path", () => {
+    const result = parseWishTarget("#favorites/list/0");
+    expect(result).toEqual({ key: "#favorites", path: ["list", "0"] });
+  });
+
+  it("trims whitespace", () => {
+    const result = parseWishTarget("  /allCharms  ");
+    expect(result).toEqual({ key: "/", path: ["allCharms"] });
+  });
+
+  it("filters empty segments", () => {
+    const result = parseWishTarget("/allCharms//nested/");
+    expect(result).toEqual({ key: "/", path: ["allCharms", "nested"] });
+  });
+
+  it("throws on empty string", () => {
+    expect(() => parseWishTarget("")).toThrow('Wish target "" is empty');
+  });
+
+  it("throws on whitespace-only string", () => {
+    expect(() => parseWishTarget("   ")).toThrow("is empty");
+  });
+
+  it("throws on unrecognized path format", () => {
+    expect(() => parseWishTarget("noSlashOrHash")).toThrow("is not recognized");
+  });
+
+  it("throws on hash-only target", () => {
+    expect(() => parseWishTarget("#")).toThrow("is not recognized");
   });
 });

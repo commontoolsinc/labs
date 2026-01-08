@@ -48,6 +48,10 @@ CommonTools requires **two servers** for local development:
 
 You cannot access spaces without BOTH running. Access the application at **port 8000**, which proxies to shell. The scripts handle starting them in the correct order.
 
+**Important:** Use `dev-local` (not `dev`) for shell when running against local Toolshed. The `dev` task points to production.
+
+**After editing runtime code:** Restart the servers to pick up changes.
+
 ---
 
 ## Troubleshooting
@@ -81,6 +85,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:5173          # Shell
 | Space shows errors | Only one server running | Ensure BOTH are running |
 | Port already in use | Previous server didn't stop | Use `--force` flag |
 | Stale data | Cache issues | Use `--clear-cache` flag |
+| `*.ts.net` URLs hang | Not on Tailscale | Connect to CT network via Tailscale |
 
 ### Manual Fallback
 
@@ -102,6 +107,14 @@ SHELL_URL=http://localhost:5173 deno task dev
 cd packages/shell
 deno task dev-local
 ```
+
+**Alternative: Local shell with cloud backend:**
+```bash
+cd packages/toolshed
+SHELL_URL=http://localhost:5173 API_URL=https://toolshed.saga-castor.ts.net/ deno task dev
+```
+
+**Environment setup:** Copy `.env.example` to `.env` in the toolshed directory. See `packages/toolshed/env.ts` for all available environment variables.
 
 ### Checking Logs
 

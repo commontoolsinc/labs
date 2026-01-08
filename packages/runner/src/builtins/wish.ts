@@ -59,12 +59,12 @@ function resolveWishTarget(
   return cell;
 }
 
-type ParsedWishTarget = {
+export type ParsedWishTarget = {
   key: "/" | WishTag;
   path: string[];
 };
 
-function parseWishTarget(target: string): ParsedWishTarget {
+export function parseWishTarget(target: string): ParsedWishTarget {
   const trimmed = target.trim();
   if (trimmed === "") {
     throw new WishError(`Wish target "${target}" is empty.`);
