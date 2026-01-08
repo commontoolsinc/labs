@@ -552,6 +552,9 @@ const handleGetSummary = handler<
         }
         if (charm?.url !== undefined) moduleData.url = charm.url;
         if (charm?.notes !== undefined) moduleData.notes = charm.notes;
+        if (charm?.occurrences !== undefined) {
+          moduleData.occurrences = charm.occurrences;
+        }
       } catch {
         // Ignore errors from charms without expected fields
       }

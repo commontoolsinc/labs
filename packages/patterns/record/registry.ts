@@ -73,6 +73,10 @@ import {
   CustomFieldModule,
   MODULE_METADATA as CustomFieldMeta,
 } from "../custom-field.tsx";
+import {
+  MODULE_METADATA as OccurrenceTrackerMeta,
+  OccurrenceTrackerModule,
+} from "../occurrence-tracker.tsx";
 import type { ModuleMetadata } from "../container-protocol.ts";
 
 // NOTE: TypePickerMeta is NOT imported here to avoid circular dependency:
@@ -209,6 +213,10 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
   "custom-field": fromMetadata(
     CustomFieldMeta,
     (init) => CustomFieldModule(init as any),
+  ),
+  "occurrence-tracker": fromMetadata(
+    OccurrenceTrackerMeta,
+    (init) => OccurrenceTrackerModule(init as any),
   ),
 
   // Controller modules - TypePicker needs special handling in record.tsx
