@@ -717,8 +717,9 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 
   /**
    * Sets this instance's value based on `newValue` interpreted as a
-   * JSON-serializable "data value". This contrasts with {@link #set}, which
-   * accepts arbitrary values / references.
+   * JSON-serializable "data value." This contrasts with {@link #set}, which
+   * accepts arbitrary values / references and performs no data conversions.
+   * See {@link toJSONValue} for details about how `newValue` gets transformed.
    *
    * @param newValue - The value whose sanitized clone is to be stored in the
    *     cell.
