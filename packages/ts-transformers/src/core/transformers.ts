@@ -27,17 +27,28 @@ export interface TransformationOptions {
   readonly typeRegistry?: TypeRegistry;
   readonly mapCallbackRegistry?: WeakSet<ts.Node>;
   readonly schemaHints?: SchemaHints;
+  /**
+   * Shared diagnostics collector that accumulates diagnostics across all transformers.
+   * If provided, diagnostics are pushed to this array in addition to the local context.
+   */
+  readonly diagnosticsCollector?: TransformationDiagnostic[];
 }
 
+export type DiagnosticSeverity = "error" | "warning";
+
 export interface TransformationDiagnostic {
+  readonly severity: DiagnosticSeverity;
   readonly type: string;
   readonly message: string;
   readonly fileName: string;
   readonly line: number;
   readonly column: number;
+  readonly start: number;
+  readonly length: number;
 }
 
 export interface DiagnosticInput {
+  readonly severity?: DiagnosticSeverity;
   readonly type: string;
   readonly message: string;
   readonly node: ts.Node;
@@ -89,17 +100,10 @@ export abstract class Transformer {
 
       const transformed = this.transform(context);
 
-      if (
-        context.options.mode === "error" &&
-        context.diagnostics.length > 0
-      ) {
-        const message = context.diagnostics
-          .map((diagnostic) =>
-            `${diagnostic.fileName}:${diagnostic.line}:${diagnostic.column} - ${diagnostic.message}`
-          )
-          .join("\n");
-        throw new Error(`OpaqueRef transformation errors:\n${message}`);
-      }
+      // Diagnostics are collected in the shared diagnosticsCollector (if provided)
+      // and can be accessed via pipeline.getDiagnostics() after transformation.
+      // We no longer throw here - consumers decide how to handle diagnostics.
+
       return transformed;
     };
   }
