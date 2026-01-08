@@ -1,5 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { handler } from "commontools";
+import "commontools/schema";
 const eventSchema = {
     type: "object",
     properties: {

@@ -1,5 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { Cell, Default, handler, NAME, recipe, toSchema, UI, } from "commontools";
+import "commontools/schema";
 interface Item {
     text: Default<string, "">;
 }

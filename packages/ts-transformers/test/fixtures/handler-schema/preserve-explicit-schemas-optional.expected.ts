@@ -1,5 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { handler } from "commontools";
+import "commontools/schema";
 // Schema without required fields - properties are optional
 const eventSchema = {
     type: "object",
