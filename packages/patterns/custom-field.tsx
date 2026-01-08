@@ -228,7 +228,9 @@ export const CustomFieldModule = recipe<
               <input
                 type="checkbox"
                 checked={isChecked}
-                onClick={toggleBoolean({ value: value as unknown as Cell<string> })}
+                onClick={toggleBoolean({
+                  value: value as unknown as Cell<string>,
+                })}
                 style={{ width: "18px", height: "18px" }}
               />
               <span style={{ color: "#374151" }}>{displayName}</span>

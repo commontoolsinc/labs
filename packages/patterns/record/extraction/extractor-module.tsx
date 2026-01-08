@@ -932,7 +932,9 @@ const applySelected = handler<
               });
               anySuccess = true;
               console.debug(
-                `[Extract] Created new ${moduleType} instance: ${JSON.stringify(initialValues)}`,
+                `[Extract] Created new ${moduleType} instance: ${
+                  JSON.stringify(initialValues)
+                }`,
               );
             } catch (e) {
               console.warn(
