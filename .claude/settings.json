@@ -26,6 +26,10 @@
           {
             "type": "command",
             "command": "deno run --allow-read --allow-run \"$CLAUDE_PROJECT_DIR/.claude/scripts/pre-commit.ts\""
+          },
+          {
+            "type": "command",
+            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/deno-test-filter.ts\""
           }
         ]
       }
@@ -69,9 +73,8 @@
       {
         "hooks": [
           {
-            "type": "prompt",
-            "prompt": "Evaluate if Claude should stop. Context: $ARGUMENTS\n\nCheck:\n1. Are there uncommitted changes? If so, have tests been run?\n2. Did the user's requested tasks complete successfully?\n3. Are there type errors or lint issues that need fixing?\n\nIf there are code changes but tests haven't been run, block and request running 'deno task check' and 'deno task test'.\n\nRespond with JSON: {\"decision\": \"approve\" or \"block\", \"reason\": \"your explanation\"}",
-            "timeout": 30
+            "type": "command",
+            "command": "deno run --allow-read --allow-run \"$CLAUDE_PROJECT_DIR/.claude/scripts/stop-check.ts\""
           }
         ]
       }
