@@ -20,6 +20,7 @@
  * - lift() callbacks
  * - handler() callbacks
  * - Inline JSX event handlers (onClick={() => {...}}) - transformed to handler()
+ * - Standalone function definitions (we can't know where they're called from)
  * - JSX expressions (handled by OpaqueRefJSXTransformer)
  *
  * This module is used by both validation transformers (to report errors)
@@ -112,9 +113,60 @@ function isInlineJsxEventHandler(
 }
 
 /**
+ * Checks if a function is a "standalone" function definition.
+ *
+ * A standalone function is one that's NOT directly a callback to a builder/map call.
+ * Examples:
+ * - `function helper() { ... }` - function declaration
+ * - `const helper = () => { ... }` - arrow function assigned to variable
+ * - `const helper = function() { ... }` - function expression assigned to variable
+ *
+ * We skip validation inside standalone functions because we can't know where
+ * they're called from. If they're only called from safe wrappers (like computed),
+ * they're actually safe.
+ */
+function isStandaloneFunctionDefinition(
+  func: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
+): boolean {
+  // Function declarations are always standalone
+  if (ts.isFunctionDeclaration(func)) {
+    return true;
+  }
+
+  const parent = func.parent;
+
+  // Arrow/function expression assigned to a variable: `const helper = () => { }`
+  if (ts.isVariableDeclaration(parent)) {
+    return true;
+  }
+
+  // Arrow/function expression as property value: `{ helper: () => { } }`
+  if (ts.isPropertyAssignment(parent)) {
+    return true;
+  }
+
+  // If it's a callback to a call expression, it's NOT standalone
+  // (it's either a builder callback, map callback, or safe wrapper callback)
+  if (ts.isCallExpression(parent) && parent.arguments.includes(func)) {
+    return false;
+  }
+
+  // If it's in a JSX attribute, it's NOT standalone (it's an inline handler)
+  if (ts.isJsxExpression(parent)) {
+    return false;
+  }
+
+  // Default to not standalone for other cases
+  return false;
+}
+
+/**
  * Checks if a node is inside a safe wrapper callback where opaque reading is allowed.
  *
- * Safe wrappers are: computed, action, derive, lift, handler, and inline JSX event handlers
+ * Safe wrappers are:
+ * - computed, action, derive, lift, handler callbacks
+ * - inline JSX event handlers
+ * - standalone function definitions (we can't know where they're called from)
  */
 export function isInsideSafeWrapper(
   node: ts.Node,
@@ -123,10 +175,23 @@ export function isInsideSafeWrapper(
   let current: ts.Node | undefined = node.parent;
 
   while (current) {
+    // Check for function declarations (always standalone)
+    if (ts.isFunctionDeclaration(current)) {
+      if (isStandaloneFunctionDefinition(current)) {
+        return true;
+      }
+    }
+
     if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
       // Check for inline JSX event handlers (onClick={() => {...}})
       // These get transformed into handler() calls
       if (isInlineJsxEventHandler(current)) {
+        return true;
+      }
+
+      // Check for standalone function definitions (const helper = () => {...})
+      // We skip validation because we can't know where they're called from
+      if (isStandaloneFunctionDefinition(current)) {
         return true;
       }
 

@@ -330,6 +330,64 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
       );
     },
   );
+
+  await t.step(
+    "allows reading opaques inside standalone function declarations",
+    async () => {
+      const source = `/// <cts-enable />
+      import { recipe, computed, h } from "commontools";
+
+      interface Item { name: string; price: number; }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        // Helper function defined in pattern - called from computed
+        function isExpensive() {
+          return item.price > 100;
+        }
+
+        const expensive = computed(() => isExpensive());
+        return <div>{expensive}</div>;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Reading opaques inside standalone function declarations should be allowed",
+      );
+    },
+  );
+
+  await t.step(
+    "allows reading opaques inside standalone arrow functions",
+    async () => {
+      const source = `/// <cts-enable />
+      import { recipe, computed, h } from "commontools";
+
+      interface Item { name: string; price: number; }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        // Helper arrow function defined in pattern - called from computed
+        const isExpensive = () => item.price > 100;
+
+        const expensive = computed(() => isExpensive());
+        return <div>{expensive}</div>;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Reading opaques inside standalone arrow functions should be allowed",
+      );
+    },
+  );
 });
 
 Deno.test("Diagnostic output format", async (t) => {
