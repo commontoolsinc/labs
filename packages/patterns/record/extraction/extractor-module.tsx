@@ -40,8 +40,11 @@ import type {
   ExtractableSource,
   ExtractedField,
   ExtractionPreview,
+  SourceExtraction,
+  SourceExtractionStatus,
   ValidationIssue,
 } from "./types.ts";
+import { SOURCE_PRECEDENCE } from "./types.ts";
 import type { JSONSchema } from "./schema-utils.ts";
 import { getResultSchema, getSchemaForType } from "./schema-utils.ts";
 import { getCellValue } from "./schema-utils-pure.ts";
@@ -317,6 +320,48 @@ function formatValue(value: unknown): string {
   if (Array.isArray(value)) return JSON.stringify(value);
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+/**
+ * Merge extraction results from multiple sources using precedence rules.
+ * Higher precedence sources (photos > text-import > notes) overwrite lower ones.
+ * Null/undefined values are skipped (don't overwrite existing values).
+ *
+ * @param sourceExtractions - Array of per-source extraction results
+ * @returns Combined extraction result with highest-precedence values
+ */
+function mergeExtractionResults(
+  sourceExtractions: SourceExtraction[],
+): Record<string, unknown> {
+  // Sort by precedence (lowest first, so higher precedence overwrites)
+  const sorted = [...sourceExtractions]
+    .filter((s) => s.status === "complete" && s.extractedFields !== null)
+    .sort(
+      (a, b) => SOURCE_PRECEDENCE[a.sourceType] - SOURCE_PRECEDENCE[b.sourceType],
+    );
+
+  const merged: Record<string, unknown> = {};
+
+  for (const source of sorted) {
+    const fields = source.extractedFields;
+    if (!fields) continue;
+
+    for (const [key, value] of Object.entries(fields)) {
+      // Skip null/undefined values - don't overwrite existing data
+      if (value === null || value === undefined) continue;
+      // Also skip "null" string values (LLM workaround)
+      if (typeof value === "string" && value.toLowerCase() === "null") continue;
+      // Skip empty strings
+      if (typeof value === "string" && value.trim() === "") continue;
+      // Skip empty arrays
+      if (Array.isArray(value) && value.length === 0) continue;
+
+      // Overwrite with this source's value (higher precedence wins due to sort order)
+      merged[key] = value;
+    }
+  }
+
+  return merged;
 }
 
 /**
@@ -783,6 +828,10 @@ const toggleTrashHandler = handler<
 
 /**
  * Handler to start extraction - defined at module scope
+ *
+ * With per-source extraction architecture, this handler only needs to:
+ * 1. Snapshot Notes content for cleanup comparison
+ * 2. Set phase to "extracting" - prompts are built reactively per-source
  */
 const startExtraction = handler<
   unknown,
@@ -798,8 +847,6 @@ const startExtraction = handler<
     notesContentSnapshotCell: Writable<
       Default<Record<number, string>, Record<number, never>>
     >;
-    // Read-only: computed() provides OpaqueRef, no Cell wrapper needed
-    ocrResultsValue: Record<number, string>;
   }
 >(
   (
@@ -807,30 +854,28 @@ const startExtraction = handler<
     {
       sourceSelectionsCell,
       parentSubCharmsCell,
-      extractionPromptCell,
       extractPhaseCell,
       notesContentSnapshotCell,
-      ocrResultsValue,
     },
   ) => {
     // Use .get() to read Cell values inside handler
     const selectionsMap = sourceSelectionsCell.get() || {};
     const subCharmsData = parentSubCharmsCell.get() || [];
-    const ocrResultsMap = ocrResultsValue || {};
 
-    // First pass: use scanExtractableSources to identify sources and their indices
-    // This may return stale content for some sources
+    // Scan sources to find selected Notes for snapshot
     const sources = scanExtractableSources(subCharmsData);
 
-    // Build combined content from selected sources
-    // For notes/text-import, use Cell.key() navigation to ensure we read live content
-    const parts: string[] = [];
     // Map to store ALL selected Notes modules' content (index -> content)
+    // This is used for cleanup comparison after extraction
     const notesSnapshots: Record<string, string> = {};
+    let hasSelectedSources = false;
 
     for (const source of sources) {
-      // Skip if explicitly deselected
+      // Skip if explicitly deselected or empty
       if (selectionsMap[source.index] === false) continue;
+      if (source.isEmpty) continue;
+
+      hasSelectedSources = true;
 
       if (source.type === "notes") {
         // Access charm content via .get() first to resolve links, then access properties
@@ -843,7 +888,6 @@ const startExtraction = handler<
         const content = typeof liveContent === "string" ? liveContent : "";
 
         if (content.trim()) {
-          parts.push(`--- ${source.label} ---\n${content}`);
           // Store snapshot for this Notes module (keyed by index as string to avoid Cell array coercion)
           notesSnapshots[String(source.index)] = content;
         }
@@ -868,12 +912,10 @@ const startExtraction = handler<
       }
     }
 
-    const combinedContent = parts.join("\n\n");
-
-    if (combinedContent.trim()) {
+    if (hasSelectedSources) {
       // Snapshot ALL selected Notes content for cleanup (map of index -> content)
       notesContentSnapshotCell.set(notesSnapshots);
-      extractionPromptCell.set(combinedContent);
+      // Set phase to extracting - per-source prompts are built reactively
       extractPhaseCell.set("extracting");
     }
   },
@@ -1592,32 +1634,217 @@ export const ExtractorModule = recipe<
       return results;
     });
 
-    // Reactive extraction - only runs when extractionPrompt is set
-    // Note: generateObject accepts Opaque<> which allows Cell-wrapped values
-    const extraction = generateObject({
-      system: EXTRACTION_SYSTEM_PROMPT,
-      prompt: extractionPrompt,
-      schema: extractSchema,
-      model: "anthropic:claude-haiku-4-5",
+    // ===== PER-SOURCE EXTRACTION ARCHITECTURE =====
+    // Each selected source gets its own generateObject() call, then results are merged.
+    // This enables:
+    // - Independent extraction from each source (notes, text-import, photo)
+    // - Precedence-based merging (photos > text-import > notes)
+    // - Per-source status tracking in UI
+
+    // Get selected sources that are ready for extraction
+    // Only include sources after phase transitions to "extracting"
+    const selectedSourcesForExtraction = computed((): ExtractableSource[] => {
+      const phase = extractPhase.get() || "select";
+      if (phase !== "extracting") return [];
+
+      const sources = sourceData.sources;
+      return sources.filter((s: ExtractableSource) => s.selected && !s.isEmpty);
     });
+
+    // Build per-source extraction calls using .map() pattern (like OCR calls)
+    // Each source gets its own generateObject() call with source-specific prompt
+    const perSourceExtractions = selectedSourcesForExtraction.map(
+      (source: ExtractableSource) => {
+        // Build prompt for this source
+        const prompt = computed((): string | undefined => {
+          const phase = extractPhase.get() || "select";
+          if (phase !== "extracting") return undefined;
+
+          if (source.type === "photo") {
+            // For photos, use OCR result
+            const ocrMap = ocrResults;
+            const ocrText = ocrMap[source.index];
+            if (!ocrText || !ocrText.trim()) return undefined;
+            return `--- ${source.label} (OCR) ---\n${ocrText}`;
+          } else {
+            // For notes/text-import, read live content via Cell navigation
+            const entry = (parentSubCharms as Cell<SubCharmEntry[]>)
+              .key(source.index)
+              .get();
+            const charm = entry?.charm as Record<string, unknown>;
+            const liveContent = getCellValue<unknown>(charm?.content);
+            const content = typeof liveContent === "string" ? liveContent : "";
+
+            if (!content.trim()) return undefined;
+            return `--- ${source.label} ---\n${content}`;
+          }
+        });
+
+        // Create extraction call for this source
+        const extraction = generateObject({
+          system: EXTRACTION_SYSTEM_PROMPT,
+          prompt,
+          schema: extractSchema,
+          model: "anthropic:claude-haiku-4-5",
+        });
+
+        return {
+          sourceIndex: source.index,
+          sourceType: source.type,
+          sourceLabel: source.label,
+          extraction,
+        };
+      },
+    );
+
+    // Build SourceExtraction array with status from per-source calls
+    const sourceExtractions = computed((): SourceExtraction[] => {
+      const calls = perSourceExtractions;
+      if (!calls || calls.length === 0) return [];
+
+      const results: SourceExtraction[] = [];
+
+      for (const call of calls) {
+        let status: SourceExtractionStatus = "pending";
+        let extractedFields: Record<string, unknown> | null = null;
+        let error: string | undefined;
+        let fieldCount = 0;
+
+        // Access extraction state - properties auto-dereference in computed()
+        const extraction = call.extraction as {
+          pending?: boolean;
+          error?: unknown;
+          result?: unknown;
+        };
+
+        if (extraction.pending) {
+          status = "extracting";
+        } else if (extraction.error) {
+          status = "error";
+          const errorObj = extraction.error as { message?: string };
+          error = String(errorObj.message || extraction.error);
+        } else if (extraction.result) {
+          status = "complete";
+          const result = extraction.result as Record<string, unknown>;
+          // Normalize null strings
+          extractedFields = normalizeNullString(result) as Record<
+            string,
+            unknown
+          >;
+          // Count non-null fields
+          fieldCount = Object.values(extractedFields).filter(
+            (v) => v !== null && v !== undefined,
+          ).length;
+        }
+
+        results.push({
+          sourceIndex: call.sourceIndex as number,
+          sourceType: call.sourceType as "notes" | "text-import" | "photo",
+          sourceLabel: call.sourceLabel as string,
+          status,
+          extractedFields,
+          error,
+          fieldCount,
+        });
+      }
+
+      return results;
+    });
+
+    // Per-source status tracking computed values
+    const anySourcePending = computed((): boolean => {
+      const extractions = sourceExtractions;
+      if (!extractions || extractions.length === 0) return false;
+      return extractions.some(
+        (e: SourceExtraction) =>
+          e.status === "pending" || e.status === "extracting",
+      );
+    });
+
+    const allSourcesComplete = computed((): boolean => {
+      const extractions = sourceExtractions;
+      if (!extractions || extractions.length === 0) return false;
+      return extractions.every(
+        (e: SourceExtraction) =>
+          e.status === "complete" || e.status === "error" ||
+          e.status === "skipped",
+      );
+    });
+
+    const sourceStatusMap = computed((): Record<number, SourceExtractionStatus> => {
+      const extractions = sourceExtractions;
+      const map: Record<number, SourceExtractionStatus> = {};
+      if (!extractions) return map;
+
+      for (const ext of extractions) {
+        map[ext.sourceIndex] = ext.status;
+      }
+      return map;
+    });
+
+    // Merge all per-source extraction results using precedence
+    const mergedExtractionResult = computed((): Record<string, unknown> | null => {
+      const extractions = sourceExtractions;
+      if (!extractions || extractions.length === 0) return null;
+
+      // Wait until all sources are complete
+      const allComplete = extractions.every(
+        (e: SourceExtraction) =>
+          e.status === "complete" || e.status === "error" ||
+          e.status === "skipped",
+      );
+      if (!allComplete) return null;
+
+      // Merge using precedence rules
+      return mergeExtractionResults(extractions);
+    });
+
+    // Check if any per-source extraction has an error
+    const anyExtractionError = computed((): boolean => {
+      const extractions = sourceExtractions;
+      if (!extractions) return false;
+      return extractions.some((e: SourceExtraction) => e.status === "error");
+    });
+
+    // Get first error message for display
+    const firstExtractionError = computed((): string | null => {
+      const extractions = sourceExtractions;
+      if (!extractions) return null;
+      const errorSource = extractions.find(
+        (e: SourceExtraction) => e.status === "error",
+      );
+      return errorSource?.error || null;
+    });
+
+    // Legacy compatibility: create extraction-like object from merged results
+    // This maintains compatibility with existing preview/apply code
+    const extraction = {
+      pending: anySourcePending,
+      error: computed(() => anyExtractionError ? firstExtractionError : null),
+      result: mergedExtractionResult,
+    };
 
     // Computed to dereference extraction.result for passing to handlers
     // extraction.result is a reactive property that doesn't auto-dereference when passed directly
     // This ensures the handler receives the actual value, not a reactive proxy
     const extractionResultValue = computed(
       (): Record<string, unknown> | null => {
-        const result = extraction.result;
+        const result = mergedExtractionResult;
         if (!result || typeof result !== "object") return null;
         return result as Record<string, unknown>;
       },
     );
 
-    // Build preview from extraction result
+    // Build preview from merged extraction result
     const preview = computed((): ExtractionPreview | null => {
-      if (!extraction.result) return null;
+      if (!mergedExtractionResult) return null;
       const subCharms = parentSubCharms.get() || [];
       const currentTitle = parentTitle.get() || "";
-      const result = buildPreview(extraction.result, subCharms, currentTitle);
+      const result = buildPreview(
+        mergedExtractionResult,
+        subCharms,
+        currentTitle,
+      );
       return result;
     });
 
@@ -1637,12 +1864,15 @@ export const ExtractorModule = recipe<
     // Without this, early return paths (pending/error) prevent preview from being tracked as dependency
     const currentPhase = computed(() => {
       const p = preview; // Establish reactive dependency before any conditionals
+      const pending = anySourcePending;
+      const hasError = anyExtractionError;
+      const mergedResult = mergedExtractionResult;
       const phase = extractPhase.get() || "select";
       if (phase === "extracting") {
-        if (extraction.pending) return "extracting";
-        if (extraction.error) return "error";
+        if (pending) return "extracting";
+        if (hasError) return "error";
         if (p?.fields?.length) return "preview";
-        if (extraction.result && !p?.fields?.length) return "no-results";
+        if (mergedResult && !p?.fields?.length) return "no-results";
         return "extracting";
       }
       return phase;
@@ -1650,11 +1880,11 @@ export const ExtractorModule = recipe<
 
     // Format extracted fields as text for preview display
     const previewText = computed(() => {
-      if (!extraction.result) return "No fields extracted";
+      if (!mergedExtractionResult) return "No fields extracted";
       const subCharms = parentSubCharms.get() || [];
       const currentTitle = parentTitle.get() || "";
       const previewData = buildPreview(
-        extraction.result,
+        mergedExtractionResult,
         subCharms,
         currentTitle,
       );
@@ -1735,8 +1965,8 @@ export const ExtractorModule = recipe<
       // The extraction schema includes both `content` (primary) and `notes` (alias) fields
       // from Notes module's fieldMapping: ["content", "notes"]
       // The LLM may use either field name, so check both
-      if (!extraction.result) return combinedSnapshot;
-      const result = extraction.result as Record<string, unknown>;
+      if (!mergedExtractionResult) return combinedSnapshot;
+      const result = mergedExtractionResult as Record<string, unknown>;
       // Check both `notes` (alias) and `content` (primary) - LLM may use either
       const notesValue = result.notes ?? result.content;
 
@@ -1795,13 +2025,10 @@ export const ExtractorModule = recipe<
     // Error message parsing for specific error feedback
     // Parse the extraction error to show user-friendly messages based on error type
     const errorMessage = computed((): string => {
-      const error = extraction.error;
+      const error = firstExtractionError;
       if (!error) return "Extraction failed. Try again or add more content.";
 
-      // Cast to Error-like object to access message property
-      // extraction.error is OpaqueCell<unknown> which doesn't expose .message directly
-      const errorObj = error as unknown as { message?: string };
-      const errorStr = String(errorObj.message || error).toLowerCase();
+      const errorStr = String(error).toLowerCase();
 
       // Rate limiting errors (429, rate limit)
       if (errorStr.includes("rate") || errorStr.includes("429")) {
@@ -1819,20 +2046,17 @@ export const ExtractorModule = recipe<
       }
 
       // Default: Show actual error message (truncated if needed)
-      const fullMessage = String(errorObj.message || error);
-      if (fullMessage.length > 100) {
-        return fullMessage.slice(0, 100) + "...";
+      if (error.length > 100) {
+        return error.slice(0, 100) + "...";
       }
-      return fullMessage;
+      return error;
     });
 
     // Full error details for expandable section
     const fullErrorDetails = computed((): string => {
-      const error = extraction.error;
+      const error = firstExtractionError;
       if (!error) return "";
-      // Cast to Error-like object to access message property
-      const errorObj = error as unknown as { message?: string };
-      return String(errorObj.message || error);
+      return error;
     });
 
     // Check if error details are expanded
@@ -2158,11 +2382,8 @@ export const ExtractorModule = recipe<
                       onClick={startExtraction({
                         sourceSelectionsCell: sourceSelections,
                         parentSubCharmsCell: parentSubCharms,
-                        extractionPromptCell: extractionPrompt,
                         extractPhaseCell: extractPhase,
                         notesContentSnapshotCell: notesContentSnapshot,
-                        // Read-only value from computed() - no Cell wrapper needed
-                        ocrResultsValue: ocrResults,
                       })}
                       style={{
                         padding: "8px 16px",
@@ -2749,7 +2970,7 @@ export const ExtractorModule = recipe<
                     parentSubCharmsCell: parentSubCharms,
                     parentTrashedSubCharmsCell: parentTrashedSubCharms,
                     parentTitleCell: parentTitle,
-                    // Pass computed that dereferences extraction.result (reactive properties
+                    // Pass computed that dereferences mergedExtractionResult (reactive properties
                     // don't auto-dereference when passed directly to handlers)
                     extractionResultValue: extractionResultValue,
                     selectionsCell: selections,
