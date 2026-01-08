@@ -3,7 +3,7 @@ import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
   createDataFlowAnalyzer,
   isEventHandlerJsxAttribute,
-  isInsideSafeWrapper,
+  isInsideSafeCallbackWrapper,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import { rewriteExpression } from "./opaque-ref/mod.ts";
@@ -33,10 +33,10 @@ function transform(context: TransformationContext): ts.SourceFile {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
-      // Skip if inside a safe wrapper callback (derive, computed, action, lift, handler)
+      // Skip if inside a safe callback wrapper (derive, computed, action, lift, handler)
       // These contexts already provide reactive tracking, so JSX expressions
       // don't need to be wrapped in derive.
-      if (isInsideSafeWrapper(node, checker)) {
+      if (isInsideSafeCallbackWrapper(node, checker)) {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 

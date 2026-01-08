@@ -4,6 +4,7 @@ export {
   findEnclosingCallbackContext,
   isInRestrictedReactiveContext,
   isInsideRestrictedContext,
+  isInsideSafeCallbackWrapper,
   isInsideSafeWrapper,
   RESTRICTED_CONTEXT_BUILDERS,
   SAFE_WRAPPER_BUILDERS,

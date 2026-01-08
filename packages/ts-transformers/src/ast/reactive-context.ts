@@ -161,27 +161,24 @@ function isStandaloneFunctionDefinition(
 }
 
 /**
- * Checks if a node is inside a safe wrapper callback where opaque reading is allowed.
+ * Checks if a node is inside a safe callback wrapper where opaque reading is allowed.
  *
- * Safe wrappers are:
+ * Safe callback wrappers are:
  * - computed, action, derive, lift, handler callbacks
  * - inline JSX event handlers
  * - standalone function definitions (we can't know where they're called from)
- * - JSX expressions (handled by OpaqueRefJSXTransformer)
+ *
+ * NOTE: This does NOT include JSX expressions. Use isInsideSafeWrapper for that.
+ * This function is used by the OpaqueRefJSXTransformer which needs to transform
+ * JSX expressions (so it shouldn't skip them).
  */
-export function isInsideSafeWrapper(
+export function isInsideSafeCallbackWrapper(
   node: ts.Node,
   checker: ts.TypeChecker,
 ): boolean {
   let current: ts.Node | undefined = node.parent;
 
   while (current) {
-    // Check for JSX expressions - these are handled by OpaqueRefJSXTransformer
-    // which rewrites opaque access to use derive()
-    if (ts.isJsxExpression(current)) {
-      return true;
-    }
-
     // Check for function declarations (always standalone)
     if (ts.isFunctionDeclaration(current)) {
       if (isStandaloneFunctionDefinition(current)) {
@@ -228,6 +225,37 @@ export function isInsideSafeWrapper(
   }
 
   return false;
+}
+
+/**
+ * Checks if a node is inside a safe wrapper callback where opaque reading is allowed.
+ *
+ * Safe wrappers are:
+ * - computed, action, derive, lift, handler callbacks
+ * - inline JSX event handlers
+ * - standalone function definitions (we can't know where they're called from)
+ * - JSX expressions (handled by OpaqueRefJSXTransformer)
+ *
+ * This is used by validation transformers to avoid reporting errors for code
+ * that will be transformed or is in a safe context.
+ */
+export function isInsideSafeWrapper(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+): boolean {
+  let current: ts.Node | undefined = node.parent;
+
+  while (current) {
+    // Check for JSX expressions - these are handled by OpaqueRefJSXTransformer
+    // which rewrites opaque access to use derive()
+    if (ts.isJsxExpression(current)) {
+      return true;
+    }
+    current = current.parent;
+  }
+
+  // Also check for callback-based safe wrappers
+  return isInsideSafeCallbackWrapper(node, checker);
 }
 
 /**
