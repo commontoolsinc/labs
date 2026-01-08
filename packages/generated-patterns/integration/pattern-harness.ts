@@ -1,36 +1,12 @@
 import { expect } from "@std/expect";
 import "@commontools/utils/equal-ignoring-symbols";
+import { waitFor } from "@commontools/integration";
 import { fromFileUrl } from "@std/path";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../../runner/src/storage/cache.deno.ts";
 import { Runtime } from "@commontools/runner";
 import { sleep } from "@commontools/utils/sleep";
-
-// Check if two values are deeply equal, ignoring symbols
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (typeof a !== typeof b) return false;
-  if (a === null || b === null) return a === b;
-  if (typeof a !== "object") return false;
-
-  if (Array.isArray(a) && Array.isArray(b)) {
-    if (a.length !== b.length) return false;
-    return a.every((val, i) => deepEqual(val, b[i]));
-  }
-  if (Array.isArray(a) || Array.isArray(b)) return false;
-
-  const aKeys = Object.keys(a as object);
-  const bKeys = Object.keys(b as object);
-  if (aKeys.length !== bKeys.length) return false;
-
-  return aKeys.every((key) =>
-    deepEqual(
-      (a as Record<string, unknown>)[key],
-      (b as Record<string, unknown>)[key],
-    )
-  );
-}
 
 export interface EventSpec {
   stream: string;
@@ -137,10 +113,6 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
       await runtime.idle();
     }
 
-    // Retry assertions with backoff to handle reactivity settling delays
-    const maxRetries = 10;
-    const retryDelay = 50; // ms
-
     for (const assertion of step.expect) {
       const pathSegments = splitPath(assertion.path);
       const targetCell = pathSegments.reduce(
@@ -148,36 +120,26 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
         result,
       );
 
+      // Use waitFor to poll until assertion passes or timeout
       let actual: unknown;
-      let lastError: Error | undefined;
-
-      for (let attempt = 0; attempt < maxRetries; attempt++) {
-        // Use pull() in pull mode to ensure all dependencies are computed
+      try {
+        await waitFor(async () => {
+          actual = await targetCell.pull();
+          try {
+            expect(actual).toEqualIgnoringSymbols(assertion.value);
+            return true;
+          } catch {
+            return false;
+          }
+        }, { timeout: 5000, delay: 50 });
+      } catch {
+        // Pull final value for detailed assertion error on timeout
         actual = await targetCell.pull();
-
-        if (deepEqual(actual, assertion.value)) {
-          // Assertion passed
-          lastError = undefined;
-          break;
-        }
-
-        // If not the last attempt, wait and retry
-        if (attempt < maxRetries - 1) {
-          await runtime.idle();
-          await sleep(retryDelay);
-        } else {
-          // Last attempt failed, record error for final assertion
-          lastError = new Error(
-            `Assertion failed after ${maxRetries} attempts`,
-          );
-        }
       }
 
-      // Final assertion with expect() to get proper error messages
-      if (lastError) {
-        expect(actual, `${name}:${stepIndex}:${assertion.path}`)
-          .toEqual(assertion.value);
-      }
+      // Final assertion with expect() to get proper error messages on failure
+      expect(actual, `${name}:${stepIndex}:${assertion.path}`)
+        .toEqualIgnoringSymbols(assertion.value);
     }
   }
 

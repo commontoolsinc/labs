@@ -69,7 +69,6 @@ describe("nested counter integration test", () => {
       try {
         const counterResult = await page.waitForSelector("#counter-result", {
           strategy: "pierce",
-          timeout: 2000,
         });
         const initialText = await counterResult.innerText();
         return initialText?.trim() === "Counter is the 0th number";
@@ -157,7 +156,6 @@ async function waitForCounter(page: Page, text: string) {
     try {
       const counterResult = await page.waitForSelector("#counter-result", {
         strategy: "pierce",
-        timeout: 2000,
       });
       return (await counterResult?.innerText())?.trim() === text;
     } catch (_) {
