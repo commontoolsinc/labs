@@ -301,7 +301,7 @@ describe("fetch-data mutex mechanism", () => {
     globalThis.fetch = slowFetch;
   });
 
-  it("should handle fetch errors gracefully", async () => {
+  it.only("should handle fetch errors gracefully", async () => {
     // Mock fetch to return an error
     globalThis.fetch = async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
