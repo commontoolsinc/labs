@@ -16,6 +16,7 @@ import {
   computed,
   type Default,
   handler,
+  ifElse,
   lift,
   NAME,
   recipe,
@@ -1213,7 +1214,7 @@ function _searchRestrictions(input: string, existing: string[]): string[] {
 }
 
 // Get contextual label for a restriction
-function getContextualLabel(name: string, level: RestrictionLevel): string {
+function _getContextualLabel(name: string, level: RestrictionLevel): string {
   const category = getCategory(name);
   return LEVEL_CONFIG[level].labels[category];
 }
@@ -1315,40 +1316,9 @@ const removeRestriction = handler<
   unknown,
   { restrictions: Writable<RestrictionEntry[]>; index: number }
 >((_event, { restrictions, index }) => {
-  // Normalize to handle both string[] and RestrictionEntry[] from storage
-  // Filter out null items and empty names to match normalizedRestrictions computed
-  const current = (restrictions.get() || [])
-    .filter((item) => item != null)
-    .map(normalizeRestrictionItem)
-    .filter((entry) => entry.name && entry.name.trim() !== "");
+  // Use raw index directly since UI iterates over raw restrictions array
+  const current = restrictions.get() || [];
   restrictions.set(current.toSpliced(index, 1));
-});
-
-// Level cycling order: flexible → prefer → strict → absolute → flexible
-const LEVEL_CYCLE: Record<RestrictionLevel, RestrictionLevel> = {
-  flexible: "prefer",
-  prefer: "strict",
-  strict: "absolute",
-  absolute: "flexible",
-};
-
-const cycleLevel = handler<
-  unknown,
-  { restrictions: Writable<RestrictionEntry[]>; index: number }
->((_event, { restrictions, index }) => {
-  // Normalize to handle both string[] and RestrictionEntry[] from storage
-  // Filter out null items and empty names to match normalizedRestrictions computed
-  const current = (restrictions.get() || [])
-    .filter((item) => item != null)
-    .map(normalizeRestrictionItem)
-    .filter((entry) => entry.name && entry.name.trim() !== "");
-  const entry = current[index];
-  if (!entry) return;
-
-  const nextLevel = LEVEL_CYCLE[entry.level];
-  const updated = [...current];
-  updated[index] = { ...entry, level: nextLevel };
-  restrictions.set(updated);
 });
 
 const _selectSuggestion = handler<
@@ -1498,76 +1468,25 @@ export const DietaryRestrictionsModule = recipe<
     return `${count} restriction${count !== 1 ? "s" : ""}`;
   });
 
-  // Use lift() for UI transforms that need handler bindings
-  // lift() preserves the Cell reference for handlers while allowing value access
-  // VERIFIED: These lift() functions only run when restrictions change, not on autocomplete keypress (Dec 2025).
-  const restrictionsUI = lift(
-    ({
-      list,
-      restrictionsCell,
-    }: {
-      list: RestrictionEntry[];
-      restrictionsCell: Writable<RestrictionEntry[]>;
-    }) => {
-      if (!list || list.length === 0) return emptyState;
+  // Compute whether we have restrictions for conditional rendering
+  const hasRestrictions = computed(() => {
+    const raw = (restrictions || []) as Array<string | RestrictionEntry>;
+    return raw.filter((item) => item != null).length > 0;
+  });
 
-      return (
-        <ct-vstack gap="2">
-          <span style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
-            Your Restrictions
-          </span>
-          <ct-hstack gap="2" wrap>
-            {list
-              .filter(
-                (entry): entry is RestrictionEntry =>
-                  !!entry && typeof entry.name === "string" && !!entry.name,
-              )
-              .map((entry: RestrictionEntry, index: number) => {
-                const level = entry.level || "prefer";
-                const style = LEVEL_CONFIG[level] || LEVEL_CONFIG.prefer;
-                const contextLabel = getContextualLabel(entry.name, level);
+  // Level options for ct-select
+  const levelOptions = [
+    { value: "flexible", label: "Flexible" },
+    { value: "prefer", label: "Prefer" },
+    { value: "strict", label: "Strict" },
+    { value: "absolute", label: "Absolute" },
+  ];
 
-                return (
-                  <span
-                    key={index}
-                    style={`display: inline-flex; align-items: center; gap: 6px; background: ${style.bg}; color: ${style.color}; border: 1px solid ${style.border}; border-radius: 20px; padding: 6px 12px; font-size: 14px; flex-shrink: 0; white-space: nowrap;`}
-                  >
-                    <button
-                      type="button"
-                      onClick={cycleLevel({
-                        restrictions: restrictionsCell,
-                        index,
-                      })}
-                      title="Click to change severity level"
-                      style="background: none; border: none; cursor: pointer; padding: 0; font-size: 16px; line-height: 1;"
-                    >
-                      {style.icon}
-                    </button>
-                    <span style="display: flex; flex-direction: column;">
-                      <span style="font-weight: 500;">{entry.name}</span>
-                      <span style="font-size: 10px; opacity: 0.8;">
-                        {contextLabel}
-                      </span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={removeRestriction({
-                        restrictions: restrictionsCell,
-                        index,
-                      })}
-                      style={`background: none; border: none; cursor: pointer; padding: 0; font-size: 16px; color: ${style.color}; line-height: 1; margin-left: 2px;`}
-                      title="Remove"
-                    >
-                      ×
-                    </button>
-                  </span>
-                );
-              })}
-          </ct-hstack>
-        </ct-vstack>
-      );
-    },
-  );
+  // Helper to get style config for a level - used in UI
+  const getLevelStyle = lift((level: RestrictionLevel | string) => {
+    const l = (level || "prefer") as RestrictionLevel;
+    return LEVEL_CONFIG[l] || LEVEL_CONFIG.prefer;
+  });
 
   const impliedUI = lift(
     (
@@ -1631,21 +1550,83 @@ export const DietaryRestrictionsModule = recipe<
 
           <ct-select
             $value={selectedLevel}
-            items={[
-              { value: "flexible", label: "Flexible" },
-              { value: "prefer", label: "Prefer" },
-              { value: "strict", label: "Strict" },
-              { value: "absolute", label: "Absolute" },
-            ]}
+            items={levelOptions}
             style="width: 120px;"
           />
         </ct-hstack>
 
-        {/* Restrictions list - use normalized for display, raw Cell for handlers */}
-        {restrictionsUI({
-          list: normalizedRestrictions,
-          restrictionsCell: restrictions,
-        })}
+        {/* Restrictions list - map directly over Cell for reactive $value binding */}
+        {ifElse(
+          hasRestrictions,
+          <ct-vstack gap="2">
+            <span style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
+              Your Restrictions
+            </span>
+            <ct-hstack gap="2" wrap>
+              {(restrictions as unknown as Writable<RestrictionEntry[]>).map(
+                (item, index: number) => {
+                  // Get style reactively based on item.level
+                  const style = getLevelStyle(item.level);
+                  return (
+                    <span
+                      key={index}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        background: style.bg,
+                        color: style.color,
+                        border: `1px solid ${style.border}`,
+                        borderRadius: "20px",
+                        padding: "4px 10px 4px 6px",
+                        fontSize: "14px",
+                        flexShrink: "0",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      <ct-select
+                        $value={item.level}
+                        items={levelOptions}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          cursor: "pointer",
+                          fontSize: "11px",
+                          color: style.color,
+                          padding: "2px",
+                          borderRadius: "4px",
+                          minWidth: "70px",
+                        }}
+                      />
+                      <span style="font-weight: 500;">{item.name}</span>
+                      <button
+                        type="button"
+                        onClick={removeRestriction({
+                          restrictions,
+                          index,
+                        })}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          padding: "0",
+                          fontSize: "16px",
+                          color: style.color,
+                          lineHeight: "1",
+                          marginLeft: "2px",
+                        }}
+                        title="Remove"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  );
+                },
+              )}
+            </ct-hstack>
+          </ct-vstack>,
+          emptyState,
+        )}
 
         {/* Implied items - lift for display only */}
         {impliedUI(impliedItems)}
