@@ -24,8 +24,12 @@ if (!filePath.endsWith(".ts") || filePath.endsWith(".d.ts")) {
   Deno.exit(0);
 }
 
-// Skip if the file is in node_modules or vendor
-if (filePath.includes("node_modules") || filePath.includes("vendor")) {
+// Skip if the file is in node_modules or a vendor directory (but not packages/vendor-*)
+if (
+  filePath.includes("node_modules") ||
+  filePath.includes("/vendor/") ||
+  filePath.includes("vendor/")
+) {
   Deno.exit(0);
 }
 
