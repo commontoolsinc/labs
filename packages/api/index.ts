@@ -182,18 +182,215 @@ export type Apply<F extends HKT, A> = (F & { _A: A })["type"];
  * const superCell: IKeyableCell<unknown> = sub; // OK (out T)
  */
 export interface IKeyable<out T, Wrap extends HKT> {
-  key<K extends PropertyKey>(
+  /**
+   * Navigate to nested properties by one or more keys.
+   *
+   * @example
+   * cell.key("user")                      // Cell<User>
+   * cell.key("user", "profile")           // Cell<Profile>
+   * cell.key("user", "profile", "name")   // Cell<string>
+   */
+  // Overloads to avoid recursive type evaluation which causes stack overflow
+  // Zero keys
+  key(this: IsThisObject): Apply<Wrap, T>;
+  // One key
+  key<K1 extends keyof T>(this: IsThisObject, k1: K1): Apply<Wrap, T[K1]>;
+  // Two keys
+  key<K1 extends keyof T, K2 extends keyof T[K1]>(
     this: IsThisObject,
-    valueKey: K,
-  ): KeyResultType<T, K, Wrap>;
+    k1: K1,
+    k2: K2,
+  ): Apply<Wrap, T[K1][K2]>;
+  // Three keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+  >(this: IsThisObject, k1: K1, k2: K2, k3: K3): Apply<Wrap, T[K1][K2][K3]>;
+  // Four keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+    K4 extends keyof T[K1][K2][K3],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+  ): Apply<Wrap, T[K1][K2][K3][K4]>;
+  // Five keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+    K4 extends keyof T[K1][K2][K3],
+    K5 extends keyof T[K1][K2][K3][K4],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+  ): Apply<Wrap, T[K1][K2][K3][K4][K5]>;
+  // Six keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+    K4 extends keyof T[K1][K2][K3],
+    K5 extends keyof T[K1][K2][K3][K4],
+    K6 extends keyof T[K1][K2][K3][K4][K5],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+  ): Apply<Wrap, T[K1][K2][K3][K4][K5][K6]>;
+  // Seven keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+    K4 extends keyof T[K1][K2][K3],
+    K5 extends keyof T[K1][K2][K3][K4],
+    K6 extends keyof T[K1][K2][K3][K4][K5],
+    K7 extends keyof T[K1][K2][K3][K4][K5][K6],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+    k7: K7,
+  ): Apply<Wrap, T[K1][K2][K3][K4][K5][K6][K7]>;
+  // Eight keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+    K4 extends keyof T[K1][K2][K3],
+    K5 extends keyof T[K1][K2][K3][K4],
+    K6 extends keyof T[K1][K2][K3][K4][K5],
+    K7 extends keyof T[K1][K2][K3][K4][K5][K6],
+    K8 extends keyof T[K1][K2][K3][K4][K5][K6][K7],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+    k7: K7,
+    k8: K8,
+  ): Apply<Wrap, T[K1][K2][K3][K4][K5][K6][K7][K8]>;
+  // Nine keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+    K4 extends keyof T[K1][K2][K3],
+    K5 extends keyof T[K1][K2][K3][K4],
+    K6 extends keyof T[K1][K2][K3][K4][K5],
+    K7 extends keyof T[K1][K2][K3][K4][K5][K6],
+    K8 extends keyof T[K1][K2][K3][K4][K5][K6][K7],
+    K9 extends keyof T[K1][K2][K3][K4][K5][K6][K7][K8],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+    k7: K7,
+    k8: K8,
+    k9: K9,
+  ): Apply<Wrap, T[K1][K2][K3][K4][K5][K6][K7][K8][K9]>;
+  // Ten keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+    K4 extends keyof T[K1][K2][K3],
+    K5 extends keyof T[K1][K2][K3][K4],
+    K6 extends keyof T[K1][K2][K3][K4][K5],
+    K7 extends keyof T[K1][K2][K3][K4][K5][K6],
+    K8 extends keyof T[K1][K2][K3][K4][K5][K6][K7],
+    K9 extends keyof T[K1][K2][K3][K4][K5][K6][K7][K8],
+    K10 extends keyof T[K1][K2][K3][K4][K5][K6][K7][K8][K9],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+    k7: K7,
+    k8: K8,
+    k9: K9,
+    k10: K10,
+  ): Apply<Wrap, T[K1][K2][K3][K4][K5][K6][K7][K8][K9][K10]>;
+  // Fallback for 11+ keys or unknown keys
+  key(...keys: PropertyKey[]): Apply<Wrap, any>;
 }
 
-export type KeyResultType<T, K, Wrap extends HKT> = [unknown] extends [K]
-  ? Apply<Wrap, any> // variance guard for K = any
-  : [0] extends [1 & T] ? Apply<Wrap, any> // keep any as-is
-  : T extends AnyBrandedCell<any, any> // wrapping a cell? delegate to it's .key
-    ? (T extends { key(k: K): infer R } ? R : Apply<Wrap, never>)
-  : Apply<Wrap, K extends keyof T ? T[K] : any>; // select key, fallback to any
+/**
+ * Helper to wrap a type, but preserve Cell/Stream types as-is to avoid double-wrapping.
+ * Uses non-distributive conditionals to handle union types correctly.
+ */
+export type WrapOrPreserve<T, Wrap extends HKT> = [T] extends [Cell<any>] ? T
+  : [T] extends [Stream<any>] ? T
+  : [T] extends [ComparableCell<any>] ? T
+  : [T] extends [ReadonlyCell<any>] ? T
+  : [T] extends [WriteonlyCell<any>] ? T
+  : [T] extends [OpaqueCell<any>] ? T
+  : Apply<Wrap, T>;
+
+/**
+ * Result type for key() - chains multiple key lookups.
+ * Supports single key: cell.key("a") or multiple: cell.key("a", "b", "c")
+ * When the final value is already a Cell/Stream type, returns it as-is.
+ */
+export type KeyResultType<
+  T,
+  Keys extends readonly PropertyKey[],
+  Wrap extends HKT,
+> = Keys extends readonly [] ? WrapOrPreserve<T, Wrap>
+  : Keys extends readonly [
+    infer First extends PropertyKey,
+    ...infer Rest extends readonly PropertyKey[],
+  ] ? [unknown] extends [First] ? Apply<Wrap, any> // variance guard
+    : [0] extends [1 & T] ? Apply<Wrap, any> // keep any as-is
+    : First extends keyof T ? KeyResultType<T[First], Rest, Wrap>
+    : Apply<Wrap, any> // unknown key fallback
+  : Apply<Wrap, any>;
+
+/**
+ * Result type for key() on OpaqueCell - chains multiple key lookups.
+ */
+export type KeyResultTypeOpaque<
+  T,
+  Keys extends readonly PropertyKey[],
+> = Keys extends readonly [] ? OpaqueCell<T>
+  : Keys extends readonly [
+    infer First extends PropertyKey,
+    ...infer Rest extends readonly PropertyKey[],
+  ] ? [unknown] extends [First] ? OpaqueCell<any>
+    : [0] extends [1 & T] ? OpaqueCell<any>
+    : First extends keyof UnwrapCell<T>
+      ? KeyResultTypeOpaque<UnwrapCell<T>[First], Rest>
+    : OpaqueCell<any>
+  : OpaqueCell<any>;
 
 /**
  * Cells that support key() for property access - OpaqueCell variant.
@@ -202,15 +399,145 @@ export type KeyResultType<T, K, Wrap extends HKT> = [unknown] extends [K]
  * Note: And for now it always returns an OpaqueRef<>, until we clean this up.
  */
 export interface IKeyableOpaque<T> {
-  key<K extends PropertyKey>(
+  /**
+   * Navigate to nested properties by one or more keys.
+   */
+  // Overloads to avoid recursive type evaluation which causes stack overflow
+  key(this: IsThisObject): OpaqueCell<T>;
+  key<K1 extends keyof UnwrapCell<T>>(
     this: IsThisObject,
-    valueKey: K,
-  ): unknown extends K ? OpaqueCell<any>
-    : K extends keyof UnwrapCell<T> ? (0 extends (1 & T) ? OpaqueCell<any>
-        : UnwrapCell<T>[K] extends never ? OpaqueCell<any>
-        : UnwrapCell<T>[K] extends AnyBrandedCell<infer U> ? OpaqueCell<U>
-        : OpaqueCell<UnwrapCell<T>[K]>)
-    : OpaqueCell<any>;
+    k1: K1,
+  ): OpaqueCell<UnwrapCell<T>[K1]>;
+  key<K1 extends keyof UnwrapCell<T>, K2 extends keyof UnwrapCell<T>[K1]>(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+  ): OpaqueCell<UnwrapCell<T>[K1][K2]>;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+  >(this: IsThisObject, k1: K1, k2: K2, k3: K3): OpaqueCell<
+    UnwrapCell<T>[K1][K2][K3]
+  >;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+    K4 extends keyof UnwrapCell<T>[K1][K2][K3],
+  >(this: IsThisObject, k1: K1, k2: K2, k3: K3, k4: K4): OpaqueCell<
+    UnwrapCell<T>[K1][K2][K3][K4]
+  >;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+    K4 extends keyof UnwrapCell<T>[K1][K2][K3],
+    K5 extends keyof UnwrapCell<T>[K1][K2][K3][K4],
+  >(this: IsThisObject, k1: K1, k2: K2, k3: K3, k4: K4, k5: K5): OpaqueCell<
+    UnwrapCell<T>[K1][K2][K3][K4][K5]
+  >;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+    K4 extends keyof UnwrapCell<T>[K1][K2][K3],
+    K5 extends keyof UnwrapCell<T>[K1][K2][K3][K4],
+    K6 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+  ): OpaqueCell<UnwrapCell<T>[K1][K2][K3][K4][K5][K6]>;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+    K4 extends keyof UnwrapCell<T>[K1][K2][K3],
+    K5 extends keyof UnwrapCell<T>[K1][K2][K3][K4],
+    K6 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5],
+    K7 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+    k7: K7,
+  ): OpaqueCell<UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7]>;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+    K4 extends keyof UnwrapCell<T>[K1][K2][K3],
+    K5 extends keyof UnwrapCell<T>[K1][K2][K3][K4],
+    K6 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5],
+    K7 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6],
+    K8 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+    k7: K7,
+    k8: K8,
+  ): OpaqueCell<UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7][K8]>;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+    K4 extends keyof UnwrapCell<T>[K1][K2][K3],
+    K5 extends keyof UnwrapCell<T>[K1][K2][K3][K4],
+    K6 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5],
+    K7 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6],
+    K8 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7],
+    K9 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7][K8],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+    k7: K7,
+    k8: K8,
+    k9: K9,
+  ): OpaqueCell<UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7][K8][K9]>;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+    K4 extends keyof UnwrapCell<T>[K1][K2][K3],
+    K5 extends keyof UnwrapCell<T>[K1][K2][K3][K4],
+    K6 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5],
+    K7 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6],
+    K8 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7],
+    K9 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7][K8],
+    K10 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7][K8][K9],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+    k7: K7,
+    k8: K8,
+    k9: K9,
+    k10: K10,
+  ): OpaqueCell<UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7][K8][K9][K10]>;
+  key(...keys: PropertyKey[]): OpaqueCell<any>;
 }
 
 /**

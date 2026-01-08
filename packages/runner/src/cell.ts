@@ -6,7 +6,6 @@ import {
   type AnyCell,
   type AnyCellWrapping,
   type Apply,
-  type AsCell,
   type Cell,
   type CellKind,
   type CellTypeConstructor,
@@ -20,7 +19,6 @@ import {
   type IsThisObject,
   type IStreamable,
   type JSONSchema,
-  type KeyResultType,
   type NodeFactory,
   type NodeRef,
   type Opaque,
@@ -907,38 +905,48 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     return areLinksSame(this, other);
   }
 
-  key<K extends PropertyKey>(
-    valueKey: K,
-  ): KeyResultType<T, K, AsCell> {
-    // Get child schema if we have one
-    const childSchema = this._link.schema
-      ? this.runtime.cfc.getSchemaAtPath(
-        this._link.schema,
-        [valueKey.toString()],
-        this._link.rootSchema,
-      )
-      : undefined;
+  /**
+   * Navigate to nested properties by one or more keys.
+   *
+   * @example
+   * cell.key("user")                      // Cell<User>
+   * cell.key("user", "profile")           // Cell<Profile>
+   * cell.key("user", "profile", "name")   // Cell<string>
+   */
+  key(...keys: PropertyKey[]): Cell<any> {
+    let currentLink = this._link;
 
-    // Create a child link with extended path
-    // When we have a childSchema, we need to preserve the rootSchema that contains $defs
-    // for resolving $ref references. If rootSchema wasn't set, fall back to the parent schema.
-    const childLink: NormalizedLink = {
-      ...this._link,
-      path: [...this._link.path, valueKey.toString()] as string[],
-      schema: childSchema,
-      rootSchema: childSchema
-        ? (this._link.rootSchema ?? this._link.schema)
-        : undefined,
-    };
+    for (const key of keys) {
+      // Get child schema if we have one
+      const childSchema = currentLink.schema
+        ? this.runtime.cfc.getSchemaAtPath(
+          currentLink.schema,
+          [key.toString()],
+          currentLink.rootSchema,
+        )
+        : undefined;
+
+      // Create a child link with extended path
+      // When we have a childSchema, we need to preserve the rootSchema that contains $defs
+      // for resolving $ref references. If rootSchema wasn't set, fall back to the parent schema.
+      currentLink = {
+        ...currentLink,
+        path: [...currentLink.path, key.toString()] as string[],
+        schema: childSchema,
+        rootSchema: childSchema
+          ? (currentLink.rootSchema ?? currentLink.schema)
+          : undefined,
+      };
+    }
 
     return new CellImpl(
       this.runtime,
       this.tx,
-      childLink,
+      currentLink,
       this.synced,
       this._causeContainer,
       this._kind,
-    ) as unknown as KeyResultType<T, K, AsCell>;
+    ) as unknown as Cell<any>;
   }
 
   asSchema<S extends JSONSchema = JSONSchema>(

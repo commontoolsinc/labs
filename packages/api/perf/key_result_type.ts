@@ -62,23 +62,23 @@ type ComplexCellValue = {
 type ComplexCell = Cell<ComplexCellValue>;
 
 type LiteralKeys = {
-  profile: KeyResultType<ComplexCell, "profile", AsCell>;
-  posts: KeyResultType<ComplexCell, "posts", AsCell>;
-  stats: KeyResultType<ComplexCell, "stats", AsCell>;
+  profile: KeyResultType<ComplexCell, ["profile"], AsCell>;
+  posts: KeyResultType<ComplexCell, ["posts"], AsCell>;
+  stats: KeyResultType<ComplexCell, ["stats"], AsCell>;
   miscFlags: KeyResultType<
     Cell<{ misc: ComplexCellValue["misc"] }>,
-    "misc",
+    ["misc"],
     AsCell
   >;
 };
 
-type UnionKeys = KeyResultType<ComplexCell, "profile" | "posts", AsCell>;
+type UnionKeys = KeyResultType<ComplexCell, ["profile" | "posts"], AsCell>;
 
-type FallbackKeys = KeyResultType<ComplexCell, string, AsCell>;
+type FallbackKeys = KeyResultType<ComplexCell, [string], AsCell>;
 
-type SymbolKeys = KeyResultType<ComplexCell, symbol, AsCell>;
+type SymbolKeys = KeyResultType<ComplexCell, [symbol], AsCell>;
 
-type PropertyKeyAccess = KeyResultType<ComplexCell, PropertyKey, AsCell>;
+type PropertyKeyAccess = KeyResultType<ComplexCell, [PropertyKey], AsCell>;
 
 type NestedProfiles = KeyResultType<
   Cell<{
@@ -91,7 +91,7 @@ type NestedProfiles = KeyResultType<
       >
     >;
   }>,
-  "users",
+  ["users"],
   AsCell
 >;
 
@@ -107,8 +107,12 @@ type StressRecordCell = Cell<{ [K in StressLiteral]: ComplexCellValue }>;
 
 type StressMatrix = {
   [K in StressLiteral]: {
-    direct: KeyResultType<StressRecordCell, K, AsCell>;
-    spread: KeyResultType<StressRecordCell, K | keyof ComplexCellValue, AsCell>;
+    direct: KeyResultType<StressRecordCell, [K], AsCell>;
+    spread: KeyResultType<
+      StressRecordCell,
+      [K | keyof ComplexCellValue],
+      AsCell
+    >;
     cross: {
       [P in StressLiteral]: KeyResultType<
         Cell<{
@@ -116,7 +120,7 @@ type StressMatrix = {
           secondary: ComplexCellValue;
           registry: Record<StressLiteral, ComplexCellValue>;
         }>,
-        K | P | "primary" | "secondary" | "registry",
+        [K | P | "primary" | "secondary" | "registry"],
         AsCell
       >;
     };
@@ -131,13 +135,13 @@ type StressSummary = {
   mapped: {
     [K in StressLiteral]: KeyResultType<
       Cell<Record<StressLiteral, ComplexCellValue>>,
-      K,
+      [K],
       AsCell
     >;
   };
   fallback: KeyResultType<
     ComplexCell,
-    StressLiteral | `${StressLiteral & string}_fallback`,
+    [StressLiteral | `${StressLiteral & string}_fallback`],
     AsCell
   >;
 };
