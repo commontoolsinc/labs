@@ -108,7 +108,7 @@ export default recipe<ListInput, ListOutput>(
         items.get().concat([
           { [ID]: 5, title: "E" },
           { [ID]: 6, title: "F" },
-        ] as any),
+        ]),
     );
     const combinedItems = computed(
       () =>
