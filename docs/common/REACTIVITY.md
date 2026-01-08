@@ -210,7 +210,7 @@ export default pattern(({ inputItems }) => {
   // Create new cells for local state
   const filteredItems = Cell.of<Item[]>([]);
   const searchQuery = Cell.of("");
-  const selectedItem = Cell.of<Item | null>(null);
+  const selectedItem = Cell.of<Item | undefined>();  // Use undefined, not null
 
   return {
     [UI]: <div>...</div>,
@@ -225,9 +225,23 @@ export default pattern(({ inputItems }) => {
 const count = Cell.of(0);                           // Number
 const name = Cell.of("Alice");                      // String
 const items = Cell.of<Item[]>([]);                  // Empty array with type
-const user = Cell.of<User>();                       // Optional value
+const user = Cell.of<User>();                       // Optional value (undefined)
 const config = Cell.of<Config>({ theme: "dark" });  // Object with initial value
 ```
+
+**Use `undefined`, not `null`, for "no value" states:**
+
+```typescript
+// ❌ WRONG - Cell.of(null) creates unexpected behavior
+const selected = Cell.of<Item | null>(null);
+if (selected.get() !== null) { ... }  // Always true! Returns Cell reference, not null
+
+// ✅ CORRECT - Use undefined and omit argument
+const selected = Cell.of<Item | undefined>();
+if (selected.get()) { ... }  // Works correctly - falsy when no value
+```
+
+When you call `Cell.of(null)`, the runtime creates a cell with a default schema pointing to null. Reading it via `.get()` returns an immutable cell reference, not primitive `null`. This causes `!== null` checks to always be truthy.
 
 **Common mistake:**
 
@@ -302,6 +316,29 @@ const result = computed(() => {
 - Performance optimization when you want a "snapshot" of a value
 
 **Caution:** Overusing `.sample()` can lead to stale data. Only use it when you specifically want to avoid reactivity.
+
+### Dependency Tracking and Early Returns
+
+The reactive system tracks dependencies by observing which values are **actually accessed during execution**. If your code path returns early before accessing a computed value, that value is never tracked as a dependency.
+
+```typescript
+// BROKEN - dependency not tracked when early return happens
+const result = computed(() => {
+  if (loading) return "Loading...";  // Returns before accessing data!
+  return data.value;  // This dependency never gets tracked if loading=true
+});
+
+// CORRECT - access dependencies before early returns
+const result = computed(() => {
+  const d = data;  // Establish dependency FIRST
+  if (loading) return "Loading...";
+  return d.value;  // Use local variable
+});
+```
+
+**Key insight:** Assign computed values to local variables at the TOP of your function, before any conditional logic. This ensures the dependency is tracked regardless of which code path executes.
+
+This is a fundamental reactive programming principle that applies to any execution-based dependency tracking system (MobX, Vue, Solid.js, etc.).
 
 ### Cell.equals()
 
@@ -792,6 +829,36 @@ const greeting = str`Hello, ${user.name}! You have ${notifications.count} new me
 ```
 
 ## Performance Considerations
+
+### The Dependency Scope Principle
+
+**A reactive computation re-runs whenever ANY of its dependencies change.** This is the fundamental principle for understanding reactive performance.
+
+Structure your computations to have the narrowest reasonable dependency scope. When inputs change independently, prefer multiple fine-grained computeds over one coarse-grained computed.
+
+```typescript
+// Coarse-grained: One computed over entire array
+// Re-runs ALL items when ANY item changes
+const processedItems = computed(() => {
+  return items.map(item => expensiveProcess(item));
+});
+
+// Fine-grained: Per-item computed inside .map()
+// Only re-runs the specific item that changed
+{items.map(item => (
+  <div>{computed(() => expensiveProcess(item))}</div>
+))}
+```
+
+**When to use which approach:**
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Items change independently | Per-item `computed()` in `.map()` |
+| Need to process entire array (sort, filter, reduce) | Single `computed()` over array |
+| Displaying static transformations | Either works; prefer simpler code |
+
+The per-item approach creates separate reactive nodes, each with its own narrow dependency. When an item is added, only the new item's computation runs. The single-computed approach treats the entire array as one dependency—any change reprocesses everything.
 
 ### When to Optimize
 

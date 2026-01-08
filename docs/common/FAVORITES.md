@@ -58,6 +58,30 @@ export default pattern<Input>(({ enableSearch }) => {
 
 This ensures the wish is established once. Conditional logic belongs in how you *use* the result, not in whether you *create* the wish.
 
+# Special Wish Targets
+
+## `#mentionable` - All Mentionable Charms
+
+Returns charms that can appear in `[[` autocomplete:
+
+```tsx
+const mentionable = wish<MentionableCharm[]>("#mentionable");
+```
+
+**Important:** This target requires the default-app infrastructure. It resolves to `spaceCell.defaultPattern.backlinksIndex.mentionable`. CLI deployments (`ct charm new`) don't set up this infrastructure automatically.
+
+**Projection:** Returns minimal data for performance - only `$NAME`, `backlinks`, and `mentioned` properties. For full charm data, use `wish("/").allCharms` instead.
+
+## `wish("/")` - Space Root
+
+Returns full space data including all charms:
+
+```tsx
+const { allCharms } = wish<{ allCharms: Charm[] }>("/");
+```
+
+Use this when you need full charm properties (like `subCharms`, custom fields).
+
 # Intended Usage
 
 Keep a handle to important information in a charm, e.g. google auth, user preferences/biography, cross-cutting data (calendar).

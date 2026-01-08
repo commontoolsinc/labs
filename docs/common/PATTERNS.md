@@ -240,6 +240,27 @@ Both patterns receive the same `items` cell - changes sync automatically.
 - **Pattern Composition**: Multiple views in one UI, reusable components
 - **Linked Charms**: Independent deployments that communicate
 
+### Child Modifying Parent State
+
+When a child pattern needs to modify parent state (and survive serialization for
+trash/restore), pass parent Cells as INPUT parameters:
+
+```typescript
+// Parent passes its Cell to child
+const picker = ChildModule({ parentItems: items });
+
+// Child receives Cell and can modify it
+interface ChildInput { parentItems: Cell<Item[]>; }
+
+export const ChildModule = pattern<ChildInput>(({ parentItems }) => {
+  const add = action(() => parentItems.push({ title: "New" }));
+  return { [UI]: <ct-button onClick={add}>Add to Parent</ct-button> };
+});
+```
+
+This works because passed Cells become SigilLinks with `overwrite: "redirect"` - writes
+flow to the parent and the reference survives JSON serialization.
+
 ---
 
 ## Making Charms Discoverable

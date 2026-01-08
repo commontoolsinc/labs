@@ -26,6 +26,8 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | CLI `get` returns stale computed values | `charm set` doesn't trigger recompute | Run `charm step` after `set` to trigger re-evaluation ([see below](#stale-computed-values-after-charm-set)) |
 | Space URL 404 or routing errors | Space name contains `/` | Use only `a-z`, `0-9`, `-`, `_` in space names |
 | "StorageTransactionInconsistent" | Read-modify-write race with spread | Use `.push()` for append, `.key(idx).set()` for updates ([see below](#array-mutation-patterns)) |
+| "X.key is not a function" | Called `.get()` then `.key()` | Use `.key()` chains for navigation ([see below](#key-not-found-after-get)) |
+| "FATAL ERROR: Reached heap limit" | VDOM type inference explosion | Use `unknown` for UI properties in output interface ([TYPES](TYPES_AND_SCHEMAS.md#vdom-properties-in-output-interfaces)) |
 
 ---
 
@@ -224,6 +226,25 @@ const total = calcTotal({ expenses });
 ```
 
 **Why:** `lift()` creates a new frame, and cells cannot be accessed via closure across frames. `computed()` gets automatic closure extraction by the CTS transformer; `lift()` does not. Use `computed()` by default in patterns.
+
+### .key() Not Found After .get()
+
+**Error:** `X.key is not a function`
+
+**Symptom:** Navigating nested data for writes, calling `.get()` then `.key()` on the result.
+
+```typescript
+// ❌ WRONG: .get() returns a value, not a Cell
+const entry = charmCell.key("subCharms").get().find(e => e.type === "x");
+entry.charm.key("items");  // TypeError: .key is not a function
+
+// ✅ CORRECT: Use .key() chains to maintain Cell references
+const itemsCell = charmCell.key("subCharms").key(0).key("charm").key("items");
+itemsCell.set([...itemsCell.get(), newItem]);
+```
+
+**Why:** `.get()` unwraps a Cell and returns its value. `.key()` is a Cell method. Use `.key()` for
+navigation when you need writable references; use `.get()` only at the END for the actual value.
 
 ### Handler Binding Error: Unknown Property
 
@@ -682,16 +703,56 @@ const removeItem = handler((_, { items, item }) => { ... });
 {items.map(item => <ct-button onClick={removeItem({ items, item })}>×</ct-button>)}
 ```
 
-**2. Pre-compute outside loops**
+**2. Choose the right reactivity granularity**
+
+The choice between per-item `computed()` and pre-computed arrays depends on your update
+pattern. See "The Dependency Scope Principle" in CELLS_AND_REACTIVITY.md for details.
 
 ```typescript
-// ❌ Expensive in loop
+// Per-item computed: O(1) when ONE item changes (only that item recomputes)
 {items.map(item => <div>{computed(() => expensive(item))}</div>)}
 
-// ✅ Compute once
+// Pre-computed array: O(1) when you need ALL items together
+// But O(N) when any single item changes (entire array recomputes)
 const processed = computed(() => items.map(expensive));
 {processed.map(result => <div>{result}</div>)}
 ```
+
+**Rule of thumb:** If individual items change frequently, per-item `computed()` is more
+efficient. If you always need the whole collection, pre-compute once.
+
+### Measuring Performance Correctly
+
+**`console.time()` inside `computed()` doesn't work** - it only measures initial graph
+setup, not reactive re-execution. The framework schedules re-runs asynchronously via
+`setTimeout(..., 0)`.
+
+```typescript
+// ❌ WRONG - Only measures setup, not re-runs
+const result = computed(() => {
+  console.time('compute');
+  const val = expensiveWork();
+  console.timeEnd('compute');
+  return val;
+});
+
+// ✅ CORRECT - Count function calls to detect N² complexity
+let callCount = 0;
+const result = computed(() => {
+  callCount++;
+  console.log(`compute called ${callCount} times`);
+  return expensiveWork();
+});
+```
+
+If `callCount` reaches 18 when you expected 1, you've found N² complexity.
+
+**Other measurement approaches:**
+
+- **Chrome DevTools Performance tab** - Record while interacting, look for long tasks (>50ms)
+- **`.sink()` to observe re-execution** - `myComputed.sink(v => console.log('recomputed'))`
+- **Handler timing** - Handlers execute synchronously, so `Date.now()` works there
+- **A/B testing** - Deploy BEFORE/AFTER versions to separate spaces, compare call counts
 
 ---
 
