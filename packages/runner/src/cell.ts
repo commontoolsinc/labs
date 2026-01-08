@@ -730,7 +730,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     newValue: AnyCellWrapping<T> | T,
     onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): Cell<JSONValue> {
-    const origValue: any = isCell(newValue) ? newValue.value : newValue;
+    const origValue: any = isCell(newValue) ? newValue.get() : newValue;
     const jsonValue = toJSONValue(origValue);
 
     return (this as unknown as Cell<JSONValue>).set(jsonValue, onCommit);
@@ -1960,7 +1960,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
  * @returns The converted value.
  */
 export function toJSONValue(
-  value: any
+  value: any,
 ): JSONValue {
   // Note: This function works by round-tripping through a JSON string, which
   // isn't particularly efficient.
@@ -1978,10 +1978,10 @@ export function toJSONValue(
       return {
         "@Error": {
           ...error,
-          name:    error.name,
+          name: error.name,
           message: error.message,
-          stack:   error.stack,
-        }
+          stack: error.stack,
+        },
       };
     }
 

@@ -67,9 +67,13 @@ describe("toJSONValue", () => {
     const arr = [new Error("first"), "middle", new Error("last")];
     const result = toJSONValue(arr) as unknown[];
 
-    expect((result[0] as { "@Error": Record<string, unknown> })["@Error"].message).toBe("first");
+    expect(
+      (result[0] as { "@Error": Record<string, unknown> })["@Error"].message,
+    ).toBe("first");
     expect(result[1]).toBe("middle");
-    expect((result[2] as { "@Error": Record<string, unknown> })["@Error"].message).toBe("last");
+    expect(
+      (result[2] as { "@Error": Record<string, unknown> })["@Error"].message,
+    ).toBe("last");
   });
 
   it("should throw on circular references", () => {
