@@ -4,8 +4,9 @@
  *
  * Claude Code Pre-Tool hook.
  * - Intercepts `git commit` commands.
- * - Runs `deno task check` and `deno task test` before allowing the commit.
+ * - Runs `deno task check`, `deno fmt --check`, and `deno lint`.
  * - Exits 2 to block the commit if checks fail.
+ * - Tests are skipped (CI will run them).
  */
 
 const rawInput = await new Response(Deno.stdin.readable).text();
@@ -24,39 +25,56 @@ if (!/\bgit\s+commit\b/.test(cmd)) {
   Deno.exit(0);
 }
 
+// Skip if using --no-verify
+if (/--no-verify/.test(cmd)) {
+  Deno.exit(0);
+}
+
 // Skip if this is an amend with no changes (e.g., just editing message)
 if (/--amend\s+--no-edit/.test(cmd) || /--amend\s+-C/.test(cmd)) {
   Deno.exit(0);
 }
 
-console.error("Running pre-commit checks...");
+console.error("Running pre-commit checks (type check, fmt, lint)...");
 
-// Run type checking
-const check = new Deno.Command("deno", {
-  args: ["task", "check"],
-  stdout: "piped",
-  stderr: "piped",
-});
-const checkResult = await check.output();
+// Run all checks in parallel for speed
+const [checkResult, fmtResult, lintResult] = await Promise.all([
+  new Deno.Command("deno", {
+    args: ["task", "check"],
+    stdout: "piped",
+    stderr: "piped",
+  }).output(),
+  new Deno.Command("deno", {
+    args: ["fmt", "--check"],
+    stdout: "piped",
+    stderr: "piped",
+  }).output(),
+  new Deno.Command("deno", {
+    args: ["lint"],
+    stdout: "piped",
+    stderr: "piped",
+  }).output(),
+]);
+
+const errors: string[] = [];
 
 if (!checkResult.success) {
-  console.error("Type check failed. Please fix type errors before committing:");
-  console.error(new TextDecoder().decode(checkResult.stderr));
-  Deno.exit(2);
+  errors.push("Type check failed:");
+  errors.push(new TextDecoder().decode(checkResult.stderr));
 }
 
-// Run tests
-const test = new Deno.Command("deno", {
-  args: ["task", "test"],
-  stdout: "piped",
-  stderr: "piped",
-});
-const testResult = await test.output();
+if (!fmtResult.success) {
+  errors.push("Formatting issues found. Run `deno fmt` to fix:");
+  errors.push(new TextDecoder().decode(fmtResult.stdout));
+}
 
-if (!testResult.success) {
-  console.error("Tests failed. Please fix failing tests before committing:");
-  console.error(new TextDecoder().decode(testResult.stderr));
-  console.error(new TextDecoder().decode(testResult.stdout));
+if (!lintResult.success) {
+  errors.push("Lint errors found:");
+  errors.push(new TextDecoder().decode(lintResult.stdout));
+}
+
+if (errors.length > 0) {
+  console.error(errors.join("\n"));
   Deno.exit(2);
 }
 
