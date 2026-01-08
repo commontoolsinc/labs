@@ -7,10 +7,10 @@ import {
   llm,
   NAME,
   recipe,
-  Schema,
   str,
   UI,
 } from "commontools";
+import type { Schema } from "commontools/schema";
 
 const EmailSchema = {
   type: "object",

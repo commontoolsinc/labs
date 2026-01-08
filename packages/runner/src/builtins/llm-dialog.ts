@@ -12,8 +12,8 @@ import type {
   BuiltInLLMTool,
   BuiltInLLMToolCallPart,
   JSONSchema,
-  Schema,
 } from "commontools";
+import type { Schema } from "@commontools/api/schema";
 import {
   LLMMessageSchema,
   LLMParamsSchema,
