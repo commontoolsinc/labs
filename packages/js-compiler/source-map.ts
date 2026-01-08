@@ -1,5 +1,7 @@
 import { SourceMap } from "./interface.ts";
 import { MappedPosition, SourceMapConsumer } from "source-map-js";
+
+export type { MappedPosition };
 import { getLogger } from "@commontools/utils/logger";
 
 const logger = getLogger("source-map");
@@ -135,6 +137,22 @@ export class SourceMapParser {
       // Replace the original line with the mapped position information
       return `    at ${fnName} (${originalPosition.source}:${originalPosition.line}:${originalPosition.column})`;
     }).join("\n");
+  }
+
+  // Map a single position to its original source location.
+  // More efficient than parse() when you only need one position.
+  mapPosition(
+    filename: string,
+    line: number,
+    column: number,
+  ): MappedPosition | null {
+    if (!this.sourceMaps.has(filename)) return null;
+
+    this.touch(filename);
+    const consumer = this.getConsumer(filename);
+    const pos = consumer.originalPositionFor({ line, column });
+
+    return mapIsEmpty(pos) ? null : pos;
   }
 
   private getConsumer(filename: string): SourceMapConsumer {

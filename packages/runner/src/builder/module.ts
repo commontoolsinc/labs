@@ -96,7 +96,9 @@ export function parseStackFrame(
   };
 }
 
-/** Extract the first source location from a stack trace that isn't from this file */
+/** Extract the first source location from a stack trace that isn't from this file.
+ * If a source map is available, maps the position back to the original source.
+ */
 function getExternalSourceLocation(): string | null {
   const stack = new Error().stack;
   if (!stack) return null;
@@ -118,6 +120,12 @@ function getExternalSourceLocation(): string | null {
   for (const line of lines) {
     const frame = parseStackFrame(line);
     if (frame && frame.file !== thisFile) {
+      // Try to map via source maps if available
+      const harness = getTopFrame()?.runtime?.harness;
+      const mapped = harness?.mapPosition(frame.file, frame.line, frame.col);
+      if (mapped?.source && mapped?.line != null) {
+        return `${mapped.source}:${mapped.line}:${mapped.column ?? 0}`;
+      }
       return `${frame.file}:${frame.line}:${frame.col}`;
     }
   }

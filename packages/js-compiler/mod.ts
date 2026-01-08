@@ -18,5 +18,10 @@ export {
   HttpProgramResolver,
   InMemoryProgram,
 } from "./program.ts";
-export { isSourceMap, parseSourceMap, SourceMapParser } from "./source-map.ts";
+export {
+  isSourceMap,
+  type MappedPosition,
+  parseSourceMap,
+  SourceMapParser,
+} from "./source-map.ts";
 export { getTypeScriptEnvironmentTypes } from "./utils.ts";
