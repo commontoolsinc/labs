@@ -170,8 +170,28 @@ export const CustomFieldModule = recipe<
     return n || "Value";
   });
 
-  // For URL type, check if has value
+  // For URL type, check if has value and sanitize URL to prevent XSS
   const urlHasValue = computed(() => String(value || "").length > 0);
+
+  // Sanitize URL to only allow http/https protocols (prevent javascript:/data: XSS)
+  const safeUrl = computed(() => {
+    const v = String(value || "").trim();
+    if (!v) return "";
+    // Add https if no protocol specified
+    const urlWithProtocol = v.startsWith("http://") || v.startsWith("https://")
+      ? v
+      : `https://${v}`;
+    // Only allow http/https protocols
+    try {
+      const url = new URL(urlWithProtocol);
+      if (url.protocol === "http:" || url.protocol === "https:") {
+        return urlWithProtocol;
+      }
+      return ""; // Invalid protocol
+    } catch {
+      return ""; // Invalid URL
+    }
+  });
 
   return {
     [NAME]: computed(() => {
@@ -244,9 +264,9 @@ export const CustomFieldModule = recipe<
             <ct-vstack style={{ gap: "8px" }}>
               <ct-input $value={value} placeholder="https://..." />
               {ifElse(
-                urlHasValue,
+                computed(() => !!safeUrl),
                 <a
-                  href={value as unknown as string}
+                  href={safeUrl as unknown as string}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{
