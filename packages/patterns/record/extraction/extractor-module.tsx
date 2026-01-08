@@ -37,14 +37,17 @@ import {
 } from "../registry.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "../types.ts";
 import type {
+  ConfidenceLevel,
   ExtractableSource,
   ExtractedField,
   ExtractionPreview,
+  ExtractionRecommendation,
+  RecommendationsResult,
   SourceExtraction,
   SourceExtractionStatus,
   ValidationIssue,
 } from "./types.ts";
-import { SOURCE_PRECEDENCE } from "./types.ts";
+import { getConfidenceLevel, SOURCE_PRECEDENCE } from "./types.ts";
 import type { JSONSchema } from "./schema-utils.ts";
 import { getResultSchema, getSchemaForType } from "./schema-utils.ts";
 import { getCellValue } from "./schema-utils-pure.ts";
@@ -110,76 +113,137 @@ interface ExtractorModuleOutput {
 // ===== Constants =====
 
 const EXTRACTION_SYSTEM_PROMPT =
-  `You are a precise data extractor for STRUCTURED fields from text like signatures, bios, or vCards.
+  `You are a precise data extractor that returns recommendations with confidence scores.
 
-=== Field Extraction Patterns (with examples) ===
+=== OUTPUT FORMAT ===
+Return a JSON object with a "recommendations" array. Each recommendation represents ONE module type:
+{
+  "recommendations": [
+    {
+      "type": "email",           // Module type (email, phone, birthday, address, social, dietary, notes)
+      "score": 95,               // Confidence 0-100
+      "explanation": "Found explicit email address in signature",
+      "extractedData": { "address": "john@example.com" },
+      "sourceExcerpt": "Email: john@example.com"
+    }
+  ]
+}
 
-PHONE (field: "number"):
-- PRESERVE original formatting exactly as written
-- Example: "Cell: (415) 555-1234" → "number": "(415) 555-1234"
-- Example: "Mobile +1-650-555-9876" → "number": "+1-650-555-9876"
-- DO NOT normalize or reformat phone numbers
+=== CONFIDENCE SCORING ===
+- 90-100 (HIGH): Explicit, unambiguous data. Clear labels like "Email:", "Phone:", exact formats.
+- 50-89 (MEDIUM): Likely correct but some inference needed. Unlabeled but recognizable patterns.
+- 0-49 (LOW): Uncertain extraction. Context-dependent, ambiguous, or partial data.
 
-EMAIL (field: "address"):
+Examples:
+- "Email: john@example.com" → score: 95 (explicit label + valid format)
+- "john@example.com" (no label) → score: 75 (valid format but no label)
+- "reach me at john at example dot com" → score: 40 (requires interpretation)
+
+=== FIELD PATTERNS ===
+
+PHONE (type: "phone", field: "number"):
+- PRESERVE original formatting exactly
+- Example: "Cell: (415) 555-1234" → score: 95, extractedData: {"number": "(415) 555-1234"}
+
+EMAIL (type: "email", field: "address"):
 - Extract complete email address only
-- Example: "Contact me at john.doe@acme.com anytime" → "address": "john.doe@acme.com"
-- "john at company dot com" is NOT an email - return null
+- Example: "john.doe@acme.com" → score: 90, extractedData: {"address": "john.doe@acme.com"}
 
-BIRTHDAY (fields: "birthMonth", "birthDay", "birthYear"):
-- Extract as SEPARATE string components, not a combined date
-- Example: "Born March 15, 1990" → "birthMonth": "3", "birthDay": "15", "birthYear": "1990"
-- Example: "DOB: 12/25" → "birthMonth": "12", "birthDay": "25", "birthYear": null
-- Month values: 1-12 (not "January", "March")
+BIRTHDAY (type: "birthday", fields: "birthMonth", "birthDay", "birthYear"):
+- Extract as SEPARATE string components
+- Example: "Born March 15, 1990" → score: 85, extractedData: {"birthMonth": "3", "birthDay": "15", "birthYear": "1990"}
 
-ADDRESS (fields: "street", "city", "state", "zip"):
-- state: Use 2-letter US abbreviation (CA, NY, TX, etc.)
-- Example: "123 Main St, San Francisco, California 94102"
-  → "street": "123 Main St", "city": "San Francisco", "state": "CA", "zip": "94102"
+ADDRESS (type: "address", fields: "street", "city", "state", "zip"):
+- state: Use 2-letter US abbreviation
+- Example: "123 Main St, San Francisco, CA 94102" → score: 90
 
-SOCIAL MEDIA (fields: "platform", "handle", "profileUrl"):
-- platform: Normalize to lowercase (twitter, linkedin, github, instagram, facebook, youtube, tiktok, mastodon, bluesky)
+SOCIAL MEDIA (type: "social", fields: "platform", "handle", "profileUrl"):
+- platform: Normalize to lowercase (twitter, linkedin, github, etc.)
 - handle: WITHOUT the @ prefix
-- Example: "@alice_smith on Twitter" → "platform": "twitter", "handle": "alice_smith"
-- Example: "github.com/bob-dev" → "platform": "github", "handle": "bob-dev", "profileUrl": "https://github.com/bob-dev"
+- Example: "@alice_smith on Twitter" → score: 95, extractedData: {"platform": "twitter", "handle": "alice_smith"}
 
-DIETARY (field: "restrictions"):
+DIETARY (type: "dietary", field: "restrictions"):
 - Array of {name, level} objects
-- Infer severity from context:
-  - "absolute": Allergies, medical necessity, religious requirements (anaphylaxis, "allergic to", kosher)
-  - "strict": Ethical commitment, strong avoidance (vegan lifestyle, "can't have")
-  - "prefer": Mild intolerance, general preference ("try to avoid", "sensitive to")
-  - "flexible": Slight preference ("if possible", "when convenient")
-- Example: "I'm allergic to peanuts and try to avoid dairy"
-  → "restrictions": [{"name": "peanuts", "level": "absolute"}, {"name": "dairy", "level": "prefer"}]
+- Levels: "absolute" (allergies), "strict" (ethical), "prefer" (mild), "flexible" (slight)
+- Example: "allergic to peanuts" → score: 95, extractedData: {"restrictions": [{"name": "peanuts", "level": "absolute"}]}
 
-=== What TO Extract (structured data only) ===
+NAME (type: "record-title", field: "name"):
+- Extract person's full name for Record title
+- Example: "John Smith" in signature → score: 80, extractedData: {"name": "John Smith"}
+
+NOTES (type: "notes", field: "content"):
+- Content that should REMAIN in notes after extraction (non-structured content)
+- This is what's LEFT OVER, not what's extracted
+
+=== WHAT TO EXTRACT ===
 - Email addresses, phone numbers, physical addresses
 - Social media handles and profile URLs
 - Specific dates (birthdays, anniversaries)
 - Explicit dietary restrictions or allergies
-- URLs and links
+- Names (when clearly a person's name)
 
-=== What NOT to Extract (leave in Notes) ===
-- Vague preferences: "loves coffee", "enjoys hiking", "likes rabbits"
-- Opinions or personality traits: "is very friendly", "great sense of humor"
-- Conversational text: "met at the conference", "works with Sarah"
-- Hobby mentions: "plays guitar", "into photography"
-- Food preferences that aren't restrictions: "loves Italian food", "favorite is pizza"
+=== WHAT NOT TO EXTRACT ===
+- Vague preferences: "loves coffee", "enjoys hiking" → Keep in notes
+- Personality traits: "is very friendly" → Keep in notes
+- Conversational text: "met at conference" → Keep in notes
+- Food preferences (not restrictions): "loves pizza" → Keep in notes
 
-=== Stopping Rules ===
-1. Extract ONLY fields present in the provided schema
-2. Return null for missing fields - when in doubt, return null
-3. STOP if you find yourself inferring or fabricating data
-4. "Loves X", "likes X", "enjoys X" → NEVER extract (not structured data)
-5. DO NOT extract labels like "Mobile", "Work" as separate fields
-
-Return JSON with extracted fields. Prefer leaving text in Notes over aggressive extraction.`;
+=== RULES ===
+1. Return ONLY recommendations with score > 0
+2. One recommendation per module type
+3. Include sourceExcerpt showing the text that led to extraction
+4. When uncertain, use lower confidence score rather than omitting
+5. Always include a "notes" recommendation for remaining content`;
 
 const OCR_SYSTEM_PROMPT =
   `You are an OCR system. Extract all text from the provided image.
 Return ONLY the extracted text, preserving formatting and line breaks.
 Do not add any commentary, explanation, or formatting like markdown.
 If no text is visible, return an empty string.`;
+
+/**
+ * Schema for recommendations-based extraction.
+ * Instead of a flat field extraction, the LLM returns an array of recommendations
+ * with confidence scores and explanations.
+ */
+const RECOMMENDATIONS_SCHEMA: JSONSchema = {
+  type: "object",
+  properties: {
+    recommendations: {
+      type: "array",
+      description: "Array of extraction recommendations, one per module type",
+      items: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            description:
+              "Module type: email, phone, birthday, address, social, dietary, notes, record-title",
+          },
+          score: {
+            type: "number",
+            description: "Confidence score 0-100. High: 90-100, Medium: 50-89, Low: 0-49",
+          },
+          explanation: {
+            type: "string",
+            description: "Brief explanation of why this was extracted and confidence level",
+          },
+          extractedData: {
+            type: "object",
+            description: "The extracted field values for this module type",
+            additionalProperties: true,
+          },
+          sourceExcerpt: {
+            type: "string",
+            description: "The text snippet from the source that led to this extraction",
+          },
+        },
+        required: ["type", "score", "explanation", "extractedData"],
+      },
+    },
+  },
+  required: ["recommendations"],
+};
 
 // NOTES_CLEANUP via extraction result:
 // =====================================
@@ -535,8 +599,64 @@ function validateExtractedField(
 }
 
 /**
- * Build extraction preview from raw LLM result and existing modules
+ * Check if extraction result is in recommendations format
+ */
+function isRecommendationsResult(
+  result: unknown,
+): result is RecommendationsResult {
+  if (!result || typeof result !== "object") return false;
+  const obj = result as Record<string, unknown>;
+  return Array.isArray(obj.recommendations);
+}
+
+/**
+ * Convert recommendations to flat field format for merging with legacy code.
+ * Also returns a map of field keys to their confidence/explanation metadata.
+ */
+function flattenRecommendations(
+  recommendations: ExtractionRecommendation[],
+): {
+  flatFields: Record<string, unknown>;
+  fieldMetadata: Record<
+    string,
+    { confidence: number; explanation: string; sourceExcerpt?: string }
+  >;
+} {
+  const flatFields: Record<string, unknown> = {};
+  const fieldMetadata: Record<
+    string,
+    { confidence: number; explanation: string; sourceExcerpt?: string }
+  > = {};
+
+  for (const rec of recommendations) {
+    const moduleType = rec.type;
+    const extractedData = rec.extractedData || {};
+
+    for (const [fieldName, value] of Object.entries(extractedData)) {
+      if (value === null || value === undefined) continue;
+
+      // Store flat field
+      flatFields[fieldName] = value;
+
+      // Store metadata keyed by "moduleType.fieldName"
+      const fieldKey = `${moduleType}.${fieldName}`;
+      fieldMetadata[fieldKey] = {
+        confidence: rec.score,
+        explanation: rec.explanation,
+        sourceExcerpt: rec.sourceExcerpt,
+      };
+    }
+  }
+
+  return { flatFields, fieldMetadata };
+}
+
+/**
+ * Build extraction preview from raw LLM result and existing modules.
+ * Supports both legacy flat field format and new recommendations format.
+ *
  * @param currentTitle - Current Record title (for "record-title" pseudo-type)
+ * @param fieldMetadata - Optional metadata from recommendations (confidence, explanation)
  *
  * Note: Normalizes "null" strings to null before processing (LLM workaround)
  */
@@ -544,6 +664,10 @@ function buildPreview(
   extracted: Record<string, unknown>,
   subCharms: readonly SubCharmEntry[],
   currentTitle?: string,
+  fieldMetadata?: Record<
+    string,
+    { confidence: number; explanation: string; sourceExcerpt?: string }
+  >,
 ): ExtractionPreview {
   // Normalize "null" strings to actual null in the entire extraction result
   const normalizedExtracted = normalizeNullString(extracted) as Record<
@@ -574,11 +698,21 @@ function buildPreview(
       // Compare against current Record title
       if (currentTitle === extractedValue) continue;
 
+      // Look up confidence metadata if available
+      const fieldKey = `${moduleType}.name`;
+      const meta = fieldMetadata?.[fieldKey];
+
       const field: ExtractedField = {
         fieldName: "name",
         targetModule: "record-title",
         extractedValue,
         currentValue: currentTitle || undefined,
+        confidence: meta?.confidence,
+        confidenceLevel: meta?.confidence !== undefined
+          ? getConfidenceLevel(meta.confidence)
+          : undefined,
+        explanation: meta?.explanation,
+        sourceExcerpt: meta?.sourceExcerpt,
       };
 
       fields.push(field);
@@ -616,12 +750,22 @@ function buildPreview(
       }
     }
 
+    // Look up confidence metadata if available
+    const fieldKey = `${moduleType}.${fieldName}`;
+    const meta = fieldMetadata?.[fieldKey];
+
     const field: ExtractedField = {
       fieldName,
       targetModule: moduleType,
       extractedValue,
       currentValue,
       validationIssue,
+      confidence: meta?.confidence,
+      confidenceLevel: meta?.confidence !== undefined
+        ? getConfidenceLevel(meta.confidence)
+        : undefined,
+      explanation: meta?.explanation,
+      sourceExcerpt: meta?.sourceExcerpt,
     };
 
     fields.push(field);
@@ -666,6 +810,19 @@ function buildPreview(
       byModule[def.type].push(field);
     }
   }
+
+  // Sort fields by confidence (high first), then by module type
+  fields.sort((a, b) => {
+    // Fields with confidence come before those without
+    if (a.confidence !== undefined && b.confidence === undefined) return -1;
+    if (a.confidence === undefined && b.confidence !== undefined) return 1;
+    // Sort by confidence descending
+    if (a.confidence !== undefined && b.confidence !== undefined) {
+      return b.confidence - a.confidence;
+    }
+    // Fall back to alphabetical by module type
+    return a.targetModule.localeCompare(b.targetModule);
+  });
 
   return {
     fields,
@@ -823,6 +980,30 @@ const toggleTrashHandler = handler<
   trashSelectionsCell.set({
     ...current,
     [index]: !currentValue,
+  });
+});
+
+/**
+ * Toggle field selection handler - for preview checkboxes
+ */
+const toggleFieldHandler = handler<
+  unknown,
+  {
+    fieldKey: string;
+    selectionsCell: Cell<
+      Default<Record<string, boolean>, Record<string, never>>
+    >;
+    defaultSelected: boolean;
+  }
+>((_event, { fieldKey, selectionsCell, defaultSelected }) => {
+  const current = selectionsCell.get() || {};
+  // Use default if not explicitly set
+  const currentValue = current[fieldKey] !== undefined
+    ? current[fieldKey] !== false
+    : defaultSelected;
+  selectionsCell.set({
+    ...current,
+    [fieldKey]: !currentValue,
   });
 });
 
@@ -1273,7 +1454,13 @@ const applySelected = handler<
       const fieldsByModule: Record<string, ExtractedField[]> = {};
       for (const field of previewData.fields) {
         const fieldKey = `${field.targetModule}.${field.fieldName}`;
-        if (selected[fieldKey] === false) continue;
+        // Check explicit selection state first
+        if (selected[fieldKey] !== undefined) {
+          if (selected[fieldKey] === false) continue;
+        } else {
+          // Default: skip low confidence fields (not explicitly selected)
+          if (field.confidenceLevel === "low") continue;
+        }
 
         if (!fieldsByModule[field.targetModule]) {
           fieldsByModule[field.targetModule] = [];
@@ -1680,11 +1867,13 @@ export const ExtractorModule = recipe<
           }
         });
 
-        // Create extraction call for this source
+        // Create extraction call for this source using recommendations schema
+        // Wrap schema in computed() to satisfy OpaqueCell type requirement
+        const recommendationsSchemaCell = computed(() => RECOMMENDATIONS_SCHEMA);
         const extraction = generateObject({
           system: EXTRACTION_SYSTEM_PROMPT,
           prompt,
-          schema: extractSchema,
+          schema: recommendationsSchemaCell,
           model: "anthropic:claude-haiku-4-5",
         });
 
@@ -1698,11 +1887,24 @@ export const ExtractorModule = recipe<
     );
 
     // Build SourceExtraction array with status from per-source calls
-    const sourceExtractions = computed((): SourceExtraction[] => {
+    // Also collect field metadata (confidence, explanation) for preview
+    const sourceExtractionsWithMetadata = computed((): {
+      extractions: SourceExtraction[];
+      allFieldMetadata: Record<
+        string,
+        { confidence: number; explanation: string; sourceExcerpt?: string }
+      >;
+    } => {
       const calls = perSourceExtractions;
-      if (!calls || calls.length === 0) return [];
+      if (!calls || calls.length === 0) {
+        return { extractions: [], allFieldMetadata: {} };
+      }
 
       const results: SourceExtraction[] = [];
+      const allFieldMetadata: Record<
+        string,
+        { confidence: number; explanation: string; sourceExcerpt?: string }
+      > = {};
 
       for (const call of calls) {
         let status: SourceExtractionStatus = "pending";
@@ -1725,12 +1927,27 @@ export const ExtractorModule = recipe<
           error = String(errorObj.message || extraction.error);
         } else if (extraction.result) {
           status = "complete";
-          const result = extraction.result as Record<string, unknown>;
-          // Normalize null strings
-          extractedFields = normalizeNullString(result) as Record<
-            string,
-            unknown
-          >;
+          const result = extraction.result;
+
+          // Check if result is in recommendations format
+          if (isRecommendationsResult(result)) {
+            // Convert recommendations to flat fields and collect metadata
+            const { flatFields, fieldMetadata } = flattenRecommendations(
+              result.recommendations,
+            );
+            extractedFields = normalizeNullString(flatFields) as Record<
+              string,
+              unknown
+            >;
+            // Merge metadata from this source
+            Object.assign(allFieldMetadata, fieldMetadata);
+          } else {
+            // Legacy flat field format - normalize null strings
+            extractedFields = normalizeNullString(
+              result as Record<string, unknown>,
+            ) as Record<string, unknown>;
+          }
+
           // Count non-null fields
           fieldCount = Object.values(extractedFields).filter(
             (v) => v !== null && v !== undefined,
@@ -1748,8 +1965,21 @@ export const ExtractorModule = recipe<
         });
       }
 
-      return results;
+      return { extractions: results, allFieldMetadata };
     });
+
+    // Accessor for just the extractions array
+    const sourceExtractions = computed(
+      (): SourceExtraction[] => sourceExtractionsWithMetadata.extractions,
+    );
+
+    // Accessor for field metadata (for buildPreview)
+    const extractionFieldMetadata = computed(
+      (): Record<
+        string,
+        { confidence: number; explanation: string; sourceExcerpt?: string }
+      > => sourceExtractionsWithMetadata.allFieldMetadata,
+    );
 
     // Per-source status tracking computed values
     const anySourcePending = computed((): boolean => {
@@ -1840,22 +2070,33 @@ export const ExtractorModule = recipe<
       if (!mergedExtractionResult) return null;
       const subCharms = parentSubCharms.get() || [];
       const currentTitle = parentTitle.get() || "";
+      const metadata = extractionFieldMetadata;
       const result = buildPreview(
         mergedExtractionResult,
         subCharms,
         currentTitle,
+        metadata,
       );
       return result;
     });
 
     // Count selected fields for button text
+    // Low confidence fields (< 50) are deselected by default
     const selectedCount = computed(() => {
       const p = preview;
       if (!p?.fields) return 0;
       const sel = selections.get() || {};
       return p.fields.filter((f: ExtractedField) => {
         const key = `${f.targetModule}.${f.fieldName}`;
-        return sel[key] !== false; // Default is selected
+        // Check explicit selection state first
+        if (sel[key] !== undefined) {
+          return sel[key] !== false;
+        }
+        // Default: deselect low confidence fields (< 50)
+        if (f.confidenceLevel === "low") {
+          return false;
+        }
+        return true; // Default is selected for high/medium confidence
       }).length;
     });
 
@@ -1883,10 +2124,12 @@ export const ExtractorModule = recipe<
       if (!mergedExtractionResult) return "No fields extracted";
       const subCharms = parentSubCharms.get() || [];
       const currentTitle = parentTitle.get() || "";
+      const metadata = extractionFieldMetadata;
       const previewData = buildPreview(
         mergedExtractionResult,
         subCharms,
         currentTitle,
+        metadata,
       );
       if (!previewData?.fields?.length) return "No fields extracted";
       return previewData.fields.map((f: ExtractedField) => {
@@ -1902,7 +2145,15 @@ export const ExtractorModule = recipe<
             ? " [ERROR]"
             : " [WARNING]"
           : "";
-        return `${displayModule}.${f.fieldName}: ${current} -> ${extracted}${validationIndicator}`;
+        // Add confidence indicator if available
+        const confidenceIndicator = f.confidenceLevel
+          ? f.confidenceLevel === "high"
+            ? " [HIGH]"
+            : f.confidenceLevel === "medium"
+              ? " [MED]"
+              : " [LOW]"
+          : "";
+        return `${displayModule}.${f.fieldName}: ${current} -> ${extracted}${validationIndicator}${confidenceIndicator}`;
       }).join("\n");
     });
 
@@ -2088,6 +2339,26 @@ export const ExtractorModule = recipe<
     // Pre-computed trash selection state map
     // Uses centralized sourceData to avoid redundant scanExtractableSources() calls
     const trashCheckStates = computed(() => sourceData.trashCheckStates);
+
+    // Pre-computed field selection state map for preview checkboxes
+    // Low confidence fields are deselected by default
+    const fieldCheckStates = computed((): Record<string, boolean> => {
+      const p = preview;
+      if (!p?.fields) return {};
+      const sel = selections.get() || {};
+      const result: Record<string, boolean> = {};
+      for (const f of p.fields) {
+        const key = `${f.targetModule}.${f.fieldName}`;
+        // Check explicit selection state first
+        if (sel[key] !== undefined) {
+          result[key] = sel[key] !== false;
+        } else {
+          // Default: deselect low confidence fields (< 50)
+          result[key] = f.confidenceLevel !== "low";
+        }
+      }
+      return result;
+    });
 
     // Preview phase computed values
     const hasNotesSnapshot = computed(() => {
@@ -2553,34 +2824,170 @@ export const ExtractorModule = recipe<
             <div
               style={{ display: "flex", flexDirection: "column", gap: "16px" }}
             >
-              {/* Extracted fields */}
+              {/* Extracted fields with confidence badges */}
               <div
                 style={{
                   background: "white",
                   borderRadius: "6px",
                   border: "1px solid #e5e7eb",
-                  padding: "12px",
+                  overflow: "hidden",
                 }}
               >
                 <div
                   style={{
-                    marginBottom: "8px",
+                    padding: "12px",
+                    borderBottom: "1px solid #e5e7eb",
                     fontWeight: "500",
                     color: "#374151",
                   }}
                 >
-                  Extracted Fields:
+                  Extracted Fields ({selectedCount} selected):
                 </div>
-                <div
-                  style={{
-                    fontSize: "13px",
-                    color: "#6b7280",
-                    whiteSpace: "pre-wrap",
-                    fontFamily: "monospace",
-                  }}
-                >
-                  {previewText}
-                </div>
+                {preview?.fields?.map((f: ExtractedField, idx: number) => {
+                  const fieldKey = `${f.targetModule}.${f.fieldName}`;
+                  const displayModule = f.targetModule === "record-title"
+                    ? "Record Title"
+                    : f.targetModule;
+                  const isChecked = fieldCheckStates[fieldKey] === true;
+                  const defaultSelected = f.confidenceLevel !== "low";
+
+                  // Confidence badge - always include, show based on level
+                  const confidenceBg = f.confidenceLevel === "high"
+                    ? "#dcfce7"
+                    : f.confidenceLevel === "medium"
+                      ? "#fef9c3"
+                      : f.confidenceLevel === "low"
+                        ? "#fee2e2"
+                        : "transparent";
+                  const confidenceColor = f.confidenceLevel === "high"
+                    ? "#166534"
+                    : f.confidenceLevel === "medium"
+                      ? "#854d0e"
+                      : f.confidenceLevel === "low"
+                        ? "#991b1b"
+                        : "#9ca3af";
+                  const confidenceIcon = f.confidenceLevel === "high"
+                    ? "\u2713"
+                    : f.confidenceLevel === "medium"
+                      ? "\u25CF"
+                      : f.confidenceLevel === "low"
+                        ? "\u26A0"
+                        : "";
+                  const confidenceLabel = f.confidenceLevel === "high"
+                    ? "High"
+                    : f.confidenceLevel === "medium"
+                      ? "Med"
+                      : f.confidenceLevel === "low"
+                        ? "Low"
+                        : "";
+                  const hasConfidence = f.confidenceLevel !== undefined;
+
+                  return (
+                    <div
+                      key={idx}
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "8px",
+                        padding: "10px 12px",
+                        borderBottom: "1px solid #f3f4f6",
+                        opacity: isChecked ? 1 : 0.6,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={toggleFieldHandler({
+                          fieldKey,
+                          selectionsCell: selections,
+                          defaultSelected,
+                        })}
+                        style={{ marginTop: "2px" }}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            marginBottom: "4px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontWeight: "500",
+                              color: "#374151",
+                              fontSize: "13px",
+                            }}
+                          >
+                            {displayModule}.{f.fieldName}
+                          </span>
+                          {ifElse(
+                            hasConfidence,
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                padding: "1px 6px",
+                                borderRadius: "4px",
+                                background: confidenceBg,
+                                color: confidenceColor,
+                              }}
+                            >
+                              {confidenceIcon} {confidenceLabel}
+                            </span>,
+                            null,
+                          )}
+                          {ifElse(
+                            f.validationIssue !== undefined,
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                padding: "1px 6px",
+                                borderRadius: "4px",
+                                background:
+                                  f.validationIssue?.severity === "error"
+                                    ? "#fee2e2"
+                                    : "#fef3c7",
+                                color:
+                                  f.validationIssue?.severity === "error"
+                                    ? "#991b1b"
+                                    : "#92400e",
+                              }}
+                            >
+                              {f.validationIssue?.message}
+                            </span>,
+                            null,
+                          )}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "12px",
+                            color: "#6b7280",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          {formatValue(f.currentValue)} -&gt;{" "}
+                          {formatValue(f.extractedValue)}
+                        </div>
+                        {ifElse(
+                          f.explanation !== undefined && f.explanation !== "",
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              color: "#9ca3af",
+                              marginTop: "4px",
+                              fontStyle: "italic",
+                            }}
+                          >
+                            {f.explanation}
+                          </div>,
+                          null,
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Notes cleanup section */}

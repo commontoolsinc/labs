@@ -28,6 +28,10 @@ export interface ExtractedField {
   currentValue?: unknown; // For diff display (read from existing module)
   isNewInstance?: boolean; // For array extraction mode - each item creates a new module instance
   validationIssue?: ValidationIssue; // Validation problem if any
+  confidence?: number; // 0-100 confidence score from LLM
+  confidenceLevel?: ConfidenceLevel; // "high" | "medium" | "low"
+  explanation?: string; // Why this field was extracted
+  sourceExcerpt?: string; // Text snippet that led to extraction
 }
 
 /**
