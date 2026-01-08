@@ -409,6 +409,87 @@ function getFieldSchema(
 }
 
 /**
+ * Validate an extracted field value and return a ValidationIssue if there's a problem.
+ * Checks for type mismatches, invalid email format, and invalid phone format.
+ */
+function validateExtractedField(
+  fieldName: string,
+  extractedValue: unknown,
+  expectedSchema: JSONSchema | undefined,
+): ValidationIssue | undefined {
+  // Type mismatch validation
+  if (expectedSchema?.type) {
+    const actualType = Array.isArray(extractedValue)
+      ? "array"
+      : typeof extractedValue;
+    const expectedType = expectedSchema.type;
+
+    // Check for type mismatch (allow strings where numbers expected since LLMs often return strings)
+    if (expectedType === "array" && actualType !== "array") {
+      return {
+        code: "TYPE_MISMATCH",
+        message: `Expected array, got ${actualType}`,
+        severity: "error",
+      };
+    }
+    if (
+      expectedType === "object" && actualType !== "object" &&
+      extractedValue !== null
+    ) {
+      return {
+        code: "TYPE_MISMATCH",
+        message: `Expected object, got ${actualType}`,
+        severity: "error",
+      };
+    }
+    if (expectedType === "boolean" && actualType !== "boolean") {
+      return {
+        code: "TYPE_MISMATCH",
+        message: `Expected boolean, got ${actualType}`,
+        severity: "error",
+      };
+    }
+  }
+
+  // Email format validation (check for @ symbol)
+  if (
+    fieldName === "address" || fieldName === "email" ||
+    fieldName.toLowerCase().includes("email")
+  ) {
+    if (typeof extractedValue === "string" && extractedValue.trim()) {
+      if (!extractedValue.includes("@")) {
+        return {
+          code: "INVALID_FORMAT",
+          message: "Invalid email format (missing @)",
+          severity: "warning",
+        };
+      }
+    }
+  }
+
+  // Phone format validation (basic check for digits)
+  if (
+    fieldName === "number" || fieldName === "phone" ||
+    fieldName.toLowerCase().includes("phone")
+  ) {
+    if (typeof extractedValue === "string" && extractedValue.trim()) {
+      // Remove common phone formatting characters and check if there are at least some digits
+      const digitsOnly = extractedValue.replace(/[\s\-\(\)\+\.]/g, "");
+      const digitCount = (digitsOnly.match(/\d/g) || []).length;
+      if (digitCount < 7) {
+        return {
+          code: "INVALID_FORMAT",
+          message: "Phone number appears too short",
+          severity: "warning",
+        };
+      }
+    }
+  }
+
+  return undefined;
+}
+
+/**
  * Build extraction preview from raw LLM result and existing modules
  * @param currentTitle - Current Record title (for "record-title" pseudo-type)
  *
@@ -429,6 +510,10 @@ function buildPreview(
   const fieldToType = getFullFieldMapping();
   const fields: ExtractedField[] = [];
   const byModule: Record<string, ExtractedField[]> = {};
+
+  // Track validation issue counts
+  let errorCount = 0;
+  let warningCount = 0;
 
   for (
     const [fieldName, extractedValue] of Object.entries(normalizedExtracted)
@@ -467,11 +552,31 @@ function buildPreview(
       continue;
     }
 
+    // Get field schema for validation
+    const fieldSchema = getFieldSchema(subCharms, moduleType, fieldName);
+
+    // Validate the extracted field
+    const validationIssue = validateExtractedField(
+      fieldName,
+      extractedValue,
+      fieldSchema,
+    );
+
+    // Count validation issues
+    if (validationIssue) {
+      if (validationIssue.severity === "error") {
+        errorCount++;
+      } else {
+        warningCount++;
+      }
+    }
+
     const field: ExtractedField = {
       fieldName,
       targetModule: moduleType,
       extractedValue,
       currentValue,
+      validationIssue,
     };
 
     fields.push(field);
@@ -517,7 +622,14 @@ function buildPreview(
     }
   }
 
-  return { fields, byModule };
+  return {
+    fields,
+    byModule,
+    validationSummary: {
+      errorCount,
+      warningCount,
+    },
+  };
 }
 
 /**
@@ -1493,8 +1605,41 @@ export const ExtractorModule = recipe<
         const displayModule = f.targetModule === "record-title"
           ? "Record Title"
           : f.targetModule;
-        return `${displayModule}.${f.fieldName}: ${current} -> ${extracted}`;
+        // Add validation indicator if there's an issue
+        const validationIndicator = f.validationIssue
+          ? f.validationIssue.severity === "error"
+            ? " [ERROR]"
+            : " [WARNING]"
+          : "";
+        return `${displayModule}.${f.fieldName}: ${current} -> ${extracted}${validationIndicator}`;
       }).join("\n");
+    });
+
+    // Validation summary computed values
+    const validationErrorCount = computed(() => {
+      const p = preview;
+      return p?.validationSummary?.errorCount || 0;
+    });
+    const validationWarningCount = computed(() => {
+      const p = preview;
+      return p?.validationSummary?.warningCount || 0;
+    });
+    const hasValidationIssues = computed(() => {
+      const errors = Number(validationErrorCount);
+      const warnings = Number(validationWarningCount);
+      return errors > 0 || warnings > 0;
+    });
+    const validationSummaryText = computed(() => {
+      const errors = Number(validationErrorCount);
+      const warnings = Number(validationWarningCount);
+      const parts: string[] = [];
+      if (errors > 0) {
+        parts.push(`${errors} error${errors === 1 ? "" : "s"}`);
+      }
+      if (warnings > 0) {
+        parts.push(`${warnings} warning${warnings === 1 ? "" : "s"}`);
+      }
+      return parts.join(", ");
     });
 
     // Notes cleanup now uses the extraction result's `notes` field directly.
@@ -1592,7 +1737,10 @@ export const ExtractorModule = recipe<
       const error = extraction.error;
       if (!error) return "Extraction failed. Try again or add more content.";
 
-      const errorStr = String(error.message || error).toLowerCase();
+      // Cast to Error-like object to access message property
+      // extraction.error is OpaqueCell<unknown> which doesn't expose .message directly
+      const errorObj = error as unknown as { message?: string };
+      const errorStr = String(errorObj.message || error).toLowerCase();
 
       // Rate limiting errors (429, rate limit)
       if (errorStr.includes("rate") || errorStr.includes("429")) {
@@ -1610,7 +1758,7 @@ export const ExtractorModule = recipe<
       }
 
       // Default: Show actual error message (truncated if needed)
-      const fullMessage = String(error.message || error);
+      const fullMessage = String(errorObj.message || error);
       if (fullMessage.length > 100) {
         return fullMessage.slice(0, 100) + "...";
       }
@@ -1621,7 +1769,9 @@ export const ExtractorModule = recipe<
     const fullErrorDetails = computed((): string => {
       const error = extraction.error;
       if (!error) return "";
-      return String(error.message || error);
+      // Cast to Error-like object to access message property
+      const errorObj = error as unknown as { message?: string };
+      return String(errorObj.message || error);
     });
 
     // Check if error details are expanded
@@ -2009,13 +2159,56 @@ export const ExtractorModule = recipe<
                   fontSize: "13px",
                 }}
               >
-                Extraction failed. Try again or add more content.
+                {errorMessage}
+              </div>
+              {/* Expandable error details section */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const current = errorDetailsExpanded.get() === true;
+                    errorDetailsExpanded.set(!current);
+                  }}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "12px",
+                    color: "#6b7280",
+                    padding: "4px 0",
+                    textDecoration: "underline",
+                  }}
+                >
+                  {ifElse(showErrorDetails, "Hide details", "Show details")}
+                </button>
+                {ifElse(
+                  showErrorDetails,
+                  <div
+                    style={{
+                      marginTop: "8px",
+                      padding: "8px",
+                      background: "#fef2f2",
+                      borderRadius: "4px",
+                      fontSize: "11px",
+                      color: "#7f1d1d",
+                      fontFamily: "monospace",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      maxHeight: "120px",
+                      overflow: "auto",
+                    }}
+                  >
+                    {fullErrorDetails}
+                  </div>,
+                  null,
+                )}
               </div>
               <button
                 type="button"
                 onClick={() => {
                   extractPhase.set("select");
                   extractionPrompt.set("");
+                  errorDetailsExpanded.set(false);
                 }}
                 style={{
                   padding: "8px 16px",
@@ -2396,6 +2589,59 @@ export const ExtractorModule = recipe<
                 null,
               )}
 
+              {/* Validation summary */}
+              {ifElse(
+                hasValidationIssues,
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    padding: "8px 12px",
+                    background: "#fef3c7",
+                    border: "1px solid #fde68a",
+                    borderRadius: "6px",
+                    fontSize: "13px",
+                    color: "#92400e",
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    {ifElse(
+                      validationErrorCount,
+                      <span
+                        style={{
+                          display: "inline-block",
+                          width: "8px",
+                          height: "8px",
+                          borderRadius: "50%",
+                          background: "#ef4444",
+                        }}
+                      />,
+                      <span
+                        style={{
+                          display: "inline-block",
+                          width: "8px",
+                          height: "8px",
+                          borderRadius: "50%",
+                          background: "#f59e0b",
+                        }}
+                      />,
+                    )}
+                    <span>{validationSummaryText}</span>
+                  </span>
+                  <span style={{ color: "#78716c", fontSize: "12px" }}>
+                    - review before applying
+                  </span>
+                </div>,
+                null,
+              )}
+
               {/* Action buttons */}
               <div
                 style={{
@@ -2508,6 +2754,7 @@ export const ExtractorModule = recipe<
       notesContentSnapshot,
       cleanupApplyStatus,
       applyInProgress,
+      errorDetailsExpanded,
     };
   },
 );
