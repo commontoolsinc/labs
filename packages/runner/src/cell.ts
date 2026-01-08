@@ -1973,8 +1973,11 @@ export function toJSONValue(
     if (Error.isError(value)) {
       const error = value as Error;
       // This returns a single-key object whose key in a form unlikely to be
-      // mistaken as being for other purposes, though to be clear this form
-      // isn't (yet?) used anywhere else in the system.
+      // mistaken as being for other purposes. Note: Using `@` as the sigil for
+      // a special object key is used elsewhere in the system, though the
+      // specific pattern of using a single-property object with an `@key` to
+      // encode (the state of) an instance of a class is not (yet?) an
+      // established pattern in the system.
       return {
         "@Error": {
           ...error,
