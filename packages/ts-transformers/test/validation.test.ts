@@ -295,6 +295,41 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
       "Reading opaques inside handler() should be allowed",
     );
   });
+
+  await t.step(
+    "allows reading opaques inside inline JSX event handlers",
+    async () => {
+      const source = `/// <cts-enable />
+      import { recipe, Cell, h } from "commontools";
+
+      interface Item { name: string; price: number; }
+
+      export default recipe<{ item: Item, count: Cell<number> }>("test", ({ item, count }) => {
+        return (
+          <div>
+            <button onClick={() => {
+              const currentPrice = item.price;
+              if (currentPrice > 100) {
+                count.set(count.get() + 1);
+              }
+            }}>
+              Click me
+            </button>
+          </div>
+        );
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Reading opaques inside inline JSX event handlers should be allowed",
+      );
+    },
+  );
 });
 
 Deno.test("Diagnostic output format", async (t) => {

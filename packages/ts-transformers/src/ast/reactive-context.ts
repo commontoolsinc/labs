@@ -19,6 +19,7 @@
  * - derive() callbacks
  * - lift() callbacks
  * - handler() callbacks
+ * - Inline JSX event handlers (onClick={() => {...}}) - transformed to handler()
  * - JSX expressions (handled by OpaqueRefJSXTransformer)
  *
  * This module is used by both validation transformers (to report errors)
@@ -83,9 +84,37 @@ export function findEnclosingCallbackContext(
 }
 
 /**
+ * Checks if a function is an inline JSX event handler.
+ *
+ * An inline JSX event handler is an arrow function or function expression
+ * that is the value of a JSX attribute starting with "on" (like onClick, onSubmit, etc.).
+ *
+ * These get transformed into handler() calls, so they're safe wrappers.
+ */
+function isInlineJsxEventHandler(
+  func: ts.ArrowFunction | ts.FunctionExpression,
+): boolean {
+  const parent = func.parent;
+
+  // Check if function is inside a JSX expression
+  if (ts.isJsxExpression(parent)) {
+    const jsxExprParent = parent.parent;
+
+    // Check if JSX expression is inside a JSX attribute
+    if (ts.isJsxAttribute(jsxExprParent)) {
+      const attrName = jsxExprParent.name.getText();
+      // Event handlers start with "on"
+      return attrName.startsWith("on");
+    }
+  }
+
+  return false;
+}
+
+/**
  * Checks if a node is inside a safe wrapper callback where opaque reading is allowed.
  *
- * Safe wrappers are: computed, action, derive, lift, handler
+ * Safe wrappers are: computed, action, derive, lift, handler, and inline JSX event handlers
  */
 export function isInsideSafeWrapper(
   node: ts.Node,
@@ -95,6 +124,12 @@ export function isInsideSafeWrapper(
 
   while (current) {
     if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      // Check for inline JSX event handlers (onClick={() => {...}})
+      // These get transformed into handler() calls
+      if (isInlineJsxEventHandler(current)) {
+        return true;
+      }
+
       const functionParent = current.parent;
       if (
         functionParent &&
