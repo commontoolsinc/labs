@@ -37,15 +37,17 @@ if (/--amend\s+--no-edit/.test(cmd) || /--amend\s+-C/.test(cmd)) {
 
 console.error("Running pre-commit checks (type check, fmt, lint)...");
 
-// Run all checks in parallel for speed
-const [checkResult, fmtResult, lintResult] = await Promise.all([
+// Auto-fix formatting first (fast)
+await new Deno.Command("deno", {
+  args: ["fmt"],
+  stdout: "piped",
+  stderr: "piped",
+}).output();
+
+// Run type check and lint in parallel
+const [checkResult, lintResult] = await Promise.all([
   new Deno.Command("deno", {
     args: ["task", "check"],
-    stdout: "piped",
-    stderr: "piped",
-  }).output(),
-  new Deno.Command("deno", {
-    args: ["fmt", "--check"],
     stdout: "piped",
     stderr: "piped",
   }).output(),
@@ -61,11 +63,6 @@ const errors: string[] = [];
 if (!checkResult.success) {
   errors.push("Type check failed:");
   errors.push(new TextDecoder().decode(checkResult.stderr));
-}
-
-if (!fmtResult.success) {
-  errors.push("Formatting issues found. Run `deno fmt` to fix:");
-  errors.push(new TextDecoder().decode(fmtResult.stdout));
 }
 
 if (!lintResult.success) {

@@ -7,10 +7,7 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { ALL_CHARMS_ID } from "../src/builtins/well-known.ts";
 import { UI } from "../src/builder/types.ts";
-import {
-  type ParsedWishTarget,
-  parseWishTarget,
-} from "../src/builtins/wish.ts";
+import { parseWishTarget } from "../src/builtins/wish.ts";
 
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
