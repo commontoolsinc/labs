@@ -156,7 +156,7 @@ const insertAtPosition = handler<
   // Find the ACTUAL entry in current array using Writable.equals() for proper link identity
   // This ensures we have complete, fresh data even if sourceCell is stale from multi-tab conflicts
   const fromIndex = current.findIndex((e) =>
-    e?.charm && sourceWritable.equals(e.charm)
+    e?.charm && sourceCell.equals(e.charm)
   );
   if (fromIndex === -1) return; // Entry not found (removed by another tab), bail
 
@@ -201,7 +201,7 @@ const insertAtPosition = handler<
 
 | Original                                            | Fixed                                                           |
 | --------------------------------------------------- | --------------------------------------------------------------- |
-| `e?.charm === draggedEntry?.charm`                  | `sourceWritable.equals(e.charm)`                                |
+| `e?.charm === draggedEntry?.charm`                  | `sourceCell.equals(e.charm)`                                    |
 | `e?.charm === insertAfterEntry?.charm`              | `(e.charm as Writable<unknown>).equals(insertAfterEntry.charm)` |
 | Spread `draggedEntry` (from stale sourceCell.get()) | Spread `actualEntry` (fresh from current array)                 |
 
