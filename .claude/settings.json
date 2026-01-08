@@ -32,6 +32,15 @@
             "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/deno-test-filter.ts\""
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/pre-edit-reminders.ts\""
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -41,10 +50,6 @@
           {
             "type": "command",
             "command": "deno run --allow-read --allow-run \"$CLAUDE_PROJECT_DIR/.claude/scripts/post-edit-ts.ts\""
-          },
-          {
-            "type": "command",
-            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/post-edit-reminders.ts\""
           }
         ]
       },
