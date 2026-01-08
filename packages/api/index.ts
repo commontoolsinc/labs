@@ -876,7 +876,7 @@ export declare const CELL_LIKE: unique symbol;
  * Helper type to transform Cell<T> to Opaque<T> in pattern/lift/handler inputs.
  * Preserves Stream<T> since Streams are callable interfaces (.send()), not data containers.
  */
-export type StripCell<T> = T extends Stream<any> ? T  // Preserve Stream<T> - it's a callable interface
+export type StripCell<T> = T extends Stream<any> ? T // Preserve Stream<T> - it's a callable interface
   : T extends AnyBrandedCell<infer U> ? StripCell<U>
   : T extends ArrayBuffer | ArrayBufferView | URL | Date ? T
   : T extends Array<infer U> ? StripCell<U>[]
