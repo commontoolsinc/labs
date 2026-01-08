@@ -1,5 +1,19 @@
 # Repository Guidelines for AI Agents
 
+This repository represents the Common Tools runtime: a fully integrated, reactive runtime and execution environment for user-created programs. These programs are known as patterns and somewhat similar to Solid.js components. Each pattern is comprised of reactive `Cell`s stored in `Space`s (defined by a DID). These cells enable durable communication between patterns. The reactivity is enabled by subscribing the to result of a query, defined by the schemas/type signatures.
+
+## Pace Layers
+
+This repository contains many packages that compose and stack to create the Common Tools product.
+
+1. Foundation: api, runtime, identity, memory
+2. System: schema-generator, iframe-sandbox, ts-transformers, js-compiler, js-sandbox
+3. Capabilities: charm, html, llm
+4. Operation: background-charm-service, cli
+5. Deployed Product: toolshed, shell
+6. User Interface: ui
+7. End-User Programs: home-schemas, patterns
+
 ## Pattern Development
 
 If you are developing patterns, use Claude Skills (pattern-dev) to do the work.
@@ -26,12 +40,6 @@ If you are developing patterns, use Claude Skills (pattern-dev) to do the work.
   troubleshooting
 - `docs/common/LLM.md` - Using generateText and generateObject for LLM
   integration
-
-**Task Management**
-
-- If available, use `bd` to manage subtasks and local todo lists
-  (`bd quickstart` and `bd --help`)
-  - Read `task-management` skill for workflow
 
 **Reference:**
 

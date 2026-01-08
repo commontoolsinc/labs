@@ -170,3 +170,56 @@ Or use the `<ct-updater>` component in your charm's UI.
 | Charm not polling | Not registered | Register via `/api/integrations/bg` |
 
 See `packages/background-charm-service/CLAUDE.md` for more details.
+
+---
+
+<!-- @TODO: bf -->
+# Consolidated, Duplicated Content for Review
+
+## Running Development Servers
+
+### Backend (Toolshed)
+
+The backend runs on port 8000 by default.
+
+```bash
+cd packages/toolshed
+SHELL_URL=http://localhost:5173 deno task dev
+```
+**Development Options: Toolshed pointing to cloud backend instead**
+```bash
+SHELL_URL=http://localhost:5173 API_URL=https://toolshed.saga-castor.ts.net/ deno task dev
+```
+
+**Environment Setup:**
+- Copy `.env.example` to `.env` in the toolshed directory
+- See `env.ts` for all available environment variables and defaults
+- Default URL: http://localhost:8000
+
+### Frontend (Shell)
+
+The frontend dev server runs on port 5173 by default. Access the application at port 8000, which proxies to shell.
+
+```bash
+cd packages/shell
+deno task dev-local
+```
+
+**Note:** Use `dev-local` (not `dev`) when running against a local Toolshed backend. The `dev` task points to the production backend.
+
+### Background charm service
+This is only needed if you are working on either the background charm service or need to support running background charms.
+Default assumption is that its not needed.
+
+How to start:
+```bash
+cd packages/background-charm-service
+OPERATOR_PASS="implicit trust" API_URL="http://localhost:8000" deno task start
+```
+
+
+**Important:** For `*.ts.net` URLs, you must be connected to the CT network via Tailscale. Commands will hang or timeout if not connected.
+
+### Restarting Servers
+
+After making edits to runtime code, restart the shell server.
