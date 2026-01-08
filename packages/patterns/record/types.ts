@@ -76,6 +76,8 @@ export type SubCharmType =
   | "photo"
   // Custom field (generic property/value pairs)
   | "custom-field"
+  // Occurrence tracking
+  | "occurrence-tracker"
   // Controller modules (internal, not user-addable)
   | "type-picker"
   | "extractor";
