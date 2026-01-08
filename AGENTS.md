@@ -64,7 +64,7 @@ If you are developing runtime code, read the following documentation:
   overview
 - `docs/development/DEVELOPMENT.md` - Coding style, design principles, and best
   practices
-- `docs/development/UI_TESTING.md` - How to work with shadow dom in our integration
-  tests
+- `docs/development/UI_TESTING.md` - How to work with shadow dom in our
+  integration tests
 - `docs/development/LOCAL_DEV_SERVERS.md` - **CRITICAL**: How to start local dev
   servers correctly (use `dev-local` for shell, not `dev`)
