@@ -266,12 +266,7 @@ const bindChildren = (
       return newRendered.cancel;
     });
 
-    // If effect callback wasn't called synchronously (e.g., Stream cells),
-    // provide a placeholder node that will be replaced when the value arrives
-    return {
-      node: currentNode ?? document.createTextNode(""),
-      cancel,
-    };
+    return { node: currentNode!, cancel };
   };
 
   // When the children array changes, diff its flattened values against what we previously rendered.
@@ -379,15 +374,6 @@ const bindProps = (
         });
         addCancel(cancel);
       }
-    } else if (isEventProp(propKey) && typeof propValue === "function") {
-      // Handle function event handlers (e.g., @ct-click={(e) => ...})
-      const key = cleanEventProp(propKey);
-      if (key != null) {
-        const cancel = listen(element, key, (event) => {
-          propValue(event);
-        });
-        addCancel(cancel);
-      }
     } else {
       setProperty(element, propKey, propValue);
     }
@@ -395,14 +381,9 @@ const bindProps = (
   return cancel;
 };
 
-const isEventProp = (key: string) =>
-  key.startsWith("on") || key.startsWith("@");
+const isEventProp = (key: string) => key.startsWith("on");
 
 const cleanEventProp = (key: string) => {
-  if (key.startsWith("@")) {
-    // @ct-click -> ct-click (remove @ prefix)
-    return key.slice(1);
-  }
   if (!key.startsWith("on")) {
     return null;
   }
