@@ -57,6 +57,7 @@ export type SubCharmType =
   | "link"
   // Wave 3
   | "location"
+  | "location-track"
   | "relationship"
   | "giftprefs"
   | "timing"

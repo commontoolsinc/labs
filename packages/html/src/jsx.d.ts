@@ -2922,6 +2922,7 @@ interface CTCharmElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
 interface CTVoiceInputElement extends CTHTMLElement {}
 interface CTAudioVisualizerElement extends CTHTMLElement {}
+interface CTLocationElement extends CTHTMLElement {}
 
 // Tab components
 interface CTTabsElement extends CTHTMLElement {}
@@ -3030,6 +3031,19 @@ interface CTAudioVisualizerAttributes<T> extends CTHTMLAttributes<T> {
   "maxHeight"?: number;
   "color"?: string;
   "smoothing"?: number;
+}
+
+interface CTLocationAttributes<T> extends CTHTMLAttributes<T> {
+  "$location"?: CellLike<any>;
+  "enableHighAccuracy"?: boolean;
+  "timeout"?: number;
+  "maximumAge"?: number;
+  "continuous"?: boolean;
+  "disabled"?: boolean;
+  "onct-location-start"?: EventHandler<any>;
+  "onct-location-update"?: EventHandler<any>;
+  "onct-location-error"?: EventHandler<any>;
+  "onct-change"?: EventHandler<any>;
 }
 
 interface CTChatAttributes<T> extends CTHTMLAttributes<T> {
@@ -4538,6 +4552,10 @@ declare global {
       "ct-audio-visualizer": CTDOM.DetailedHTMLProps<
         CTAudioVisualizerAttributes<CTAudioVisualizerElement>,
         CTAudioVisualizerElement
+      >;
+      "ct-location": CTDOM.DetailedHTMLProps<
+        CTLocationAttributes<CTLocationElement>,
+        CTLocationElement
       >;
       "ct-fragment": CTDOM.DetailedHTMLProps<
         CTHTMLAttributes<CTFragmentElement>,
