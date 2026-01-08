@@ -3965,19 +3965,16 @@ interface CTMapAttributes<T> extends CTHTMLAttributes<T> {
   "fitToBounds"?: boolean | CellLike<boolean>;
   "interactive"?: boolean | CellLike<boolean>;
   "onct-click"?: (event: CustomEvent<{ lat: number; lng: number }>) => void;
-  "@ct-click"?: any;
   "onct-bounds-change"?: (
     event: CustomEvent<
       { bounds: CTMapBounds; center: CTMapLatLng; zoom: number }
     >,
   ) => void;
-  "@ct-bounds-change"?: any;
   "onct-marker-click"?: (
     event: CustomEvent<
       { marker: CTMapMarker; index: number; lat: number; lng: number }
     >,
   ) => void;
-  "@ct-marker-click"?: any;
   "onct-marker-drag-end"?: (
     event: CustomEvent<
       {
@@ -3988,13 +3985,11 @@ interface CTMapAttributes<T> extends CTHTMLAttributes<T> {
       }
     >,
   ) => void;
-  "@ct-marker-drag-end"?: any;
   "onct-circle-click"?: (
     event: CustomEvent<
       { circle: CTMapCircle; index: number; lat: number; lng: number }
     >,
   ) => void;
-  "@ct-circle-click"?: any;
 }
 
 interface CTMapElement extends CTHTMLElement {}
