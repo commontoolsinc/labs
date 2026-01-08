@@ -40,6 +40,7 @@ import type {
   ExtractableSource,
   ExtractedField,
   ExtractionPreview,
+  ValidationIssue,
 } from "./types.ts";
 import type { JSONSchema } from "./schema-utils.ts";
 import { getResultSchema, getSchemaForType } from "./schema-utils.ts";
@@ -83,6 +84,8 @@ interface ExtractorModuleInput {
   >;
   // Apply in progress guard (prevents double-click race condition)
   applyInProgress: Writable<Default<boolean, false>>;
+  // Error details expanded state (for showing full error in UI)
+  errorDetailsExpanded: Writable<Default<boolean, false>>;
 }
 
 interface ExtractorModuleOutput {
@@ -98,6 +101,7 @@ interface ExtractorModuleOutput {
     "pending"
   >;
   applyInProgress?: Default<boolean, false>;
+  errorDetailsExpanded?: Default<boolean, false>;
 }
 
 // ===== Constants =====
@@ -1255,6 +1259,7 @@ export const ExtractorModule = recipe<
       notesContentSnapshot,
       cleanupApplyStatus,
       applyInProgress,
+      errorDetailsExpanded,
     },
   ) => {
     // Use FULL registry schema - enables extraction to create new modules
@@ -1580,6 +1585,48 @@ export const ExtractorModule = recipe<
     const isExtractingPhase = computed(() => currentPhase === "extracting");
     const isErrorPhase = computed(() => currentPhase === "error");
     const isNoResultsPhase = computed(() => currentPhase === "no-results");
+
+    // Error message parsing for specific error feedback
+    // Parse the extraction error to show user-friendly messages based on error type
+    const errorMessage = computed((): string => {
+      const error = extraction.error;
+      if (!error) return "Extraction failed. Try again or add more content.";
+
+      const errorStr = String(error.message || error).toLowerCase();
+
+      // Rate limiting errors (429, rate limit)
+      if (errorStr.includes("rate") || errorStr.includes("429")) {
+        return "Rate limited - please wait a moment and try again";
+      }
+
+      // Timeout errors
+      if (errorStr.includes("timeout")) {
+        return "Request timed out - try with less content";
+      }
+
+      // Parse/validation errors
+      if (errorStr.includes("invalid") || errorStr.includes("parse")) {
+        return "Invalid response from AI - try again";
+      }
+
+      // Default: Show actual error message (truncated if needed)
+      const fullMessage = String(error.message || error);
+      if (fullMessage.length > 100) {
+        return fullMessage.slice(0, 100) + "...";
+      }
+      return fullMessage;
+    });
+
+    // Full error details for expandable section
+    const fullErrorDetails = computed((): string => {
+      const error = extraction.error;
+      if (!error) return "";
+      return String(error.message || error);
+    });
+
+    // Check if error details are expanded
+    const showErrorDetails = computed(() => errorDetailsExpanded.get() === true);
+
     // True when there are no source modules at all (Notes, Photo, Text Import)
     // Uses centralized sourceData to avoid redundant scanExtractableSources() calls
     const hasNoSourceModules = computed(() => sourceData.hasNoSourceModules);
@@ -1663,6 +1710,36 @@ export const ExtractorModule = recipe<
     const applyButtonCursor = computed(() =>
       applyButtonDisabled ? "not-allowed" : "pointer"
     );
+
+    // Progress feedback computed values for extracting phase
+    const photoSourceCount = computed(() => sourceData.photoSources.length);
+
+    // Progress message for extracting phase
+    const extractingProgressMessage = computed(() => {
+      const photosCount = Number(photoSourceCount);
+      const ocrInProgress = Boolean(ocrPending);
+
+      if (photosCount > 0 && ocrInProgress) {
+        // OCR is still running
+        if (photosCount > 1) {
+          return `Processing ${photosCount} photos (OCR)...`;
+        }
+        return "Processing photo (OCR)...";
+      }
+      // OCR done (or no photos), extraction is running
+      return "Extracting structured data...";
+    });
+
+    // Progress icon for extracting phase
+    const extractingProgressIcon = computed(() => {
+      const photosCount = Number(photoSourceCount);
+      const ocrInProgress = Boolean(ocrPending);
+
+      if (photosCount > 0 && ocrInProgress) {
+        return "\u{1F4F7}"; // camera emoji
+      }
+      return "\u{1F50D}"; // magnifying glass emoji
+    });
 
     return {
       [NAME]: "AI Extract",
@@ -1910,7 +1987,9 @@ export const ExtractorModule = recipe<
               }}
             >
               <ct-loader size="sm" show-elapsed />
-              <span style={{ color: "#92400e" }}>Extracting data...</span>
+              <span style={{ color: "#92400e" }}>
+                {extractingProgressIcon} {extractingProgressMessage}
+              </span>
             </div>,
             null,
           )}
