@@ -38,7 +38,7 @@ import { inferTypeFromModules } from "./record/template-registry.ts";
 import { TypePickerModule } from "./type-picker.tsx";
 import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
 import { getResultSchema } from "./record/extraction/schema-utils.ts";
-import { MembersModule } from "./members.tsx";
+import { RelationshipsModule } from "./relationships.tsx";
 import type { ContainerCoordinationContext } from "./container-protocol.ts";
 import type { MentionableCharm } from "./system/backlinks-index.tsx";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
@@ -269,7 +269,7 @@ const closeExpanded = handler<
 
 // Add a new sub-charm (module) to the Record
 // Note: Receives recordPatternJson to create Notes with correct wiki-link target
-// Note: Controller modules (extractor, members) receive parent Cells for coordination
+// Note: Controller modules (extractor, relationships) receive parent Cells for coordination
 const addSubCharm = handler<
   { detail: { value: string } },
   {
@@ -306,7 +306,7 @@ const addSubCharm = handler<
   // Special case: create Note (rendered via ct-render variant="embedded")
   // Pass recordPatternJson so [[wiki-links]] create Record charms instead of Note charms
   // Special case: create ExtractorModule as controller with parent Cells
-  // Special case: create MembersModule with parent context for bidirectional links and createRecord callback
+  // Special case: create RelationshipsModule with parent context for bidirectional links
   // deno-lint-ignore no-explicit-any
   const charm = type === "notes"
     ? Note({ linkPattern: recordPatternJson })
@@ -316,13 +316,13 @@ const addSubCharm = handler<
       parentTrashedSubCharms: trash,
       parentTitle: title,
     } as any)
-    : type === "members"
-    ? MembersModule({
+    : type === "relationships"
+    ? RelationshipsModule({
       mentionable: mentionableExcludingSelf,
       parentRecord: selfRecord,
       // NOTE: createRecord callback not passed - functions can't survive serialization boundary
       // See CT-1130 for future work on pattern instantiation
-      // deno-lint-ignore no-explicit-any -- MembersModuleInput allows extra props for future use
+      // deno-lint-ignore no-explicit-any -- RelationshipsModuleInput allows extra props for future use
     } as any)
     : createSubCharm(type, initialValues);
 

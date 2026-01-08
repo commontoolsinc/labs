@@ -83,8 +83,8 @@ import {
   TextImportModule,
 } from "../text-import.tsx";
 import {
-  MODULE_METADATA as MembersMeta,
-} from "../members.tsx";
+  MODULE_METADATA as RelationshipsMeta,
+} from "../relationships.tsx";
 import type { ModuleMetadata } from "../container-protocol.ts";
 
 // NOTE: TypePickerMeta is NOT imported here to avoid circular dependency:
@@ -231,19 +231,19 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     TextImportMeta,
     (init) => TextImportModule(init as any),
   ),
-  // Members needs special handling in record.tsx - receives parentSubCharms and createPattern
-  members: {
-    type: "members",
-    label: MembersMeta.label,
-    icon: MembersMeta.icon,
+  // Relationships needs special handling in record.tsx - receives parentRecord and mentionable
+  relationships: {
+    type: "relationships",
+    label: RelationshipsMeta.label,
+    icon: RelationshipsMeta.icon,
     createInstance: () => {
       throw new Error(
-        "Use MembersModule directly with parentSubCharms and createPattern in record.tsx",
+        "Use RelationshipsModule directly with parentRecord and mentionable in record.tsx",
       );
     },
     internal: false,
-    schema: MembersMeta.schema,
-    fieldMapping: MembersMeta.fieldMapping,
+    schema: RelationshipsMeta.schema,
+    fieldMapping: RelationshipsMeta.fieldMapping,
   },
 
   // Controller modules - TypePicker needs special handling in record.tsx
