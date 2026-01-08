@@ -5,6 +5,32 @@ import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../../runner/src/storage/cache.deno.ts";
 import { Runtime } from "@commontools/runner";
+import { sleep } from "@commontools/utils/sleep";
+
+// Check if two values are deeply equal, ignoring symbols
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (a === null || b === null) return a === b;
+  if (typeof a !== "object") return false;
+
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((val, i) => deepEqual(val, b[i]));
+  }
+  if (Array.isArray(a) || Array.isArray(b)) return false;
+
+  const aKeys = Object.keys(a as object);
+  const bKeys = Object.keys(b as object);
+  if (aKeys.length !== bKeys.length) return false;
+
+  return aKeys.every((key) =>
+    deepEqual(
+      (a as Record<string, unknown>)[key],
+      (b as Record<string, unknown>)[key],
+    )
+  );
+}
 
 export interface EventSpec {
   stream: string;
@@ -88,8 +114,8 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   const result = runtime.run(tx, patternFactory, argument, resultCell);
   tx.commit();
 
-  // Sink to keep the result reactive
-  result.sink(() => {});
+  // Sink to keep the result reactive, track cancel function for cleanup
+  const cancelSink = result.sink(() => {});
   await runtime.idle();
 
   let stepIndex = 0;
@@ -111,18 +137,58 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
       await runtime.idle();
     }
 
+    // Retry assertions with backoff to handle reactivity settling delays
+    const maxRetries = 10;
+    const retryDelay = 50; // ms
+
     for (const assertion of step.expect) {
       const pathSegments = splitPath(assertion.path);
       const targetCell = pathSegments.reduce(
         (cell, segment) => cell.key(segment),
         result,
       );
-      // Use pull() in pull mode to ensure all dependencies are computed
-      const actual = await targetCell.pull();
-      expect(actual, `${name}:${stepIndex}:${assertion.path}`)
-        .toEqual(assertion.value);
+
+      let actual: unknown;
+      let lastError: Error | undefined;
+
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        // Use pull() in pull mode to ensure all dependencies are computed
+        actual = await targetCell.pull();
+
+        if (deepEqual(actual, assertion.value)) {
+          // Assertion passed
+          lastError = undefined;
+          break;
+        }
+
+        // If not the last attempt, wait and retry
+        if (attempt < maxRetries - 1) {
+          await runtime.idle();
+          await sleep(retryDelay);
+        } else {
+          // Last attempt failed, record error for final assertion
+          lastError = new Error(
+            `Assertion failed after ${maxRetries} attempts`,
+          );
+        }
+      }
+
+      // Final assertion with expect() to get proper error messages
+      if (lastError) {
+        expect(actual, `${name}:${stepIndex}:${assertion.path}`)
+          .toEqual(assertion.value);
+      }
     }
   }
+
+  // Cancel the sink to stop reactive updates
+  cancelSink();
+
+  // Wait for any pending work to complete before cleanup
+  await runtime.idle();
+
+  // Small delay to allow any pending debounce timers to either fire or be cancelled
+  await sleep(100);
 
   await runtime.dispose();
   await storageManager.close();
