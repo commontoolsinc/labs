@@ -161,6 +161,7 @@ declare module "@commontools/api" {
     ): SigilWriteRedirectLink;
     getRaw(options?: IReadOptions): Immutable<T> | undefined;
     setRaw(value: any): void;
+    setAsJSONValue(value: any): Cell<JSONValue>;
     getSourceCell<T>(
       schema?: JSONSchema,
     ):
