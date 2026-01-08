@@ -31,6 +31,7 @@ import {
 import {
   buildExtractionSchema as buildFullSchema,
   createSubCharm,
+  getDefinition,
   getFieldToTypeMapping as getFullFieldMapping,
   SUB_CHARM_REGISTRY,
 } from "../registry.ts";
@@ -454,6 +455,43 @@ function buildPreview(
     byModule[moduleType].push(field);
   }
 
+  // Handle array extraction mode (e.g., customFields for custom-field module)
+  // Modules with extractionMode: "array" extract an array where each item
+  // becomes a separate module instance
+  for (const def of Object.values(SUB_CHARM_REGISTRY)) {
+    if (def.extractionMode !== "array" || !def.fieldMapping) continue;
+
+    // Get the array field name (first entry in fieldMapping)
+    const arrayFieldName = def.fieldMapping[0];
+    const extractedArray = normalizedExtracted[arrayFieldName];
+
+    if (!Array.isArray(extractedArray) || extractedArray.length === 0) continue;
+
+    // Each array item becomes a separate ExtractedField with isNewInstance flag
+    for (const item of extractedArray) {
+      if (!item || typeof item !== "object") continue;
+
+      // For custom-field: item has fieldName, fieldValue, fieldType
+      // Create a display name for the field
+      const itemName = (item as Record<string, unknown>).fieldName ||
+        (item as Record<string, unknown>).name ||
+        "Custom Field";
+
+      const field: ExtractedField = {
+        fieldName: `${arrayFieldName}:${itemName}`,
+        targetModule: def.type,
+        extractedValue: item,
+        currentValue: undefined, // New instances don't have current values
+        isNewInstance: true,
+      };
+
+      fields.push(field);
+
+      if (!byModule[def.type]) byModule[def.type] = [];
+      byModule[def.type].push(field);
+    }
+  }
+
   return { fields, byModule };
 }
 
@@ -859,6 +897,51 @@ const applySelected = handler<
             }
           }
           continue; // Skip normal module processing
+        }
+
+        // Handle array extraction mode (e.g., custom-field)
+        // Each field with isNewInstance creates a separate module instance
+        const moduleDef = getDefinition(moduleType);
+        if (moduleDef?.extractionMode === "array") {
+          for (const field of fields) {
+            if (!field.isNewInstance) continue;
+
+            try {
+              // extractedValue contains the array item (e.g., {fieldName, fieldValue, fieldType})
+              const item = field.extractedValue as Record<string, unknown>;
+
+              // Map array item properties to module input properties
+              // For custom-field: fieldName -> name, fieldValue -> value, fieldType -> valueType
+              const initialValues: Record<string, unknown> = {};
+              if (moduleType === "custom-field") {
+                initialValues.name = item.fieldName || "";
+                initialValues.value = item.fieldValue || "";
+                initialValues.valueType = item.fieldType || "text";
+              } else {
+                // Generic mapping for other array modules
+                Object.assign(initialValues, item);
+              }
+
+              const newCharm = createSubCharm(moduleType, initialValues);
+              const schema = getResultSchema(newCharm);
+              newEntries.push({
+                type: moduleType,
+                pinned: false,
+                charm: newCharm,
+                schema,
+              });
+              anySuccess = true;
+              console.debug(
+                `[Extract] Created new ${moduleType} instance: ${JSON.stringify(initialValues)}`,
+              );
+            } catch (e) {
+              console.warn(
+                `[Extract] Failed to create ${moduleType} instance:`,
+                e,
+              );
+            }
+          }
+          continue; // Skip normal module processing for array extraction modules
         }
 
         const existingIndex = current.findIndex((e) => e?.type === moduleType);
