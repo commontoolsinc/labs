@@ -1,4 +1,5 @@
 import { type HFunction, type RenderNode, type VNode } from "@commontools/api";
+import { isCell, isCellResult } from "@commontools/runner";
 
 /**
  * Fragment element name used for JSX fragments.
@@ -24,12 +25,27 @@ export const h: HFunction = Object.assign(
         children: children.flat(),
       });
     } else {
-      return {
-        type: "vnode",
-        name,
-        props: props ?? {},
-        children: children.flat(),
-      };
+      props ??= {};
+      Object.keys(props).filter((key) => key.startsWith("$")).forEach((key) => {
+        const value = props![key];
+        if (typeof value !== "object") {
+          throw new Error(
+            `Bidirectionally bound property ${key} is not reactive\n` +
+              "If invoking from within computed(), consider moving the component into a pattern: E.g.\n" +
+              "```\n" +
+              (key === "$checked"
+                ? "const Item = pattern<Item>((item) => <div><ct-checkbox $checked={item.checked} />{item.title}</div>);"
+                : "const Item = pattern<Item>((item) => <div><ct-input $value={item.value} />{item.title}</div>);") +
+              "\n```",
+          );
+        } else if (!isCell(value) && !isCellResult(value)) {
+          throw new Error(
+            `Bidirectionally bound property ${key} is not reactive\n` +
+              "Use pattern parameter or create a cell using Cell.of()",
+          );
+        }
+      });
+      return { type: "vnode", name, props, children: children.flat() };
     }
   },
   {
