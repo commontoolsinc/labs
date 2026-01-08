@@ -31,7 +31,7 @@ Before starting pattern development:
 3. **Reference docs as needed:**
    - `docs/common/COMPONENTS.md` - UI components and bidirectional binding
    - `docs/common/TYPES_AND_SCHEMAS.md` - Type system, Cell<> vs OpaqueRef<>
-   - `docs/common/DEBUGGING.md` - Error reference and troubleshooting
+   - `docs/development/DEBUGGING.md` - Error reference and troubleshooting
 4. **Check example patterns** - Look in `packages/patterns/` for working examples
 
 ## Quick Decision Tree
@@ -278,7 +278,7 @@ See `PATTERNS.md` Level 3-4 for linking and composition patterns.
 | Cells, reactivity, computed() | `docs/common/CELLS_AND_REACTIVITY.md` |
 | Type system, Cell<> vs OpaqueRef<> | `docs/common/TYPES_AND_SCHEMAS.md` |
 | Component usage and bidirectional binding | `docs/common/COMPONENTS.md` |
-| Error reference and debugging | `docs/common/DEBUGGING.md` |
+| Error reference and debugging | `docs/development/DEBUGGING.md` |
 | LLM integration (generateObject, etc.) | `docs/common/LLM.md` |
 | ct commands | Use **ct** skill |
 | Working examples | `packages/patterns/` directory |

@@ -98,7 +98,7 @@ For example, if you deployed to space `my-space` and got charm ID `baedrei...xyz
 http://localhost:8000/my-space/baedrei...xyz
 ```
 
-If scripts fail, see `docs/common/LOCAL_DEV_SERVERS.md` for troubleshooting.
+If scripts fail, see `docs/development/LOCAL_DEV_SERVERS.md` for troubleshooting.
 
 ## Prerequisites and Setup
 

@@ -239,9 +239,9 @@ When you need details:
 
 | Question | Resource |
 |----------|----------|
-| How do cells work? | `docs/common/RECIPES.md` |
+| How do cells work? | `docs/common/CELLS_AND_REACTIVITY.md` |
 | Common pattern examples? | `docs/common/PATTERNS.md` |
-| Handler type errors? | `docs/common/HANDLERS.md` |
+| Handler type errors? | `docs/common/PATTERNS.md` |
 | Component props? | `docs/common/COMPONENTS.md` |
 | ct commands? | **ct** skill |
 | Working code? | `packages/patterns/` |

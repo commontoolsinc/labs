@@ -21,7 +21,7 @@ server-side execution.
 
 ### Prerequisites
 
-1. Local dev servers running (see `docs/common/LOCAL_DEV_SERVERS.md`)
+1. Local dev servers running (see `docs/development/LOCAL_DEV_SERVERS.md`)
 2. Binaries built: `deno task build-binaries` (from labs root)
 
 ### Setup Steps
