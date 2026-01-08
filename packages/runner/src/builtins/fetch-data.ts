@@ -317,7 +317,7 @@ async function startFetch(
 
       // Only write error and inputHash if inputs still match
       if (currentHash === inputHash) {
-        error.withTx(tx).set(err);
+        error.withTx(tx).setAsJSONValue(err);
         internal.withTx(tx).update({ inputHash });
       }
     });
