@@ -56,4 +56,10 @@ export interface ModuleMetadata {
 
   /** If true, this module exports a settingsUI for configuration */
   hasSettings?: boolean;
+
+  /** If true, always include this module's schema in extraction even with no instances */
+  alwaysExtract?: boolean;
+
+  /** Extraction mode: "single" (default) or "array" (each array item creates a module instance) */
+  extractionMode?: "single" | "array";
 }

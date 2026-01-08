@@ -69,6 +69,10 @@ import {
   SimpleListModule,
 } from "../simple-list.tsx";
 import { MODULE_METADATA as PhotoMeta, PhotoModule } from "../photo.tsx";
+import {
+  CustomFieldModule,
+  MODULE_METADATA as CustomFieldMeta,
+} from "../custom-field.tsx";
 import type { ModuleMetadata } from "../container-protocol.ts";
 
 // NOTE: TypePickerMeta is NOT imported here to avoid circular dependency:
@@ -104,6 +108,10 @@ export interface SubCharmDefinition {
   // Only modules with this flag should use ct-render variant="embedded"
   // (using variant triggers waiting in ct-render which is expensive)
   hasEmbeddedUI?: boolean;
+  // If true, always include schema in extraction even with no instances
+  alwaysExtract?: boolean;
+  // Extraction mode: "single" (default) or "array" (each array item creates a module instance)
+  extractionMode?: "single" | "array";
 }
 
 // Helper to create SubCharmDefinition from ModuleMetadata
@@ -124,6 +132,8 @@ function fromMetadata(
     schema: meta.schema,
     fieldMapping: meta.fieldMapping,
     hasSettings: meta.hasSettings,
+    alwaysExtract: meta.alwaysExtract,
+    extractionMode: meta.extractionMode,
   };
 }
 
@@ -196,6 +206,10 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     (init) => SimpleListModule(init as any),
   ),
   photo: fromMetadata(PhotoMeta, (init) => PhotoModule(init as any)),
+  "custom-field": fromMetadata(
+    CustomFieldMeta,
+    (init) => CustomFieldModule(init as any),
+  ),
 
   // Controller modules - TypePicker needs special handling in record.tsx
   // Metadata is inlined here to avoid circular dependency (see note at top)

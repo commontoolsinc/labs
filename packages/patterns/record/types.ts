@@ -74,6 +74,8 @@ export type SubCharmType =
   | "simple-list"
   // Photo module (with settings)
   | "photo"
+  // Custom field (generic property/value pairs)
+  | "custom-field"
   // Controller modules (internal, not user-addable)
   | "type-picker"
   | "extractor";

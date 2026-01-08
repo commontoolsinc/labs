@@ -12,6 +12,7 @@ export interface ExtractedField {
   targetModule: string; // e.g., "contact", "birthday"
   extractedValue: unknown;
   currentValue?: unknown; // For diff display (read from existing module)
+  isNewInstance?: boolean; // For array extraction mode - each item creates a new module instance
 }
 
 /**
