@@ -36,6 +36,25 @@ export class XBodyView extends BaseView {
       min-height: 0;
     }
 
+    .pattern-error {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      color: #c00;
+      text-align: center;
+    }
+
+    .pattern-error h2 {
+      margin: 0 0 1rem;
+    }
+
+    .pattern-error p {
+      margin: 0;
+      font-family: monospace;
+    }
+
     v-box {
       flex: 1;
     }
@@ -56,25 +75,27 @@ export class XBodyView extends BaseView {
   @property({ type: Boolean })
   showSidebar = false;
 
+  @property({ attribute: false })
+  patternError?: Error;
+
   @state()
   private hasSidebarContent = false;
 
   private _charms = new Task(this, {
-    task: async ([rt]) => {
+    task: async ([rt, _spaceRootPattern]) => {
       if (!rt) return undefined;
+      // Include spaceRootPattern in args so we re-fetch when it changes.
+      // This ensures newly created default patterns appear in the list.
 
       const manager = rt.cc().manager();
       await manager.synced();
       return rt.cc().getAllCharms();
     },
-    args: () => [this.rt],
+    args: () => [this.rt, this.spaceRootPattern],
   });
 
   override render() {
     const charms = this._charms.value;
-    const spaceName = this.rt
-      ? this.rt.cc().manager().getSpaceName()
-      : undefined;
     if (!charms) {
       return html`
         <div class="content">
@@ -84,11 +105,14 @@ export class XBodyView extends BaseView {
     }
 
     if (this.showShellCharmListView) {
+      const spaceName = this.rt?.cc().manager().getSpaceName();
+      const spaceDid = this.rt?.cc().manager().getSpace();
       return html`
         <div class="content">
           <x-charm-list-view
             .charms="${charms}"
             .spaceName="${spaceName}"
+            .spaceDid="${spaceDid}"
             .rt="${this.rt}"
             @charm-removed="${() => this._charms.run()}"
           ></x-charm-list-view>
@@ -96,7 +120,15 @@ export class XBodyView extends BaseView {
       `;
     }
 
-    const mainContent = this.activePattern
+    // Show error if pattern failed to start
+    const mainContent = this.patternError
+      ? html`
+        <div slot="main" class="pattern-error">
+          <h2>Failed to load charm</h2>
+          <p>${this.patternError.message}</p>
+        </div>
+      `
+      : this.activePattern
       ? html`
         <ct-charm slot="main" .charmId="${this.activePattern.id}">
           <ct-render .cell="${this.activePattern.getCell()}"></ct-render>

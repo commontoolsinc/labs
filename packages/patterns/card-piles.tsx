@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   Default,
   handler,
@@ -8,6 +7,7 @@ import {
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 // Card suits and ranks
@@ -80,8 +80,8 @@ const getSuitColor = lift((suit: Suit): string => {
 
 // Handler to move a card to pile 1
 const moveToPile1 = handler<
-  { detail: { sourceCell: Cell } },
-  { pile1: Cell<Card[]>; pile2: Cell<Card[]> }
+  { detail: { sourceCell: Writable } },
+  { pile1: Writable<Card[]>; pile2: Writable<Card[]> }
 >((event, { pile1, pile2 }) => {
   const sourceCard = event.detail?.sourceCell?.get() as Card;
   if (!sourceCard) return;
@@ -99,8 +99,8 @@ const moveToPile1 = handler<
 
 // Handler to move a card to pile 2
 const moveToPile2 = handler<
-  { detail: { sourceCell: Cell } },
-  { pile1: Cell<Card[]>; pile2: Cell<Card[]> }
+  { detail: { sourceCell: Writable } },
+  { pile1: Writable<Card[]>; pile2: Writable<Card[]> }
 >((event, { pile1, pile2 }) => {
   const sourceCard = event.detail?.sourceCell?.get() as Card;
   if (!sourceCard) return;

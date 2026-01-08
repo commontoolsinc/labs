@@ -2887,6 +2887,8 @@ interface CTFileDownloadElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
 interface CTHStackElement extends CTHTMLElement {}
 interface CTFabElement extends CTHTMLElement {}
+interface CTModalElement extends CTHTMLElement {}
+interface CTModalProviderElement extends CTHTMLElement {}
 interface CTChevronButtonElement extends CTHTMLElement {}
 interface CTCardElement extends CTHTMLElement {}
 interface CTAlertElement extends CTHTMLElement {}
@@ -2920,6 +2922,7 @@ interface CTCharmElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
 interface CTVoiceInputElement extends CTHTMLElement {}
 interface CTAudioVisualizerElement extends CTHTMLElement {}
+interface CTLocationElement extends CTHTMLElement {}
 
 // Tab components
 interface CTTabsElement extends CTHTMLElement {}
@@ -3028,6 +3031,19 @@ interface CTAudioVisualizerAttributes<T> extends CTHTMLAttributes<T> {
   "maxHeight"?: number;
   "color"?: string;
   "smoothing"?: number;
+}
+
+interface CTLocationAttributes<T> extends CTHTMLAttributes<T> {
+  "$location"?: CellLike<any>;
+  "enableHighAccuracy"?: boolean;
+  "timeout"?: number;
+  "maximumAge"?: number;
+  "continuous"?: boolean;
+  "disabled"?: boolean;
+  "onct-location-start"?: EventHandler<any>;
+  "onct-location-update"?: EventHandler<any>;
+  "onct-location-error"?: EventHandler<any>;
+  "onct-change"?: EventHandler<any>;
 }
 
 interface CTChatAttributes<T> extends CTHTMLAttributes<T> {
@@ -3240,6 +3256,14 @@ interface CTIframeAttributes<T> extends CTHTMLAttributes<T> {
 
 interface CTRenderAttributes<T> extends CTHTMLAttributes<T> {
   "$cell": CellLike<any>;
+  "variant"?:
+    | "default"
+    | "preview"
+    | "thumbnail"
+    | "sidebar"
+    | "fab"
+    | "settings"
+    | "embedded";
 }
 
 interface CTCellContextAttributes<T> extends CTHTMLAttributes<T> {
@@ -3296,6 +3320,20 @@ interface CTFabAttributes<T> extends CTHTMLAttributes<T> {
   "pending"?: boolean;
   "$previewMessage"?: CellLike<string>;
 }
+
+interface CTModalAttributes<T> extends CTHTMLAttributes<T> {
+  "$open"?: CellLike<boolean> | boolean;
+  "dismissable"?: boolean;
+  "size"?: "sm" | "md" | "lg" | "full";
+  "prevent-scroll"?: boolean;
+  "label"?: string;
+  "onct-modal-open"?: (event: CustomEvent) => void;
+  "onct-modal-close"?: (event: CustomEvent<{ reason: string }>) => void;
+  "onct-modal-opened"?: (event: CustomEvent) => void;
+  "onct-modal-closed"?: (event: CustomEvent) => void;
+}
+
+interface CTModalProviderAttributes<T> extends CTHTMLAttributes<T> {}
 
 interface CTChevronButtonAttributes<T> extends CTHTMLAttributes<T> {
   "expanded"?: boolean;
@@ -4391,6 +4429,14 @@ declare global {
         CTFabAttributes<CTFabElement>,
         CTFabElement
       >;
+      "ct-modal": CTDOM.DetailedHTMLProps<
+        CTModalAttributes<CTModalElement>,
+        CTModalElement
+      >;
+      "ct-modal-provider": CTDOM.DetailedHTMLProps<
+        CTModalProviderAttributes<CTModalProviderElement>,
+        CTModalProviderElement
+      >;
       "ct-file-download": CTDOM.DetailedHTMLProps<
         CTFileDownloadAttributes<CTFileDownloadElement>,
         CTFileDownloadElement
@@ -4506,6 +4552,10 @@ declare global {
       "ct-audio-visualizer": CTDOM.DetailedHTMLProps<
         CTAudioVisualizerAttributes<CTAudioVisualizerElement>,
         CTAudioVisualizerElement
+      >;
+      "ct-location": CTDOM.DetailedHTMLProps<
+        CTLocationAttributes<CTLocationElement>,
+        CTLocationElement
       >;
       "ct-fragment": CTDOM.DetailedHTMLProps<
         CTHTMLAttributes<CTFragmentElement>,

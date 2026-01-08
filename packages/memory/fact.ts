@@ -12,44 +12,22 @@ import {
   Unclaimed,
 } from "./interface.ts";
 import * as Ref from "./reference.ts";
-import {
-  fromJSON,
-  fromString,
-  intern,
-  is as isReference,
-  refer,
-} from "./reference.ts";
+import { fromJSON, fromString, is as isReference, refer } from "./reference.ts";
 
 /**
  * Creates an unclaimed fact.
- * Interned so repeated {the, of} patterns share identity for cache hits.
  */
 export const unclaimed = (
   { the, of }: { the: MIME; of: URI },
-): Unclaimed => intern({ the, of });
-
-/**
- * Cache for unclaimed references.
- * Caches the refer() result so repeated calls with same {the, of} are O(1).
- * This saves ~29µs per call (refer cost on small objects).
- */
-const unclaimedRefCache = new Map<string, Ref.View<Unclaimed>>();
+): Unclaimed => ({ the, of });
 
 /**
  * Returns a cached merkle reference to an unclaimed fact.
- * Use this instead of `refer(unclaimed({the, of}))` for better performance.
+ * Caching is handled by refer() for {the, of} patterns.
  */
 export const unclaimedRef = (
   { the, of }: { the: MIME; of: URI },
-): Ref.View<Unclaimed> => {
-  const key = `${the}|${of}`;
-  let ref = unclaimedRefCache.get(key);
-  if (!ref) {
-    ref = refer(unclaimed({ the, of }));
-    unclaimedRefCache.set(key, ref);
-  }
-  return ref;
-};
+): Ref.View<Unclaimed> => refer({ the, of });
 
 export const assert = <Is extends JSONValue, T extends MIME, Of extends URI>({
   the,
@@ -65,8 +43,7 @@ export const assert = <Is extends JSONValue, T extends MIME, Of extends URI>({
   ({
     the,
     of,
-    // Intern the payload so identical content shares identity for cache hits
-    is: intern(is),
+    is,
     cause: isReference(cause)
       ? cause
       : cause == null
@@ -75,7 +52,7 @@ export const assert = <Is extends JSONValue, T extends MIME, Of extends URI>({
         the: cause.the,
         of: cause.of,
         cause: cause.cause,
-        ...(cause.is ? { is: intern(cause.is) } : undefined),
+        ...(cause.is ? { is: cause.is } : undefined),
       }),
   }) as Assertion<T, Of, Is>;
 
@@ -182,13 +159,13 @@ export function normalizeFact<
       the: arg.cause.the,
       of: arg.cause.of,
       cause: arg.cause.cause,
-      ...(arg.cause.is ? { is: intern(arg.cause.is) } : undefined),
+      ...(arg.cause.is ? { is: arg.cause.is } : undefined),
     });
   if (arg.is !== undefined) {
     return ({
       the: arg.the,
       of: arg.of,
-      is: intern(arg.is),
+      is: arg.is,
       cause: newCause,
     }) as Assertion<T, Of, Is>;
   } else {

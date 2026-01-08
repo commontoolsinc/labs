@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   BuiltInLLMTool,
-  Cell,
   compileAndRun,
   computed,
   fetchData,
@@ -11,6 +10,7 @@ import {
   navigateTo,
   pattern,
   wish,
+  Writable,
 } from "commontools";
 
 ///// COMMON TOOLS (get it?) ////
@@ -54,12 +54,12 @@ export const calculator = pattern<
 type AddListItemRequest = {
   /** The item to add to the list. */
   item: string;
-  result: Cell<string>;
+  result: Writable<string>;
 };
 
 /** Read all items from the list. */
 type ReadListItemsRequest = {
-  result: Cell<string>;
+  result: Writable<string>;
 };
 
 export type ListItem = {
@@ -68,7 +68,7 @@ export type ListItem = {
 
 export const addListItem = handler<
   AddListItemRequest,
-  { list: Cell<ListItem[]> }
+  { list: Writable<ListItem[]> }
 >(
   (args, state) => {
     try {
@@ -214,7 +214,7 @@ export default pattern<ToolsInput>(({ list }) => {
  */
 type FetchAndRunPatternInput = {
   url: string;
-  args: Cell<any>;
+  args: Writable<any>;
 };
 
 export const fetchAndRunPattern = pattern<FetchAndRunPatternInput>(
@@ -253,7 +253,7 @@ export const fetchAndRunPattern = pattern<FetchAndRunPatternInput>(
  * Especially useful after instantiating a pattern with fetchAndRunPattern:
  * Pass the "@link" you get at `cell` to navigate to the pattern's view.
  */
-type NavigateToPatternInput = { cell: Cell<any> }; // Hack to steer LLM
+type NavigateToPatternInput = { cell: Writable<any> }; // Hack to steer LLM
 export const navigateToPattern = pattern<NavigateToPatternInput>(
   ({ cell }) => {
     const success = navigateTo(cell);

@@ -435,8 +435,24 @@ export function pushFrameFromCause(
 }
 
 export function popFrame(frame?: Frame): void {
-  if (frame && getTopFrame() !== frame) throw new Error("Frame mismatch");
-  frames.pop();
+  if (!frame) {
+    frames.pop();
+    return;
+  }
+
+  // If frame is at top, pop normally
+  if (getTopFrame() === frame) {
+    frames.pop();
+    return;
+  }
+
+  // Frame not at top - this can happen during navigation when a new runtime
+  // is created before the old one finishes disposing. Find and remove it.
+  const index = frames.indexOf(frame);
+  if (index !== -1) {
+    frames.splice(index, 1);
+  }
+  // If frame not found, it was already removed - that's fine
 }
 
 export function getTopFrame(): Frame | undefined {

@@ -87,7 +87,18 @@ deno task ct charm new path/to/pattern.tsx \
 # Then open: http://localhost:8000/my-space
 ```
 
-If scripts fail, see `docs/common/LOCAL_DEV_SERVERS.md` for troubleshooting.
+**Charm URLs:**
+After deploying a charm, access it in the browser at:
+```
+http://localhost:8000/<space>/<charm-id>
+```
+
+For example, if you deployed to space `my-space` and got charm ID `baedrei...xyz`:
+```
+http://localhost:8000/my-space/baedrei...xyz
+```
+
+If scripts fail, see `docs/development/LOCAL_DEV_SERVERS.md` for troubleshooting.
 
 ## Prerequisites and Setup
 

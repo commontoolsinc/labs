@@ -629,6 +629,111 @@ describe("Cell Static Methods", () => {
     });
   });
 
+  describe("Cell.of() validation", () => {
+    it("should throw when given a Cell", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const existingCell = Cell.of(42);
+        expect(() => Cell.of(existingCell)).toThrow(
+          /Cell\.of\(\) only accepts static data.*found a reactive value/,
+        );
+      });
+    });
+
+    it("should throw when given a Cell nested in an object", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const existingCell = Cell.of(42);
+        expect(() => Cell.of({ nested: existingCell })).toThrow(
+          /Cell\.of\(\) only accepts static data.*found a reactive value.*path 'nested'/,
+        );
+      });
+    });
+
+    it("should throw when given a Cell nested in an array", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const existingCell = Cell.of(42);
+        expect(() => Cell.of([1, 2, existingCell, 4])).toThrow(
+          /Cell\.of\(\) only accepts static data.*found a reactive value.*path '2'/,
+        );
+      });
+    });
+
+    it("should throw when given a Cell deeply nested", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const existingCell = Cell.of(42);
+        expect(() =>
+          Cell.of({
+            level1: {
+              level2: {
+                cells: [existingCell],
+              },
+            },
+          })
+        ).toThrow(
+          /Cell\.of\(\) only accepts static data.*found a reactive value.*path 'level1.level2.cells.0'/,
+        );
+      });
+    });
+
+    it("should throw when given a circular reference", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const circular: any = { a: 1 };
+        circular.self = circular;
+        expect(() => Cell.of(circular)).toThrow(
+          /Cell\.of\(\) does not accept circular references.*Cycle detected.*path 'self'/,
+        );
+      });
+    });
+
+    it("should throw when given a deeply nested circular reference", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const obj: any = { level1: { level2: { value: 1 } } };
+        obj.level1.level2.backRef = obj.level1;
+        expect(() => Cell.of(obj)).toThrow(
+          /Cell\.of\(\) does not accept circular references.*Cycle detected/,
+        );
+      });
+    });
+
+    it("should throw when given circular reference in arrays", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const arr: any[] = [1, 2, 3];
+        arr.push(arr);
+        expect(() => Cell.of(arr)).toThrow(
+          /Cell\.of\(\) does not accept circular references.*Cycle detected.*path '3'/,
+        );
+      });
+    });
+
+    it("should allow shared references (same object at multiple paths)", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const shared = { x: 1 };
+        // Same object referenced twice - this is NOT a cycle
+        const cell1 = Cell.of([shared, shared]);
+        expect(cell1.get()).toEqual([{ x: 1 }, { x: 1 }]);
+
+        const cell2 = Cell.of({ a: shared, b: shared });
+        expect(cell2.get()).toEqual({ a: { x: 1 }, b: { x: 1 } });
+      });
+    });
+
+    it("should allow deeply shared references", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const shared = { value: 42 };
+        const obj = {
+          level1: { ref: shared },
+          level2: { ref: shared },
+          arr: [shared, shared],
+        };
+        const cell = Cell.of(obj);
+        expect(cell.get()).toEqual({
+          level1: { ref: { value: 42 } },
+          level2: { ref: { value: 42 } },
+          arr: [{ value: 42 }, { value: 42 }],
+        });
+      });
+    });
+  });
+
   describe("Edge cases", () => {
     it("should handle creating cell with very large numbers", () => {
       withinHandlerContext(runtime, space, tx, () => {

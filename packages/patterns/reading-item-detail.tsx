@@ -1,8 +1,8 @@
 /// <cts-enable />
-import { Cell, computed, Default, NAME, pattern, UI } from "commontools";
+import { computed, Default, NAME, pattern, UI, Writable } from "commontools";
 
-/** Wrap all fields of T in Cell<> for write access */
-type Cellify<T> = { [K in keyof T]: Cell<T[K]> };
+/** Wrap all fields of T in Writable<> for write access */
+type Cellify<T> = { [K in keyof T]: Writable<T[K]> };
 
 export type ItemType = "book" | "article" | "paper" | "video";
 export type ItemStatus = "want" | "reading" | "finished" | "abandoned";

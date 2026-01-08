@@ -1,13 +1,16 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
+  equals,
   handler,
+  ifElse,
+  lift,
   NAME,
   navigateTo,
   pattern,
   UI,
   wish,
+  Writable,
 } from "commontools";
 
 import { default as Note } from "../notes/note.tsx";
@@ -39,7 +42,7 @@ interface CharmsListOutput {
 
 const _visit = handler<
   Record<string, never>,
-  { charm: Cell<MinimalCharm> }
+  { charm: Writable<MinimalCharm> }
 >((_, state) => {
   return navigateTo(state.charm);
 }, { proxy: true });
@@ -47,8 +50,8 @@ const _visit = handler<
 const removeCharm = handler<
   Record<string, never>,
   {
-    charm: Cell<MinimalCharm>;
-    allCharms: Cell<MinimalCharm[]>;
+    charm: Writable<MinimalCharm>;
+    allCharms: Writable<MinimalCharm[]>;
   }
 >((_, state) => {
   const allCharmsValue = state.allCharms.get();
@@ -63,24 +66,44 @@ const removeCharm = handler<
   }
 });
 
-const toggleFab = handler<any, { fabExpanded: Cell<boolean> }>(
+// Handler for dropping a note onto a notebook row
+const dropOntoNotebook = handler<
+  { detail: { sourceCell: Writable<unknown> } },
+  { notebook: Writable<{ notes?: unknown[] }> }
+>((event, { notebook }) => {
+  const sourceCell = event.detail.sourceCell;
+  const notesCell = notebook.key("notes");
+  const notesList = notesCell.get() ?? [];
+
+  // Prevent duplicates using Writable.equals
+  const alreadyExists = notesList.some((n) => equals(sourceCell, n as any));
+  if (alreadyExists) return;
+
+  // Hide from Patterns list
+  sourceCell.key("isHidden").set(true);
+
+  // Add to notebook - push cell reference, not value, to maintain charm identity
+  notesCell.push(sourceCell);
+});
+
+const toggleFab = handler<any, { fabExpanded: Writable<boolean> }>(
   (_, { fabExpanded }) => {
     fabExpanded.set(!fabExpanded.get());
   },
 );
 
 // Toggle dropdown menu
-const toggleMenu = handler<void, { menuOpen: Cell<boolean> }>(
+const toggleMenu = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => menuOpen.set(!menuOpen.get()),
 );
 
 // Close dropdown menu (for backdrop click)
-const closeMenu = handler<void, { menuOpen: Cell<boolean> }>(
+const closeMenu = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => menuOpen.set(false),
 );
 
 // Menu: New Note
-const menuNewNote = handler<void, { menuOpen: Cell<boolean> }>(
+const menuNewNote = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => {
     menuOpen.set(false);
     return navigateTo(Note({
@@ -92,7 +115,7 @@ const menuNewNote = handler<void, { menuOpen: Cell<boolean> }>(
 );
 
 // Menu: New Notebook
-const menuNewNotebook = handler<void, { menuOpen: Cell<boolean> }>(
+const menuNewNotebook = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => {
     menuOpen.set(false);
     return navigateTo(Notebook({ title: "New Notebook" }));
@@ -100,7 +123,7 @@ const menuNewNotebook = handler<void, { menuOpen: Cell<boolean> }>(
 );
 
 // Helper to find existing All Notes charm
-const findAllNotebooksCharm = (allCharms: Cell<MinimalCharm[]>) => {
+const findAllNotebooksCharm = (allCharms: Writable<MinimalCharm[]>) => {
   const charms = allCharms.get();
   return charms.find((charm: any) => {
     const name = charm?.[NAME];
@@ -111,7 +134,7 @@ const findAllNotebooksCharm = (allCharms: Cell<MinimalCharm[]>) => {
 // Menu: All Notes
 const menuAllNotebooks = handler<
   void,
-  { menuOpen: Cell<boolean>; allCharms: Cell<MinimalCharm[]> }
+  { menuOpen: Writable<boolean>; allCharms: Writable<MinimalCharm[]> }
 >((_, { menuOpen, allCharms }) => {
   menuOpen.set(false);
   const existing = findAllNotebooksCharm(allCharms);
@@ -125,13 +148,14 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
   const { allCharms } = wish<{ allCharms: MentionableCharm[] }>("/");
 
   // Dropdown menu state
-  const menuOpen = Cell.of(false);
+  const menuOpen = Writable.of(false);
 
   // Filter out hidden charms and charms without resolved NAME
   // (prevents transient hash-only pills during reactive updates)
+  // NOTE: Use truthy check, not === true, because charm.isHidden is a proxy object
   const visibleCharms = computed(() =>
     allCharms.filter((charm) => {
-      if (charm.isHidden === true) return false;
+      if (charm.isHidden) return false;
       const name = (charm as any)?.[NAME];
       return typeof name === "string" && name.length > 0;
     })
@@ -140,7 +164,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
   const index = BacklinksIndex({ allCharms });
 
   const fab = OmniboxFAB({
-    mentionable: index.mentionable as unknown as Cell<MentionableCharm[]>,
+    mentionable: index.mentionable as unknown as Writable<MentionableCharm[]>,
   });
 
   return {
@@ -163,7 +187,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
 
         <ct-toolbar slot="header" sticky>
           <div slot="start">
-            <h2 style={{ margin: 0, fontSize: "20px" }}>Pages</h2>
+            <h2 style={{ margin: 0, fontSize: "20px" }}>Patterns</h2>
           </div>
           <div slot="end">
             <ct-button
@@ -255,24 +279,62 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
 
             <ct-table full-width hover>
               <tbody>
-                {visibleCharms.map((charm) => (
-                  <tr>
-                    <td>
-                      <ct-cell-context $cell={charm}>
-                        <ct-cell-link $cell={charm} />
-                      </ct-cell-context>
-                    </td>
-                    <td>
-                      <ct-button
-                        size="sm"
-                        variant="ghost"
-                        onClick={removeCharm({ charm, allCharms })}
+                {visibleCharms.map((charm) => {
+                  // Check if charm is a notebook by NAME prefix (isNotebook prop not reliable through proxy)
+                  const isNotebook = lift((args: { c: unknown }) => {
+                    const name = (args.c as any)?.[NAME];
+                    const result = typeof name === "string" &&
+                      name.startsWith("📓");
+                    return result;
+                  })({ c: charm });
+
+                  const dragHandle = (
+                    <ct-drag-source $cell={charm} type="note">
+                      <span
+                        style={{ cursor: "grab", padding: "4px", opacity: 0.5 }}
                       >
-                        🗑️
-                      </ct-button>
-                    </td>
-                  </tr>
-                ))}
+                        ⠿
+                      </span>
+                    </ct-drag-source>
+                  );
+
+                  const link = (
+                    <ct-cell-context $cell={charm}>
+                      <ct-cell-link $cell={charm} />
+                    </ct-cell-context>
+                  );
+
+                  return (
+                    <tr>
+                      <td style={{ width: "24px", padding: "0 4px" }}>
+                        {dragHandle}
+                      </td>
+                      <td>
+                        {ifElse(
+                          isNotebook,
+                          <ct-drop-zone
+                            accept="note"
+                            onct-drop={dropOntoNotebook({
+                              notebook: charm as any,
+                            })}
+                          >
+                            {link}
+                          </ct-drop-zone>,
+                          link,
+                        )}
+                      </td>
+                      <td>
+                        <ct-button
+                          size="sm"
+                          variant="ghost"
+                          onClick={removeCharm({ charm, allCharms })}
+                        >
+                          🗑️
+                        </ct-button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </ct-table>
           </ct-vstack>

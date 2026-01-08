@@ -18,6 +18,7 @@ export type { Action, ErrorWithContext, ReactivityLog } from "./scheduler.ts";
 export * as StorageInspector from "./storage/inspector.ts";
 export { StorageTelemetry } from "./storage/telemetry.ts";
 export type {
+  ChangeGroup,
   IExtendedStorageTransaction,
   MemorySpace,
 } from "./storage/interface.ts";
@@ -30,8 +31,8 @@ export {
 export { convertCellsToLinks, isCell, isStream } from "./cell.ts";
 export {
   getCellOrThrow,
-  isCellResult as isQueryResult,
-  isCellResultForDereferencing as isQueryResultForDereferencing,
+  isCellResult,
+  isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
@@ -125,6 +126,9 @@ export {
   RuntimeTelemetryEvent,
   type RuntimeTelemetryMarker,
   type RuntimeTelemetryMarkerResult,
+  type SchedulerGraphEdge,
+  type SchedulerGraphNode,
+  type SchedulerGraphSnapshot,
 } from "./telemetry.ts";
 
 // Utility functions (split from utils.ts)

@@ -1,13 +1,14 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   Default,
+  equals,
   handler,
   ifElse,
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 import Counter from "../counter.tsx";
 
@@ -18,22 +19,22 @@ interface Item {
 
 interface DragDropDemoInput {
   availableItems: Default<Item[], []>;
-  droppedItems: Cell<Item[]>;
+  droppedItems: Writable<Item[]>;
 }
 
 interface DragDropDemoOutput {
   availableItems: Default<Item[], []>;
-  droppedItems: Cell<Item[]>;
+  droppedItems: Writable<Item[]>;
 }
 
 // Handler to remove an item from the dropped list
 const removeItem = handler<
   unknown,
-  { droppedItems: Cell<Item[]>; item: Cell<Item> }
+  { droppedItems: Writable<Item[]>; item: Writable<Item> }
 >(
   (_, { droppedItems, item }) => {
     const current = droppedItems.get();
-    const index = current.findIndex((el) => Cell.equals(item, el));
+    const index = current.findIndex((el) => equals(item, el));
     if (index >= 0) {
       droppedItems.set(current.toSpliced(index, 1));
     }
@@ -91,7 +92,7 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
 
           <ct-drop-zone
             accept="item"
-            onct-drop={(e: { detail: { sourceCell: Cell } }) => {
+            onct-drop={(e: { detail: { sourceCell: Writable<Item> } }) => {
               const sourceItem = e.detail.sourceCell.get() as Item;
               // Append the dropped item to the list
               droppedItems.push(sourceItem);

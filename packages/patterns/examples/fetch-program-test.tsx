@@ -1,12 +1,12 @@
 /// <cts-enable />
 import {
-  Cell,
   compileAndRun,
   computed,
   fetchProgram,
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 /**
@@ -15,7 +15,7 @@ import {
  */
 export default pattern(() => {
   // URL to a simple pattern file
-  const url = Cell.of(
+  const url = Writable.of(
     "https://raw.githubusercontent.com/commontoolsinc/labs/main/packages/patterns/counter.tsx",
   );
 

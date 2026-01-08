@@ -258,8 +258,10 @@ export class CTPicker extends BaseElement {
           private _touchStartX = 0;
           private _isTouching = false;
 
+          private _changeGroup = crypto.randomUUID();
           private _cellController = createCellController<number>(this, {
             timing: { strategy: "immediate" },
+            changeGroup: this._changeGroup,
             onChange: (newIndex) => {
               this.emit("ct-change", {
                 index: newIndex,

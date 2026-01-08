@@ -7,6 +7,7 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { ALL_CHARMS_ID } from "../src/builtins/well-known.ts";
 import { UI } from "../src/builder/types.ts";
+import { parseWishTarget } from "../src/builtins/wish.ts";
 
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
@@ -74,10 +75,10 @@ describe("wish built-in", () => {
     );
     const result = runtime.run(tx, wishRecipe, {}, resultCell);
     await tx.commit();
-    await runtime.idle();
     tx = runtime.edit();
 
-    await runtime.idle();
+    // Pull to trigger computation
+    await result.pull();
 
     const actualCell = result.key("allCharms");
     const rawValue = actualCell.getRaw() as
@@ -131,10 +132,10 @@ describe("wish built-in", () => {
     );
     const result = runtime.run(tx, wishRecipe, {}, resultCell);
     await tx.commit();
-    await runtime.idle();
     tx = runtime.edit();
 
-    await runtime.idle();
+    // Pull to trigger computation
+    await result.pull();
 
     expect(result.key("semanticAllCharms").get()).toEqual(charmsData);
     expect(result.key("semanticFirstTitle").get()).toEqual("Alpha");
@@ -174,10 +175,10 @@ describe("wish built-in", () => {
     );
     const result = runtime.run(tx, wishRecipe, {}, resultCell);
     await tx.commit();
-    await runtime.idle();
     tx = runtime.edit();
 
-    await runtime.idle();
+    // Pull to trigger computation
+    await result.pull();
 
     expect(result.key("defaultTitle").get()).toEqual("Default App");
     expect(result.key("defaultGreeting").get()).toEqual("hello");
@@ -217,10 +218,9 @@ describe("wish built-in", () => {
     );
     const result = runtime.run(tx, wishRecipe, {}, resultCell);
     await tx.commit();
-    await runtime.idle();
     tx = runtime.edit();
 
-    await runtime.idle();
+    await result.pull();
 
     expect(result.key("mentionable").get()).toEqual([
       { name: "Alpha" },
@@ -261,10 +261,9 @@ describe("wish built-in", () => {
     );
     const result = runtime.run(tx, wishRecipe, {}, resultCell);
     await tx.commit();
-    await runtime.idle();
     tx = runtime.edit();
 
-    await runtime.idle();
+    await result.pull();
 
     expect(result.key("recent").get()).toEqual(recentData);
     expect(result.key("recentFirst").get()).toEqual("Charm A");
@@ -284,10 +283,9 @@ describe("wish built-in", () => {
     const before = Date.now();
     const result = runtime.run(tx, wishRecipe, {}, resultCell);
     await tx.commit();
-    await runtime.idle();
     tx = runtime.edit();
 
-    await runtime.idle();
+    await result.pull();
 
     const after = Date.now();
     const nowValue = result.key("nowValue").get();
@@ -322,7 +320,7 @@ describe("wish built-in", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    await result.pull();
 
     const readTx = runtime.readTx();
     const spaceResultCell = result.withTx(readTx).key("spaceResult");
@@ -361,7 +359,7 @@ describe("wish built-in", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    await result.pull();
 
     const readTx = runtime.readTx();
 
@@ -388,7 +386,7 @@ describe("wish built-in", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    await result.pull();
 
     const missingResult = result.key("missing").get();
     // Unknown wish targets now return an error object for better UX
@@ -430,10 +428,9 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
-      await runtime.idle();
       tx = runtime.edit();
 
-      await runtime.idle();
+      await result.pull();
 
       expect(result.key("allCharms").get()?.result).toEqual(charmsData);
     });
@@ -478,10 +475,9 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
-      await runtime.idle();
       tx = runtime.edit();
 
-      await runtime.idle();
+      await result.pull();
 
       expect(result.key("firstTitle").get()?.result).toEqual("First Title");
     });
@@ -510,10 +506,9 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
-      await runtime.idle();
       tx = runtime.edit();
 
-      await runtime.idle();
+      await result.pull();
 
       expect(result.key("spaceResult").get()?.result).toEqual(spaceData);
     });
@@ -547,10 +542,9 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
-      await runtime.idle();
       tx = runtime.edit();
 
-      await runtime.idle();
+      await result.pull();
 
       expect(result.key("configLink").get()?.result).toEqual({
         setting: "value",
@@ -574,10 +568,9 @@ describe("wish built-in", () => {
       const before = Date.now();
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
-      await runtime.idle();
       tx = runtime.edit();
 
-      await runtime.idle();
+      await result.pull();
 
       const after = Date.now();
       const nowValue = result.key("nowValue").get()?.result;
@@ -602,10 +595,9 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
-      await runtime.idle();
       tx = runtime.edit();
 
-      await runtime.idle();
+      await result.pull();
 
       const missingResult = result.key("missing").get();
       // Unknown tags now search favorites, returning "No favorite found" error
@@ -628,10 +620,9 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
-      await runtime.idle();
       tx = runtime.edit();
 
-      await runtime.idle();
+      await result.pull();
 
       const missingResult = result.key("missing").get();
       expect(missingResult?.error).toMatch(/no query/);
@@ -661,10 +652,9 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
-      await runtime.idle();
       tx = runtime.edit();
 
-      await runtime.idle();
+      await result.pull();
 
       const wishResult = result.key("spaceResult").get() as Record<
         string | symbol,
@@ -702,10 +692,9 @@ describe("wish built-in", () => {
         );
         const result = runtime.run(tx, wishRecipe, {}, resultCell);
         await tx.commit();
-        await runtime.idle();
         tx = runtime.edit();
 
-        await runtime.idle();
+        await result.pull();
 
         const wishResult = result.key("missing").get() as Record<
           string | symbol,
@@ -778,10 +767,9 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, loadedRecipe, {}, resultCell);
       await tx.commit();
-      await runtime.idle();
       tx = runtime.edit();
 
-      await runtime.idle();
+      await result.pull();
 
       // The wish should resolve to the space cell data, wrapped in { result: ... }
       expect(result.key("spaceResult").get()?.result).toEqual(spaceData);
@@ -831,10 +819,9 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, loadedRecipe, {}, resultCell);
       await tx.commit();
-      await runtime.idle();
       tx = runtime.edit();
 
-      await runtime.idle();
+      await result.pull();
 
       expect(result.key("deepValue").get()?.result).toEqual("found it");
     });
@@ -905,8 +892,9 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
-      await runtime.idle();
       tx = runtime.edit();
+
+      await result.pull();
 
       // Verify: Favorites resolved from home space, not pattern space
       const favorites = result.key("favorites").get()?.result;
@@ -963,8 +951,9 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
-      await runtime.idle();
       tx = runtime.edit();
+
+      await result.pull();
 
       // Verify: Gets pattern space's #default, not home space's
       const defaultData = result.key("defaultData").get()?.result;
@@ -1021,8 +1010,9 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
-      await runtime.idle();
       tx = runtime.edit();
+
+      await result.pull();
 
       // Verify: Each resolves to correct space
       const favorites = result.key("favorites").get()?.result;
@@ -1076,8 +1066,9 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishRecipe, {}, resultCell);
       await tx.commit();
-      await runtime.idle();
       tx = runtime.edit();
+
+      await result.pull();
 
       // Verify: Searches home space favorites, finds correct cell
       const taggedItem = result.key("taggedItem").get()?.result;
@@ -1132,8 +1123,9 @@ describe("wish built-in", () => {
       );
       const result = runtime.run(tx, wishingRecipe, {}, resultCell);
       await tx.commit();
-      await runtime.idle();
       tx = runtime.edit();
+
+      await result.pull();
 
       // Verify: Wish triggered charm to start and returns running charm data
       const charmData = result.key("charmData").get()?.result;
@@ -1146,5 +1138,53 @@ describe("wish built-in", () => {
         expect("count" in charmData || "increment" in charmData).toBe(true);
       }
     });
+  });
+});
+
+describe("parseWishTarget", () => {
+  it("parses absolute paths starting with /", () => {
+    const result = parseWishTarget("/allCharms");
+    expect(result).toEqual({ key: "/", path: ["allCharms"] });
+  });
+
+  it("parses nested absolute paths", () => {
+    const result = parseWishTarget("/allCharms/0/title");
+    expect(result).toEqual({ key: "/", path: ["allCharms", "0", "title"] });
+  });
+
+  it("parses hash tag targets", () => {
+    const result = parseWishTarget("#favorites");
+    expect(result).toEqual({ key: "#favorites", path: [] });
+  });
+
+  it("parses hash tag targets with path", () => {
+    const result = parseWishTarget("#favorites/list/0");
+    expect(result).toEqual({ key: "#favorites", path: ["list", "0"] });
+  });
+
+  it("trims whitespace", () => {
+    const result = parseWishTarget("  /allCharms  ");
+    expect(result).toEqual({ key: "/", path: ["allCharms"] });
+  });
+
+  it("filters empty segments", () => {
+    const result = parseWishTarget("/allCharms//nested/");
+    expect(result).toEqual({ key: "/", path: ["allCharms", "nested"] });
+  });
+
+  it("throws on empty string", () => {
+    expect(() => parseWishTarget("")).toThrow('Wish target "" is empty');
+  });
+
+  it("throws on whitespace-only string", () => {
+    expect(() => parseWishTarget("   ")).toThrow("is empty");
+  });
+
+  it("throws on unrecognized path format", () => {
+    expect(() => parseWishTarget("noSlashOrHash")).toThrow("is not recognized");
+  });
+
+  it("throws on hash-only target", () => {
+    expect(() => parseWishTarget("#")).toThrow("is not recognized");
   });
 });

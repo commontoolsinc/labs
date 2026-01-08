@@ -1,7 +1,11 @@
 import { Cancel, isCancel, noOp } from "./cancel.ts";
+import type { ChangeGroup } from "./storage/interface.ts";
 
 export type SinkableCell<T = unknown> = {
-  sink: (callback: (value: T) => Cancel | undefined | void) => Cancel;
+  sink: (
+    callback: (value: T) => Cancel | undefined | void,
+    options?: { changeGroup?: ChangeGroup },
+  ) => Cancel;
 };
 
 export function isSinkableCell(value: unknown): value is SinkableCell {

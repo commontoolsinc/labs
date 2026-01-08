@@ -1,12 +1,12 @@
 /// <cts-enable />
 
-import { Cell, Default, NAME, pattern, UI } from "commontools";
+import { Default, NAME, pattern, UI, Writable } from "commontools";
 
 type Input = {
-  selected: Cell<Default<string, "opt_1">>;
-  numericChoice: Cell<Default<number, 1>>;
-  category: Cell<Default<string, "Other">>;
-  activeTab: Cell<Default<string, "tab1">>;
+  selected: Writable<Default<string, "opt_1">>;
+  numericChoice: Writable<Default<number, 1>>;
+  category: Writable<Default<string, "Other">>;
+  activeTab: Writable<Default<string, "tab1">>;
 };
 
 type Result = {

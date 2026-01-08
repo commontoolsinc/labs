@@ -82,7 +82,7 @@ type AmplifyKeys<
 > = {
   [Index in Extract<keyof Keys, number>]: KeyResultType<
     Source,
-    Keys[Index],
+    [Keys[Index]],
     AsCell
   >;
 };
@@ -99,13 +99,13 @@ type AmplifiedTopLevel = AmplifyKeys<UserProfileCell, TopLevelKeys>;
 
 type StatsKeys = ["followers", "engagementScore", "liveFeed", "lastLogin"];
 type AmplifiedStats = AmplifyKeys<
-  KeyResultType<UserProfileCell, "stats", AsCell>,
+  KeyResultType<UserProfileCell, ["stats"], AsCell>,
   StatsKeys
 >;
 
 type NotificationKeys = ["email", "push", "sms"];
 type AmplifiedNotifications = AmplifyKeys<
-  KeyResultType<UserProfileCell, "notificationPrefs", AsCell>,
+  KeyResultType<UserProfileCell, ["notificationPrefs"], AsCell>,
   NotificationKeys
 >;
 
@@ -115,7 +115,7 @@ type KeyChain<
   Keys extends readonly PropertyKey[],
 > = Keys extends
   readonly [infer Head extends PropertyKey, ...infer Tail extends PropertyKey[]]
-  ? KeyChain<KeyResultType<Source, Head, AsCell>, Tail>
+  ? KeyChain<KeyResultType<Source, [Head], AsCell>, Tail>
   : Source;
 
 type FrequentPaths = [

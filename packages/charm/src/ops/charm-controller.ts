@@ -17,9 +17,9 @@ import {
 } from "../iframe/recipe.ts";
 
 interface CharmCellIo {
-  get(path?: CellPath): unknown;
+  get(path?: CellPath): Promise<unknown>;
   set(value: unknown, path?: CellPath): Promise<void>;
-  getCell(): Cell<unknown>;
+  getCell(): Promise<Cell<unknown>>;
 }
 
 type CharmPropIoType = "result" | "input";
@@ -32,21 +32,20 @@ class CharmPropIo implements CharmCellIo {
     this.#type = type;
   }
 
-  get(path?: CellPath) {
-    const targetCell = this.#getTargetCell();
+  async get(path?: CellPath) {
+    const targetCell = await this.#getTargetCell();
     return resolveCellPath(targetCell, path ?? []);
   }
 
-  getCell(): Cell<unknown> {
+  getCell(): Promise<Cell<unknown>> {
     return this.#getTargetCell();
   }
 
   async set(value: unknown, path?: CellPath) {
     const manager = this.#cc.manager();
+    const targetCell = await this.#getTargetCell();
 
     await manager.runtime.editWithRetry((tx) => {
-      const targetCell = this.#getTargetCell();
-
       // Build the path with transaction context
       let txCell = targetCell.withTx(tx);
       for (const segment of (path ?? [])) {
@@ -60,11 +59,11 @@ class CharmPropIo implements CharmCellIo {
     await manager.synced();
   }
 
-  #getTargetCell(): Cell<unknown> {
+  #getTargetCell(): Promise<Cell<unknown>> {
     if (this.#type === "input") {
       return this.#cc.manager().getArgument(this.#cc.getCell());
     } else if (this.#type === "result") {
-      return this.#cc.manager().getResult(this.#cc.getCell());
+      return Promise.resolve(this.#cc.manager().getResult(this.#cc.getCell()));
     }
     throw new Error(`Unknown property type "${this.#type}"`);
   }
@@ -114,11 +113,12 @@ export class CharmController<T = unknown> {
     return recipe;
   }
 
-  getRecipeMeta(): Promise<RecipeMeta> {
-    return this.#manager.runtime.recipeManager.loadRecipeMeta(
-      getRecipeIdFromCharm(this.#cell),
-      this.#manager.getSpace(),
-    );
+  async getRecipeMeta(): Promise<RecipeMeta> {
+    const recipeId = getRecipeIdFromCharm(this.#cell);
+    const space = this.#manager.getSpace();
+    // Ensure the recipe is loaded first - this populates the metadata
+    await this.#manager.runtime.recipeManager.loadRecipe(recipeId, space);
+    return this.#manager.runtime.recipeManager.loadRecipeMeta(recipeId, space);
   }
 
   // Returns an `IFrameRecipe` for the charm, or `undefined`
@@ -147,16 +147,14 @@ export class CharmController<T = unknown> {
     await execute(this.#manager, this.id, recipe);
   }
 
-  readingFrom(): CharmController[] {
-    return this.#manager.getReadingFrom(this.#cell).map((cell) =>
-      new CharmController(this.#manager, cell)
-    );
+  async readingFrom(): Promise<CharmController[]> {
+    const cells = await this.#manager.getReadingFrom(this.#cell);
+    return cells.map((cell) => new CharmController(this.#manager, cell));
   }
 
-  readBy(): CharmController[] {
-    return this.#manager.getReadByCharms(this.#cell).map((cell) =>
-      new CharmController(this.#manager, cell)
-    );
+  async readBy(): Promise<CharmController[]> {
+    const cells = await this.#manager.getReadByCharms(this.#cell);
+    return cells.map((cell) => new CharmController(this.#manager, cell));
   }
 
   manager(): CharmManager {

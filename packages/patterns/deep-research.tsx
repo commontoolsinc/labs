@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   generateObject,
   NAME,
@@ -9,6 +8,7 @@ import {
   str,
   toSchema,
   UI,
+  Writable,
 } from "commontools";
 import { readWebpage, searchWeb } from "./system/common-tools.tsx";
 
@@ -31,7 +31,7 @@ export default pattern<
   { question: string; context?: { [id: string]: any } },
   {
     question: string;
-    result: Cell<ResearchResult | undefined>;
+    result: Writable<ResearchResult | undefined>;
     pending: boolean;
     error: string | undefined;
   }

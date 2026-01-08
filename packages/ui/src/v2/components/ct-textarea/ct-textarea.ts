@@ -279,12 +279,14 @@ export class CTTextarea extends BaseElement {
       declare theme?: CTTheme;
 
       // Cache + initial setup
+      private _changeGroup = crypto.randomUUID();
       private _textarea: HTMLTextAreaElement | null = null;
       private _cellController = createStringCellController(this, {
         timing: {
           strategy: "debounce",
           delay: 300,
         },
+        changeGroup: this._changeGroup,
       });
 
       constructor() {

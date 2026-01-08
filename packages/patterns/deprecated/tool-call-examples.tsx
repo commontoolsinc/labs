@@ -1,10 +1,10 @@
 /// <cts-enable />
-import { Cell, generateText, NAME, recipe, str, UI } from "commontools";
+import { generateText, NAME, recipe, str, UI, Writable } from "commontools";
 
 import { calculator } from "../system/common-tools.tsx";
 
 export default recipe("ToolCallExamples", () => {
-  const expression = Cell.of("1+1");
+  const expression = Writable.of("1+1");
 
   const text = generateText({
     system:

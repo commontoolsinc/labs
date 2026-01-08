@@ -57,6 +57,7 @@ export type SubCharmType =
   | "link"
   // Wave 3
   | "location"
+  | "location-track"
   | "relationship"
   | "giftprefs"
   | "timing"
@@ -69,6 +70,14 @@ export type SubCharmType =
   | "nickname"
   // Icon customization
   | "record-icon"
+  // List modules
+  | "simple-list"
+  // Photo module (with settings)
+  | "photo"
+  // Custom field (generic property/value pairs)
+  | "custom-field"
+  // Occurrence tracking
+  | "occurrence-tracker"
   // Controller modules (internal, not user-addable)
   | "type-picker"
   | "extractor";

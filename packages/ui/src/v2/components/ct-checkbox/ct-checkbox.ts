@@ -171,11 +171,13 @@ export class CTCheckbox extends BaseElement {
     declare name: string;
     declare value: string;
 
+    private _changeGroup = crypto.randomUUID();
     private _checkedCellController = createBooleanCellController(this, {
       timing: {
         strategy: "immediate",
         delay: 0,
       },
+      changeGroup: this._changeGroup,
       onChange: (newValue: boolean, _oldValue: boolean) => {
         this.emit("ct-change", {
           checked: newValue,

@@ -1,4 +1,9 @@
-import { JsScript, SourceMap, SourceMapParser } from "@commontools/js-compiler";
+import {
+  JsScript,
+  MappedPosition,
+  SourceMap,
+  SourceMapParser,
+} from "@commontools/js-compiler";
 
 // A reference to a runtime value from a `JsIsolate`.
 export interface JsValue {
@@ -69,6 +74,21 @@ class IsolateInternals {
   loadSourceMap(filename: string, sourceMap: SourceMap) {
     this.sourceMaps.load(filename, sourceMap);
   }
+
+  mapPosition(
+    filename: string,
+    line: number,
+    column: number,
+  ): MappedPosition | null {
+    return this.sourceMaps.mapPosition(filename, line, column);
+  }
+
+  /**
+   * Clear accumulated source maps to release memory.
+   */
+  clear(): void {
+    this.sourceMaps.clear();
+  }
 }
 
 export class UnsafeEvalIsolate implements JsIsolate {
@@ -93,6 +113,22 @@ export class UnsafeEvalIsolate implements JsIsolate {
   value<T>(value: T) {
     return new UnsafeEvalJsValue(this.internals, value);
   }
+
+  mapPosition(
+    filename: string,
+    line: number,
+    column: number,
+  ): MappedPosition | null {
+    return this.internals.mapPosition(filename, line, column);
+  }
+
+  /**
+   * Clear accumulated source maps and other state.
+   * Call this when disposing the runtime to prevent memory leaks.
+   */
+  clear(): void {
+    this.internals.clear();
+  }
 }
 
 export class UnsafeEvalRuntime extends EventTarget implements JsRuntime {
@@ -104,4 +140,21 @@ export class UnsafeEvalRuntime extends EventTarget implements JsRuntime {
   getIsolate(_key: string): UnsafeEvalIsolate {
     return this.isolateSingleton;
   }
+
+  mapPosition(
+    filename: string,
+    line: number,
+    column: number,
+  ): MappedPosition | null {
+    return this.isolateSingleton.mapPosition(filename, line, column);
+  }
+
+  /**
+   * Clear all isolate state. Call on dispose to release memory.
+   */
+  clear(): void {
+    this.isolateSingleton.clear();
+  }
 }
+
+export type { MappedPosition };

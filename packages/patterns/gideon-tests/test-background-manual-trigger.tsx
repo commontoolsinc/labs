@@ -31,7 +31,7 @@
  * - Requires production-style ACL configuration
  * - Code review verification is sufficient for claim validation
  */
-import { Cell, Default, handler, NAME, pattern, UI } from "commontools";
+import { Default, handler, NAME, pattern, UI, Writable } from "commontools";
 
 interface Input {
   runCount: Default<number, 0>;
@@ -41,7 +41,7 @@ interface Input {
 // Browser-triggered handler - explicitly marks source as BROWSER
 const browserTrigger = handler<
   unknown,
-  { runCount: Cell<number>; logs: Cell<string[]> }
+  { runCount: Writable<number>; logs: Writable<string[]> }
 >((_event, state) => {
   const now = Date.now();
   const count = state.runCount.get() + 1;
@@ -52,7 +52,7 @@ const browserTrigger = handler<
 // Clear logs handler
 const clearLogs = handler<
   unknown,
-  { runCount: Cell<number>; logs: Cell<string[]> }
+  { runCount: Writable<number>; logs: Writable<string[]> }
 >(
   (_event, state) => {
     state.runCount.set(0);
@@ -64,7 +64,7 @@ const clearLogs = handler<
 // The service sends {} as the event, handler executes server-side
 const bgUpdateHandler = handler<
   unknown,
-  { runCount: Cell<number>; logs: Cell<string[]> }
+  { runCount: Writable<number>; logs: Writable<string[]> }
 >((_event, state) => {
   const now = Date.now();
   const count = state.runCount.get() + 1;

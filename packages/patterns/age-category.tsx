@@ -9,13 +9,13 @@
  * Design: Single enum prevents invalid states (e.g., adult + baby subcategory).
  */
 import {
-  Cell,
   computed,
   type Default,
   handler,
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
@@ -165,7 +165,7 @@ export function inferCategoryFromAge(age: number): AgeCategory {
 // Handle age group radio change
 const handleGroupChange = handler<
   { detail: { value: string } },
-  { ageCategory: Cell<AgeCategory> }
+  { ageCategory: Writable<AgeCategory> }
 >(({ detail }, { ageCategory }) => {
   const newGroup = detail.value;
   const current = ageCategory.get();

@@ -6,13 +6,13 @@
  * like Record. Tracks gift tier, favorites, and items to avoid.
  */
 import {
-  Cell,
   computed,
   type Default,
   handler,
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
@@ -69,7 +69,7 @@ const TIER_OPTIONS = [
 // Handler to add a favorite
 const addFavorite = handler<
   unknown,
-  { favorites: Cell<string[]>; favoriteInput: Cell<string> }
+  { favorites: Writable<string[]>; favoriteInput: Writable<string> }
 >((_event, { favorites, favoriteInput }) => {
   const newItem = favoriteInput.get().trim();
   if (!newItem) return;
@@ -83,7 +83,7 @@ const addFavorite = handler<
 // Handler to remove a favorite by index
 const removeFavorite = handler<
   unknown,
-  { favorites: Cell<string[]>; index: number }
+  { favorites: Writable<string[]>; index: number }
 >((_event, { favorites, index }) => {
   favorites.set((favorites.get() || []).toSpliced(index, 1));
 });
@@ -91,7 +91,7 @@ const removeFavorite = handler<
 // Handler to add an avoid item
 const addAvoid = handler<
   unknown,
-  { avoid: Cell<string[]>; avoidInput: Cell<string> }
+  { avoid: Writable<string[]>; avoidInput: Writable<string> }
 >((_event, { avoid, avoidInput }) => {
   const newItem = avoidInput.get().trim();
   if (!newItem) return;
@@ -105,7 +105,7 @@ const addAvoid = handler<
 // Handler to remove an avoid item by index
 const removeAvoid = handler<
   unknown,
-  { avoid: Cell<string[]>; index: number }
+  { avoid: Writable<string[]>; index: number }
 >((_event, { avoid, index }) => {
   avoid.set((avoid.get() || []).toSpliced(index, 1));
 });
@@ -117,8 +117,8 @@ export const GiftPrefsModule = recipe<
 >(
   "GiftPrefsModule",
   ({ giftTier, favorites, avoid }) => {
-    const favoriteInput = Cell.of<string>("");
-    const avoidInput = Cell.of<string>("");
+    const favoriteInput = Writable.of<string>("");
+    const avoidInput = Writable.of<string>("");
 
     const displayText = computed(() => {
       const opt = TIER_OPTIONS.find((o) => o.value === giftTier);

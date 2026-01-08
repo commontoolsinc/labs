@@ -1,5 +1,13 @@
 /// <cts-enable />
-import { Cell, Default, derive, handler, NAME, recipe, UI } from "commontools";
+import {
+  Default,
+  derive,
+  handler,
+  NAME,
+  recipe,
+  UI,
+  Writable,
+} from "commontools";
 
 interface LinkedList {
   value: string;
@@ -17,7 +25,7 @@ type InputEventType = {
 };
 
 interface ListState {
-  items_list: Cell<LinkedList>;
+  items_list: Writable<LinkedList>;
 }
 
 // Helper function to add a node to the linked list
@@ -47,7 +55,7 @@ const addItem = handler<InputEventType, ListState>(
 );
 
 export default recipe<InputSchema>(({ title }) => {
-  const items_list = Cell.of<LinkedList>({ value: "1" });
+  const items_list = Writable.of<LinkedList>({ value: "1" });
 
   // Create a derived value for the linked list string representation
   // FIXME(@ellyxir): use inputschema instead of just creating it here

@@ -4,7 +4,7 @@
 /// description: Protocol for controller patterns that coordinate with parent containers
 /// </cts-meta>
 
-import type { Cell } from "commontools";
+import type { Writable } from "commontools";
 
 /**
  * ContainerCoordinationContext - Passed to controller patterns that need
@@ -19,10 +19,10 @@ import type { Cell } from "commontools";
  */
 export interface ContainerCoordinationContext<TEntry = unknown> {
   /** Container's list of child entries */
-  entries: Cell<TEntry[]>;
+  entries: Writable<TEntry[]>;
 
   /** Container's trash for soft-deleted entries */
-  trashedEntries: Cell<(TEntry & { trashedAt: string })[]>;
+  trashedEntries: Writable<(TEntry & { trashedAt: string })[]>;
 
   /** Factory to create modules with correct container context */
   createModule: (type: string) => unknown;
@@ -53,4 +53,13 @@ export interface ModuleMetadata {
 
   /** Field names this module manages (for data mapping) */
   fieldMapping?: string[];
+
+  /** If true, this module exports a settingsUI for configuration */
+  hasSettings?: boolean;
+
+  /** If true, always include this module's schema in extraction even with no instances */
+  alwaysExtract?: boolean;
+
+  /** Extraction mode: "single" (default) or "array" (each array item creates a module instance) */
+  extractionMode?: "single" | "array";
 }

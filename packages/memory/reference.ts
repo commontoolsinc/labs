@@ -1,6 +1,14 @@
 import * as Reference from "merkle-reference";
 import { isDeno } from "@commontools/utils/env";
+import { createSHA256, type IHasher } from "hash-wasm";
 export * from "merkle-reference";
+
+/**
+ * Which SHA-256 implementation is currently in use.
+ */
+export type HashImplementation = "node:crypto" | "hash-wasm" | "noble";
+
+let activeHashImpl: HashImplementation = "noble";
 
 // Don't know why deno does not seem to see there is a `fromString` so we just
 // workaround it like this.
@@ -9,18 +17,19 @@ export const fromString = Reference.fromString as (
 ) => Reference.View;
 
 /**
- * Refer function - uses merkle-reference's default in browsers (@noble/hashes),
- * upgrades to node:crypto in server environments for ~1.5-2x speedup.
+ * Internal refer implementation - set based on environment.
  *
- * Browser environments use merkle-reference's default (pure JS, works everywhere).
- * Server environments (Node.js, Deno) use node:crypto when available.
+ * Priority:
+ * 1. Server (Deno): node:crypto - hardware accelerated via OpenSSL
+ * 2. Browser: hash-wasm - WASM SHA-256, ~3x faster than pure JS
+ * 3. Fallback: merkle-reference default (@noble/hashes)
  */
 let referImpl: <T>(source: T) => Reference.View<T> = Reference.refer;
 
-// In Deno, try to use node:crypto for better performance
+// Initialize hash implementation based on environment
 if (isDeno()) {
+  // Server: use node:crypto for hardware acceleration
   try {
-    // Dynamic import to avoid bundler resolution in browsers
     const nodeCrypto = await import("node:crypto");
     const nodeSha256 = (payload: Uint8Array): Uint8Array => {
       return nodeCrypto.createHash("sha256").update(payload).digest();
@@ -29,113 +38,93 @@ if (isDeno()) {
     referImpl = <T>(source: T): Reference.View<T> => {
       return treeBuilder.refer(source) as unknown as Reference.View<T>;
     };
+    activeHashImpl = "node:crypto";
   } catch {
     // node:crypto not available, use merkle-reference's default
+  }
+} else {
+  // Browser: use hash-wasm (WASM SHA-256, ~3x faster than @noble/hashes)
+  try {
+    const hasher: IHasher = await createSHA256();
+    // Note: This hash function is synchronous (no awaits between init/update/digest).
+    // In JS's single-threaded model, synchronous code runs to completion without
+    // interruption, so the shared hasher instance is safe from interleaving.
+    const wasmSha256 = (payload: Uint8Array): Uint8Array => {
+      hasher.init();
+      hasher.update(payload);
+      return hasher.digest("binary");
+    };
+    const treeBuilder = Reference.Tree.createBuilder(wasmSha256);
+    referImpl = <T>(source: T): Reference.View<T> => {
+      return treeBuilder.refer(source) as unknown as Reference.View<T>;
+    };
+    activeHashImpl = "hash-wasm";
+  } catch {
+    // hash-wasm failed, keep merkle-reference's default (@noble/hashes)
   }
 }
 
 /**
- * Object interning cache: maps JSON content to a canonical object instance.
- * Uses strong references with LRU eviction to ensure cache hits.
- *
- * Previously used WeakRef, but this caused cache misses because GC would
- * collect interned objects between calls when no strong reference held them.
- * This prevented merkle-reference's WeakMap from getting cache hits.
- *
- * With strong references + LRU eviction, interned objects stay alive long
- * enough for refer() to benefit from merkle-reference's identity-based cache.
+ * Cache for {the, of} references (unclaimed facts).
+ * These patterns repeat constantly in claims, so caching avoids redundant hashing.
+ * Bounded with LRU eviction to prevent unbounded memory growth.
  */
-const INTERN_CACHE_MAX_SIZE = 10000;
-const internCache = new Map<string, object>();
+const UNCLAIMED_CACHE_MAX_SIZE = 50_000; // ~50KB overhead (small string keys + refs)
+const unclaimedCache = new Map<string, Reference.View<unknown>>();
 
 /**
- * WeakSet to track objects that are already interned (canonical instances).
- * This allows O(1) early return for already-interned objects.
+ * Check if source is exactly {the, of} with string values and no other keys.
  */
-const internedObjects = new WeakSet<object>();
-
-/**
- * Recursively intern an object and all its nested objects.
- * Returns a new object where all sub-objects are canonical instances,
- * enabling merkle-reference's WeakMap cache to hit on shared sub-content.
- *
- * Example:
- *   const obj1 = intern({ id: "uuid-1", content: { large: "data" } });
- *   const obj2 = intern({ id: "uuid-2", content: { large: "data" } });
- *   // obj1.content === obj2.content (same object instance)
- *   // refer(obj1) then refer(obj2) will cache-hit on content
- */
-export const intern = <T>(source: T): T => {
-  // Only intern objects (not primitives)
-  if (source === null || typeof source !== "object") {
-    return source;
+const isUnclaimed = (
+  source: unknown,
+): source is { the: string; of: string } => {
+  if (source === null || typeof source !== "object" || Array.isArray(source)) {
+    return false;
   }
-
-  // Fast path: if this object is already interned, return it immediately
-  if (internedObjects.has(source)) {
-    return source;
-  }
-
-  // Handle arrays
-  if (Array.isArray(source)) {
-    const internedArray = source.map((item) => intern(item));
-    const key = JSON.stringify(internedArray);
-    const cached = internCache.get(key);
-
-    if (cached !== undefined) {
-      // Move to end (most recently used) by re-inserting
-      internCache.delete(key);
-      internCache.set(key, cached);
-      return cached as T;
-    }
-
-    // Evict oldest entry if cache is full
-    if (internCache.size >= INTERN_CACHE_MAX_SIZE) {
-      const oldest = internCache.keys().next().value;
-      if (oldest !== undefined) internCache.delete(oldest);
-    }
-    internCache.set(key, internedArray);
-    internedObjects.add(internedArray);
-    return internedArray as T;
-  }
-
-  // Handle plain objects: recursively intern all values first
-  const internedObj: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(source)) {
-    internedObj[k] = intern(v);
-  }
-
-  const key = JSON.stringify(internedObj);
-  const cached = internCache.get(key);
-
-  if (cached !== undefined) {
-    // Move to end (most recently used) by re-inserting
-    internCache.delete(key);
-    internCache.set(key, cached);
-    return cached as T;
-  }
-
-  // Evict oldest entry if cache is full
-  if (internCache.size >= INTERN_CACHE_MAX_SIZE) {
-    const oldest = internCache.keys().next().value;
-    if (oldest !== undefined) internCache.delete(oldest);
-  }
-  // Store this object as the canonical instance
-  internCache.set(key, internedObj);
-  internedObjects.add(internedObj);
-
-  return internedObj as T;
+  const keys = Object.keys(source);
+  if (keys.length !== 2) return false;
+  const obj = source as Record<string, unknown>;
+  return typeof obj.the === "string" && typeof obj.of === "string";
 };
 
 /**
  * Compute a merkle reference for the given source.
  *
- * In server environments, uses node:crypto SHA-256 (with hardware acceleration)
- * for ~1.5-2x speedup. In browsers, uses merkle-reference's default (@noble/hashes).
+ * For {the, of} objects (unclaimed facts), results are cached since these
+ * patterns repeat constantly in claims.
  *
- * merkle-reference's internal WeakMap caches sub-objects by identity, so passing
- * the same payload object to multiple assertions will benefit from caching.
+ * In server environments, uses node:crypto SHA-256 (hardware accelerated).
+ * In browsers, uses hash-wasm (WASM, ~3x faster than pure JS).
+ * Falls back to @noble/hashes if neither is available.
  */
 export const refer = <T>(source: T): Reference.View<T> => {
+  // Cache {the, of} patterns (unclaimed facts)
+  if (isUnclaimed(source)) {
+    // Use null character as delimiter to avoid collisions if the/of contain '|'
+    const key = `${source.the}\0${source.of}`;
+    const cached = unclaimedCache.get(key);
+    if (cached) {
+      // Move to end for LRU behavior
+      unclaimedCache.delete(key);
+      unclaimedCache.set(key, cached);
+      return cached as Reference.View<T>;
+    }
+    const result = referImpl(source);
+    // Evict oldest entry if at capacity
+    if (unclaimedCache.size >= UNCLAIMED_CACHE_MAX_SIZE) {
+      const oldest = unclaimedCache.keys().next().value;
+      if (oldest !== undefined) unclaimedCache.delete(oldest);
+    }
+    unclaimedCache.set(key, result);
+    return result;
+  }
+
   return referImpl(source);
+};
+
+/**
+ * Get the currently active SHA-256 implementation.
+ */
+export const getHashImplementation = (): HashImplementation => {
+  return activeHashImpl;
 };

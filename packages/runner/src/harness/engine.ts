@@ -15,11 +15,15 @@ import {
   Source,
   TypeScriptCompiler,
 } from "@commontools/js-compiler";
-import { UnsafeEvalIsolate, UnsafeEvalRuntime } from "./eval-runtime.ts";
+import {
+  MappedPosition,
+  UnsafeEvalIsolate,
+  UnsafeEvalRuntime,
+} from "./eval-runtime.ts";
 import { CommonToolsTransformerPipeline } from "@commontools/ts-transformers";
 import * as RuntimeModules from "./runtime-modules.ts";
 import { Runtime } from "../runtime.ts";
-import * as merkleReference from "merkle-reference";
+import { refer } from "@commontools/memory/reference";
 import { StaticCache } from "@commontools/static";
 import { pretransformProgram } from "./pretransform.ts";
 
@@ -221,6 +225,17 @@ export class Engine extends EventTarget implements Harness {
     return eval(source);
   }
 
+  // Map a single position to its original source location.
+  // Returns null if no source map is loaded for the filename.
+  mapPosition(
+    filename: string,
+    line: number,
+    column: number,
+  ): MappedPosition | null {
+    if (!this.internals) return null;
+    return this.internals.isolate.mapPosition(filename, line, column);
+  }
+
   // Returns a map of runtime module types.
   static getRuntimeModuleTypes(cache: StaticCache) {
     return RuntimeModules.getTypes(cache);
@@ -240,6 +255,27 @@ export class Engine extends EventTarget implements Harness {
     }
     return this.internals;
   }
+
+  /**
+   * Clean up resources held by the engine.
+   * Clears accumulated source maps and other state to prevent memory leaks.
+   */
+  dispose(): void {
+    // Clear global console hook to prevent memory leak via the Engine reference
+    // @ts-ignore: Dynamic property access for cleanup - globalThis doesn't have this symbol typed
+    if (globalThis[RUNTIME_ENGINE_CONSOLE_HOOK]) {
+      // @ts-ignore: Dynamic property deletion - TypeScript doesn't understand symbol-keyed globalThis properties
+      delete globalThis[RUNTIME_ENGINE_CONSOLE_HOOK];
+    }
+
+    if (this.internals) {
+      // Clear the UnsafeEvalRuntime which holds accumulated source maps
+      this.internals.runtime.clear();
+
+      // Clear references to allow GC
+      this.internals = undefined;
+    }
+  }
 }
 
 function computeId(program: Program): string {
@@ -247,5 +283,5 @@ function computeId(program: Program): string {
     program.main,
     ...program.files.filter(({ name }) => !name.endsWith(".d.ts")),
   ];
-  return merkleReference.refer(source).toString();
+  return refer(source).toString();
 }

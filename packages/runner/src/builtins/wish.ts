@@ -5,6 +5,7 @@ import {
   type WishTag,
 } from "@commontools/api";
 import { h } from "@commontools/html";
+import { favoriteListSchema, journalSchema } from "@commontools/home-schemas";
 import { HttpProgramResolver } from "@commontools/js-compiler";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
@@ -16,26 +17,12 @@ import type {
 import type { EntityId } from "../create-ref.ts";
 import { ALL_CHARMS_ID } from "./well-known.ts";
 import { type JSONSchema, type Recipe, UI } from "../builder/types.ts";
-
-// Define locally to avoid circular dependency with @commontools/charm
-const favoriteEntrySchema = {
-  type: "object",
-  properties: {
-    cell: { not: true, asCell: true },
-    tag: { type: "string", default: "" },
-  },
-  required: ["cell"],
-} as const satisfies JSONSchema;
-
-const favoriteListSchema = {
-  type: "array",
-  items: favoriteEntrySchema,
-} as const satisfies JSONSchema;
 import { getRecipeEnvironment } from "../env.ts";
 
-const WISH_TSX_PATH = getRecipeEnvironment().apiUrl + "api/patterns/wish.tsx";
+const WISH_TSX_PATH = getRecipeEnvironment().apiUrl +
+  "api/patterns/system/wish.tsx";
 const SUGGESTION_TSX_PATH = getRecipeEnvironment().apiUrl +
-  "api/patterns/suggestion.tsx";
+  "api/patterns/system/suggestion.tsx";
 
 class WishError extends Error {
   constructor(message: string) {
@@ -72,12 +59,12 @@ function resolveWishTarget(
   return cell;
 }
 
-type ParsedWishTarget = {
+export type ParsedWishTarget = {
   key: "/" | WishTag;
   path: string[];
 };
 
-function parseWishTarget(target: string): ParsedWishTarget {
+export function parseWishTarget(target: string): ParsedWishTarget {
   const trimmed = target.trim();
   if (trimmed === "") {
     throw new WishError(`Wish target "${target}" is empty.`);
@@ -183,9 +170,16 @@ function resolveBase(
       );
       const favorites = favoritesCell.get() || [];
 
-      // Case-insensitive search in tag.
+      // Case-insensitive search in userTags or tag field.
       // If tag is empty, try to compute it lazily from the cell's schema.
       const match = favorites.find((entry) => {
+        // Check userTags first
+        const userTags = entry.userTags ?? [];
+        for (const t of userTags) {
+          if (t.toLowerCase().includes(searchTerm)) return true;
+        }
+
+        // Fall back to tag field
         let tag = entry.tag;
 
         // Fallback: compute tag lazily if not stored
@@ -227,6 +221,19 @@ function resolveBase(
       );
       return [{ cell: nowCell }];
     }
+    case "#journal": {
+      // Journal always comes from the HOME space (user identity DID)
+      const userDID = ctx.runtime.userIdentityDID;
+      if (!userDID) {
+        throw new WishError("User identity DID not available for #journal");
+      }
+
+      const journal = ctx.runtime.getHomeSpaceCell(ctx.tx).key("journal")
+        .asSchema(journalSchema);
+      journal.sync();
+
+      return [{ cell: journal }];
+    }
     default: {
       // Check if it's a well-known target
       const resolution = WISH_TARGETS[parsed.key];
@@ -256,11 +263,19 @@ function resolveBase(
         );
         const favorites = favoritesCell.get() || [];
 
-        // Match hash tags in tag field (the schema), all lowercase.
+        // Match hash tags in userTags or tag field (the schema), all lowercase.
         // If tag is empty, try to compute it lazily from the cell's schema.
         // This handles existing favorites that were saved before schema was synced.
-        const searchTerm = parsed.key.toLowerCase();
+        const searchTerm = parsed.key.toLowerCase(); // e.g., "#my-tag"
+        const searchTermWithoutHash = searchTerm.slice(1); // e.g., "my-tag"
         const matches = favorites.filter((entry) => {
+          // Check userTags first (stored without # prefix)
+          const userTags = entry.userTags ?? [];
+          for (const t of userTags) {
+            if (t.toLowerCase() === searchTermWithoutHash) return true;
+          }
+
+          // Fall back to tag field (schema-based hashtag search)
           let tag = entry.tag;
 
           // Fallback: compute tag lazily if not stored
@@ -277,7 +292,7 @@ function resolveBase(
           }
 
           const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
-          return [...hashtags].some((m) => m[0] === searchTerm);
+          return [...hashtags].some((m) => m[1] === searchTermWithoutHash);
         });
 
         if (matches.length === 0) {
@@ -316,7 +331,7 @@ async function fetchWishPattern(
 
     return pattern;
   } catch (e) {
-    console.error("Can't load wish.tsx", e);
+    console.error("[wish] fetchWishPattern: Failed to load wish.tsx", e);
     return undefined;
   }
 }
@@ -384,10 +399,10 @@ export function wish(
   let wishPatternInput: WishParams | undefined;
   let wishPatternResultCell: Cell<WishState<any>> | undefined;
 
-  function launchWishPattern(
+  async function launchWishPattern(
     input?: WishParams & { candidates?: Cell<unknown>[] },
     providedTx?: IExtendedStorageTransaction,
-  ) {
+  ): Promise<Cell<WishState<any>>> {
     if (input) wishPatternInput = input;
 
     const tx = providedTx || runtime.edit();
@@ -403,6 +418,7 @@ export function wish(
       addCancel(() => runtime.runner.stop(wishPatternResultCell!));
     }
 
+    // Wait for pattern to be loaded
     if (!wishPattern) {
       if (!wishPatternFetchPromise) {
         wishPatternFetchPromise = fetchWishPattern(runtime).then((pattern) => {
@@ -410,16 +426,21 @@ export function wish(
           return pattern;
         });
       }
-      wishPatternFetchPromise.then((pattern) => {
-        if (pattern) {
-          launchWishPattern();
-        }
-      });
-    } else {
-      runtime.runSynced(wishPatternResultCell, wishPattern, wishPatternInput);
+      await wishPatternFetchPromise;
     }
 
-    if (!providedTx) tx.commit();
+    // Now run the pattern - await to ensure it's set up before returning
+    if (wishPattern) {
+      await runtime.runSynced(
+        wishPatternResultCell,
+        wishPattern,
+        wishPatternInput,
+      );
+    } else {
+      console.error("[wish] launchWishPattern: Pattern failed to load!");
+    }
+
+    if (!providedTx) await tx.commit();
 
     return wishPatternResultCell;
   }
@@ -482,7 +503,7 @@ export function wish(
 
   // Wish action, reactive to changes in inputsCell and any cell we read during
   // initial resolution
-  return (tx: IExtendedStorageTransaction) => {
+  return async (tx: IExtendedStorageTransaction) => {
     const inputsWithTx = inputsCell.withTx(tx);
     const targetValue = inputsWithTx.asSchema(TARGET_SCHEMA).get();
 
@@ -503,6 +524,8 @@ export function wish(
           ? [...baseResolutions[0].pathPrefix, ...parsed.path]
           : parsed.path;
         const resolvedCell = resolvePath(baseResolutions[0].cell, combinedPath);
+        // Sync the cell to ensure data is loaded (required for pull-based scheduler)
+        await resolvedCell.sync();
         sendResult(tx, resolvedCell);
       } catch (e) {
         // Provide helpful feedback for common defaultPattern issues
@@ -567,20 +590,25 @@ export function wish(
           });
           if (resultCells.length === 1) {
             // If it's one result, just return it directly
+            const resolvedCell = resultCells[0];
+
+            // Sync the resolved cell to ensure data is loaded
+            await resolvedCell.sync();
             sendResult(tx, {
-              result: resultCells[0],
-              [UI]: cellLinkUI(resultCells[0]),
+              result: resolvedCell,
+              [UI]: cellLinkUI(resolvedCell),
             });
           } else {
-            // If it's multiple result, launch the wish pattern, which will
-            // immediately return the first candidate as result
-            sendResult(
-              tx,
-              launchWishPattern({
-                ...targetValue as WishParams,
-                candidates: resultCells,
-              }, tx),
-            );
+            // If it's multiple results, launch the wish pattern for the user
+            // to pick from. Navigation goes to the picker charm.
+            const wishResultCell = await launchWishPattern({
+              ...targetValue as WishParams,
+              candidates: resultCells,
+            }, tx);
+            sendResult(tx, {
+              result: wishResultCell,
+              [UI]: wishResultCell.get()[UI],
+            });
           }
         } catch (e) {
           const errorMsg = e instanceof WishError ? e.message : String(e);

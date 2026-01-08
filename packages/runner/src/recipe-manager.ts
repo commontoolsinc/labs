@@ -14,6 +14,13 @@ import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 
 const logger = getLogger("recipe-manager");
 
+/**
+ * Maximum number of recipes to cache in memory.
+ * When exceeded, oldest (least recently used) recipes are evicted.
+ * Set conservatively to prevent OOM in long-running processes and tests.
+ */
+const MAX_RECIPE_CACHE_SIZE = 100;
+
 export const recipeMetaSchema = {
   type: "object",
   properties: {
@@ -59,6 +66,46 @@ export class RecipeManager {
   private pendingMetaById = new Map<string, Partial<RecipeMeta>>();
 
   constructor(readonly runtime: Runtime) {}
+
+  /**
+   * Evict oldest recipes if cache exceeds MAX_RECIPE_CACHE_SIZE.
+   * Uses Map insertion order for LRU - oldest entries are first.
+   */
+  private evictIfNeeded(): void {
+    while (this.recipeIdMap.size > MAX_RECIPE_CACHE_SIZE) {
+      const oldestId = this.recipeIdMap.keys().next().value;
+      if (oldestId === undefined) break;
+
+      // Remove from all caches
+      this.recipeIdMap.delete(oldestId);
+      this.recipeMetaCellById.delete(oldestId);
+      // Note: recipeToIdMap is WeakMap, will be GC'd when recipe is collected
+
+      logger.debug(
+        "recipe-manager",
+        `Evicted recipe ${oldestId} (cache size: ${this.recipeIdMap.size})`,
+      );
+    }
+  }
+
+  /**
+   * Touch a recipe to mark it as recently used (moves to end of Map).
+   * Call this on cache hits to maintain LRU order.
+   */
+  private touchRecipe(recipeId: string): void {
+    const recipe = this.recipeIdMap.get(recipeId);
+    if (recipe) {
+      // Re-insert to move to end (most recently used)
+      this.recipeIdMap.delete(recipeId);
+      this.recipeIdMap.set(recipeId, recipe);
+    }
+
+    const metaCell = this.recipeMetaCellById.get(recipeId);
+    if (metaCell) {
+      this.recipeMetaCellById.delete(recipeId);
+      this.recipeMetaCellById.set(recipeId, metaCell);
+    }
+  }
 
   private getRecipeMetaCell(
     { recipeId, space }: { recipeId: string; space: MemorySpace },
@@ -152,6 +199,10 @@ export class RecipeManager {
 
     if (!this.recipeIdMap.has(generatedId)) {
       this.recipeIdMap.set(generatedId, recipe as Recipe);
+      this.evictIfNeeded();
+    } else {
+      // Recipe exists - touch to mark as recently used
+      this.touchRecipe(generatedId);
     }
 
     return generatedId;
@@ -204,6 +255,8 @@ export class RecipeManager {
     if (recipe) this.recipeToIdMap.set(recipe, recipeId);
     // Clear pending once persisted
     this.pendingMetaById.delete(recipeId);
+    // Evict if cache is full
+    this.evictIfNeeded();
     return true;
   }
 
@@ -221,7 +274,12 @@ export class RecipeManager {
 
   // returns a recipe already loaded
   recipeById(recipeId: string): Recipe | undefined {
-    return this.recipeIdMap.get(recipeId);
+    const recipe = this.recipeIdMap.get(recipeId);
+    if (recipe) {
+      // Touch to mark as recently used
+      this.touchRecipe(recipeId);
+    }
+    return recipe;
   }
 
   async compileRecipe(input: string | RuntimeProgram): Promise<Recipe> {
@@ -237,6 +295,62 @@ export class RecipeManager {
     const recipe = await this.runtime.harness.run(program);
     recipe.program = program;
     return recipe;
+  }
+
+  /**
+   * Compile a recipe from source, or return a cached/in-flight result.
+   * Provides single-flight deduplication based on program content.
+   *
+   * @param input - Source code string or RuntimeProgram to compile
+   * @returns The compiled recipe (from cache, in-flight compilation, or new)
+   */
+  compileOrGetRecipe(input: string | RuntimeProgram): Promise<Recipe> {
+    // Normalize to RuntimeProgram
+    let program: RuntimeProgram;
+    if (typeof input === "string") {
+      program = {
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents: input }],
+      };
+    } else {
+      program = input;
+    }
+
+    // Compute deterministic recipeId (matches registerRecipe's ID generation)
+    const recipeId = createRef({ src: program }, "recipe source").toString();
+
+    // Check cache
+    const existing = this.recipeIdMap.get(recipeId);
+    if (existing) {
+      this.touchRecipe(recipeId);
+      return Promise.resolve(existing);
+    }
+
+    // Check in-flight compilation (single-flight deduplication)
+    const inProgress = this.inProgressCompilations.get(recipeId);
+    if (inProgress) {
+      return inProgress;
+    }
+
+    // Compile with single-flight pattern
+    const compilationPromise = this.compileRecipe(program)
+      .then((recipe) => {
+        // Register directly with pre-computed recipeId to avoid double-hashing
+        // (registerRecipe would recompute the same hash from program)
+        recipe = this.findOriginalRecipe(recipe);
+        this.recipeToIdMap.set(recipe, recipeId);
+        if (!this.recipeIdMap.has(recipeId)) {
+          this.recipeIdMap.set(recipeId, recipe);
+          this.evictIfNeeded();
+        }
+        return recipe;
+      })
+      .finally(() => {
+        this.inProgressCompilations.delete(recipeId);
+      });
+
+    this.inProgressCompilations.set(recipeId, compilationPromise);
+    return compilationPromise;
   }
 
   // we need to ensure we only compile once otherwise we get ~12 +/- 4
@@ -261,6 +375,7 @@ export class RecipeManager {
     this.recipeIdMap.set(recipeId, recipe);
     this.recipeToIdMap.set(recipe, recipeId);
     this.recipeMetaCellById.set(recipeId, metaCell.withTx());
+    this.evictIfNeeded();
     return recipe;
   }
 
@@ -271,6 +386,8 @@ export class RecipeManager {
   ): Promise<Recipe> {
     const existing = this.recipeIdMap.get(id);
     if (existing) {
+      // Touch to mark as recently used
+      this.touchRecipe(id);
       return existing;
     }
 

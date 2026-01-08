@@ -9,7 +9,7 @@ This directory contains documentation for pattern developers and framework contr
 | Doc | Description |
 |-----|-------------|
 | [PATTERNS.md](PATTERNS.md) | Main tutorial with examples - **start here** |
-| [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) | Core reactive programming model |
+| [REACTIVITY.md](REACTIVITY.md) | Core reactive programming model |
 | [COMPONENTS.md](COMPONENTS.md) | UI components reference (ct-input, ct-button, etc.) |
 | [TYPES_AND_SCHEMAS.md](TYPES_AND_SCHEMAS.md) | Type system, Cell<>, Default<>, schemas |
 

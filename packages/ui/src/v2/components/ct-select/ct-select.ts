@@ -120,6 +120,7 @@ export class CTSelect extends BaseElement {
     ];
 
     /* ---------- Refs & helpers ---------- */
+    private _changeGroup = crypto.randomUUID();
     private _select!: HTMLSelectElement;
     /** Mapping from stringified option key -> SelectItem */
     private _keyMap = new Map<string, SelectItem>();
@@ -127,6 +128,7 @@ export class CTSelect extends BaseElement {
     /* ---------- Cell controller for value binding ---------- */
     private _cellController = createCellController<unknown | unknown[]>(this, {
       timing: { strategy: "immediate" }, // Select changes should be immediate
+      changeGroup: this._changeGroup,
       onChange: (newValue, oldValue) => {
         // Sync cell value changes to DOM
         this.applyValueToDom();
@@ -356,7 +358,7 @@ export class CTSelect extends BaseElement {
 
     private _buildKeyMap() {
       this._keyMap.clear();
-      this.items.forEach((item, index) => {
+      this.items?.forEach((item, index) => {
         this._keyMap.set(this._makeKey(item, index), item);
       });
     }

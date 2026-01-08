@@ -732,6 +732,287 @@ describe("link-utils", () => {
       expect((result as any).asCell).toBeUndefined();
       expect((result as any).properties.name.asStream).toBeUndefined();
     });
+
+    it("should handle circular schema references without stack overflow", () => {
+      // Create a circular schema like Record pattern has
+      const schema: any = {
+        type: "object",
+        asCell: true,
+        properties: {
+          name: { type: "string" },
+          subCharms: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                schema: {} as any, // Will be set to parent schema
+              },
+            },
+          },
+        },
+      };
+      // Create the circular reference
+      schema.properties.subCharms.items.properties.schema = schema;
+
+      // This should not throw a stack overflow
+      const result = sanitizeSchemaForLinks(schema);
+
+      // Should have removed asCell from top level
+      expect((result as any).asCell).toBeUndefined();
+      // Should have processed nested properties
+      expect((result as any).properties.name.type).toBe("string");
+      // CT-1142: Result should be JSON-serializable without exponential growth
+      expect(() => JSON.stringify(result)).not.toThrow();
+      // The circular reference should use $ref
+      const schemaRef = (result as any).properties.subCharms.items.properties
+        .schema;
+      expect(schemaRef.$ref).toBeDefined();
+      expect(schemaRef.$ref).toMatch(/^#\/\$defs\//);
+    });
+
+    it("should handle direct self-reference cycle with $ref", () => {
+      const schema: any = {
+        type: "object",
+        asCell: true,
+        asStream: true,
+      };
+      schema.self = schema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      // Top level flags should be removed
+      expect((result as any).asCell).toBeUndefined();
+      expect((result as any).asStream).toBeUndefined();
+      // Cycle reference should be replaced with $ref
+      expect((result as any).self.$ref).toBeDefined();
+      expect((result as any).self.$ref).toMatch(/^#\/\$defs\//);
+      // Result should have $defs section with the circular schema
+      expect((result as any).$defs).toBeDefined();
+      // Result should be JSON-serializable (no circular object references)
+      expect(() => JSON.stringify(result)).not.toThrow();
+    });
+
+    it("should handle three-way cycle (A → B → C → A) with $ref", () => {
+      const a: any = { type: "a", asCell: true, next: null };
+      const b: any = { type: "b", asStream: true, next: null };
+      const c: any = { type: "c", asCell: true, next: null };
+      a.next = b;
+      b.next = c;
+      c.next = a;
+
+      const result = sanitizeSchemaForLinks(a);
+
+      // All flags should be removed in the processed chain
+      expect((result as any).asCell).toBeUndefined();
+      expect((result as any).next.asStream).toBeUndefined();
+      expect((result as any).next.next.asCell).toBeUndefined();
+      // The cycle back should be a $ref
+      expect((result as any).next.next.next.$ref).toBeDefined();
+      expect((result as any).next.next.next.$ref).toMatch(/^#\/\$defs\//);
+      // Result should be JSON-serializable
+      expect(() => JSON.stringify(result)).not.toThrow();
+    });
+
+    it("should handle cycle through array items with $ref", () => {
+      const schema: any = {
+        type: "array",
+        asCell: true,
+        items: null,
+      };
+      schema.items = schema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect((result as any).asCell).toBeUndefined();
+      // Cycle reference should be a $ref
+      expect((result as any).items.$ref).toBeDefined();
+      expect((result as any).items.$ref).toMatch(/^#\/\$defs\//);
+      // Result should be JSON-serializable
+      expect(() => JSON.stringify(result)).not.toThrow();
+    });
+
+    it("should handle cycle through anyOf with $ref", () => {
+      const schema: any = {
+        type: "object",
+        asCell: true,
+        anyOf: [{ type: "string" }, null],
+      };
+      schema.anyOf[1] = schema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect((result as any).asCell).toBeUndefined();
+      expect((result as any).anyOf[0].type).toBe("string");
+      // Cycle reference should be a $ref
+      expect((result as any).anyOf[1].$ref).toBeDefined();
+      expect((result as any).anyOf[1].$ref).toMatch(/^#\/\$defs\//);
+      // Result should be JSON-serializable
+      expect(() => JSON.stringify(result)).not.toThrow();
+    });
+
+    it("should handle multiple independent cycles", () => {
+      const cycle1: any = { type: "cycle1", asCell: true };
+      cycle1.self = cycle1;
+      const cycle2: any = { type: "cycle2", asStream: true };
+      cycle2.self = cycle2;
+      const schema: any = { a: cycle1, b: cycle2 };
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect((result as any).a.asCell).toBeUndefined();
+      expect((result as any).b.asStream).toBeUndefined();
+    });
+
+    it("should handle keepStreams option with circular schemas", () => {
+      const schema: any = {
+        type: "object",
+        asCell: true,
+        asStream: true,
+      };
+      schema.self = schema;
+
+      const result = sanitizeSchemaForLinks(schema, { keepStreams: true });
+
+      expect((result as any).asCell).toBeUndefined();
+      // asStream should be kept
+      expect((result as any).asStream).toBe(true);
+    });
+
+    it("should handle shared references (diamond pattern) correctly", () => {
+      // Test that same object referenced from multiple places is handled
+      const shared: any = { type: "shared", asCell: true };
+      const schema: any = {
+        left: { path: shared },
+        right: { path: shared },
+      };
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      // First encounter should strip asCell
+      expect((result as any).left.path.asCell).toBeUndefined();
+      // Second encounter returns the same processed result (consistent!)
+      expect((result as any).right.path).toBe((result as any).left.path);
+      expect((result as any).right.path.asCell).toBeUndefined();
+    });
+
+    it("should process schemas inside existing $defs", () => {
+      // Bug fix test: schemas inside $defs should have asCell/asStream stripped
+      const schema: any = {
+        type: "object",
+        $defs: {
+          MyType: {
+            type: "string",
+            asCell: true,
+            asStream: true,
+          },
+          NestedType: {
+            type: "object",
+            properties: {
+              nested: { asCell: true },
+            },
+          },
+        },
+        $ref: "#/$defs/MyType",
+      };
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      // $defs schemas should have asCell/asStream stripped
+      expect((result as any).$defs.MyType.asCell).toBeUndefined();
+      expect((result as any).$defs.MyType.asStream).toBeUndefined();
+      expect((result as any).$defs.MyType.type).toBe("string");
+      // Nested properties too
+      expect(
+        (result as any).$defs.NestedType.properties.nested.asCell,
+      ).toBeUndefined();
+      // $ref should be preserved
+      expect((result as any).$ref).toBe("#/$defs/MyType");
+    });
+
+    it("should avoid name collisions with existing $defs", () => {
+      // Bug fix test: generated names should not overwrite existing $defs
+      const schema: any = {
+        type: "object",
+        $defs: {
+          CircularSchema_0: { type: "string", description: "user-defined" },
+          CircularSchema_1: { type: "number", description: "user-defined" },
+        },
+      };
+      // Create a cycle that would normally generate CircularSchema_0
+      schema.self = schema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      // User's definitions should be preserved
+      expect((result as any).$defs.CircularSchema_0.description).toBe(
+        "user-defined",
+      );
+      expect((result as any).$defs.CircularSchema_1.description).toBe(
+        "user-defined",
+      );
+      // The cycle should use a different name (CircularSchema_2 or higher)
+      expect((result as any).self.$ref).toBeDefined();
+      const refName = (result as any).self.$ref.replace("#/$defs/", "");
+      expect(refName).not.toBe("CircularSchema_0");
+      expect(refName).not.toBe("CircularSchema_1");
+      // Result should be JSON-serializable
+      expect(() => JSON.stringify(result)).not.toThrow();
+    });
+
+    it("should handle cycles through oneOf", () => {
+      const schema: any = {
+        type: "object",
+        asCell: true,
+        oneOf: [{ type: "null" }, null],
+      };
+      schema.oneOf[1] = schema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect((result as any).asCell).toBeUndefined();
+      expect((result as any).oneOf[0].type).toBe("null");
+      expect((result as any).oneOf[1].$ref).toBeDefined();
+      expect(() => JSON.stringify(result)).not.toThrow();
+    });
+
+    it("should handle cycles through allOf", () => {
+      const schema: any = {
+        type: "object",
+        asStream: true,
+        allOf: [{ type: "object" }, null],
+      };
+      schema.allOf[1] = { properties: { nested: schema } };
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect((result as any).asStream).toBeUndefined();
+      expect((result as any).allOf[1].properties.nested.$ref).toBeDefined();
+      expect(() => JSON.stringify(result)).not.toThrow();
+    });
+
+    it("should handle $defs with internal cycles", () => {
+      // A definition that references itself
+      const myDef: any = { type: "object", asCell: true };
+      myDef.properties = { child: myDef };
+
+      const schema: any = {
+        type: "object",
+        $defs: {
+          MyRecursiveDef: myDef,
+        },
+        $ref: "#/$defs/MyRecursiveDef",
+      };
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      // asCell should be stripped
+      expect((result as any).$defs.MyRecursiveDef.asCell).toBeUndefined();
+      // The internal cycle should be converted to $ref
+      expect(
+        (result as any).$defs.MyRecursiveDef.properties.child.$ref,
+      ).toBeDefined();
+      expect(() => JSON.stringify(result)).not.toThrow();
+    });
   });
 
   describe("createDataCellURI", () => {

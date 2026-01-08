@@ -5,17 +5,28 @@
  *
  * @reviewed 2025-12-10 docs-rationalization
  */
-import { Cell, handler, NAME, pattern, UI, wish } from "commontools";
+import { handler, NAME, pattern, UI, wish, Writable } from "commontools";
 
-type Favorite = { cell: Cell<{ [NAME]?: string }>; tag: string };
+type Favorite = {
+  cell: Writable<{ [NAME]?: string }>;
+  tag: string;
+  userTags: Writable<string[]>;
+};
 
 const onRemoveFavorite = handler<
   Record<string, never>,
-  { favorites: Cell<Array<Favorite>>; item: Cell<unknown> }
+  { favorites: Writable<Array<Favorite>>; item: Writable<unknown> }
 >((_, { favorites, item }) => {
   favorites.set([
     ...favorites.get().filter((f: Favorite) => !f.cell.equals(item)),
   ]);
+});
+
+const onUpdateUserTags = handler<
+  { detail: { tags: string[] } },
+  { userTags: Writable<string[]> }
+>(({ detail }, { userTags }) => {
+  userTags.set(detail?.tags ?? []);
 });
 
 export default pattern<Record<string, never>>((_) => {
@@ -24,24 +35,31 @@ export default pattern<Record<string, never>>((_) => {
   return {
     [NAME]: "Favorites Manager",
     [UI]: (
-      <div>
+      <ct-vstack gap="3">
         {wishResult.result.map((item) => (
           <ct-cell-context $cell={item.cell}>
-            <div>
-              <ct-cell-link $cell={item.cell} />
-              <ct-button
-                onClick={onRemoveFavorite({
-                  favorites: wishResult.result,
-                  item: item.cell,
-                })}
-              >
-                Remove
-              </ct-button>
-              <pre>{item.tag}</pre>
-            </div>
+            <ct-vstack gap="2">
+              <ct-hstack gap="2" align="center">
+                <ct-cell-link $cell={item.cell} />
+                <ct-button
+                  variant="destructive"
+                  size="sm"
+                  onClick={onRemoveFavorite({
+                    favorites: wishResult.result,
+                    item: item.cell,
+                  })}
+                >
+                  Remove
+                </ct-button>
+              </ct-hstack>
+              <ct-tags
+                tags={item.userTags}
+                onct-change={onUpdateUserTags({ userTags: item.userTags })}
+              />
+            </ct-vstack>
           </ct-cell-context>
         ))}
-      </div>
+      </ct-vstack>
     ),
   };
 });

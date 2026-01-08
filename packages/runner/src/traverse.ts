@@ -1,4 +1,4 @@
-import { refer } from "merkle-reference";
+import { refer } from "@commontools/memory/reference";
 import { SchemaAll } from "@commontools/memory/schema";
 import { MIME } from "@commontools/memory/interface";
 import { JSONSchemaObj } from "@commontools/api";

@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   BuiltInLLMMessage,
-  Cell,
   computed,
   Default,
   handler,
@@ -13,6 +12,7 @@ import {
   pattern,
   UI,
   wish,
+  Writable,
 } from "commontools";
 
 import Chat from "../chatbot.tsx";
@@ -44,7 +44,7 @@ export type PageInput = {
 const handleCharmLinkClick = handler<
   {
     detail: {
-      charm: Cell<Charm>;
+      charm: Writable<Charm>;
     };
   },
   Record<string, never>
@@ -74,9 +74,9 @@ export const Page = pattern<PageInput>(({ outline }) => {
 });
 
 type LLMTestInput = {
-  title?: Cell<Default<string, "LLM Test">>;
-  messages?: Cell<Default<Array<BuiltInLLMMessage>, []>>;
-  expandChat?: Cell<Default<boolean, false>>;
+  title?: Writable<Default<string, "LLM Test">>;
+  messages?: Writable<Default<Array<BuiltInLLMMessage>, []>>;
+  expandChat?: Writable<Default<boolean, false>>;
   outline?: Default<
     Outliner,
     { root: { body: "Untitled Page"; children: []; attachments: [] } }
@@ -93,9 +93,9 @@ const appendOutlinerNode = handler<
     /** The text content/title of the outliner node to be appended */
     body: string;
     /** A cell to store the result message indicating success or error */
-    result: Cell<string>;
+    result: Writable<string>;
   },
-  { outline: Cell<Outliner> }
+  { outline: Writable<Outliner> }
 >(
   (args, state) => {
     try {

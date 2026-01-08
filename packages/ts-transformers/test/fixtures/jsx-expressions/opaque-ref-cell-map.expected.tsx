@@ -585,13 +585,11 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             type: "object",
             properties: {
                 typedCellRef: {
-                    type: "object",
-                    properties: {
-                        length: {
-                            type: "number"
-                        }
-                    },
-                    required: ["length"]
+                    type: "array",
+                    items: {
+                        not: true,
+                        asOpaque: true
+                    }
                 }
             },
             required: ["typedCellRef"]

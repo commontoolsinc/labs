@@ -245,7 +245,9 @@ export class CTFileInput extends BaseElement {
   @property({ attribute: false })
   declare theme?: CTTheme;
 
+  protected _changeGroup = crypto.randomUUID();
   protected _cellController = createArrayCellController<FileData>(this, {
+    changeGroup: this._changeGroup,
     onChange: (_newFiles: FileData[], _oldFiles: FileData[]) => {
       this.requestUpdate();
     },
@@ -416,6 +418,7 @@ export class CTFileInput extends BaseElement {
   }
 
   private _handleButtonClick() {
+    this.emit("ct-click"); // Emit before opening file picker
     const input = this.shadowRoot?.querySelector(
       'input[type="file"]',
     ) as HTMLInputElement;

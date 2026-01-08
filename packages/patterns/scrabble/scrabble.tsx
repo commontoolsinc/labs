@@ -11,7 +11,6 @@
  */
 
 import {
-  Cell,
   computed,
   Default,
   handler,
@@ -19,6 +18,7 @@ import {
   navigateTo,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 import ScrabbleGame, {
@@ -38,13 +38,13 @@ import ScrabbleGame, {
 
 interface LobbyInput {
   gameName: Default<string, "Scrabble Match">;
-  boardJson: Cell<Default<string, "">>; // JSON string of PlacedTile[]
-  bagJson: Cell<Default<string, "">>;
-  bagIndex: Cell<Default<number, 0>>;
-  playersJson: Cell<Default<string, "[]">>; // JSON string of Player[]
-  gameEventsJson: Cell<Default<string, "[]">>; // JSON string of GameEvent[]
-  allRacksJson: Cell<Default<string, "{}">>; // JSON string of AllRacks
-  allPlacedJson: Cell<Default<string, "{}">>; // JSON string of AllPlaced
+  boardJson: Writable<Default<string, "">>; // JSON string of PlacedTile[]
+  bagJson: Writable<Default<string, "">>;
+  bagIndex: Writable<Default<number, 0>>;
+  playersJson: Writable<Default<string, "[]">>; // JSON string of Player[]
+  gameEventsJson: Writable<Default<string, "[]">>; // JSON string of GameEvent[]
+  allRacksJson: Writable<Default<string, "{}">>; // JSON string of AllRacks
+  allPlacedJson: Writable<Default<string, "{}">>; // JSON string of AllPlaced
 }
 
 interface LobbyOutput {
@@ -60,13 +60,13 @@ interface LobbyOutput {
 
 let createGameAndNavigate: (
   gameName: string,
-  boardJson: Cell<string>,
-  bagJson: Cell<string>,
-  bagIndex: Cell<number>,
-  playersJson: Cell<string>,
-  gameEventsJson: Cell<string>,
-  allRacksJson: Cell<string>,
-  allPlacedJson: Cell<string>,
+  boardJson: Writable<string>,
+  bagJson: Writable<string>,
+  bagIndex: Writable<number>,
+  playersJson: Writable<string>,
+  gameEventsJson: Writable<string>,
+  allRacksJson: Writable<string>,
+  allPlacedJson: Writable<string>,
   myName: string,
 ) => unknown = null as any;
 
@@ -75,15 +75,15 @@ const joinAsPlayer = handler<
   unknown,
   {
     gameName: string;
-    nameInput: Cell<string>;
+    nameInput: Writable<string>;
     playerSlot: number;
-    boardJson: Cell<string>;
-    bagJson: Cell<string>;
-    bagIndex: Cell<number>;
-    playersJson: Cell<string>;
-    gameEventsJson: Cell<string>;
-    allRacksJson: Cell<string>;
-    allPlacedJson: Cell<string>;
+    boardJson: Writable<string>;
+    bagJson: Writable<string>;
+    bagIndex: Writable<number>;
+    playersJson: Writable<string>;
+    gameEventsJson: Writable<string>;
+    allRacksJson: Writable<string>;
+    allPlacedJson: Writable<string>;
   }
 >((
   _event,
@@ -206,13 +206,13 @@ const joinAsPlayer = handler<
 const resetLobby = handler<
   unknown,
   {
-    boardJson: Cell<string>;
-    bagJson: Cell<string>;
-    bagIndex: Cell<number>;
-    playersJson: Cell<string>;
-    gameEventsJson: Cell<string>;
-    allRacksJson: Cell<string>;
-    allPlacedJson: Cell<string>;
+    boardJson: Writable<string>;
+    bagJson: Writable<string>;
+    bagIndex: Writable<number>;
+    playersJson: Writable<string>;
+    gameEventsJson: Writable<string>;
+    allRacksJson: Writable<string>;
+    allPlacedJson: Writable<string>;
   }
 >((
   _event,
@@ -257,8 +257,8 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
     },
   ) => {
     // Separate name inputs for each player slot
-    const player1NameInput = Cell.of("");
-    const player2NameInput = Cell.of("");
+    const player1NameInput = Writable.of("");
+    const player2NameInput = Writable.of("");
 
     // Derive player data reactively from playersJson
     const player1 = computed(() => {
@@ -521,13 +521,13 @@ const ScrabbleLobby = pattern<LobbyInput, LobbyOutput>(
 
 createGameAndNavigate = (
   gameName: string,
-  boardJson: Cell<string>,
-  bagJson: Cell<string>,
-  bagIndex: Cell<number>,
-  playersJson: Cell<string>,
-  gameEventsJson: Cell<string>,
-  allRacksJson: Cell<string>,
-  allPlacedJson: Cell<string>,
+  boardJson: Writable<string>,
+  bagJson: Writable<string>,
+  bagIndex: Writable<number>,
+  playersJson: Writable<string>,
+  gameEventsJson: Writable<string>,
+  allRacksJson: Writable<string>,
+  allPlacedJson: Writable<string>,
   myName: string,
 ) => {
   console.log("[createGameAndNavigate] Starting...");

@@ -53,8 +53,12 @@ import type {
   MemorySpace,
   URI,
 } from "./storage/interface.ts";
-import { ignoreReadForScheduling } from "./scheduler.ts";
+import {
+  ignoreReadForScheduling,
+  markReadAsPotentialWrite,
+} from "./scheduler.ts";
 import { FunctionCache } from "./function-cache.ts";
+import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
 
@@ -106,6 +110,8 @@ export class Runner {
    * Prepare a charm for running by creating/updating its process and result
    * cells, registering the recipe, and applying defaults/arguments.
    * This does not schedule any nodes. Use start() to schedule execution.
+   * If the charm is already running and the recipe changes, it will stop the
+   * charm.
    */
   setup<T, R>(
     tx: IExtendedStorageTransaction | undefined,
@@ -119,11 +125,6 @@ export class Runner {
     argument: T,
     resultCell: Cell<R>,
   ): Promise<Cell<R>>;
-
-  /**
-   * Configure charm without running it. If the charm is already running and the
-   * recipe changes, it will stop the charm.
-   */
   setup<T, R = any>(
     providedTx: IExtendedStorageTransaction | undefined,
     recipeOrModule: Recipe | Module | undefined,
@@ -268,8 +269,8 @@ export class Runner {
         return { resultCell, needsStart: false };
       }
 
-      // Otherwise stop execution of the old recipe.
-      this.stop(resultCell);
+      // Recipe changed - let the $TYPE sink detect the change and handle
+      // stop() + start(). Don't call stop() here as it would cancel the sink.
     }
 
     // Walk the recipe's schema and extract all default values
@@ -356,80 +357,310 @@ export class Runner {
   /**
    * Start scheduling nodes for a previously set up charm.
    * If already started, this is a no-op.
+   *
+   * Returns a Promise that resolves to true on success, or rejects with an error.
+   * Runs synchronously when data is available (important for tests).
    */
-  start<T = any>(resultCell: Cell<T>): void {
-    const tx = this.runtime.edit();
-    try {
-      this.startWithTx(tx, resultCell);
-    } finally {
-      // No writes expected; commit to release resources.
-      tx.commit();
+  start<T = any>(resultCell: Cell<T>): Promise<boolean> {
+    return this.doStart(resultCell);
+  }
+
+  /** Convert a module to recipe format */
+  private moduleToRecipe(module: Module): Recipe {
+    return {
+      argumentSchema: module.argumentSchema ?? {},
+      resultSchema: module.resultSchema ?? {},
+      result: { $alias: { path: ["internal"] } },
+      nodes: [
+        {
+          module,
+          inputs: { $alias: { path: ["argument"] } },
+          outputs: { $alias: { path: ["internal"] } },
+        },
+      ],
+    } satisfies Recipe;
+  }
+
+  /** Resolve a Recipe or Module to a Recipe */
+  private resolveToRecipe(recipeOrModule: Recipe | Module): Recipe {
+    return isModule(recipeOrModule)
+      ? this.moduleToRecipe(recipeOrModule as Module)
+      : (recipeOrModule as Recipe);
+  }
+
+  /**
+   * Core start implementation. Sets up cancel groups, instantiates nodes,
+   * and watches for recipe changes.
+   *
+   * @param resultCell - The result cell to start
+   * @param processCell - The process cell containing recipe state
+   * @param options.tx - Transaction to use for initial setup (optional)
+   * @param options.givenRecipe - Recipe to use instead of looking up by ID
+   * @param options.allowAsyncLoad - Whether to allow async recipe loading
+   * @returns Promise for async mode, void for sync mode
+   */
+  private startCore<T = any>(
+    resultCell: Cell<T>,
+    processCell: Cell<any>,
+    options: {
+      tx?: IExtendedStorageTransaction;
+      givenRecipe?: Recipe;
+      doNotUpdateOnPatternChange?: boolean;
+    } = {},
+  ): void {
+    const { tx, givenRecipe, doNotUpdateOnPatternChange } = options;
+    const key = this.getDocKey(resultCell);
+
+    // Create cancel group early - before the $TYPE sink
+    const [cancel, addCancel] = useCancelGroup();
+    this.cancels.set(key, cancel);
+    this.allCancels.add(cancel);
+
+    // Helper to clean up on error
+    const cleanup = () => {
+      this.cancels.delete(key);
+      this.allCancels.delete(cancel);
+      cancel();
+    };
+
+    // Track recipe ID and node cancellation
+    let currentRecipeId: string | undefined;
+    let cancelNodes: Cancel | undefined;
+
+    // Helper to instantiate nodes for a recipe
+    const instantiateRecipe = (
+      recipe: Recipe,
+      useTx?: IExtendedStorageTransaction,
+    ) => {
+      // Create new cancel group for nodes
+      const [nodeCancel, addNodeCancel] = useCancelGroup();
+      cancelNodes = nodeCancel;
+      addCancel(nodeCancel);
+
+      // Instantiate nodes
+      this.discoverAndCacheFunctions(recipe, new Set());
+      const actualTx = useTx ?? this.runtime.edit();
+      const shouldCommit = !useTx;
+      try {
+        for (const node of recipe.nodes) {
+          this.instantiateNode(
+            actualTx,
+            node.module,
+            node.inputs,
+            node.outputs,
+            processCell.withTx(actualTx),
+            addNodeCancel,
+            recipe,
+          );
+        }
+      } finally {
+        if (shouldCommit) actualTx.commit();
+      }
+    };
+
+    // Helper to set up the $TYPE watcher
+    const setupTypeWatcher = () => {
+      const typeCell = processCell.key(TYPE).asSchema({ type: "string" });
+      addCancel(
+        typeCell.sink((newRecipeId) => {
+          if (!newRecipeId) return;
+          if (newRecipeId === currentRecipeId) return; // No change
+
+          // Recipe changed
+          const previousRecipeId = currentRecipeId;
+          currentRecipeId = newRecipeId;
+
+          const resolved = this.runtime.recipeManager.recipeById(newRecipeId);
+          if (!resolved) {
+            // Async load for recipe change after initial start.
+            // Errors are logged here since there's no caller to propagate to.
+            this.runtime.recipeManager
+              .loadRecipe(newRecipeId, resultCell.space)
+              .then((loaded) => {
+                if (currentRecipeId !== newRecipeId) return;
+
+                logger.info("recipe changed", {
+                  from: {
+                    id: previousRecipeId,
+                    recipe: this.runtime.recipeManager.recipeById(
+                      previousRecipeId!,
+                    ),
+                  },
+                  to: { id: newRecipeId, recipe: loaded },
+                });
+
+                // Cancel previous nodes (after we're sure it's a valid one)
+                cancelNodes?.();
+
+                instantiateRecipe(loaded);
+              })
+              .catch((err) => {
+                logger.error(
+                  "recipe-load-error",
+                  `Failed to load recipe ${newRecipeId}`,
+                  err,
+                );
+              });
+          } else {
+            cancelNodes?.();
+            instantiateRecipe(resolved);
+          }
+        }),
+      );
+    };
+
+    // Get initial recipe ID
+    const processCellForRead = tx ? processCell.withTx(tx) : processCell;
+    const initialRecipeId = processCellForRead.key(TYPE).getRaw({
+      meta: ignoreReadForScheduling,
+    }) as string | undefined;
+
+    if (!initialRecipeId) {
+      cleanup();
+      throw new Error("Cannot start: no recipe ID ($TYPE)");
     }
+
+    // Determine initial recipe
+    if (givenRecipe) {
+      currentRecipeId = initialRecipeId;
+      if (
+        this.runtime.recipeManager.registerRecipe(givenRecipe) !==
+          currentRecipeId
+      ) {
+        cleanup();
+        throw new Error("Recipe ID mismatch");
+      }
+      instantiateRecipe(givenRecipe, tx);
+      if (!doNotUpdateOnPatternChange) {
+        setupTypeWatcher();
+      }
+      return;
+    }
+
+    // Try sync lookup
+    const initialResolved = this.runtime.recipeManager.recipeById(
+      initialRecipeId,
+    );
+    if (!initialResolved) {
+      cleanup();
+      throw new Error(`Unknown recipe: ${initialRecipeId}`);
+    }
+
+    // Sync path - instantiate immediately
+    currentRecipeId = initialRecipeId;
+    instantiateRecipe(this.resolveToRecipe(initialResolved), tx);
+    if (!doNotUpdateOnPatternChange) {
+      setupTypeWatcher();
+    }
+
+    return;
+  }
+
+  /**
+   * Internal start implementation with cascade of checks.
+   * Each check: if it fails and needs async work, return a promise that
+   * resolves the missing piece and retries.
+   */
+  private doStart<T = any>(
+    resultCell: Cell<T>,
+    seenCells: Set<Cell> = new Set(),
+  ): Promise<boolean> {
+    // Step 1: For subpath cells, resolve to root cell
+    const link = resultCell.getAsNormalizedFullLink();
+    const rootCell = link.path.length > 0
+      ? this.runtime.getCellFromLink({ ...link, path: [] })
+      : resultCell;
+
+    const key = this.getDocKey(rootCell);
+
+    // Step 2: Already started? Return success
+    if (this.cancels.has(key)) return Promise.resolve(true);
+
+    // Step 3: Not synced yet? Sync and retry
+    // Once getRaw() has a value, all properties including source are synced.
+    if (rootCell.getRaw() === undefined) {
+      return Promise.resolve(rootCell.sync()).then(() => {
+        if (rootCell.getRaw() === undefined) {
+          return Promise.reject(new Error("No data at cell"));
+        } else {
+          return this.doStart(rootCell, seenCells);
+        }
+      });
+    }
+
+    // Step 4: Check for process cell, or follow link if there is one
+    const processCell = rootCell.getSourceCell();
+    if (!processCell) {
+      const maybeLink = parseLink(resultCell.getRaw(), resultCell);
+      if (maybeLink) {
+        // Follow link. This happens when the id is for a handle that pointed to
+        // the actual pattern instance, sometimes because it was passed along.
+        const nextCell = this.runtime.getCellFromLink(maybeLink);
+        if (seenCells.has(nextCell)) {
+          return Promise.reject(new Error("Circular link detected"));
+        }
+        seenCells.add(nextCell);
+        logger.info("start: followed link", {
+          from: resultCell.getAsNormalizedFullLink(),
+          to: nextCell.getAsNormalizedFullLink(),
+        });
+        return this.doStart(nextCell, seenCells);
+      } else {
+        return Promise.reject(new Error("Cannot start: no process cell"));
+      }
+    }
+
+    // Step 5: Check whether the recipe is available, otherwise load it
+    const recipeId = processCell.key(TYPE).getRaw() as string | undefined;
+    if (!recipeId) {
+      return Promise.reject(
+        new Error(`Cannot start: no recipe ID ($TYPE)`),
+      );
+    }
+    const recipe = this.runtime.recipeManager.recipeById(recipeId);
+    if (!recipe) {
+      return this.runtime.recipeManager.loadRecipe(recipeId, resultCell.space)
+        .then((loaded) => {
+          if (loaded) {
+            return this.doStart(rootCell, seenCells);
+          } else {
+            return Promise.reject(
+              new Error(`Could not load recipe ${recipeId}`),
+            );
+          }
+        });
+    }
+
+    // Step 6: Start the recipe
+    try {
+      this.startCore(rootCell, processCell);
+    } catch (err) {
+      return Promise.reject(err);
+    }
+
+    // Success!
+    return Promise.resolve(true);
   }
 
   private startWithTx<T = any>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
     givenRecipe?: Recipe,
+    options: { doNotUpdateOnPatternChange?: boolean } = {},
   ): void {
     const key = this.getDocKey(resultCell);
     if (this.cancels.has(key)) return; // Already started
 
     const processCell = resultCell.withTx(tx).getSourceCell();
     if (!processCell) {
-      console.warn("Cannot start: process cell missing. Did you call setup()?");
-      return;
+      throw new Error("Cannot start: no process cell");
     }
 
-    let recipe: Recipe | undefined = givenRecipe;
-    if (!recipe) {
-      const recipeId = processCell.withTx(tx).key(TYPE).getRaw({
-        meta: ignoreReadForScheduling,
-      });
-      if (!recipeId) {
-        console.warn("Cannot start: recipe id missing in process cell.");
-        return;
-      }
-      const resolved = this.runtime.recipeManager.recipeById(recipeId);
-      if (!resolved) throw new Error(`Unknown recipe: ${recipeId}`);
-      if (isModule(resolved)) {
-        const module = resolved as Module;
-        recipe = {
-          argumentSchema: module.argumentSchema ?? {},
-          resultSchema: module.resultSchema ?? {},
-          result: { $alias: { path: ["internal"] } },
-          nodes: [
-            {
-              module,
-              inputs: { $alias: { path: ["argument"] } },
-              outputs: { $alias: { path: ["internal"] } },
-            },
-          ],
-        } satisfies Recipe;
-      } else {
-        recipe = resolved as Recipe;
-      }
-    }
-
-    // Keep track of subscriptions to cancel them later
-    const [cancel, addCancel] = useCancelGroup();
-    this.cancels.set(key, cancel);
-    this.allCancels.add(cancel);
-
-    // Re-discover functions to be safe (idempotent)
-    this.discoverAndCacheFunctions(recipe, new Set());
-
-    for (const node of recipe.nodes) {
-      this.instantiateNode(
-        tx,
-        node.module,
-        node.inputs,
-        node.outputs,
-        processCell,
-        addCancel,
-        recipe,
-      );
-    }
+    this.startCore(resultCell, processCell, {
+      tx,
+      givenRecipe,
+      doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
+    });
   }
 
   /**
@@ -461,18 +692,21 @@ export class Runner {
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
+    options?: { doNotUpdateOnPatternChange?: boolean },
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    options?: { doNotUpdateOnPatternChange?: boolean },
   ): Cell<R>;
   run<T, R = any>(
     providedTx: IExtendedStorageTransaction,
     recipeOrModule: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    options: { doNotUpdateOnPatternChange?: boolean } = {},
   ): Cell<R> {
     const tx = providedTx ?? this.runtime.edit();
 
@@ -484,7 +718,7 @@ export class Runner {
     );
 
     if (needsStart) {
-      this.startWithTx(tx, resultCell, recipe);
+      this.startWithTx(tx, resultCell, recipe, options);
     }
 
     if (!providedTx) tx.commit();
@@ -941,6 +1175,9 @@ export class Runner {
       fn = module.implementation as (inputs: any) => any;
     }
 
+    // Prefer .src (backup) over .name since name can be finicky
+    const name = (fn as { src?: string; name?: string }).src || fn.name;
+
     if (module.wrapper && module.wrapper in moduleWrappers) {
       fn = moduleWrappers[module.wrapper](fn);
     }
@@ -967,19 +1204,30 @@ export class Runner {
     }
 
     if (streamLink) {
+      // Helper to merge event into inputs
+      const mergeEventIntoInputs = (event: any) => {
+        const eventInputs = { ...(inputs as Record<string, any>) };
+        for (const key in eventInputs) {
+          if (isWriteRedirectLink(eventInputs[key])) {
+            const eventLink = parseLink(eventInputs[key], processCell);
+            if (areNormalizedLinksSame(eventLink, streamLink)) {
+              eventInputs[key] = event;
+            }
+          }
+        }
+        return eventInputs;
+      };
+
       // Register as event handler for the stream
       const handler = (tx: IExtendedStorageTransaction, event: any) => {
         // TODO(seefeld): Scheduler has to create the transaction instead
         if (event.preventDefault) event.preventDefault();
-        const eventInputs = { ...(inputs as Record<string, any>) };
+        const eventInputs = mergeEventIntoInputs(event);
         const cause = { ...(inputs as Record<string, any>) };
-        for (const key in eventInputs) {
-          if (isWriteRedirectLink(eventInputs[key])) {
-            // Use format-agnostic comparison for links
-            const eventLink = parseLink(eventInputs[key], processCell);
-
+        for (const key in cause) {
+          if (isWriteRedirectLink(cause[key])) {
+            const eventLink = parseLink(cause[key], processCell);
             if (areNormalizedLinksSame(eventLink, streamLink)) {
-              eventInputs[key] = event;
               cause[key] = crypto.randomUUID();
             }
           }
@@ -1033,7 +1281,10 @@ export class Runner {
           const result = isValidArgument ? fn(argument) : undefined;
 
           const postRun = (result: any) => {
-            if (containsOpaqueRef(result) || frame.opaqueRefs.size > 0) {
+            if (
+              validateAndCheckOpaqueRefs(result, name) ||
+              frame.opaqueRefs.size > 0
+            ) {
               const resultRecipe = recipeFromFrame(
                 "event handler result",
                 undefined,
@@ -1051,7 +1302,39 @@ export class Runner {
                   tx,
                 ),
               );
-              addCancel(() => this.stop(resultCell));
+
+              const rawResult = tx.readValueOrThrow(
+                resultCell.getAsNormalizedFullLink(),
+                { meta: ignoreReadForScheduling },
+              );
+
+              const resultRedirects = findAllWriteRedirectCells(
+                rawResult,
+                processCell,
+              );
+
+              // Create effect that re-runs when inputs change
+              // (nothing else would read from it, otherwise)
+              const readResultAction: Action = (tx) =>
+                resultRedirects.forEach((link) => tx.readValueOrThrow(link));
+              if (name) {
+                Object.defineProperty(readResultAction, "name", {
+                  value: `readResult:${name}`,
+                  configurable: true,
+                });
+                // Also set .src as backup (name can be finicky)
+                (readResultAction as Action & { src?: string }).src =
+                  `readResult:${name}`;
+              }
+              const cancel = this.runtime.scheduler.subscribe(
+                readResultAction,
+                readResultAction,
+                { isEffect: true },
+              );
+              addCancel(() => {
+                cancel();
+                this.stop(resultCell);
+              });
             }
             return result;
           };
@@ -1069,14 +1352,44 @@ export class Runner {
         }
       };
 
+      if (name) {
+        Object.defineProperty(handler, "name", {
+          value: `handler:${name}`,
+          configurable: true,
+        });
+      }
       const wrappedHandler = Object.assign(handler, {
         reads,
         writes,
         module,
         recipe,
       });
+
+      // Create callback to populate dependencies for pull mode scheduling.
+      // This reads all cells the handler will access (from the argument schema and event).
+      const populateDependencies = module.argumentSchema
+        ? (depTx: IExtendedStorageTransaction, event: any) => {
+          // Merge event into inputs the same way the handler does
+          const eventInputs = mergeEventIntoInputs(event);
+          const inputsCell = this.runtime.getImmutableCell(
+            processCell.space,
+            eventInputs,
+            undefined,
+            depTx,
+          );
+          // Use traverseCells to read into all nested Cell objects (including event)
+          inputsCell.asSchema(module.argumentSchema!).get({
+            traverseCells: true,
+          });
+        }
+        : undefined;
+
       addCancel(
-        this.runtime.scheduler.addEventHandler(wrappedHandler, streamLink),
+        this.runtime.scheduler.addEventHandler(
+          wrappedHandler,
+          streamLink,
+          populateDependencies,
+        ),
       );
     } else {
       if (isRecord(inputs) && "$event" in inputs) {
@@ -1140,7 +1453,10 @@ export class Runner {
           const result = isValidArgument ? fn(argument) : undefined;
 
           const postRun = (result: any) => {
-            if (containsOpaqueRef(result) || frame.opaqueRefs.size > 0) {
+            if (
+              validateAndCheckOpaqueRefs(result, name) ||
+              frame.opaqueRefs.size > 0
+            ) {
               const resultRecipe = recipeFromFrame(
                 "action result",
                 undefined,
@@ -1208,18 +1524,56 @@ export class Runner {
         }
       };
 
+      if (name) {
+        Object.defineProperty(action, "name", {
+          value: `action:${name}`,
+          configurable: true,
+        });
+        // Also set .src as backup (name can be finicky)
+        (action as Action & { src?: string }).src = `action:${name}`;
+      }
       const wrappedAction = Object.assign(action, {
         reads,
         writes,
         module,
         recipe,
       });
+
+      // Create populateDependencies callback to discover what cells the action reads
+      // and writes. Both are needed for pull-based scheduling:
+      // - reads: to know when to re-run the action (input dependencies)
+      // - writes: so collectDirtyDependencies() can find this computation when
+      //   an effect needs its outputs
+      const populateDependencies = (depTx: IExtendedStorageTransaction) => {
+        // Capture read dependencies - use the pre-computed reads list
+        // Note: We DON'T run fn(depTx) here because that would execute
+        // user code with side effects during dependency discovery
+        if (module.argumentSchema !== undefined) {
+          const inputsCell = this.runtime.getImmutableCell(
+            processCell.space,
+            inputs,
+            undefined,
+            depTx,
+          );
+          inputsCell.asSchema(module.argumentSchema!).get({
+            traverseCells: true,
+          });
+        } else {
+          for (const read of reads) {
+            this.runtime.getCellFromLink(read, undefined, depTx)?.get();
+          }
+        }
+        // Capture write dependencies by marking outputs as potential writes
+        for (const output of writes) {
+          // Reading with markReadAsPotentialWrite registers this as a write dependency
+          this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
+            meta: markReadAsPotentialWrite,
+          });
+        }
+      };
+
       addCancel(
-        this.runtime.scheduler.subscribe(
-          wrappedAction,
-          { reads, writes },
-          true,
-        ),
+        this.runtime.scheduler.subscribe(wrappedAction, populateDependencies),
       );
     }
   }
@@ -1256,6 +1610,9 @@ export class Runner {
       mappedInputBindings,
       processCell,
     );
+    // outputCells tracks what cells this action writes to. This is needed for
+    // pull-based scheduling so collectDirtyDependencies() can find computations
+    // that write to cells being read by effects.
     const outputCells = findAllWriteRedirectCells(
       mappedOutputBindings,
       processCell,
@@ -1268,7 +1625,7 @@ export class Runner {
       tx,
     );
 
-    const action = module.implementation(
+    const builtinResult: RawBuiltinReturnType = module.implementation(
       inputsCell,
       (tx: IExtendedStorageTransaction, result: any) => {
         sendValueToBinding(
@@ -1284,12 +1641,63 @@ export class Runner {
       this.runtime,
     );
 
+    // Handle both legacy (just Action) and new (RawBuiltinResult) return formats
+    const action = isRawBuiltinResult(builtinResult)
+      ? builtinResult.action
+      : builtinResult;
+    const builtinIsEffect = isRawBuiltinResult(builtinResult)
+      ? builtinResult.isEffect
+      : undefined;
+    const builtinPopulateDependencies = isRawBuiltinResult(builtinResult)
+      ? builtinResult.populateDependencies
+      : undefined;
+
+    // Name the raw action for debugging - use implementation name or fallback to "raw"
+    const impl = module.implementation as (...args: unknown[]) => Action;
+    const rawName = `raw:${impl.name || "anonymous"}`;
+    Object.defineProperty(action, "name", {
+      value: rawName,
+      configurable: true,
+    });
+    (action as Action & { src?: string }).src = rawName;
+
+    // Create populateDependencies callback.
+    // If builtin provides custom reads, use that; otherwise read all inputs.
+    // Always register output writes so collectDirtyDependencies() can find this
+    // computation when an effect needs its outputs.
+    const populateDependencies = (depTx: IExtendedStorageTransaction) => {
+      // Capture read dependencies - use custom if provided, otherwise read all inputs
+      if (builtinPopulateDependencies) {
+        if (typeof builtinPopulateDependencies === "function") {
+          builtinPopulateDependencies(depTx);
+        } else {
+          // It's a ReactivityLog - reads are already captured, nothing to do
+          for (const read of builtinPopulateDependencies.reads) {
+            depTx.readOrThrow(read);
+          }
+        }
+      } else {
+        // Default: read all inputs
+        for (const input of inputCells) {
+          this.runtime.getCellFromLink(input, undefined, depTx)?.get();
+        }
+      }
+      // Always capture write dependencies by marking outputs as potential writes
+      for (const output of outputCells) {
+        // Reading with markReadAsPotentialWrite registers this as a write dependency
+        this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
+          meta: markReadAsPotentialWrite,
+        });
+      }
+    };
+
+    // isEffect can come from module options or from the builtin result
+    const isEffect = module.isEffect ?? builtinIsEffect;
+
     addCancel(
-      this.runtime.scheduler.subscribe(
-        action,
-        { reads: inputCells, writes: outputCells },
-        true,
-      ),
+      this.runtime.scheduler.subscribe(action, populateDependencies, {
+        isEffect,
+      }),
     );
   }
 
@@ -1349,7 +1757,11 @@ export class Runner {
       sendToBindings = true;
     }
 
-    this.run(tx, recipeImpl, inputs, resultCell);
+    // Run the nested recipe without the $TYPE watcher to prevent infinite loops.
+    // Nested recipes don't need to watch for recipe changes - their parent manages lifecycle.
+    this.run(tx, recipeImpl, inputs, resultCell, {
+      doNotUpdateOnPatternChange: true,
+    });
 
     if (sendToBindings) {
       sendValueToBinding(
@@ -1373,13 +1785,95 @@ function getSpellLink(recipeId: string): SigilLink {
   return { "/": { [LINK_V1_TAG]: { id: `of:${id}` } } };
 }
 
-function containsOpaqueRef(value: unknown): boolean {
+/**
+ * Validates an action result and checks if it contains opaque refs.
+ * Throws if result contains invalid types (Map, Set, functions, etc.).
+ * Returns true if the result contains any OpaqueRefs.
+ */
+export function validateAndCheckOpaqueRefs(
+  value: unknown,
+  actionName?: string,
+  path: string[] = [],
+): boolean {
+  // Allowed types
+  if (value === null || value === undefined) return false;
   if (isOpaqueRef(value)) return true;
   if (isCellLink(value)) return false;
-  if (isRecord(value)) {
-    return Object.values(value).some(containsOpaqueRef);
+
+  const formatError = (typeName: string, hint?: string) => {
+    const pathStr = path.length > 0 ? ` at path "${path.join(".")}"` : "";
+    const actionStr = actionName ? `\n  in action: ${actionName}` : "";
+    const hintStr = hint ? ` ${hint}` : "";
+    return `Action returned a ${typeName}${pathStr}.${actionStr}\nActions must return JSON-serializable values, OpaqueRefs, or Cells.${hintStr}`;
+  };
+
+  // Functions are not allowed
+  if (typeof value === "function") {
+    throw new Error(formatError("function"));
   }
-  return false;
+
+  // Symbols are not JSON-serializable
+  if (typeof value === "symbol") {
+    throw new Error(formatError("Symbol", "Consider removing this property."));
+  }
+
+  // BigInt is not JSON-serializable
+  if (typeof value === "bigint") {
+    throw new Error(
+      formatError("BigInt", "Consider converting to number or string."),
+    );
+  }
+
+  // NaN and Infinity are not JSON-serializable (they become null)
+  if (typeof value === "number") {
+    if (Number.isNaN(value)) {
+      throw new Error(
+        formatError("NaN", "Check your inputs or return null instead."),
+      );
+    }
+    if (!Number.isFinite(value)) {
+      throw new Error(
+        formatError("Infinity", "Check your inputs or return null instead."),
+      );
+    }
+    return false;
+  }
+
+  // Other primitives (string, boolean) are fine
+  if (typeof value !== "object") return false;
+
+  // From here, value is object (non-null)
+  const obj = value as object;
+
+  // Check for Map and Set before other object checks
+  if (obj instanceof Map) {
+    throw new Error(
+      formatError("Map", "Consider using a plain object instead."),
+    );
+  }
+
+  if (obj instanceof Set) {
+    throw new Error(formatError("Set", "Consider using an array instead."));
+  }
+
+  // Arrays - recurse
+  if (Array.isArray(obj)) {
+    return obj.some((item: unknown, index: number) =>
+      validateAndCheckOpaqueRefs(item, actionName, [...path, `[${index}]`])
+    );
+  }
+
+  // Reject non-plain objects (Date, RegExp, etc.)
+  const proto = Object.getPrototypeOf(obj);
+  if (proto !== null && proto !== Object.prototype) {
+    const typeName = obj.constructor?.name ?? "unknown type";
+    throw new Error(formatError(typeName));
+  }
+
+  // Plain object - recurse
+  return Object.entries(obj as Record<string, unknown>).some(
+    ([key, val]) => validateAndCheckOpaqueRefs(val, actionName, [...path, key]),
+  );
 }
 
 export function cellAwareDeepCopy<T = unknown>(value: T): Mutable<T> {

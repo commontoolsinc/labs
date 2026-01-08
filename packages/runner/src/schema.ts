@@ -342,11 +342,17 @@ function annotateWithBackToCellSymbols(
   return value;
 }
 
+export interface ValidateAndTransformOptions {
+  /** When true, also read into each Cell created for asCell fields to capture dependencies */
+  traverseCells?: boolean;
+}
+
 export function validateAndTransform(
   runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   _seen?: Array<[string, any]>,
+  options?: ValidateAndTransformOptions,
 ): any {
   // If the transaction is no longer open, just treat it as no transaction, i.e.
   // create temporary transactions to read. The main reason we use transactions
@@ -441,7 +447,7 @@ export function validateAndTransform(
     undefined,
     undefined,
     objectCreator,
-    false,
+    options?.traverseCells ?? false,
   );
   return traverser.traverse(doc, link);
 }

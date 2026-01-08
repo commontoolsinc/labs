@@ -1,16 +1,17 @@
 /// <cts-enable />
-import { Cell, lift, NAME, OpaqueRef, pattern, UI } from "commontools";
+import { lift, NAME, OpaqueRef, pattern, UI, Writable } from "commontools";
 
 export type MentionableCharm = {
   [NAME]?: string;
   isHidden?: boolean;
+  isMentionable?: boolean;
   mentioned?: MentionableCharm[];
   backlinks?: MentionableCharm[];
 };
 
 export type WriteableBacklinks = {
-  mentioned?: WriteableBacklinks[];
-  backlinks?: Cell<WriteableBacklinks[]>;
+  mentioned: WriteableBacklinks[];
+  backlinks: Writable<WriteableBacklinks[]>;
 };
 
 type Input = {
@@ -64,16 +65,20 @@ const computeMentionable = lift<
   const cs = charmList ?? [];
   const out: MentionableCharm[] = [];
   for (const c of cs) {
+    // Skip charms explicitly marked as not mentionable (like note-md viewer charms)
+    // Note: We check isMentionable === false, not isHidden, because notes in
+    // notebooks are hidden but should still be mentionable
+    if (c.isMentionable === false) continue;
     out.push(c);
     const exported = (c as unknown as {
       mentionable?: MentionableCharm[] | { get?: () => MentionableCharm[] };
     }).mentionable;
     if (Array.isArray(exported)) {
-      for (const m of exported) if (m) out.push(m);
+      for (const m of exported) if (m && m.isMentionable !== false) out.push(m);
     } else if (exported && typeof (exported as any).get === "function") {
       const arr = (exported as { get: () => MentionableCharm[] }).get() ??
         [];
-      for (const m of arr) if (m) out.push(m);
+      for (const m of arr) if (m && m.isMentionable !== false) out.push(m);
     }
   }
   return out;

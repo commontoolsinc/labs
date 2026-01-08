@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { spy } from "@std/testing/mock";
 import "@commontools/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commontools/identity";
@@ -85,9 +86,8 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    expect(result.getAsQueryResult()).toMatchObject({ result: 10 });
+    const value = await result.pull();
+    expect(value).toMatchObject({ result: 10 });
   });
 
   it("should handle nested recipes", async () => {
@@ -120,9 +120,8 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    expect(result.getAsQueryResult()).toEqual({ result: 17 });
+    const value = await result.pull();
+    expect(value).toEqual({ result: 17 });
   });
 
   it("should handle recipes with default values", async () => {
@@ -156,9 +155,8 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
-
-    expect(result1.getAsQueryResult()).toMatchObject({ sum: 15 });
+    const value1 = await result1.pull();
+    expect(value1).toMatchObject({ sum: 15 });
 
     const resultCell2 = runtime.getCell<{ sum: number }>(
       space,
@@ -171,9 +169,8 @@ describe("Recipe Runner", () => {
     }, resultCell2);
     tx.commit();
 
-    await runtime.idle();
-
-    expect(result2.getAsQueryResult()).toMatchObject({ sum: 30 });
+    const value2 = await result2.pull();
+    expect(value2).toMatchObject({ sum: 30 });
   });
 
   it("should handle recipes with map nodes", async () => {
@@ -213,9 +210,8 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    expect(result.get()).toMatchObjectIgnoringSymbols({
+    const value = await result.pull();
+    expect(value).toMatchObjectIgnoringSymbols({
       multiplied: [{ multiplied: 3 }, { multiplied: 12 }, { multiplied: 27 }],
     });
   });
@@ -245,9 +241,8 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    expect(result.get()).toMatchObjectIgnoringSymbols({ doubled: [] });
+    const value = await result.pull();
+    expect(value).toMatchObjectIgnoringSymbols({ doubled: [] });
   });
 
   it("should execute handlers", async () => {
@@ -276,15 +271,59 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
+    await result.pull();
 
     result.key("stream").send({ amount: 1 });
-    await runtime.idle();
-    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 1 } });
+    let value = await result.pull();
+    expect(value).toMatchObject({ counter: { value: 1 } });
 
     result.key("stream").send({ amount: 2 });
-    await runtime.idle();
-    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
+    value = await result.pull();
+    expect(value).toMatchObject({ counter: { value: 3 } });
+  });
+
+  it("should propagate handler source location to scheduler via .name", async () => {
+    // Spy on addEventHandler to capture the handler passed to it
+    const addEventHandlerSpy = spy(runtime.scheduler, "addEventHandler");
+
+    const incHandler = handler<
+      { amount: number },
+      { counter: { value: number } }
+    >(
+      ({ amount }, { counter }) => {
+        counter.value += amount;
+      },
+      { proxy: true },
+    );
+
+    const incRecipe = recipe<{ counter: { value: number } }>(
+      "Handler source location test",
+      ({ counter }) => {
+        return { counter, stream: incHandler({ counter }) };
+      },
+    );
+
+    const resultCell = runtime.getCell<
+      { counter: { value: number }; stream: any }
+    >(space, "handler source location test", undefined, tx);
+    const result = runtime.run(tx, incRecipe, {
+      counter: { value: 0 },
+    }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    // Verify addEventHandler was called and the handler has .name set
+    expect(addEventHandlerSpy.calls.length).toBeGreaterThan(0);
+    const registeredHandler = addEventHandlerSpy.calls[0].args[0];
+
+    // The handler's .name should be set to handler:source_location (file:line:col)
+    expect(registeredHandler.name).toMatch(
+      /^handler:.*recipes\.test\.ts:\d+:\d+$/,
+    );
+
+    addEventHandlerSpy.restore();
   });
 
   it("should execute recipes returned by handlers", async () => {
@@ -305,12 +344,17 @@ describe("Recipe Runner", () => {
 
     const values: [number, number, number][] = [];
 
-    const incLogger = lift<{
-      counter: { value: number };
-      amount: number;
-      nested: { c: number };
-    }>(({ counter, amount, nested }) => {
-      values.push([counter.value, amount, nested.c]);
+    const incLogger = lift<
+      {
+        counter: { value: number };
+        amount: number;
+        nested: { c: number };
+      },
+      [number, number, number]
+    >(({ counter, amount, nested }) => {
+      const tuple: [number, number, number] = [counter.value, amount, nested.c];
+      values.push(tuple);
+      return tuple;
     });
 
     const incHandler = handler<
@@ -344,7 +388,7 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
+    await result.pull();
 
     result.key("stream").send({ amount: 1 });
     await runtime.idle();
@@ -369,6 +413,7 @@ describe("Recipe Runner", () => {
     );
     x.withTx(tx).set(2);
     tx.commit();
+    await x.pull();
     tx = runtime.edit();
 
     const y = runtime.getCell<number>(
@@ -379,6 +424,7 @@ describe("Recipe Runner", () => {
     );
     y.withTx(tx).set(3);
     tx.commit();
+    await y.pull();
     tx = runtime.edit();
 
     const runCounts = {
@@ -387,22 +433,46 @@ describe("Recipe Runner", () => {
       multiplyGenerator2: 0,
     };
 
-    const multiply = lift<{ x: number; y: number }>(({ x, y }) => {
-      runCounts.multiply++;
-      return x * y;
-    });
+    const multiply = lift(
+      {
+        type: "object",
+        properties: { x: { type: "number" }, y: { type: "number" } },
+        required: ["x", "y"],
+      } as const satisfies JSONSchema,
+      { type: "number" } as const satisfies JSONSchema,
+      ({ x, y }) => {
+        runCounts.multiply++;
+        return x * y;
+      },
+    );
 
-    const multiplyGenerator = lift<{ x: number; y: number }>((args) => {
-      runCounts.multiplyGenerator++;
-      return multiply(args);
-    });
+    const multiplyGenerator = lift(
+      {
+        type: "object",
+        properties: { x: { type: "number" }, y: { type: "number" } },
+        required: ["x", "y"],
+      } as const satisfies JSONSchema,
+      { type: "number" } as const satisfies JSONSchema,
+      (args) => {
+        runCounts.multiplyGenerator++;
+        return multiply(args);
+      },
+    );
 
-    const multiplyGenerator2 = lift<{ x: number; y: number }>(({ x, y }) => {
-      runCounts.multiplyGenerator2++;
-      // Now passing literals, so will hardcode values in recipe and hence
-      // re-run when values change
-      return multiply({ x, y });
-    });
+    const multiplyGenerator2 = lift(
+      {
+        type: "object",
+        properties: { x: { type: "number" }, y: { type: "number" } },
+        required: ["x", "y"],
+      } as const satisfies JSONSchema,
+      { type: "number" } as const satisfies JSONSchema,
+      ({ x, y }) => {
+        runCounts.multiplyGenerator2++;
+        // Now passing literals, so will hardcode values in recipe and hence
+        // re-run when values change
+        return multiply({ x, y });
+      },
+    );
 
     const multiplyRecipe = recipe<{ x: number; y: number }>(
       "multiply",
@@ -433,9 +503,8 @@ describe("Recipe Runner", () => {
       multiplyGenerator2: 0,
     });
 
-    await runtime.idle();
-
-    expect(result.getAsQueryResult()).toMatchObject({
+    let value = await result.pull();
+    expect(value).toMatchObject({
       result1: 6,
       result2: 6,
     });
@@ -451,15 +520,15 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    value = await result.pull();
 
     expect(runCounts).toMatchObject({
       multiply: 4,
-      multiplyGenerator: 1, // Did not re-run, since we didn't read the values!
+      multiplyGenerator: 2,
       multiplyGenerator2: 2,
     });
 
-    expect(result.getAsQueryResult()).toMatchObject({
+    expect(value).toMatchObject({
       result1: 9,
       result2: 9,
     });
@@ -492,9 +561,8 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    expect(result.getAsQueryResult()).toMatchObject({ result: 10 });
+    const value = await result.pull();
+    expect(value).toMatchObject({ result: 10 });
   });
 
   it("should handle schema with cell references", async () => {
@@ -533,6 +601,7 @@ describe("Recipe Runner", () => {
     );
     settingsCell.withTx(tx).set({ value: 5 });
     tx.commit();
+    await settingsCell.pull();
     tx = runtime.edit();
 
     const resultCell = runtime.getCell<{ result: number }>(
@@ -548,18 +617,16 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
-
-    expect(result.getAsQueryResult()).toEqual({ result: 15 });
+    let value = await result.pull();
+    expect(value).toEqual({ result: 15 });
 
     // Update the cell and verify the recipe recomputes
     settingsCell.withTx(tx).send({ value: 10 });
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
-
-    expect(result.getAsQueryResult()).toEqual({ result: 30 });
+    value = await result.pull();
+    expect(value).toEqual({ result: 30 });
   });
 
   it("should handle nested cell references in schema", async () => {
@@ -627,9 +694,8 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    expect(result.getAsQueryResult()).toEqual({ result: 3 });
+    const value = await result.pull();
+    expect(value).toEqual({ result: 3 });
   });
 
   it("should handle dynamic cell references with schema", async () => {
@@ -692,9 +758,8 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
-
-    expect(result.getAsQueryResult()).toEqual({ result: 12 });
+    const value = await result.pull();
+    expect(value).toEqual({ result: 12 });
   });
 
   it("should execute handlers with schemas", async () => {
@@ -733,15 +798,15 @@ describe("Recipe Runner", () => {
     }, resultCell);
     tx.commit();
 
-    await runtime.idle();
+    await result.pull();
 
     result.key("stream").send({ amount: 1 });
-    await runtime.idle();
-    expect(result.getAsQueryResult()).toMatchObject({ counter: 1 });
+    let value = await result.pull();
+    expect(value).toMatchObject({ counter: 1 });
 
     result.key("stream").send({ amount: 2 });
-    await runtime.idle();
-    expect(result.getAsQueryResult()).toMatchObject({ counter: 3 });
+    value = await result.pull();
+    expect(value).toMatchObject({ counter: 3 });
   });
 
   it("failed handlers should be ignored", async () => {
@@ -782,18 +847,18 @@ describe("Recipe Runner", () => {
     const charm = runtime.run(tx, divRecipe, { result: 1 }, charmCell);
     tx.commit();
 
-    await runtime.idle();
+    await charm.pull();
 
     charm.key("updater").send({ divisor: 5, dividend: 1 });
-    await runtime.idle();
+    let value = await charm.pull();
     expect(errors).toBe(0);
 
-    expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
+    expect(value).toMatchObject({ result: 5 });
 
     charm.key("updater").send({ divisor: 10, dividend: 0 });
-    await runtime.idle();
+    value = await charm.pull();
     expect(errors).toBe(1);
-    expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
+    expect(value).toMatchObject({ result: 5 });
 
     // Cast to any to avoid type checking
     const sourceCellValue = charm.getSourceCell()?.getRaw() as any;
@@ -813,8 +878,8 @@ describe("Recipe Runner", () => {
     // NOTE(ja): this test is really important after a handler
     // fails the entire system crashes!!!!
     charm.key("updater").send({ divisor: 10, dividend: 5 });
-    await runtime.idle();
-    expect(charm.getAsQueryResult()).toMatchObject({ result: 2 });
+    value = await charm.pull();
+    expect(value).toMatchObject({ result: 2 });
   });
 
   it("failed lifted functions should be ignored", async () => {
@@ -853,6 +918,7 @@ describe("Recipe Runner", () => {
     );
     dividend.withTx(tx).set(1);
     tx.commit();
+    await dividend.pull();
     tx = runtime.edit();
 
     const charmCell = runtime.getCell<{ result: number }>(
@@ -868,18 +934,18 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    let value = await charm.pull();
 
     expect(errors).toBe(0);
-    expect(charm.get()).toMatchObject({ result: 10 });
+    expect(value).toMatchObject({ result: 10 });
 
     dividend.withTx(tx).send(0);
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    value = await charm.pull();
     expect(errors).toBe(1);
-    expect(charm.getAsQueryResult()).toMatchObject({ result: 10 });
+    expect(value).toMatchObject({ result: 10 });
 
     const recipeId = charm.getSourceCell()?.get()?.[TYPE];
     expect(recipeId).toBeDefined();
@@ -894,11 +960,11 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    value = await charm.pull();
     expect((charm.getRaw() as any).result.$alias.cell).toEqual(
       charm.getSourceCell()?.entityId,
     );
-    expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
+    expect(value).toMatchObject({ result: 5 });
   });
 
   it("idle should wait for slow async lifted functions", async () => {
@@ -933,13 +999,19 @@ describe("Recipe Runner", () => {
     const result = runtime.run(tx, slowRecipe, { x: 1 }, resultCell);
     tx.commit();
 
+    // In pull-based scheduling, the lift won't run until something pulls on it.
+    // Start the pull (but don't await yet) to trigger the computation.
+    const pullPromise = result.pull();
+
+    // Give time for the lift to start but not complete
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(liftCalled).toBe(true);
     expect(timeoutCalled).toBe(false);
 
-    await runtime.idle();
+    // Now await the pull to wait for completion
+    const value = await pullPromise;
     expect(timeoutCalled).toBe(true);
-    expect(result.get()).toMatchObject({ result: 2 });
+    expect(value).toMatchObject({ result: 2 });
   });
 
   it("idle should wait for slow async handlers", async () => {
@@ -977,7 +1049,7 @@ describe("Recipe Runner", () => {
     const charm = runtime.run(tx, slowHandlerRecipe, { result: 0 }, charmCell);
     tx.commit();
 
-    await runtime.idle();
+    await charm.pull();
 
     // Trigger the handler
     charm.key("updater").send({ value: 5 });
@@ -987,10 +1059,10 @@ describe("Recipe Runner", () => {
     expect(handlerCalled).toBe(true);
     expect(timeoutCalled).toBe(false);
 
-    // Now idle should wait for the handler's promise to resolve
-    await runtime.idle();
+    // Now pull should wait for the handler's promise to resolve
+    const value = await charm.pull();
     expect(timeoutCalled).toBe(true);
-    expect(charm.get()).toMatchObject({ result: 10 });
+    expect(value).toMatchObject({ result: 10 });
   });
 
   it("idle should not wait for deliberately async handlers and writes should fail", async () => {
@@ -1034,20 +1106,21 @@ describe("Recipe Runner", () => {
     const charm = runtime.run(tx, slowHandlerRecipe, { result: 0 }, charmCell);
     tx.commit();
 
-    await runtime.idle();
+    await charm.pull();
 
     // Trigger the handler
     charm.key("updater").send({ value: 5 });
 
-    await runtime.idle();
+    await charm.pull();
     expect(handlerCalled).toBe(true);
     expect(timeoutCalled).toBe(false);
 
-    // Now idle should wait for the handler's promise to resolve
+    // Now wait for the timeout promise to resolve
     await timeoutPromise;
     expect(timeoutCalled).toBe(true);
     expect(caughtErrorTryingToSetResult).toBeDefined();
-    expect(charm.get()?.result).toBe(0); // No change
+    const value = await charm.pull();
+    expect(value?.result).toBe(0); // No change
   });
 
   it("should create and use a named cell inside a lift", async () => {
@@ -1086,7 +1159,7 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    await result.pull();
 
     // Initial state
     const wrapperCell = result.key("value").get();
@@ -1108,7 +1181,7 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    await result.pull();
 
     // That same value was updated, which shows that the id was stable
     expect(tx.readValueOrThrow(ref)).toBe(10);
@@ -1176,39 +1249,36 @@ describe("Recipe Runner", () => {
     const result = runtime.run(tx, itemsRecipe, { items: [] }, resultCell);
     tx.commit();
 
-    await runtime.idle();
+    await result.pull();
 
     // Add first item
     result.key("stream").send({ detail: { message: "First Item" } });
-    await runtime.idle();
+    let value = await result.pull();
 
-    const firstState = result.getAsQueryResult();
-    expect(firstState.items).toHaveLength(1);
-    expect(firstState.items[0].title).toBe("First Item");
+    expect(value.items).toHaveLength(1);
+    expect(value.items[0].title).toBe("First Item");
 
     // Test reuse of proxy for array items
-    expect(firstState.items[0].items).toBe(firstState.items);
+    expect(value.items[0].items).toBe(value.items);
 
     // Add second item
     result.key("stream").send({ detail: { message: "Second Item" } });
-    await runtime.idle();
-
-    const secondState = result.getAsQueryResult();
-    expect(secondState.items).toHaveLength(2);
-    expect(secondState.items[1].title).toBe("Second Item");
+    value = await result.pull();
+    expect(value.items).toHaveLength(2);
+    expect(value.items[1].title).toBe("Second Item");
 
     // All three should point to the same array
-    expect(secondState.items[0].items).toBe(secondState.items);
-    expect(secondState.items[1].items).toBe(secondState.items);
+    expect(value.items[0].items).toBe(value.items);
+    expect(value.items[1].items).toBe(value.items);
 
     // And triple check that it actually refers to the same underlying array
-    expect(firstState.items[0].items[1].title).toBe("Second Item");
+    expect(value.items[0].items[1].title).toBe("Second Item");
 
     const recurse = ({ items }: { items: { items: any[] }[] }): any =>
       items.map((item) => recurse(item));
 
     // Now test that we catch infinite recursion
-    expect(() => recurse(firstState)).toThrow();
+    expect(() => recurse(value as any)).toThrow();
   });
 
   it("should allow sending cells to an event handler", async () => {
@@ -1260,10 +1330,10 @@ describe("Recipe Runner", () => {
     const charm = runtime.run(tx, listRecipe, { list: [] }, charmCell);
     tx.commit();
 
-    await runtime.idle();
+    await charm.pull();
 
     charm.key("stream").send({ charm: testCell });
-    await runtime.idle();
+    await charm.pull();
 
     // Add schema so we get the entry as a cell and can compare the two
     const listCell = charm.key("list").asSchema({
@@ -1334,18 +1404,84 @@ describe("Recipe Runner", () => {
 
     tx.commit();
 
-    await runtime.idle();
+    await charm.pull();
 
     // Toggle
     charm.key("stream").send({ expandChat: true });
-    await runtime.idle();
+    await charm.pull();
 
     expect(charm.key("text").get()).toEqual("A");
 
     charm.key("stream").send({ expandChat: false });
-    await runtime.idle();
+    await charm.pull();
 
     expect(charm.key("text").get()).toEqual("b");
+  });
+
+  it("ifElse selects the correct branch based on condition", async () => {
+    // This test verifies that ifElse correctly selects between branches
+    // Note: Both branches may run initially as they both depend on the condition input,
+    // but only the selected branch's value is used in the result.
+
+    const ifElseRecipe = recipe<
+      { condition: boolean; trueValue: string; falseValue: string }
+    >(
+      "ifElse selection test",
+      ({ condition, trueValue, falseValue }) => {
+        // Use separate inputs for each branch to make dependencies clearer
+        return {
+          condition,
+          trueValue,
+          falseValue,
+          text: ifElse(condition, trueValue, falseValue),
+        };
+      },
+    );
+
+    const charmCell = runtime.getCell<
+      {
+        condition: boolean;
+        trueValue: string;
+        falseValue: string;
+        text: string;
+      }
+    >(
+      space,
+      "ifElse selection test",
+      ifElseRecipe.resultSchema,
+      tx,
+    );
+
+    // Start with condition = true
+    const charm = runtime.run(
+      tx,
+      ifElseRecipe,
+      { condition: true, trueValue: "A", falseValue: "B" },
+      charmCell,
+    );
+
+    tx.commit();
+    await charm.pull();
+
+    // With condition=true, ifElse should select trueValue
+    expect(charm.key("text").get()).toEqual("A");
+
+    // Now switch condition to false
+    tx = runtime.edit();
+    charm.withTx(tx).key("condition").set(false);
+    tx.commit();
+    await charm.pull();
+
+    // With condition=false, ifElse should select falseValue
+    expect(charm.key("text").get()).toEqual("B");
+
+    // Change the falseValue and verify it updates
+    tx = runtime.edit();
+    charm.withTx(tx).key("falseValue").set("C");
+    tx.commit();
+    await charm.pull();
+
+    expect(charm.key("text").get()).toEqual("C");
   });
 
   it("should allow Cell<Array>.push of newly created charms", async () => {
@@ -1426,7 +1562,7 @@ describe("Recipe Runner", () => {
     runtime.run(tx, outerPattern, {}, charmCell);
     tx.commit();
 
-    await runtime.idle();
+    await charmCell.pull();
 
     tx = runtime.edit();
 
@@ -1438,11 +1574,110 @@ describe("Recipe Runner", () => {
     result.add.withTx(tx).send({ text: "hello" });
     tx.commit();
 
-    await runtime.idle();
+    await charmCell.pull();
 
     tx = runtime.edit();
     const result2 = charmCell.withTx(tx).get();
     expect(result2.list.get()).toEqual([{ text: "hello" }]);
+  });
+
+  it("should wait for lift before handler that reads lift output from event", async () => {
+    // This test verifies that when handler A creates a lift and sends its output
+    // as an event to handler B, the scheduler waits for the lift to complete
+    // before running handler B.
+    //
+    // Flow:
+    // 1. Send { value: 5 } to streamA
+    // 2. Handler A creates a lift (double(value)) and sends its output to streamB
+    // 3. Handler B receives the lift output cell, reads its value, and logs it
+    // 4. The lift must run before handler B can read the correct value (10)
+    //
+    // This test should FAIL if populateDependencies doesn't receive the event,
+    // because then the scheduler won't know handler B depends on the lift output.
+
+    const log: number[] = [];
+
+    // Lift that doubles a number
+    const double = lift((x: number) => x * 2);
+
+    // Handler B receives an event (a cell reference) and logs its value
+    const handlerB = handler(
+      // Event: a cell reference (link to the doubled output)
+      { type: "number", asCell: true },
+      // No state needed
+      {},
+      (eventCell, _state) => {
+        // Read the cell value and log it
+        const value = eventCell.get();
+        log.push(value);
+      },
+    );
+
+    // Handler A receives a value, creates a lift, and sends its output to streamB
+    const handlerA = handler(
+      {
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+      },
+      {
+        type: "object",
+        properties: {
+          streamB: { asStream: true },
+        },
+        required: ["streamB"],
+      },
+      ({ value }, { streamB }) => {
+        // Create the lift dynamically and send its output to streamB
+        const doubled = double(value);
+        streamB.send(doubled);
+        return doubled;
+      },
+    );
+
+    const testRecipe = recipe(
+      "Handler dependency pulling test",
+      () => {
+        // Create handler B's stream (receives cell references, logs values)
+        const streamB = handlerB({});
+
+        // Create handler A's stream (creates lift and dispatches to streamB)
+        const streamA = handlerA({ streamB });
+
+        return { streamA };
+      },
+    );
+
+    const resultCell = runtime.getCell<{ streamA: any }>(
+      space,
+      "should wait for lift before handler that reads lift output from event",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    // Verify initial state
+    expect(log).toEqual([]);
+
+    // Send an event to handler A with value 5
+    result.key("streamA").send({ value: 5 });
+    await result.pull();
+
+    // Handler B should have logged 10 (5 * 2) - the lift must have run first
+    // If the lift didn't run before handler B, we'd get undefined or wrong value
+    expect(log).toEqual([10]);
+
+    // Send another event to verify consistent behavior
+    result.key("streamA").send({ value: 7 });
+    await result.pull();
+
+    // Handler B should have logged 14 (7 * 2)
+    expect(log).toEqual([10, 14]);
   });
 
   it("should support non-reactive reads with sample()", async () => {
@@ -1513,10 +1748,10 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    let value = await result.pull();
 
     // Verify initial result: 10 + 5 = 15
-    expect(result.get()).toMatchObject({ result: 15 });
+    expect(value).toMatchObject({ result: 15 });
     expect(liftRunCount).toBe(1);
 
     // Update the second cell (read with sample(), so non-reactive)
@@ -1524,24 +1759,286 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    value = await result.pull();
 
     // The lift should NOT have re-run because sample() is non-reactive
     expect(liftRunCount).toBe(1);
     // Result should still be 15 (not updated)
-    expect(result.get()).toMatchObject({ result: 15 });
+    expect(value).toMatchObject({ result: 15 });
 
     // Now update the first cell (read reactively via the normal get())
     firstCell.withTx(tx).send(100);
     tx.commit();
     tx = runtime.edit();
 
-    await runtime.idle();
+    value = await result.pull();
 
     // The lift should have re-run now
     expect(liftRunCount).toBe(2);
     // Result should reflect both new values: 100 + 20 = 120
     // (the second cell's new value is picked up because the lift re-ran)
-    expect(result.get()).toMatchObject({ result: 120 });
+    expect(value).toMatchObject({ result: 120 });
+  });
+
+  it("should not run lifts until something pulls on them", async () => {
+    // This test verifies true pull-based scheduling:
+    // - Create two independent recipes with lifts
+    // - Instantiate both
+    // - Pull only on the first one's result
+    // - Only the lift in the first recipe should run
+
+    let lift1Runs = 0;
+    let lift2Runs = 0;
+
+    const recipe1 = recipe<{ value: number }>(
+      "Recipe 1 with lift",
+      ({ value }) => {
+        const doubled = lift(
+          { type: "number" } as const satisfies JSONSchema,
+          { type: "number" } as const satisfies JSONSchema,
+          (x: number) => {
+            lift1Runs++;
+            return x * 2;
+          },
+        )(value);
+        return { result: doubled };
+      },
+    );
+
+    const recipe2 = recipe<{ value: number }>(
+      "Recipe 2 with lift",
+      ({ value }) => {
+        const tripled = lift(
+          { type: "number" } as const satisfies JSONSchema,
+          { type: "number" } as const satisfies JSONSchema,
+          (x: number) => {
+            lift2Runs++;
+            return x * 3;
+          },
+        )(value);
+        return { result: tripled };
+      },
+    );
+
+    // Instantiate both recipes
+    const resultCell1 = runtime.getCell<{ result: number }>(
+      space,
+      "lift-pull-test-recipe1",
+      undefined,
+      tx,
+    );
+    const resultCell2 = runtime.getCell<{ result: number }>(
+      space,
+      "lift-pull-test-recipe2",
+      undefined,
+      tx,
+    );
+
+    const result1 = runtime.run(tx, recipe1, { value: 5 }, resultCell1);
+    const result2 = runtime.run(tx, recipe2, { value: 5 }, resultCell2);
+    tx.commit();
+    tx = runtime.edit();
+
+    // Before any pull, no lifts should have run
+    expect(lift1Runs).toBe(0);
+    expect(lift2Runs).toBe(0);
+
+    // Pull only on recipe 1's result
+    const value1 = await result1.pull();
+    expect(value1).toMatchObject({ result: 10 });
+
+    // Both lifts run because the scheduler flushes everything
+    expect(lift1Runs).toBe(1);
+    expect(lift2Runs).toBe(1);
+
+    // Now pull on recipe 2's result
+    const value2 = await result2.pull();
+    expect(value2).toMatchObject({ result: 15 });
+
+    // Still 1
+    expect(lift1Runs).toBe(1);
+    expect(lift2Runs).toBe(1);
+  });
+
+  it("should run dynamically instantiated recipes before reading their outputs", async () => {
+    // This test reproduces a bug where:
+    // 1. A lift dynamically instantiates recipes and pushes them to an array
+    // 2. Another lift reads computed values from those array entries
+    // 3. The dynamically instantiated recipes haven't executed yet, so their
+    //    computed outputs are undefined
+    //
+    // The bug manifests with push-based scheduling (sink + idle) but not with
+    // pull-based scheduling (pull()) because pull correctly traverses the
+    // dependency chain.
+
+    // Inner recipe that computes itemCount from a values array
+    const itemCountRecipe = recipe(
+      // Input schema
+      {
+        type: "object",
+        properties: {
+          values: {
+            type: "array",
+            items: { type: "number" },
+            default: [],
+          },
+        },
+      } as const satisfies JSONSchema,
+      // Output schema
+      {
+        type: "object",
+        properties: {
+          values: { type: "array", items: { type: "number" } },
+          itemCount: { type: "number" },
+        },
+      } as const satisfies JSONSchema,
+      ({ values }) => {
+        // Compute item count from values
+        const itemCount = lift(
+          {
+            type: "array",
+            items: { type: "number" },
+          } as const satisfies JSONSchema,
+          { type: "number" } as const satisfies JSONSchema,
+          (arr: number[]) => (Array.isArray(arr) ? arr.length : 0),
+        )(values);
+
+        return { values, itemCount };
+      },
+    );
+
+    // Lift that dynamically instantiates itemCountRecipe for each group
+    const instantiateGroups = lift(
+      {
+        type: "object",
+        properties: {
+          groups: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                values: { type: "array", items: { type: "number" } },
+              },
+            },
+            asCell: true,
+          },
+        },
+        required: ["groups"],
+      } as const satisfies JSONSchema,
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            values: { type: "array", items: { type: "number" } },
+            itemCount: { type: "number" },
+          },
+        },
+      } as const satisfies JSONSchema,
+      ({ groups }) => {
+        const raw = groups.get();
+        const list = Array.isArray(raw) ? raw : [];
+        const children = [];
+        for (let index = 0; index < list.length; index++) {
+          const groupCell = groups.key(index)!;
+          const valuesCell = groupCell.key("values");
+          const child = itemCountRecipe({
+            values: valuesCell,
+          });
+          children.push(child);
+        }
+        return children;
+      },
+    );
+
+    // Lift that sums itemCount from all groups
+    const computeTotalItems = lift(
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            itemCount: { type: "number" },
+          },
+        },
+      } as const satisfies JSONSchema,
+      { type: "number" } as const satisfies JSONSchema,
+      (entries: Array<{ itemCount?: number }>) => {
+        if (!Array.isArray(entries)) {
+          return 0;
+        }
+        return entries.reduce((sum, entry) => {
+          const count = entry?.itemCount;
+          return typeof count === "number" ? sum + count : sum;
+        }, 0);
+      },
+    );
+
+    // Outer recipe that uses instantiateGroups and computeTotalItems
+    const outerRecipe = recipe(
+      {
+        type: "object",
+        properties: {
+          groups: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                values: { type: "array", items: { type: "number" } },
+              },
+            },
+            default: [],
+          },
+        },
+      } as const satisfies JSONSchema,
+      {
+        type: "object",
+        properties: {
+          groups: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                values: { type: "array", items: { type: "number" } },
+                itemCount: { type: "number" },
+              },
+            },
+          },
+          totalItems: { type: "number" },
+        },
+      } as const satisfies JSONSchema,
+      ({ groups: groupSeeds }) => {
+        const groups = instantiateGroups({ groups: groupSeeds });
+        const totalItems = computeTotalItems(groups);
+        return { groups, totalItems };
+      },
+    );
+
+    const resultCell = runtime.getCell<{
+      groups: Array<{ values: number[]; itemCount: number }>;
+      totalItems: number;
+    }>(
+      space,
+      "should run dynamically instantiated recipes before reading their outputs",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, outerRecipe, {
+      groups: [
+        { values: [1, 2, 3] },
+        { values: [4, 5] },
+      ],
+    }, resultCell);
+    tx.commit();
+
+    const value = await result.pull();
+
+    // The bug: totalItems would be 0 because the dynamically instantiated
+    // recipes haven't run yet when computeTotalItems executes
+    expect(value.groups).toHaveLength(2);
+    expect(value.groups![0].itemCount).toBe(3);
+    expect(value.groups![1].itemCount).toBe(2);
+    expect(value.totalItems).toBe(5); // This fails if nested recipes aren't run first
   });
 });

@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   Default,
   handler,
@@ -11,13 +10,14 @@ import {
   recipe,
   toSchema,
   UI,
+  Writable,
 } from "commontools";
 
 // full recipe state
 interface RecipeState {
   charm: any;
-  cellRef: Cell<{ charm: any }>;
-  isInitialized: Cell<boolean>;
+  cellRef: Writable<{ charm: any }>;
+  isInitialized: Writable<boolean>;
 }
 const RecipeStateSchema = toSchema<RecipeState>();
 
@@ -74,9 +74,12 @@ const storeCharmAndNavigate = lift(
 // 1. Creates a local isInitialized cell to track one-time execution
 // 2. Instantiates SimpleRecipe charm
 // 3. Uses storeCharmAndNavigate lift to save reference and navigate
-const createSimpleRecipe = handler<unknown, { cellRef: Cell<{ charm: any }> }>(
+const createSimpleRecipe = handler<
+  unknown,
+  { cellRef: Writable<{ charm: any }> }
+>(
   (_, { cellRef }) => {
-    const isInitialized = Cell.of(false);
+    const isInitialized = Writable.of(false);
 
     // Create a random 5-digit ID
     const randomId = Math.floor(10000 + Math.random() * 90000).toString();
@@ -90,7 +93,7 @@ const createSimpleRecipe = handler<unknown, { cellRef: Cell<{ charm: any }> }>(
 );
 
 // Handler to navigate to the stored charm (just console.log for now)
-const goToStoredCharm = handler<unknown, { cellRef: Cell<{ charm: any }> }>(
+const goToStoredCharm = handler<unknown, { cellRef: Writable<{ charm: any }> }>(
   (_, { cellRef }) => {
     console.log("goToStoredCharm clicked");
     const cellValue = cellRef.get();

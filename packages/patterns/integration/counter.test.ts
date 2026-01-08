@@ -16,6 +16,7 @@ describe("counter direct operations test", () => {
   let identity: Identity;
   let cc: CharmsController;
   let charm: CharmController;
+  let charmSinkCancel: (() => void) | undefined;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -33,9 +34,15 @@ describe("counter direct operations test", () => {
       program, // We operate on the charm in this thread
       { start: true },
     );
+
+    // In pull mode, create a sink to keep the charm reactive when inputs change.
+    // Without this, setting values won't trigger recipe re-computation.
+    const resultCell = cc.manager().getResult(charm.getCell());
+    charmSinkCancel = resultCell.sink(() => {});
   });
 
   afterAll(async () => {
+    charmSinkCancel?.();
     if (cc) await cc.dispose();
   });
 
@@ -61,7 +68,7 @@ describe("counter direct operations test", () => {
       return initialText?.trim() === "Counter is the 0th number";
     });
 
-    assertEquals(charm.result.get(["value"]), 0);
+    assertEquals(await charm.result.get(["value"]), 0);
   });
 
   it("should update counter value via direct operation (live)", async () => {

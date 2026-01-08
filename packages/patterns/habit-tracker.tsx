@@ -1,13 +1,14 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   Default,
+  equals,
   ifElse,
   lift,
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 interface Habit {
@@ -23,8 +24,8 @@ interface HabitLog {
 }
 
 interface Input {
-  habits: Cell<Default<Habit[], []>>;
-  logs: Cell<Default<HabitLog[], []>>;
+  habits: Writable<Default<Habit[], []>>;
+  logs: Writable<Default<HabitLog[], []>>;
 }
 
 interface Output {
@@ -86,8 +87,8 @@ const calcStreak = lift((args: { logs: HabitLog[]; name: string }): number => {
 
 export default pattern<Input, Output>(({ habits, logs }) => {
   const todayDate = getTodayDate();
-  const newHabitName = Cell.of("");
-  const newHabitIcon = Cell.of("✓");
+  const newHabitName = Writable.of("");
+  const newHabitIcon = Writable.of("✓");
 
   const habitCount = computed(() => habits.get().length);
 
@@ -162,9 +163,7 @@ export default pattern<Input, Output>(({ habits, logs }) => {
                       variant="ghost"
                       onClick={() => {
                         const current = habits.get();
-                        const idx = current.findIndex((h) =>
-                          Cell.equals(habit, h)
-                        );
+                        const idx = current.findIndex((h) => equals(habit, h));
                         if (idx >= 0) {
                           habits.set(current.toSpliced(idx, 1));
                         }

@@ -15,6 +15,7 @@ import type {
   CompileAndRunFunction,
   ComputedFunction,
   DeriveFunction,
+  EqualsFunction,
   FetchDataFunction,
   FetchProgramFunction,
   GenerateObjectFunction,
@@ -158,6 +159,8 @@ declare module "@commontools/api" {
     wrapper?: "handler";
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;
+    /** If true, this module is an effect (side-effectful) rather than a computation */
+    isEffect?: boolean;
   }
 }
 
@@ -258,9 +261,11 @@ export interface BuilderFunctionsAndConstants {
 
   // Cell creation
   cell: CellTypeConstructor<AsCell>["of"];
+  equals: EqualsFunction;
 
   // Cell constructors with static methods
   Cell: CellTypeConstructor<AsCell>;
+  Writable: CellTypeConstructor<AsCell>; // Alias for Cell with clearer write-access semantics
   OpaqueCell: CellTypeConstructor<AsOpaqueCell>;
   Stream: CellTypeConstructor<AsStream>;
   ComparableCell: CellTypeConstructor<AsComparableCell>;

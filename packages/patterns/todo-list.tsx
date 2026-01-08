@@ -1,5 +1,13 @@
 /// <cts-enable />
-import { Cell, Default, NAME, pattern, UI, wish } from "commontools";
+import {
+  Default,
+  equals,
+  NAME,
+  pattern,
+  UI,
+  wish,
+  Writable,
+} from "commontools";
 
 interface TodoItem {
   title: string;
@@ -7,11 +15,11 @@ interface TodoItem {
 }
 
 interface Input {
-  items: Cell<Default<TodoItem[], []>>;
+  items: Writable<Default<TodoItem[], []>>;
 }
 
 interface Output {
-  items: Cell<TodoItem[]>;
+  items: Writable<TodoItem[]>;
 }
 
 export default pattern<Input, Output>(({ items }) => {
@@ -67,9 +75,7 @@ export default pattern<Input, Output>(({ items }) => {
                   <ct-button
                     onClick={() => {
                       const current = items.get();
-                      const index = current.findIndex((el) =>
-                        Cell.equals(item, el)
-                      );
+                      const index = current.findIndex((el) => equals(item, el));
                       if (index >= 0) {
                         items.set(current.toSpliced(index, 1));
                       }

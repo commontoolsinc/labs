@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   BuiltInLLMMessage,
-  Cell,
   computed,
   Default,
   fetchData,
@@ -15,6 +14,7 @@ import {
   UI,
   VNode,
   wish,
+  Writable,
 } from "commontools";
 import { type MentionableCharm } from "./system/backlinks-index.tsx";
 
@@ -45,8 +45,8 @@ const clearChat = handler(
   (
     _: never,
     { messages, pending }: {
-      messages: Cell<Array<BuiltInLLMMessage>>;
-      pending: Cell<boolean | undefined>;
+      messages: Writable<Array<BuiltInLLMMessage>>;
+      pending: Writable<boolean | undefined>;
     },
   ) => {
     messages.set([]);
@@ -55,7 +55,7 @@ const clearChat = handler(
 );
 
 type ChatInput = {
-  messages?: Cell<Default<Array<BuiltInLLMMessage>, []>>;
+  messages?: Writable<Default<Array<BuiltInLLMMessage>, []>>;
   tools?: any;
   theme?: any;
   system?: string;
@@ -125,7 +125,7 @@ export const TitleGenerator = pattern<
 
 const listMentionable = pattern<
   { mentionable: Array<MentionableCharm> },
-  { result: Array<{ label: string; cell: Cell<unknown> }> }
+  { result: Array<{ label: string; cell: Writable<unknown> }> }
 >(
   ({ mentionable }) => {
     const result = mentionable.map((charm) => ({
@@ -138,7 +138,7 @@ const listMentionable = pattern<
 
 const listRecent = pattern<
   { recentCharms: Array<MentionableCharm> },
-  { result: Array<{ label: string; cell: Cell<unknown> }> }
+  { result: Array<{ label: string; cell: Writable<unknown> }> }
 >(
   ({ recentCharms }) => {
     const namesList = recentCharms.map((charm) => ({
@@ -151,7 +151,7 @@ const listRecent = pattern<
 
 export default pattern<ChatInput, ChatOutput>(
   ({ messages, tools, theme, system }) => {
-    const model = Cell.of<string>("anthropic:claude-sonnet-4-5");
+    const model = Writable.of<string>("anthropic:claude-sonnet-4-5");
     const mentionable = wish<MentionableCharm[]>("#mentionable");
     const recentCharms = wish<MentionableCharm[]>("#recent");
 

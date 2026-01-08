@@ -11,7 +11,6 @@
  */
 
 import {
-  Cell,
   computed,
   Default,
   handler,
@@ -19,6 +18,7 @@ import {
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 // Word dictionary for validation
@@ -648,7 +648,7 @@ function sanitizeLetter(letter: Letter): Letter {
 }
 
 function updatePlayerRack(
-  allRacksJson: Cell<string>,
+  allRacksJson: Writable<string>,
   playerName: string,
   newRack: Letter[],
 ) {
@@ -659,7 +659,7 @@ function updatePlayerRack(
 }
 
 function updatePlayerPlaced(
-  allPlacedJson: Cell<string>,
+  allPlacedJson: Writable<string>,
   playerName: string,
   newPlaced: PlacedTile[],
 ) {
@@ -671,11 +671,11 @@ function updatePlayerPlaced(
 const dropOnBoard = handler<
   any,
   {
-    allRacksJson: Cell<string>;
-    allPlacedJson: Cell<string>;
+    allRacksJson: Writable<string>;
+    allPlacedJson: Writable<string>;
     myName: string;
-    boardJson: Cell<string>;
-    message: Cell<string>;
+    boardJson: Writable<string>;
+    message: Writable<string>;
   }
 >((event, { allRacksJson, allPlacedJson, myName, boardJson, message }) => {
   const cellWithGap = CELL_SIZE + 2;
@@ -793,10 +793,10 @@ const dropOnBoard = handler<
 const returnToRack = handler<
   any,
   {
-    allRacksJson: Cell<string>;
-    allPlacedJson: Cell<string>;
+    allRacksJson: Writable<string>;
+    allPlacedJson: Writable<string>;
     myName: string;
-    message: Cell<string>;
+    message: Writable<string>;
   }
 >((event, { allRacksJson, allPlacedJson, myName, message }) => {
   const dragType = event.detail?.type;
@@ -872,10 +872,10 @@ const returnToRack = handler<
 const clearBoard = handler<
   unknown,
   {
-    allRacksJson: Cell<string>;
-    allPlacedJson: Cell<string>;
+    allRacksJson: Writable<string>;
+    allPlacedJson: Writable<string>;
     myName: string;
-    message: Cell<string>;
+    message: Writable<string>;
   }
 >((_event, { allRacksJson, allPlacedJson, myName, message }) => {
   const allRacks = parseAllRacksJson(allRacksJson.get());
@@ -897,15 +897,15 @@ const clearBoard = handler<
 const submitTurn = handler<
   unknown,
   {
-    allRacksJson: Cell<string>;
-    allPlacedJson: Cell<string>;
+    allRacksJson: Writable<string>;
+    allPlacedJson: Writable<string>;
     myName: string;
-    boardJson: Cell<string>;
-    bagJson: Cell<string>;
-    bagIndex: Cell<number>;
-    playersJson: Cell<string>;
-    gameEventsJson: Cell<string>;
-    message: Cell<string>;
+    boardJson: Writable<string>;
+    bagJson: Writable<string>;
+    bagIndex: Writable<number>;
+    playersJson: Writable<string>;
+    gameEventsJson: Writable<string>;
+    message: Writable<string>;
   }
 >((
   _event,
@@ -1169,13 +1169,13 @@ const getBagCount = lift<{ bagJson: string; bagIndex: number }, number>(
 
 interface GameInput {
   gameName: Default<string, "Scrabble Match">;
-  boardJson: Cell<Default<string, "">>; // JSON string of PlacedTile[]
-  bagJson: Cell<Default<string, "">>;
-  bagIndex: Cell<Default<number, 0>>;
-  playersJson: Cell<Default<string, "[]">>; // JSON string of Player[]
-  gameEventsJson: Cell<Default<string, "[]">>; // JSON string of GameEvent[]
-  allRacksJson: Cell<Default<string, "{}">>; // JSON string of AllRacks
-  allPlacedJson: Cell<Default<string, "{}">>; // JSON string of AllPlaced
+  boardJson: Writable<Default<string, "">>; // JSON string of PlacedTile[]
+  bagJson: Writable<Default<string, "">>;
+  bagIndex: Writable<Default<number, 0>>;
+  playersJson: Writable<Default<string, "[]">>; // JSON string of Player[]
+  gameEventsJson: Writable<Default<string, "[]">>; // JSON string of GameEvent[]
+  allRacksJson: Writable<Default<string, "{}">>; // JSON string of AllRacks
+  allPlacedJson: Writable<Default<string, "{}">>; // JSON string of AllPlaced
   myName: Default<string, "">;
 }
 
@@ -1221,7 +1221,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
       }
     }
 
-    const message = Cell.of("");
+    const message = Writable.of("");
 
     return {
       [NAME]: computed(() => `Scrabble: ${myName}`),

@@ -1,13 +1,14 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   Default,
+  equals,
   ifElse,
   NAME,
   navigateTo,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 import ContactDetail, { type Contact } from "./contact-detail.tsx";
@@ -19,8 +20,8 @@ interface Relationship {
 }
 
 interface Input {
-  contacts: Cell<Default<Contact[], []>>;
-  relationships: Cell<Default<Relationship[], []>>;
+  contacts: Writable<Default<Contact[], []>>;
+  relationships: Writable<Default<Relationship[], []>>;
 }
 
 interface Output {
@@ -29,10 +30,10 @@ interface Output {
 }
 
 export default pattern<Input, Output>(({ contacts, relationships }) => {
-  const searchQuery = Cell.of("");
-  const newRelationFrom = Cell.of("");
-  const newRelationTo = Cell.of("");
-  const newRelationLabel = Cell.of("");
+  const searchQuery = Writable.of("");
+  const newRelationFrom = Writable.of("");
+  const newRelationTo = Writable.of("");
+  const newRelationLabel = Writable.of("");
 
   const contactCount = computed(() => contacts.get().length);
 
@@ -120,7 +121,7 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
                       onClick={() => {
                         const current = contacts.get();
                         const idx = current.findIndex((c) =>
-                          Cell.equals(contact, c)
+                          equals(contact, c)
                         );
                         if (idx >= 0) {
                           contacts.set(current.toSpliced(idx, 1));

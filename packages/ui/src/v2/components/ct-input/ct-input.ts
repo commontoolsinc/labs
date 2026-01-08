@@ -350,12 +350,14 @@ export class CTInput extends BaseElement {
       declare timingStrategy: InputTimingOptions["strategy"];
       declare timingDelay: number;
 
+      private _changeGroup = crypto.randomUUID();
       private _input: HTMLInputElement | null = null;
       private _cellController = createStringCellController(this, {
         timing: {
           strategy: "debounce",
           delay: 300,
         },
+        changeGroup: this._changeGroup,
         onChange: (newValue: string, oldValue: string) => {
           this.emit("ct-change", {
             value: newValue,

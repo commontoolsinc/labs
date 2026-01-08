@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   Default,
   handler,
@@ -14,6 +13,7 @@ import {
   toSchema,
   UI,
   wish,
+  Writable,
 } from "commontools";
 
 import Chat from "./chatbot-note-composed.tsx";
@@ -30,9 +30,9 @@ type Input = {
   selectedCharm: Default<{ charm: any }, { charm: undefined }>;
   charmsList: Default<CharmEntry[], []>;
   theme?: {
-    accentColor: Cell<Default<string, "#3b82f6">>;
-    fontFace: Cell<Default<string, "system-ui, -apple-system, sans-serif">>;
-    borderRadius: Cell<Default<string, "0.5rem">>;
+    accentColor: Writable<Default<string, "#3b82f6">>;
+    fontFace: Writable<Default<string, "system-ui, -apple-system, sans-serif">>;
+    borderRadius: Writable<Default<string, "0.5rem">>;
   };
 };
 
@@ -47,9 +47,9 @@ type Output = {
 const removeChat = handler<
   unknown,
   {
-    charmsList: Cell<CharmEntry[]>;
+    charmsList: Writable<CharmEntry[]>;
     id: string;
-    selectedCharm: Cell<Default<{ charm: any }, { charm: undefined }>>;
+    selectedCharm: Writable<Default<{ charm: any }, { charm: undefined }>>;
   }
 >(
   (
@@ -84,15 +84,15 @@ const removeChat = handler<
 const storeCharm = lift(
   toSchema<{
     charm: any;
-    selectedCharm: Cell<Default<{ charm: any }, { charm: undefined }>>;
-    charmsList: Cell<CharmEntry[]>;
-    allCharms: Cell<MentionableCharm[]>;
+    selectedCharm: Writable<Default<{ charm: any }, { charm: undefined }>>;
+    charmsList: Writable<CharmEntry[]>;
+    allCharms: Writable<MentionableCharm[]>;
     theme?: {
       accentColor: Default<string, "#3b82f6">;
       fontFace: Default<string, "system-ui, -apple-system, sans-serif">;
       borderRadius: Default<string, "0.5rem">;
     };
-    isInitialized: Cell<boolean>;
+    isInitialized: Writable<boolean>;
   }>(),
   undefined,
   ({ charm, selectedCharm, charmsList, isInitialized, allCharms: _ }) => { // Not including `allCharms` is a compile error...
@@ -119,15 +119,15 @@ const storeCharm = lift(
 const populateChatList = lift(
   toSchema<{
     charmsList: CharmEntry[];
-    allCharms: Cell<any[]>;
-    selectedCharm: Cell<{ charm: any }>;
+    allCharms: Writable<any[]>;
+    selectedCharm: Writable<{ charm: any }>;
   }>(),
   undefined,
   (
     { charmsList, allCharms, selectedCharm },
   ) => {
     if (charmsList.length === 0) {
-      const isInitialized = Cell.of(false);
+      const isInitialized = Writable.of(false);
       return storeCharm({
         charm: Chat({
           title: "New Chat",
@@ -136,7 +136,7 @@ const populateChatList = lift(
         selectedCharm,
         charmsList,
         allCharms,
-        isInitialized: isInitialized as unknown as Cell<boolean>,
+        isInitialized: isInitialized as unknown as Writable<boolean>,
       });
     }
 
@@ -147,13 +147,13 @@ const populateChatList = lift(
 const createChatRecipe = handler<
   unknown,
   {
-    selectedCharm: Cell<{ charm: any }>;
-    charmsList: Cell<CharmEntry[]>;
-    allCharms: Cell<MentionableCharm[]>;
+    selectedCharm: Writable<{ charm: any }>;
+    charmsList: Writable<CharmEntry[]>;
+    allCharms: Writable<MentionableCharm[]>;
   }
 >(
   (_, { selectedCharm, charmsList, allCharms }) => {
-    const isInitialized = Cell.of(false);
+    const isInitialized = Writable.of(false);
 
     const charm = Chat({
       title: "New Chat",
@@ -165,14 +165,14 @@ const createChatRecipe = handler<
       selectedCharm,
       charmsList: charmsList as unknown as OpaqueRef<CharmEntry[]>,
       allCharms,
-      isInitialized: isInitialized as unknown as Cell<boolean>,
+      isInitialized: isInitialized as unknown as Writable<boolean>,
     });
   },
 );
 
 const selectCharm = handler<
   unknown,
-  { selectedCharm: Cell<{ charm: any }>; charm: any }
+  { selectedCharm: Writable<{ charm: any }>; charm: any }
 >(
   (_, { selectedCharm, charm }) => {
     console.log("selectCharm: updating selectedCharm to ", charm);
@@ -182,8 +182,8 @@ const selectCharm = handler<
 );
 
 const logCharmsList = lift<
-  { charmsList: Cell<CharmEntry[]> },
-  Cell<CharmEntry[]>
+  { charmsList: Writable<CharmEntry[]> },
+  Writable<CharmEntry[]>
 >(
   ({ charmsList }) => {
     console.log("logCharmsList: ", charmsList.get());
@@ -192,7 +192,7 @@ const logCharmsList = lift<
 );
 
 const _handleCharmLinkClicked = handler(
-  (_: any, { charm }: { charm: Cell<MentionableCharm> }) => {
+  (_: any, { charm }: { charm: Writable<MentionableCharm> }) => {
     return navigateTo(charm);
   },
 );
@@ -238,10 +238,12 @@ export default pattern<Input, Output>(
   ({ selectedCharm, charmsList, theme }) => {
     const wishedCharms = wish<MentionableCharm[]>("#allCharms");
     const allCharms = computed(() => wishedCharms ?? []);
-    logCharmsList({ charmsList: charmsList as unknown as Cell<CharmEntry[]> });
+    logCharmsList({
+      charmsList: charmsList as unknown as Writable<CharmEntry[]>,
+    });
 
     populateChatList({
-      selectedCharm: selectedCharm as unknown as Cell<
+      selectedCharm: selectedCharm as unknown as Writable<
         Pick<CharmEntry, "charm">
       >,
       charmsList,
@@ -255,9 +257,9 @@ export default pattern<Input, Output>(
     const localMentionable = extractLocalMentionable({ list: charmsList });
 
     const localTheme = theme ?? {
-      accentColor: Cell.of("#3b82f6"),
-      fontFace: Cell.of("system-ui, -apple-system, sans-serif"),
-      borderRadius: Cell.of("0.5rem"),
+      accentColor: Writable.of("#3b82f6"),
+      fontFace: Writable.of("system-ui, -apple-system, sans-serif"),
+      borderRadius: Writable.of("0.5rem"),
     };
 
     return {

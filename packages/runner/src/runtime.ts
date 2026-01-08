@@ -4,6 +4,7 @@ import {
   StaticCacheHTTP,
 } from "@commontools/static";
 import { RuntimeTelemetry } from "@commontools/runner";
+import { favoriteListSchema, journalSchema } from "@commontools/home-schemas";
 import type {
   AnyCell,
   JSONSchema,
@@ -15,6 +16,7 @@ import type {
 import { ContextualFlowControl } from "./cfc.ts";
 import { RecipeEnvironment, setRecipeEnvironment } from "./builder/env.ts";
 import type {
+  ChangeGroup,
   CommitError,
   DID,
   IExtendedStorageTransaction,
@@ -107,18 +109,8 @@ export const homeSpaceCellSchema: JSONSchema = {
     },
     defaultPattern: { not: true, asCell: true },
     // Plus home-space-specific properties
-    favorites: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          cell: { not: true, asCell: true },
-          tag: { type: "string", default: "" },
-        },
-        required: ["cell"],
-      },
-      asCell: true,
-    },
+    favorites: { ...favoriteListSchema, asCell: true },
+    journal: { ...journalSchema, asCell: true },
   },
 } as JSONSchema;
 
@@ -135,6 +127,15 @@ export interface SpaceCellContents {
  */
 export interface HomeSpaceCellContents extends SpaceCellContents {
   favorites: Cell<{ cell: Cell<unknown>; tag: string }[]>;
+  journal: Cell<{
+    timestamp: number;
+    eventType: string;
+    subject?: Cell<unknown>;
+    snapshot?: { name?: string; schemaTag?: string; valueExcerpt?: string };
+    narrative?: string;
+    tags?: string[];
+    space: string;
+  }[]>;
 }
 
 /**
@@ -253,11 +254,17 @@ export class Runtime {
     // Wait for any pending operations
     await this.scheduler.idle();
 
+    // Clean up scheduler timers
+    this.scheduler.dispose();
+
     // Pop the default frame
     if (this.defaultFrame) {
       popFrame(this.defaultFrame);
       this.defaultFrame = undefined;
     }
+
+    // Dispose the Engine (clears TypeScriptCompiler, UnsafeEvalRuntime source maps, console hook)
+    this.harness.dispose();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern
@@ -272,8 +279,14 @@ export class Runtime {
    * locally replicated memory spaces. Transaction allows reading from many
    * multiple spaces but writing only to one space.
    */
-  edit(): IExtendedStorageTransaction {
-    return new ExtendedStorageTransaction(this.storageManager.edit());
+  edit(
+    options: { changeGroup?: ChangeGroup } = {},
+  ): IExtendedStorageTransaction {
+    const tx = this.storageManager.edit();
+    if (options.changeGroup !== undefined) {
+      tx.changeGroup = options.changeGroup;
+    }
+    return new ExtendedStorageTransaction(tx);
   }
 
   /**
@@ -524,7 +537,7 @@ export class Runtime {
     return this.runner.runSynced(resultCell, recipe, inputs);
   }
 
-  start<T = any>(resultCell: Cell<T>): void {
+  start<T = any>(resultCell: Cell<T>): Promise<boolean> {
     return this.runner.start(resultCell);
   }
 

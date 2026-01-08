@@ -1,10 +1,10 @@
 /// <cts-enable />
 /**
- * TEST PATTERN: Cell.equals() vs Manual IDs
+ * TEST PATTERN: equals() vs Manual IDs
  *
  * WHAT THIS TESTS:
  * This pattern demonstrates that the framework tracks object identity internally,
- * and manual ID generation is unnecessary. Using Cell.equals() for item comparison
+ * and manual ID generation is unnecessary. Using equals() for item comparison
  * is the recommended approach.
  *
  * MANUAL VERIFICATION STEPS:
@@ -22,18 +22,19 @@
  * WHAT CONFIRMS IT WORKS:
  * - Items can be selected/deselected by clicking
  * - Selection highlighting follows the correct item even after list changes
- * - Items can be removed using Cell.equals() to find them
+ * - Items can be removed using equals() to find them
  * - No manual ID generation is needed for any of this to work
  * - The pattern uses object references (cells) instead of string IDs
  */
 import {
-  Cell,
   computed,
+  equals,
   handler,
   ifElse,
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 interface Item {
@@ -42,15 +43,15 @@ interface Item {
 }
 
 interface TestCellEqualsInput {
-  items: Cell<Item[]>;
-  selectedItem: Cell<Item | null>;
+  items: Writable<Item[]>;
+  selectedItem: Writable<Item | null>;
 }
 
 interface TestCellEqualsOutput extends TestCellEqualsInput {}
 
 // Handler to add a new item at the END of the list
 // (Adding at end keeps indices stable for existing items)
-const addItem = handler<unknown, { items: Cell<Item[]> }>(
+const addItem = handler<unknown, { items: Writable<Item[]> }>(
   (_, { items }) => {
     const timestamp = new Date().toLocaleTimeString();
     const newItem: Item = {
@@ -66,17 +67,21 @@ const addItem = handler<unknown, { items: Cell<Item[]> }>(
 // which gives us plain values instead of cell references.
 const selectItem = handler<
   unknown,
-  { selectedItem: Cell<Item | null>; items: Cell<Item[]>; index: number }
+  {
+    selectedItem: Writable<Item | null>;
+    items: Writable<Item[]>;
+    index: number;
+  }
 >(
   (_, { selectedItem, items, index }) => {
     const current = selectedItem.get();
     const targetItem = items.get()[index];
     if (!targetItem) return;
 
-    // Use Cell.equals() to check if this item is already selected
-    // This tests the core claim: Cell.equals() can identify items
+    // Use equals() to check if this item is already selected
+    // This tests the core claim: equals() can identify items
     // without needing manual IDs
-    if (current && Cell.equals(current, targetItem)) {
+    if (current && equals(current, targetItem)) {
       // Deselect if clicking the same item
       selectedItem.set(null);
     } else {
@@ -89,15 +94,15 @@ const selectItem = handler<
 // Handler to remove the selected item
 const removeSelected = handler<
   unknown,
-  { items: Cell<Item[]>; selectedItem: Cell<Item | null> }
+  { items: Writable<Item[]>; selectedItem: Writable<Item | null> }
 >(
   (_, { items, selectedItem }) => {
     const selected = selectedItem.get();
     if (!selected) return;
 
     const current = items.get();
-    // Use Cell.equals() to find the item in the array
-    const index = current.findIndex((el) => Cell.equals(selected, el));
+    // Use equals() to find the item in the array
+    const index = current.findIndex((el) => equals(selected, el));
     if (index >= 0) {
       items.set(current.toSpliced(index, 1));
       selectedItem.set(null);
@@ -122,18 +127,18 @@ export default pattern<TestCellEqualsInput, TestCellEqualsOutput>(
       return items.get().map((item, index) => ({
         item,
         index,
-        isSelected: selected !== null && Cell.equals(selected, item),
+        isSelected: selected !== null && equals(selected, item),
       }));
     });
 
     return {
-      [NAME]: "Test Cell.equals()",
+      [NAME]: "Test equals()",
       [UI]: (
         <div style={{ padding: "1rem" }}>
-          <h2>Cell.equals() Test Pattern</h2>
+          <h2>equals() Test Pattern</h2>
           <p style={{ color: "#666", fontSize: "0.9rem" }}>
-            This pattern demonstrates using Cell.equals() for item
-            identification instead of manual ID generation.
+            This pattern demonstrates using equals() for item identification
+            instead of manual ID generation.
           </p>
 
           {/* Controls */}

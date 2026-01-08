@@ -1,14 +1,15 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   Default,
+  equals,
   ifElse,
   lift,
   NAME,
   navigateTo,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 import EventDetail from "./event-detail.tsx";
@@ -21,7 +22,7 @@ interface Event {
 }
 
 interface Input {
-  events: Cell<Default<Event[], []>>;
+  events: Writable<Default<Event[], []>>;
 }
 
 interface Output {
@@ -75,9 +76,9 @@ const getSortedDates = lift((grouped: Record<string, Event[]>): string[] => {
 export default pattern<Input, Output>(({ events }) => {
   const todayDate = getTodayDate();
 
-  const newTitle = Cell.of("");
-  const newDate = Cell.of(todayDate);
-  const newTime = Cell.of("");
+  const newTitle = Writable.of("");
+  const newDate = Writable.of(todayDate);
+  const newTime = Writable.of("");
 
   const eventCount = computed(() => events.get().length);
   const grouped = groupEventsByDate(events);
@@ -156,7 +157,7 @@ export default pattern<Input, Output>(({ events }) => {
                           onClick={() => {
                             const current = events.get();
                             const idx = current.findIndex((e) =>
-                              Cell.equals(event, e)
+                              equals(event, e)
                             );
                             if (idx >= 0) {
                               events.set(current.toSpliced(idx, 1));

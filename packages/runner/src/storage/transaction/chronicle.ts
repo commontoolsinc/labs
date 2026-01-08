@@ -29,7 +29,7 @@ import {
   UnsupportedMediaTypeError,
   write,
 } from "./attestation.ts";
-import { refer } from "merkle-reference";
+import { refer } from "@commontools/memory/reference";
 import * as Edit from "./edit.ts";
 
 export const open = (replica: ISpaceReplica) => new Chronicle(replica);
@@ -201,19 +201,16 @@ export class Chronicle {
     const { error, ok: invariant } = read(loaded, address);
     if (error) {
       // If the read failed because of path errors, this is still effectively a
-      // read, so let's log it for validation
+      // read, so let's log it for validation at commit
       if (
         error.name === "NotFoundError" || error.name === "TypeMismatchError"
       ) {
-        this.#history.claim(loaded);
+        this.#history.put(loaded);
       }
       return { error };
     } else {
-      // Capture the original replica read in history (for validation)
-      const claim = this.#history.claim(invariant);
-      if (claim.error) {
-        return claim;
-      }
+      // Capture the original replica read in history (for validation at commit)
+      this.#history.put(invariant);
 
       // Apply any overlapping writes from novelty and return merged result
       const changes = this.#novelty.select(address);
@@ -384,7 +381,11 @@ class History {
         const expected = read(candidate, address).ok?.value;
         const actual = read(attestation, address).ok?.value;
 
-        if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+        // Fast path: reference equality check avoids expensive JSON.stringify
+        if (
+          expected !== actual &&
+          JSON.stringify(expected) !== JSON.stringify(actual)
+        ) {
           return {
             error: StateInconsistency({
               address,
@@ -424,7 +425,12 @@ class History {
   }
 
   put(attestation: IAttestation) {
-    this.#model.set(Address.toString(attestation.address), attestation);
+    const key = Address.toString(attestation.address);
+    // Only store the first read - subsequent reads at the same address are ignored
+    // This ensures commit-time validation uses the original snapshot
+    if (!this.#model.has(key)) {
+      this.#model.set(key, attestation);
+    }
   }
   delete(attestation: IAttestation) {
     this.#model.delete(Address.toString(attestation.address));
@@ -509,6 +515,14 @@ class Novelty {
 
   [Symbol.iterator]() {
     return this.#model.values();
+  }
+
+  /**
+   * Returns true if there are any changes tracked in novelty.
+   * Used for early exit optimization in commit().
+   */
+  hasChanges(): boolean {
+    return this.#model.size > 0;
   }
 
   *changes(): Iterable<IAttestation> {

@@ -17,15 +17,18 @@ export const MODULE_METADATA: ModuleMetadata = {
   label: "Phone",
   icon: "\u{1F4F1}", // 📱 mobile phone emoji
   allowMultiple: true, // Show "add another" button for multiple phones
+  // Schema field names MUST match module input property names for extraction to work
   schema: {
-    phone: { type: "string", description: "Phone number" },
-    phoneLabel: {
+    number: { type: "string", description: "Phone number" },
+    label: {
       type: "string",
       enum: STANDARD_LABELS,
       description: "Phone label (Mobile, Home, Work, etc.)",
     },
   },
-  fieldMapping: ["phone", "phoneNumber"],
+  // fieldMapping maps LLM extraction field names to this module type
+  // First entry should be primary (matches schema), rest are aliases
+  fieldMapping: ["number", "phone", "phoneNumber"],
 };
 
 // ===== Types =====

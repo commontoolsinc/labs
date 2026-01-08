@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   Default,
   handler,
@@ -9,6 +8,7 @@ import {
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 
 // NOTE: This example uses [ID] to demonstrate advanced array manipulation features
@@ -21,7 +21,7 @@ interface Item {
 }
 
 interface ListInput {
-  items: Default<Item[], []>;
+  items: Writable<Default<Item[], []>>;
 }
 
 interface ListOutput extends ListInput {}
@@ -30,10 +30,10 @@ const typeTest = handler(
   (
     _,
     state: {
-      a: Cell<Item[]>;
+      a: Writable<Item[]>;
       b: readonly Item[];
-      c: readonly Cell<Item>[];
-      d: Cell<Cell<Item>[]>;
+      c: readonly Writable<Item>[];
+      d: Writable<Writable<Item>[]>;
     },
   ) => {
     const { a, b, c, d } = state;
@@ -41,27 +41,27 @@ const typeTest = handler(
   },
 );
 
-const resetList = handler((_, state: { items: Cell<Item[]> }) => {
+const resetList = handler((_, state: { items: Writable<Item[]> }) => {
   state.items.set([{ [ID]: 1, title: "A" }, { [ID]: 2, title: "B" }, {
     [ID]: 3,
     title: "C",
   }, { [ID]: 4, title: "D" }]);
 });
 
-const deleteFirstItem = handler((_, state: { items: Cell<Item[]> }) => {
+const deleteFirstItem = handler((_, state: { items: Writable<Item[]> }) => {
   state.items.set(state.items.get().slice(1));
 });
 
-const deleteLastItem = handler((_, state: { items: Cell<Item[]> }) => {
+const deleteLastItem = handler((_, state: { items: Writable<Item[]> }) => {
   const currentItems = state.items.get();
   state.items.set(currentItems.slice(0, -1));
 });
 
-const deleteAllItems = handler((_, state: { items: Cell<Item[]> }) => {
+const deleteAllItems = handler((_, state: { items: Writable<Item[]> }) => {
   state.items.set([]);
 });
 
-const insertItemAtStart = handler((_, state: { items: Cell<Item[]> }) => {
+const insertItemAtStart = handler((_, state: { items: Writable<Item[]> }) => {
   const currentItems = state.items.get();
   state.items.set([
     { [ID]: Math.random(), title: "New Start" },
@@ -69,12 +69,12 @@ const insertItemAtStart = handler((_, state: { items: Cell<Item[]> }) => {
   ]);
 });
 
-const insertItemAtEnd = handler((_, state: { items: Cell<Item[]> }) => {
+const insertItemAtEnd = handler((_, state: { items: Writable<Item[]> }) => {
   const currentItems = state.items.get();
   state.items.set([...currentItems, { [ID]: Math.random(), title: "New End" }]);
 });
 
-const shuffleItems = handler((_, state: { items: Cell<Item[]> }) => {
+const shuffleItems = handler((_, state: { items: Writable<Item[]> }) => {
   const currentItems = state.items.get();
   const shuffled = [...currentItems].sort(() => Math.random() - 0.5);
   state.items.set(shuffled);
@@ -96,12 +96,12 @@ export default recipe<ListInput, ListOutput>(
     );
     // const lowerCase = items.map((item) => item.title.toLowerCase()); // fails with 'TypeError: item.title.toLowerCase is not a function'
 
-    // We do not just have top-level support on Cell<T[]> for the major array operations.
+    // We do not just have top-level support on Writable<T[]> for the major array operations.
     // However, performing them on a ProxyObject (such as within a derive, or calling .get() on a Cell in a handler) will work as expected.
     // caveat: behaviour is only guaranteed to be correct for all operations IF the items include an [ID] property.
     // excluding the [ID] in this recipe leads to item alignment bugs when insertig or removing from items at the FRONT of an array
     const itemsLessThanB = computed(
-      () => items.filter((item) => item.title < "B"),
+      () => items.get().filter((item) => item.title < "B"),
     );
     const extendedItems = computed(
       () =>
@@ -111,7 +111,8 @@ export default recipe<ListInput, ListOutput>(
         ] as any),
     );
     const combinedItems = computed(
-      () => items.reduce((acc: string, item: Item) => acc += item.title, ""),
+      () =>
+        items.get().reduce((acc: string, item: Item) => acc += item.title, ""),
     );
 
     // Notice that you can bind the same cell to many types

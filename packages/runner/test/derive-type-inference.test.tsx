@@ -13,10 +13,6 @@ describe("derive type inference", () => {
   function _doNotRun(): void {
     it("should unwrap OpaqueRef<T[]> to T[] in callback", () => {
       const messages = Cell.of<BuiltInLLMMessage[]>().getAsOpaqueRefProxy();
-      messages.set([
-        { role: "user", content: [{ type: "text", text: "hello" }] },
-        { role: "assistant", content: [{ type: "text", text: "hi" }] },
-      ]);
 
       const assistantCount = derive(messages, (msgs) => {
         // Type assertion to verify the type inference is correct
@@ -35,13 +31,6 @@ describe("derive type inference", () => {
       }
 
       const messages = Cell.of<ComplexMessage[]>().getAsOpaqueRefProxy();
-      messages.set([
-        { role: "assistant", content: "hello" },
-        {
-          role: "user",
-          content: [{ text: "hi", type: "text" }],
-        },
-      ]);
 
       const lastMessage = derive(messages, (msgs) => {
         // Verify we can access array properties and methods
@@ -88,7 +77,6 @@ describe("derive type inference", () => {
 
     it("should handle primitive array types", () => {
       const numbers = Cell.of<number[]>().getAsOpaqueRefProxy();
-      numbers.set([1, 2, 3, 4, 5]);
 
       const sum = derive(numbers, (nums) => {
         // Type check: nums should be number[]
@@ -101,7 +89,6 @@ describe("derive type inference", () => {
 
     it("should handle nested array types", () => {
       const matrix = Cell.of<number[][]>().getAsOpaqueRefProxy();
-      matrix.set([[1, 2], [3, 4], [5, 6]]);
 
       const flattened = derive(matrix, (m) => {
         // Type check: m should be number[][]
@@ -124,11 +111,6 @@ describe("derive type inference", () => {
       }
 
       const user = Cell.of<User>().getAsOpaqueRefProxy();
-      user.set({
-        name: "Alice",
-        email: "alice@example.com",
-        profile: { age: 30, city: "NYC" },
-      });
 
       const displayName = derive(user, (u) => {
         // Type check: u should be User
@@ -151,11 +133,6 @@ describe("derive type inference", () => {
       }
 
       const user = Cell.of<User>().getAsOpaqueRefProxy();
-      user.set({
-        name: "Alice",
-        email: "alice@example.com",
-        profile: { age: 30, city: "NYC" },
-      });
 
       const displayName = derive({ user }, ({ user }) => {
         // Type check: u should be User
@@ -179,16 +156,6 @@ describe("derive type inference", () => {
       }
 
       const chatbot = Cell.of<ChatbotState>().getAsOpaqueRefProxy();
-      chatbot.set({
-        messages: [
-          { role: "user", content: "hello" },
-          { role: "assistant", content: "hi there" },
-          { role: "user", content: "how are you?" },
-          { role: "assistant", content: "I'm doing well!" },
-        ],
-        system: "You are a helpful assistant",
-        pending: false,
-      });
 
       // This simulates the exact pattern from omnibox-fab.tsx:
       // derive(omnibot.messages, (messages) => ...)
@@ -234,13 +201,6 @@ describe("derive type inference", () => {
 
       // Simulate what happens when you call a recipe
       const chatbot = Cell.of<ChatOutput>().getAsOpaqueRefProxy();
-      chatbot.set({
-        messages: [
-          { role: "user", content: "hello" },
-          { role: "assistant", content: "response" },
-        ],
-        pending: false,
-      });
 
       // Access messages property - this has type OpaqueCell<Message[]> & Array<OpaqueRef<Message>>
       const messages = chatbot.messages;
@@ -269,12 +229,6 @@ describe("derive type inference", () => {
       }
 
       const parent = Cell.of<{ items: Item[] }>().getAsOpaqueRefProxy();
-      parent.set({
-        items: [
-          { id: 1, name: "first" },
-          { id: 2, name: "second" },
-        ],
-      });
 
       // parent.items has type: OpaqueCell<Item[]> & Array<OpaqueRef<Item>>
       const items = parent.items;
@@ -302,10 +256,6 @@ describe("derive type inference", () => {
       const Chatbot = recipe<ChatbotInput, ChatbotOutput>("TestChatbot", () => {
         const messagesRef = Cell.of<BuiltInLLMMessage[]>()
           .getAsOpaqueRefProxy();
-        messagesRef.set([
-          { role: "user", content: "hello" },
-          { role: "assistant", content: "response" },
-        ]);
 
         return {
           messages: messagesRef,
@@ -335,10 +285,6 @@ describe("derive type inference", () => {
         () => {
           const messagesRef = Cell.of<BuiltInLLMMessage[]>()
             .getAsOpaqueRefProxy();
-          messagesRef.set([
-            { role: "user", content: "hello" },
-            { role: "assistant", content: "response" },
-          ]);
           return {
             messages: messagesRef,
           };
@@ -413,7 +359,6 @@ describe("derive type inference", () => {
     it("should honor explicit derive<In, Out> typing", () => {
       type ExplicitInput = { role: "user"; text: string };
       const explicitCell = Cell.of<ExplicitInput>().getAsOpaqueRefProxy();
-      explicitCell.set({ role: "user", text: "hello" });
 
       const derived = derive<ExplicitInput, number>(
         explicitCell,
@@ -429,7 +374,6 @@ describe("derive type inference", () => {
     it("should honor explicit parameter typing", () => {
       type ExplicitInput = { role: "user"; text: string };
       const explicitCell = Cell.of<ExplicitInput>().getAsOpaqueRefProxy();
-      explicitCell.set({ role: "user", text: "hello" });
 
       const derived = derive(
         explicitCell,
@@ -445,7 +389,6 @@ describe("derive type inference", () => {
     it("should honor explicit Cell<T> inputs", () => {
       type ExplicitInput = { role: "user"; text: string };
       const explicitCell = Cell.of<Cell<ExplicitInput>>().getAsOpaqueRefProxy();
-      explicitCell.set({ role: "user", text: "hello" });
 
       const derived = derive(
         explicitCell,

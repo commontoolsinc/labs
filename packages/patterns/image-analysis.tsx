@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   generateText,
   ifElse,
@@ -9,6 +8,7 @@ import {
   pattern,
   UI,
   VNode,
+  Writable,
 } from "commontools";
 
 /**
@@ -21,8 +21,8 @@ type ImageChatInput = {
 };
 
 type ImageChatOutput = {
-  images: Cell<ImageData[]>;
-  prompt: Cell<string>;
+  images: Writable<ImageData[]>;
+  prompt: Writable<string>;
   response: string | undefined;
   pending: boolean | undefined;
   ui: VNode;
@@ -30,8 +30,8 @@ type ImageChatOutput = {
 
 export default pattern<ImageChatInput, ImageChatOutput>(
   ({ systemPrompt, model }) => {
-    const images = Cell.of<ImageData[]>([]);
-    const prompt = Cell.of<string>("");
+    const images = Writable.of<ImageData[]>([]);
+    const prompt = Writable.of<string>("");
 
     // Build content parts array with text and images
     const contentParts = computed(() => {

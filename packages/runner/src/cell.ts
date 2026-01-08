@@ -6,7 +6,6 @@ import {
   type AnyCell,
   type AnyCellWrapping,
   type Apply,
-  type AsCell,
   type Cell,
   type CellKind,
   type CellTypeConstructor,
@@ -20,7 +19,6 @@ import {
   type IsThisObject,
   type IStreamable,
   type JSONSchema,
-  type KeyResultType,
   type NodeFactory,
   type NodeRef,
   type Opaque,
@@ -71,6 +69,7 @@ import {
   type NormalizedLink,
 } from "./link-utils.ts";
 import type {
+  ChangeGroup,
   IExtendedStorageTransaction,
   IReadOptions,
 } from "./storage/interface.ts";
@@ -80,6 +79,13 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { getLogger } from "@commontools/utils/logger";
+
+const logger = getLogger("cell");
+
+type SinkOptions = {
+  changeGroup?: ChangeGroup;
+};
 
 // Shared map factory instance for all cells
 let mapFactory: NodeFactory<any, any> | undefined;
@@ -127,8 +133,12 @@ declare module "@commontools/api" {
     ): Cell<T>;
     asSchemaFromLinks<T = unknown>(): Cell<T>;
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
-    sink(callback: (value: Readonly<T>) => Cancel | undefined | void): Cancel;
+    sink(
+      callback: (value: Readonly<T>) => Cancel | undefined | void,
+      options?: SinkOptions,
+    ): Cancel;
     sync(): Promise<Cell<T>> | Cell<T>;
+    pull(): Promise<Readonly<T>>;
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
@@ -233,6 +243,7 @@ const cellMethods = new Set<keyof ICell<unknown>>([
   "withTx",
   "sink",
   "sync",
+  "pull",
   "getAsQueryResult",
   "getAsNormalizedFullLink",
   "getAsLink",
@@ -523,9 +534,25 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     return isStreamValue(value);
   }
 
-  get(): Readonly<T> {
+  get(options?: { traverseCells?: boolean }): Readonly<T> {
     if (!this.synced) this.sync(); // No await, just kicking this off
-    return validateAndTransform(this.runtime, this.tx, this.link);
+    const begin = performance.now();
+    const value = validateAndTransform(
+      this.runtime,
+      this.tx,
+      this.link,
+      [],
+      options,
+    );
+    const elapsed = performance.now() - begin;
+    if (elapsed > 10) {
+      logger.warn(
+        `get >${Math.floor(elapsed - (elapsed % 10))}ms`,
+        `get() took ${Math.floor(elapsed)}ms`,
+        this.link,
+      );
+    }
+    return value;
   }
 
   /**
@@ -546,6 +573,76 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     const nonReactiveTx = createNonReactiveTransaction(readTx);
 
     return validateAndTransform(this.runtime, nonReactiveTx, this.link);
+  }
+
+  /**
+   * Pull the cell's value, ensuring all dependencies are computed first.
+   *
+   * In pull-based scheduling mode, computations don't run automatically when
+   * their inputs change - they only run when pulled by an effect. This method
+   * registers a temporary effect that reads the cell's value, triggering the
+   * scheduler to compute all transitive dependencies first.
+   *
+   * In push-based mode (the default), this is equivalent to `await idle()`
+   * followed by `get()`, but ensures consistent behavior across both modes.
+   *
+   * Use this in tests or when you need to ensure a computed value is up-to-date
+   * before reading it:
+   *
+   * ```ts
+   * // Instead of:
+   * await runtime.scheduler.idle();
+   * const value = cell.get();
+   *
+   * // Use:
+   * const value = await cell.pull();
+   * ```
+   *
+   * @returns A promise that resolves to the cell's current value after all
+   *          dependencies have been computed.
+   */
+  pull(): Promise<Readonly<T>> {
+    if (!this.synced) this.sync(); // No await, just kicking this off
+
+    // Check if we need to traverse the result to register all dependencies.
+    // This is needed when there's no schema or when the schema is TrueSchema ("any"),
+    // because without schema constraints we need to read all nested values.
+    const schema = this._link.schema;
+    const needsTraversal = schema === undefined ||
+      ContextualFlowControl.isTrueSchema(schema);
+
+    return new Promise((resolve) => {
+      let result: Readonly<T>;
+
+      const action: Action = (tx) => {
+        // Read the value inside the effect - this ensures dependencies are pulled
+        result = validateAndTransform(this.runtime, tx, this.link);
+
+        // If no schema or TrueSchema, traverse the result to register all
+        // nested values as read dependencies.
+        if (needsTraversal && result !== undefined && result !== null) {
+          deepTraverse(result);
+        }
+      };
+      // Name the action for debugging
+      Object.defineProperty(action, "name", {
+        value: `pull:${this.sourceURI}`,
+        configurable: true,
+      });
+      // Also set .src as backup (name can be finicky)
+      (action as Action & { src?: string }).src = `pull:${this.sourceURI}`;
+
+      // Subscribe as an effect so it runs in the next cycle.
+      const cancel = this.runtime.scheduler.subscribe(action, action, {
+        isEffect: true,
+      });
+
+      // Wait for the scheduler to process all pending work, then resolve
+      this.runtime.scheduler.idle().then(() => {
+        cancel?.();
+        resolve(result);
+      });
+    });
   }
 
   set(
@@ -802,34 +899,48 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     return areLinksSame(this, other);
   }
 
-  key<K extends PropertyKey>(
-    valueKey: K,
-  ): KeyResultType<T, K, AsCell> {
-    // Get child schema if we have one
-    const childSchema = this._link.schema
-      ? this.runtime.cfc.getSchemaAtPath(
-        this._link.schema,
-        [valueKey.toString()],
-        this._link.rootSchema,
-      )
-      : undefined;
+  /**
+   * Navigate to nested properties by one or more keys.
+   *
+   * @example
+   * cell.key("user")                      // Cell<User>
+   * cell.key("user", "profile")           // Cell<Profile>
+   * cell.key("user", "profile", "name")   // Cell<string>
+   */
+  key(...keys: PropertyKey[]): Cell<any> {
+    let currentLink = this._link;
 
-    // Create a child link with extended path
-    const childLink: NormalizedLink = {
-      ...this._link,
-      path: [...this._link.path, valueKey.toString()] as string[],
-      schema: childSchema,
-      rootSchema: childSchema ? this._link.rootSchema : undefined,
-    };
+    for (const key of keys) {
+      // Get child schema if we have one
+      const childSchema = currentLink.schema
+        ? this.runtime.cfc.getSchemaAtPath(
+          currentLink.schema,
+          [key.toString()],
+          currentLink.rootSchema,
+        )
+        : undefined;
+
+      // Create a child link with extended path
+      // When we have a childSchema, we need to preserve the rootSchema that contains $defs
+      // for resolving $ref references. If rootSchema wasn't set, fall back to the parent schema.
+      currentLink = {
+        ...currentLink,
+        path: [...currentLink.path, key.toString()] as string[],
+        schema: childSchema,
+        rootSchema: childSchema
+          ? (currentLink.rootSchema ?? currentLink.schema)
+          : undefined,
+      };
+    }
 
     return new CellImpl(
       this.runtime,
       this.tx,
-      childLink,
+      currentLink,
       this.synced,
       this._causeContainer,
       this._kind,
-    ) as unknown as KeyResultType<T, K, AsCell>;
+    ) as unknown as Cell<any>;
   }
 
   asSchema<S extends JSONSchema = JSONSchema>(
@@ -923,7 +1034,10 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     ) as unknown as Cell<T>;
   }
 
-  sink(callback: (value: Readonly<T>) => Cancel | undefined | void): Cancel {
+  sink(
+    callback: (value: Readonly<T>) => Cancel | undefined | void,
+    options: SinkOptions = {},
+  ): Cancel {
     // Check if this is a stream
     if (this.isStream()) {
       // Stream behavior: add listener
@@ -937,7 +1051,12 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     } else {
       // Regular cell behavior: subscribe to changes
       if (!this.synced) this.sync(); // No await, just kicking this off
-      return subscribeToReferencedDocs(callback, this.runtime, this.link);
+      return subscribeToReferencedDocs(
+        callback,
+        this.runtime,
+        this.link,
+        options,
+      );
     }
   }
 
@@ -1186,7 +1305,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
         : this._initialValue,
       name: this._causeContainer.cause as string | undefined,
       external: this._link.id
-        ? this.getAsLink({
+        ? this.getAsWriteRedirectLink({
           baseSpace: this._frame.space,
           includeSchema: true,
         })
@@ -1350,6 +1469,7 @@ function subscribeToReferencedDocs<T>(
   callback: (value: T) => Cancel | undefined | void,
   runtime: Runtime,
   link: NormalizedFullLink,
+  options: SinkOptions = {},
 ): Cancel {
   let cleanup: Cancel | undefined | void;
 
@@ -1371,6 +1491,13 @@ function subscribeToReferencedDocs<T>(
     // on changes already.
     extraTx.commit();
   };
+  // Name the action for debugging
+  const sinkName = `sink:${link.space}/${link.id}/${link.path.join("/")}`;
+  Object.defineProperty(action, "name", {
+    value: sinkName,
+    configurable: true,
+  });
+  (action as Action & { src?: string }).src = sinkName;
 
   // Call action once immediately, which also defines what docs need to be
   // subscribed to.
@@ -1383,12 +1510,128 @@ function subscribeToReferencedDocs<T>(
   // changed. But ideally we enforce read-only as well.
   tx.commit();
 
-  const cancel = runtime.scheduler.subscribe(action, log);
+  // Mark as effect since sink() is a side-effectful consumer (FRP effect/sink)
+  // Use resubscribe because we've already run it once above
+  const resubscribeOptions = {
+    isEffect: true,
+    ...(options.changeGroup !== undefined && {
+      changeGroup: options.changeGroup,
+    }),
+  };
+  runtime.scheduler.resubscribe(action, log, resubscribeOptions);
 
   return () => {
-    cancel();
+    runtime.scheduler.unsubscribe(action);
     if (isCancel(cleanup)) cleanup();
   };
+}
+
+/**
+ * Deeply traverse a value to access all properties.
+ * This is used by pull() to ensure all nested values are read,
+ * which registers them as dependencies for pull-based scheduling.
+ * Works with query result proxies which trigger reads on property access.
+ */
+function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
+  if (value === null || value === undefined) return;
+  if (typeof value !== "object") return;
+
+  // Avoid infinite loops with circular references
+  if (seen.has(value)) return;
+  seen.add(value);
+
+  try {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        deepTraverse(item, seen);
+      }
+    } else {
+      for (const key in value) {
+        if (Object.prototype.hasOwnProperty.call(value, key)) {
+          try {
+            deepTraverse((value as Record<string, unknown>)[key], seen);
+          } catch {
+            // Ignore errors from accessing individual properties (e.g., link cycles)
+          }
+        }
+      }
+    }
+  } catch {
+    // Ignore errors from traversal (e.g., link cycles)
+    // We've already registered the dependencies we can access
+  }
+}
+
+/**
+ * Validates that a value contains only static data (no cells or cell-like objects)
+ * and has no circular references. Used by Cell.of() to ensure only serializable
+ * static data is passed.
+ *
+ * Note: Shared references (same object at multiple paths) are allowed.
+ * Only true cycles (object referencing an ancestor) are rejected.
+ *
+ * @param value - The value to validate
+ * @throws Error if value contains cells or has circular references
+ */
+function validateStaticData(value: unknown): void {
+  // Track ancestors in current path (for cycle detection)
+  // Shared references are fine - only cycles back to ancestors are errors
+  const ancestors = new Set<object>();
+
+  function traverse(val: unknown, path: string[]): void {
+    // Primitives are always fine
+    if (val === null || val === undefined) return;
+    if (typeof val !== "object" && typeof val !== "function") return;
+
+    const obj = val as object;
+
+    // Check for cells and cell-like objects first (before cycle check)
+    if (isCell(obj)) {
+      throw new Error(
+        `Cell.of() only accepts static data, but found a reactive value (Cell) at path '${
+          path.join(".")
+        }'.\n` +
+          "help: use Cell references as handler parameters or in computed() closures instead of embedding them in Cell.of() values",
+      );
+    }
+
+    if (isCellResultForDereferencing(obj)) {
+      throw new Error(
+        `Cell.of() only accepts static data, but found a reactive value (CellResult) at path '${
+          path.join(".")
+        }'.\n` +
+          "help: use .get() to extract the value first, or pass Cell references as handler parameters",
+      );
+    }
+
+    // Check for cycles - only ancestors in current path, not all seen objects
+    if (ancestors.has(obj)) {
+      throw new Error(
+        `Cell.of() does not accept circular references. Cycle detected at path '${
+          path.join(".")
+        }'.\n` +
+          "help: restructure your data to avoid circular references",
+      );
+    }
+
+    ancestors.add(obj);
+
+    // Traverse arrays and objects
+    if (Array.isArray(obj)) {
+      for (let i = 0; i < obj.length; i++) {
+        traverse(obj[i], [...path, String(i)]);
+      }
+    } else {
+      for (const key of Object.keys(obj)) {
+        traverse((obj as Record<string, unknown>)[key], [...path, key]);
+      }
+    }
+
+    // Remove from ancestors when backtracking (shared refs at other paths are ok)
+    ancestors.delete(obj);
+  }
+
+  traverse(value, []);
 }
 
 /**
@@ -1569,6 +1812,11 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
         throw new Error(
           "Can't invoke Cell.of() outside of a recipe/handler/lift context",
         );
+      }
+
+      // Validate that value contains only static data (no cells or cycles)
+      if (value !== undefined) {
+        validateStaticData(value);
       }
 
       // Convert schema to object form and merge default value if value is defined

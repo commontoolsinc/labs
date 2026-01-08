@@ -17,7 +17,69 @@
         "hooks": [
           {
             "type": "command",
-            "command": "deno run \"$(git rev-parse --show-toplevel)/.claude/scripts/block-node.ts\""
+            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/block-node.ts\""
+          },
+          {
+            "type": "command",
+            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/block-ct.ts\""
+          },
+          {
+            "type": "command",
+            "command": "deno run --allow-read --allow-run \"$CLAUDE_PROJECT_DIR/.claude/scripts/pre-commit.ts\""
+          },
+          {
+            "type": "command",
+            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/deno-test-filter.ts\""
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/pre-edit-reminders.ts\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deno run --allow-read --allow-run \"$CLAUDE_PROJECT_DIR/.claude/scripts/post-edit-ts.ts\""
+          }
+        ]
+      },
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/post-exit-plan.ts\""
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deno run --allow-read --allow-run \"$CLAUDE_PROJECT_DIR/.claude/scripts/subagent-stop.ts\"",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deno run --allow-read --allow-run \"$CLAUDE_PROJECT_DIR/.claude/scripts/stop-check.ts\""
           }
         ]
       }

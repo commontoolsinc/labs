@@ -1,9 +1,17 @@
 /// <cts-enable />
-import { Cell, Default, handler, ifElse, NAME, pattern, UI } from "commontools";
+import {
+  Default,
+  handler,
+  ifElse,
+  NAME,
+  pattern,
+  UI,
+  Writable,
+} from "commontools";
 
 interface CheckboxDemoInput {
-  simpleEnabled: Cell<Default<boolean, false>>;
-  trackedEnabled: Cell<Default<boolean, false>>;
+  simpleEnabled: Writable<Default<boolean, false>>;
+  trackedEnabled: Writable<Default<boolean, false>>;
 }
 
 interface CheckboxDemoOutput extends CheckboxDemoInput {}
@@ -13,7 +21,7 @@ export default pattern<CheckboxDemoInput, CheckboxDemoOutput>(
     // Handler for checkbox changes - only needed when you want additional logic
     const toggleWithLogging = handler<
       { detail: { checked: boolean } },
-      { enabled: Cell<boolean> }
+      { enabled: Writable<boolean> }
     >(
       ({ detail }, { enabled }) => {
         const newValue = detail?.checked ?? false;
@@ -72,7 +80,7 @@ export default pattern<CheckboxDemoInput, CheckboxDemoOutput>(
           <ct-card>
             <h4>Key Takeaway</h4>
             <p>
-              <strong>$checked automatically updates the Cell</strong>{" "}
+              <strong>$checked automatically updates the Writable</strong>{" "}
               - you don't need a handler unless you want to add extra logic
               beyond just updating the value.
             </p>

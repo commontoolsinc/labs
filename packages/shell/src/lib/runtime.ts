@@ -1,4 +1,4 @@
-import { createSession, Identity, isDID } from "@commontools/identity";
+import { createSession, DID, Identity, isDID } from "@commontools/identity";
 import {
   Runtime,
   RuntimeTelemetry,
@@ -38,7 +38,6 @@ export class RuntimeInternals extends EventTarget {
   #space: string; // The MemorySpace DID
   #spaceRootPatternId?: string;
   #isHomeSpace: boolean;
-  #patternCache: PatternCache;
 
   private constructor(
     cc: CharmsController,
@@ -58,7 +57,6 @@ export class RuntimeInternals extends EventTarget {
     this.#telemetry = telemetry;
     this.#telemetry.addEventListener("telemetry", this.#onTelemetry);
     this.#telemetryMarkers = [];
-    this.#patternCache = new PatternCache(this.#cc);
   }
 
   telemetry(): RuntimeTelemetryMarkerResult[] {
@@ -83,43 +81,64 @@ export class RuntimeInternals extends EventTarget {
   async getSpaceRootPattern(): Promise<CharmController<NameSchema>> {
     this.#check();
     if (this.#spaceRootPatternId) {
-      return this.getPattern(this.#spaceRootPatternId);
+      const { controller, ready } = this.getPattern(this.#spaceRootPatternId);
+      await ready; // Wait for it to be running
+      return controller;
     }
     const pattern = await PatternFactory.getOrCreate(
       this.#cc,
       this.#isHomeSpace ? "home" : "space-root",
     );
     this.#spaceRootPatternId = pattern.id;
-    await this.#patternCache.add(pattern);
     return pattern;
   }
 
-  async getPattern(id: string): Promise<CharmController<NameSchema>> {
+  /**
+   * Get a pattern by ID. Returns immediately with the controller.
+   * The `ready` promise resolves when the charm is running, or rejects on error.
+   */
+  getPattern(
+    id: string,
+  ): { controller: CharmController<NameSchema>; ready: Promise<boolean> } {
     this.#check();
-    const cached = await this.#patternCache.get(id);
-    if (cached) {
-      return cached;
-    }
+    const runtime = this.runtime();
+    const cell = runtime.getCellFromEntityId(this.#space as DID, { "/": id });
+    const controller = new CharmController(
+      this.#cc.manager(),
+      cell.asSchema(nameSchema),
+    );
 
-    const pattern = await this.#cc.get(id, true, nameSchema);
-    await this.#patternCache.add(pattern);
-    return pattern;
+    // Start the charm - handles sync, recipe loading, and running
+    const ready = runtime.start(cell);
+
+    // Fire-and-forget: track as recent charm
+    this.#cc.manager().trackRecentCharm(cell).catch((err) => {
+      console.error("[getPattern] Failed to track recent charm:", err);
+    });
+
+    return { controller, ready };
   }
 
   async dispose() {
     if (this.#disposed) return;
     this.#disposed = true;
+    // Unsubscribe from telemetry BEFORE stopping the runner.
+    // This prevents the "RuntimeInternals disposed" error when
+    // cancel callbacks trigger commits during disposal.
+    this.#telemetry.removeEventListener("telemetry", this.#onTelemetry);
     this.#inspector.close();
     await this.#cc.dispose();
   }
 
   #onInspectorUpdate = (command: Inspector.BroadcastCommand) => {
-    this.#check();
+    // Gracefully ignore if disposed (can happen during cleanup)
+    if (this.#disposed) return;
     this.#telemetry.processInspectorCommand(command);
   };
 
   #onTelemetry = (event: Event) => {
-    this.#check();
+    // Gracefully ignore if disposed (can happen during cleanup)
+    if (this.#disposed) return;
     const marker = (event as RuntimeTelemetryEvent).marker;
     this.#telemetryMarkers.push(marker);
     // Dispatch an event here so that views may subscribe,
@@ -240,10 +259,14 @@ export class RuntimeInternals extends EventTarget {
           }
         };
 
-        // Await storage being synced, at least for now, as the page fully
-        // reloads. Once we have in-page navigation with reloading, we don't
-        // need this anymore
-        runtime.storageManager.synced().then(async () => {
+        // For same-space navigation, skip waiting for storage sync.
+        // Storage syncs in background - we don't need to block navigation.
+        // Cross-space navigation requires sync because page will reload.
+        const syncPromise = isCrossSpace
+          ? runtime.storageManager.synced()
+          : Promise.resolve();
+
+        syncPromise.then(() => {
           // Only add to local charm list for same-space navigation
           // Cross-space charms belong to their own space's list
           if (!isCrossSpace) {
@@ -261,8 +284,10 @@ export class RuntimeInternals extends EventTarget {
               // happening as part of the runtime built-in function, not up in
               // the shell layer...
 
-              // Add target charm to the charm list
-              await charmManager.add([target]);
+              // Add target charm to the charm list (fire-and-forget)
+              charmManager.add([target]).catch((err) => {
+                console.error("[navigateCallback] Failed to add charm:", err);
+              });
             }
           }
 
@@ -297,28 +322,5 @@ export class RuntimeInternals extends EventTarget {
       session.space,
       isHomeSpace,
     );
-  }
-}
-
-// Caches patterns, and updates recent charms data upon access.
-class PatternCache {
-  private cache: Map<string, CharmController<NameSchema>> = new Map();
-  private cc: CharmsController;
-
-  constructor(cc: CharmsController) {
-    this.cc = cc;
-  }
-
-  async add(pattern: CharmController<NameSchema>) {
-    this.cache.set(pattern.id, pattern);
-    await this.cc.manager().trackRecentCharm(pattern.getCell());
-  }
-
-  async get(id: string): Promise<CharmController<NameSchema> | undefined> {
-    const cached = this.cache.get(id);
-    if (cached) {
-      await this.cc.manager().trackRecentCharm(cached.getCell());
-      return cached;
-    }
   }
 }
