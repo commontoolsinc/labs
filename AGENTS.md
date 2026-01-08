@@ -5,7 +5,7 @@ reactive runtime and execution environment for user-created programs. These
 programs are known as patterns and somewhat similar to Solid.js components. Each
 pattern is comprised of reactive `Cell`s stored in `Space`s (defined by a DID).
 These cells enable durable communication between patterns. The reactivity is
-enabled by subscribing the to result of a query, defined by the schemas/type
+enabled by subscribing to the result of a query, defined by the schemas/type
 signatures.
 
 ## Pace Layers

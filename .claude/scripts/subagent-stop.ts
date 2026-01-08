@@ -89,10 +89,7 @@ if (hasChanges) {
 }
 
 console.log(JSON.stringify({
-  hookSpecificOutput: {
-    hookEventName: "SubagentStop",
-    additionalContext: context,
-  },
+  systemMessage: context,
 }));
 
 Deno.exit(0);

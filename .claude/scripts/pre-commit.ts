@@ -38,7 +38,7 @@ if (/--amend\s+--no-edit/.test(cmd) || /--amend\s+-C/.test(cmd)) {
 console.error("Running pre-commit checks (type check, fmt, lint)...");
 
 // Auto-fix formatting first (fast)
-await new Deno.Command("deno", {
+const fmtResult = await new Deno.Command("deno", {
   args: ["fmt"],
   stdout: "piped",
   stderr: "piped",
@@ -59,6 +59,11 @@ const [checkResult, lintResult] = await Promise.all([
 ]);
 
 const errors: string[] = [];
+
+if (!fmtResult.success) {
+  errors.push("Formatting failed (syntax error?):");
+  errors.push(new TextDecoder().decode(fmtResult.stderr));
+}
 
 if (!checkResult.success) {
   errors.push("Type check failed:");
