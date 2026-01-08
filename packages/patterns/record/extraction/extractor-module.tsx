@@ -1370,6 +1370,11 @@ const applySelected = handler<
     parentTrashedSubCharmsCell: Writable<TrashedSubCharmEntry[]>;
     parentTitleCell: Writable<string>;
     extractionResultValue: Record<string, unknown> | null;
+    // Field metadata from extraction (confidence scores, explanations)
+    extractionFieldMetadataValue: Record<
+      string,
+      { confidence: number; explanation: string; sourceExcerpt?: string }
+    >;
     selectionsCell: Writable<
       Default<Record<string, boolean>, Record<string, never>>
     >;
@@ -1393,6 +1398,7 @@ const applySelected = handler<
       parentTrashedSubCharmsCell,
       parentTitleCell,
       extractionResultValue,
+      extractionFieldMetadataValue,
       selectionsCell,
       trashSelectionsCell,
       cleanupEnabledValue,
@@ -1423,6 +1429,7 @@ const applySelected = handler<
         extractionResult,
         subCharmsData,
         currentTitle,
+        extractionFieldMetadataValue,
       );
       const sourcesData = scanExtractableSources(subCharmsData);
 
@@ -2086,6 +2093,16 @@ export const ExtractorModule = recipe<
         const result = mergedExtractionResult;
         if (!result || typeof result !== "object") return null;
         return result as Record<string, unknown>;
+      },
+    );
+
+    // Computed to dereference field metadata for passing to handlers
+    const extractionFieldMetadataValue = computed(
+      (): Record<
+        string,
+        { confidence: number; explanation: string; sourceExcerpt?: string }
+      > => {
+        return extractionFieldMetadata || {};
       },
     );
 
@@ -3392,6 +3409,8 @@ export const ExtractorModule = recipe<
                     // Pass computed that dereferences mergedExtractionResult (reactive properties
                     // don't auto-dereference when passed directly to handlers)
                     extractionResultValue: extractionResultValue,
+                    // Pass field metadata for confidence levels in buildPreview
+                    extractionFieldMetadataValue: extractionFieldMetadataValue,
                     selectionsCell: selections,
                     trashSelectionsCell: trashSelections,
                     cleanupEnabledValue: (() => {
