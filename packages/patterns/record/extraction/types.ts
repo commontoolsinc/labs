@@ -5,6 +5,20 @@
 import type { ImageData } from "commontools";
 
 /**
+ * Validation issue severity level
+ */
+export type ValidationSeverity = "error" | "warning";
+
+/**
+ * A validation issue found during extraction
+ */
+export interface ValidationIssue {
+  code: string; // e.g., "TYPE_MISMATCH", "INVALID_FORMAT"
+  message: string;
+  severity: ValidationSeverity;
+}
+
+/**
  * A single extracted field with its current and new values for diff display
  */
 export interface ExtractedField {
@@ -13,6 +27,7 @@ export interface ExtractedField {
   extractedValue: unknown;
   currentValue?: unknown; // For diff display (read from existing module)
   isNewInstance?: boolean; // For array extraction mode - each item creates a new module instance
+  validationIssue?: ValidationIssue; // Validation problem if any
 }
 
 /**
@@ -21,6 +36,10 @@ export interface ExtractedField {
 export interface ExtractionPreview {
   fields: ExtractedField[];
   byModule: Record<string, ExtractedField[]>; // Grouped by module type
+  validationSummary: {
+    errorCount: number;
+    warningCount: number;
+  };
 }
 
 /**

@@ -43,6 +43,7 @@ import type {
 } from "./types.ts";
 import type { JSONSchema } from "./schema-utils.ts";
 import { getResultSchema, getSchemaForType } from "./schema-utils.ts";
+import { getCellValue } from "./schema-utils-pure.ts";
 
 // ===== Types =====
 
@@ -104,50 +105,68 @@ interface ExtractorModuleOutput {
 const EXTRACTION_SYSTEM_PROMPT =
   `You are a precise data extractor for STRUCTURED fields from text like signatures, bios, or vCards.
 
-=== Field Ownership (fields belong to specific modules) ===
-- Phone: "number" only (preserve formatting)
-- Email: "address" only
-- Address: "street", "city", "state", "zip"
-- Social: "platform" (twitter/linkedin/github/instagram/facebook/youtube/tiktok/mastodon/bluesky), "handle" (without @), "profileUrl"
-- Birthday: "birthMonth" (1-12), "birthDay" (1-31), "birthYear" (YYYY) as separate strings
-- Location: "locationName", "locationAddress", "coordinates"
-- Link: "url", "linkTitle", "description"
-- Dietary: "restrictions" as array of {name, level} objects where:
-  - name: the restriction item (e.g., "nightshades", "peanuts", "gluten", "vegetarian")
-  - level: severity level based on context:
-    - "absolute": Medical necessity, allergies, anaphylaxis risk, religious requirements - no exceptions ever
-    - "strict": Strong avoidance, ethical commitment (e.g., vegan lifestyle) - very important but not medical
-    - "prefer": General preference or mild intolerance - would rather avoid but can be flexible
-    - "flexible": Slight preference - only if convenient
-  - Examples: [{"name": "peanuts", "level": "absolute"}, {"name": "dairy", "level": "prefer"}]
-  - Infer severity from context clues (allergies→absolute, preferences→prefer, etc.)
+=== Field Extraction Patterns (with examples) ===
+
+PHONE (field: "number"):
+- PRESERVE original formatting exactly as written
+- Example: "Cell: (415) 555-1234" → "number": "(415) 555-1234"
+- Example: "Mobile +1-650-555-9876" → "number": "+1-650-555-9876"
+- DO NOT normalize or reformat phone numbers
+
+EMAIL (field: "address"):
+- Extract complete email address only
+- Example: "Contact me at john.doe@acme.com anytime" → "address": "john.doe@acme.com"
+- "john at company dot com" is NOT an email - return null
+
+BIRTHDAY (fields: "birthMonth", "birthDay", "birthYear"):
+- Extract as SEPARATE string components, not a combined date
+- Example: "Born March 15, 1990" → "birthMonth": "3", "birthDay": "15", "birthYear": "1990"
+- Example: "DOB: 12/25" → "birthMonth": "12", "birthDay": "25", "birthYear": null
+- Month values: 1-12 (not "January", "March")
+
+ADDRESS (fields: "street", "city", "state", "zip"):
+- state: Use 2-letter US abbreviation (CA, NY, TX, etc.)
+- Example: "123 Main St, San Francisco, California 94102"
+  → "street": "123 Main St", "city": "San Francisco", "state": "CA", "zip": "94102"
+
+SOCIAL MEDIA (fields: "platform", "handle", "profileUrl"):
+- platform: Normalize to lowercase (twitter, linkedin, github, instagram, facebook, youtube, tiktok, mastodon, bluesky)
+- handle: WITHOUT the @ prefix
+- Example: "@alice_smith on Twitter" → "platform": "twitter", "handle": "alice_smith"
+- Example: "github.com/bob-dev" → "platform": "github", "handle": "bob-dev", "profileUrl": "https://github.com/bob-dev"
+
+DIETARY (field: "restrictions"):
+- Array of {name, level} objects
+- Infer severity from context:
+  - "absolute": Allergies, medical necessity, religious requirements (anaphylaxis, "allergic to", kosher)
+  - "strict": Ethical commitment, strong avoidance (vegan lifestyle, "can't have")
+  - "prefer": Mild intolerance, general preference ("try to avoid", "sensitive to")
+  - "flexible": Slight preference ("if possible", "when convenient")
+- Example: "I'm allergic to peanuts and try to avoid dairy"
+  → "restrictions": [{"name": "peanuts", "level": "absolute"}, {"name": "dairy", "level": "prefer"}]
 
 === What TO Extract (structured data only) ===
 - Email addresses, phone numbers, physical addresses
 - Social media handles and profile URLs
 - Specific dates (birthdays, anniversaries)
-- Explicit dietary restrictions or allergies (e.g. "allergic to peanuts", "vegetarian", "gluten-free")
+- Explicit dietary restrictions or allergies
 - URLs and links
 
 === What NOT to Extract (leave in Notes) ===
 - Vague preferences: "loves coffee", "enjoys hiking", "likes rabbits"
 - Opinions or personality traits: "is very friendly", "great sense of humor"
-- Conversational text or context: "met at the conference", "works with Sarah"
-- Gift ideas unless explicitly labeled: "loves bonny rabbits" is NOT a gift preference
+- Conversational text: "met at the conference", "works with Sarah"
 - Hobby mentions: "plays guitar", "into photography"
 - Food preferences that aren't restrictions: "loves Italian food", "favorite is pizza"
 
-=== Rules ===
-1. Only extract EXPLICITLY STRUCTURED data (emails, phones, dates, addresses, URLs)
+=== Stopping Rules ===
+1. Extract ONLY fields present in the provided schema
 2. Return null for missing fields - when in doubt, return null
-3. Arrays (tags, restrictions): use simple string arrays like ["item1", "item2"]
-4. DO NOT extract labels like "Mobile", "Work", "Personal" as separate fields - these are UI defaults
-5. Normalize social platforms to lowercase (X/Twitter -> "twitter", Insta -> "instagram")
-6. Preserve original formatting for phone numbers
-7. Be VERY conservative - leave conversational/descriptive text for the user to read in Notes
-8. "Loves X", "likes X", "enjoys X" should NEVER be extracted unless X is an explicit dietary restriction
+3. STOP if you find yourself inferring or fabricating data
+4. "Loves X", "likes X", "enjoys X" → NEVER extract (not structured data)
+5. DO NOT extract labels like "Mobile", "Work" as separate fields
 
-Return JSON with extracted fields. Use null for missing data. Prefer leaving text in Notes over aggressive extraction.`;
+Return JSON with extracted fields. Prefer leaving text in Notes over aggressive extraction.`;
 
 const OCR_SYSTEM_PROMPT =
   `You are an OCR system. Extract all text from the provided image.
@@ -511,12 +530,7 @@ function scanExtractableSources(
     if (entry.type === "notes") {
       // Notes module - extract content
       const charm = entry.charm as Record<string, unknown>;
-      const contentCell = charm?.content;
-      const content = typeof contentCell === "object" &&
-          contentCell !== null &&
-          "get" in contentCell
-        ? (contentCell as { get: () => unknown }).get()
-        : contentCell;
+      const content = getCellValue<unknown>(charm?.content);
 
       if (content && typeof content === "string" && content.trim()) {
         // Replace newlines with spaces for clean single-line preview display
@@ -544,20 +558,8 @@ function scanExtractableSources(
     } else if (entry.type === "text-import") {
       // Text Import module - extract content and filename
       const charm = entry.charm as Record<string, unknown>;
-      const contentCell = charm?.content;
-      const filenameCell = charm?.filename;
-
-      const content = typeof contentCell === "object" &&
-          contentCell !== null &&
-          "get" in contentCell
-        ? (contentCell as { get: () => unknown }).get()
-        : contentCell;
-
-      const filename = typeof filenameCell === "object" &&
-          filenameCell !== null &&
-          "get" in filenameCell
-        ? (filenameCell as { get: () => unknown }).get()
-        : filenameCell;
+      const content = getCellValue<unknown>(charm?.content);
+      const filename = getCellValue<unknown>(charm?.filename);
 
       if (content && typeof content === "string" && content.trim()) {
         const label = (filename && typeof filename === "string")
@@ -578,20 +580,8 @@ function scanExtractableSources(
     } else if (entry.type === "photo") {
       // Photo module - needs OCR
       const charm = entry.charm as Record<string, unknown>;
-      const imageCell = charm?.image;
-      const labelCell = charm?.label;
-
-      const image = typeof imageCell === "object" &&
-          imageCell !== null &&
-          "get" in imageCell
-        ? (imageCell as { get: () => unknown }).get() as ImageData | null
-        : imageCell as ImageData | null;
-
-      const label = typeof labelCell === "object" &&
-          labelCell !== null &&
-          "get" in labelCell
-        ? (labelCell as { get: () => unknown }).get()
-        : labelCell;
+      const image = getCellValue<ImageData | null>(charm?.image);
+      const label = getCellValue<unknown>(charm?.label);
 
       if (image && (image.data || image.url)) {
         sources.push({
@@ -733,12 +723,7 @@ const startExtraction = handler<
           .key(source.index)
           .get();
         const charm = entry?.charm as Record<string, unknown>;
-        const contentCell = charm?.content;
-        const liveContent = typeof contentCell === "object" &&
-            contentCell !== null &&
-            "get" in contentCell
-          ? (contentCell as { get: () => unknown }).get()
-          : contentCell;
+        const liveContent = getCellValue<unknown>(charm?.content);
         const content = typeof liveContent === "string" ? liveContent : "";
 
         if (content.trim()) {
@@ -752,12 +737,7 @@ const startExtraction = handler<
           .key(source.index)
           .get();
         const charm = entry?.charm as Record<string, unknown>;
-        const contentCell = charm?.content;
-        const liveContent = typeof contentCell === "object" &&
-            contentCell !== null &&
-            "get" in contentCell
-          ? (contentCell as { get: () => unknown }).get()
-          : contentCell;
+        const liveContent = getCellValue<unknown>(charm?.content);
         const content = typeof liveContent === "string" ? liveContent : "";
 
         if (content.trim()) {
@@ -1839,6 +1819,17 @@ export const ExtractorModule = recipe<
                           >
                             {source.preview}
                           </div>
+                          {source.isEmpty && (
+                            <div
+                              style={{
+                                fontSize: "11px",
+                                color: "#6b7280",
+                                marginTop: "4px",
+                              }}
+                            >
+                              Add content to enable extraction
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}
