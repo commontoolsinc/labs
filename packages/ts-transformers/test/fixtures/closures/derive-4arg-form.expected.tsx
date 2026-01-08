@@ -1,5 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive, type JSONSchema } from "commontools";
+import "commontools/schema";
 export default function TestDerive() {
     const value = cell(10, {
         type: "number"
