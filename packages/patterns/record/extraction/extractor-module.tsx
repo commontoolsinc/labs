@@ -29,7 +29,6 @@ import {
   Writable,
 } from "commontools";
 import {
-  buildExtractionSchema as buildFullSchema,
   createSubCharm,
   getDefinition,
   getFieldToTypeMapping as getFullFieldMapping,
@@ -40,9 +39,16 @@ import type {
   ExtractableSource,
   ExtractedField,
   ExtractionPreview,
+  ExtractionRecommendation,
+  RecommendationsResult,
+  SourceExtraction,
+  SourceExtractionStatus,
+  ValidationIssue,
 } from "./types.ts";
+import { getConfidenceLevel, SOURCE_PRECEDENCE } from "./types.ts";
 import type { JSONSchema } from "./schema-utils.ts";
 import { getResultSchema, getSchemaForType } from "./schema-utils.ts";
+import { getCellValue } from "./schema-utils-pure.ts";
 
 // ===== Types =====
 
@@ -82,6 +88,8 @@ interface ExtractorModuleInput {
   >;
   // Apply in progress guard (prevents double-click race condition)
   applyInProgress: Writable<Default<boolean, false>>;
+  // Error details expanded state (for showing full error in UI)
+  errorDetailsExpanded: Writable<Default<boolean, false>>;
 }
 
 interface ExtractorModuleOutput {
@@ -97,63 +105,148 @@ interface ExtractorModuleOutput {
     "pending"
   >;
   applyInProgress?: Default<boolean, false>;
+  errorDetailsExpanded?: Default<boolean, false>;
 }
 
 // ===== Constants =====
 
 const EXTRACTION_SYSTEM_PROMPT =
-  `You are a precise data extractor for STRUCTURED fields from text like signatures, bios, or vCards.
+  `You are a precise data extractor that returns recommendations with confidence scores.
 
-=== Field Ownership (fields belong to specific modules) ===
-- Phone: "number" only (preserve formatting)
-- Email: "address" only
-- Address: "street", "city", "state", "zip"
-- Social: "platform" (twitter/linkedin/github/instagram/facebook/youtube/tiktok/mastodon/bluesky), "handle" (without @), "profileUrl"
-- Birthday: "birthMonth" (1-12), "birthDay" (1-31), "birthYear" (YYYY) as separate strings
-- Location: "locationName", "locationAddress", "coordinates"
-- Link: "url", "linkTitle", "description"
-- Dietary: "restrictions" as array of {name, level} objects where:
-  - name: the restriction item (e.g., "nightshades", "peanuts", "gluten", "vegetarian")
-  - level: severity level based on context:
-    - "absolute": Medical necessity, allergies, anaphylaxis risk, religious requirements - no exceptions ever
-    - "strict": Strong avoidance, ethical commitment (e.g., vegan lifestyle) - very important but not medical
-    - "prefer": General preference or mild intolerance - would rather avoid but can be flexible
-    - "flexible": Slight preference - only if convenient
-  - Examples: [{"name": "peanuts", "level": "absolute"}, {"name": "dairy", "level": "prefer"}]
-  - Infer severity from context clues (allergies→absolute, preferences→prefer, etc.)
+=== OUTPUT FORMAT ===
+Return a JSON object with a "recommendations" array. Each recommendation represents ONE module type:
+{
+  "recommendations": [
+    {
+      "type": "email",           // Module type (email, phone, birthday, address, social, dietary, notes)
+      "score": 95,               // Confidence 0-100
+      "explanation": "Found explicit email address in signature",
+      "extractedData": { "address": "john@example.com" },
+      "sourceExcerpt": "Email: john@example.com"
+    }
+  ]
+}
 
-=== What TO Extract (structured data only) ===
+=== CONFIDENCE SCORING ===
+- 80-100 (HIGH): Explicit, unambiguous data. Clear labels like "Email:", "Phone:", exact formats.
+- 50-79 (MEDIUM): Likely correct but some inference needed. Unlabeled but recognizable patterns.
+- 0-49 (LOW): Uncertain extraction. Context-dependent, ambiguous, or partial data.
+
+Examples:
+- "Email: john@example.com" → score: 95 (explicit label + valid format)
+- "john@example.com" (no label) → score: 70 (valid format but no label)
+- "reach me at john at example dot com" → score: 40 (requires interpretation)
+
+=== FIELD PATTERNS ===
+
+PHONE (type: "phone", field: "number"):
+- PRESERVE original formatting exactly
+- Example: "Cell: (415) 555-1234" → score: 95, extractedData: {"number": "(415) 555-1234"}
+
+EMAIL (type: "email", field: "address"):
+- Extract complete email address only
+- Example: "john.doe@acme.com" → score: 90, extractedData: {"address": "john.doe@acme.com"}
+
+BIRTHDAY (type: "birthday", fields: "birthMonth", "birthDay", "birthYear"):
+- Extract as SEPARATE string components
+- Example: "Born March 15, 1990" → score: 85, extractedData: {"birthMonth": "3", "birthDay": "15", "birthYear": "1990"}
+
+ADDRESS (type: "address", fields: "street", "city", "state", "zip"):
+- state: Use 2-letter US abbreviation
+- Example: "123 Main St, San Francisco, CA 94102" → score: 90
+
+SOCIAL MEDIA (type: "social", fields: "platform", "handle", "profileUrl"):
+- platform: Normalize to lowercase (twitter, linkedin, github, etc.)
+- handle: WITHOUT the @ prefix
+- Example: "@alice_smith on Twitter" → score: 95, extractedData: {"platform": "twitter", "handle": "alice_smith"}
+
+DIETARY (type: "dietary", field: "restrictions"):
+- Array of {name, level} objects
+- Levels: "absolute" (allergies), "strict" (ethical), "prefer" (mild), "flexible" (slight)
+- Example: "allergic to peanuts" → score: 95, extractedData: {"restrictions": [{"name": "peanuts", "level": "absolute"}]}
+
+NAME (type: "record-title", field: "name"):
+- Extract person's full name for Record title
+- Example: "John Smith" in signature → score: 80, extractedData: {"name": "John Smith"}
+
+NOTES (type: "notes", field: "content"):
+- Content that should REMAIN in notes after extraction (non-structured content)
+- This is what's LEFT OVER, not what's extracted
+
+=== WHAT TO EXTRACT ===
 - Email addresses, phone numbers, physical addresses
 - Social media handles and profile URLs
 - Specific dates (birthdays, anniversaries)
-- Explicit dietary restrictions or allergies (e.g. "allergic to peanuts", "vegetarian", "gluten-free")
-- URLs and links
+- Explicit dietary restrictions or allergies
+- Names (when clearly a person's name)
 
-=== What NOT to Extract (leave in Notes) ===
-- Vague preferences: "loves coffee", "enjoys hiking", "likes rabbits"
-- Opinions or personality traits: "is very friendly", "great sense of humor"
-- Conversational text or context: "met at the conference", "works with Sarah"
-- Gift ideas unless explicitly labeled: "loves bonny rabbits" is NOT a gift preference
-- Hobby mentions: "plays guitar", "into photography"
-- Food preferences that aren't restrictions: "loves Italian food", "favorite is pizza"
+=== WHAT NOT TO EXTRACT ===
+- Vague preferences: "loves coffee", "enjoys hiking" → Keep in notes
+- Personality traits: "is very friendly" → Keep in notes
+- Conversational text: "met at conference" → Keep in notes
+- Food preferences (not restrictions): "loves pizza" → Keep in notes
 
-=== Rules ===
-1. Only extract EXPLICITLY STRUCTURED data (emails, phones, dates, addresses, URLs)
-2. Return null for missing fields - when in doubt, return null
-3. Arrays (tags, restrictions): use simple string arrays like ["item1", "item2"]
-4. DO NOT extract labels like "Mobile", "Work", "Personal" as separate fields - these are UI defaults
-5. Normalize social platforms to lowercase (X/Twitter -> "twitter", Insta -> "instagram")
-6. Preserve original formatting for phone numbers
-7. Be VERY conservative - leave conversational/descriptive text for the user to read in Notes
-8. "Loves X", "likes X", "enjoys X" should NEVER be extracted unless X is an explicit dietary restriction
-
-Return JSON with extracted fields. Use null for missing data. Prefer leaving text in Notes over aggressive extraction.`;
+=== RULES ===
+1. Return ONLY recommendations with score > 0
+2. One recommendation per module type
+3. Include sourceExcerpt showing the text that led to extraction
+4. When uncertain, use lower confidence score rather than omitting
+5. Always include a "notes" recommendation for remaining content`;
 
 const OCR_SYSTEM_PROMPT =
   `You are an OCR system. Extract all text from the provided image.
 Return ONLY the extracted text, preserving formatting and line breaks.
 Do not add any commentary, explanation, or formatting like markdown.
 If no text is visible, return an empty string.`;
+
+/**
+ * Schema for recommendations-based extraction.
+ * Instead of a flat field extraction, the LLM returns an array of recommendations
+ * with confidence scores and explanations.
+ */
+// Use `as const` for schema literal to satisfy generateObject's type expectations.
+// Do NOT annotate with JSONSchema - that type is incompatible with generateObject's schema param.
+const RECOMMENDATIONS_SCHEMA = {
+  type: "object",
+  properties: {
+    recommendations: {
+      type: "array",
+      description: "Array of extraction recommendations, one per module type",
+      items: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            description:
+              "Module type: email, phone, birthday, address, social, dietary, notes, record-title",
+          },
+          score: {
+            type: "number",
+            description:
+              "Confidence score 0-100. High: 90-100, Medium: 50-89, Low: 0-49",
+          },
+          explanation: {
+            type: "string",
+            description:
+              "Brief explanation of why this was extracted and confidence level",
+          },
+          extractedData: {
+            type: "object",
+            description: "The extracted field values for this module type",
+            additionalProperties: true,
+          },
+          sourceExcerpt: {
+            type: "string",
+            description:
+              "The text snippet from the source that led to this extraction",
+          },
+        },
+        required: ["type", "score", "explanation", "extractedData"],
+      },
+    },
+  },
+  required: ["recommendations"],
+} as const;
 
 // NOTES_CLEANUP via extraction result:
 // =====================================
@@ -297,6 +390,49 @@ function formatValue(value: unknown): string {
 }
 
 /**
+ * Merge extraction results from multiple sources using precedence rules.
+ * Higher precedence sources (photos > text-import > notes) overwrite lower ones.
+ * Null/undefined values are skipped (don't overwrite existing values).
+ *
+ * @param sourceExtractions - Array of per-source extraction results
+ * @returns Combined extraction result with highest-precedence values
+ */
+function mergeExtractionResults(
+  sourceExtractions: SourceExtraction[],
+): Record<string, unknown> {
+  // Sort by precedence (lowest first, so higher precedence overwrites)
+  const sorted = [...sourceExtractions]
+    .filter((s) => s.status === "complete" && s.extractedFields !== null)
+    .sort(
+      (a, b) =>
+        SOURCE_PRECEDENCE[a.sourceType] - SOURCE_PRECEDENCE[b.sourceType],
+    );
+
+  const merged: Record<string, unknown> = {};
+
+  for (const source of sorted) {
+    const fields = source.extractedFields;
+    if (!fields) continue;
+
+    for (const [key, value] of Object.entries(fields)) {
+      // Skip null/undefined values - don't overwrite existing data
+      if (value === null || value === undefined) continue;
+      // Also skip "null" string values (LLM workaround)
+      if (typeof value === "string" && value.toLowerCase() === "null") continue;
+      // Skip empty strings
+      if (typeof value === "string" && value.trim() === "") continue;
+      // Skip empty arrays
+      if (Array.isArray(value) && value.length === 0) continue;
+
+      // Overwrite with this source's value (higher precedence wins due to sort order)
+      merged[key] = value;
+    }
+  }
+
+  return merged;
+}
+
+/**
  * Validate that an extracted value matches the expected JSON Schema type
  *
  * Note: Normalizes "null" strings to null before validation (LLM workaround)
@@ -386,8 +522,145 @@ function getFieldSchema(
 }
 
 /**
- * Build extraction preview from raw LLM result and existing modules
+ * Validate an extracted field value and return a ValidationIssue if there's a problem.
+ * Checks for type mismatches, invalid email format, and invalid phone format.
+ */
+function validateExtractedField(
+  fieldName: string,
+  extractedValue: unknown,
+  expectedSchema: JSONSchema | undefined,
+): ValidationIssue | undefined {
+  // Type mismatch validation
+  if (expectedSchema?.type) {
+    const actualType = Array.isArray(extractedValue)
+      ? "array"
+      : typeof extractedValue;
+    const expectedType = expectedSchema.type;
+
+    // Check for type mismatch (allow strings where numbers expected since LLMs often return strings)
+    if (expectedType === "array" && actualType !== "array") {
+      return {
+        code: "TYPE_MISMATCH",
+        message: `Expected array, got ${actualType}`,
+        severity: "error",
+      };
+    }
+    if (
+      expectedType === "object" && actualType !== "object" &&
+      extractedValue !== null
+    ) {
+      return {
+        code: "TYPE_MISMATCH",
+        message: `Expected object, got ${actualType}`,
+        severity: "error",
+      };
+    }
+    if (expectedType === "boolean" && actualType !== "boolean") {
+      return {
+        code: "TYPE_MISMATCH",
+        message: `Expected boolean, got ${actualType}`,
+        severity: "error",
+      };
+    }
+  }
+
+  // Email format validation (check for @ symbol)
+  if (
+    fieldName === "address" || fieldName === "email" ||
+    fieldName.toLowerCase().includes("email")
+  ) {
+    if (typeof extractedValue === "string" && extractedValue.trim()) {
+      if (!extractedValue.includes("@")) {
+        return {
+          code: "INVALID_FORMAT",
+          message: "Invalid email format (missing @)",
+          severity: "warning",
+        };
+      }
+    }
+  }
+
+  // Phone format validation (basic check for digits)
+  if (
+    fieldName === "number" || fieldName === "phone" ||
+    fieldName.toLowerCase().includes("phone")
+  ) {
+    if (typeof extractedValue === "string" && extractedValue.trim()) {
+      // Remove common phone formatting characters and check if there are at least some digits
+      const digitsOnly = extractedValue.replace(/[\s\-\(\)\+\.]/g, "");
+      const digitCount = (digitsOnly.match(/\d/g) || []).length;
+      if (digitCount < 7) {
+        return {
+          code: "INVALID_FORMAT",
+          message: "Phone number appears too short",
+          severity: "warning",
+        };
+      }
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Check if extraction result is in recommendations format
+ */
+function isRecommendationsResult(
+  result: unknown,
+): result is RecommendationsResult {
+  if (!result || typeof result !== "object") return false;
+  const obj = result as Record<string, unknown>;
+  return Array.isArray(obj.recommendations);
+}
+
+/**
+ * Convert recommendations to flat field format for merging with legacy code.
+ * Also returns a map of field keys to their confidence/explanation metadata.
+ */
+function flattenRecommendations(
+  recommendations: ExtractionRecommendation[],
+): {
+  flatFields: Record<string, unknown>;
+  fieldMetadata: Record<
+    string,
+    { confidence: number; explanation: string; sourceExcerpt?: string }
+  >;
+} {
+  const flatFields: Record<string, unknown> = {};
+  const fieldMetadata: Record<
+    string,
+    { confidence: number; explanation: string; sourceExcerpt?: string }
+  > = {};
+
+  for (const rec of recommendations) {
+    const moduleType = rec.type;
+    const extractedData = rec.extractedData || {};
+
+    for (const [fieldName, value] of Object.entries(extractedData)) {
+      if (value === null || value === undefined) continue;
+
+      // Store flat field
+      flatFields[fieldName] = value;
+
+      // Store metadata keyed by "moduleType.fieldName"
+      const fieldKey = `${moduleType}.${fieldName}`;
+      fieldMetadata[fieldKey] = {
+        confidence: rec.score,
+        explanation: rec.explanation,
+        sourceExcerpt: rec.sourceExcerpt,
+      };
+    }
+  }
+
+  return { flatFields, fieldMetadata };
+}
+
+/**
+ * Build extraction preview from raw LLM result and existing modules.
+ * Supports both legacy flat field format and new recommendations format.
+ *
  * @param currentTitle - Current Record title (for "record-title" pseudo-type)
+ * @param fieldMetadata - Optional metadata from recommendations (confidence, explanation)
  *
  * Note: Normalizes "null" strings to null before processing (LLM workaround)
  */
@@ -395,6 +668,10 @@ function buildPreview(
   extracted: Record<string, unknown>,
   subCharms: readonly SubCharmEntry[],
   currentTitle?: string,
+  fieldMetadata?: Record<
+    string,
+    { confidence: number; explanation: string; sourceExcerpt?: string }
+  >,
 ): ExtractionPreview {
   // Normalize "null" strings to actual null in the entire extraction result
   const normalizedExtracted = normalizeNullString(extracted) as Record<
@@ -406,6 +683,10 @@ function buildPreview(
   const fieldToType = getFullFieldMapping();
   const fields: ExtractedField[] = [];
   const byModule: Record<string, ExtractedField[]> = {};
+
+  // Track validation issue counts
+  let errorCount = 0;
+  let warningCount = 0;
 
   for (
     const [fieldName, extractedValue] of Object.entries(normalizedExtracted)
@@ -421,11 +702,21 @@ function buildPreview(
       // Compare against current Record title
       if (currentTitle === extractedValue) continue;
 
+      // Look up confidence metadata if available
+      const fieldKey = `${moduleType}.name`;
+      const meta = fieldMetadata?.[fieldKey];
+
       const field: ExtractedField = {
         fieldName: "name",
         targetModule: "record-title",
         extractedValue,
         currentValue: currentTitle || undefined,
+        confidence: meta?.confidence,
+        confidenceLevel: meta?.confidence !== undefined
+          ? getConfidenceLevel(meta.confidence)
+          : undefined,
+        explanation: meta?.explanation,
+        sourceExcerpt: meta?.sourceExcerpt,
       };
 
       fields.push(field);
@@ -444,11 +735,41 @@ function buildPreview(
       continue;
     }
 
+    // Get field schema for validation
+    const fieldSchema = getFieldSchema(subCharms, moduleType, fieldName);
+
+    // Validate the extracted field
+    const validationIssue = validateExtractedField(
+      fieldName,
+      extractedValue,
+      fieldSchema,
+    );
+
+    // Count validation issues
+    if (validationIssue) {
+      if (validationIssue.severity === "error") {
+        errorCount++;
+      } else {
+        warningCount++;
+      }
+    }
+
+    // Look up confidence metadata if available
+    const fieldKey = `${moduleType}.${fieldName}`;
+    const meta = fieldMetadata?.[fieldKey];
+
     const field: ExtractedField = {
       fieldName,
       targetModule: moduleType,
       extractedValue,
       currentValue,
+      validationIssue,
+      confidence: meta?.confidence,
+      confidenceLevel: meta?.confidence !== undefined
+        ? getConfidenceLevel(meta.confidence)
+        : undefined,
+      explanation: meta?.explanation,
+      sourceExcerpt: meta?.sourceExcerpt,
     };
 
     fields.push(field);
@@ -494,7 +815,27 @@ function buildPreview(
     }
   }
 
-  return { fields, byModule };
+  // Sort fields by confidence (high first), then by module type
+  fields.sort((a, b) => {
+    // Fields with confidence come before those without
+    if (a.confidence !== undefined && b.confidence === undefined) return -1;
+    if (a.confidence === undefined && b.confidence !== undefined) return 1;
+    // Sort by confidence descending
+    if (a.confidence !== undefined && b.confidence !== undefined) {
+      return b.confidence - a.confidence;
+    }
+    // Fall back to alphabetical by module type
+    return a.targetModule.localeCompare(b.targetModule);
+  });
+
+  return {
+    fields,
+    byModule,
+    validationSummary: {
+      errorCount,
+      warningCount,
+    },
+  };
 }
 
 /**
@@ -511,12 +852,7 @@ function scanExtractableSources(
     if (entry.type === "notes") {
       // Notes module - extract content
       const charm = entry.charm as Record<string, unknown>;
-      const contentCell = charm?.content;
-      const content = typeof contentCell === "object" &&
-          contentCell !== null &&
-          "get" in contentCell
-        ? (contentCell as { get: () => unknown }).get()
-        : contentCell;
+      const content = getCellValue<unknown>(charm?.content);
 
       if (content && typeof content === "string" && content.trim()) {
         // Replace newlines with spaces for clean single-line preview display
@@ -544,20 +880,8 @@ function scanExtractableSources(
     } else if (entry.type === "text-import") {
       // Text Import module - extract content and filename
       const charm = entry.charm as Record<string, unknown>;
-      const contentCell = charm?.content;
-      const filenameCell = charm?.filename;
-
-      const content = typeof contentCell === "object" &&
-          contentCell !== null &&
-          "get" in contentCell
-        ? (contentCell as { get: () => unknown }).get()
-        : contentCell;
-
-      const filename = typeof filenameCell === "object" &&
-          filenameCell !== null &&
-          "get" in filenameCell
-        ? (filenameCell as { get: () => unknown }).get()
-        : filenameCell;
+      const content = getCellValue<unknown>(charm?.content);
+      const filename = getCellValue<unknown>(charm?.filename);
 
       if (content && typeof content === "string" && content.trim()) {
         const label = (filename && typeof filename === "string")
@@ -578,20 +902,8 @@ function scanExtractableSources(
     } else if (entry.type === "photo") {
       // Photo module - needs OCR
       const charm = entry.charm as Record<string, unknown>;
-      const imageCell = charm?.image;
-      const labelCell = charm?.label;
-
-      const image = typeof imageCell === "object" &&
-          imageCell !== null &&
-          "get" in imageCell
-        ? (imageCell as { get: () => unknown }).get() as ImageData | null
-        : imageCell as ImageData | null;
-
-      const label = typeof labelCell === "object" &&
-          labelCell !== null &&
-          "get" in labelCell
-        ? (labelCell as { get: () => unknown }).get()
-        : labelCell;
+      const image = getCellValue<ImageData | null>(charm?.image);
+      const label = getCellValue<unknown>(charm?.label);
 
       if (image && (image.data || image.url)) {
         sources.push({
@@ -676,7 +988,35 @@ const toggleTrashHandler = handler<
 });
 
 /**
+ * Toggle field selection handler - for preview checkboxes
+ */
+const toggleFieldHandler = handler<
+  unknown,
+  {
+    fieldKey: string;
+    selectionsCell: Writable<
+      Default<Record<string, boolean>, Record<string, never>>
+    >;
+    defaultSelected: boolean;
+  }
+>((_event, { fieldKey, selectionsCell, defaultSelected }) => {
+  const current = selectionsCell.get() || {};
+  // Use default if not explicitly set
+  const currentValue = current[fieldKey] !== undefined
+    ? current[fieldKey] !== false
+    : defaultSelected;
+  selectionsCell.set({
+    ...current,
+    [fieldKey]: !currentValue,
+  });
+});
+
+/**
  * Handler to start extraction - defined at module scope
+ *
+ * With per-source extraction architecture, this handler only needs to:
+ * 1. Snapshot Notes content for cleanup comparison
+ * 2. Set phase to "extracting" - prompts are built reactively per-source
  */
 const startExtraction = handler<
   unknown,
@@ -685,15 +1025,12 @@ const startExtraction = handler<
       Default<Record<number, boolean>, Record<number, never>>
     >;
     parentSubCharmsCell: Writable<SubCharmEntry[]>;
-    extractionPromptCell: Writable<Default<string, "">>;
     extractPhaseCell: Writable<
       Default<"select" | "extracting" | "preview", "select">
     >;
     notesContentSnapshotCell: Writable<
       Default<Record<number, string>, Record<number, never>>
     >;
-    // Read-only: computed() provides OpaqueRef, no Cell wrapper needed
-    ocrResultsValue: Record<number, string>;
   }
 >(
   (
@@ -701,30 +1038,28 @@ const startExtraction = handler<
     {
       sourceSelectionsCell,
       parentSubCharmsCell,
-      extractionPromptCell,
       extractPhaseCell,
       notesContentSnapshotCell,
-      ocrResultsValue,
     },
   ) => {
     // Use .get() to read Cell values inside handler
     const selectionsMap = sourceSelectionsCell.get() || {};
     const subCharmsData = parentSubCharmsCell.get() || [];
-    const ocrResultsMap = ocrResultsValue || {};
 
-    // First pass: use scanExtractableSources to identify sources and their indices
-    // This may return stale content for some sources
+    // Scan sources to find selected Notes for snapshot
     const sources = scanExtractableSources(subCharmsData);
 
-    // Build combined content from selected sources
-    // For notes/text-import, use Cell.key() navigation to ensure we read live content
-    const parts: string[] = [];
     // Map to store ALL selected Notes modules' content (index -> content)
+    // This is used for cleanup comparison after extraction
     const notesSnapshots: Record<string, string> = {};
+    let hasSelectedSources = false;
 
     for (const source of sources) {
-      // Skip if explicitly deselected
+      // Skip if explicitly deselected or empty
       if (selectionsMap[source.index] === false) continue;
+      if (source.isEmpty) continue;
+
+      hasSelectedSources = true;
 
       if (source.type === "notes") {
         // Access charm content via .get() first to resolve links, then access properties
@@ -733,55 +1068,297 @@ const startExtraction = handler<
           .key(source.index)
           .get();
         const charm = entry?.charm as Record<string, unknown>;
-        const contentCell = charm?.content;
-        const liveContent = typeof contentCell === "object" &&
-            contentCell !== null &&
-            "get" in contentCell
-          ? (contentCell as { get: () => unknown }).get()
-          : contentCell;
+        const liveContent = getCellValue<unknown>(charm?.content);
         const content = typeof liveContent === "string" ? liveContent : "";
 
         if (content.trim()) {
-          parts.push(`--- ${source.label} ---\n${content}`);
           // Store snapshot for this Notes module (keyed by index as string to avoid Cell array coercion)
           notesSnapshots[String(source.index)] = content;
         }
-      } else if (source.type === "text-import") {
-        // Same pattern for text-import
-        const entry = (parentSubCharmsCell as Writable<SubCharmEntry[]>)
-          .key(source.index)
-          .get();
-        const charm = entry?.charm as Record<string, unknown>;
-        const contentCell = charm?.content;
-        const liveContent = typeof contentCell === "object" &&
-            contentCell !== null &&
-            "get" in contentCell
-          ? (contentCell as { get: () => unknown }).get()
-          : contentCell;
-        const content = typeof liveContent === "string" ? liveContent : "";
-
-        if (content.trim()) {
-          parts.push(`--- ${source.label} ---\n${content}`);
-        }
-      } else if (source.type === "photo") {
-        // Include OCR text for photos
-        const ocrText = ocrResultsMap[source.index];
-        if (ocrText && ocrText.trim()) {
-          parts.push(`--- ${source.label} (OCR) ---\n${ocrText}`);
-        }
       }
+      // Note: text-import and photo sources don't need special handling here
+      // Per-source extraction architecture builds prompts reactively for each source
     }
 
-    const combinedContent = parts.join("\n\n");
-
-    if (combinedContent.trim()) {
+    if (hasSelectedSources) {
       // Snapshot ALL selected Notes content for cleanup (map of index -> content)
       notesContentSnapshotCell.set(notesSnapshots);
-      extractionPromptCell.set(combinedContent);
+      // Set phase to extracting - per-source prompts are built reactively
       extractPhaseCell.set("extracting");
     }
   },
 );
+
+// ===== applySelected Helper Functions =====
+
+/**
+ * Apply a single extracted value to an existing module field.
+ * Validates the value against the schema before applying.
+ *
+ * @returns true if the field was successfully applied, false otherwise
+ */
+function applyFieldToModule(
+  parentSubCharmsCell: Writable<SubCharmEntry[]>,
+  existingIndex: number,
+  moduleType: string,
+  fieldName: string,
+  extractedValue: unknown,
+  subCharms: readonly SubCharmEntry[],
+): boolean {
+  // Get the primary field name (e.g., "notes" alias -> "content" primary)
+  const actualFieldName = getPrimaryFieldName(fieldName, moduleType);
+
+  // Validate extracted value against schema (use actual field name)
+  const fieldSchema = getFieldSchema(subCharms, moduleType, actualFieldName);
+  const isValid = validateFieldValue(extractedValue, fieldSchema);
+
+  if (!isValid) {
+    const actualType = Array.isArray(extractedValue)
+      ? "array"
+      : typeof extractedValue;
+    console.warn(
+      `[Extract] Type mismatch for ${moduleType}.${actualFieldName}: ` +
+        `expected ${fieldSchema?.type}, got ${actualType}. ` +
+        `Value: ${JSON.stringify(extractedValue)}. Skipping field.`,
+    );
+    return false;
+  }
+
+  try {
+    // Only write if validation passed
+    // Cast needed: Cell.key() navigation loses type info for dynamic nested paths
+    // Use actualFieldName to write to the correct field (handles aliases)
+    (parentSubCharmsCell as Writable<SubCharmEntry[]>)
+      .key(existingIndex)
+      .key("charm")
+      .key(actualFieldName)
+      .set(extractedValue);
+    return true;
+  } catch (e) {
+    console.warn(`Failed to set ${moduleType}.${actualFieldName}:`, e);
+    return false;
+  }
+}
+
+/**
+ * Create a new sub-charm module with extracted fields.
+ * Validates each field before adding to initial values.
+ *
+ * @returns The new SubCharmEntry or null if no valid fields
+ */
+function createModuleWithFields(
+  moduleType: string,
+  fields: ExtractedField[],
+  subCharms: readonly SubCharmEntry[],
+): SubCharmEntry | null {
+  // Build initial values object from extracted fields
+  const initialValues: Record<string, unknown> = {};
+
+  for (const field of fields) {
+    // Get the primary field name (e.g., "notes" alias -> "content" primary)
+    const actualFieldName = getPrimaryFieldName(field.fieldName, moduleType);
+
+    // Validate before adding to initialValues (use actual field name)
+    const fieldSchema = getFieldSchema(subCharms, moduleType, actualFieldName);
+    const isValid = validateFieldValue(field.extractedValue, fieldSchema);
+
+    if (!isValid) {
+      const actualType = Array.isArray(field.extractedValue)
+        ? "array"
+        : typeof field.extractedValue;
+      console.warn(
+        `[Extract] Type mismatch for new module ${moduleType}.${actualFieldName}: ` +
+          `expected ${fieldSchema?.type}, got ${actualType}. ` +
+          `Value: ${JSON.stringify(field.extractedValue)}. Skipping field.`,
+      );
+      continue;
+    }
+
+    // Use actualFieldName to store in the correct field
+    initialValues[actualFieldName] = field.extractedValue;
+  }
+
+  // Only create module if we have at least one valid field
+  if (Object.keys(initialValues).length === 0) {
+    return null;
+  }
+
+  try {
+    const newCharm = createSubCharm(moduleType, initialValues);
+    // Capture schema at creation time for dynamic discovery
+    const schema = getResultSchema(newCharm);
+    return {
+      type: moduleType,
+      pinned: false,
+      charm: newCharm,
+      schema,
+    };
+  } catch (e) {
+    console.warn(`Failed to create module ${moduleType}:`, e);
+    return null;
+  }
+}
+
+/**
+ * Parameters for Notes cleanup operation.
+ */
+interface NotesCleanupParams {
+  parentSubCharmsCell: Writable<SubCharmEntry[]>;
+  current: SubCharmEntry[];
+  cleanupEnabledValue: boolean;
+  cleanedNotesValue: string;
+  notesSnapshotMapValue: Record<string, string>;
+  cleanupApplyStatusCell: Writable<
+    Default<"pending" | "success" | "failed" | "skipped", "pending">
+  >;
+}
+
+/**
+ * Apply Notes cleanup by updating the Notes module content.
+ * Uses a dual-approach architecture for reliability:
+ *
+ * 1. Stream.send() - Preferred method for cross-charm mutation
+ * 2. Cell.key() navigation - Fallback when stream is unavailable
+ *
+ * @returns true if any cleanup was successfully applied
+ */
+function applyNotesCleanup(params: NotesCleanupParams): boolean {
+  const {
+    parentSubCharmsCell,
+    current,
+    cleanupEnabledValue,
+    cleanedNotesValue,
+    notesSnapshotMapValue,
+    cleanupApplyStatusCell,
+  } = params;
+
+  if (!cleanupEnabledValue || cleanedNotesValue === undefined) {
+    cleanupApplyStatusCell.set("skipped");
+    return false;
+  }
+
+  // Get all Notes module indices that were used as extraction sources
+  const notesIndices = Object.keys(notesSnapshotMapValue || {}).map(Number);
+
+  if (notesIndices.length === 0) {
+    cleanupApplyStatusCell.set("skipped");
+    return false;
+  }
+
+  let allCleanupSucceeded = true;
+  let anyCleanupAttempted = false;
+  let anyCleanupSucceeded = false;
+
+  // Apply cleanup to ALL selected Notes modules
+  for (const notesIndex of notesIndices) {
+    const notesEntry = current[notesIndex];
+    if (!notesEntry || notesEntry.type !== "notes") {
+      console.warn(
+        `[Extract] Notes entry at index ${notesIndex} not found or wrong type`,
+      );
+      allCleanupSucceeded = false;
+      continue;
+    }
+
+    anyCleanupAttempted = true;
+    let thisCleanupSucceeded = false;
+
+    // Approach 1: Try editContent.send (best for UI reactivity)
+    try {
+      const notesCharm = notesEntry.charm as {
+        editContent?: { send?: (data: unknown) => void };
+      };
+      if (notesCharm?.editContent?.send) {
+        notesCharm.editContent.send({
+          detail: { value: cleanedNotesValue },
+        });
+        thisCleanupSucceeded = true;
+        console.debug(
+          `[Extract] Applied Notes cleanup to index ${notesIndex} via editContent stream`,
+        );
+      }
+    } catch (e) {
+      console.warn(
+        `[Extract] editContent.send failed for index ${notesIndex}:`,
+        e,
+      );
+    }
+
+    // Approach 2: Fallback to Cell key navigation
+    if (!thisCleanupSucceeded) {
+      try {
+        // Cast needed: Writable.key() navigation loses type info for dynamic nested paths
+        (parentSubCharmsCell as Writable<SubCharmEntry[]>)
+          .key(notesIndex)
+          .key("charm")
+          .key("content")
+          .set(cleanedNotesValue);
+        thisCleanupSucceeded = true;
+        console.debug(
+          `[Extract] Applied Notes cleanup to index ${notesIndex} via Cell key navigation`,
+        );
+      } catch (e) {
+        console.warn(
+          `[Extract] Cell key navigation failed for index ${notesIndex}:`,
+          e,
+        );
+      }
+    }
+
+    if (thisCleanupSucceeded) {
+      anyCleanupSucceeded = true;
+    } else {
+      allCleanupSucceeded = false;
+      console.warn(
+        `[Extract] All cleanup approaches failed for Notes at index ${notesIndex}`,
+      );
+    }
+  }
+
+  if (!anyCleanupAttempted) {
+    cleanupApplyStatusCell.set("failed");
+    console.warn("[Extract] No valid Notes entries found for cleanup");
+  } else {
+    cleanupApplyStatusCell.set(allCleanupSucceeded ? "success" : "failed");
+  }
+
+  return anyCleanupSucceeded;
+}
+
+/**
+ * Build a list of indices to trash based on source selections.
+ * Excludes Notes modules (they are never trashed).
+ *
+ * @param sources - All extractable sources
+ * @param trashSelections - Map of source index to trash selection state
+ * @param selfIndex - Index of the extractor module (always included in trash list)
+ * @returns Array of indices to trash, sorted descending for safe removal
+ */
+function buildTrashList(
+  sources: ExtractableSource[],
+  trashSelections: Record<number, boolean>,
+  selfIndex: number,
+): number[] {
+  const indicesToTrash: number[] = [];
+
+  // Add selected source indices to trash list (excluding Notes - Notes is never trashed)
+  for (const source of sources) {
+    if (source.type === "notes") continue; // Never trash Notes
+    if (trashSelections[source.index] === true) {
+      indicesToTrash.push(source.index);
+    }
+  }
+
+  // Add self (extractor) index
+  if (selfIndex >= 0) {
+    indicesToTrash.push(selfIndex);
+  }
+
+  // Sort descending to preserve indices when removing
+  indicesToTrash.sort((a, b) => b - a);
+
+  return indicesToTrash;
+}
 
 /**
  * Handler to apply selected extractions - defined at module scope
@@ -793,6 +1370,11 @@ const applySelected = handler<
     parentTrashedSubCharmsCell: Writable<TrashedSubCharmEntry[]>;
     parentTitleCell: Writable<string>;
     extractionResultValue: Record<string, unknown> | null;
+    // Field metadata from extraction (confidence scores, explanations)
+    extractionFieldMetadataValue: Record<
+      string,
+      { confidence: number; explanation: string; sourceExcerpt?: string }
+    >;
     selectionsCell: Writable<
       Default<Record<string, boolean>, Record<string, never>>
     >;
@@ -816,6 +1398,7 @@ const applySelected = handler<
       parentTrashedSubCharmsCell,
       parentTitleCell,
       extractionResultValue,
+      extractionFieldMetadataValue,
       selectionsCell,
       trashSelectionsCell,
       cleanupEnabledValue,
@@ -846,6 +1429,7 @@ const applySelected = handler<
         extractionResult,
         subCharmsData,
         currentTitle,
+        extractionFieldMetadataValue,
       );
       const sourcesData = scanExtractableSources(subCharmsData);
 
@@ -864,7 +1448,13 @@ const applySelected = handler<
       const fieldsByModule: Record<string, ExtractedField[]> = {};
       for (const field of previewData.fields) {
         const fieldKey = `${field.targetModule}.${field.fieldName}`;
-        if (selected[fieldKey] === false) continue;
+        // Check explicit selection state first
+        if (selected[fieldKey] !== undefined) {
+          if (selected[fieldKey] === false) continue;
+        } else {
+          // Default: skip low confidence fields (not explicitly selected)
+          if (field.confidenceLevel === "low") continue;
+        }
 
         if (!fieldsByModule[field.targetModule]) {
           fieldsByModule[field.targetModule] = [];
@@ -951,9 +1541,9 @@ const applySelected = handler<
         const existingIndex = current.findIndex((e) => e?.type === moduleType);
 
         if (existingIndex >= 0) {
-          // Module exists - use Cell navigation to update fields
+          // Module exists - use helper to update fields
           for (const field of fields) {
-            // Get the primary field name (e.g., "notes" alias -> "content" primary)
+            // Get the primary field name for skip-check
             const actualFieldName = getPrimaryFieldName(
               field.fieldName,
               moduleType,
@@ -961,9 +1551,9 @@ const applySelected = handler<
 
             // Skip Notes content extraction when cleanup is enabled
             // The cleanup will handle setting the final Notes content (with extracted data removed)
-            // If we don't skip, both extraction and cleanup try to set notes.content with different values
             if (
-              moduleType === "notes" && actualFieldName === "content" &&
+              moduleType === "notes" &&
+              actualFieldName === "content" &&
               cleanupEnabledValue
             ) {
               console.debug(
@@ -972,114 +1562,42 @@ const applySelected = handler<
               continue;
             }
 
-            // Validate extracted value against schema (use actual field name)
-            const fieldSchema = getFieldSchema(
-              subCharms,
+            // Apply field using helper function
+            const success = applyFieldToModule(
+              parentSubCharmsCell,
+              existingIndex,
               moduleType,
-              actualFieldName,
-            );
-            const isValid = validateFieldValue(
+              field.fieldName,
               field.extractedValue,
-              fieldSchema,
+              subCharms,
             );
-
-            if (!isValid) {
-              const actualType = Array.isArray(field.extractedValue)
-                ? "array"
-                : typeof field.extractedValue;
-              console.warn(
-                `[Extract] Type mismatch for ${moduleType}.${actualFieldName}: ` +
-                  `expected ${fieldSchema?.type}, got ${actualType}. ` +
-                  `Value: ${
-                    JSON.stringify(field.extractedValue)
-                  }. Skipping field.`,
-              );
-              continue; // Skip this field
-            }
-
-            try {
-              // Only write if validation passed
-              // Cast needed: Cell.key() navigation loses type info for dynamic nested paths
-              // Use actualFieldName to write to the correct field (handles aliases)
-              (parentSubCharmsCell as Writable<SubCharmEntry[]>).key(
-                existingIndex,
-              )
-                .key("charm").key(
-                  actualFieldName,
-                ).set(field.extractedValue);
+            if (success) {
               anySuccess = true;
-            } catch (e) {
-              console.warn(
-                `Failed to set ${moduleType}.${actualFieldName}:`,
-                e,
-              );
             }
           }
         } else if (moduleType !== "notes") {
-          // Module doesn't exist - create it with initial values
-          try {
-            // Build initial values object from extracted fields
-            const initialValues: Record<string, unknown> = {};
-            for (const field of fields) {
-              // Get the primary field name (e.g., "notes" alias -> "content" primary)
-              const actualFieldName = getPrimaryFieldName(
-                field.fieldName,
-                moduleType,
-              );
-
-              // Validate before adding to initialValues (use actual field name)
-              const fieldSchema = getFieldSchema(
-                subCharms,
-                moduleType,
-                actualFieldName,
-              );
-              const isValid = validateFieldValue(
-                field.extractedValue,
-                fieldSchema,
-              );
-
-              if (!isValid) {
-                const actualType = Array.isArray(field.extractedValue)
-                  ? "array"
-                  : typeof field.extractedValue;
-                console.warn(
-                  `[Extract] Type mismatch for new module ${moduleType}.${actualFieldName}: ` +
-                    `expected ${fieldSchema?.type}, got ${actualType}. ` +
-                    `Value: ${
-                      JSON.stringify(field.extractedValue)
-                    }. Skipping field.`,
-                );
-                continue; // Skip this field
-              }
-
-              // Use actualFieldName to store in the correct field
-              initialValues[actualFieldName] = field.extractedValue;
-            }
-
-            // Only create module if we have at least one valid field
-            if (Object.keys(initialValues).length > 0) {
-              const newCharm = createSubCharm(moduleType, initialValues);
-              // Capture schema at creation time for dynamic discovery
-              const schema = getResultSchema(newCharm);
-              newEntries.push({
-                type: moduleType,
-                pinned: false,
-                charm: newCharm,
-                schema,
-              });
-              anySuccess = true;
-            }
-          } catch (e) {
-            console.warn(`Failed to create module ${moduleType}:`, e);
+          // Module doesn't exist - use helper to create it with initial values
+          const newEntry = createModuleWithFields(
+            moduleType,
+            fields,
+            subCharms,
+          );
+          if (newEntry) {
+            newEntries.push(newEntry);
+            anySuccess = true;
           }
         }
       }
 
-      // Only proceed with trashing if at least one update succeeded OR cleanup is pending
+      // Only proceed with trashing if at least one update succeeded OR cleanup will change content
       // Notes cleanup counts as a "success" because the extraction worked - we have cleaned content to apply
+      const combinedSnapshot = Object.values(notesSnapshotMapValue || {}).join(
+        "\n\n---\n\n",
+      );
       const cleanupWillApply = cleanupEnabledValue &&
         cleanedNotesValue !== undefined &&
-        Object.keys(notesSnapshotMapValue || {}).length > 0;
+        Object.keys(notesSnapshotMapValue || {}).length > 0 &&
+        cleanedNotesValue !== combinedSnapshot;
 
       if (!anySuccess && !cleanupWillApply) {
         console.warn(
@@ -1088,150 +1606,20 @@ const applySelected = handler<
         return;
       }
 
-      // ===== Notes Cleanup: Dual-Approach Architecture =====
-      //
-      // PROBLEM: We need to update Notes.content from the Extractor module (cross-charm mutation).
-      //
-      // WHY TWO APPROACHES ARE NECESSARY:
-      //
-      // The correct CommonTools pattern for cross-charm mutations is Stream.send() (see docs/common/PATTERNS.md).
-      // Direct Cell.set() on another charm's cells throws WriteIsolationError. However, Stream handlers
-      // can be "lost" when accessing charms through reactive proxies in Writable<SubCharmEntry[]>.
-      //
-      // APPROACH 1: editContent.send() - Stream Handler (PREFERRED)
-      //   - Uses the Notes pattern's exposed Stream<{ detail: { value: string } }> handler
-      //   - This is the canonical cross-charm mutation pattern in CommonTools
-      //   - The handler (handleEditContent in notes/note.tsx) calls content.set() within the Notes charm's scope
-      //   - Guarantees UI reactivity: ct-code-editor subscriptions fire immediately
-      //   - WHY IT CAN FAIL: Stream handlers may not be accessible when the Notes charm is accessed
-      //     through notesEntry.charm (reactive proxy may strip the handler reference)
-      //
-      // APPROACH 2: Cell.key() Navigation (FALLBACK)
-      //   - Directly navigates through parentSubCharmsCell.key(notesIndex).key("charm").key("content")
-      //   - Sets the content field directly using Cell navigation (same underlying data as Approach 1)
-      //   - This works because we're navigating through our INPUT Cell (parentSubCharms), not crossing
-      //     charm boundaries (no WriteIsolationError)
-      //   - WHY IT WORKS: Cell.key() creates a new Cell reference to the same underlying data
-      //   - UI REACTIVITY: In practice, Lit's reactivity picks up the change without page refresh
-      //     (the ct-code-editor's $value binding still updates), though Stream.send is more reliable
-      //
-      // FAILURE MODES:
-      //   - If both approaches fail: cleanupApplyStatus -> "failed", user sees warning UI
-      //   - Extraction still succeeds (new modules created), only Notes cleanup fails
-      //   - User can manually edit Notes or retry extraction
-      //
-      // This dual-approach pattern is a pragmatic solution to the reactive proxy access issue.
-      // If Stream handler access could be guaranteed, Approach 1 alone would be sufficient.
-      //
-      if (cleanupEnabledValue && cleanedNotesValue !== undefined) {
-        // Get all Notes module indices that were used as extraction sources
-        const notesIndices = Object.keys(notesSnapshotMapValue || {}).map(
-          Number,
-        );
+      // Apply Notes cleanup using helper function
+      // See applyNotesCleanup for dual-approach architecture details
+      applyNotesCleanup({
+        parentSubCharmsCell,
+        current,
+        cleanupEnabledValue,
+        cleanedNotesValue,
+        notesSnapshotMapValue,
+        cleanupApplyStatusCell,
+      });
 
-        if (notesIndices.length === 0) {
-          cleanupApplyStatusCell.set("skipped");
-        } else {
-          let allCleanupSucceeded = true;
-          let anyCleanupAttempted = false;
-
-          // Apply cleanup to ALL selected Notes modules
-          for (const notesIndex of notesIndices) {
-            const notesEntry = current[notesIndex];
-            if (!notesEntry || notesEntry.type !== "notes") {
-              console.warn(
-                `[Extract] Notes entry at index ${notesIndex} not found or wrong type`,
-              );
-              allCleanupSucceeded = false;
-              continue;
-            }
-
-            anyCleanupAttempted = true;
-            let thisCleanupSucceeded = false;
-
-            // Approach 1: Try editContent.send (best for UI reactivity)
-            try {
-              const notesCharm = notesEntry.charm as {
-                editContent?: { send?: (data: unknown) => void };
-              };
-              if (notesCharm?.editContent?.send) {
-                notesCharm.editContent.send({
-                  detail: { value: cleanedNotesValue },
-                });
-                thisCleanupSucceeded = true;
-                console.debug(
-                  `[Extract] Applied Notes cleanup to index ${notesIndex} via editContent stream`,
-                );
-              }
-            } catch (e) {
-              console.warn(
-                `[Extract] editContent.send failed for index ${notesIndex}:`,
-                e,
-              );
-            }
-
-            // Approach 2: Fallback to Cell key navigation
-            if (!thisCleanupSucceeded) {
-              try {
-                // Cast needed: Cell.key() navigation loses type info for dynamic nested paths
-                (parentSubCharmsCell as Writable<SubCharmEntry[]>).key(
-                  notesIndex,
-                )
-                  .key("charm").key(
-                    "content",
-                  ).set(cleanedNotesValue);
-                thisCleanupSucceeded = true;
-                console.debug(
-                  `[Extract] Applied Notes cleanup to index ${notesIndex} via Cell key navigation`,
-                );
-              } catch (e) {
-                console.warn(
-                  `[Extract] Cell key navigation failed for index ${notesIndex}:`,
-                  e,
-                );
-              }
-            }
-
-            if (!thisCleanupSucceeded) {
-              allCleanupSucceeded = false;
-              console.warn(
-                `[Extract] All cleanup approaches failed for Notes at index ${notesIndex}`,
-              );
-            }
-          }
-
-          if (!anyCleanupAttempted) {
-            cleanupApplyStatusCell.set("failed");
-            console.warn("[Extract] No valid Notes entries found for cleanup");
-          } else {
-            cleanupApplyStatusCell.set(
-              allCleanupSucceeded ? "success" : "failed",
-            );
-          }
-        }
-      } else {
-        cleanupApplyStatusCell.set("skipped");
-      }
-
-      // Collect indices to trash (sources + self, excluding Notes)
-      const indicesToTrash: number[] = [];
-
-      // Add selected source indices to trash list (excluding Notes - Notes is never trashed)
-      for (const source of sourcesData) {
-        if (source.type === "notes") continue; // Never trash Notes
-        if (toTrash[source.index] === true) {
-          indicesToTrash.push(source.index);
-        }
-      }
-
-      // Find self (extractor) index - only trash if updates succeeded
+      // Build trash list using helper function
       const selfIndex = current.findIndex((e) => e?.type === "extractor");
-      if (selfIndex >= 0) {
-        indicesToTrash.push(selfIndex);
-      }
-
-      // Sort descending to preserve indices when removing
-      indicesToTrash.sort((a, b) => b - a);
+      const indicesToTrash = buildTrashList(sourcesData, toTrash, selfIndex);
 
       // Move items to trash
       for (const idx of indicesToTrash) {
@@ -1275,14 +1663,9 @@ export const ExtractorModule = recipe<
       notesContentSnapshot,
       cleanupApplyStatus,
       applyInProgress,
+      errorDetailsExpanded,
     },
   ) => {
-    // Use FULL registry schema - enables extraction to create new modules
-    // This includes all available module types, not just existing ones
-    const extractSchema = computed(() => {
-      return buildFullSchema() as JSONSchema;
-    });
-
     // ===== TRANSFORMER BUG WORKAROUND =====
     // The TypeScript transformer has a bug where .map()/.filter()/.some() called on
     // a computed variable aren't properly transformed to their reactive equivalents.
@@ -1414,8 +1797,8 @@ export const ExtractorModule = recipe<
       const calls = ocrCalls;
       if (!calls || calls.length === 0) return false;
       return calls.some(
-        (call: { index: number; ocr: { pending: boolean } }) =>
-          call.ocr.pending,
+        (call: { index: number; ocr?: { pending?: boolean } }) =>
+          call.ocr?.pending,
       );
     });
 
@@ -1427,50 +1810,334 @@ export const ExtractorModule = recipe<
       if (!calls || calls.length === 0) return results;
 
       for (const call of calls) {
-        if (call.ocr.result) {
+        if (call.ocr?.result) {
           results[call.index] = call.ocr.result as string;
         }
       }
       return results;
     });
 
-    // Reactive extraction - only runs when extractionPrompt is set
-    // Note: generateObject accepts Opaque<> which allows Cell-wrapped values
-    const extraction = generateObject({
+    // Get OCR errors as a map (index -> error message)
+    const ocrErrors = computed((): Record<number, string> => {
+      const calls = ocrCalls;
+      const errors: Record<number, string> = {};
+      if (!calls || calls.length === 0) return errors;
+
+      for (const call of calls) {
+        const error = call.ocr?.error as { message?: string } | undefined;
+        if (error) {
+          errors[call.index] = String(error.message || error);
+        }
+      }
+      return errors;
+    });
+
+    // Check if any OCR failed
+    const hasOcrErrors = computed(() => {
+      const errors = ocrErrors;
+      return Object.keys(errors).length > 0;
+    });
+
+    // ===== PER-SOURCE EXTRACTION ARCHITECTURE =====
+    // Each selected source gets its own generateObject() call, then results are merged.
+    // This enables:
+    // - Independent extraction from each source (notes, text-import, photo)
+    // - Precedence-based merging (photos > text-import > notes)
+    // - Per-source status tracking in UI
+
+    // Get selected sources that are ready for extraction
+    // Only include sources after phase transitions to "extracting"
+    const selectedSourcesForExtraction = computed((): ExtractableSource[] => {
+      const phase = extractPhase.get() || "select";
+      if (phase !== "extracting") return [];
+
+      const sources = sourceData.sources;
+      return sources.filter((s: ExtractableSource) => s.selected && !s.isEmpty);
+    });
+
+    // ===== SINGLE COMBINED EXTRACTION =====
+    // Build a single combined prompt from all sources to avoid the complexity
+    // of per-source extraction with .map() which can cause reactive issues.
+    // This is simpler and avoids the problem of creating computed() nodes
+    // inside .map() callbacks.
+    const combinedExtractionPrompt = computed((): string | undefined => {
+      const phase = extractPhase.get() || "select";
+      if (phase !== "extracting") return undefined;
+
+      const sources = selectedSourcesForExtraction;
+      const ocrMap = ocrResults;
+      const promptParts: string[] = [];
+
+      for (const source of sources) {
+        if (source.type === "photo") {
+          // For photos, use OCR result
+          const ocrText = ocrMap[source.index];
+          if (ocrText && ocrText.trim()) {
+            promptParts.push(`--- ${source.label} (OCR) ---\n${ocrText}`);
+          }
+        } else {
+          // Use content from source object directly
+          const content = source.content || "";
+          if (content.trim()) {
+            promptParts.push(`--- ${source.label} ---\n${content}`);
+          }
+        }
+      }
+
+      if (promptParts.length === 0) return undefined;
+      return promptParts.join("\n\n");
+    });
+
+    // Single extraction call for all sources combined
+    const singleExtraction = generateObject({
       system: EXTRACTION_SYSTEM_PROMPT,
-      prompt: extractionPrompt,
-      schema: extractSchema,
+      prompt: combinedExtractionPrompt,
+      schema: RECOMMENDATIONS_SCHEMA,
       model: "anthropic:claude-haiku-4-5",
     });
 
-    // Computed to dereference extraction.result for passing to handlers
+    // Build a synthetic perSourceExtractions array for compatibility with existing code
+    // This wraps the single extraction result as if it came from multiple sources
+    // NOTE: Use for loop instead of .map() to avoid transformer issues inside computed()
+    const perSourceExtractions = computed(() => {
+      const sources = selectedSourcesForExtraction;
+      if (!sources || sources.length === 0) return [];
+
+      // All sources share the same extraction result
+      const result: Array<{
+        sourceIndex: number;
+        sourceType: "notes" | "text-import" | "photo";
+        sourceLabel: string;
+        extraction: typeof singleExtraction;
+      }> = [];
+
+      for (const source of sources) {
+        result.push({
+          sourceIndex: source.index,
+          sourceType: source.type,
+          sourceLabel: source.label,
+          extraction: singleExtraction,
+        });
+      }
+
+      return result;
+    });
+
+    // ===== EXTRACTION STATE TRACKING =====
+    // Access reactive properties directly inside computed() to establish proper subscriptions.
+    // This follows the same pattern as ocrPending and ocrResults which access call.ocr?.pending
+    // and call.ocr?.result directly inside computed().
+    //
+    // IMPORTANT: Do NOT use intermediate .map() arrays outside computed() - they create
+    // non-reactive plain arrays that don't update when the underlying reactive properties change.
+
+    // Build SourceExtraction array with status from per-source calls
+    // Also collect field metadata (confidence, explanation) for preview
+    // Access extraction.pending, extraction.result, extraction.error directly to establish subscriptions
+    const sourceExtractionsWithMetadata = computed((): {
+      extractions: SourceExtraction[];
+      allFieldMetadata: Record<
+        string,
+        { confidence: number; explanation: string; sourceExcerpt?: string }
+      >;
+    } => {
+      const calls = perSourceExtractions;
+
+      if (!calls || calls.length === 0) {
+        return { extractions: [], allFieldMetadata: {} };
+      }
+
+      const extractionList: SourceExtraction[] = [];
+      const allFieldMetadata: Record<
+        string,
+        { confidence: number; explanation: string; sourceExcerpt?: string }
+      > = {};
+
+      for (let i = 0; i < calls.length; i++) {
+        const call = calls[i];
+        let status: SourceExtractionStatus = "pending";
+        let extractedFields: Record<string, unknown> | null = null;
+        let error: string | undefined;
+        let fieldCount = 0;
+
+        // Access extraction state directly from the call object (reactive)
+        // This establishes proper reactive subscriptions, just like ocrPending/ocrResults do
+        const isPending = call.extraction?.pending;
+        const extractionResult = call.extraction?.result;
+        const extractionError = call.extraction?.error;
+
+        // Determine status based on extraction state
+        if (isPending === undefined && !extractionResult && !extractionError) {
+          // Extraction not initialized yet
+          status = "pending";
+        } else if (isPending) {
+          status = "extracting";
+        } else if (extractionError) {
+          status = "error";
+          const errorObj = extractionError as { message?: string };
+          error = String(errorObj.message || extractionError);
+        } else if (
+          !isPending && !extractionResult && !extractionError
+        ) {
+          // No pending, no result, no error = extraction hasn't started (prompt undefined)
+          // This happens when waiting for OCR or content is empty
+          // Mark as pending so UI shows loading state
+          status = "pending";
+        } else if (extractionResult) {
+          status = "complete";
+          const result = extractionResult;
+
+          // Check if result is in recommendations format
+          if (isRecommendationsResult(result)) {
+            // Convert recommendations to flat fields and collect metadata
+            const { flatFields, fieldMetadata } = flattenRecommendations(
+              result.recommendations,
+            );
+            extractedFields = normalizeNullString(flatFields) as Record<
+              string,
+              unknown
+            >;
+            // Merge metadata from this source
+            Object.assign(allFieldMetadata, fieldMetadata);
+          } else {
+            // Legacy flat field format - normalize null strings
+            extractedFields = normalizeNullString(
+              result as Record<string, unknown>,
+            ) as Record<string, unknown>;
+          }
+
+          // Count non-null fields
+          fieldCount = Object.values(extractedFields).filter(
+            (v) => v !== null && v !== undefined,
+          ).length;
+        }
+
+        extractionList.push({
+          sourceIndex: call.sourceIndex as number,
+          sourceType: call.sourceType as "notes" | "text-import" | "photo",
+          sourceLabel: call.sourceLabel as string,
+          status,
+          extractedFields,
+          error,
+          fieldCount,
+        });
+      }
+
+      return { extractions: extractionList, allFieldMetadata };
+    });
+
+    // Accessor for just the extractions array
+    const sourceExtractions = computed(
+      (): SourceExtraction[] => sourceExtractionsWithMetadata.extractions,
+    );
+
+    // Accessor for field metadata (for buildPreview)
+    const extractionFieldMetadata = computed(
+      (): Record<
+        string,
+        { confidence: number; explanation: string; sourceExcerpt?: string }
+      > => sourceExtractionsWithMetadata.allFieldMetadata,
+    );
+
+    // Per-source status tracking computed values
+    const anySourcePending = computed((): boolean => {
+      const extractions = sourceExtractions;
+      if (!extractions || extractions.length === 0) return false;
+      return extractions.some(
+        (e: SourceExtraction) =>
+          e.status === "pending" || e.status === "extracting",
+      );
+    });
+
+    // Merge all per-source extraction results using precedence
+    const mergedExtractionResult = computed(
+      (): Record<string, unknown> | null => {
+        const extractions = sourceExtractions;
+        if (!extractions || extractions.length === 0) return null;
+
+        // Wait until all sources are complete
+        const allComplete = extractions.every(
+          (e: SourceExtraction) =>
+            e.status === "complete" || e.status === "error" ||
+            e.status === "skipped",
+        );
+        if (!allComplete) return null;
+
+        // Merge using precedence rules
+        return mergeExtractionResults(extractions);
+      },
+    );
+
+    // Check if any per-source extraction has an error
+    const anyExtractionError = computed((): boolean => {
+      const extractions = sourceExtractions;
+      if (!extractions) return false;
+      return extractions.some((e: SourceExtraction) => e.status === "error");
+    });
+
+    // Get first error message for display
+    const firstExtractionError = computed((): string | null => {
+      const extractions = sourceExtractions;
+      if (!extractions) return null;
+      const errorSource = extractions.find(
+        (e: SourceExtraction) => e.status === "error",
+      );
+      return errorSource?.error || null;
+    });
+
+    // Computed to dereference extraction result for passing to handlers
     // extraction.result is a reactive property that doesn't auto-dereference when passed directly
     // This ensures the handler receives the actual value, not a reactive proxy
     const extractionResultValue = computed(
       (): Record<string, unknown> | null => {
-        const result = extraction.result;
+        const result = mergedExtractionResult;
         if (!result || typeof result !== "object") return null;
         return result as Record<string, unknown>;
       },
     );
 
-    // Build preview from extraction result
+    // Computed to dereference field metadata for passing to handlers
+    const extractionFieldMetadataValue = computed(
+      (): Record<
+        string,
+        { confidence: number; explanation: string; sourceExcerpt?: string }
+      > => {
+        return extractionFieldMetadata || {};
+      },
+    );
+
+    // Build preview from merged extraction result
     const preview = computed((): ExtractionPreview | null => {
-      if (!extraction.result) return null;
+      if (!mergedExtractionResult) return null;
       const subCharms = parentSubCharms.get() || [];
       const currentTitle = parentTitle.get() || "";
-      const result = buildPreview(extraction.result, subCharms, currentTitle);
+      const metadata = extractionFieldMetadata;
+      const result = buildPreview(
+        mergedExtractionResult,
+        subCharms,
+        currentTitle,
+        metadata,
+      );
       return result;
     });
 
     // Count selected fields for button text
+    // Low confidence fields (< 50) are deselected by default
     const selectedCount = computed(() => {
       const p = preview;
       if (!p?.fields) return 0;
       const sel = selections.get() || {};
       return p.fields.filter((f: ExtractedField) => {
         const key = `${f.targetModule}.${f.fieldName}`;
-        return sel[key] !== false; // Default is selected
+        // Check explicit selection state first
+        if (sel[key] !== undefined) {
+          return sel[key] !== false;
+        }
+        // Default: deselect low confidence fields (< 50)
+        if (f.confidenceLevel === "low") {
+          return false;
+        }
+        return true; // Default is selected for high/medium confidence
       }).length;
     });
 
@@ -1479,37 +2146,45 @@ export const ExtractorModule = recipe<
     // Without this, early return paths (pending/error) prevent preview from being tracked as dependency
     const currentPhase = computed(() => {
       const p = preview; // Establish reactive dependency before any conditionals
+      const pending = anySourcePending;
+      const hasError = anyExtractionError;
+      const mergedResult = mergedExtractionResult;
       const phase = extractPhase.get() || "select";
       if (phase === "extracting") {
-        if (extraction.pending) return "extracting";
-        if (extraction.error) return "error";
+        if (pending) return "extracting";
+        if (hasError) return "error";
         if (p?.fields?.length) return "preview";
-        if (extraction.result && !p?.fields?.length) return "no-results";
+        if (mergedResult && !p?.fields?.length) return "no-results";
         return "extracting";
       }
       return phase;
     });
 
-    // Format extracted fields as text for preview display
-    const previewText = computed(() => {
-      if (!extraction.result) return "No fields extracted";
-      const subCharms = parentSubCharms.get() || [];
-      const currentTitle = parentTitle.get() || "";
-      const previewData = buildPreview(
-        extraction.result,
-        subCharms,
-        currentTitle,
-      );
-      if (!previewData?.fields?.length) return "No fields extracted";
-      return previewData.fields.map((f: ExtractedField) => {
-        const current = formatValue(f.currentValue);
-        const extracted = formatValue(f.extractedValue);
-        // Show "Record Title" for record-title pseudo-type instead of module name
-        const displayModule = f.targetModule === "record-title"
-          ? "Record Title"
-          : f.targetModule;
-        return `${displayModule}.${f.fieldName}: ${current} -> ${extracted}`;
-      }).join("\n");
+    // Validation summary computed values
+    const validationErrorCount = computed(() => {
+      const p = preview;
+      return p?.validationSummary?.errorCount || 0;
+    });
+    const validationWarningCount = computed(() => {
+      const p = preview;
+      return p?.validationSummary?.warningCount || 0;
+    });
+    const hasValidationIssues = computed(() => {
+      const errors = Number(validationErrorCount);
+      const warnings = Number(validationWarningCount);
+      return errors > 0 || warnings > 0;
+    });
+    const validationSummaryText = computed(() => {
+      const errors = Number(validationErrorCount);
+      const warnings = Number(validationWarningCount);
+      const parts: string[] = [];
+      if (errors > 0) {
+        parts.push(`${errors} error${errors === 1 ? "" : "s"}`);
+      }
+      if (warnings > 0) {
+        parts.push(`${warnings} warning${warnings === 1 ? "" : "s"}`);
+      }
+      return parts.join(", ");
     });
 
     // Notes cleanup now uses the extraction result's `notes` field directly.
@@ -1544,8 +2219,8 @@ export const ExtractorModule = recipe<
       // The extraction schema includes both `content` (primary) and `notes` (alias) fields
       // from Notes module's fieldMapping: ["content", "notes"]
       // The LLM may use either field name, so check both
-      if (!extraction.result) return combinedSnapshot;
-      const result = extraction.result as Record<string, unknown>;
+      if (!mergedExtractionResult) return combinedSnapshot;
+      const result = mergedExtractionResult as Record<string, unknown>;
       // Check both `notes` (alias) and `content` (primary) - LLM may use either
       const notesValue = result.notes ?? result.content;
 
@@ -1600,6 +2275,49 @@ export const ExtractorModule = recipe<
     const isExtractingPhase = computed(() => currentPhase === "extracting");
     const isErrorPhase = computed(() => currentPhase === "error");
     const isNoResultsPhase = computed(() => currentPhase === "no-results");
+
+    // Error message parsing for specific error feedback
+    // Parse the extraction error to show user-friendly messages based on error type
+    const errorMessage = computed((): string => {
+      const error = firstExtractionError;
+      if (!error) return "Extraction failed. Try again or add more content.";
+
+      const errorStr = String(error).toLowerCase();
+
+      // Rate limiting errors (429, rate limit)
+      if (errorStr.includes("rate") || errorStr.includes("429")) {
+        return "Rate limited - please wait a moment and try again";
+      }
+
+      // Timeout errors
+      if (errorStr.includes("timeout")) {
+        return "Request timed out - try with less content";
+      }
+
+      // Parse/validation errors
+      if (errorStr.includes("invalid") || errorStr.includes("parse")) {
+        return "Invalid response from AI - try again";
+      }
+
+      // Default: Show actual error message (truncated if needed)
+      if (error.length > 100) {
+        return error.slice(0, 100) + "...";
+      }
+      return error;
+    });
+
+    // Full error details for expandable section
+    const fullErrorDetails = computed((): string => {
+      const error = firstExtractionError;
+      if (!error) return "";
+      return error;
+    });
+
+    // Check if error details are expanded
+    const showErrorDetails = computed(() =>
+      errorDetailsExpanded.get() === true
+    );
+
     // True when there are no source modules at all (Notes, Photo, Text Import)
     // Uses centralized sourceData to avoid redundant scanExtractableSources() calls
     const hasNoSourceModules = computed(() => sourceData.hasNoSourceModules);
@@ -1626,6 +2344,26 @@ export const ExtractorModule = recipe<
     // Pre-computed trash selection state map
     // Uses centralized sourceData to avoid redundant scanExtractableSources() calls
     const trashCheckStates = computed(() => sourceData.trashCheckStates);
+
+    // Pre-computed field selection state map for preview checkboxes
+    // Low confidence fields are deselected by default
+    const fieldCheckStates = computed((): Record<string, boolean> => {
+      const p = preview;
+      if (!p?.fields) return {};
+      const sel = selections.get() || {};
+      const result: Record<string, boolean> = {};
+      for (const f of p.fields) {
+        const key = `${f.targetModule}.${f.fieldName}`;
+        // Check explicit selection state first
+        if (sel[key] !== undefined) {
+          result[key] = sel[key] !== false;
+        } else {
+          // Default: deselect low confidence fields (< 50)
+          result[key] = f.confidenceLevel !== "low";
+        }
+      }
+      return result;
+    });
 
     // Preview phase computed values
     const hasNotesSnapshot = computed(() => {
@@ -1683,6 +2421,36 @@ export const ExtractorModule = recipe<
     const applyButtonCursor = computed(() =>
       applyButtonDisabled ? "not-allowed" : "pointer"
     );
+
+    // Progress feedback computed values for extracting phase
+    const photoSourceCount = computed(() => sourceData.photoSources.length);
+
+    // Progress message for extracting phase
+    const extractingProgressMessage = computed(() => {
+      const photosCount = Number(photoSourceCount);
+      const ocrInProgress = Boolean(ocrPending);
+
+      if (photosCount > 0 && ocrInProgress) {
+        // OCR is still running
+        if (photosCount > 1) {
+          return `Processing ${photosCount} photos (OCR)...`;
+        }
+        return "Processing photo (OCR)...";
+      }
+      // OCR done (or no photos), extraction is running
+      return "Extracting structured data...";
+    });
+
+    // Progress icon for extracting phase
+    const extractingProgressIcon = computed(() => {
+      const photosCount = Number(photoSourceCount);
+      const ocrInProgress = Boolean(ocrPending);
+
+      if (photosCount > 0 && ocrInProgress) {
+        return "\u{1F4F7}"; // camera emoji
+      }
+      return "\u{1F50D}"; // magnifying glass emoji
+    });
 
     return {
       [NAME]: "AI Extract",
@@ -1839,6 +2607,17 @@ export const ExtractorModule = recipe<
                           >
                             {source.preview}
                           </div>
+                          {source.isEmpty && (
+                            <div
+                              style={{
+                                fontSize: "11px",
+                                color: "#6b7280",
+                                marginTop: "4px",
+                              }}
+                            >
+                              Add content to enable extraction
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -1865,6 +2644,31 @@ export const ExtractorModule = recipe<
                     null,
                   )}
 
+                  {/* OCR error indicator */}
+                  {ifElse(
+                    hasOcrErrors,
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        padding: "8px",
+                        background: "#fef2f2",
+                        borderRadius: "6px",
+                        fontSize: "13px",
+                        color: "#dc2626",
+                        border: "1px solid #fecaca",
+                      }}
+                    >
+                      <span style={{ fontSize: "16px" }}>⚠️</span>
+                      <span>
+                        OCR failed for some photos. Extraction will continue
+                        with available text.
+                      </span>
+                    </div>,
+                    null,
+                  )}
+
                   {/* Extract button */}
                   <div
                     style={{
@@ -1879,11 +2683,8 @@ export const ExtractorModule = recipe<
                       onClick={startExtraction({
                         sourceSelectionsCell: sourceSelections,
                         parentSubCharmsCell: parentSubCharms,
-                        extractionPromptCell: extractionPrompt,
                         extractPhaseCell: extractPhase,
                         notesContentSnapshotCell: notesContentSnapshot,
-                        // Read-only value from computed() - no Cell wrapper needed
-                        ocrResultsValue: ocrResults,
                       })}
                       style={{
                         padding: "8px 16px",
@@ -1919,7 +2720,9 @@ export const ExtractorModule = recipe<
               }}
             >
               <ct-loader size="sm" show-elapsed />
-              <span style={{ color: "#92400e" }}>Extracting data...</span>
+              <span style={{ color: "#92400e" }}>
+                {extractingProgressIcon} {extractingProgressMessage}
+              </span>
             </div>,
             null,
           )}
@@ -1939,13 +2742,56 @@ export const ExtractorModule = recipe<
                   fontSize: "13px",
                 }}
               >
-                Extraction failed. Try again or add more content.
+                {errorMessage}
+              </div>
+              {/* Expandable error details section */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const current = errorDetailsExpanded.get() === true;
+                    errorDetailsExpanded.set(!current);
+                  }}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "12px",
+                    color: "#6b7280",
+                    padding: "4px 0",
+                    textDecoration: "underline",
+                  }}
+                >
+                  {ifElse(showErrorDetails, "Hide details", "Show details")}
+                </button>
+                {ifElse(
+                  showErrorDetails,
+                  <div
+                    style={{
+                      marginTop: "8px",
+                      padding: "8px",
+                      background: "#fef2f2",
+                      borderRadius: "4px",
+                      fontSize: "11px",
+                      color: "#7f1d1d",
+                      fontFamily: "monospace",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      maxHeight: "120px",
+                      overflow: "auto",
+                    }}
+                  >
+                    {fullErrorDetails}
+                  </div>,
+                  null,
+                )}
               </div>
               <button
                 type="button"
                 onClick={() => {
                   extractPhase.set("select");
                   extractionPrompt.set("");
+                  errorDetailsExpanded.set(false);
                 }}
                 style={{
                   padding: "8px 16px",
@@ -2008,34 +2854,169 @@ export const ExtractorModule = recipe<
             <div
               style={{ display: "flex", flexDirection: "column", gap: "16px" }}
             >
-              {/* Extracted fields */}
+              {/* Extracted fields with confidence badges */}
               <div
                 style={{
                   background: "white",
                   borderRadius: "6px",
                   border: "1px solid #e5e7eb",
-                  padding: "12px",
+                  overflow: "hidden",
                 }}
               >
                 <div
                   style={{
-                    marginBottom: "8px",
+                    padding: "12px",
+                    borderBottom: "1px solid #e5e7eb",
                     fontWeight: "500",
                     color: "#374151",
                   }}
                 >
-                  Extracted Fields:
+                  Extracted Fields ({selectedCount} selected):
                 </div>
-                <div
-                  style={{
-                    fontSize: "13px",
-                    color: "#6b7280",
-                    whiteSpace: "pre-wrap",
-                    fontFamily: "monospace",
-                  }}
-                >
-                  {previewText}
-                </div>
+                {preview?.fields?.map((f: ExtractedField, idx: number) => {
+                  const fieldKey = `${f.targetModule}.${f.fieldName}`;
+                  const displayModule = f.targetModule === "record-title"
+                    ? "Record Title"
+                    : f.targetModule;
+                  const isChecked = fieldCheckStates[fieldKey] === true;
+                  const defaultSelected = f.confidenceLevel !== "low";
+
+                  // Confidence badge - always include, show based on level
+                  const confidenceBg = f.confidenceLevel === "high"
+                    ? "#dcfce7"
+                    : f.confidenceLevel === "medium"
+                    ? "#fef9c3"
+                    : f.confidenceLevel === "low"
+                    ? "#fee2e2"
+                    : "transparent";
+                  const confidenceColor = f.confidenceLevel === "high"
+                    ? "#166534"
+                    : f.confidenceLevel === "medium"
+                    ? "#854d0e"
+                    : f.confidenceLevel === "low"
+                    ? "#991b1b"
+                    : "#9ca3af";
+                  const confidenceIcon = f.confidenceLevel === "high"
+                    ? "\u2713"
+                    : f.confidenceLevel === "medium"
+                    ? "\u25CF"
+                    : f.confidenceLevel === "low"
+                    ? "\u26A0"
+                    : "";
+                  const confidenceLabel = f.confidenceLevel === "high"
+                    ? "High"
+                    : f.confidenceLevel === "medium"
+                    ? "Med"
+                    : f.confidenceLevel === "low"
+                    ? "Low"
+                    : "";
+                  const hasConfidence = f.confidenceLevel !== undefined;
+
+                  return (
+                    <div
+                      key={idx}
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "8px",
+                        padding: "10px 12px",
+                        borderBottom: "1px solid #f3f4f6",
+                        opacity: isChecked ? 1 : 0.6,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={toggleFieldHandler({
+                          fieldKey,
+                          selectionsCell: selections,
+                          defaultSelected,
+                        })}
+                        style={{ marginTop: "2px" }}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            marginBottom: "4px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontWeight: "500",
+                              color: "#374151",
+                              fontSize: "13px",
+                            }}
+                          >
+                            {displayModule}.{f.fieldName}
+                          </span>
+                          {ifElse(
+                            hasConfidence,
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                padding: "1px 6px",
+                                borderRadius: "4px",
+                                background: confidenceBg,
+                                color: confidenceColor,
+                              }}
+                            >
+                              {confidenceIcon} {confidenceLabel}
+                            </span>,
+                            null,
+                          )}
+                          {ifElse(
+                            f.validationIssue !== undefined,
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                padding: "1px 6px",
+                                borderRadius: "4px",
+                                background:
+                                  f.validationIssue?.severity === "error"
+                                    ? "#fee2e2"
+                                    : "#fef3c7",
+                                color: f.validationIssue?.severity === "error"
+                                  ? "#991b1b"
+                                  : "#92400e",
+                              }}
+                            >
+                              {f.validationIssue?.message}
+                            </span>,
+                            null,
+                          )}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "12px",
+                            color: "#6b7280",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          {formatValue(f.currentValue)} -&gt;{" "}
+                          {formatValue(f.extractedValue)}
+                        </div>
+                        {ifElse(
+                          f.explanation !== undefined && f.explanation !== "",
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              color: "#9ca3af",
+                              marginTop: "4px",
+                              fontStyle: "italic",
+                            }}
+                          >
+                            {f.explanation}
+                          </div>,
+                          null,
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Notes cleanup section */}
@@ -2326,6 +3307,59 @@ export const ExtractorModule = recipe<
                 null,
               )}
 
+              {/* Validation summary */}
+              {ifElse(
+                hasValidationIssues,
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    padding: "8px 12px",
+                    background: "#fef3c7",
+                    border: "1px solid #fde68a",
+                    borderRadius: "6px",
+                    fontSize: "13px",
+                    color: "#92400e",
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    {ifElse(
+                      validationErrorCount,
+                      <span
+                        style={{
+                          display: "inline-block",
+                          width: "8px",
+                          height: "8px",
+                          borderRadius: "50%",
+                          background: "#ef4444",
+                        }}
+                      />,
+                      <span
+                        style={{
+                          display: "inline-block",
+                          width: "8px",
+                          height: "8px",
+                          borderRadius: "50%",
+                          background: "#f59e0b",
+                        }}
+                      />,
+                    )}
+                    <span>{validationSummaryText}</span>
+                  </span>
+                  <span style={{ color: "#78716c", fontSize: "12px" }}>
+                    - review before applying
+                  </span>
+                </div>,
+                null,
+              )}
+
               {/* Action buttons */}
               <div
                 style={{
@@ -2372,9 +3406,11 @@ export const ExtractorModule = recipe<
                     parentSubCharmsCell: parentSubCharms,
                     parentTrashedSubCharmsCell: parentTrashedSubCharms,
                     parentTitleCell: parentTitle,
-                    // Pass computed that dereferences extraction.result (reactive properties
+                    // Pass computed that dereferences mergedExtractionResult (reactive properties
                     // don't auto-dereference when passed directly to handlers)
                     extractionResultValue: extractionResultValue,
+                    // Pass field metadata for confidence levels in buildPreview
+                    extractionFieldMetadataValue: extractionFieldMetadataValue,
                     selectionsCell: selections,
                     trashSelectionsCell: trashSelections,
                     cleanupEnabledValue: (() => {
@@ -2438,6 +3474,7 @@ export const ExtractorModule = recipe<
       notesContentSnapshot,
       cleanupApplyStatus,
       applyInProgress,
+      errorDetailsExpanded,
     };
   },
 );

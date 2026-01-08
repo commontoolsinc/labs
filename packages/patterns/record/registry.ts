@@ -77,6 +77,10 @@ import {
   MODULE_METADATA as OccurrenceTrackerMeta,
   OccurrenceTrackerModule,
 } from "../occurrence-tracker.tsx";
+import {
+  MODULE_METADATA as TextImportMeta,
+  TextImportModule,
+} from "../text-import.tsx";
 import type { ModuleMetadata } from "../container-protocol.ts";
 
 // NOTE: TypePickerMeta is NOT imported here to avoid circular dependency:
@@ -217,6 +221,10 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
   "occurrence-tracker": fromMetadata(
     OccurrenceTrackerMeta,
     (init) => OccurrenceTrackerModule(init as any),
+  ),
+  "text-import": fromMetadata(
+    TextImportMeta,
+    (init) => TextImportModule(init as any),
   ),
 
   // Controller modules - TypePicker needs special handling in record.tsx
