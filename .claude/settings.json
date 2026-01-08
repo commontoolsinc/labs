@@ -17,7 +17,61 @@
         "hooks": [
           {
             "type": "command",
-            "command": "deno run \"$(git rev-parse --show-toplevel)/.claude/scripts/block-node.ts\""
+            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/block-node.ts\""
+          },
+          {
+            "type": "command",
+            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/block-ct.ts\""
+          },
+          {
+            "type": "command",
+            "command": "deno run --allow-read --allow-run \"$CLAUDE_PROJECT_DIR/.claude/scripts/pre-commit.ts\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deno run --allow-read --allow-run \"$CLAUDE_PROJECT_DIR/.claude/scripts/post-edit-ts.ts\""
+          },
+          {
+            "type": "command",
+            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/post-edit-reminders.ts\""
+          }
+        ]
+      },
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/post-exit-plan.ts\""
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deno run --allow-read --allow-run \"$CLAUDE_PROJECT_DIR/.claude/scripts/subagent-stop.ts\"",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Evaluate if Claude should stop. Context: $ARGUMENTS\n\nCheck:\n1. Are there uncommitted changes? If so, have tests been run?\n2. Did the user's requested tasks complete successfully?\n3. Are there type errors or lint issues that need fixing?\n\nIf there are code changes but tests haven't been run, block and request running 'deno task check' and 'deno task test'.\n\nRespond with JSON: {\"decision\": \"approve\" or \"block\", \"reason\": \"your explanation\"}",
+            "timeout": 30
           }
         ]
       }
