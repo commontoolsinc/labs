@@ -88,25 +88,62 @@ export class CastValidationTransformer extends Transformer {
 
   /**
    * Checks if this is a double-cast pattern: `expr as unknown as X`
+   * Also handles mixed syntax: `(<unknown>expr) as X`
    */
   private isDoubleUnknownCast(node: ts.AsExpression): boolean {
-    // Check if inner expression is also an `as` expression casting to `unknown`
+    // Check if inner expression is an `as` expression casting to `unknown`
     if (ts.isAsExpression(node.expression)) {
       const innerType = node.expression.type;
       return this.isUnknownType(innerType);
+    }
+    // Check for mixed syntax: `(<unknown>expr) as X`
+    if (ts.isTypeAssertionExpression(node.expression)) {
+      const innerType = node.expression.type;
+      return this.isUnknownType(innerType);
+    }
+    // Check for parenthesized expressions: `(expr as unknown) as X`
+    if (ts.isParenthesizedExpression(node.expression)) {
+      const inner = node.expression.expression;
+      if (ts.isAsExpression(inner) && this.isUnknownType(inner.type)) {
+        return true;
+      }
+      if (
+        ts.isTypeAssertionExpression(inner) && this.isUnknownType(inner.type)
+      ) {
+        return true;
+      }
     }
     return false;
   }
 
   /**
    * Checks if this is a double-cast with angle bracket syntax: `<X><unknown>expr`
+   * Also handles mixed syntax: `<X>(expr as unknown)`
    */
   private isDoubleUnknownTypeAssertion(
     node: ts.TypeAssertion,
   ): boolean {
+    // Check for angle bracket inner: `<X><unknown>expr`
     if (ts.isTypeAssertionExpression(node.expression)) {
       const innerType = node.expression.type;
       return this.isUnknownType(innerType);
+    }
+    // Check for mixed syntax: `<X>(expr as unknown)`
+    if (ts.isAsExpression(node.expression)) {
+      const innerType = node.expression.type;
+      return this.isUnknownType(innerType);
+    }
+    // Check for parenthesized expressions
+    if (ts.isParenthesizedExpression(node.expression)) {
+      const inner = node.expression.expression;
+      if (ts.isAsExpression(inner) && this.isUnknownType(inner.type)) {
+        return true;
+      }
+      if (
+        ts.isTypeAssertionExpression(inner) && this.isUnknownType(inner.type)
+      ) {
+        return true;
+      }
     }
     return false;
   }

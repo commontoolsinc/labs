@@ -41,6 +41,9 @@ export class PatternContextValidationTransformer extends Transformer {
       }
 
       // Check for optional chaining in reactive context
+      // Note: isInRestrictedReactiveContext returns false for JSX expressions
+      // (they are handled by OpaqueRefJSXTransformer), so this won't flag
+      // optional chaining inside JSX like <div>{user?.name}</div>
       if (ts.isPropertyAccessExpression(node) && node.questionDotToken) {
         if (isInRestrictedReactiveContext(node, checker)) {
           context.reportDiagnostic({
