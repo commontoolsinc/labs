@@ -170,9 +170,6 @@ export const CustomFieldModule = recipe<
     return n || "Value";
   });
 
-  // For URL type, check if has value and sanitize URL to prevent XSS
-  const urlHasValue = computed(() => String(value || "").length > 0);
-
   // Sanitize URL to only allow http/https protocols (prevent javascript:/data: XSS)
   const safeUrl = computed(() => {
     const v = String(value || "").trim();
