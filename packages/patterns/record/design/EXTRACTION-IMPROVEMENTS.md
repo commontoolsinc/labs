@@ -1,6 +1,6 @@
 # AI Extraction Module Improvements
 
-## Status: In Progress
+## Status: Complete
 
 This document captures planned improvements to the AI extraction module
 (`extraction/extractor-module.tsx`) based on analysis of community patterns and
@@ -14,9 +14,9 @@ best practices.
 | ------------------------ | ---------- | ------ | -------- | ----------- |
 | Prompt Improvements      | S          | High   | 1        | ✅ Done     |
 | Validation Improvements  | M          | High   | 2        | ✅ Done     |
-| Confidence Scoring       | M          | High   | 3        | ⏳ Planned  |
-| Per-Source Extraction    | M          | Medium | 4        | ⏳ Planned  |
-| Schema Selection Pattern | M          | Medium | 5        | ⏳ Planned  |
+| Confidence Scoring       | M          | High   | 3        | ✅ Done     |
+| Per-Source Extraction    | M          | Medium | 4        | ✅ Done     |
+| Schema Selection Pattern | M          | Medium | 5        | ✅ Done     |
 
 ---
 
@@ -381,6 +381,8 @@ interface ExtractionRecommendation {
 
 ## Changelog
 
+- 2026-01-08: All improvements completed - per-source extraction and schema
+  selection pattern with confidence scoring implemented
 - 2026-01-08: v2 improvements completed (prompts, validation, error messages,
   progress feedback, helper refactoring)
 - 2026-01-06: Initial document created from research and sub-agent planning
