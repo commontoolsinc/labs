@@ -4,6 +4,7 @@
     "test": "echo 'No tests to run.'"
   },
   "exports": {
-    ".": "./index.ts"
+    ".": "./index.ts",
+    "./schema": "./schema.ts"
   }
 }

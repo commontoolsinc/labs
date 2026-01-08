@@ -1,4 +1,5 @@
-import type { JSONSchema, Schema, SchemaWithoutCell } from "../index.ts";
+import type { JSONSchema } from "../index.ts";
+import type { Schema, SchemaWithoutCell } from "../schema.ts";
 
 type ComplexSchema = {
   readonly $id: "Root";

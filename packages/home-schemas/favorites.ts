@@ -3,7 +3,8 @@
  * These define the structure of user's favorited charms.
  */
 
-import type { JSONSchema, Schema } from "@commontools/api";
+import type { JSONSchema } from "@commontools/api";
+import type { Schema } from "@commontools/api/schema";
 
 export const favoriteEntrySchema = {
   type: "object",

@@ -14,8 +14,8 @@ import {
   BuiltInLLMMessage,
   BuiltInLLMParams,
   JSONSchema,
-  Schema,
 } from "@commontools/api";
+import type { Schema } from "@commontools/api/schema";
 import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
