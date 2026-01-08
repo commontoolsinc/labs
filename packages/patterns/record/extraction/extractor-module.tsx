@@ -879,6 +879,277 @@ const startExtraction = handler<
   },
 );
 
+// ===== applySelected Helper Functions =====
+
+/**
+ * Apply a single extracted value to an existing module field.
+ * Validates the value against the schema before applying.
+ *
+ * @returns true if the field was successfully applied, false otherwise
+ */
+function applyFieldToModule(
+  parentSubCharmsCell: Writable<SubCharmEntry[]>,
+  existingIndex: number,
+  moduleType: string,
+  fieldName: string,
+  extractedValue: unknown,
+  subCharms: readonly SubCharmEntry[],
+): boolean {
+  // Get the primary field name (e.g., "notes" alias -> "content" primary)
+  const actualFieldName = getPrimaryFieldName(fieldName, moduleType);
+
+  // Validate extracted value against schema (use actual field name)
+  const fieldSchema = getFieldSchema(subCharms, moduleType, actualFieldName);
+  const isValid = validateFieldValue(extractedValue, fieldSchema);
+
+  if (!isValid) {
+    const actualType = Array.isArray(extractedValue)
+      ? "array"
+      : typeof extractedValue;
+    console.warn(
+      `[Extract] Type mismatch for ${moduleType}.${actualFieldName}: ` +
+        `expected ${fieldSchema?.type}, got ${actualType}. ` +
+        `Value: ${JSON.stringify(extractedValue)}. Skipping field.`,
+    );
+    return false;
+  }
+
+  try {
+    // Only write if validation passed
+    // Cast needed: Cell.key() navigation loses type info for dynamic nested paths
+    // Use actualFieldName to write to the correct field (handles aliases)
+    (parentSubCharmsCell as Writable<SubCharmEntry[]>)
+      .key(existingIndex)
+      .key("charm")
+      .key(actualFieldName)
+      .set(extractedValue);
+    return true;
+  } catch (e) {
+    console.warn(`Failed to set ${moduleType}.${actualFieldName}:`, e);
+    return false;
+  }
+}
+
+/**
+ * Create a new sub-charm module with extracted fields.
+ * Validates each field before adding to initial values.
+ *
+ * @returns The new SubCharmEntry or null if no valid fields
+ */
+function createModuleWithFields(
+  moduleType: string,
+  fields: ExtractedField[],
+  subCharms: readonly SubCharmEntry[],
+): SubCharmEntry | null {
+  // Build initial values object from extracted fields
+  const initialValues: Record<string, unknown> = {};
+
+  for (const field of fields) {
+    // Get the primary field name (e.g., "notes" alias -> "content" primary)
+    const actualFieldName = getPrimaryFieldName(field.fieldName, moduleType);
+
+    // Validate before adding to initialValues (use actual field name)
+    const fieldSchema = getFieldSchema(subCharms, moduleType, actualFieldName);
+    const isValid = validateFieldValue(field.extractedValue, fieldSchema);
+
+    if (!isValid) {
+      const actualType = Array.isArray(field.extractedValue)
+        ? "array"
+        : typeof field.extractedValue;
+      console.warn(
+        `[Extract] Type mismatch for new module ${moduleType}.${actualFieldName}: ` +
+          `expected ${fieldSchema?.type}, got ${actualType}. ` +
+          `Value: ${JSON.stringify(field.extractedValue)}. Skipping field.`,
+      );
+      continue;
+    }
+
+    // Use actualFieldName to store in the correct field
+    initialValues[actualFieldName] = field.extractedValue;
+  }
+
+  // Only create module if we have at least one valid field
+  if (Object.keys(initialValues).length === 0) {
+    return null;
+  }
+
+  try {
+    const newCharm = createSubCharm(moduleType, initialValues);
+    // Capture schema at creation time for dynamic discovery
+    const schema = getResultSchema(newCharm);
+    return {
+      type: moduleType,
+      pinned: false,
+      charm: newCharm,
+      schema,
+    };
+  } catch (e) {
+    console.warn(`Failed to create module ${moduleType}:`, e);
+    return null;
+  }
+}
+
+/**
+ * Parameters for Notes cleanup operation.
+ */
+interface NotesCleanupParams {
+  parentSubCharmsCell: Writable<SubCharmEntry[]>;
+  current: SubCharmEntry[];
+  cleanupEnabledValue: boolean;
+  cleanedNotesValue: string;
+  notesSnapshotMapValue: Record<string, string>;
+  cleanupApplyStatusCell: Writable<
+    Default<"pending" | "success" | "failed" | "skipped", "pending">
+  >;
+}
+
+/**
+ * Apply Notes cleanup by updating the Notes module content.
+ * Uses a dual-approach architecture for reliability:
+ *
+ * 1. Stream.send() - Preferred method for cross-charm mutation
+ * 2. Cell.key() navigation - Fallback when stream is unavailable
+ *
+ * @returns true if any cleanup was successfully applied
+ */
+function applyNotesCleanup(params: NotesCleanupParams): boolean {
+  const {
+    parentSubCharmsCell,
+    current,
+    cleanupEnabledValue,
+    cleanedNotesValue,
+    notesSnapshotMapValue,
+    cleanupApplyStatusCell,
+  } = params;
+
+  if (!cleanupEnabledValue || cleanedNotesValue === undefined) {
+    cleanupApplyStatusCell.set("skipped");
+    return false;
+  }
+
+  // Get all Notes module indices that were used as extraction sources
+  const notesIndices = Object.keys(notesSnapshotMapValue || {}).map(Number);
+
+  if (notesIndices.length === 0) {
+    cleanupApplyStatusCell.set("skipped");
+    return false;
+  }
+
+  let allCleanupSucceeded = true;
+  let anyCleanupAttempted = false;
+  let anyCleanupSucceeded = false;
+
+  // Apply cleanup to ALL selected Notes modules
+  for (const notesIndex of notesIndices) {
+    const notesEntry = current[notesIndex];
+    if (!notesEntry || notesEntry.type !== "notes") {
+      console.warn(
+        `[Extract] Notes entry at index ${notesIndex} not found or wrong type`,
+      );
+      allCleanupSucceeded = false;
+      continue;
+    }
+
+    anyCleanupAttempted = true;
+    let thisCleanupSucceeded = false;
+
+    // Approach 1: Try editContent.send (best for UI reactivity)
+    try {
+      const notesCharm = notesEntry.charm as {
+        editContent?: { send?: (data: unknown) => void };
+      };
+      if (notesCharm?.editContent?.send) {
+        notesCharm.editContent.send({
+          detail: { value: cleanedNotesValue },
+        });
+        thisCleanupSucceeded = true;
+        console.debug(
+          `[Extract] Applied Notes cleanup to index ${notesIndex} via editContent stream`,
+        );
+      }
+    } catch (e) {
+      console.warn(
+        `[Extract] editContent.send failed for index ${notesIndex}:`,
+        e,
+      );
+    }
+
+    // Approach 2: Fallback to Cell key navigation
+    if (!thisCleanupSucceeded) {
+      try {
+        // Cast needed: Writable.key() navigation loses type info for dynamic nested paths
+        (parentSubCharmsCell as Writable<SubCharmEntry[]>)
+          .key(notesIndex)
+          .key("charm")
+          .key("content")
+          .set(cleanedNotesValue);
+        thisCleanupSucceeded = true;
+        console.debug(
+          `[Extract] Applied Notes cleanup to index ${notesIndex} via Cell key navigation`,
+        );
+      } catch (e) {
+        console.warn(
+          `[Extract] Cell key navigation failed for index ${notesIndex}:`,
+          e,
+        );
+      }
+    }
+
+    if (thisCleanupSucceeded) {
+      anyCleanupSucceeded = true;
+    } else {
+      allCleanupSucceeded = false;
+      console.warn(
+        `[Extract] All cleanup approaches failed for Notes at index ${notesIndex}`,
+      );
+    }
+  }
+
+  if (!anyCleanupAttempted) {
+    cleanupApplyStatusCell.set("failed");
+    console.warn("[Extract] No valid Notes entries found for cleanup");
+  } else {
+    cleanupApplyStatusCell.set(allCleanupSucceeded ? "success" : "failed");
+  }
+
+  return anyCleanupSucceeded;
+}
+
+/**
+ * Build a list of indices to trash based on source selections.
+ * Excludes Notes modules (they are never trashed).
+ *
+ * @param sources - All extractable sources
+ * @param trashSelections - Map of source index to trash selection state
+ * @param selfIndex - Index of the extractor module (always included in trash list)
+ * @returns Array of indices to trash, sorted descending for safe removal
+ */
+function buildTrashList(
+  sources: ExtractableSource[],
+  trashSelections: Record<number, boolean>,
+  selfIndex: number,
+): number[] {
+  const indicesToTrash: number[] = [];
+
+  // Add selected source indices to trash list (excluding Notes - Notes is never trashed)
+  for (const source of sources) {
+    if (source.type === "notes") continue; // Never trash Notes
+    if (trashSelections[source.index] === true) {
+      indicesToTrash.push(source.index);
+    }
+  }
+
+  // Add self (extractor) index
+  if (selfIndex >= 0) {
+    indicesToTrash.push(selfIndex);
+  }
+
+  // Sort descending to preserve indices when removing
+  indicesToTrash.sort((a, b) => b - a);
+
+  return indicesToTrash;
+}
+
 /**
  * Handler to apply selected extractions - defined at module scope
  */
@@ -1047,9 +1318,9 @@ const applySelected = handler<
         const existingIndex = current.findIndex((e) => e?.type === moduleType);
 
         if (existingIndex >= 0) {
-          // Module exists - use Cell navigation to update fields
+          // Module exists - use helper to update fields
           for (const field of fields) {
-            // Get the primary field name (e.g., "notes" alias -> "content" primary)
+            // Get the primary field name for skip-check
             const actualFieldName = getPrimaryFieldName(
               field.fieldName,
               moduleType,
@@ -1057,9 +1328,9 @@ const applySelected = handler<
 
             // Skip Notes content extraction when cleanup is enabled
             // The cleanup will handle setting the final Notes content (with extracted data removed)
-            // If we don't skip, both extraction and cleanup try to set notes.content with different values
             if (
-              moduleType === "notes" && actualFieldName === "content" &&
+              moduleType === "notes" &&
+              actualFieldName === "content" &&
               cleanupEnabledValue
             ) {
               console.debug(
@@ -1068,105 +1339,25 @@ const applySelected = handler<
               continue;
             }
 
-            // Validate extracted value against schema (use actual field name)
-            const fieldSchema = getFieldSchema(
-              subCharms,
+            // Apply field using helper function
+            const success = applyFieldToModule(
+              parentSubCharmsCell,
+              existingIndex,
               moduleType,
-              actualFieldName,
-            );
-            const isValid = validateFieldValue(
+              field.fieldName,
               field.extractedValue,
-              fieldSchema,
+              subCharms,
             );
-
-            if (!isValid) {
-              const actualType = Array.isArray(field.extractedValue)
-                ? "array"
-                : typeof field.extractedValue;
-              console.warn(
-                `[Extract] Type mismatch for ${moduleType}.${actualFieldName}: ` +
-                  `expected ${fieldSchema?.type}, got ${actualType}. ` +
-                  `Value: ${
-                    JSON.stringify(field.extractedValue)
-                  }. Skipping field.`,
-              );
-              continue; // Skip this field
-            }
-
-            try {
-              // Only write if validation passed
-              // Cast needed: Cell.key() navigation loses type info for dynamic nested paths
-              // Use actualFieldName to write to the correct field (handles aliases)
-              (parentSubCharmsCell as Writable<SubCharmEntry[]>).key(
-                existingIndex,
-              )
-                .key("charm").key(
-                  actualFieldName,
-                ).set(field.extractedValue);
+            if (success) {
               anySuccess = true;
-            } catch (e) {
-              console.warn(
-                `Failed to set ${moduleType}.${actualFieldName}:`,
-                e,
-              );
             }
           }
         } else if (moduleType !== "notes") {
-          // Module doesn't exist - create it with initial values
-          try {
-            // Build initial values object from extracted fields
-            const initialValues: Record<string, unknown> = {};
-            for (const field of fields) {
-              // Get the primary field name (e.g., "notes" alias -> "content" primary)
-              const actualFieldName = getPrimaryFieldName(
-                field.fieldName,
-                moduleType,
-              );
-
-              // Validate before adding to initialValues (use actual field name)
-              const fieldSchema = getFieldSchema(
-                subCharms,
-                moduleType,
-                actualFieldName,
-              );
-              const isValid = validateFieldValue(
-                field.extractedValue,
-                fieldSchema,
-              );
-
-              if (!isValid) {
-                const actualType = Array.isArray(field.extractedValue)
-                  ? "array"
-                  : typeof field.extractedValue;
-                console.warn(
-                  `[Extract] Type mismatch for new module ${moduleType}.${actualFieldName}: ` +
-                    `expected ${fieldSchema?.type}, got ${actualType}. ` +
-                    `Value: ${
-                      JSON.stringify(field.extractedValue)
-                    }. Skipping field.`,
-                );
-                continue; // Skip this field
-              }
-
-              // Use actualFieldName to store in the correct field
-              initialValues[actualFieldName] = field.extractedValue;
-            }
-
-            // Only create module if we have at least one valid field
-            if (Object.keys(initialValues).length > 0) {
-              const newCharm = createSubCharm(moduleType, initialValues);
-              // Capture schema at creation time for dynamic discovery
-              const schema = getResultSchema(newCharm);
-              newEntries.push({
-                type: moduleType,
-                pinned: false,
-                charm: newCharm,
-                schema,
-              });
-              anySuccess = true;
-            }
-          } catch (e) {
-            console.warn(`Failed to create module ${moduleType}:`, e);
+          // Module doesn't exist - use helper to create it with initial values
+          const newEntry = createModuleWithFields(moduleType, fields, subCharms);
+          if (newEntry) {
+            newEntries.push(newEntry);
+            anySuccess = true;
           }
         }
       }
@@ -1184,150 +1375,20 @@ const applySelected = handler<
         return;
       }
 
-      // ===== Notes Cleanup: Dual-Approach Architecture =====
-      //
-      // PROBLEM: We need to update Notes.content from the Extractor module (cross-charm mutation).
-      //
-      // WHY TWO APPROACHES ARE NECESSARY:
-      //
-      // The correct CommonTools pattern for cross-charm mutations is Stream.send() (see docs/common/PATTERNS.md).
-      // Direct Cell.set() on another charm's cells throws WriteIsolationError. However, Stream handlers
-      // can be "lost" when accessing charms through reactive proxies in Writable<SubCharmEntry[]>.
-      //
-      // APPROACH 1: editContent.send() - Stream Handler (PREFERRED)
-      //   - Uses the Notes pattern's exposed Stream<{ detail: { value: string } }> handler
-      //   - This is the canonical cross-charm mutation pattern in CommonTools
-      //   - The handler (handleEditContent in notes/note.tsx) calls content.set() within the Notes charm's scope
-      //   - Guarantees UI reactivity: ct-code-editor subscriptions fire immediately
-      //   - WHY IT CAN FAIL: Stream handlers may not be accessible when the Notes charm is accessed
-      //     through notesEntry.charm (reactive proxy may strip the handler reference)
-      //
-      // APPROACH 2: Cell.key() Navigation (FALLBACK)
-      //   - Directly navigates through parentSubCharmsCell.key(notesIndex).key("charm").key("content")
-      //   - Sets the content field directly using Cell navigation (same underlying data as Approach 1)
-      //   - This works because we're navigating through our INPUT Cell (parentSubCharms), not crossing
-      //     charm boundaries (no WriteIsolationError)
-      //   - WHY IT WORKS: Cell.key() creates a new Cell reference to the same underlying data
-      //   - UI REACTIVITY: In practice, Lit's reactivity picks up the change without page refresh
-      //     (the ct-code-editor's $value binding still updates), though Stream.send is more reliable
-      //
-      // FAILURE MODES:
-      //   - If both approaches fail: cleanupApplyStatus -> "failed", user sees warning UI
-      //   - Extraction still succeeds (new modules created), only Notes cleanup fails
-      //   - User can manually edit Notes or retry extraction
-      //
-      // This dual-approach pattern is a pragmatic solution to the reactive proxy access issue.
-      // If Stream handler access could be guaranteed, Approach 1 alone would be sufficient.
-      //
-      if (cleanupEnabledValue && cleanedNotesValue !== undefined) {
-        // Get all Notes module indices that were used as extraction sources
-        const notesIndices = Object.keys(notesSnapshotMapValue || {}).map(
-          Number,
-        );
+      // Apply Notes cleanup using helper function
+      // See applyNotesCleanup for dual-approach architecture details
+      applyNotesCleanup({
+        parentSubCharmsCell,
+        current,
+        cleanupEnabledValue,
+        cleanedNotesValue,
+        notesSnapshotMapValue,
+        cleanupApplyStatusCell,
+      });
 
-        if (notesIndices.length === 0) {
-          cleanupApplyStatusCell.set("skipped");
-        } else {
-          let allCleanupSucceeded = true;
-          let anyCleanupAttempted = false;
-
-          // Apply cleanup to ALL selected Notes modules
-          for (const notesIndex of notesIndices) {
-            const notesEntry = current[notesIndex];
-            if (!notesEntry || notesEntry.type !== "notes") {
-              console.warn(
-                `[Extract] Notes entry at index ${notesIndex} not found or wrong type`,
-              );
-              allCleanupSucceeded = false;
-              continue;
-            }
-
-            anyCleanupAttempted = true;
-            let thisCleanupSucceeded = false;
-
-            // Approach 1: Try editContent.send (best for UI reactivity)
-            try {
-              const notesCharm = notesEntry.charm as {
-                editContent?: { send?: (data: unknown) => void };
-              };
-              if (notesCharm?.editContent?.send) {
-                notesCharm.editContent.send({
-                  detail: { value: cleanedNotesValue },
-                });
-                thisCleanupSucceeded = true;
-                console.debug(
-                  `[Extract] Applied Notes cleanup to index ${notesIndex} via editContent stream`,
-                );
-              }
-            } catch (e) {
-              console.warn(
-                `[Extract] editContent.send failed for index ${notesIndex}:`,
-                e,
-              );
-            }
-
-            // Approach 2: Fallback to Cell key navigation
-            if (!thisCleanupSucceeded) {
-              try {
-                // Cast needed: Cell.key() navigation loses type info for dynamic nested paths
-                (parentSubCharmsCell as Writable<SubCharmEntry[]>).key(
-                  notesIndex,
-                )
-                  .key("charm").key(
-                    "content",
-                  ).set(cleanedNotesValue);
-                thisCleanupSucceeded = true;
-                console.debug(
-                  `[Extract] Applied Notes cleanup to index ${notesIndex} via Cell key navigation`,
-                );
-              } catch (e) {
-                console.warn(
-                  `[Extract] Cell key navigation failed for index ${notesIndex}:`,
-                  e,
-                );
-              }
-            }
-
-            if (!thisCleanupSucceeded) {
-              allCleanupSucceeded = false;
-              console.warn(
-                `[Extract] All cleanup approaches failed for Notes at index ${notesIndex}`,
-              );
-            }
-          }
-
-          if (!anyCleanupAttempted) {
-            cleanupApplyStatusCell.set("failed");
-            console.warn("[Extract] No valid Notes entries found for cleanup");
-          } else {
-            cleanupApplyStatusCell.set(
-              allCleanupSucceeded ? "success" : "failed",
-            );
-          }
-        }
-      } else {
-        cleanupApplyStatusCell.set("skipped");
-      }
-
-      // Collect indices to trash (sources + self, excluding Notes)
-      const indicesToTrash: number[] = [];
-
-      // Add selected source indices to trash list (excluding Notes - Notes is never trashed)
-      for (const source of sourcesData) {
-        if (source.type === "notes") continue; // Never trash Notes
-        if (toTrash[source.index] === true) {
-          indicesToTrash.push(source.index);
-        }
-      }
-
-      // Find self (extractor) index - only trash if updates succeeded
+      // Build trash list using helper function
       const selfIndex = current.findIndex((e) => e?.type === "extractor");
-      if (selfIndex >= 0) {
-        indicesToTrash.push(selfIndex);
-      }
-
-      // Sort descending to preserve indices when removing
-      indicesToTrash.sort((a, b) => b - a);
+      const indicesToTrash = buildTrashList(sourcesData, toTrash, selfIndex);
 
       // Move items to trash
       for (const idx of indicesToTrash) {
