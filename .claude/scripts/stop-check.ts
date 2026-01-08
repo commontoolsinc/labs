@@ -48,15 +48,10 @@ const branchName = new TextDecoder().decode(branch.stdout).trim();
 // Count changed files
 const changedFiles = changes.split("\n").filter((l) => l.trim()).length;
 
-// Provide context but don't block
+// Provide context via systemMessage (shown to user, doesn't block)
 console.log(JSON.stringify({
-  decision: undefined, // Don't block, just provide context
-  hookSpecificOutput: {
-    hookEventName: "Stop",
-    additionalContext:
-      `There are ${changedFiles} uncommitted change(s) on branch '${branchName}'. ` +
-      `If you made code changes, consider running \`deno task check\` and tests before finishing.`,
-  },
+  systemMessage:
+    `Note: ${changedFiles} uncommitted change(s) on branch '${branchName}'.`,
 }));
 
 Deno.exit(0);
