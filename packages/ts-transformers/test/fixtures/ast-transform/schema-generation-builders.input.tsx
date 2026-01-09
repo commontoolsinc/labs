@@ -24,7 +24,7 @@ export default recipe<TodoState>((state) => {
           Add
         </button>
         <ul>
-          {state.items.map((item) => <li key={item}>{item}</li>)}
+          {state.items.map((item, index) => <li key={index}>{item}</li>)}
         </ul>
       </div>
     ),

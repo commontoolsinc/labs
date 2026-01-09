@@ -86,7 +86,7 @@ describe("Conflict Reproduction", () => {
     const conflictRepro = recipe<{ items: Item[] }>(
       "Conflict Repro",
       ({ items }) => {
-        const sequence = cell();
+        const sequence = cell<number>();
 
         // Minimal repro: Removing the lift and the map removes the conflict
         lift((item: Item[]) => item.map((_) => ({})))(items);
@@ -159,7 +159,7 @@ describe("Conflict Reproduction", () => {
     const conflictReproNoLift = recipe<{ items: Item[] }>(
       "Conflict Repro No Lift",
       ({ items }) => {
-        const sequence = cell();
+        const sequence = cell<number>();
 
         // NO lift - this should eliminate conflicts
 

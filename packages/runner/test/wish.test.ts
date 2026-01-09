@@ -39,7 +39,7 @@ describe("wish built-in", () => {
   });
 
   it("resolves the well known all charms cell", async () => {
-    const allCharmsCell = runtime.getCellFromEntityId(
+    const allCharmsCell = runtime.getCellFromEntityId<unknown[]>(
       space,
       { "/": ALL_CHARMS_ID },
       [],
@@ -395,7 +395,7 @@ describe("wish built-in", () => {
 
   describe("object-based wish syntax", () => {
     it("resolves allCharms using tag parameter", async () => {
-      const allCharmsCell = runtime.getCellFromEntityId(
+      const allCharmsCell = runtime.getCellFromEntityId<unknown[]>(
         space,
         { "/": ALL_CHARMS_ID },
         [],
@@ -436,7 +436,7 @@ describe("wish built-in", () => {
     });
 
     it("resolves nested paths using tag and path parameters", async () => {
-      const allCharmsCell = runtime.getCellFromEntityId(
+      const allCharmsCell = runtime.getCellFromEntityId<unknown[]>(
         space,
         { "/": ALL_CHARMS_ID },
         [],
