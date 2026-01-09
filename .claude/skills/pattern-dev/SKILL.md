@@ -24,15 +24,9 @@ Use this skill when:
 
 Before starting pattern development:
 
-1. **Know the ct CLI** - Use the **ct** skill for ct command reference
-2. **Read the core documentation** - These two docs are essential; read them before starting:
-   - `docs/common/PATTERNS.md` - Main tutorial with examples and common patterns
-   - `docs/common/REACTIVITY.md` - Cell system, computed(), lift(), frame-based execution
-3. **Reference docs as needed:**
-   - `docs/common/COMPONENTS.md` - UI components and bidirectional binding
-   - `docs/common/TYPES_AND_SCHEMAS.md` - Type system, Writable<>, defaults
-   - `docs/development/DEBUGGING.md` - Error reference and troubleshooting
-4. **Check example patterns** - Look in `packages/patterns/` for working examples
+1. **Know the ct CLI** - Run `ct --help` to learn the operations
+2. **Check example patterns** - Look in `packages/patterns/` for useful working examples
+3. **Read the core documentation** - Explore the top-level `docs/` folder
 
 ## Quick Decision Tree
 

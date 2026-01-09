@@ -4,7 +4,9 @@
 
 Four contexts where types appear differently:
 
-```typescript
+```tsx
+import { Default, Writable, pattern, UI } from 'commontools';
+
 interface ShoppingItem {
   title: string;
   done: Default<boolean, false>;
