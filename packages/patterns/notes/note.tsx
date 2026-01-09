@@ -107,7 +107,7 @@ const handleNewBacklink = handler<
   },
   {
     mentionable: Writable<MentionableCharm[]>;
-    allCharms: Writable<MinimalCharm[]>;
+    allCharms: Writable<any[]>;
   }
 >(({ detail }, { mentionable, allCharms }) => {
   console.log("new charm", detail.text, detail.charmId);
@@ -182,7 +182,7 @@ const closeMenu = handler<void, { menuOpen: Writable<boolean> }>(
 const createNewNote = handler<
   void,
   {
-    allCharms: Writable<MinimalCharm[]>;
+    allCharms: Writable<any[]>;
     parentNotebook: Writable<NotebookCharm | null>;
   }
 >((_, { allCharms, parentNotebook }) => {
@@ -281,7 +281,7 @@ const translateFn = (
 // Menu: All Notes (find existing only - can't create due to circular imports)
 const menuAllNotebooks = handler<
   void,
-  { menuOpen: Writable<boolean>; allCharms: Writable<MinimalCharm[]> }
+  { menuOpen: Writable<boolean>; allCharms: Writable<any[]> }
 >((_, { menuOpen, allCharms }) => {
   menuOpen.set(false);
   const charms = allCharms.get();
