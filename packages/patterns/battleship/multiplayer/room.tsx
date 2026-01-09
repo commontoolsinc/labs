@@ -40,7 +40,7 @@ import {
   SHIP_NAMES,
   ShotsData,
   SquareState,
-} from "./battleship-types.ts";
+} from "./types.ts";
 
 // =============================================================================
 // GAME ROOM PATTERN
