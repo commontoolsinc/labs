@@ -272,7 +272,7 @@ const translateFn = (
 
   return computed(() => {
     if (genResult.pending) return undefined;
-    if (genResult.result == null) return "Error occured";
+    if (genResult.result == null) return "Error occurred";
     return genResult.result;
   });
 };
