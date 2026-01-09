@@ -1,4 +1,10 @@
-import { type Immutable, isObject, isRecord } from "@commontools/utils/types";
+import {
+  type Immutable,
+  isFunction,
+  isInstance,
+  isObject,
+  isRecord,
+} from "@commontools/utils/types";
 import type { MemorySpace } from "@commontools/memory/interface";
 import { getTopFrame, recipe } from "./builder/recipe.ts";
 import { createNodeFactory } from "./builder/module.ts";
@@ -1738,38 +1744,73 @@ export function convertCellsToLinks(
     };
   }
 
+  // Early-return cases
   if (isCellResultForDereferencing(value)) {
-    value = getCellOrThrow(value).getAsLink(options);
+    return getCellOrThrow(value).getAsLink(options);
   } else if (isCell(value)) {
-    value = value.getAsLink(options);
-  } else if (isRecord(value) || typeof value === "function") {
-    // Only add here, otherwise they are literals or already cells:
-    seen.set(value, path);
+    return value.getAsLink(options);
+  } else if (!(isRecord(value) || isFunction(value))) {
+    return value;
+  }
 
-    // Process toJSON if it exists like JSON.stringify does.
-    if ("toJSON" in value && typeof value.toJSON === "function") {
-      value = value.toJSON();
-      if (!isRecord(value)) return value;
-      // Fall through to process, so even if there is a .toJSON on the
-      // result we don't call it again.
-    } else if (typeof value === "function") {
-      // Handle functions without toJSON like JSON.stringify does.
-      value = undefined;
+  // At this point `value` is a non-`null` object(ish) thing.
+
+  seen.set(value, path); // ...which needs to be tracked for circularity.
+
+  // Handle functions and instances, by converting to JSON-encodable values if
+  // possible, and throwing if not. We do these conversions and let the
+  // converted value (if any) flow down into the subsequent handlers.
+  //
+  // TODO(@danfuzz): This section is very similar to (and has the same puropose
+  // as) a section of `normalizeAndDiff()` in `data-updating.ts`. The two
+  // versions should probably be extracted to a common location.
+  const valueIsFunction = isFunction(value);
+  const valueIsInstance = isInstance(value);
+  if (valueIsFunction || valueIsInstance) {
+    const typeName = valueIsFunction ? "function" : "instance";
+    if (!("toJSON" in value && typeof value.toJSON === "function")) {
+      throw new Error(`Cannot store ${typeName} per se (needs to have a \`toJSON()\` method)`);
     }
 
-    // Recursively process arrays and objects.
-    if (Array.isArray(value)) {
-      value = value.map((value, index) =>
-        convertCellsToLinks(value, options, [...path, String(index)], seen)
-      );
-    } else {
-      value = Object.fromEntries(
-        Object.entries(value).map(([key, value]) => [
-          key,
-          convertCellsToLinks(value, options, [...path, String(key)], seen),
-        ]),
-      );
+    // Note: This assumes that `toJSON()` won't ever return anything that
+    // requires any of the special handling above this handler block (e.g.,
+    // we aren't expecting it to turn out to be a `Cell`).
+    value = value.toJSON();
+
+    if (isFunction(value) || isInstance(value)) {
+      // Give up when faced with a `toJSON()` result which would need to be
+      // _directly_ called upon to `toJSON()` itself. (We can relax this
+      // restriction if needed.)
+      throw new Error(`\`toJSON()\` on ${typeName} returned something other than a \`JSONValue\``);
     }
+
+    // ...and fall through to handle whatever sort of thing the converted value
+    // turns out to be.
+  }
+
+  // Process toJSON if it exists like JSON.stringify does.
+  if ("toJSON" in value && typeof value.toJSON === "function") {
+    value = value.toJSON();
+    if (!isRecord(value)) return value;
+    // Fall through to process, so even if there is a .toJSON on the
+    // result we don't call it again.
+  } else if (typeof value === "function") {
+    // Handle functions without toJSON like JSON.stringify does.
+    value = undefined;
+  }
+
+  // Recursively process arrays and objects.
+  if (Array.isArray(value)) {
+    value = value.map((value, index) =>
+      convertCellsToLinks(value, options, [...path, String(index)], seen)
+    );
+  } else {
+    value = Object.fromEntries(
+      Object.entries(value).map(([key, value]) => [
+        key,
+        convertCellsToLinks(value, options, [...path, String(key)], seen),
+      ]),
+    );
   }
 
   return value;

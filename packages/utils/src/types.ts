@@ -14,7 +14,9 @@ export function isRecord(
  * @param value - The value to check
  * @returns True if the value is a function
  */
-export function isFunction(value: unknown): value is function {
+export function isFunction(
+  value: unknown,
+): value is (...args: unknown[]) => unknown {
   return typeof value === "function";
 }
 
