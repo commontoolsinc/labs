@@ -889,20 +889,25 @@ export declare const CELL_LIKE: unique symbol;
  * Helper type to transform Cell<T> to Opaque<T> in pattern/lift/handler inputs.
  * Preserves Stream<T> since Streams are callable interfaces (.send()), not data containers.
  *
- * Implementation uses two-phase approach:
- * 1. Outer `T extends any ? ... : never` forces distribution over unions (needed for
- *    optional properties like `title?: Writable<string>` which expand to `Writable<string> | undefined`)
- * 2. Inner non-distributive conditionals ([T] extends [...]) prevent distribution over
- *    intersection types (needed for OpaqueRef's `OpaqueCell<T> & T` intersections)
+ * Implementation is non-distributive by default to preserve union types like RenderNode
+ * that intentionally contain AnyBrandedCell as a data variant. However, it distributes
+ * specifically for "Cell | undefined" patterns (optional cell properties) so that
+ * `title?: Writable<string>` correctly strips to `title?: string`.
  *
  * See packages/api/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
  */
-export type StripCell<T> = T extends any ? StripCellInner<T> : never;
+export type StripCell<T> =
+  // Distribute for optional cell properties: "SomeCell | undefined" pattern
+  [T] extends [AnyBrandedCell<any> | undefined]
+    ? (T extends any ? StripCellInner<T> : never)
+    // Non-distributive for everything else (preserves unions like RenderNode)
+    : StripCellInner<T>;
 
 type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - it's a callable interface
   : [T] extends [AnyBrandedCell<infer U>] ? StripCell<U>
   : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
   : [T] extends [Array<infer U>] ? StripCell<U>[]
+  // deno-lint-ignore ban-types
   : [T] extends [Function] ? T // Preserve function types
   : [T] extends [object] ? { [K in keyof T]: StripCell<T[K]> }
   : T;
