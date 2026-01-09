@@ -1,3 +1,5 @@
+export { CastValidationTransformer } from "./cast-validation.ts";
 export { OpaqueRefJSXTransformer } from "./opaque-ref-jsx.ts";
+export { PatternContextValidationTransformer } from "./pattern-context-validation.ts";
 export { SchemaInjectionTransformer } from "./schema-injection.ts";
 export { SchemaGeneratorTransformer } from "./schema-generator.ts";

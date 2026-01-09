@@ -166,8 +166,13 @@ export class Engine extends EventTarget implements Harness {
       runtimeModules: Engine.runtimeModuleNames(),
       bundleExportAll: true,
       getTransformedProgram: options.getTransformedProgram,
-      beforeTransformers: (program) =>
-        new CommonToolsTransformerPipeline().toFactories(program),
+      beforeTransformers: (program) => {
+        const pipeline = new CommonToolsTransformerPipeline();
+        return {
+          factories: pipeline.toFactories(program),
+          getDiagnostics: () => pipeline.getDiagnostics(),
+        };
+      },
     });
 
     if (!options.noRun) {

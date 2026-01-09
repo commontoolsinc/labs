@@ -101,8 +101,8 @@ const createNoteAndOpen = handler<
     isHidden: true,
     noteId: generateId(),
   });
-  allCharms.push(newNote as unknown as NoteCharm);
-  notes.push(newNote as unknown as NoteCharm);
+  allCharms.push(newNote);
+  notes.push(newNote);
 
   const shouldNavigate = !usedCreateAnotherNote.get();
 
@@ -134,8 +134,8 @@ const createNoteAndContinue = handler<
     isHidden: true,
     noteId: generateId(),
   });
-  allCharms.push(newNote as unknown as NoteCharm);
-  notes.push(newNote as unknown as NoteCharm);
+  allCharms.push(newNote);
+  notes.push(newNote);
   // Mark that "Create Another" was used
   usedCreateAnotherNote.set(true);
   // Keep modal open, just clear the title for the next note
@@ -188,7 +188,7 @@ const _handleCharmDrop = handler<
   sourceCell.key("isHidden").set(true);
 
   // Add to notebook - push cell reference, not value, to maintain charm identity
-  notes.push(sourceCell as unknown as NoteCharm);
+  notes.push(sourceCell);
 });
 
 // Handler for dropping items onto the current notebook's card
@@ -433,8 +433,8 @@ const createNestedNotebookAndOpen = handler<
   const title = newNestedNotebookTitle.get() || "New Notebook";
   // Pass isHidden: true at creation time (like Note does) to hide from default-app
   const nb = Notebook({ title, notes: [], isHidden: true });
-  allCharms.push(nb as unknown as NoteCharm);
-  notes.push(nb as unknown as NoteCharm);
+  allCharms.push(nb);
+  notes.push(nb);
 
   const shouldNavigate = !usedCreateAnotherNotebook.get();
 
@@ -465,8 +465,8 @@ const createNestedNotebookAndContinue = handler<
   const title = newNestedNotebookTitle.get() || "New Notebook";
   // Pass isHidden: true at creation time (like Note does) to hide from default-app
   const nb = Notebook({ title, notes: [], isHidden: true });
-  allCharms.push(nb as unknown as NoteCharm);
-  notes.push(nb as unknown as NoteCharm);
+  allCharms.push(nb);
+  notes.push(nb);
   // Mark that "Create Another" was used
   usedCreateAnotherNotebook.set(true);
   newNestedNotebookTitle.set("");
@@ -559,7 +559,7 @@ const duplicateSelectedNotes = handler<
         content: original.content ?? "",
         isHidden: true,
         noteId: generateId(),
-      }) as unknown as NoteCharm);
+      }));
     }
   }
   allCharms.push(...copies);
@@ -846,7 +846,7 @@ const createNotebookFromPrompt = handler<
     notes: selectedItems,
     isHidden: true,
   });
-  allCharms.push(newNotebook as unknown as MinimalCharm);
+  allCharms.push(newNotebook);
 
   if (action === "move") {
     // For move: remove selected items from existing notebooks and this notebook
@@ -865,10 +865,10 @@ const createNotebookFromPrompt = handler<
 
     // Remove selected items from this notebook, then add new notebook
     const filtered = notesList.filter((n: any) => !shouldRemove(n));
-    notes.set([...filtered, newNotebook as unknown as NoteCharm]);
+    notes.set([...filtered, newNotebook]);
   } else {
     // For add: just add the new notebook as sibling
-    notes.push(newNotebook as unknown as NoteCharm);
+    notes.push(newNotebook);
   }
   // For add: notes are already in the new notebook, no removal needed
 
@@ -994,8 +994,8 @@ const handleCreateNote = handler<
     isHidden: true,
     noteId: generateId(),
   });
-  allCharms.push(newNote as unknown as NoteCharm);
-  notes.push(newNote as unknown as NoteCharm);
+  allCharms.push(newNote);
+  notes.push(newNote);
   return newNote;
 });
 
@@ -1012,7 +1012,7 @@ const handleCreateNotes = handler<
       content: data.content,
       isHidden: true,
       noteId: generateId(),
-    }) as unknown as NoteCharm);
+    }));
   }
   allCharms.push(...created);
   notes.push(...created);
@@ -1042,7 +1042,7 @@ const handleCreateNotebook = handler<
         content: data.content,
         isHidden: true,
         noteId: generateId(),
-      }) as unknown as NoteCharm);
+      }));
     }
   }
 
@@ -1053,7 +1053,7 @@ const handleCreateNotebook = handler<
   });
 
   // Batch push all items at once
-  allCharms.push(...notesToAdd, newNotebook as unknown as NoteCharm);
+  allCharms.push(...notesToAdd, newNotebook);
   return newNotebook;
 });
 
@@ -1109,7 +1109,7 @@ const Notebook = pattern<Input, Output>(
       allCharms.filter((charm: any) => {
         const name = charm?.[NAME];
         return typeof name === "string" && name.startsWith("📓");
-      }) as unknown as NotebookCharm[]
+      })
     );
 
     // Find parent notebooks (notebooks that contain this notebook in their notes)

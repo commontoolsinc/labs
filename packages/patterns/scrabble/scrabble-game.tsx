@@ -738,10 +738,7 @@ const dropOnBoard = handler<
       return;
     }
     if (sourceLetter.isBlank && !sourceLetter.char) {
-      const win = globalThis as unknown as {
-        prompt?: (msg: string) => string | null;
-      };
-      const chosenChar = win.prompt?.(
+      const chosenChar = (globalThis as any).prompt?.(
         "Enter a letter for this blank tile (A-Z):",
       );
       if (!chosenChar || !/^[A-Za-z]$/.test(chosenChar)) {

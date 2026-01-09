@@ -424,12 +424,7 @@ const adjustVendorResponse = handler(
     if (topic.length === 0) {
       return;
     }
-    const rawSource = context.vendors as unknown as {
-      getRaw?: () => unknown;
-    };
-    const currentValue = typeof rawSource.getRaw === "function"
-      ? rawSource.getRaw()
-      : context.vendors.get();
+    const currentValue = context.vendors.get();
     const current = sanitizeVendorList(currentValue);
     let mutated = false;
     let trackedTopic: string | null = null;

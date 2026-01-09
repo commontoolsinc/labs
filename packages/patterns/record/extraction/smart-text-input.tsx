@@ -687,8 +687,8 @@ export function SmartTextInput(
 
   return {
     value: $value,
-    pending: isPending as unknown as boolean,
-    error: errorMessage as unknown as string | null,
+    pending: isPending,
+    error: errorMessage,
     ui: {
       complete,
       textArea,

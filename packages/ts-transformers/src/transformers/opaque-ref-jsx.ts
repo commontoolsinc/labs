@@ -2,8 +2,8 @@ import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
   createDataFlowAnalyzer,
-  detectCallKind,
   isEventHandlerJsxAttribute,
+  isInsideSafeCallbackWrapper,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import { rewriteExpression } from "./opaque-ref/mod.ts";
@@ -16,37 +16,6 @@ export class OpaqueRefJSXTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
     return transform(context);
   }
-}
-
-function isInsideDeriveCallback(
-  node: ts.Node,
-  checker: ts.TypeChecker,
-): boolean {
-  let current: ts.Node | undefined = node.parent;
-
-  while (current) {
-    // Check if we're inside an arrow function or function expression
-    if (
-      ts.isArrowFunction(current) ||
-      ts.isFunctionExpression(current)
-    ) {
-      // Check if this function is an argument to a derive call
-      const functionParent = current.parent;
-      if (
-        functionParent &&
-        ts.isCallExpression(functionParent) &&
-        functionParent.arguments.includes(current as ts.Expression)
-      ) {
-        const callKind = detectCallKind(functionParent, checker);
-        if (callKind?.kind === "derive") {
-          return true;
-        }
-      }
-    }
-    current = current.parent;
-  }
-
-  return false;
 }
 
 function transform(context: TransformationContext): ts.SourceFile {
@@ -64,9 +33,10 @@ function transform(context: TransformationContext): ts.SourceFile {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
-      // Skip if inside a derive callback
-      const insideDeriveCallback = isInsideDeriveCallback(node, checker);
-      if (insideDeriveCallback) {
+      // Skip if inside a safe callback wrapper (derive, computed, action, lift, handler)
+      // These contexts already provide reactive tracking, so JSX expressions
+      // don't need to be wrapped in derive.
+      if (isInsideSafeCallbackWrapper(node, checker)) {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
