@@ -834,8 +834,12 @@ describe("generateObject with tools", () => {
           prompt: testPrompt,
           schema: resultSchema,
           tools: {
-            listItems: patternTool(listItems, { items: itemsData }) as unknown as BuiltInLLMTool,
-            countItems: patternTool(countItems, { items: itemsData }) as unknown as BuiltInLLMTool,
+            listItems: patternTool(listItems, {
+              items: itemsData,
+            }) as unknown as BuiltInLLMTool,
+            countItems: patternTool(countItems, {
+              items: itemsData,
+            }) as unknown as BuiltInLLMTool,
           },
         });
         return result;
@@ -996,7 +1000,9 @@ describe("generateObject with tools", () => {
               description: "Fetch data from source",
               handler: fetchData({}),
             },
-            analyzeData: patternTool(analyzeData, { data: dataCell }) as unknown as BuiltInLLMTool,
+            analyzeData: patternTool(analyzeData, {
+              data: dataCell,
+            }) as unknown as BuiltInLLMTool,
           },
         });
         return result;
