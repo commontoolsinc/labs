@@ -1263,7 +1263,7 @@ const selectDayFromCalendar = handler<
 });
 
 // Handler to change month
-const changeMonth = handler<
+const _changeMonth = handler<
   { detail: { value: number } },
   { currentDate: Writable<string> }
 >(({ detail }, { currentDate }) => {
@@ -1273,7 +1273,7 @@ const changeMonth = handler<
 });
 
 // Handler to change year
-const changeYear = handler<
+const _changeYear = handler<
   { detail: { value: number } },
   { currentDate: Writable<string> }
 >(({ detail }, { currentDate }) => {
@@ -1987,7 +1987,7 @@ const deleteNote = handler<
 });
 
 // Handler to enable inline editing of a note
-const enableNoteEditing = handler<
+const _enableNoteEditing = handler<
   never,
   { noteId: string; editingNoteId: Writable<string> }
 >((_event, { noteId, editingNoteId }) => {
@@ -3285,7 +3285,7 @@ export default recipe<Input, Output>(
     );
 
     // Track which note is being edited inline (empty string = none)
-    const editingNoteId = Writable.of<string>("");
+    const _editingNoteId = Writable.of<string>("");
 
     // Track if this is a new event (text was empty when modal opened)
     const isNewEventCell = Writable.of<boolean>(false);
