@@ -246,7 +246,7 @@ export const CustomFieldModule = recipe<
                 type="checkbox"
                 checked={isChecked}
                 onClick={toggleBoolean({
-                  value: value as unknown as Writable<string>,
+                  value,
                 })}
                 style={{ width: "18px", height: "18px" }}
               />
@@ -263,7 +263,7 @@ export const CustomFieldModule = recipe<
               {ifElse(
                 computed(() => !!safeUrl),
                 <a
-                  href={safeUrl as unknown as string}
+                  href={safeUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{

@@ -1,6 +1,7 @@
 export { TransformationContext } from "./context.ts";
 export type {
   DiagnosticInput,
+  DiagnosticSeverity,
   SchemaHint,
   SchemaHints,
   TransformationDiagnostic,

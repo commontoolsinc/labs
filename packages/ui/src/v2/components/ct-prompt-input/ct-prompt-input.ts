@@ -1,7 +1,7 @@
 import { css, html, nothing, render } from "lit";
 import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
-import { type Cell, NAME } from "@commontools/runner";
+import { type CellHandle, NAME } from "@commontools/runtime-client";
 import { BaseElement } from "../../core/base-element.ts";
 import {
   applyThemeToElement,
@@ -50,9 +50,9 @@ export interface ModelItem {
  * @attr {boolean} autoResize - Whether textarea auto-resizes to fit content (default: true)
  * @attr {number} rows - Initial number of rows for the textarea (default: 1)
  * @attr {number} maxRows - Maximum number of rows for auto-resize (default: 10)
- * @attr {Cell<MentionableArray>} mentionable - Array of mentionable items for @-mention autocomplete
+ * @attr {CellHandle<MentionableArray>} mentionable - Array of mentionable items for @-mention autocomplete
  * @attr {ModelItem[]} modelItems - Array of model options for the model picker
- * @attr {Cell<string>|string} model - Selected model value (supports Cell binding)
+ * @attr {CellHandle<string>|string} model - Selected model value (supports Cell binding)
  *
  * @fires ct-send - Fired when send button is clicked or Enter is pressed. detail: { text: string, attachments: PromptAttachment[], mentions: [] }
  * @fires ct-stop - Fired when stop button is clicked during pending state
@@ -333,9 +333,9 @@ export class CTPromptInput extends BaseElement {
         declare maxRows: number;
         declare size: string;
         declare variant: string;
-        declare mentionable: Cell<MentionableArray> | null;
-        declare modelItems: ModelItem[];
-        declare model: Cell<string> | string | null;
+        declare mentionable: CellHandle<MentionableArray> | null;
+        declare modelItems: Array<ModelItem | undefined>;
+        declare model: CellHandle<string> | string | null;
 
         @consume({ context: themeContext, subscribe: true })
         @property({ attribute: false })
@@ -355,11 +355,9 @@ export class CTPromptInput extends BaseElement {
           getContent: () => this.value,
         });
 
-        private _changeGroup = crypto.randomUUID();
         // Model cell controller for binding
         private _modelController = createCellController<string>(this, {
           timing: { strategy: "immediate" },
-          changeGroup: this._changeGroup,
         });
 
         // Overlay management for mentions dropdown (rendered in body)
@@ -632,7 +630,7 @@ export class CTPromptInput extends BaseElement {
          */
         private _insertMentionAtCursor(
           _markdown: string,
-          mentionCell: Cell<Mentionable>,
+          mentionCell: CellHandle<Mentionable>,
         ): void {
           const textarea = this._textareaElement as HTMLTextAreaElement;
           if (!textarea) return;
@@ -650,7 +648,7 @@ export class CTPromptInput extends BaseElement {
           const name = mentionCell.get()?.[NAME] || "Unknown";
 
           // Get the link in /of: format
-          const link = mentionCell.resolveAsCell().getAsNormalizedFullLink();
+          const link = mentionCell.ref();
           const handle = link.id || "";
           const pathSegments = link.path || [];
 
@@ -752,12 +750,15 @@ export class CTPromptInput extends BaseElement {
                         ?disabled="${this.disabled || this.pending}"
                         title="Select model"
                       >
-                        ${this.modelItems.map((item) =>
-                          html`
-                            <option value="${item.value}">
-                              ${item.label}
-                            </option>
-                          `
+                        ${(this.modelItems.filter(Boolean) as ModelItem[]).map(
+                          (
+                            item,
+                          ) =>
+                            html`
+                              <option value="${item.value}">
+                                ${item.label}
+                              </option>
+                            `,
                         )}
                       </select>
                     `

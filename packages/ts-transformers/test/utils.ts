@@ -3,6 +3,7 @@ import { join } from "@std/path";
 import { StaticCacheFS } from "@commontools/static";
 import {
   CommonToolsTransformerPipeline,
+  TransformationDiagnostic,
   transformCtDirective,
 } from "../src/mod.ts";
 import { assert } from "@std/assert";
@@ -531,15 +532,233 @@ export async function checkWouldTransform(
   source: string,
   types: Record<string, string> = {},
 ): Promise<boolean> {
-  try {
-    await transformSource(source, { mode: "error", types });
-    return false;
-  } catch {
-    return true;
-  }
+  // Use validateSource to check if there are any transformation diagnostics
+  const { diagnostics } = await validateSource(source, {
+    mode: "error",
+    types,
+  });
+  // If there are any diagnostics, transformation would be needed
+  return diagnostics.length > 0;
 }
 
 transformSource.checkWouldTransform = checkWouldTransform;
+
+/**
+ * Validates source code and returns any diagnostics from the transformer pipeline.
+ * Unlike transformSource, this function does not throw on errors but returns them.
+ */
+export async function validateSource(
+  source: string,
+  options: TransformOptions = {},
+): Promise<{
+  diagnostics: readonly TransformationDiagnostic[];
+  output: string;
+}> {
+  const fileName = "/test.tsx";
+  const result = await validateFiles({ [fileName]: source }, options);
+  return {
+    diagnostics: result.diagnostics,
+    output: result.outputs[fileName] ?? "",
+  };
+}
+
+/**
+ * Validates multiple files and returns diagnostics from the transformer pipeline.
+ */
+export async function validateFiles(
+  inFiles: Record<string, string>,
+  options: TransformOptions = {},
+): Promise<{
+  diagnostics: readonly TransformationDiagnostic[];
+  outputs: Record<string, string>;
+}> {
+  const {
+    mode = "transform",
+    types = {},
+    logger,
+  } = options;
+  if (!envTypesCache) {
+    envTypesCache = await loadEnvironmentTypes();
+  }
+  if (!sourceFileCache) {
+    sourceFileCache = new Map();
+  }
+
+  // Pretransform
+  const files = Object.entries(inFiles).reduce((files, [key, value]) => {
+    files[key] = transformCtDirective(value);
+    return files;
+  }, {} as Record<string, string>);
+
+  // Match compiler options from deno.json for consistent type-checking
+  const compilerOptions: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ES2020,
+    module: ts.ModuleKind.CommonJS,
+    jsx: ts.JsxEmit.React,
+    jsxFactory: "h",
+    strict: true,
+    noImplicitAny: true,
+    strictNullChecks: true,
+    strictFunctionTypes: true,
+    strictBindCallApply: true,
+    strictPropertyInitialization: true,
+    noImplicitThis: true,
+    noImplicitReturns: true,
+    noFallthroughCasesInSwitch: true,
+    noUncheckedIndexedAccess: true,
+    noImplicitOverride: true,
+  };
+
+  // Merge environment types and custom types
+  const allTypes: Record<string, string> = {
+    ...types,
+  };
+
+  // Add environment types with .d.ts extension
+  for (const [key, value] of Object.entries(envTypesCache)) {
+    allTypes[`${key}.d.ts`] = value;
+  }
+
+  const host: ts.CompilerHost = {
+    getSourceFile: (name) => {
+      const isTypeDefFile = !files[name] && (
+        name === "lib.d.ts" ||
+        name.endsWith("/lib.d.ts") ||
+        allTypes[name] ||
+        (baseNameFromPath(name) && allTypes[baseNameFromPath(name)!])
+      );
+
+      if (isTypeDefFile && sourceFileCache!.has(name)) {
+        return sourceFileCache!.get(name);
+      }
+
+      let sourceText: string | undefined;
+
+      if (files[name] !== undefined) {
+        sourceText = files[name];
+      } else if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
+        sourceText = allTypes["es2023.d.ts"] || "";
+      } else if (allTypes[name]) {
+        sourceText = allTypes[name];
+      } else {
+        const baseName = baseNameFromPath(name);
+        if (baseName && allTypes[baseName]) {
+          sourceText = allTypes[baseName];
+        }
+      }
+
+      if (sourceText === undefined) {
+        return undefined;
+      }
+
+      const sourceFile = ts.createSourceFile(
+        name,
+        sourceText,
+        compilerOptions.target!,
+        true,
+      );
+
+      if (isTypeDefFile) {
+        sourceFileCache!.set(name, sourceFile);
+      }
+
+      return sourceFile;
+    },
+    writeFile: () => {},
+    getCurrentDirectory: () => "/",
+    getDirectories: () => [],
+    fileExists: (name) => {
+      if (files[name] !== undefined) return true;
+      if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) return true;
+      if (allTypes[name]) return true;
+      const baseName = baseNameFromPath(name);
+      if (baseName && allTypes[baseName]) return true;
+      return false;
+    },
+    readFile: (name) => {
+      if (files[name] !== undefined) return files[name];
+      if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
+        return allTypes["es2023.d.ts"];
+      }
+      if (allTypes[name]) return allTypes[name];
+      const baseName = baseNameFromPath(name);
+      if (baseName && allTypes[baseName]) return allTypes[baseName];
+      return undefined;
+    },
+    getCanonicalFileName: (name) => name,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => "\n",
+    getDefaultLibFileName: () => "lib.d.ts",
+    resolveModuleNames: (moduleNames) => {
+      return moduleNames.map((name) => {
+        if (name === "commontools" && types["commontools.d.ts"]) {
+          return {
+            resolvedFileName: "commontools.d.ts",
+            extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          };
+        }
+        if (name === "@commontools/common" && types["commontools.d.ts"]) {
+          return {
+            resolvedFileName: "commontools.d.ts",
+            extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          };
+        }
+        return undefined;
+      });
+    },
+    resolveTypeReferenceDirectives: (typeDirectiveNames) =>
+      typeDirectiveNames.map((directive) => {
+        const name = typeof directive === "string"
+          ? directive
+          : directive.fileName;
+        if (allTypes[name]) {
+          return {
+            primary: true,
+            resolvedFileName: name,
+            extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          };
+        }
+        return undefined;
+      }),
+  };
+
+  const typeDefFiles = Object.keys(allTypes).filter((name) =>
+    name.endsWith(".d.ts")
+  );
+  const rootFiles = [...Object.keys(files), ...typeDefFiles];
+
+  const program = ts.createProgram(rootFiles, compilerOptions, host);
+  const pipeline = new CommonToolsTransformerPipeline({ mode, logger });
+
+  const outputs: Record<string, string> = {};
+  for (const fileName of Object.keys(files)) {
+    const sourceFile = program.getSourceFile(fileName);
+    assert(
+      sourceFile,
+      "Expected virtual source file to be present in program",
+    );
+    const result = ts.transform(sourceFile, pipeline.toFactories(program));
+    const printer = ts.createPrinter({
+      newLine: ts.NewLineKind.LineFeed,
+      removeComments: false,
+    });
+    const transformedFile = result.transformed[0];
+    assert(
+      transformedFile,
+      "Expected transformer pipeline to return a source file",
+    );
+    outputs[fileName] = printer.printFile(transformedFile);
+    result.dispose?.();
+  }
+
+  return {
+    diagnostics: pipeline.getDiagnostics(),
+    outputs,
+  };
+}
 
 export async function loadFixture(path: string): Promise<string> {
   const fixturesDir = join(import.meta.dirname!, "fixtures");

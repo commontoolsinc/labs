@@ -6,7 +6,10 @@ const ENVIRONMENT = PRODUCTION ? "production" : "development";
 const config: Config = {
   entries: [
     { in: "src/index.ts", out: "scripts/index" },
-    { in: "src/worker.ts", out: "scripts/worker" },
+    {
+      in: "../runtime-client/backends/web-worker/index.ts",
+      out: "scripts/worker-runtime",
+    },
   ],
   outDir: "dist",
   hostname: "127.0.0.1",

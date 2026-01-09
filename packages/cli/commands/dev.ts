@@ -39,8 +39,10 @@ export const dev = new Command()
   )
   .arguments("<main:string>")
   .action(async (options, main) => {
+    const mainPath = join(Deno.cwd(), main);
+
     const { main: exports } = await process({
-      main: join(Deno.cwd(), main),
+      main: mainPath,
       check: options.check,
       run: options.run,
       output: options.output,

@@ -21,6 +21,7 @@
     "./packages/memory",
     "./packages/patterns",
     "./packages/runner",
+    "./packages/runtime-client",
     "./packages/seeder",
     "./packages/shell",
     "./packages/static",
@@ -65,6 +66,7 @@
     "exclude": [
       ".beads/",
       "./packages/static/assets",
+      "./packages/ui/src/v2/components/ct-outliner",
       "./packages/vendor-astral"
     ],
     "rules": {

@@ -18,7 +18,7 @@ import {
   appViewToUrlPath,
   deserialize,
   isAppViewEqual,
-} from "../shell/src/lib/app/mod.ts";
+} from "@commontools/shell/shared";
 import { waitFor } from "./utils.ts";
 import { ConsoleEvent, PageErrorEvent } from "@astral/astral";
 

@@ -4,7 +4,8 @@
 import * as htmlparser2 from "htmlparser2";
 import * as domhandler from "domhandler";
 import * as domserializer from "dom-serializer";
-import { RenderOptions, styleObjectToCssString } from "./render.ts";
+import { RenderOptions } from "./render.ts";
+import { styleObjectToCssString } from "./render-utils.ts";
 
 function renderOptionsFromDoc(document: globalThis.Document): RenderOptions {
   return {
@@ -88,6 +89,17 @@ export class MockDoc {
       innerHTML: {
         get() {
           return domserializer.render((this as any).children);
+        },
+        set(value: string) {
+          if (value !== "") {
+            throw new Error(
+              "Only the empty string is supported when setting innerHTML.",
+            );
+          }
+          const children = DomUtils.getChildren(this as any);
+          for (const child of children) {
+            DomUtils.removeElement(child);
+          }
         },
       },
     };

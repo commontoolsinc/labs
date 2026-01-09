@@ -7,9 +7,14 @@ export type {
   SourceMap,
 } from "./interface.ts";
 export {
+  type BeforeTransformersResult,
   CompilationError,
   type CompilationErrorType,
   CompilerError,
+  formatTransformerDiagnostic,
+  type TransformerDiagnosticInfo,
+  TransformerError,
+  type TransformerPipelineResult,
   TypeScriptCompiler,
   type TypeScriptCompilerOptions,
 } from "./typescript/mod.ts";

@@ -1,4 +1,4 @@
-import { type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
 import type { Node as OutlineTreeNode, Tree } from "./types.ts";
 
 /**
@@ -47,7 +47,7 @@ export function getNodeByPath(
  */
 export function getNodePath(
   tree: Tree,
-  targetNode: OutlineTreeNode | Cell<OutlineTreeNode>,
+  targetNode: OutlineTreeNode | CellHandle<OutlineTreeNode>,
 ): number[] | null {
   // If it's a Cell, we can't reliably find its path in the tree without a tree Cell
   // This function needs to be redesigned to work with Cell-based paths
@@ -96,24 +96,24 @@ export function getNodePath(
 
 /**
  * Get the Cell for a specific node in the tree using its path
- * @param treeCell The root Cell<Tree> containing the tree data
+ * @param treeCell The root CellHandle<Tree> containing the tree data
  * @param node The target node to get a Cell for
  * @returns Cell<Node> pointing to the node, or null if not found
  */
 export function getNodeCell(
-  treeCell: Cell<Tree>,
+  treeCell: CellHandle<Tree>,
   tree: Tree,
   node: OutlineTreeNode,
-): Cell<OutlineTreeNode> | null {
+): CellHandle<OutlineTreeNode> | null {
   const nodePath = getNodePath(tree, node);
   if (nodePath === null) return null;
 
   // Handle root node (empty path)
   if (nodePath.length === 0) {
-    return treeCell.key("root") as Cell<OutlineTreeNode>;
+    return treeCell.key("root") as CellHandle<OutlineTreeNode>;
   }
 
-  let targetCell: Cell<any> = treeCell.key("root").key("children");
+  let targetCell: CellHandle<any> = treeCell.key("root").key("children");
   for (let i = 0; i < nodePath.length; i++) {
     targetCell = targetCell.key(nodePath[i]);
     if (i < nodePath.length - 1) {
@@ -121,41 +121,41 @@ export function getNodeCell(
     }
   }
 
-  return targetCell as Cell<OutlineTreeNode>;
+  return targetCell as CellHandle<OutlineTreeNode>;
 }
 
 /**
  * Get the Cell for a specific node's body content
- * @param treeCell The root Cell<Tree> containing the tree data
+ * @param treeCell The root CellHandle<Tree> containing the tree data
  * @param tree The tree structure for path finding
  * @param node The target node to get a body Cell for
- * @returns Cell<string> pointing to the node's body, or null if not found
+ * @returns CellHandle<string> pointing to the node's body, or null if not found
  */
 export function getNodeBodyCell(
-  treeCell: Cell<Tree>,
+  treeCell: CellHandle<Tree>,
   tree: Tree,
   node: OutlineTreeNode,
-): Cell<string> | null {
+): CellHandle<string> | null {
   const nodeCell = getNodeCell(treeCell, tree, node);
-  return nodeCell ? nodeCell.key("body") as Cell<string> : null;
+  return nodeCell ? nodeCell.key("body") as CellHandle<string> : null;
 }
 
 /**
  * Get the Cell for a node's body content using a path
- * @param treeCell The root Cell<Tree> containing the tree data
+ * @param treeCell The root CellHandle<Tree> containing the tree data
  * @param nodePath The path to the node as an array of indices
- * @returns Cell<string> pointing to the node's body, or null if not found
+ * @returns CellHandle<string> pointing to the node's body, or null if not found
  */
 export function getNodeBodyCellByPath(
-  treeCell: Cell<Tree>,
+  treeCell: CellHandle<Tree>,
   nodePath: number[],
-): Cell<string> | null {
+): CellHandle<string> | null {
   // Handle root node (empty path)
   if (nodePath.length === 0) {
-    return treeCell.key("root").key("body") as Cell<string>;
+    return treeCell.key("root").key("body") as CellHandle<string>;
   }
 
-  let targetCell: Cell<any> = treeCell.key("root").key("children");
+  let targetCell: CellHandle<any> = treeCell.key("root").key("children");
   for (let i = 0; i < nodePath.length; i++) {
     targetCell = targetCell.key(nodePath[i]);
     if (i < nodePath.length - 1) {
@@ -163,30 +163,30 @@ export function getNodeBodyCellByPath(
     }
   }
 
-  return targetCell.key("body") as Cell<string>;
+  return targetCell.key("body") as CellHandle<string>;
 }
 
 /**
  * Get the Cell for a specific node's children array
- * @param treeCell The root Cell<Tree> containing the tree data (optional, used when node is regular Node)
+ * @param treeCell The root CellHandle<Tree> containing the tree data (optional, used when node is regular Node)
  * @param tree The tree structure for path finding (optional, used when node is regular Node)
  * @param node The target node to get a children Cell for
- * @returns Cell<OutlineTreeNode[]> pointing to the node's children, or null if not found
+ * @returns CellHandle<OutlineTreeNode[]> pointing to the node's children, or null if not found
  */
 export function getNodeChildrenCell(
-  treeCell: Cell<Tree> | null,
+  treeCell: CellHandle<Tree> | null,
   tree: Tree | null,
-  node: OutlineTreeNode | Cell<OutlineTreeNode>,
-): Cell<OutlineTreeNode[]> | null {
+  node: OutlineTreeNode | CellHandle<OutlineTreeNode>,
+): CellHandle<OutlineTreeNode[]> | null {
   if ("equals" in node) {
     // It's already a Cell
-    return node.key("children") as Cell<OutlineTreeNode[]>;
+    return node.key("children") as CellHandle<OutlineTreeNode[]>;
   } else {
     // It's a regular node - need tree context
     if (!treeCell || !tree) return null;
     const nodeCell = getNodeCell(treeCell, tree, node);
     return nodeCell
-      ? nodeCell.key("children") as Cell<OutlineTreeNode[]>
+      ? nodeCell.key("children") as CellHandle<OutlineTreeNode[]>
       : null;
   }
 }
@@ -195,10 +195,10 @@ export function getNodeChildrenCell(
  * Get a Cell at a specific path, supporting both numeric indices and string keys
  */
 export function getNodeCellByPath(
-  treeCell: Cell<Tree>,
+  treeCell: CellHandle<Tree>,
   path: (number | string)[],
-): Cell<any> | null {
-  let cell: Cell<any> = treeCell.key("root");
+): CellHandle<any> | null {
+  let cell: CellHandle<any> = treeCell.key("root");
 
   for (const segment of path) {
     if (segment === "children" || typeof segment === "string") {

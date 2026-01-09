@@ -3,7 +3,12 @@ import { repeat } from "lit/directives/repeat.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { marked } from "marked";
-import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
+import {
+  type CellHandle,
+  getEntityId,
+  isCellHandle,
+  NAME,
+} from "@commontools/runtime-client";
 import { MentionableArray } from "../../core/mentionable.ts";
 import { MentionController } from "../../core/mention-controller.ts";
 
@@ -12,9 +17,9 @@ import { MentionController } from "../../core/mention-controller.ts";
  * @param cell - The Cell to mutate
  * @param mutator - Function that performs the mutation
  */
-async function mutateCell<T>(
-  cell: Cell<T>,
-  mutator: (cell: Cell<T>) => void,
+async function mutateCellHandle<T>(
+  cell: CellHandle<T>,
+  mutator: (cell: CellHandle<T>) => void,
 ): Promise<void> {
   const tx = cell.runtime.edit();
   mutator(cell.withTx(tx));
@@ -52,21 +57,21 @@ import "../ct-render/ct-render.ts";
 /**
  * CTOutliner - An outliner component with hierarchical tree structure
  *
- * Works directly with Cell<Tree> values for reactive state management.
+ * Works directly with CellHandle<Tree> values for reactive state management.
  * Operations automatically propagate changes through the Cell system.
  *
  * @element ct-outliner
  *
- * @attr {Cell<Tree>} value - Tree structure Cell containing root node and children
+ * @attr {CellHandle<Tree>} value - Tree structure Cell containing root node and children
  * @attr {boolean} readonly - Whether the outliner is read-only
- * @attr {Cell<MentionableArray>} mentionable - Items available for @-mention autocomplete
+ * @attr {CellHandle<MentionableArray>} mentionable - Items available for @-mention autocomplete
  *
  * @fires ct-change - Fired when content changes with detail: { value }
  * @fires charm-link-click - Fired when a charm link is clicked with detail: { href, text, charm }
  *
  * @example
- * // With Cell<Tree> for reactive updates
- * const treeCell = runtime.getCell<Tree>({ type: "tree" });
+ * // With CellHandle<Tree> for reactive updates
+ * const treeCell = runtime.getCellHandle<Tree>({ type: "tree" });
  * <ct-outliner .value=${treeCell}></ct-outliner>
  */
 
@@ -133,9 +138,9 @@ export class CTOutliner extends BaseElement
     focusedNodePath: { type: Array, state: true },
   };
 
-  declare value: Cell<Tree> | null;
+  declare value: CellHandle<Tree> | null;
   declare readonly: boolean;
-  declare mentionable: Cell<MentionableArray>;
+  declare mentionable: CellHandle<MentionableArray>;
 
   // Direct tree access from Cell
   get tree(): Tree {
@@ -219,7 +224,7 @@ export class CTOutliner extends BaseElement
     }
 
     // Apply the delete operation using existing Cell operations
-    const nodeCell = getNodeCellByPath(this.value, path) as Cell<
+    const nodeCell = getNodeCellByPath(this.value, path) as CellHandle<
       OutlineTreeNode
     >;
     if (nodeCell) {
@@ -307,7 +312,7 @@ export class CTOutliner extends BaseElement
     }
 
     // Apply the move operation using existing Cell operations
-    const nodeCell = getNodeCellByPath(this.value, path) as Cell<
+    const nodeCell = getNodeCellByPath(this.value, path) as CellHandle<
       OutlineTreeNode
     >;
     if (nodeCell) {
@@ -340,7 +345,7 @@ export class CTOutliner extends BaseElement
     }
 
     // Apply the move operation using existing Cell operations
-    const nodeCell = getNodeCellByPath(this.value, path) as Cell<
+    const nodeCell = getNodeCellByPath(this.value, path) as CellHandle<
       OutlineTreeNode
     >;
     if (nodeCell) {
@@ -380,7 +385,7 @@ export class CTOutliner extends BaseElement
     }
 
     // Apply the create operation using existing Cell operations
-    const nodeCell = getNodeCellByPath(this.value, path) as Cell<
+    const nodeCell = getNodeCellByPath(this.value, path) as CellHandle<
       OutlineTreeNode
     >;
     if (nodeCell) {
@@ -975,7 +980,7 @@ export class CTOutliner extends BaseElement
       }
 
       // Subscribe to new Cell if it exists
-      if (this.value && isCell(this.value)) {
+      if (this.value && isCellHandle(this.value)) {
         this._unsubscribe = this.value.sink(() => {
           this.emit("ct-change", { value: this.tree });
           // Handle focus restoration after tree changes
@@ -1174,7 +1179,7 @@ export class CTOutliner extends BaseElement
       const focusedNodeCell = getNodeCellByPath(
         this.value,
         focusedNodePath,
-      ) as Cell<OutlineTreeNode>;
+      ) as CellHandle<OutlineTreeNode>;
       if (!focusedNodeCell) return;
 
       const parentNode = TreeOperations.findParentNodeCell(
@@ -1329,7 +1334,7 @@ export class CTOutliner extends BaseElement
    * @description Creates an empty node as a sibling after the given node,
    * focuses it, and immediately enters edit mode. Uses Cell operations.
    */
-  private async createNewNodeAfterCell(node: Cell<OutlineTreeNode>) {
+  private async createNewNodeAfterCell(node: CellHandle<OutlineTreeNode>) {
     if (!this.value) return;
 
     const parentNode = TreeOperations.findParentNodeCell(
@@ -1612,7 +1617,9 @@ export class CTOutliner extends BaseElement
       const newNode = TreeOperations.createNode({ body: "" });
 
       if (this.value) {
-        const rootChildrenCell = this.value.key("root").key("children") as Cell<
+        const rootChildrenCell = this.value.key("root").key(
+          "children",
+        ) as CellHandle<
           OutlineTreeNode[]
         >;
         mutateCell(rootChildrenCell, (cell) => {
@@ -1657,7 +1664,7 @@ export class CTOutliner extends BaseElement
       if (!focusedNode) return;
 
       const focusedNodeCell = this.value
-        ? getNodeCellByPath(this.value, this.focusedNodePath) as Cell<
+        ? getNodeCellByPath(this.value, this.focusedNodePath) as CellHandle<
           OutlineTreeNode
         >
         : null;
@@ -1705,7 +1712,9 @@ export class CTOutliner extends BaseElement
     } else if (this.tree.root.children.length === 0) {
       // No nodes exist, replace root children using Cell operations
       if (this.value) {
-        const rootChildrenCell = this.value.key("root").key("children") as Cell<
+        const rootChildrenCell = this.value.key("root").key(
+          "children",
+        ) as CellHandle<
           OutlineTreeNode[]
         >;
         mutateCell(rootChildrenCell, (cell) => {
@@ -1717,7 +1726,9 @@ export class CTOutliner extends BaseElement
     } else {
       // No focused node but tree has nodes, append to the end using Cell operations
       if (this.value) {
-        const rootChildrenCell = this.value.key("root").key("children") as Cell<
+        const rootChildrenCell = this.value.key("root").key(
+          "children",
+        ) as CellHandle<
           OutlineTreeNode[]
         >;
         mutateCell(rootChildrenCell, (cell) => {
@@ -1767,7 +1778,7 @@ export class CTOutliner extends BaseElement
   }
 
   private renderNodes(
-    nodes: Cell<OutlineTreeNode[]>,
+    nodes: CellHandle<OutlineTreeNode[]>,
     level: number,
     parentPath: number[] = [],
   ): unknown {
@@ -1780,7 +1791,7 @@ export class CTOutliner extends BaseElement
   }
 
   private renderNode(
-    node: Cell<OutlineTreeNode>,
+    node: CellHandle<OutlineTreeNode>,
     level: number,
     calculatedPath: number[],
   ): unknown {
@@ -2015,18 +2026,18 @@ export class CTOutliner extends BaseElement
   /**
    * Render attachments for a node using ct-render
    */
-  private renderAttachments(node: Cell<OutlineTreeNode>): unknown {
+  private renderAttachments(node: CellHandle<OutlineTreeNode>): unknown {
     const attachments = node.key("attachments").getAsQueryResult() as unknown[];
 
     if (!attachments || attachments.length === 0) {
       return "";
     }
 
-    if (!isCell(this.value)) {
+    if (!isCellHandle(this.value)) {
       return "";
     }
 
-    const tree: Cell<Tree> = this.value;
+    const tree: CellHandle<Tree> = this.value;
     const runtime = tree.runtime;
     const space = tree.space;
 
@@ -2058,11 +2069,11 @@ export class CTOutliner extends BaseElement
         );
         return null;
       }
-    }).filter((cell): cell is Cell<unknown> => cell !== null);
+    }).filter((cell): cell is CellHandle<unknown> => cell !== null);
 
     return html`
       <div class="attachments">
-        ${charmCells.map((charmCell: Cell<unknown>) => {
+        ${charmCells.map((charmCell: CellHandle<unknown>) => {
           return html`
             <div class="attachment">
               <ct-render .cell="${charmCell}"></ct-render>

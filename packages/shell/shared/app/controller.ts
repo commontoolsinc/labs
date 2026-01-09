@@ -4,7 +4,7 @@ import {
   KeyStore,
   TransferrableInsecureCryptoKeyPair,
 } from "@commontools/identity";
-import { XRootView } from "../../views/RootView.ts";
+import { AppElement } from "./element.ts";
 import { Command } from "./commands.ts";
 import { AppState, AppUpdateEvent } from "./mod.ts";
 import { AppStateSerialized, serialize } from "./state.ts";
@@ -15,8 +15,8 @@ export const ROOT_KEY = "$ROOT_KEY";
 
 // Interact with application state outside of the application.
 export class App extends EventTarget {
-  #element: XRootView;
-  constructor(element: XRootView) {
+  #element: AppElement;
+  constructor(element: AppElement) {
     super();
     this.#element = element;
     this.#element.addEventListener("appupdate", (event: Event) => {
@@ -25,6 +25,10 @@ export class App extends EventTarget {
         new AppUpdateEvent(e.command, { state: e.state, error: e.error }),
       );
     });
+  }
+
+  element(): AppElement {
+    return this.#element;
   }
 
   state(): AppState {

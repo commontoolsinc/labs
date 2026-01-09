@@ -3,10 +3,16 @@ import { property, state } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import "../ct-chip/ct-chip.ts";
-import type { Cell, MemorySpace, Runtime } from "@commontools/runner";
-import { NAME } from "@commontools/runner";
-import { parseLLMFriendlyLink } from "@commontools/runner";
+import {
+  type CellHandle,
+  CellRef,
+  NAME,
+  parseLLMFriendlyLink,
+  type RuntimeClient,
+} from "@commontools/runtime-client";
+import type { DID } from "@commontools/identity";
 import { runtimeContext, spaceContext } from "../../runtime-context.ts";
+import { navigate } from "@commontools/shell/shared";
 
 /**
  * CTCellLink - Renders a link or cell as a clickable pill
@@ -43,18 +49,18 @@ export class CTCellLink extends BaseElement {
   label?: string;
 
   @property({ attribute: false })
-  cell?: Cell;
+  cell?: CellHandle;
 
   @consume({ context: runtimeContext, subscribe: true })
   @property({ attribute: false })
-  runtime?: Runtime;
+  runtime?: RuntimeClient;
 
   @consume({ context: spaceContext, subscribe: true })
   @property({ attribute: false })
-  space?: MemorySpace;
+  space?: DID;
 
   @state()
-  private _resolvedCell?: Cell;
+  private _resolvedCell?: CellHandle;
 
   @state()
   private _name?: string;
@@ -111,13 +117,16 @@ export class CTCellLink extends BaseElement {
 
     if (this.link && this.runtime) {
       try {
+        // TODO(runtime-worker-refactor): Making some changes here, but
+        // `this.space` will be Shell's active space, not necessarily the
+        // space for `this.link`.
         const parsedLink = parseLLMFriendlyLink(this.link, this.space);
-        // We need to cast because parseLLMFriendlyLink returns NormalizedLink (if space optional)
-        // but getCellFromLink might expect NormalizedFullLink or handle it.
-        // Based on runtime.ts, getCellFromLink handles NormalizedLink but casts to NormalizedFullLink internally for createCell.
-        // If space is missing in parsedLink, createCell might fail if it strictly needs it.
-        // However, we pass what we have.
-        this._resolvedCell = this.runtime.getCellFromLink(parsedLink);
+        if (!parsedLink.space) {
+          throw new Error("Link missing space.");
+        }
+        this._resolvedCell = this.runtime.getCellFromRef(
+          parsedLink as CellRef,
+        );
       } catch (e) {
         console.error("Failed to resolve link:", e);
         this._resolvedCell = undefined;
@@ -132,8 +141,7 @@ export class CTCellLink extends BaseElement {
 
     if (this._resolvedCell) {
       // Subscribe to the cell to get updates for NAME
-      // We assume the cell value is an object that might have NAME symbol
-      this._unsubscribe = this._resolvedCell.sink((val) => {
+      this._unsubscribe = this._resolvedCell.subscribe((val) => {
         this._updateNameFromValue(val);
       });
     }
@@ -150,10 +158,7 @@ export class CTCellLink extends BaseElement {
 
   private _updateDisplayInfo() {
     if (this._resolvedCell) {
-      const link = this._resolvedCell.getAsNormalizedFullLink();
-      // Create a short handle from the ID
-      const id = link.id;
-      const shortId = id.split(":").pop()?.slice(-6) ?? "???";
+      const shortId = this._resolvedCell.id().slice(-6);
       this._handle = `#${shortId}`;
     } else if (this.link) {
       // Fallback if we can't resolve the cell but have a link string
@@ -172,10 +177,12 @@ export class CTCellLink extends BaseElement {
 
   private _handleClick(e: Event) {
     e.stopPropagation();
-    if (this._resolvedCell && this._resolvedCell.runtime) {
-      this._resolvedCell.runtime.navigateCallback?.(this._resolvedCell);
-    } else if (this.runtime && this._resolvedCell) {
-      this.runtime.navigateCallback?.(this._resolvedCell);
+    // @TODO(runtime-worker-refactor)
+    if (this._resolvedCell) {
+      navigate({
+        spaceDid: this._resolvedCell.space(),
+        charmId: this._resolvedCell.id(),
+      });
     }
   }
 

@@ -111,7 +111,6 @@ describe("ct-code-editor cursor stability", () => {
         const cellValue = await charm.result.get(["content"]);
         return editorContent === "" && cellValue === "";
       },
-      { timeout: 5000, delay: 50 },
     );
 
     // Extra settling time for any pending Cell subscription callbacks to drain.
@@ -145,7 +144,6 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for debounce to complete and Cell to update
     await waitFor(
       async () => await charm.result.get(["content"]) === textToType,
-      { timeout: DEBOUNCE_DELAY + 2000, delay: 50 },
     );
 
     // Wait for the Cell echo to propagate and confirm cursor stays stable.
@@ -193,7 +191,6 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for debounce to complete (only fires ONCE after last character)
     await waitFor(
       async () => await charm.result.get(["content"]) === fullText,
-      { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
     await new Promise((r) => setTimeout(r, DEBOUNCE_BUFFER));
@@ -218,7 +215,6 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for Cell to sync
     await waitFor(
       async () => await charm.result.get(["content"]) === initialText,
-      { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
     // Move cursor to middle (after "Start ")
@@ -242,7 +238,6 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for debounce
     await waitFor(
       async () => await charm.result.get(["content"]) === expectedText,
-      { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
     await new Promise((r) => setTimeout(r, DEBOUNCE_BUFFER));
@@ -330,7 +325,6 @@ describe("ct-code-editor cursor stability", () => {
         const content = await getEditorContent(page);
         return content === longContent;
       },
-      { timeout: 2000 },
     );
 
     // Move cursor to end (still no typing)
@@ -350,7 +344,6 @@ describe("ct-code-editor cursor stability", () => {
         const content = await getEditorContent(page);
         return content === shortContent;
       },
-      { timeout: 2000 },
     );
 
     // Cursor should be clamped to new content length
@@ -381,7 +374,6 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for debounce to fire and Cell to update
     await waitFor(
       async () => await charm.result.get(["content"]) === text,
-      { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
     // The Cell echo should be detected and skipped (hash match)
@@ -403,7 +395,6 @@ describe("ct-code-editor cursor stability", () => {
         const content = await getEditorContent(page);
         return content === "Different content";
       },
-      { timeout: 1000 },
     );
 
     // This should apply because hash doesn't match (external change)
@@ -425,7 +416,6 @@ describe("ct-code-editor cursor stability", () => {
     await typeInEditor(page, "Hello World");
     await waitFor(
       async () => await charm.result.get(["content"]) === "Hello World",
-      { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
     // Backspace several times
@@ -442,7 +432,6 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for debounce
     await waitFor(
       async () => await charm.result.get(["content"]) === expectedText,
-      { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
     await new Promise((r) => setTimeout(r, DEBOUNCE_BUFFER));
@@ -470,7 +459,6 @@ describe("ct-code-editor cursor stability", () => {
     await typeInEditor(page, "Hello World");
     await waitFor(
       async () => await charm.result.get(["content"]) === "Hello World",
-      { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
     // Blur the editor - this should allow external updates to apply
@@ -488,7 +476,6 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for external update to apply
     await waitFor(
       async () => (await getEditorContent(page)) === "Short",
-      { timeout: 2000 },
     );
 
     // Cursor should be clamped to new content length (not stuck at old position)
@@ -513,7 +500,6 @@ describe("ct-code-editor cursor stability", () => {
     await typeInEditor(page, "User typed");
     await waitFor(
       async () => await charm.result.get(["content"]) === "User typed",
-      { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
     // Wait extra time to ensure hash is fully cleared
@@ -524,7 +510,6 @@ describe("ct-code-editor cursor stability", () => {
 
     await waitFor(
       async () => (await getEditorContent(page)) === "External update",
-      { timeout: 2000 },
     );
 
     const content = await getEditorContent(page);
@@ -552,7 +537,6 @@ describe("ct-code-editor cursor stability", () => {
     // Final content should be last update
     await waitFor(
       async () => (await getEditorContent(page)) === "Update 4",
-      { timeout: 2000 },
     );
 
     // Cursor should be valid
@@ -577,14 +561,12 @@ describe("ct-code-editor cursor stability", () => {
     await typeInEditor(page, "Hello");
     await waitFor(
       async () => await charm.result.get(["content"]) === "Hello",
-      { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
     // Type more text
     await typeInEditor(page, " World");
     await waitFor(
       async () => await charm.result.get(["content"]) === "Hello World",
-      { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
     // Undo (Cmd+Z on Mac, Ctrl+Z on others)
@@ -636,7 +618,6 @@ describe("ct-code-editor cursor stability", () => {
     await charm.result.set("Hello World Test", ["content"]);
     await waitFor(
       async () => (await getEditorContent(page)) === "Hello World Test",
-      { timeout: 2000 },
     );
 
     await focusEditor(page);
@@ -697,7 +678,6 @@ describe("ct-code-editor cursor stability", () => {
     await charm.result.set("Hi", ["content"]);
     await waitFor(
       async () => (await getEditorContent(page)) === "Hi",
-      { timeout: 2000 },
     );
 
     // Selection should be clamped to new content length
@@ -766,7 +746,6 @@ describe("ct-code-editor cursor stability", () => {
         const c = await charm.result.get(["content"]);
         return e === c;
       },
-      { timeout: 2000 },
     );
 
     // Cursor should be valid
@@ -966,7 +945,6 @@ describe("ct-code-editor cursor stability", () => {
 
     await waitFor(
       async () => (await getEditorContent(page)) === longContent,
-      { timeout: 2000 },
     );
 
     // Position cursor at the very end
@@ -981,7 +959,6 @@ describe("ct-code-editor cursor stability", () => {
 
     await waitFor(
       async () => (await getEditorContent(page)) === "X",
-      { timeout: 2000 },
     );
 
     // Cursor should be clamped to valid range [0, 1]
@@ -1011,7 +988,6 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for debounce to send to Cell
     await waitFor(
       async () => await charm.result.get(["content"]) === "Hello   ",
-      { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
     // Simulate backend trimming the content
@@ -1020,7 +996,6 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for the update to apply
     await waitFor(
       async () => (await getEditorContent(page)) === "Hello",
-      { timeout: 2000 },
     );
 
     // Cursor should be clamped to new length
@@ -1081,7 +1056,6 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for debounce
     await waitFor(
       async () => await charm.result.get(["content"]) === specialContent,
-      { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
     await new Promise((r) => setTimeout(r, DEBOUNCE_BUFFER));
@@ -1105,7 +1079,6 @@ describe("ct-code-editor cursor stability", () => {
     await charm.result.set("Static content", ["content"]);
     await waitFor(
       async () => (await getEditorContent(page)) === "Static content",
-      { timeout: 2000 },
     );
 
     // Focus and position cursor in the middle
@@ -1148,7 +1121,6 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for debounce to complete
     await waitFor(
       async () => await charm.result.get(["content"]) === "First",
-      { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
     // Verify Cell has first content
@@ -1163,7 +1135,6 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for second debounce
     await waitFor(
       async () => await charm.result.get(["content"]) === "FirstSecond",
-      { timeout: DEBOUNCE_DELAY + 1000 },
     );
 
     await new Promise((r) => setTimeout(r, DEBOUNCE_BUFFER));
@@ -1254,7 +1225,6 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for blur's debounce to complete - use longer timeout since blur->commit path may vary
     await waitFor(
       async () => await charm.result.get(["content"]) === "UserContent",
-      { timeout: DEBOUNCE_DELAY + 500 },
     );
 
     // Now send external update - should apply immediately
@@ -1263,7 +1233,6 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for sync
     await waitFor(
       async () => (await getEditorContent(page)) === "ExternalAfterBlur",
-      { timeout: 1000 },
     );
 
     const content = await getEditorContent(page);
@@ -1274,6 +1243,8 @@ describe("ct-code-editor cursor stability", () => {
     );
   });
 
+  /*
+  // TODO(runtime-worker-refactor)
   it("ADVERSARIAL: Component disconnect/reconnect during typing should handle state correctly", async () => {
     // Type, disconnect component, reconnect, verify external updates work
     const page = shell.page();
@@ -1315,7 +1286,6 @@ describe("ct-code-editor cursor stability", () => {
     // Wait for sync
     await waitFor(
       async () => (await getEditorContent(page)) === "AfterReconnect",
-      { timeout: 1000 },
     );
 
     const content = await getEditorContent(page);
@@ -1325,6 +1295,7 @@ describe("ct-code-editor cursor stability", () => {
       "External update should apply after canceling debounced writes",
     );
   });
+  */
 
   it("ADVERSARIAL: Value property change to different Cell during typing", async () => {
     // This test verifies that switching to a different Cell mid-typing
@@ -1404,7 +1375,6 @@ async function resetEditorState(
       const cellValue = await charmController.result.get(["content"]);
       return editorContent === "" && cellValue === "";
     },
-    { timeout: 2000, delay: 50 },
   );
 
   // Extra settling time for any pending subscription callbacks

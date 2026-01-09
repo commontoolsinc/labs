@@ -6,9 +6,9 @@ import {
   startDrag,
   updateDragPointer,
 } from "../../core/drag-state.ts";
-import { render } from "@commontools/html";
-import { UI } from "@commontools/runner";
-import type { Cell } from "@commontools/runner";
+import { render } from "@commontools/html/client";
+import { UI } from "@commontools/runtime-client";
+import type { CellHandle } from "@commontools/runtime-client";
 import "../ct-cell-context/ct-cell-context.ts";
 import "../ct-cell-link/ct-cell-link.ts";
 
@@ -20,17 +20,17 @@ import "../ct-cell-link/ct-cell-link.ts";
  *
  * @element ct-drag-source
  *
- * @property {Cell} cell - Required: the cell being dragged
+ * @property {CellHandle} cell - Required: the cell being dragged
  * @property {string} type - Optional: type identifier for filtering drop zones
  * @property {boolean} disabled - Disable dragging
  *
- * @fires ct-drag-start - Fired when drag starts with { cell: Cell }
- * @fires ct-drag-end - Fired when drag ends with { cell: Cell, dropped: boolean }
+ * @fires ct-drag-start - Fired when drag starts with { cell: CellHandle }
+ * @fires ct-drag-end - Fired when drag ends with { cell: CellHandle, dropped: boolean }
  *
  * @slot - Default slot for draggable content
  *
  * @example
- * <ct-drag-source .cell=${myCell} type="item">
+ * <ct-drag-source .cell=${myCellHandle} type="item">
  *   <div>Drag me!</div>
  * </ct-drag-source>
  */
@@ -59,7 +59,7 @@ export class CTDragSource extends BaseElement {
   ];
 
   @property({ attribute: false })
-  cell?: Cell;
+  cell?: CellHandle;
 
   @property({ type: String })
   type?: string;

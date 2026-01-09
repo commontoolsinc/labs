@@ -116,7 +116,7 @@ export function isNormalizedLink(value: any): value is NormalizedLink {
 /**
  * Check if value is a normalized link.
  *
- * Beware: Unlike all the other types that `isLinkLink` is checking for, this could
+ * Beware: Unlike all the other types that `isLink` is checking for, this could
  * appear in regular data and not actually be meant as a link. So only use this
  * if you know for sure that the value is a link.
  */

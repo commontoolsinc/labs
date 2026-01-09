@@ -6,6 +6,21 @@ export interface ErrorDetails {
   source?: string;
 }
 
+/**
+ * Represents a diagnostic from the CommonTools transformer pipeline.
+ * This mirrors TransformationDiagnostic from @commontools/ts-transformers.
+ */
+export interface TransformerDiagnosticInfo {
+  readonly severity: "error" | "warning";
+  readonly type: string;
+  readonly message: string;
+  readonly fileName: string;
+  readonly line: number;
+  readonly column: number;
+  readonly start: number;
+  readonly length: number;
+}
+
 export type CompilationErrorType = "MODULE_NOT_FOUND" | "ERROR";
 
 export class CompilationError {
@@ -89,5 +104,55 @@ export class CompilerError extends Error {
 
   get errors(): CompilationError[] {
     return this.#errors;
+  }
+}
+
+/**
+ * Formats a transformer diagnostic with source context.
+ * Returns a string like:
+ * ```
+ * /path/to/file.ts:10:5 - error: Message here
+ *  8 | previous line
+ *  9 | another line
+ * 10 | error line
+ *    |     ^
+ * 11 | next line
+ * ```
+ */
+export function formatTransformerDiagnostic(
+  diagnostic: TransformerDiagnosticInfo,
+  source: string,
+): string {
+  const prefix = diagnostic.severity === "error" ? "error" : "warning";
+  const header =
+    `${diagnostic.fileName}:${diagnostic.line}:${diagnostic.column} - ${prefix}: ${diagnostic.message}`;
+
+  const inline = renderInline({
+    source,
+    line: diagnostic.line,
+    column: diagnostic.column,
+    contextLines: 2,
+  });
+
+  return `${header}\n${inline}`;
+}
+
+/**
+ * Error thrown when the transformer pipeline reports errors.
+ */
+export class TransformerError extends Error {
+  override name = "TransformerError";
+  readonly diagnostics: TransformerDiagnosticInfo[];
+
+  constructor(
+    diagnostics: TransformerDiagnosticInfo[],
+    sources: Map<string, string>,
+  ) {
+    const messages = diagnostics.map((d) => {
+      const source = sources.get(d.fileName) ?? "";
+      return formatTransformerDiagnostic(d, source);
+    });
+    super(messages.join("\n\n"));
+    this.diagnostics = diagnostics;
   }
 }

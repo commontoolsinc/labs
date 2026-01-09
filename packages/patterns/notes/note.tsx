@@ -112,12 +112,12 @@ const handleNewBacklink = handler<
   console.log("new charm", detail.text, detail.charmId);
 
   // Push to allCharms so it appears in default-app (this was the missing piece!)
-  allCharms.push(detail.charm as unknown as MinimalCharm);
+  allCharms.push(detail.charm);
 
   if (detail.navigate) {
     return navigateTo(detail.charm);
   } else {
-    mentionable.push(detail.charm as unknown as MentionableCharm);
+    mentionable.push(detail.charm);
   }
 });
 
@@ -193,7 +193,7 @@ const createNewNote = handler<
     noteId: generateId(),
     isHidden: !!notebook, // Hide from default-app if in a notebook
   });
-  allCharms.push(note as unknown as MinimalCharm);
+  allCharms.push(note);
 
   // Add to parent notebook using Cell.key() pattern
   if (notebook) {
@@ -204,8 +204,8 @@ const createNewNote = handler<
     );
     if (nbIndex >= 0) {
       const notebookCell = allCharms.key(nbIndex);
-      const notesCell = notebookCell.key("notes") as Writable<NoteCharm[]>;
-      notesCell.push(note as unknown as NoteCharm);
+      const notesCell = notebookCell.key("notes");
+      notesCell.push(note);
     }
   }
 
@@ -264,7 +264,7 @@ const Note = pattern<Input, Output>(
       allCharms.filter((charm: any) => {
         const name = charm?.[NAME];
         return typeof name === "string" && name.startsWith("📓");
-      }) as unknown as NotebookCharm[]
+      })
     );
 
     // Check if "All Notes" charm exists in the space

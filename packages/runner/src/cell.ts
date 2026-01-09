@@ -80,6 +80,8 @@ import {
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { getLogger } from "@commontools/utils/logger";
+import { ensureNotRenderThread } from "@commontools/utils/env";
+ensureNotRenderThread();
 
 const logger = getLogger("cell");
 
@@ -149,6 +151,8 @@ declare module "@commontools/api" {
         base?: Cell<any>;
         baseSpace?: MemorySpace;
         includeSchema?: boolean;
+        keepStreams?: boolean;
+        keepAsCell?: boolean;
       },
     ): SigilLink;
     getAsWriteRedirectLink(
@@ -1102,6 +1106,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       base?: Cell<any>;
       baseSpace?: MemorySpace;
       includeSchema?: boolean;
+      keepStreams?: boolean;
+      keepAsCell?: boolean;
     },
   ): SigilLink {
     return createSigilLinkFromParsedLink(this.link, {
@@ -1709,6 +1715,11 @@ function recursivelyAddIDIfNeeded<T>(
  */
 export function convertCellsToLinks(
   value: readonly any[] | Record<string, any> | any,
+  options: {
+    includeSchema?: boolean;
+    keepStreams?: boolean;
+    keepAsCell?: boolean;
+  } = {},
   path: string[] = [],
   seen: Map<any, string[]> = new Map(),
 ): any {
@@ -1721,9 +1732,9 @@ export function convertCellsToLinks(
   }
 
   if (isCellResultForDereferencing(value)) {
-    value = getCellOrThrow(value).getAsLink();
+    value = getCellOrThrow(value).getAsLink(options);
   } else if (isCell(value)) {
-    value = value.getAsLink();
+    value = value.getAsLink(options);
   } else if (isRecord(value) || typeof value === "function") {
     // Only add here, otherwise they are literals or already cells:
     seen.set(value, path);
@@ -1742,13 +1753,13 @@ export function convertCellsToLinks(
     // Recursively process arrays and objects.
     if (Array.isArray(value)) {
       value = value.map((value, index) =>
-        convertCellsToLinks(value, [...path, String(index)], seen)
+        convertCellsToLinks(value, options, [...path, String(index)], seen)
       );
     } else {
       value = Object.fromEntries(
         Object.entries(value).map(([key, value]) => [
           key,
-          convertCellsToLinks(value, [...path, String(key)], seen),
+          convertCellsToLinks(value, options, [...path, String(key)], seen),
         ]),
       );
     }

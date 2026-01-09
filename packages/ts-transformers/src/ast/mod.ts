@@ -1,5 +1,14 @@
 export { type CallKind, detectCallKind } from "./call-kind.ts";
 export * from "./dataflow.ts";
+export {
+  findEnclosingCallbackContext,
+  isInRestrictedReactiveContext,
+  isInsideRestrictedContext,
+  isInsideSafeCallbackWrapper,
+  isInsideSafeWrapper,
+  RESTRICTED_CONTEXT_BUILDERS,
+  SAFE_WRAPPER_BUILDERS,
+} from "./reactive-context.ts";
 export * from "./normalize.ts";
 export {
   isEventHandlerJsxAttribute,

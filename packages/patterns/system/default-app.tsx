@@ -164,7 +164,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
   const index = BacklinksIndex({ allCharms });
 
   const fab = OmniboxFAB({
-    mentionable: index.mentionable as unknown as Writable<MentionableCharm[]>,
+    mentionable: index.mentionable,
   });
 
   return {

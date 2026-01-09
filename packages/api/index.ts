@@ -873,9 +873,11 @@ type MaybeCellWrapped<T> =
 export declare const CELL_LIKE: unique symbol;
 
 /**
- * Helper type to transform Cell<T> to Opaque<T> in pattern/lift/handler inputs
+ * Helper type to transform Cell<T> to Opaque<T> in pattern/lift/handler inputs.
+ * Preserves Stream<T> since Streams are callable interfaces (.send()), not data containers.
  */
-export type StripCell<T> = T extends AnyBrandedCell<infer U> ? StripCell<U>
+export type StripCell<T> = T extends Stream<any> ? T // Preserve Stream<T> - it's a callable interface
+  : T extends AnyBrandedCell<infer U> ? StripCell<U>
   : T extends ArrayBuffer | ArrayBufferView | URL | Date ? T
   : T extends Array<infer U> ? StripCell<U>[]
   : T extends object ? { [K in keyof T]: StripCell<T[K]> }
@@ -1348,14 +1350,20 @@ export interface BuiltInCompileAndRunState<T> {
 
 // Function type definitions
 export type PatternFunction = {
+  // Primary overload: T and R inferred from function
   <T, R>(
     fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
   ): RecipeFactory<StripCell<T>, StripCell<R>>;
 
+  // Single type param overload: T explicit, R inferred
+  // NOTE: Using `any` return in signature causes ReturnType to be `any`.
+  // This is a TypeScript limitation - we recommend using pattern<T, R>()
+  // for proper type safety when output types include Stream<>.
   <T>(
     fn: (input: OpaqueRef<Required<T>>) => any,
   ): RecipeFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
+  // Schema-based overload with explicit argument and result schemas
   <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
     fn: (
       input: OpaqueRef<Required<Schema<IS>>>,

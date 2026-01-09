@@ -288,7 +288,7 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
         </div>
       </div>
     ),
-    triggerCount: triggerCount as unknown as Writable<number>,
+    triggerCount,
     nonIdempotentRunCount: nonIdempotentCounter,
     idempotentRunCount: idempotentCounter,
     nonIdempotentData: nonIdempotentArray,

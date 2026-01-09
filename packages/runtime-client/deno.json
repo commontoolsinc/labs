@@ -1,0 +1,11 @@
+{
+  "name": "@commontools/runtime-client",
+  "tasks": {
+    "test": "echo 'No tests to run.'",
+    "integration": "LOG_LEVEL=warn deno test -A ./integration/*.test.ts"
+  },
+  "exports": {
+    ".": "./mod.ts",
+    "./transports/web-worker": "./client/transports/web-worker/transport-web-worker.ts"
+  }
+}

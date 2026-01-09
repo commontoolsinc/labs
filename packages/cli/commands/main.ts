@@ -5,6 +5,7 @@ import { dev } from "./dev.ts";
 import { init } from "./init.ts";
 import { charm } from "./charm.ts";
 import { identity } from "./identity.ts";
+import { test } from "./test.ts";
 
 export const main = new Command()
   .name("ct")
@@ -27,4 +28,5 @@ export const main = new Command()
   .command("charm", charm)
   .command("dev", dev)
   .command("id", identity)
-  .command("init", init);
+  .command("init", init)
+  .command("test", test);

@@ -504,9 +504,9 @@ function performImport(
     originalContent: string;
   }> = [];
   // Map noteId → created note charm for linking
-  const noteIdToCharm = new Map<string, unknown>();
+  const noteIdToCharm = new Map<string, NoteCharm>();
   // Map notebook name → notes to add (from v1 format or v2 noteId mapping)
-  const notesByNotebook = new Map<string, unknown[]>();
+  const notesByNotebook = new Map<string, NoteCharm[]>();
 
   const startingIndex = allCharms.get().length;
   let currentIndex = startingIndex;
@@ -536,7 +536,7 @@ function performImport(
       isHidden,
     });
 
-    newItems.push(note as unknown as NoteCharm);
+    newItems.push(note);
     noteIdToCharm.set(noteIdToUse, note);
     createdNotes.push({
       title: noteData.title,
@@ -578,13 +578,13 @@ function performImport(
   // === PHASE 2: Create notebooks in topological order ===
   // For v2 format, we have hierarchy info. For v1, just create flat notebooks.
   // Track created notebooks by INDEX (not title) to handle duplicates
-  const createdNotebookByIndex = new Map<number, unknown>();
+  const createdNotebookByIndex = new Map<number, NoteCharm>();
   // Track which titles have been used (for deduplication)
   const usedTitles = new Set<string>(existingNames);
   // Track notebooks separately so we can reorder them to match original export order
   const createdNotebooks: Array<{
     originalIndex: number;
-    notebook: unknown;
+    notebook: NoteCharm;
   }> = [];
 
   // Helper to generate unique title
@@ -628,7 +628,7 @@ function performImport(
       const notesForNotebook = notesByNotebook.get(nbData.title) ?? [];
 
       // Collect child notebooks by looking up their indices
-      const childNotebooks: unknown[] = [];
+      const childNotebooks: NoteCharm[] = [];
       for (const childTitle of nbData.childNotebookTitles) {
         const childIndices = titleToChildIndices.get(childTitle) ?? [];
         for (const childIdx of childIndices) {
@@ -643,7 +643,7 @@ function performImport(
       const allContents = [
         ...notesForNotebook,
         ...childNotebooks,
-      ] as unknown as NoteCharm[];
+      ];
 
       const newNb = Notebook({
         title: actualName,
@@ -660,7 +660,7 @@ function performImport(
     // Sort notebooks back to original export order and add to newItems
     createdNotebooks.sort((a, b) => a.originalIndex - b.originalIndex);
     for (const { notebook } of createdNotebooks) {
-      newItems.push(notebook as unknown as NoteCharm);
+      newItems.push(notebook);
     }
   } else {
     // v1 format: create flat notebooks (no hierarchy info)
@@ -671,10 +671,10 @@ function performImport(
       const notesForNotebook = notesByNotebook.get(nbName) ?? [];
       const newNb = Notebook({
         title: actualName,
-        notes: notesForNotebook as unknown as NoteCharm[],
+        notes: notesForNotebook,
       });
 
-      newItems.push(newNb as unknown as NoteCharm);
+      newItems.push(newNb);
     }
   }
 
@@ -1266,7 +1266,7 @@ const createStandaloneNotebookAndOpen = handler<
 >((_, { standaloneNotebookTitle, showStandaloneNotebookPrompt, allCharms }) => {
   const title = standaloneNotebookTitle.get().trim() || "New Notebook";
   const nb = Notebook({ title });
-  allCharms.push(nb as unknown as NoteCharm);
+  allCharms.push(nb);
   showStandaloneNotebookPrompt.set(false);
   standaloneNotebookTitle.set("");
   return navigateTo(nb);
@@ -1282,7 +1282,7 @@ const createStandaloneNotebookAndContinue = handler<
 >((_, { standaloneNotebookTitle, allCharms }) => {
   const title = standaloneNotebookTitle.get().trim() || "New Notebook";
   const nb = Notebook({ title });
-  allCharms.push(nb as unknown as NoteCharm);
+  allCharms.push(nb);
   // Keep modal open, just clear the title for the next notebook
   standaloneNotebookTitle.set("");
 });
@@ -1305,7 +1305,7 @@ const _createNotebook = handler<
   { allCharms: Writable<NoteCharm[]> }
 >((_, { allCharms }) => {
   const nb = Notebook({ title: "New Notebook" });
-  allCharms.push(nb as unknown as NoteCharm);
+  allCharms.push(nb);
 });
 
 // Handler to create a new note (without navigating)
@@ -1318,7 +1318,7 @@ const createNote = handler<
     content: "",
     noteId: generateId(),
   });
-  allCharms.push(note as unknown as NoteCharm);
+  allCharms.push(note);
 });
 
 // Helper to perform the actual add-to-notebook operation
@@ -1557,7 +1557,7 @@ const duplicateSelectedNotes = handler<
         title: (original.title ?? "Note") + " (Copy)",
         content: original.content ?? "",
         noteId: generateId(),
-      }) as unknown as NoteCharm);
+      }));
     }
   }
   allCharms.push(...copies);
@@ -1924,7 +1924,7 @@ const cloneSelectedNotebooks = handler<
       copies.push(Notebook({
         title: baseTitle + " (Clone)",
         notes: [...(original?.notes ?? [])], // Shallow copy - reference same notes
-      }) as unknown as NoteCharm);
+      }));
     }
   }
   allCharms.push(...copies);
@@ -1955,7 +1955,7 @@ const duplicateSelectedNotebooks = handler<
           content: note.content ?? "",
           isHidden: true,
           noteId: generateId(),
-        }) as unknown as NoteCharm
+        })
       );
 
       // Add new notes to collection (visible in All Notes)
@@ -1973,7 +1973,7 @@ const duplicateSelectedNotebooks = handler<
       newItems.push(Notebook({
         title: baseTitle + " (Copy)",
         notes: newNotes,
-      }) as unknown as NoteCharm);
+      }));
     }
   }
 
@@ -2180,7 +2180,7 @@ const createNotebookFromPrompt = handler<
 
   // Create notebook with items directly (simpler approach)
   const newNotebook = Notebook({ title: name, notes: selectedItems });
-  allCharms.push(newNotebook as unknown as NoteCharm);
+  allCharms.push(newNotebook);
 
   // Mark selected items as hidden
   for (const idx of selected) {
@@ -2327,7 +2327,7 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
     allCharms.filter((charm: any) => {
       const name = charm?.[NAME];
       return typeof name === "string" && name.startsWith("📓");
-    }) as unknown as NotebookCharm[]
+    })
   );
 
   // Selection state for notes multi-select
@@ -2528,10 +2528,7 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
   const notebooksWithMemberships = computed((): NotebookWithMemberships[] => {
     // Read notebookMemberships directly - don't use JSON.parse/stringify which loses Cell references
     // Simply reading the computed value establishes the dependency
-    const membershipMap = notebookMemberships as unknown as Record<
-      string,
-      Array<{ name: string; notebook: NotebookCharm }>
-    >;
+    const membershipMap = notebookMemberships;
     return notebooks.map((notebook: NotebookCharm) => {
       const notebookName = (notebook as any)?.[NAME] ??
         (notebook as any)?.title ?? "";
