@@ -4,7 +4,6 @@ import {
   computed,
   Default,
   handler,
-  lift,
   recipe,
   str,
 } from "commontools";
