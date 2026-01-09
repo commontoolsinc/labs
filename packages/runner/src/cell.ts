@@ -1762,21 +1762,22 @@ export function convertCellsToLinks(
   // convertible.
   value = toStorableValue(value);
 
-  // Recursively process arrays and objects.
-  if (Array.isArray(value)) {
-    value = value.map((value, index) =>
+  // Recursively process arrays and objects, if we ended up with one of those.
+  if (!isRecord(value)) {
+    // `toStorableValue()` converted this into a primitive value of some sort.
+    return value;
+  } else if (Array.isArray(value)) {
+    return value.map((value, index) =>
       convertCellsToLinks(value, options, [...path, String(index)], seen)
     );
   } else {
-    value = Object.fromEntries(
+    return Object.fromEntries(
       Object.entries(value).map(([key, value]) => [
         key,
         convertCellsToLinks(value, options, [...path, String(key)], seen),
       ]),
     );
   }
-
-  return value;
 }
 
 /**
