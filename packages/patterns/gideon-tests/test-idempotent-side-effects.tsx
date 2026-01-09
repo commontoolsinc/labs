@@ -41,7 +41,7 @@ interface TestInput {
 }
 
 interface TestOutput {
-  triggerCount: Writable<number>;
+  triggerCount: number;
   nonIdempotentRunCount: number;
   idempotentRunCount: number;
   nonIdempotentData: unknown[];

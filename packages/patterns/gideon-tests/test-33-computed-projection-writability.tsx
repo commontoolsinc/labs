@@ -40,9 +40,9 @@ interface InputSchema {
   }>;
 }
 
-// Pattern parameter type - wrap in Cell<> for write access
+// Pattern output type - source is passed through
 interface Input {
-  source: Cell<Source>;
+  source: Source;
 }
 
 // Handler to update via computed projection

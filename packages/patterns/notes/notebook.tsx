@@ -175,7 +175,7 @@ const removeFromNotebook = handler<
 // Handler for dropping a charm onto this notebook
 const _handleCharmDrop = handler<
   { detail: { sourceCell: Writable<unknown> } },
-  { notes: Writable<NoteCharm[]> }
+  { notes: Writable<any[]> }
 >((event, { notes }) => {
   const sourceCell = event.detail.sourceCell;
   const notesList = notes.get() ?? [];
@@ -795,7 +795,7 @@ const createNotebookFromPrompt = handler<
     pendingNotebookAction: Writable<"add" | "move" | "">;
     selectedNoteIndices: Writable<number[]>;
     notes: Writable<NoteCharm[]>;
-    allCharms: Writable<MinimalCharm[]>;
+    allCharms: Writable<any[]>;
     notebooks: Writable<NotebookCharm[]>;
   }
 >((_, state) => {
