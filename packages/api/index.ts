@@ -890,16 +890,17 @@ export declare const CELL_LIKE: unique symbol;
  * Preserves Stream<T> since Streams are callable interfaces (.send()), not data containers.
  *
  * Implementation is non-distributive by default to preserve union types like RenderNode
- * that intentionally contain AnyBrandedCell as a data variant. However, it distributes
- * specifically for "Cell | undefined" patterns (optional cell properties) so that
- * `title?: Writable<string>` correctly strips to `title?: string`.
+ * that intentionally contain AnyBrandedCell as a data variant. However, for optional cell
+ * properties like `title?: Writable<string>` (which expand to `Writable<string> | undefined`),
+ * we extract the cell parts, strip them, and recombine with the non-cell parts.
  *
  * See packages/api/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
  */
 export type StripCell<T> =
-  // Distribute for optional cell properties: "SomeCell | undefined" pattern
+  // Handle optional cell properties: "SomeCell | undefined" pattern
+  // Strip the cell part, preserve undefined only if it was present
   [T] extends [AnyBrandedCell<any> | undefined]
-    ? (T extends any ? StripCellInner<T> : never)
+    ? StripCellInner<Exclude<T, undefined>> | Extract<T, undefined>
     // Non-distributive for everything else (preserves unions like RenderNode)
     : StripCellInner<T>;
 
