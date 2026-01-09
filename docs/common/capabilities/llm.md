@@ -73,3 +73,39 @@ const summaries = articles.map((article) => ({
   </div>
 ))}
 ```
+
+### Valid Model Names
+
+Model names must match the registry format exactly. Invalid names cause cryptic errors:
+
+```typescript
+// ❌ WRONG - causes "Cannot read properties of undefined"
+model: "claude-3-5-sonnet-20241022"   // Wrong format
+model: "claude-sonnet-4-5"            // Missing vendor prefix
+model: "anthropic/claude-sonnet-4-5"  // Wrong separator
+
+// ✅ CORRECT - use vendor:model format
+model: "anthropic:claude-sonnet-4-5"
+model: "anthropic:claude-haiku-4-5"
+model: "anthropic:claude-opus-4-1"
+model: "openai:gpt-4o"
+
+// ✅ ALSO CORRECT - aliases work
+model: "sonnet-4-5"
+model: "opus-4-1"
+```
+
+If you get `TypeError: Cannot read properties of undefined (reading 'model')`, check your model name format first.
+
+**Discovery:** Query `/api/ai/llm/models` to see all available models.
+
+### Cache Busting for Regeneration
+
+For "respin" or "regenerate" features, set `cache: false` in the options:
+
+```typescript
+const result = generateText({
+  prompt,
+  cache: false,  // Forces fresh generation
+});
+```
