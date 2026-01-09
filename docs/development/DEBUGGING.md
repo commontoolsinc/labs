@@ -22,8 +22,12 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | Handler binding: unknown property | Passing event data at binding time | Use inline handler for test buttons ([see below](#handler-binding-error-unknown-property)) |
 | Stream.subscribe doesn't exist | Using Stream.of()/subscribe() | Bound handler IS the stream ([see below](#streamof--subscribe-dont-exist)) |
 | Can't access variable in nested scope | Variable scoping limitation | Pre-compute grouped data or use lift() with explicit params ([see below](#variable-scoping-in-reactive-contexts)) |
-| "Cannot access cell via closure" | Using lift() with closure | Pass all reactive deps as params to lift() ([REACTIVITY](REACTIVITY.md#lift-and-closure-limitations)) |
+| "Cannot access cell via closure" / "Accessing an opaque ref via closure is not supported" | Using lift() with closure | Pass all reactive deps as params to lift() ([REACTIVITY](REACTIVITY.md#lift-and-closure-limitations)) |
 | CLI `get` returns stale computed values | `charm set` doesn't trigger recompute | Run `charm step` after `set` to trigger re-evaluation ([see below](#stale-computed-values-after-charm-set)) |
+| Space URL 404 or routing errors | Space name contains `/` | Use only `a-z`, `0-9`, `-`, `_` in space names |
+| "StorageTransactionInconsistent" | Read-modify-write race with spread | Use `.push()` for append, `.key(idx).set()` for updates ([see below](#array-mutation-patterns)) |
+| "X.key is not a function" | Called `.get()` then `.key()` | Use `.key()` chains for navigation ([see below](#key-not-found-after-get)) |
+| "FATAL ERROR: Reached heap limit" | VDOM type inference explosion | Use `unknown` for UI properties in output interface ([TYPES](TYPES_AND_SCHEMAS.md#vdom-properties-in-output-interfaces)) |
 
 ---
 
@@ -116,6 +120,39 @@ items.map((item) => (
 
 See [REACTIVITY.md](REACTIVITY.md#using-reactive-values-to-index-objects-in-map) for more examples.
 
+### First-Pass Empty Data for Async Sources
+
+**Symptom:** Console errors during initial load, but UI works correctly after a moment
+
+When patterns load, the first reactive pass may have empty data for asynchronously-loaded sources:
+- `wish()` results (favorites not yet loaded)
+- Cells from external sources
+- Data from storage
+
+This is expected behavior. Use `computed()` for data that depends on async sources - it automatically re-evaluates when data arrives:
+
+```typescript
+// ✅ computed() handles async data correctly
+const authEmail = computed(() => wishResult.result?.user?.email ?? "");
+
+// Check both error and empty states in UI
+{ifElse(
+  wishResult.error,
+  <div>Not found</div>,
+  ifElse(
+    authEmail === "",
+    <div>Not configured</div>,
+    <div>Authenticated: {authEmail}</div>
+  )
+)}
+```
+
+**Key distinction:**
+- `wish.error` = charm not found
+- `wish.result` exists but data empty = charm found, not yet configured
+
+Don't assume first-pass errors indicate permanent failure - check the final UI state.
+
 ### onClick Inside computed()
 
 **Error:** "ReadOnlyAddressError: Cannot write to read-only address"
@@ -189,6 +226,25 @@ const total = calcTotal({ expenses });
 ```
 
 **Why:** `lift()` creates a new frame, and cells cannot be accessed via closure across frames. `computed()` gets automatic closure extraction by the CTS transformer; `lift()` does not. Use `computed()` by default in patterns.
+
+### .key() Not Found After .get()
+
+**Error:** `X.key is not a function`
+
+**Symptom:** Navigating nested data for writes, calling `.get()` then `.key()` on the result.
+
+```typescript
+// ❌ WRONG: .get() returns a value, not a Cell
+const entry = charmCell.key("subCharms").get().find(e => e.type === "x");
+entry.charm.key("items");  // TypeError: .key is not a function
+
+// ✅ CORRECT: Use .key() chains to maintain Cell references
+const itemsCell = charmCell.key("subCharms").key(0).key("charm").key("items");
+itemsCell.set([...itemsCell.get(), newItem]);
+```
+
+**Why:** `.get()` unwraps a Cell and returns its value. `.key()` is a Cell method. Use `.key()` for
+navigation when you need writable references; use `.get()` only at the END for the actual value.
 
 ### Handler Binding Error: Unknown Property
 
@@ -522,6 +578,55 @@ export default pattern(({ searchQuery }) => {
 
 **Rule:** Handlers should be synchronous state changes. Use `fetchData` for async operations.
 
+### Array Mutation Patterns
+
+**Error:** `StorageTransactionInconsistent: Transaction consistency violated`
+
+The spread pattern for array mutations can race with concurrent operations:
+
+```typescript
+// ❌ Can race - read-modify-write pattern
+const current = items.get();
+items.set([...current, newItem]);
+```
+
+Use atomic cell methods instead:
+
+| Operation | Pattern |
+|-----------|---------|
+| Append item | `items.push(newItem)` |
+| Update item property | `items.key(idx).key("prop").set(value)` |
+| Remove at index | `items.set(items.get().toSpliced(idx, 1))` |
+
+`.push()` and `.key().set()` are atomic within the framework's transaction system.
+
+---
+
+## Development Best Practices
+
+### Use Isolated Spaces for Testing
+
+A charm with an infinite loop or high CPU usage can make an entire space unusable. When you visit a space URL, all charms in that space may be loaded - if one loops, the space becomes unresponsive.
+
+**Symptoms:**
+1. Deploy a charm that causes infinite loop or 100% CPU
+2. Server becomes unresponsive, needs restart
+3. After restart, visiting the space triggers the loop again
+4. Space is effectively "poisoned" until the charm is removed
+
+**Prevention:** Use isolated spaces for testing new patterns:
+
+```bash
+# ❌ Don't test in your main space
+--space my-production-space
+
+# ✅ Use throwaway spaces for testing
+--space test-feature-1
+--space debug-session-2
+```
+
+This way, if a charm causes issues, you don't lose access to your main space with other working charms.
+
 ---
 
 ## Debugging Workflow
@@ -598,16 +703,56 @@ const removeItem = handler((_, { items, item }) => { ... });
 {items.map(item => <ct-button onClick={removeItem({ items, item })}>×</ct-button>)}
 ```
 
-**2. Pre-compute outside loops**
+**2. Choose the right reactivity granularity**
+
+The choice between per-item `computed()` and pre-computed arrays depends on your update
+pattern. See "The Dependency Scope Principle" in CELLS_AND_REACTIVITY.md for details.
 
 ```typescript
-// ❌ Expensive in loop
+// Per-item computed: O(1) when ONE item changes (only that item recomputes)
 {items.map(item => <div>{computed(() => expensive(item))}</div>)}
 
-// ✅ Compute once
+// Pre-computed array: O(1) when you need ALL items together
+// But O(N) when any single item changes (entire array recomputes)
 const processed = computed(() => items.map(expensive));
 {processed.map(result => <div>{result}</div>)}
 ```
+
+**Rule of thumb:** If individual items change frequently, per-item `computed()` is more
+efficient. If you always need the whole collection, pre-compute once.
+
+### Measuring Performance Correctly
+
+**`console.time()` inside `computed()` doesn't work** - it only measures initial graph
+setup, not reactive re-execution. The framework schedules re-runs asynchronously via
+`setTimeout(..., 0)`.
+
+```typescript
+// ❌ WRONG - Only measures setup, not re-runs
+const result = computed(() => {
+  console.time('compute');
+  const val = expensiveWork();
+  console.timeEnd('compute');
+  return val;
+});
+
+// ✅ CORRECT - Count function calls to detect N² complexity
+let callCount = 0;
+const result = computed(() => {
+  callCount++;
+  console.log(`compute called ${callCount} times`);
+  return expensiveWork();
+});
+```
+
+If `callCount` reaches 18 when you expected 1, you've found N² complexity.
+
+**Other measurement approaches:**
+
+- **Chrome DevTools Performance tab** - Record while interacting, look for long tasks (>50ms)
+- **`.sink()` to observe re-execution** - `myComputed.sink(v => console.log('recomputed'))`
+- **Handler timing** - Handlers execute synchronously, so `Date.now()` works there
+- **A/B testing** - Deploy BEFORE/AFTER versions to separate spaces, compare call counts
 
 ---
 

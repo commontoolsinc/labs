@@ -86,6 +86,8 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:5173          # Shell
 | Port already in use | Previous server didn't stop | Use `--force` flag |
 | Stale data | Cache issues | Use `--clear-cache` flag |
 | `*.ts.net` URLs hang | Not on Tailscale | Connect to CT network via Tailscale |
+| OAuth error: `Unexpected token '<'` | Fetching from wrong port | Use port 8000 for API calls ([see below](#oauth-returns-html-instead-of-json)) |
+| UI component changes not appearing | Shell doesn't watch packages/ui | Restart local dev server |
 
 ### Manual Fallback
 
@@ -129,6 +131,26 @@ tail -50 packages/toolshed/local-dev-toolshed.log
 tail -f packages/shell/local-dev-shell.log
 tail -f packages/toolshed/local-dev-toolshed.log
 ```
+
+### OAuth Returns HTML Instead of JSON
+
+**Error:** `SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON`
+
+This happens when OAuth or API calls hit port 5173 (frontend) instead of port 8000 (backend). The frontend returns HTML, which fails JSON parsing.
+
+| Port | Server | Returns |
+|------|--------|---------|
+| **5173** | Frontend (Shell) | HTML |
+| **8000** | Backend (Toolshed) | JSON |
+
+**Fix:** Ensure API calls use port 8000:
+- Deployment: `--api-url http://localhost:8000`
+- In patterns: Check `getRecipeEnvironment().apiUrl`
+- Browser testing: Navigate to `http://localhost:5173` for UI, but API calls should target 8000
+
+### UI Component Changes Not Appearing
+
+When editing `ct-*` components in `packages/ui/`, restart the local dev server to ensure the updated code is running.
 
 ---
 

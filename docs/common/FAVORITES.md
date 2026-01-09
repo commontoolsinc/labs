@@ -37,6 +37,51 @@ Later, I wish for "#note" and discover the first matching item in the list.
 const wishResult = wish<{ content: string }>({ query: "#note" });
 ```
 
+# Call wish() at Pattern Level
+
+Always call `wish()` at the pattern body level, not inside `computed()` or other reactive constructs:
+
+```tsx
+export default pattern<Input>(({ enableSearch }) => {
+  // ✅ Call wish() once at pattern level
+  const searchCharm = wish<SearchOutput>({ query: "#search" });
+
+  // Use computed() to conditionally process the result
+  const searchData = computed(() => {
+    if (!enableSearch) return null;
+    return searchCharm?.result?.data;
+  });
+
+  return { searchData, [UI]: <div>{searchData}</div> };
+});
+```
+
+This ensures the wish is established once. Conditional logic belongs in how you *use* the result, not in whether you *create* the wish.
+
+# Special Wish Targets
+
+## `#mentionable` - All Mentionable Charms
+
+Returns charms that can appear in `[[` autocomplete:
+
+```tsx
+const mentionable = wish<MentionableCharm[]>("#mentionable");
+```
+
+**Important:** This target requires the default-app infrastructure. It resolves to `spaceCell.defaultPattern.backlinksIndex.mentionable`. CLI deployments (`ct charm new`) don't set up this infrastructure automatically.
+
+**Projection:** Returns minimal data for performance - only `$NAME`, `backlinks`, and `mentioned` properties. For full charm data, use `wish("/").allCharms` instead.
+
+## `wish("/")` - Space Root
+
+Returns full space data including all charms:
+
+```tsx
+const { allCharms } = wish<{ allCharms: Charm[] }>("/");
+```
+
+Use this when you need full charm properties (like `subCharms`, custom fields).
+
 # Intended Usage
 
 Keep a handle to important information in a charm, e.g. google auth, user preferences/biography, cross-cutting data (calendar).

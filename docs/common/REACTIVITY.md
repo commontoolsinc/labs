@@ -74,7 +74,39 @@ Think of `Writable<>` as a permission declaration:
 | Can pass to `computed()` | Can mutate directly |
 | Can use in JSX | Everything read-only can do, plus mutation |
 
-## Accessing Reactive Values
+### Access Patterns Are Type-Based
+
+How you access a value depends on its **type**, not where you're accessing it:
+
+| Type | How to access | Created by |
+|------|---------------|------------|
+| `Writable<T>` | `.get()` to read, `.set()` to write | `Writable.of()`, `Writable<>` in type signature |
+| `OpaqueRef<T>` | Direct property access | Pattern inputs without `Writable<>`, items in `.map()` |
+
+**Important:** `Writable<T>` always requires `.get()`—this never changes regardless of context.
+
+`OpaqueRef<T>` property access works anywhere using accessors (e.g., `user.name`). However, to **call methods or perform computation** on an OpaqueRef value, you must do so inside a `computed()` that captures it from the enclosing scope:
+
+```typescript
+export default pattern<{ user: { name: string } }>(({ user }) => {
+  // ✅ Property access on OpaqueRef works anywhere
+  const nameDisplay = user.name;  // Fine in pattern body, JSX, etc.
+
+  // ✅ Computation on OpaqueRef must be inside computed() that captures it
+  const upperName = computed(() => user.name.toUpperCase());
+
+  // ❌ Can't call methods on OpaqueRef outside computed()
+  // const broken = user.name.toUpperCase();  // Won't work
+
+  return { [UI]: <div>{user.name} / {upperName}</div> };
+});
+
+// Writable<T> always needs .get(), regardless of context
+const localCell = Writable.of("hello");
+const upper = computed(() => localCell.get().toUpperCase());
+```
+
+## Writable Basics
 
 Different reactive types have different access patterns:
 
@@ -178,7 +210,7 @@ export default pattern(({ inputItems }) => {
   // Create new cells for local state
   const filteredItems = Cell.of<Item[]>([]);
   const searchQuery = Cell.of("");
-  const selectedItem = Cell.of<Item | null>(null);
+  const selectedItem = Cell.of<Item | undefined>();  // Use undefined, not null
 
   return {
     [UI]: <div>...</div>,
@@ -193,9 +225,23 @@ export default pattern(({ inputItems }) => {
 const count = Cell.of(0);                           // Number
 const name = Cell.of("Alice");                      // String
 const items = Cell.of<Item[]>([]);                  // Empty array with type
-const user = Cell.of<User>();                       // Optional value
+const user = Cell.of<User>();                       // Optional value (undefined)
 const config = Cell.of<Config>({ theme: "dark" });  // Object with initial value
 ```
+
+**Use `undefined`, not `null`, for "no value" states:**
+
+```typescript
+// ❌ WRONG - Cell.of(null) creates unexpected behavior
+const selected = Cell.of<Item | null>(null);
+if (selected.get() !== null) { ... }  // Always true! Returns Cell reference, not null
+
+// ✅ CORRECT - Use undefined and omit argument
+const selected = Cell.of<Item | undefined>();
+if (selected.get()) { ... }  // Works correctly - falsy when no value
+```
+
+When you call `Cell.of(null)`, the runtime creates a cell with a default schema pointing to null. Reading it via `.get()` returns an immutable cell reference, not primitive `null`. This causes `!== null` checks to always be truthy.
 
 **Common mistake:**
 
@@ -271,6 +317,29 @@ const result = computed(() => {
 
 **Caution:** Overusing `.sample()` can lead to stale data. Only use it when you specifically want to avoid reactivity.
 
+### Dependency Tracking and Early Returns
+
+The reactive system tracks dependencies by observing which values are **actually accessed during execution**. If your code path returns early before accessing a computed value, that value is never tracked as a dependency.
+
+```typescript
+// BROKEN - dependency not tracked when early return happens
+const result = computed(() => {
+  if (loading) return "Loading...";  // Returns before accessing data!
+  return data.value;  // This dependency never gets tracked if loading=true
+});
+
+// CORRECT - access dependencies before early returns
+const result = computed(() => {
+  const d = data;  // Establish dependency FIRST
+  if (loading) return "Loading...";
+  return d.value;  // Use local variable
+});
+```
+
+**Key insight:** Assign computed values to local variables at the TOP of your function, before any conditional logic. This ensures the dependency is tracked regardless of which code path executes.
+
+This is a fundamental reactive programming principle that applies to any execution-based dependency tracking system (MobX, Vue, Solid.js, etc.).
+
 ### Cell.equals()
 
 Use `Cell.equals()` to compare cells or cell values:
@@ -300,14 +369,17 @@ const removeItem = (items: Writable<Item[]>, item: Writable<Item>) => {
 ### Basic Usage
 
 ```typescript
+// With Cell.of() - use .get() to access the value
 const firstName = Cell.of("Alice");
 const lastName = Cell.of("Smith");
+const fullName = computed(() => `${firstName.get()} ${lastName.get()}`);
 
-// Automatically updates when firstName or lastName changes
-const fullName = computed(() => `${firstName} ${lastName}`);
-
-// Use in JSX
-<div>Hello, {fullName}!</div>
+// With pattern inputs (no Cell<> in type) - direct access works
+// because pattern inputs are OpaqueRef, not Cell
+export default pattern<{ user: { first: string; last: string } }>(({ user }) => {
+  const greeting = computed(() => `Hello, ${user.first} ${user.last}!`);
+  return { [UI]: <div>{greeting}</div> };
+});
 ```
 
 ### Never Nest computed()
@@ -329,16 +401,14 @@ Use `computed()` **outside of JSX** for reactive transformations:
 
 ```typescript
 // ✅ Use computed() outside JSX
+// (assuming items, searchQuery, groupedItems are pattern inputs - OpaqueRef)
 const filteredItems = computed(() => {
-  const query = searchQuery.toLowerCase();
-  return items.filter(item => item.title.toLowerCase().includes(query));
+  return items.filter(item => item.title.toLowerCase().includes(searchQuery.toLowerCase()));
 });
 
 const itemCount = computed(() => items.length);
 
-const categories = computed(() => {
-  return Object.keys(groupedItems).sort();
-});
+const categories = computed(() => Object.keys(groupedItems).sort());
 
 // Then use the computed values in JSX
 return {
@@ -533,7 +603,7 @@ const increment = handler<never, { count: Writable<number> }>(
 );
 ```
 
-**Remember:** Whether a cell was passed in as an input or created locally with `Cell.of()`, if the type is `Writable<T>`, you use `.get()` to read its value.
+**Remember:** Whether a cell was passed in as an input or created locally with `Writable.of()`, if the type is `Writable<T>`, you use `.get()` to read its value. This is true everywhere—in `computed()`, handlers, JSX, or any other context. Access patterns are determined by the **type**, not the calling context.
 
 ### 5. In computed() Functions
 
@@ -555,9 +625,10 @@ const summary = computed(() => {
 ```typescript
 const searchQuery = Cell.of("");
 
-// Reactive filtered list
+// searchQuery is Cell<string>, so use .get()
+// items is a pattern input (OpaqueRef), so direct access works
 const filteredItems = computed(() => {
-  const query = searchQuery.toLowerCase();
+  const query = searchQuery.get().toLowerCase();
   return items.filter(item =>
     item.title.toLowerCase().includes(query)
   );
@@ -758,6 +829,36 @@ const greeting = str`Hello, ${user.name}! You have ${notifications.count} new me
 ```
 
 ## Performance Considerations
+
+### The Dependency Scope Principle
+
+**A reactive computation re-runs whenever ANY of its dependencies change.** This is the fundamental principle for understanding reactive performance.
+
+Structure your computations to have the narrowest reasonable dependency scope. When inputs change independently, prefer multiple fine-grained computeds over one coarse-grained computed.
+
+```typescript
+// Coarse-grained: One computed over entire array
+// Re-runs ALL items when ANY item changes
+const processedItems = computed(() => {
+  return items.map(item => expensiveProcess(item));
+});
+
+// Fine-grained: Per-item computed inside .map()
+// Only re-runs the specific item that changed
+{items.map(item => (
+  <div>{computed(() => expensiveProcess(item))}</div>
+))}
+```
+
+**When to use which approach:**
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Items change independently | Per-item `computed()` in `.map()` |
+| Need to process entire array (sort, filter, reduce) | Single `computed()` over array |
+| Displaying static transformations | Either works; prefer simpler code |
+
+The per-item approach creates separate reactive nodes, each with its own narrow dependency. When an item is added, only the new item's computation runs. The single-computed approach treats the entire array as one dependency—any change reprocesses everything.
 
 ### When to Optimize
 

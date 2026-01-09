@@ -83,20 +83,12 @@ alias ct="deno task ct"
 
 deno task ct charm new path/to/pattern.tsx \
   -i claude.key -a http://localhost:8000 -s my-space
+# Returns charm ID like: baedrei...
 
-# Then open: http://localhost:8000/my-space
-```
-
-**Charm URLs:**
-After deploying a charm, access it in the browser at:
-```
-http://localhost:8000/<space>/<charm-id>
+# Then open: http://localhost:8000/my-space/baedrei...
 ```
 
-For example, if you deployed to space `my-space` and got charm ID `baedrei...xyz`:
-```
-http://localhost:8000/my-space/baedrei...xyz
-```
+**Charm URL format:** Use a slash between space and charm ID: `http://localhost:8000/my-space/baedrei...`
 
 If scripts fail, see `docs/development/LOCAL_DEV_SERVERS.md` for troubleshooting.
 

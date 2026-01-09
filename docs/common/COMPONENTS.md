@@ -18,6 +18,18 @@ Use `$` prefix for automatic two-way sync. No handler needed for simple updates.
 
 For when to use handlers vs binding, see [PATTERNS.md](PATTERNS.md).
 
+## Property Names: Use CamelCase
+
+Use camelCase for `ct-*` component properties. Kebab-case JSX attributes don't map correctly:
+
+```tsx
+// ❌ Kebab-case won't work
+<ct-autocomplete allow-custom={true} />  // Sets element["allow-custom"], not allowCustom
+
+// ✅ CamelCase works
+<ct-autocomplete allowCustom={true} />  // Sets element.allowCustom correctly
+```
+
 ---
 
 ## ct-button
@@ -129,7 +141,6 @@ Input + button combo for adding items.
 
 ```tsx
 <ct-message-input
-  buttonText="Add item"
   placeholder="New item"
   onct-send={(e) => {
     const text = e.detail?.message?.trim();
@@ -239,6 +250,60 @@ const removeItem = handler<unknown, { items: Writable<Item[]>; item: Item }>(
 
 ---
 
+## ct-screen
+
+Full-screen container for app-like layouts. Use instead of `<div style={{ height: "100%" }}>` which doesn't work (parent has no explicit height). The component already sets `display: flex; flex-direction: column;` internally.
+
+```tsx
+// ❌ DOESN'T WORK - content appears blank
+<div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+  {/* Content in DOM but invisible */}
+</div>
+
+// ✅ WORKS - full available width and height
+<ct-screen>
+  <header>Title</header>
+  <ct-vscroll style="flex: 1;">
+    {/* Scrollable content */}
+  </ct-vscroll>
+</ct-screen>
+```
+
+---
+
+## ct-image-input
+
+```tsx
+<ct-image-input
+  onct-change={handleImageUpload}
+  maxSizeBytes={5000000}
+>
+  📷 Add Photo
+</ct-image-input>
+```
+
+The component compresses images to fit within `maxSizeBytes`.
+
+---
+
+## ct-code-editor
+
+Rich text editor with wiki-link mentions. **Uses `[[` for completions, not `@`.**
+
+```tsx
+<ct-code-editor
+  $value={inputText}
+  $mentionable={mentionable}
+  $mentioned={mentioned}
+  placeholder="Type [[ to mention items..."
+  language="text/markdown"
+/>
+```
+
+**To trigger completions:** Type `[[` (double brackets), not `@`.
+
+---
+
 ## Style Syntax
 
 | Element | Syntax | Example |
@@ -254,3 +319,20 @@ const removeItem = handler<unknown, { items: Writable<Item[]>; item: Item }>(
   </ct-vstack>
 </div>
 ```
+
+---
+
+## Limitations
+
+### SVG Not Supported
+
+SVG elements (`<svg>`, `<path>`, `<circle>`, etc.) are not in the JSX type definitions:
+
+```tsx
+// ❌ CompilerError: Property 'svg' does not exist on type 'JSX.IntrinsicElements'
+<svg width="100" height="100">
+  <circle cx="50" cy="50" r="40" />
+</svg>
+```
+
+**Workarounds:** Use styled `<div>` elements for bar charts, text sparklines (`▁▂▃▄▅▆▇█`), or request a `ct-chart` component.
