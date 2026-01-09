@@ -5,7 +5,15 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Provides gender selection with inclusive predefined options.
  */
-import { computed, type Default, NAME, recipe, UI } from "commontools";
+import {
+  computed,
+  type Default,
+  handler,
+  NAME,
+  recipe,
+  UI,
+  Writable,
+} from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -34,8 +42,8 @@ type GenderValue =
   | "prefer-not-to-say";
 
 export interface GenderModuleInput {
-  /** Gender identity */
-  gender: Default<GenderValue | "", "">;
+  /** Gender identity - Writable<> required for setGender handler to call .set() */
+  gender: Writable<Default<GenderValue | "", "">>;
 }
 
 // ===== Constants =====
@@ -48,12 +56,75 @@ const GENDER_OPTIONS = [
   { value: "prefer-not-to-say", label: "Prefer not to say" },
 ];
 
+// Valid gender values for normalization
+const VALID_GENDER_VALUES = new Set([
+  "",
+  "woman",
+  "man",
+  "non-binary",
+  "other",
+  "prefer-not-to-say",
+]);
+
+/**
+ * Normalize gender input to a valid enum value.
+ * Handles case variations (e.g., "Non-binary" -> "non-binary").
+ */
+function normalizeGenderValue(input: string): GenderValue | "" {
+  if (!input || typeof input !== "string") return "";
+  const normalized = input.toLowerCase().trim();
+  if (VALID_GENDER_VALUES.has(normalized)) {
+    return normalized as GenderValue | "";
+  }
+  // Handle common variations
+  if (normalized === "nonbinary" || normalized === "non binary") {
+    return "non-binary";
+  }
+  if (normalized === "prefer not to say" || normalized === "prefernotosay") {
+    return "prefer-not-to-say";
+  }
+  return "";
+}
+
+// ===== Handlers =====
+
+/**
+ * Handler for setting gender value programmatically.
+ * Normalizes input to handle case variations and common aliases.
+ *
+ * This handler is LLM-callable via Omnibot's invoke() tool.
+ * IMPORTANT: Handlers must accept result?: Writable<unknown> and use result.set()
+ * to return data to the LLM. The 'result' Cell is injected by llm-dialog.ts.
+ */
+const setGender = handler<
+  { value: string; result?: Writable<unknown> },
+  { gender: Writable<GenderValue | ""> }
+>(({ value, result }, { gender }) => {
+  const normalized = normalizeGenderValue(value);
+  gender.set(normalized);
+
+  // Return confirmation to the LLM
+  if (result) {
+    const displayLabel = GENDER_OPTIONS.find((o) =>
+      o.value === normalized
+    )?.label ||
+      "Not specified";
+    result.set({
+      success: true,
+      value: normalized,
+      displayLabel,
+      message: `Gender set to ${displayLabel}`,
+    });
+  }
+});
+
 // ===== The Pattern =====
 export const GenderModule = recipe<GenderModuleInput, GenderModuleInput>(
   "GenderModule",
   ({ gender }) => {
     const displayText = computed(() => {
-      const opt = GENDER_OPTIONS.find((o) => o.value === gender);
+      const currentGender = gender.get();
+      const opt = GENDER_OPTIONS.find((o) => o.value === currentGender);
       return opt?.label || "Not specified";
     });
 
@@ -66,6 +137,7 @@ export const GenderModule = recipe<GenderModuleInput, GenderModuleInput>(
         </ct-vstack>
       ),
       gender,
+      setGender: setGender({ gender }),
     };
   },
 );
