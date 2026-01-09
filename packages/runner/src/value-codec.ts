@@ -1,4 +1,4 @@
-import { isInstance } from "@commontools/utils/types";
+import { isInstance, isRecord } from "@commontools/utils/types";
 
 /**
  * Determines if the given value is JSON-encodable per se (without conversion),
@@ -137,4 +137,79 @@ export function toStorableValue(value: unknown): unknown {
   }
 
   return converted;
+}
+
+// TODO(@danfuzz): This sentinel is used to indicate a property should be
+// omitted, matching `JSON.stringify()` behavior for functions. Once the
+// codebase is tightened up to not store function properties, this sentinel and
+// the code that uses it can be removed.
+const OMIT = Symbol("OMIT");
+
+/**
+ * Recursively converts a value to storable (JSON-encodable) form. Like
+ * `toStorableValue()` but also recursively processes array elements and object
+ * properties.
+ *
+ * @param value - The value to convert.
+ * @param seen - Set for circularity detection (internal use).
+ * @param inArray - Whether we're processing an array element (internal use).
+ * @returns The storable value (original or converted).
+ * @throws Error if the value (or any nested value) can't be converted.
+ */
+export function toDeepStorableValue(
+  value: unknown,
+  seen: Set<object> = new Set(),
+  inArray: boolean = false,
+): unknown {
+  // Try to convert the top level to storable form.
+  try {
+    value = toStorableValue(value);
+  } catch (e) {
+    // TODO(@danfuzz): This block matches `JSON.stringify()` behavior where
+    // functions without `toJSON()` become `null` in arrays or get omitted from
+    // objects. Once the codebase is tightened up to not pass such values to
+    // `setRaw()`, this block should be removed (letting the error propagate).
+    if (e instanceof Error && e.message.includes("function per se")) {
+      return inArray ? null : OMIT;
+    }
+    throw e;
+  }
+
+  // Primitives and null don't need recursion.
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  // Check for circular references. We only keep current ancestors in `seen`,
+  // so finding a value there means we have a true cycle (not just a shared
+  // reference).
+  if (seen.has(value)) {
+    throw new Error("Cannot store circular reference");
+  }
+  seen.add(value);
+
+  let result: unknown;
+
+  // Recursively process arrays and objects.
+  if (Array.isArray(value)) {
+    result = value.map((element) => toDeepStorableValue(element, seen, true));
+  } else {
+    // TODO(@danfuzz): The OMIT check here is part of the temporary
+    // `JSON.stringify()` compatibility behavior for functions. Once tightened
+    // up, this can be simplified back to a plain
+    // `Object.fromEntries(Object.entries(...).map(...))`.
+    const entries: [string, unknown][] = [];
+    for (const [key, val] of Object.entries(value)) {
+      const converted = toDeepStorableValue(val, seen, false);
+      if (converted !== OMIT) {
+        entries.push([key, converted]);
+      }
+    }
+    result = Object.fromEntries(entries);
+  }
+
+  // Remove from seen after processing - only ancestors should be in the set.
+  seen.delete(value);
+
+  return result;
 }

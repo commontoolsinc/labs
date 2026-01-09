@@ -1,6 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { isStorableValue, toStorableValue } from "../src/value-codec.ts";
+import {
+  isStorableValue,
+  toDeepStorableValue,
+  toStorableValue,
+} from "../src/value-codec.ts";
 
 describe("value-codec", () => {
   describe("isStorableValue", () => {
@@ -223,6 +227,161 @@ describe("value-codec", () => {
         expect(() => toStorableValue(new ReturnsInstance())).toThrow(
           "`toJSON()` on object returned something other than a `JSONValue`",
         );
+      });
+    });
+  });
+
+  describe("toDeepStorableValue", () => {
+    describe("passes through primitives", () => {
+      it("passes through booleans", () => {
+        expect(toDeepStorableValue(true)).toBe(true);
+        expect(toDeepStorableValue(false)).toBe(false);
+      });
+
+      it("passes through strings", () => {
+        expect(toDeepStorableValue("hello")).toBe("hello");
+      });
+
+      it("passes through numbers", () => {
+        expect(toDeepStorableValue(42)).toBe(42);
+      });
+
+      it("passes through null", () => {
+        expect(toDeepStorableValue(null)).toBe(null);
+      });
+    });
+
+    describe("recursively processes arrays", () => {
+      it("returns a new array", () => {
+        const arr = [1, 2, 3];
+        const result = toDeepStorableValue(arr);
+        expect(result).toEqual([1, 2, 3]);
+        expect(result).not.toBe(arr);
+      });
+
+      it("converts nested instances via toJSON", () => {
+        const date = new Date("2024-01-15T12:00:00.000Z");
+        const result = toDeepStorableValue([date]);
+        expect(result).toEqual(["2024-01-15T12:00:00.000Z"]);
+      });
+
+      it("recursively processes nested arrays", () => {
+        const date = new Date("2024-01-15T12:00:00.000Z");
+        const result = toDeepStorableValue([[date]]);
+        expect(result).toEqual([["2024-01-15T12:00:00.000Z"]]);
+      });
+    });
+
+    describe("recursively processes objects", () => {
+      it("returns a new object", () => {
+        const obj = { a: 1 };
+        const result = toDeepStorableValue(obj);
+        expect(result).toEqual({ a: 1 });
+        expect(result).not.toBe(obj);
+      });
+
+      it("converts nested instances via toJSON", () => {
+        const date = new Date("2024-01-15T12:00:00.000Z");
+        const result = toDeepStorableValue({ date });
+        expect(result).toEqual({ date: "2024-01-15T12:00:00.000Z" });
+      });
+
+      it("recursively processes nested objects", () => {
+        const date = new Date("2024-01-15T12:00:00.000Z");
+        const result = toDeepStorableValue({ outer: { date } });
+        expect(result).toEqual({ outer: { date: "2024-01-15T12:00:00.000Z" } });
+      });
+    });
+
+    describe("handles shared references (same object from multiple places)", () => {
+      it("allows shared object references", () => {
+        const shared = { value: 42 };
+        const obj = { first: shared, second: shared };
+        const result = toDeepStorableValue(obj);
+        expect(result).toEqual({ first: { value: 42 }, second: { value: 42 } });
+      });
+
+      it("allows shared array references", () => {
+        const shared = [1, 2, 3];
+        const obj = { a: shared, b: shared };
+        const result = toDeepStorableValue(obj);
+        expect(result).toEqual({ a: [1, 2, 3], b: [1, 2, 3] });
+      });
+    });
+
+    describe("throws for circular references", () => {
+      it("throws when object references itself", () => {
+        const obj: any = { a: 1 };
+        obj.self = obj;
+        expect(() => toDeepStorableValue(obj)).toThrow(
+          "Cannot store circular reference",
+        );
+      });
+
+      it("throws when array references itself", () => {
+        const arr: any[] = [1, 2];
+        arr.push(arr);
+        expect(() => toDeepStorableValue(arr)).toThrow(
+          "Cannot store circular reference",
+        );
+      });
+
+      it("throws for indirect circular reference", () => {
+        const a: any = { name: "a" };
+        const b: any = { name: "b" };
+        a.b = b;
+        b.a = a;
+        expect(() => toDeepStorableValue(a)).toThrow(
+          "Cannot store circular reference",
+        );
+      });
+    });
+
+    describe("throws for non-storable nested values", () => {
+      it("throws for nested symbol", () => {
+        expect(() => toDeepStorableValue({ val: Symbol("test") })).toThrow(
+          "Cannot store symbol",
+        );
+      });
+
+      it("throws for nested bigint", () => {
+        expect(() => toDeepStorableValue([BigInt(123)])).toThrow(
+          "Cannot store bigint",
+        );
+      });
+
+      it("throws for deeply nested non-storable value", () => {
+        expect(() => toDeepStorableValue({ a: { b: { c: Symbol("deep") } } }))
+          .toThrow("Cannot store symbol");
+      });
+    });
+
+    describe("throws for nested instances without toJSON", () => {
+      it("throws for instance property in object", () => {
+        class NoToJSON {}
+        expect(() => toDeepStorableValue({ a: 1, inst: new NoToJSON() }))
+          .toThrow("Cannot store object per se");
+      });
+
+      it("throws for instance element in array", () => {
+        class NoToJSON {}
+        expect(() => toDeepStorableValue([1, new NoToJSON(), 3]))
+          .toThrow("Cannot store object per se");
+      });
+    });
+
+    // TODO(@danfuzz): These tests verify the temporary JSON.stringify-compatible
+    // behavior for functions. Once the codebase is tightened up, these tests
+    // should be updated to expect throws instead of drops/nulls.
+    describe("drops function values like JSON.stringify (TODO: should throw)", () => {
+      it("omits function properties from objects", () => {
+        const result = toDeepStorableValue({ a: 1, fn: () => {}, b: 2 });
+        expect(result).toEqual({ a: 1, b: 2 });
+      });
+
+      it("converts function elements in arrays to null", () => {
+        const result = toDeepStorableValue([1, () => {}, 3]);
+        expect(result).toEqual([1, null, 3]);
       });
     });
   });
