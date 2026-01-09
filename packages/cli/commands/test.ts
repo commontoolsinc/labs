@@ -1,5 +1,5 @@
 import { Command } from "@cliffy/command";
-import { join } from "@std/path";
+import { resolve } from "@std/path";
 import { expandGlob } from "@std/fs";
 import { discoverTestFiles, runTests } from "../lib/test-runner.ts";
 
@@ -36,7 +36,7 @@ export const test = new Command()
     const testFiles: string[] = [];
 
     for (const path of paths) {
-      const fullPath = join(Deno.cwd(), path);
+      const fullPath = resolve(Deno.cwd(), path);
 
       // Check if it's a glob pattern
       if (path.includes("*")) {
