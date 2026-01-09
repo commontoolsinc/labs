@@ -88,9 +88,9 @@ patterns/feature/
 
 1. Read TypeScript error message
 2. Identify category:
-   - Style-related? → See `docs/components/*`
+   - Style-related? → See `docs/common/components/*`
    - Handler types? → See `handler()` docs
-   - Cell operations? → See `docs/concepts/*`
+   - Cell operations? → See `docs/common/concepts/*`
 3. Find similar example in `packages/patterns/`
 4. Apply fix
 5. Verify with `deno task ct dev --no-run` (via ct skill)

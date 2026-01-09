@@ -22,7 +22,7 @@ export default pattern<Props, Props>((_) => {
   // ✅ Idempotent - check-before-write with deterministic key
   const goodComputed = computed(() => {
     const current = cacheMap.get();
-    const key = `items-${current.length}`;
+    const key = `items-${Object.keys(current).length}`;
     if (!(key in current)) {
       cacheMap.set({ ...current, [key]: Date.now() });
     }
