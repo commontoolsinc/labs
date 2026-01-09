@@ -464,7 +464,7 @@ const addRelationship = handler<
   // Atomic duplicate check - if found, show feedback and bail
   // Cell.equals() resolves all links on both sides to compare actual data
   const isDuplicate = currentRelationships.some((r) =>
-    Cell.equals(r.target as object, targetCharm as unknown as object)
+    Cell.equals(r.target as object, targetCharm as object)
   );
   if (isDuplicate) {
     errorMessage.set("This relationship already exists.");
@@ -582,8 +582,12 @@ export const RelationshipsModule = recipe<RelationshipsModuleInput, Relationship
 
     // Get mentionable charms - use prop if provided (pre-filtered by Record), otherwise wish
     // When passed from Record, the list is already filtered to exclude self
+    // NOTE: Must use lift() to avoid reactive context errors with ?? operator
     const mentionableFromWish = wish<MentionableCharm[]>("#mentionable");
-    const mentionable = mentionableProp ?? mentionableFromWish;
+    const mentionable = lift(
+      ({ prop, fromWish }: { prop: MentionableCharm[] | undefined; fromWish: MentionableCharm[] }) =>
+        prop !== undefined ? prop : fromWish,
+    )({ prop: mentionableProp, fromWish: mentionableFromWish });
     // Track which relationship index is being edited (-1 means none)
     // Using index instead of target reference avoids Cell.equals() in reactive contexts
     const editingIndex = Cell.of<number>(-1);
@@ -593,7 +597,10 @@ export const RelationshipsModule = recipe<RelationshipsModuleInput, Relationship
     // Parent record for bidirectional linking
     // When passed from Record, we use the prop directly - no need to search
     // This avoids all reactive proxy comparison issues
-    const parentRecord = parentRecordProp ?? null;
+    // NOTE: Must use lift() to avoid reactive context errors with ?? operator
+    const parentRecord = lift(
+      ({ prop }: { prop: MentionableCharm | undefined }) => prop ?? null,
+    )({ prop: parentRecordProp });
 
     // Build autocomplete items from mentionable using lift()
     // lift() properly unwraps OpaqueRefs from wish()
