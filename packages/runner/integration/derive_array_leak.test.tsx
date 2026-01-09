@@ -26,7 +26,7 @@ interface RecipeOutput {
 
 // Inline handlers to avoid import resolution issues
 const increment = handler<
-  unknown,
+  void,
   { value: Cell<number> }
 >(
   (_args, state) => {
@@ -38,7 +38,7 @@ const increment = handler<
 );
 
 const decrement = handler<
-  unknown,
+  void,
   { value: Cell<number> }
 >(
   (_args, state) => {

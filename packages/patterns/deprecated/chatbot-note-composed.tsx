@@ -29,8 +29,8 @@ import {
 import { type MentionableCharm } from "../system/backlinks-index.tsx";
 
 type ChatbotNoteInput = {
-  title?: Writable<Default<string, "LLM Test">>;
-  messages?: Writable<Default<Array<BuiltInLLMMessage>, []>>;
+  title?: Default<string, "LLM Test">;
+  messages?: Default<Array<BuiltInLLMMessage>, []>;
 };
 
 type ChatbotNoteResult = {

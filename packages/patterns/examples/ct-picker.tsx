@@ -55,6 +55,7 @@ export default recipe<Input, Result>(
               Next
             </ct-button>
             <div>
+              {/* @ts-expect-error selection is a charm, not a RenderNode - example needs fixing */}
               {selection}
             </div>
           </ct-card>
