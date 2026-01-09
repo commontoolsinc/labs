@@ -696,16 +696,29 @@ export const RelationshipsModule = recipe<RelationshipsModuleInput, Relationship
     });
 
     // Filter valid relationships (exclude deleted/null targets)
-    const validRelationships = computed(() => {
-      const all = relationships || [];
-      return all.filter((entry: RelationshipEntry) => {
-        try {
-          return entry?.target != null;
-        } catch {
-          return false;
-        }
-      });
-    });
+    // Uses lift to check if target charm still exists in mentionable (allCharms)
+    // This catches dangling references when target charms are deleted
+    const validRelationships = lift(
+      ({ stored, allCharms }: {
+        stored: RelationshipEntry[];
+        allCharms: MentionableCharm[];
+      }) => {
+        const all = stored || [];
+        const charms = allCharms || [];
+        return all.filter((entry: RelationshipEntry) => {
+          try {
+            // Check if target exists and is not null
+            if (entry?.target == null) return false;
+            // Check if target charm still exists in allCharms
+            return charms.some((charm: MentionableCharm) =>
+              Cell.equals(charm as object, entry.target as object)
+            );
+          } catch {
+            return false;
+          }
+        });
+      },
+    )({ stored: relationships, allCharms: mentionable });
 
     return {
       [NAME]: computed(() => `${MODULE_METADATA.icon} Relationships: ${displayText}`),
