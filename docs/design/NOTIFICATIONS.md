@@ -1,6 +1,6 @@
 # Common Tools Notification System Design
 
-> **Status**: Draft v2
+> **Status**: Draft v3
 > **Date**: 2026-01-09
 > **Branch**: `feat/notifications-system`
 
@@ -16,6 +16,7 @@ This document describes the design for a notification system in Common Tools. Th
 - **User agency is paramount** - users control their attention budget
 - **High integrity** - clicking always shows current, live content
 - **Two state machines** - notification state and content seen state are separate
+- **Simple by default** - convention over configuration, annotations-ready for multi-user
 
 ---
 
@@ -49,9 +50,9 @@ CONTENT SEEN STATE (per-user, owned by source app or user's projection)
                  in source app
 ```
 
-Where this state lives depends on the scenario:
-- **Single-user pattern**: `seen: boolean` on the source cell
-- **Multi-user pattern**: User's annotation in their projection space
+Where this state lives:
+- **Today (single-user)**: `seen: boolean` on the source cell
+- **Future (multi-user)**: User's annotation in their projection space
 
 ### State Machine 2: Notification State (Inbox-Owned)
 
@@ -131,13 +132,13 @@ This independence enables:
 │  │  │  unseenCount        - Computed: active entries with unseen content│ │  │
 │  │  │  send: Stream       - Handler adds entries, validates            │ │  │
 │  │  │                                                                   │ │  │
-│  │  │  Observes content seen state via cross-space subscriptions       │ │  │
+│  │  │  Observes content seen state via annotations or source fields    │ │  │
 │  │  └──────────────────────────────────────────────────────────────────┘ │  │
 │  │                                                                        │  │
 │  │  ┌──────────────────────────────────────────────────────────────────┐ │  │
-│  │  │  USER'S PROJECTION SPACE (for multi-user content)                 │ │  │
+│  │  │  ANNOTATIONS (temporary shim → future: projection space)         │ │  │
 │  │  │                                                                   │ │  │
-│  │  │  Annotations: { source: ref, seen: true, seenAt: Date }          │ │  │
+│  │  │  { source: ref, seen: true, seenAt: Date }                       │ │  │
 │  │  └──────────────────────────────────────────────────────────────────┘ │  │
 │  └────────────────────────────────────────────────────────────────────────┘  │
 │                                                                              │
@@ -149,7 +150,7 @@ This independence enables:
 │  │ │ Todo Cell              │ │  │ │ Message Cell               │ │         │
 │  │ │ { task, seen: bool }   │ │  │ │ { content, author }        │ │         │
 │  │ │                        │ │  │ │ // NO seen field!          │ │         │
-│  │ │ Single-user: seen here │ │  │ │ // seen in user projection │ │         │
+│  │ │ Single-user: seen here │ │  │ │ // seen via annotation     │ │         │
 │  │ └────────────────────────┘ │  │ └────────────────────────────┘ │         │
 │  └────────────────────────────┘  └────────────────────────────────┘         │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -163,66 +164,31 @@ This independence enables:
 
 ```typescript
 interface InboxEntry {
-  id: string;                              // Unique entry ID
-  ref: NormalizedLink;                     // Cross-space reference to source
+  id: string;                    // Unique entry ID
+  ref: NormalizedLink;           // Cross-space reference to source
+  addedAt: Date;
 
   // Notification state (inbox-owned)
-  state: NotificationState;
-  priority: Priority;
-  addedAt: Date;
-  noticedAt?: Date;                        // When user first saw in inbox
+  state: 'active' | 'noticed' | 'dismissed' | 'snoozed';
   snoozedUntil?: Date;
 
-  // Seen strategy for this notification
-  seenStrategy: SeenStrategy;
-
   // Cached data for display/offline
-  cachedName?: string;                     // Last known [NAME]
-  sourceSpaceName?: string;
+  cachedName?: string;           // Last known [NAME]
+  sourceSpace?: string;
 }
-
-type NotificationState =
-  | 'active'      // In inbox, demanding attention
-  | 'noticed'     // User has seen it exists (opened inbox)
-  | 'dismissed'   // User archived/swiped away
-  | 'snoozed';    // Temporarily hidden
-
-type Priority = 'low' | 'normal' | 'high' | 'urgent';
 ```
 
-### Seen Strategy
-
-How the inbox determines if content has been seen:
-
-```typescript
-type SeenStrategy =
-  | { type: 'source-field' }                    // Source has `seen: boolean`
-  | { type: 'source-multi'; field?: string }    // Source has `seenBy: DID[]`
-  | { type: 'annotation'; field?: string }      // Check user's projection space
-  | { type: 'manual' };                         // Only manual dismiss, no auto-clear
-
-// Default detection:
-// - Source has `seen: boolean` → 'source-field'
-// - Source has `seenBy` → 'source-multi'
-// - Neither → 'manual'
-```
+No `seenStrategy` field needed. The inbox uses convention to determine seen state (see below).
 
 ### Notification Payload (for sending)
 
 ```typescript
 interface NotificationPayload {
-  ref: NormalizedLink;                     // Reference to content cell
-
-  // Optional overrides
-  seenStrategy?: SeenStrategy;             // How to check seen state
-  priority?: Priority;
-  channel?: string;                        // Future: grouping/filtering
-  hints?: {
-    title?: string;                        // Override display title
-    icon?: string;
-  };
+  ref: NormalizedLink;           // Reference to content cell
 }
 ```
+
+That's it. Simple. Patterns just send a reference.
 
 ### Inbox Pattern Interface
 
@@ -232,20 +198,117 @@ interface InboxInterface {
   entries: Cell<InboxEntry[]>;
 
   // Computed (reactive)
-  activeCount: Cell<number>;               // Entries in 'active' state
-  unseenCount: Cell<number>;               // Active entries with unseen content
+  activeCount: Cell<number>;     // Entries in 'active' state
+  unseenCount: Cell<number>;     // Active entries with unseen content
 
   // Actions
   send: Stream<NotificationPayload>;       // Add notification
   dismiss: Stream<{ id: string }>;         // Archive notification
   snooze: Stream<{ id: string; until: Date }>;
   markNoticed: Stream<{ id: string }>;     // User saw it in inbox
+  markSeen: Stream<{ ref: NormalizedLink }>;  // Write annotation
 }
 ```
 
 ---
 
-## Content Seen State: Three Approaches
+## The notify() API
+
+Sending a notification is trivially simple:
+
+```typescript
+export async function notify(payload: { ref: NormalizedLink }) {
+  const inbox = await wish('#inbox');
+  inbox.send(payload);
+}
+```
+
+No magic. Just `wish` + `send`. Patterns can also do this directly without the helper:
+
+```typescript
+// Equivalent - patterns can skip the helper
+const inbox = await wish('#inbox');
+inbox.send({ ref: myCell });
+```
+
+---
+
+## Annotations-First Design
+
+### The Vision
+
+The system is designed for a multi-user future where users have **projection spaces** - personal spaces where they annotate shared content. When you see a message in a shared chat, you write `{ seen: true }` to *your* projection space, not the shared message.
+
+This means:
+- Your "seen" state is private to you
+- You don't need write access to shared content
+- Multi-user notifications work naturally
+
+### How markSeen() Works
+
+```typescript
+// User marks content as seen
+function markSeen(ref: NormalizedLink): void {
+  // Writes annotation to user's projection space
+  annotate(ref, { seen: true, seenAt: new Date() });
+}
+```
+
+### How Inbox Checks Seen State
+
+The inbox uses convention-over-configuration to determine if content has been seen:
+
+```typescript
+function isContentSeen(ref: NormalizedLink): boolean {
+  // 1. Check annotation first (preferred, works for multi-user)
+  const annotation = getAnnotation<{ seen?: boolean }>(ref);
+  if (annotation?.seen === true) return true;
+
+  // 2. Fall back to source field (backward compat for single-user)
+  const content = $(ref);
+  if (content?.seen === true) return true;
+
+  // 3. Neither - manual dismiss only
+  return false;
+}
+```
+
+This ordering means:
+- **Multi-user patterns**: Use annotations, seen state is per-user and private
+- **Single-user patterns**: Can use simple `seen: boolean` on source, just works
+- **Neither**: User must manually dismiss notification
+
+### The Temporary Shim
+
+Annotations infrastructure doesn't exist yet. Until it ships, we use a **shim** that stores pseudo-annotations in home space:
+
+```typescript
+// packages/common/src/annotations-shim.ts
+// TEMPORARY: Remove when real annotations ship
+
+const ANNOTATIONS_CELL_KEY = '#annotations-shim';
+
+export function annotate<T>(ref: NormalizedLink, data: T): void {
+  const annotations = getAnnotationsCell();
+  const key = normalizedLinkToKey(ref);
+  annotations[key] = { ...annotations[key], ...data };
+}
+
+export function getAnnotation<T>(ref: NormalizedLink): T | undefined {
+  const annotations = getAnnotationsCell();
+  const key = normalizedLinkToKey(ref);
+  return annotations[key] as T | undefined;
+}
+```
+
+When real annotations ship:
+1. Delete `annotations-shim.ts`
+2. Update imports to use real `@commontools/annotations`
+3. Pattern code stays **exactly the same**
+
+---
+
+## Content Seen State: Two Approaches
 
 ### Approach 1: Single-User (Simple)
 
@@ -261,48 +324,20 @@ interface TodoItem {
 
 // When item created, notify
 handler(onNewItem, (item) => {
-  notify({ ref: item });  // Auto-detects seenStrategy: 'source-field'
+  notify({ ref: item });
 });
 
-// When user views, mark seen (notification auto-clears)
+// When user views, mark seen (notification auto-clears via isContentSeen)
 function onItemViewed(item: TodoItem) {
   item.seen = true;
 }
 ```
 
-### Approach 2: Multi-User with Source Tracking (Privacy Tradeoff)
+The inbox's `isContentSeen()` finds `content.seen === true` and auto-clears.
 
-For multi-user patterns where it's OK to share who's seen what:
+### Approach 2: Multi-User (Annotations)
 
-```typescript
-// patterns/team-updates.tsx
-interface Announcement {
-  title: string;
-  body: string;
-  seenBy: DID[];  // Everyone can see who's read it
-}
-
-// Notify all team members
-handler(onNewAnnouncement, async (announcement, { teamMembers }) => {
-  for (const member of teamMembers) {
-    await notifyUser(member, {
-      ref: announcement,
-      seenStrategy: { type: 'source-multi', field: 'seenBy' },
-    });
-  }
-});
-
-// When user views
-function onViewed(announcement: Announcement, viewer: DID) {
-  if (!announcement.seenBy.includes(viewer)) {
-    announcement.seenBy.push(viewer);
-  }
-}
-```
-
-### Approach 3: Multi-User with Annotations (Private, Preferred)
-
-For multi-user patterns where seen state should be private:
+For multi-user patterns, use annotations:
 
 ```typescript
 // patterns/chat.tsx
@@ -315,45 +350,16 @@ interface Message {
 
 // Notify recipient
 handler(onNewMessage, async (message, { recipient }) => {
-  await notifyUser(recipient, {
-    ref: message,
-    seenStrategy: { type: 'annotation' },
-  });
+  await notifyUser(recipient, { ref: message });
 });
 
 // Chat UI writes annotation when message scrolls into view
-function onMessageVisible(message: Message, user: DID) {
-  // Writes to user's projection space, not source
-  await annotate(message, { seen: true, seenAt: new Date() });
+function onMessageVisible(message: Message) {
+  annotate(message, { seen: true, seenAt: new Date() });
 }
 ```
 
-The inbox observes the user's projection space for the annotation:
-
-```typescript
-// In inbox pattern, checking if content is seen
-function isContentSeen(entry: InboxEntry, currentUser: DID): boolean {
-  switch (entry.seenStrategy.type) {
-    case 'source-field':
-      const content = $(entry.ref);
-      return content?.seen === true;
-
-    case 'source-multi':
-      const multi = $(entry.ref);
-      const field = entry.seenStrategy.field ?? 'seenBy';
-      return multi?.[field]?.includes(currentUser);
-
-    case 'annotation':
-      // Query user's projection space for annotation
-      const annotation = getAnnotation(entry.ref, currentUser);
-      const field = entry.seenStrategy.field ?? 'seen';
-      return annotation?.[field] === true;
-
-    case 'manual':
-      return false;  // Never auto-seen, must be dismissed
-  }
-}
-```
+The inbox's `isContentSeen()` finds the annotation and auto-clears.
 
 ---
 
@@ -380,8 +386,7 @@ function isContentSeen(entry: InboxEntry, currentUser: DID): boolean {
 │ ALICE'S HOME SPACE      │    │ BOB'S HOME SPACE        │
 │                         │    │                         │
 │ ┌─────────────────────┐ │    │ ┌─────────────────────┐ │
-│ │ Projection/         │ │    │ │ Projection/         │ │
-│ │ Annotation:         │ │    │ │ Annotation:         │ │
+│ │ Annotations:        │ │    │ │ Annotations:        │ │
 │ │                     │ │    │ │                     │ │
 │ │ msg-123: {          │ │    │ │ msg-123: {          │ │
 │ │   seen: true,       │ │    │ │   seen: false       │ │
@@ -393,9 +398,7 @@ function isContentSeen(entry: InboxEntry, currentUser: DID): boolean {
 │ │ Inbox Entry:        │ │    │ │ Inbox Entry:        │ │
 │ │ {                   │ │    │ │ {                   │ │
 │ │   ref: msg-123,     │ │    │ │   ref: msg-123,     │ │
-│ │   state: DISMISSED, │ │    │ │   state: ACTIVE,    │ │
-│ │   seenStrategy:     │ │    │ │   seenStrategy:     │ │
-│ │     'annotation'    │ │    │ │     'annotation'    │ │
+│ │   state: DISMISSED  │ │    │ │   state: ACTIVE     │ │
 │ │ }                   │ │    │ │ }                   │ │
 │ └─────────────────────┘ │    │ └─────────────────────┘ │
 └─────────────────────────┘    └─────────────────────────┘
@@ -425,12 +428,14 @@ The inbox stores **pointers** to source content, not copies. This ensures:
 - Source updates propagate automatically (reactivity)
 - No data duplication or drift
 
-### 2. Content Cells Have No Required Fields
+### 2. Convention Over Configuration
 
-Unlike the earlier design, we do NOT require `seen: boolean` on source cells. The `seenStrategy` tells the inbox how to determine seen state. This allows:
-- Pure content cells (no notification system coupling)
-- Flexible per-pattern seen tracking
-- Multi-user privacy via annotations
+No `seenStrategy` field. The inbox checks:
+1. Annotations first (preferred)
+2. Source `seen` field (backward compat)
+3. Neither = manual dismiss only
+
+This makes the common case trivial and the multi-user case automatic.
 
 ### 3. Inbox Observes, Doesn't Own, Content Seen State
 
@@ -438,18 +443,19 @@ The inbox *reactively observes* content seen state but doesn't own it. This matc
 
 ### 4. Inbox in Home Space
 
-The inbox pattern lives in the user's home space (DID = identity DID). This ensures:
+The inbox pattern lives in the user's home space. This ensures:
 - Notifications aggregate across ALL spaces
 - User always has access to their inbox
-- Annotations also live here (user's projection)
+- Annotations also live here
 
-### 5. Stream-Based Sending
+### 5. Trivially Simple notify()
 
-Patterns send notifications via a stream:
 ```typescript
 const inbox = await wish('#inbox');
 inbox.send({ ref: myCell });
 ```
+
+No configuration, no options, no magic.
 
 ### 6. Deduplication by Reference
 
@@ -485,7 +491,7 @@ From deep research on Android's 15-year notification evolution:
 8. **Human communication is special**
    - Conversations deserve elevated treatment
 
-9. **Notification state ≠ content state**
+9. **Notification state != content state**
    - Two independent state machines, linked but separate
 
 10. **The system observes, apps own semantics**
@@ -510,7 +516,7 @@ The `unseenCount` is computed:
 // Active notifications where content is not yet seen
 unseenCount = entries
   .filter(e => e.state === 'active')
-  .filter(e => !isContentSeen(e, currentUser))
+  .filter(e => !isContentSeen(e.ref))
   .length;
 ```
 
@@ -522,7 +528,7 @@ unseenCount = entries
 | Click entry | Navigate to source | App may mark seen |
 | Swipe dismiss | entry → 'dismissed' | None |
 | Snooze | entry → 'snoozed' | None |
-| View content in app | None (observed) | → seen (by app) |
+| View content in app | None (observed) | → seen (by app or annotation) |
 
 ### Tauri OS Notifications (Phase 2)
 
@@ -541,23 +547,6 @@ Background service watches inbox cell, triggers native notifications for new 'ac
 | Content marked seen before notification | Inbox observes, shows as already seen |
 | User on multiple devices | Inbox syncs (home space), annotations sync |
 | Very old notifications | No auto-expiry (user's TODO list) |
-| No annotation infrastructure yet | Fall back to 'manual' seenStrategy |
-
----
-
-## Open Questions
-
-1. **Annotation infrastructure**: Does the runtime support annotations yet? If not, what's the fallback?
-
-2. **Cross-space subscription cost**: How expensive is observing content seen state across many spaces?
-
-3. **Notification permissions**: Should patterns need explicit permission to notify?
-
-4. **Channels/grouping**: Should we implement Android-style channels for filtering?
-
-5. **Swappable inbox**: How does a user replace `inbox.tsx` with their own implementation?
-
-6. **Snooze UX**: What snooze duration options? Custom time picker?
 
 ---
 
@@ -565,24 +554,25 @@ Background service watches inbox cell, triggers native notifications for new 'ac
 
 ### Phase 1: MVP (Single-User Focus)
 - Inbox pattern with entries cell and send stream
-- notify() helper API
-- SeenStrategy: 'source-field' and 'manual' only
+- `notify()` helper API
+- `isContentSeen()` checking source `seen` field
+- Annotations shim (stores in home space cell)
 - Shell bell icon with badge
 - Basic inbox UI (list, navigate, dismiss)
 - Notification states: active, dismissed
 
-### Phase 2: Full State Machine
+### Phase 2: Full State Machine + Tauri
 - Notification states: noticed, snoozed
-- SeenStrategy: 'source-multi'
+- `markSeen()` writes annotation via shim
 - Grouping by source/channel
 - Tauri OS notifications
 - Animation and feedback
 
-### Phase 3: Multi-User
-- SeenStrategy: 'annotation'
-- Per-user projection space integration
-- Annotation read/write helpers
-- Collaborative notification patterns
+### Phase 3: Real Annotations
+- Delete annotations shim
+- Real projection space annotations
+- Full multi-user seen state
+- Cross-device sync of annotations
 
 ---
 
@@ -591,5 +581,3 @@ Background service watches inbox cell, triggers native notifications for new 'ac
 - [Android Notification Design Philosophy](https://developer.android.com/develop/ui/views/notifications)
 - [Material Design Notifications](https://m3.material.io/foundations/content-design/notifications)
 - Common Tools Roadmap: Multi-User Scopes, Annotations
-- PRD: See companion document
-- Technical Design: See companion document

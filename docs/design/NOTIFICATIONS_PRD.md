@@ -285,6 +285,7 @@ Android 11 introduced **conversation notifications** as a distinct category:
 │ OTHER NOTIFICATIONS                             │
 ├─────────────────────────────────────────────────┤
 │ Package shipped · Amazon                        │
+│ Package shipped · Amazon                        │
 │ Your backup is complete · Google Drive          │
 └─────────────────────────────────────────────────┘
 ```
@@ -306,7 +307,7 @@ The philosophy: **Person-to-person communication deserves elevated treatment.** 
 | **Notifications as TODO list** | Inbox persists until you act; nothing silently disappears |
 | **High integrity** | Clicking always shows current content, not stale snapshots |
 | **Three-layer attention** | Badge (ambient) → Inbox (on-demand) → OS notification (interrupt) |
-| **Two state machines** | Notification state (inbox) ≠ content seen state (app) |
+| **Two state machines** | Notification state (inbox) ≠ content seen state (source/annotation) |
 | **User sovereignty** | Users control importance, channels, timing |
 | **Attention as currency** | Priority levels, rate limiting, grouping |
 | **Grouping** | Batch related notifications; one event = one interruption |
@@ -317,7 +318,75 @@ We're not just copying Android's UI. We're adopting its **philosophy**: notifica
 
 ---
 
-# Part 2: Product Requirements
+# Part 2: The Annotations Model — Multi-User Seen State
+
+Before diving into requirements, we need to establish how "seen" state works in a multi-user world.
+
+## Why Annotations Matter
+
+In a single-user world, "seen" is simple: the pattern has a `seen: boolean` field, and the inbox reads it directly. When you view the content, `seen` flips to `true`, and your notification clears.
+
+But what happens when Alice and Bob are both looking at the same shared document?
+
+- Alice views it → `seen = true`
+- Bob's notification disappears too (wrong!)
+
+The problem: **the document's seen state is global, but each user's attention is personal.**
+
+## The Solution: Your Seen State Lives in Your Space
+
+The annotations model separates "the content" from "who has seen it":
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  SHARED SPACE (did:space:abc)                                   │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  Document Cell                                              ││
+│  │  { title: "Q1 Report", content: "..." }                     ││
+│  │  (no seen field - content doesn't know who read it)         ││
+│  └─────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  ALICE'S PROJECTION SPACE (did:space:alice-projection)          │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  Annotation: { ref: "did:space:abc/doc", seen: true }       ││
+│  └─────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  BOB'S PROJECTION SPACE (did:space:bob-projection)              │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  Annotation: { ref: "did:space:abc/doc", seen: false }      ││
+│  └─────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**The mental model: "Your seen state is yours, stored in your space."**
+
+## Benefits
+
+1. **Privacy**: Others don't see what you've read (no "read receipts" unless you want them)
+2. **Independence**: You viewing doesn't clear others' notifications
+3. **Ownership**: Your attention metadata travels with you, not with the content
+4. **Simplicity**: Patterns don't need multi-user logic; the infrastructure handles it
+
+## How Inbox Uses Annotations
+
+The inbox checks for seen state in a simple priority order:
+
+1. **Check annotations first**: Look for a seen annotation in the user's projection space
+2. **Fall back to source.seen**: For backward compatibility with single-user patterns
+3. **Default to unseen**: If neither exists, the notification is unseen
+
+This means:
+- **Single-user patterns** work with just `seen: boolean` on the source
+- **Multi-user patterns** call `markSeen()` which writes an annotation
+- **Inbox doesn't care** which approach was used — it just checks both
+
+---
+
+# Part 3: Product Requirements
 
 ## Problem Statement
 
@@ -358,9 +427,11 @@ Common Tools currently has no way for patterns to notify users about content req
 **So that** my inbox reflects actual pending items, not stale ones
 
 **Acceptance Criteria:**
-- When source content is viewed (app marks it seen), notification updates
-- Badge count decrements
-- Notification can move to "seen" state or be auto-dismissed (configurable)
+- Single-user: Pattern has `seen: boolean`, inbox observes it directly
+- Multi-user: Pattern calls `markSeen()`, writes annotation to user's projection space
+- Inbox checks annotations first, falls back to `source.seen` for compatibility
+- Badge count decrements when content is marked seen (by either method)
+- Notification moves to "seen" state (remains in inbox but de-emphasized)
 
 ### US-4: Manual Dismiss
 **As a** Common Tools user
@@ -410,8 +481,10 @@ Common Tools currently has no way for patterns to notify users about content req
 
 **Acceptance Criteria:**
 - Each user has their own inbox (in their home space)
-- Seen state is per-user (via annotations or projection)
-- User A viewing content doesn't affect User B's notification
+- Seen state stored as annotation in user's projection space
+- User A viewing content writes annotation to A's space only
+- User B's notification remains unseen until B views it
+- Inbox checks annotations first, falls back to source.seen
 
 ---
 
@@ -443,26 +516,27 @@ Common Tools currently has no way for patterns to notify users about content req
 
 ## Scope
 
-### Phase 1: MVP
+### Phase 1: MVP with Annotation Shim
 - Inbox pattern with entries cell and send stream
-- `notify()` helper API
-- SeenStrategy: `source-field` and `manual` only
+- `notify()` helper API (syntactic sugar for `wish('#inbox').send()`)
+- Inbox checks annotations first, falls back to `source.seen`
+- Temporary annotation shim until full annotations infrastructure exists
 - Shell bell icon with badge count
 - Basic inbox UI (list, navigate, dismiss)
 - Notification states: `active`, `dismissed`
+- Single-user works great out of the box
 
-### Phase 2: Full State Machine
+### Phase 2: Full State Machine + OS Notifications
 - Notification states: `noticed`, `snoozed`
-- SeenStrategy: `source-multi`
 - Grouping by source/channel
-- Tauri OS notifications
+- Tauri OS notifications for urgent items
 - Snooze with duration options
 
-### Phase 3: Multi-User
-- SeenStrategy: `annotation`
+### Phase 3: Real Annotations Infrastructure
+- Full annotations infrastructure replaces shim
 - Per-user projection space integration
-- Annotation read/write helpers
-- Collaborative notification patterns
+- Annotation read/write helpers mature
+- Collaborative notification patterns fully supported
 
 ### Out of Scope
 - Push notifications for web (no service worker)
@@ -503,9 +577,11 @@ See companion document: `NOTIFICATIONS.md`
 
 Key points:
 - Inbox pattern lives in user's home space
+- `notify()` is syntactic sugar for `wish('#inbox').send()`
 - Cross-space references via NormalizedLink
 - Two state machines: notification state (inbox) vs content seen state (source/annotation)
-- SeenStrategy abstraction for single-user, multi-user, and annotation approaches
+- Inbox checks annotations first, falls back to `source.seen` for backward compatibility
+- Temporary annotation shim until full annotations infrastructure exists
 
 ---
 
