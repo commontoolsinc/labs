@@ -22,8 +22,10 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | Handler binding: unknown property | Passing event data at binding time | Use inline handler for test buttons ([see below](#handler-binding-error-unknown-property)) |
 | Stream.subscribe doesn't exist | Using Stream.of()/subscribe() | Bound handler IS the stream ([see below](#streamof--subscribe-dont-exist)) |
 | Can't access variable in nested scope | Variable scoping limitation | Pre-compute grouped data or use lift() with explicit params ([see below](#variable-scoping-in-reactive-contexts)) |
-| "Cannot access cell via closure" | Using lift() with closure | Pass all reactive deps as params to lift() ([REACTIVITY](REACTIVITY.md#lift-and-closure-limitations)) |
+| "Cannot access cell via closure" / "Accessing an opaque ref via closure is not supported" | Using lift() with closure | Pass all reactive deps as params to lift() ([REACTIVITY](REACTIVITY.md#lift-and-closure-limitations)) |
 | CLI `get` returns stale computed values | `charm set` doesn't trigger recompute | Run `charm step` after `set` to trigger re-evaluation ([see below](#stale-computed-values-after-charm-set)) |
+| Space URL 404 or routing errors | Space name contains `/` | Use only `a-z`, `0-9`, `-`, `_` in space names |
+| "StorageTransactionInconsistent" | Read-modify-write race with spread | Use `.push()` for append, `.key(idx).set()` for updates ([see below](#array-mutation-patterns)) |
 
 ---
 
@@ -115,6 +117,39 @@ items.map((item) => (
 **Why this happens:** Inside `.map()`, each item's properties are reactive references. Using them to index plain objects (`STYLES[item.status]`) tries to access the reactive reference outside a reactive context. The `lift()` function creates a proper reactive context for the lookup.
 
 See [REACTIVITY.md](REACTIVITY.md#using-reactive-values-to-index-objects-in-map) for more examples.
+
+### First-Pass Empty Data for Async Sources
+
+**Symptom:** Console errors during initial load, but UI works correctly after a moment
+
+When patterns load, the first reactive pass may have empty data for asynchronously-loaded sources:
+- `wish()` results (favorites not yet loaded)
+- Cells from external sources
+- Data from storage
+
+This is expected behavior. Use `computed()` for data that depends on async sources - it automatically re-evaluates when data arrives:
+
+```typescript
+// ✅ computed() handles async data correctly
+const authEmail = computed(() => wishResult.result?.user?.email ?? "");
+
+// Check both error and empty states in UI
+{ifElse(
+  wishResult.error,
+  <div>Not found</div>,
+  ifElse(
+    authEmail === "",
+    <div>Not configured</div>,
+    <div>Authenticated: {authEmail}</div>
+  )
+)}
+```
+
+**Key distinction:**
+- `wish.error` = charm not found
+- `wish.result` exists but data empty = charm found, not yet configured
+
+Don't assume first-pass errors indicate permanent failure - check the final UI state.
 
 ### onClick Inside computed()
 
@@ -521,6 +556,55 @@ export default pattern(({ searchQuery }) => {
 ```
 
 **Rule:** Handlers should be synchronous state changes. Use `fetchData` for async operations.
+
+### Array Mutation Patterns
+
+**Error:** `StorageTransactionInconsistent: Transaction consistency violated`
+
+The spread pattern for array mutations can race with concurrent operations:
+
+```typescript
+// ❌ Can race - read-modify-write pattern
+const current = items.get();
+items.set([...current, newItem]);
+```
+
+Use atomic cell methods instead:
+
+| Operation | Pattern |
+|-----------|---------|
+| Append item | `items.push(newItem)` |
+| Update item property | `items.key(idx).key("prop").set(value)` |
+| Remove at index | `items.set(items.get().toSpliced(idx, 1))` |
+
+`.push()` and `.key().set()` are atomic within the framework's transaction system.
+
+---
+
+## Development Best Practices
+
+### Use Isolated Spaces for Testing
+
+A charm with an infinite loop or high CPU usage can make an entire space unusable. When you visit a space URL, all charms in that space may be loaded - if one loops, the space becomes unresponsive.
+
+**Symptoms:**
+1. Deploy a charm that causes infinite loop or 100% CPU
+2. Server becomes unresponsive, needs restart
+3. After restart, visiting the space triggers the loop again
+4. Space is effectively "poisoned" until the charm is removed
+
+**Prevention:** Use isolated spaces for testing new patterns:
+
+```bash
+# ❌ Don't test in your main space
+--space my-production-space
+
+# ✅ Use throwaway spaces for testing
+--space test-feature-1
+--space debug-session-2
+```
+
+This way, if a charm causes issues, you don't lose access to your main space with other working charms.
 
 ---
 
