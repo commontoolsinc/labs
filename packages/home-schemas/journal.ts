@@ -3,7 +3,8 @@
  * These define the structure of user's activity journal.
  */
 
-import type { JSONSchema, Schema } from "@commontools/api";
+import type { JSONSchema } from "@commontools/api";
+import type { Schema } from "@commontools/api/schema";
 
 /**
  * Journal entry event types - the significant events we track
