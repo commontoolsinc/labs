@@ -17,16 +17,24 @@
  *   - handler()
  *   - JSX expressions (handled by OpaqueRefJSXTransformer)
  *
+ * - Function creation is NOT allowed in pattern context (must be at module scope)
+ * - lift() and handler() must be defined at module scope, not inside patterns
+ *
  * Errors reported:
  * - Property access used in computation: ERROR (must wrap in computed())
  * - Optional chaining (?.): ERROR (not allowed in reactive context)
  * - Calling .get() on cells: ERROR (must wrap in computed())
+ * - Function creation in pattern context: ERROR (move to module scope)
+ * - lift()/handler() inside pattern: ERROR (move to module scope)
  */
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
   createDataFlowAnalyzer,
+  detectCallKind,
   isInRestrictedReactiveContext,
+  isInsideRestrictedContext,
+  isInsideSafeCallbackWrapper,
 } from "../ast/mod.ts";
 
 export class PatternContextValidationTransformer extends Transformer {
@@ -38,6 +46,15 @@ export class PatternContextValidationTransformer extends Transformer {
       // Skip JSX - OpaqueRefJSXTransformer handles those
       if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
         return ts.visitEachChild(node, visit, context.tsContext);
+      }
+
+      // Check for function creation in pattern context
+      if (
+        ts.isArrowFunction(node) ||
+        ts.isFunctionExpression(node) ||
+        ts.isFunctionDeclaration(node)
+      ) {
+        this.validateFunctionCreation(node, context, checker);
       }
 
       // Check for optional chaining in reactive context
@@ -57,8 +74,12 @@ export class PatternContextValidationTransformer extends Transformer {
         }
       }
 
-      // Check for .get() calls in reactive context
+      // Check for .get() calls and lift/handler placement in reactive context
       if (ts.isCallExpression(node)) {
+        // Check for lift/handler inside pattern
+        this.validateBuilderPlacement(node, context, checker);
+
+        // Check for .get() calls
         if (
           this.isGetCall(node) &&
           isInRestrictedReactiveContext(node, checker)
@@ -190,5 +211,151 @@ export class PatternContextValidationTransformer extends Transformer {
 
     find(node);
     return result;
+  }
+
+  /**
+   * Validates that functions are not created directly in pattern context.
+   * Functions inside safe wrappers (computed, action, derive, lift, handler)
+   * and inside JSX expressions are allowed since they get transformed.
+   */
+  private validateFunctionCreation(
+    node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): void {
+    // Skip if inside JSX (including map callbacks, event handlers)
+    if (this.isInsideJsx(node)) return;
+
+    // Skip if inside safe wrapper callback (computed, action, derive, lift, handler)
+    if (isInsideSafeCallbackWrapper(node, checker)) return;
+
+    // Skip if this function IS a callback to a safe wrapper
+    // e.g., computed(() => ...), action(() => ...), derive(() => ...)
+    if (this.isSafeWrapperCallback(node, checker)) return;
+
+    // Only error if inside restricted context (recipe/pattern/render)
+    if (!isInsideRestrictedContext(node, checker)) return;
+
+    context.reportDiagnostic({
+      severity: "error",
+      type: "pattern-context:function-creation",
+      message: `Function creation is not allowed in pattern context. ` +
+        `Move this function to module scope and add explicit type parameters. ` +
+        `Example: const myFn = (price: number) => price * 2;`,
+      node,
+    });
+  }
+
+  /**
+   * Checks if a function is being passed directly as a callback to a safe wrapper
+   * (computed, action, derive, lift, handler).
+   */
+  private isSafeWrapperCallback(
+    node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
+    checker: ts.TypeChecker,
+  ): boolean {
+    // Function declarations can't be callbacks
+    if (ts.isFunctionDeclaration(node)) return false;
+
+    const parent = node.parent;
+    if (!parent || !ts.isCallExpression(parent)) return false;
+
+    // Check if this function is an argument to the call
+    if (!parent.arguments.includes(node)) return false;
+
+    const callKind = detectCallKind(parent, checker);
+    if (!callKind) return false;
+
+    // derive is a safe wrapper
+    if (callKind.kind === "derive") return true;
+
+    // Check builder-based safe wrappers (computed, action, lift, handler)
+    if (callKind.kind === "builder") {
+      const safeBuilders = new Set([
+        "computed",
+        "action",
+        "derive",
+        "lift",
+        "handler",
+      ]);
+      return safeBuilders.has(callKind.builderName);
+    }
+
+    return false;
+  }
+
+  /**
+   * Validates that lift() and handler() are at module scope, not inside patterns.
+   * These builders create reusable functions and should be defined outside the pattern body.
+   */
+  private validateBuilderPlacement(
+    node: ts.CallExpression,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): void {
+    // Only check direct calls to lift/handler, not calls to functions returned by them
+    // detectCallKind can incorrectly match calls to lift-returned functions
+    if (
+      !this.isDirectBuilderCall(node, "lift") &&
+      !this.isDirectBuilderCall(node, "handler")
+    ) {
+      return;
+    }
+
+    const builderName = this.isDirectBuilderCall(node, "lift")
+      ? "lift"
+      : "handler";
+
+    // Only error if inside restricted context
+    if (!isInsideRestrictedContext(node, checker)) return;
+
+    // Check if lift() is immediately invoked: lift(fn)(args)
+    // In this case, suggest computed() instead
+    const isImmediatelyInvoked = ts.isCallExpression(node.parent);
+
+    if (builderName === "lift" && isImmediatelyInvoked) {
+      context.reportDiagnostic({
+        severity: "error",
+        type: "pattern-context:builder-placement",
+        message:
+          `lift() should not be defined and immediately invoked inside a pattern. ` +
+          `Use computed(() => ...) instead for inline computations.`,
+        node,
+      });
+    } else {
+      context.reportDiagnostic({
+        severity: "error",
+        type: "pattern-context:builder-placement",
+        message:
+          `${builderName}() should be defined at module scope, not inside a pattern. ` +
+          `Move this ${builderName}() call outside the pattern/recipe and add explicit type parameters.`,
+        node,
+      });
+    }
+  }
+
+  /**
+   * Checks if a call expression is a direct call to a builder (lift, handler, etc.)
+   * by checking if the callee is literally the builder name.
+   */
+  private isDirectBuilderCall(
+    node: ts.CallExpression,
+    builderName: string,
+  ): boolean {
+    const callee = node.expression;
+
+    // Direct call: lift(...) or handler(...)
+    if (ts.isIdentifier(callee) && callee.text === builderName) {
+      return true;
+    }
+
+    // Property access call: something.lift(...) or something.handler(...)
+    if (
+      ts.isPropertyAccessExpression(callee) && callee.name.text === builderName
+    ) {
+      return true;
+    }
+
+    return false;
   }
 }
