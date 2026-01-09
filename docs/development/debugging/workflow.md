@@ -12,10 +12,10 @@ Fix all type errors before deploying. Most issues are caught here.
 
 ### 2. Match Error to Doc
 
-- **Type errors** - @common/concepts/types-and-schemas.md
-- **Reactivity issues** - @common/concepts/reactivity.md
-- **Component questions** - @common/components/COMPONENTS.md
-- **Pattern examples** - @common/PATTERNS.md
+- **Type errors** - [@writeable](../../common/concepts/types-and-schemas/writeable.md)
+- **Reactivity issues** - [@reactivity](../../common/concepts/reactivity.md)
+- **Component questions** - [@COMPONENTS](../../common/components/COMPONENTS.md)
+- **Pattern examples** - [@INDEX](../../../packages/patterns/INDEX.md)
 
 ### 3. Inspect Cell Values
 
@@ -54,6 +54,6 @@ deno task ct charm inspect --identity key.json --api-url URL --space SPACE --cha
 
 ## See Also
 
-- @common/components/CELL_CONTEXT.md - Cell debugging tool details
-- ./cli-debugging.md - CLI-based debugging workflows
-- ./testing.md - Testing patterns locally and deployed
+- [@CELL_CONTEXT](../../common/components/CELL_CONTEXT.md) - Cell debugging tool details
+- [cli-debugging](./cli-debugging.md) - CLI-based debugging workflows
+- [testing](./testing.md) - Testing patterns locally and deployed

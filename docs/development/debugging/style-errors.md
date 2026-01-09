@@ -49,4 +49,4 @@
 
 ## See Also
 
-- @common/components/COMPONENTS.md - Component reference and styling
+- [@COMPONENTS](../../common/components/COMPONENTS.md) - Component reference and styling

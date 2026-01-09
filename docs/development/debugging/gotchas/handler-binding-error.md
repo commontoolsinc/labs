@@ -11,10 +11,10 @@ const addItem = handler<
   { items: Writable<Item[]> }      // State type
 >(({ title }, { items }) => { items.push({ title }); });
 
-<button onClick={addItem({ title: "Test", items })}>  // Error!
+<button onClick={addItem({ title: "Test", items })}>Add</button>  // Error!
 
 // CORRECT: For test buttons, use inline handler
-<button onClick={() => items.push({ title: "Test" })}>
+<button onClick={() => items.push({ title: "Test" })}>Add</button>
 
 // CORRECT: For real handlers, bind with state only
 <ct-message-input onct-send={addItem({ items })} />

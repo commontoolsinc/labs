@@ -6,7 +6,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 
 | Error Message | Cause | Fix |
 |---------------|-------|-----|
-| "Property 'set' does not exist" | Missing `Writable<>` in signature | Add `Writable<T>` for write access ([@types-and-schemas](../../common/concepts/types-and-schemas.md)) |
+| "Property 'set' does not exist" | Missing `Writable<>` in signature | Add `Writable<T>` for write access ([@writeable](../../common/concepts/types-and-schemas/writeable.md)) |
 | "X.get is not a function" | Calling `.get()` on computed/lift result | Access directly without `.get()` - only `Writable<>` has `.get()` ([gotchas/get-is-not-a-function](gotchas/get-is-not-a-function.md)) |
 | "X.filter is not a function" | Value isn't an array (yet) | Check `Default<>`, don't assume `.get()` is the fix ([gotchas/filter-map-find-not-a-function](gotchas/filter-map-find-not-a-function.md)) |
 | "Tried to access a reactive reference outside a reactive context" | Using reactive value to index plain object in `.map()` | Use `lift()` for object indexing ([gotchas/reactive-reference-outside-context](gotchas/reactive-reference-outside-context.md)) |
@@ -60,6 +60,6 @@ These issues compile without errors but fail at runtime.
 ## See Also
 
 - [@reactivity](../../common/concepts/reactivity.md) - Reactivity system
-- [@types-and-schemas](../../common/concepts/types-and-schemas.md) - Type system
+- [@writeable](../../common/concepts/types-and-schemas/writeable.md) - Writable type system
 - [@COMPONENTS](../../common/components/COMPONENTS.md) - UI components
 - [@CELL_CONTEXT](../../common/components/CELL_CONTEXT.md) - Debug tool details
