@@ -1,6 +1,8 @@
-Here's a diagram of how cells are typically connected.
+A `Page` (historically known as a `Charm`) is an instance of a `Pattern` bound to specific cells.
 
-We often call the main result cell the "charm" and that cell's id is the id in the url.
+Here's a diagram of how cells are typically connected within a `Charm`:
+
+We often call the main result cell the "charm".
 
 ```mermaid
 flowchart TD
