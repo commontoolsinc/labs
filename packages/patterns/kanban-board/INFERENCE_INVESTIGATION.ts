@@ -32,11 +32,10 @@
  */
 
 import type {
+  AnyBrandedCell,
   Opaque,
   OpaqueRef,
   StripCell,
-  Stream,
-  AnyBrandedCell,
 } from "@commontools/api";
 
 type Factory<In, Out> = { __in: In; __out: Out };
@@ -69,7 +68,9 @@ const _proof1: "PROOF1" = proof1;
 // =============================================================================
 
 type PatternWithStripCell = {
-  <T, R>(fn: (input: OpaqueRef<Required<T>>) => Opaque<R>): Factory<T, StripCell<R>>;
+  <T, R>(
+    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+  ): Factory<T, StripCell<R>>;
 };
 
 declare const withStripCell: PatternWithStripCell;
@@ -90,7 +91,9 @@ const _proof2: "PROOF2" = proof2;
 type SimpleUnwrap<T> = T extends AnyBrandedCell<infer U> ? U : T;
 
 type PatternSimpleUnwrap = {
-  <T, R>(fn: (input: OpaqueRef<Required<T>>) => Opaque<R>): Factory<T, SimpleUnwrap<R>>;
+  <T, R>(
+    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+  ): Factory<T, SimpleUnwrap<R>>;
 };
 
 declare const simpleUnwrap: PatternSimpleUnwrap;
@@ -105,19 +108,22 @@ const _proof3a: "PROOF3A" = proof3a;
 // This BREAKS (conditional with infer + recursive mapping):
 type ConditionalRecursive<T> = T extends AnyBrandedCell<infer U>
   ? ConditionalRecursive<U>
-  : T extends object
-    ? { [K in keyof T]: ConditionalRecursive<T[K]> }
-    : T;
+  : T extends object ? { [K in keyof T]: ConditionalRecursive<T[K]> }
+  : T;
 
 type PatternConditionalRecursive = {
-  <T, R>(fn: (input: OpaqueRef<Required<T>>) => Opaque<R>): Factory<T, ConditionalRecursive<R>>;
+  <T, R>(
+    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+  ): Factory<T, ConditionalRecursive<R>>;
 };
 
 declare const conditionalRecursive: PatternConditionalRecursive;
 
-const proof3b = conditionalRecursive((input: OpaqueRef<Required<TestInput>>) => {
-  return { items: input.items, count: 5 };
-});
+const proof3b = conditionalRecursive(
+  (input: OpaqueRef<Required<TestInput>>) => {
+    return { items: input.items, count: 5 };
+  },
+);
 
 // Result: items is `unknown` ❌
 const _proof3b: "PROOF3B" = proof3b;
@@ -129,9 +135,9 @@ const _proof3b: "PROOF3B" = proof3b;
 
 import type {
   JSONSchema,
+  RecipeFactory,
   Schema,
   SchemaWithoutCell,
-  RecipeFactory,
 } from "@commontools/api";
 
 type PatternFunction = {
@@ -170,9 +176,11 @@ const proof4b = pattern<TestInput>((input) => {
 const _proof4b: "PROOF4B" = proof4b;
 
 // pattern<T, R>() - both type params: explicit types, works
-const proof4c = pattern<TestInput, { items: string[]; count: number }>((input) => {
-  return { items: input.items, count: 5 };
-});
+const proof4c = pattern<TestInput, { items: string[]; count: number }>(
+  (input) => {
+    return { items: input.items, count: 5 };
+  },
+);
 // Result: { items: string[]; count: number } ✅
 const _proof4c: "PROOF4C" = proof4c;
 

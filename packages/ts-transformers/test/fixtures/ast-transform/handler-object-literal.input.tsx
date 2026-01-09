@@ -12,7 +12,10 @@ const myHandler = handler((_, state: State) => {
 
 export default recipe({
   type: "object",
-  properties: { value: { type: "number" }, name: { type: "string" } },
+  properties: {
+    value: { type: "number", asCell: true },
+    name: { type: "string", asCell: true },
+  },
 }, (state) => {
   return {
     // Test case 1: Object literal with all properties from state

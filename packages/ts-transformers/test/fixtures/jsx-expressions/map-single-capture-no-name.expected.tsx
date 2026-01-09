@@ -341,6 +341,9 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                         },
                         required: ["id", "name"]
                     },
+                    index: {
+                        type: "number"
+                    },
                     params: {
                         type: "object",
                         properties: {}
@@ -444,7 +447,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                         }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: person, params: {} }) => (<li key={person.id}>{person.name}</li>)), {})}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: person, index, params: {} }) => (<li key={index}>{person.name}</li>)), {})}
           </ul>)}
       </div>),
     };
