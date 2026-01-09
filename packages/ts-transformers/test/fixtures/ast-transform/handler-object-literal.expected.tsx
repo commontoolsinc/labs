@@ -22,7 +22,10 @@ const myHandler = handler(false as const satisfies __ctHelpers.JSONSchema, {
 });
 export default recipe({
     type: "object",
-    properties: { value: { type: "number" }, name: { type: "string" } },
+    properties: {
+        value: { type: "number", asCell: true },
+        name: { type: "string", asCell: true },
+    },
 }, {
     type: "object",
     properties: {

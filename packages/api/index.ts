@@ -27,6 +27,13 @@ export declare const UI: "$UI";
 export declare const CELL_BRAND: unique symbol;
 
 /**
+ * Symbol for phantom property that enables type inference from AnyBrandedCell.
+ * This property doesn't exist at runtime - it's purely for TypeScript's benefit.
+ * See docs/common/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
+ */
+export declare const CELL_INNER_TYPE: unique symbol;
+
+/**
  * Minimal cell type with just the brand, no methods.
  * Used for type-level operations like unwrapping nested cells without
  * creating circular dependencies.
@@ -40,8 +47,14 @@ export type CellKind =
   | "writeonly";
 
 // `string` acts as `any`, e.g. when wanting to match any kind of cell
+// The [CELL_INNER_TYPE] property is a phantom property that enables TypeScript
+// to infer T when using `AnyBrandedCell<infer U>`. Without it, T is a phantom
+// type parameter and TypeScript produces `unknown` when trying to infer it.
+// The property must be non-optional so that plain types like `string[]` don't
+// accidentally match AnyBrandedCell.
 export type AnyBrandedCell<T, Kind extends string = string> = {
   [CELL_BRAND]: Kind;
+  readonly [CELL_INNER_TYPE]: T;
 };
 
 export type BrandedCell<T, Kind extends CellKind> = AnyBrandedCell<T, Kind>;
@@ -875,12 +888,16 @@ export declare const CELL_LIKE: unique symbol;
 /**
  * Helper type to transform Cell<T> to Opaque<T> in pattern/lift/handler inputs.
  * Preserves Stream<T> since Streams are callable interfaces (.send()), not data containers.
+ *
+ * Uses non-distributive conditionals ([T] extends [...]) to prevent TypeScript from
+ * distributing over union/intersection types, which caused issues with OpaqueRef's
+ * intersection types. See packages/api/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
  */
-export type StripCell<T> = T extends Stream<any> ? T // Preserve Stream<T> - it's a callable interface
-  : T extends AnyBrandedCell<infer U> ? StripCell<U>
-  : T extends ArrayBuffer | ArrayBufferView | URL | Date ? T
-  : T extends Array<infer U> ? StripCell<U>[]
-  : T extends object ? { [K in keyof T]: StripCell<T[K]> }
+export type StripCell<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - it's a callable interface
+  : [T] extends [AnyBrandedCell<infer U>] ? StripCell<U>
+  : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
+  : [T] extends [Array<infer U>] ? StripCell<U>[]
+  : [T] extends [object] ? { [K in keyof T]: StripCell<T[K]> }
   : T;
 
 /**

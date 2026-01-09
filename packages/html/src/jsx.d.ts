@@ -7,6 +7,7 @@ import type {
   CellLike,
   Props,
   RenderNode,
+  Stream,
   VNode,
 } from "commontools";
 
@@ -2841,6 +2842,7 @@ type CTEvent<T> = {
 
 type EventHandler<T> =
   | CellLike<CTEvent<T>>
+  | Stream<T>
   | ((event: CTEvent<T>) => void)
   | (() => void);
 

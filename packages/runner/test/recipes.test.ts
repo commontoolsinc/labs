@@ -1500,6 +1500,7 @@ describe("Recipe Runner", () => {
           type: "array",
           items: InnerSchema,
           default: [],
+          asCell: true,
         },
       },
       required: ["list"],
