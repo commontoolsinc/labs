@@ -1,7 +1,14 @@
 `handler` constructs a `Stream` that exposes `.send()` to trigger it. When binding in JSX, handlers 
 
 ```typescript
-const myHandler = handler<EventType, StateType>((event, state) => { ... });
+import { pattern, UI, Stream, handler, Cell, Writable } from "commontools";
+
+interface EventType {}
+interface StateType {}
+
+const myHandler = handler<EventType, StateType>((event, state) => { 
+  return;
+});
 //                        ^^^^^^^^^  ^^^^^^^^^
 //                        1st param  2nd param (passed at invocation)
 ```
