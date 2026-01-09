@@ -317,7 +317,7 @@ export default pattern<{ count: Writable<number> }>(({ count }) => {
     [UI]: (
       <div>
         <ct-button onClick={increment}>+1</ct-button>
-        <ct-button onClick={addAmount}>Add 10</ct-button>
+        <ct-button onClick={addAmount({ amount: 10 })}>Add 10</ct-button>
       </div>
     ),
     increment,  // Export for cross-charm access
