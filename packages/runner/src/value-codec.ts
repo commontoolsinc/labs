@@ -1,10 +1,61 @@
 import { isFunction, isInstance } from "@commontools/utils/types";
 
 /**
+ * Determines if the given value is JSON-encodable per se (without conversion),
+ * but without taking into consideration the contents of values (that is, it
+ * doesn't iterate over array or object contents to make its determination).
+ *
+ * @param value - The value to check.
+ * @returns `true` if the value is JSON-encodable per se, `false` otherwise.
+ */
+export function isStorableValue(value: unknown): boolean {
+  switch (typeof value) {
+    case "boolean":
+    case "string": {
+      return true;
+    }
+
+    // TODO(@danfuzz): `undefined` isn't JSON-encodable; this case should be
+    // moved to the `false` block below. See the related TODO item in
+    // `toStorableValue()` below.
+    case "undefined": {
+      return true;
+    }
+
+    case "number": {
+      if (Number.isFinite(value) && !Object.is(value, -0)) {
+        return true;
+      }
+      // TODO(@danfuzz): `NaN` isn't JSON-encodable; this case should return
+      // `false`. See the related TODO item in `toStorableValue()` below.
+      if (Number.isNaN(value)) {
+        return true;
+      }
+      return false;
+    }
+
+    case "object": {
+      // `null`, plain objects, and arrays are storable. Instances are not.
+      return !isInstance(value);
+    }
+
+    case "function":
+    case "bigint":
+    case "symbol":
+    default: {
+      return false;
+    }
+  }
+}
+
+/**
  * Converts a value to a storable (JSON-encodable) form. JSON-encodable values
  * pass through as-is. Functions and instances (non-plain objects) are converted
  * via `toJSON()` if available. Throws on non-encodable primitives (`bigint`,
  * `symbol`) or if a function/instance can't be converted.
+ *
+ * **Note:** This function does _not_ recursively visit the inner contents of
+ * values (that is, it doesn't iterate over array or object contents).
  *
  * @param value - The value to convert.
  * @returns The storable value (original or converted).
