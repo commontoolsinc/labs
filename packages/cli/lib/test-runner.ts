@@ -35,7 +35,6 @@ export interface TestRunnerOptions {
   verbose?: boolean;
 }
 
-
 /**
  * Run a single test pattern file.
  */
