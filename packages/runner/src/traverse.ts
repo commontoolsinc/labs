@@ -1001,6 +1001,7 @@ function combineSchemaContext(
   );
   // Collect $defs from each schema for our new root schema
   // There's the possibility of collisions here
+  // Our rootSchema will be mostly empty (just $defs)
   let newRootSchema = {};
   if (isObject(parentSchemaContext.rootSchema)) {
     newRootSchema = mergeDefs(parentSchemaContext.rootSchema, newRootSchema);
@@ -1016,7 +1017,7 @@ function combineSchemaContext(
  * and return the result. The destSchema is not modified.
  *
  * If a definition exists in both sourceSchema and destSchema, the version
- * in destsSchema will be used.
+ * in destSchema will be used.
  *
  * @param sourceSchema
  * @param destSchema
@@ -1109,13 +1110,16 @@ export function combineSchema(
   ) {
     // If both schemas have required properties, only include those that are
     // in both lists
-    const { required: parentRequired, ...parentSchemaRest } = parentSchema;
-    const { required: linkRequired, ...linkSchemaRest } = linkSchema;
+    const { required: parentRequired, $defs: parentDefs, ...parentSchemaRest } =
+      parentSchema;
+    const { required: linkRequired, $defs: linkDefs, ...linkSchemaRest } =
+      linkSchema;
     const required = parentRequired && linkRequired
       ? parentRequired.filter((item) => linkRequired.includes(item))
       : parentRequired
       ? parentRequired
       : linkRequired;
+    const mergedDefs = { ...linkDefs, ...parentDefs };
     // When combining these object types, if they both have properties,
     // we only want to include any properties that they both have.
     // If only one has properties, we will use that set
@@ -1146,6 +1150,7 @@ export function combineSchema(
         ...linkSchemaRest,
         additionalProperties,
         ...(required && { required }),
+        ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
       });
     } else if (
       linkSchema.properties === undefined &&
@@ -1159,9 +1164,14 @@ export function combineSchema(
             parentSchema.additionalProperties,
           ),
           ...(required && { required }),
+          ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
         };
       }
-      return { ...parentSchemaRest, ...(required && { required }) };
+      return {
+        ...parentSchemaRest,
+        ...(required && { required }),
+        ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
+      };
     }
     // Both objects may have properties
     const mergedSchemaProperties: Record<string, JSONSchema> = {};
@@ -1204,6 +1214,7 @@ export function combineSchema(
       ...parentSchema,
       properties: mergedSchemaProperties,
       ...(required && { required }),
+      ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
     };
   } else if (
     (isObject(linkSchema) && linkSchema.type === "array") &&
@@ -1214,6 +1225,7 @@ export function combineSchema(
     } else if (linkSchema.items === undefined) {
       return parentSchema;
     }
+    const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
     const mergedSchemaItems = combineSchema(
       parentSchema.items,
       linkSchema.items,
@@ -1223,6 +1235,7 @@ export function combineSchema(
       ...linkSchema,
       type: "array",
       items: mergedSchemaItems,
+      ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
     });
   } else if (isObject(linkSchema) && isObject(parentSchema)) {
     // this isn't great, but at least grab the flags from parent schema
@@ -1232,7 +1245,7 @@ export function combineSchema(
     // since the object types may be different
     return mergeSchemaFlags(linkSchema, {
       ...parentSchema,
-      ...(Object.keys(mergedDefs).length > 0 && { $defs: mergedDefs }),
+      ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
     });
   }
   return linkSchema;
