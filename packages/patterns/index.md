@@ -224,41 +224,6 @@ type ImageChatOutput = {
 };
 ```
 
-## `chatbot-outliner.tsx`
-
-Structured outliner with integrated AI chat that can manipulate the outline via
-tools. The AI assistant can add nodes to your outline.
-
-**Keywords:** outliner, chat, tools, ct-outliner
-
-### Input Schema
-
-```ts
-type OutlinerNode = {
-  body: Default<string, "">;
-  children: Default<OutlinerNode[], []>;
-  attachments: Default<OpaqueRef<any>[], []>;
-};
-
-type LLMTestInput = {
-  title?: Writable<Default<string, "LLM Test">>;
-  messages?: Writable<Default<Array<BuiltInLLMMessage>, []>>;
-  expandChat?: Writable<Default<boolean, false>>;
-  outline?: Default<
-    { root: OutlinerNode },
-    { root: { body: "Untitled Page"; children: []; attachments: [] } }
-  >;
-};
-```
-
-### Output Schema
-
-```ts
-type LLMTestResult = {
-  messages: Default<Array<BuiltInLLMMessage>, []>;
-};
-```
-
 ## `scrabble/scrabble.tsx`
 
 Free-for-all multiplayer Scrabble game with lobby, tile bag, game board, and

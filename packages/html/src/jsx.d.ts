@@ -3323,7 +3323,7 @@ interface CTFabAttributes<T> extends CTHTMLAttributes<T> {
   "variant"?: "default" | "primary";
   "position"?: "bottom-right" | "bottom-left" | "top-right" | "top-left";
   "pending"?: boolean;
-  "$previewMessage"?: CellLike<string>;
+  "$previewMessage"?: CellLike<string | null>;
 }
 
 interface CTModalAttributes<T> extends CTHTMLAttributes<T> {
@@ -3346,10 +3346,7 @@ interface CTChevronButtonAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 interface CTInputAttributes<T> extends CTHTMLAttributes<T> {
-  "$value"?:
-    | CellLike<string>
-    | CellLike<number>
-    | CellLike<string | number | null>;
+  "$value"?: CellLike<string | number | null>;
   "customStyle"?: string; // bf: I think this is going to go away one day soon
   "type"?:
     | "text"
