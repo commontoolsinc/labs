@@ -7,7 +7,11 @@
 - **Use `Writable<T>`** in signatures ONLY when you need write access (`.set()`, `.update()`, `.push()`, `.key()`)
 - **Omit `Writable<>`** for read-only access - the framework automatically provides reactive values
 
-```typescript
+```tsx
+import { Writable, UI, pattern } from 'commontools'
+
+interface Item {}
+
 // ✅ Read-only - No Writable<> needed (still reactive!)
 interface ReadOnlyInput {
   count: number;        // Just display it
@@ -15,7 +19,7 @@ interface ReadOnlyInput {
   userName: string;     // Just show it
 }
 
-export default pattern<ReadOnlyInput>(({ count, items, userName }) => {
+export const ReadOnly = pattern<ReadOnlyInput>(({ count, items, userName }) => {
   return {
     [UI]: (
       <div>

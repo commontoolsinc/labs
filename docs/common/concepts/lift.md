@@ -24,4 +24,4 @@ export default pattern<Props, { combined: number }>(({
 })
 ```
 
-Typically it's unusual ot use `lift()` directly. It is almost always better to use `computed()`.
+Typically it's unusual to use `lift()` directly. It is almost always better to use `computed()`.
