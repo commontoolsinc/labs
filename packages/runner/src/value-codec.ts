@@ -1,4 +1,4 @@
-import { isFunction, isInstance } from "@commontools/utils/types";
+import { isInstance } from "@commontools/utils/types";
 
 /**
  * Determines if the given value is JSON-encodable per se (without conversion),
@@ -130,7 +130,7 @@ export function toStorableValue(value: unknown): unknown {
 
   const converted = valueObj.toJSON();
 
-  if (isFunction(converted) || isInstance(converted)) {
+  if (!isStorableValue(converted)) {
     throw new Error(
       `\`toJSON()\` on ${typeName} returned something other than a \`JSONValue\``,
     );
