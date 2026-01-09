@@ -1769,7 +1769,9 @@ export function convertCellsToLinks(
   if (valueIsFunction || valueIsInstance) {
     const typeName = valueIsFunction ? "function" : "instance";
     if (!("toJSON" in value && typeof value.toJSON === "function")) {
-      throw new Error(`Cannot store ${typeName} per se (needs to have a \`toJSON()\` method)`);
+      throw new Error(
+        `Cannot store ${typeName} per se (needs to have a \`toJSON()\` method)`,
+      );
     }
 
     // Note: This assumes that `toJSON()` won't ever return anything that
@@ -1781,7 +1783,9 @@ export function convertCellsToLinks(
       // Give up when faced with a `toJSON()` result which would need to be
       // _directly_ called upon to `toJSON()` itself. (We can relax this
       // restriction if needed.)
-      throw new Error(`\`toJSON()\` on ${typeName} returned something other than a \`JSONValue\``);
+      throw new Error(
+        `\`toJSON()\` on ${typeName} returned something other than a \`JSONValue\``,
+      );
     }
 
     // ...and fall through to handle whatever sort of thing the converted value
