@@ -87,7 +87,7 @@ export default pattern<Input, Output>(({ items }) => {
 
                 <details open>
                   <summary>AI Suggestion</summary>
-                  {wishResult}
+                  {wishResult.$UI}
                 </details>
               </div>
             );

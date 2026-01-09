@@ -8,6 +8,7 @@ import {
   navigateTo,
   pattern,
   patternTool,
+  type PatternToolResult,
   Stream,
   UI,
   type VNode,
@@ -43,12 +44,12 @@ type NoteCharm = {
 };
 
 type Input = {
-  title?: Writable<Default<string, "Untitled Note">>;
-  content?: Writable<Default<string, "">>;
+  title?: Default<string, "Untitled Note">;
+  content?: Default<string, "">;
   isHidden?: Default<boolean, false>;
   noteId?: Default<string, "">;
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
-  linkPattern?: Writable<Default<string, "">>;
+  linkPattern?: Default<string, "">;
 };
 
 /** Represents a small #note a user took to remember some text. */
@@ -59,8 +60,8 @@ type Output = {
   content: Default<string, "">;
   isHidden: Default<boolean, false>;
   noteId: Default<string, "">;
-  grep: Stream<{ query: string }>;
-  translate: Stream<{ language: string }>;
+  grep: PatternToolResult<{ content: string }>;
+  translate: PatternToolResult<{ content: string }>;
   editContent: Stream<{ detail: { value: string } }>;
   /** Minimal UI for embedding in containers like Record. Use via ct-render variant="embedded". */
   embeddedUI: VNode;
@@ -401,7 +402,7 @@ const Note = pattern<Input, Output>(
     );
 
     return {
-      [NAME]: computed(() => `📝 ${title.get()}`),
+      [NAME]: computed(() => `📝 ${title}`),
       [UI]: (
         <ct-screen>
           <ct-vstack
