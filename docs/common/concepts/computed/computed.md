@@ -53,10 +53,17 @@ export default pattern<Input, Input>(({ items }) => {
 
 Use `computed()` **outside of JSX** for reactive transformations:
 
-```typescript
+```tsx
+import { computed, UI, Cell } from 'commontools';
+
+interface Item { title: string; }
+const searchQuery = Cell.of("");
+declare const items: Item[];
+declare const groupedItems: Record<string, Item[]>;
+
 // ✅ Use computed() outside JSX
 const filteredItems = computed(() => {
-  const query = searchQuery.toLowerCase();
+  const query = searchQuery.get().toLowerCase();
   return items.filter(item => item.title.toLowerCase().includes(query));
 });
 
@@ -67,7 +74,7 @@ const categories = computed(() => {
 });
 
 // Then use the computed values in JSX
-return {
+const result = {
   [UI]: (
     <div>
       <div>Total: {itemCount}</div>
@@ -83,6 +90,13 @@ return {
 If your `computed()` has side effects (like setting another cell), they should be idempotent. Non-idempotent side effects cause the scheduler to re-run repeatedly until it hits the 101-iteration limit.
 
 ```typescript
+import { computed, Cell } from 'commontools';
+
+interface Item {}
+declare const items: Item[];
+const logArray = Cell.of<{ timestamp: number }[]>([]);
+const cacheMap = Cell.of<Record<string, number>>({});
+
 // ❌ Non-idempotent - appends on every run
 const badComputed = computed(() => {
   const current = logArray.get();

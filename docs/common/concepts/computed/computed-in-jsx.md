@@ -1,26 +1,40 @@
-
 ### When NOT to Use computed()
 
 **Within JSX, reactivity is automatic—you don't need `computed()`:**
 
-```typescript
-// ❌ Don't use computed() in JSX
-<div>
-  {computed(() => `Hello, ${userName}`)}  // Unnecessary!
-</div>
+```tsx
+import { computed, UI, pattern } from 'commontools';
 
-// ✅ Just reference directly
-<div>
-  Hello, {userName}
-</div>
+interface Input {
+  userName: string;
+  user: { name: string };
+}
 
-// ❌ Don't use computed() for simple property access
-<div>
-  {computed(() => user.name)}  // Unnecessary!
-</div>
+export default pattern<Input>(({ userName, user }) => {
+  return {
+    [UI]: (
+      <>
+        {/* ❌ Don't use computed() in JSX */}
+        <div>
+          {computed(() => `Hello, ${userName}`)}  {/* Unnecessary! */}
+        </div>
 
-// ✅ Direct access works fine
-<div>
-  {user.name}
-</div>
+        {/* ✅ Just reference directly */}
+        <div>
+          Hello, {userName}
+        </div>
+
+        {/* ❌ Don't use computed() for simple property access */}
+        <div>
+          {computed(() => user.name)}  {/* Unnecessary! */}
+        </div>
+
+        {/* ✅ Direct access works fine */}
+        <div>
+          {user.name}
+        </div>
+      </>
+    ),
+  };
+});
 ```

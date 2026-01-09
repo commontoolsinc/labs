@@ -1,33 +1,40 @@
-### action() - Simplified Handlers
+### action() vs handler()
 
-For inline handlers where all data is in scope at definition time:
+**Use `action()`** for inline handlers where all data is in scope (closes over variables):
 
 ```tsx
-import { action, handler, pattern, Cell, Stream } from 'commontools';
+import { action, handler, pattern, Cell, UI, Stream } from 'commontools';
 
 interface Output {
-  exportedAction: Stream<void>;
-  exportedBoundHandler: Stream<void>;
+  increment: Stream<void>;  // Only handlers can be exported
 }
 
 export default pattern<Record<string, never>, Output>(_ => {
   const count = Cell.of(0);
 
-  // action - data bound at definition (closes over count)
-  const myAction = action(() => count.set(count.get() + 1))
-  
-  // handler - data bound at invocation (row, col passed per-call)
-  const myHandler = handler<unknown, { count: Cell<number> }>((_ev, { count }) => {
-    return count.set(count.get() + 1);
-  })
+  // action() - closes over count, used inline in JSX
+  const incrementAction = action(() => count.set(count.get() + 1));
 
-  // TODO(bf): why does this fail typecheck?
-  // we get: Type 'HandlerFactory<unknown, void>' is not assignable to type 'Opaque<Stream<void>>'. 
+  // handler() with binding - can be exported as Stream
+  const incrementHandler = handler<void, { count: Cell<number> }>(
+    (_, { count }) => count.set(count.get() + 1)
+  );
+
   return {
-    exportedAction: myAction,
-    exportedBoundHandler: myHandler({ count })
-  }
-})
+    increment: incrementHandler({ count }), // Bound handler IS the Stream
+    [UI]: (
+      <div>
+        <div>Count: {count}</div>
+        {/* action() used inline - not exported */}
+        <ct-button onClick={incrementAction}>+1 (action)</ct-button>
+        {/* Or use handler bound inline */}
+        <ct-button onClick={incrementHandler({ count })}>+1 (handler)</ct-button>
+      </div>
+    ),
+  };
+});
 ```
 
-Use `handler()` when you need to pass data at invocation time (e.g., loop variables). Use `action()` for simple inline mutations where everything needed is already in scope.
+**Key difference:**
+- `action()` returns a function for inline use (onClick, etc.) - **cannot be exported**
+- `handler()` bound with state returns `Stream<T>` - **can be exported** for other charms to call via linking
