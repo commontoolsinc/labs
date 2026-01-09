@@ -5,6 +5,7 @@ import {
   handler,
   NAME,
   pattern,
+  Stream,
   UI,
   Writable,
 } from "commontools";
@@ -13,29 +14,29 @@ import {
 // Types
 // =============================================================================
 
-type Coordinate = { row: number; col: number };
+export type Coordinate = { row: number; col: number };
 
-type ShipType =
+export type ShipType =
   | "carrier"
   | "battleship"
   | "cruiser"
   | "submarine"
   | "destroyer";
 
-interface Ship {
+export interface Ship {
   type: ShipType;
   start: Coordinate;
   orientation: "horizontal" | "vertical";
 }
 
-type SquareState = "empty" | "miss" | "hit";
+export type SquareState = "empty" | "miss" | "hit";
 
-interface PlayerBoard {
+export interface PlayerBoard {
   ships: Ship[];
   shots: SquareState[][]; // 10x10 grid - shots RECEIVED from opponent
 }
 
-interface GameState {
+export interface GameState {
   phase: "playing" | "finished";
   currentTurn: 1 | 2;
   player1: PlayerBoard;
@@ -173,13 +174,14 @@ function createInitialState(): GameState {
 }
 
 // =============================================================================
-// Handlers (module scope with explicit type parameters)
+// Handlers (module level - clean event/state separation)
 // =============================================================================
 
-const fireShot = handler<
-  unknown,
-  { row: number; col: number; game: Writable<GameState> }
->((_, { row, col, game }) => {
+// Event: coordinates to fire at, State: the game state to modify
+const fireShotHandler = handler<
+  { row: number; col: number },
+  { game: Writable<GameState> }
+>(({ row, col }, { game }) => {
   const state = game.get();
 
   // Can't fire if game is over, in transition, or awaiting pass
@@ -201,10 +203,9 @@ const fireShot = handler<
   // Check if hit
   const hitShip = findShipAt(targetBoard.ships, { row, col });
   const newShots = shots.map((r, ri) =>
-    r.map((
-      c,
-      ci,
-    ) => (ri === row && ci === col ? (hitShip ? "hit" : "miss") : c))
+    r.map((c, ci) =>
+      ri === row && ci === col ? (hitShip ? "hit" : "miss") : c
+    )
   );
 
   const newTargetBoard = { ...targetBoard, shots: newShots };
@@ -251,7 +252,8 @@ const fireShot = handler<
   }
 });
 
-const passDevice = handler<unknown, { game: Writable<GameState> }>(
+// Event: void (button click), State: the game state to modify
+const passDeviceHandler = handler<void, { game: Writable<GameState> }>(
   (_, { game }) => {
     const state = game.get();
     if (state.phase === "finished") return;
@@ -265,7 +267,8 @@ const passDevice = handler<unknown, { game: Writable<GameState> }>(
   },
 );
 
-const playerReady = handler<unknown, { game: Writable<GameState> }>(
+// Event: void (button click), State: the game state to modify
+const playerReadyHandler = handler<void, { game: Writable<GameState> }>(
   (_, { game }) => {
     const state = game.get();
     if (state.phase === "finished") return;
@@ -281,7 +284,8 @@ const playerReady = handler<unknown, { game: Writable<GameState> }>(
   },
 );
 
-const resetGame = handler<unknown, { game: Writable<GameState> }>(
+// Event: void (button click), State: the game state to modify
+const resetGameHandler = handler<void, { game: Writable<GameState> }>(
   (_, { game }) => {
     game.set(createInitialState());
   },
@@ -295,10 +299,22 @@ type Input = Record<string, never>;
 
 interface Output {
   game: Writable<GameState>;
+  fireShot: Stream<{ row: number; col: number }>;
+  passDevice: Stream<void>;
+  playerReady: Stream<void>;
+  resetGame: Stream<void>;
 }
 
 export default pattern<Input, Output>((_input) => {
   const game = Writable.of<GameState>(createInitialState());
+
+  // ---------------------------------------------------------------------------
+  // Bind handlers to this pattern's game state
+  // ---------------------------------------------------------------------------
+  const fireShot = fireShotHandler({ game });
+  const passDevice = passDeviceHandler({ game });
+  const playerReady = playerReadyHandler({ game });
+  const resetGame = resetGameHandler({ game });
 
   // ---------------------------------------------------------------------------
   // Computed Values - Consolidated to reduce reactive subscriptions
@@ -459,7 +475,7 @@ export default pattern<Input, Output>((_input) => {
       <p style={{ color: "#94a3b8", fontSize: "18px", margin: "0" }}>
         Make sure the other player isn't looking!
       </p>
-      <ct-button onClick={playerReady({ game })}>
+      <ct-button onClick={playerReady}>
         I'm Player {gameStatus.currentTurn} - Ready!
       </ct-button>
     </div>
@@ -486,7 +502,7 @@ export default pattern<Input, Output>((_input) => {
       <p style={{ color: "#94a3b8", fontSize: "18px", margin: "0" }}>
         All enemy ships have been sunk!
       </p>
-      <ct-button onClick={resetGame({ game })}>Play Again</ct-button>
+      <ct-button onClick={resetGame}>Play Again</ct-button>
     </div>
   );
 
@@ -525,7 +541,7 @@ export default pattern<Input, Output>((_input) => {
           borderRadius: "8px",
         }}
       >
-        <ct-button onClick={passDevice({ game })}>
+        <ct-button onClick={passDevice}>
           Pass to Player {gameStatus.currentTurn}
         </ct-button>
       </div>
@@ -601,11 +617,7 @@ export default pattern<Input, Output>((_input) => {
                   backgroundColor: cell.bgColor,
                   cursor: "pointer",
                 }}
-                onClick={fireShot({
-                  row: cell.row,
-                  col: cell.col,
-                  game,
-                })}
+                onClick={() => fireShot.send({ row: cell.row, col: cell.col })}
               >
                 {cell.content}
               </div>
@@ -723,10 +735,14 @@ export default pattern<Input, Output>((_input) => {
 
         {/* Reset button (always visible) */}
         <div style={{ textAlign: "center", marginTop: "30px" }}>
-          <ct-button onClick={resetGame({ game })}>New Game</ct-button>
+          <ct-button onClick={resetGame}>New Game</ct-button>
         </div>
       </div>
     ),
     game,
+    fireShot,
+    passDevice,
+    playerReady,
+    resetGame,
   };
 });
