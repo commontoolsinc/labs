@@ -1,4 +1,10 @@
-import { type Immutable, isObject, isRecord } from "@commontools/utils/types";
+import {
+  type Immutable,
+  isFunction,
+  isObject,
+  isRecord,
+} from "@commontools/utils/types";
+import { toDeepStorableValue, toStorableValue } from "./value-codec.ts";
 import type { MemorySpace } from "@commontools/memory/interface";
 import { getTopFrame, recipe } from "./builder/recipe.ts";
 import { createNodeFactory } from "./builder/module.ts";
@@ -1157,7 +1163,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     if (!this.synced) this.sync();
 
     try {
-      value = JSON.parse(JSON.stringify(value));
+      value = toDeepStorableValue(value);
     } catch (e) {
       console.error("Can't set raw value, it's not JSON serializable", e);
       return;
@@ -1738,41 +1744,40 @@ export function convertCellsToLinks(
     };
   }
 
+  // Early-return cases
   if (isCellResultForDereferencing(value)) {
-    value = getCellOrThrow(value).getAsLink(options);
+    return getCellOrThrow(value).getAsLink(options);
   } else if (isCell(value)) {
-    value = value.getAsLink(options);
-  } else if (isRecord(value) || typeof value === "function") {
-    // Only add here, otherwise they are literals or already cells:
-    seen.set(value, path);
-
-    // Process toJSON if it exists like JSON.stringify does.
-    if ("toJSON" in value && typeof value.toJSON === "function") {
-      value = value.toJSON();
-      if (!isRecord(value)) return value;
-      // Fall through to process, so even if there is a .toJSON on the
-      // result we don't call it again.
-    } else if (typeof value === "function") {
-      // Handle functions without toJSON like JSON.stringify does.
-      value = undefined;
-    }
-
-    // Recursively process arrays and objects.
-    if (Array.isArray(value)) {
-      value = value.map((value, index) =>
-        convertCellsToLinks(value, options, [...path, String(index)], seen)
-      );
-    } else {
-      value = Object.fromEntries(
-        Object.entries(value).map(([key, value]) => [
-          key,
-          convertCellsToLinks(value, options, [...path, String(key)], seen),
-        ]),
-      );
-    }
+    return value.getAsLink(options);
+  } else if (!(isRecord(value) || isFunction(value))) {
+    return value;
   }
 
-  return value;
+  // At this point `value` is a non-`null` object(ish) thing.
+
+  seen.set(value, path); // ...which needs to be tracked for circularity.
+
+  // Convert the (top level of) the value to something JSON-encodable if not
+  // already JSON-encodable, or throw if it's neither already valid nor
+  // convertible.
+  value = toStorableValue(value);
+
+  // Recursively process arrays and objects, if we ended up with one of those.
+  if (!isRecord(value)) {
+    // `toStorableValue()` converted this into a primitive value of some sort.
+    return value;
+  } else if (Array.isArray(value)) {
+    return value.map((value, index) =>
+      convertCellsToLinks(value, options, [...path, String(index)], seen)
+    );
+  } else {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, value]) => [
+        key,
+        convertCellsToLinks(value, options, [...path, String(key)], seen),
+      ]),
+    );
+  }
 }
 
 /**
