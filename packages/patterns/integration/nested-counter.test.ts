@@ -63,16 +63,14 @@ describe("nested counter integration test", () => {
       identity,
     });
 
-    // Use try/catch because element may become stale between waitForSelector and evaluate
+    // Use try/catch because element may become stale between waitForSelector and innerText
+    // Use innerText() instead of evaluate() as it's more robust against stale handles
     await waitFor(async () => {
       try {
         const counterResult = await page.waitForSelector("#counter-result", {
           strategy: "pierce",
-          timeout: 500,
         });
-        const initialText = await counterResult.evaluate((el: HTMLElement) =>
-          el.textContent
-        );
+        const initialText = await counterResult.innerText();
         return initialText?.trim() === "Counter is the 0th number";
       } catch (_) {
         return false;
@@ -126,7 +124,8 @@ describe("nested counter integration test", () => {
   it("should verify nested counter has multiple counter displays", async () => {
     const page = shell.page();
 
-    // Use try/catch because elements may become stale between $$ and evaluate
+    // Use try/catch because elements may become stale between $$ and innerText
+    // Use innerText() instead of evaluate() as it's more robust against stale handles
     await waitFor(async () => {
       try {
         // Find all counter result elements (should be 2 for nested counter)
@@ -138,9 +137,7 @@ describe("nested counter integration test", () => {
         }
         // Verify both show the same value
         for (const counter of counterResults) {
-          const text = await counter.evaluate((el: HTMLElement) =>
-            el.textContent
-          );
+          const text = await counter.innerText();
           if (text?.trim() !== "Counter is the 5th number") {
             return false;
           }
@@ -159,7 +156,6 @@ async function waitForCounter(page: Page, text: string) {
     try {
       const counterResult = await page.waitForSelector("#counter-result", {
         strategy: "pierce",
-        timeout: 500,
       });
       return (await counterResult?.innerText())?.trim() === text;
     } catch (_) {

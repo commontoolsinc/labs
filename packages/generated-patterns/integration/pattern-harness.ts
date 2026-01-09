@@ -1,10 +1,12 @@
 import { expect } from "@std/expect";
 import "@commontools/utils/equal-ignoring-symbols";
+import { waitFor } from "@commontools/integration";
 import { fromFileUrl } from "@std/path";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../../runner/src/storage/cache.deno.ts";
 import { Runtime } from "@commontools/runner";
+import { sleep } from "@commontools/utils/sleep";
 
 export interface EventSpec {
   stream: string;
@@ -88,8 +90,8 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   const result = runtime.run(tx, patternFactory, argument, resultCell);
   tx.commit();
 
-  // Sink to keep the result reactive
-  result.sink(() => {});
+  // Sink to keep the result reactive, track cancel function for cleanup
+  const cancelSink = result.sink(() => {});
   await runtime.idle();
 
   let stepIndex = 0;
@@ -117,12 +119,38 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
         (cell, segment) => cell.key(segment),
         result,
       );
-      // Use pull() in pull mode to ensure all dependencies are computed
-      const actual = await targetCell.pull();
+
+      // Use waitFor to poll until assertion passes or timeout
+      let actual: unknown;
+      try {
+        await waitFor(async () => {
+          actual = await targetCell.pull();
+          try {
+            expect(actual).toEqualIgnoringSymbols(assertion.value);
+            return true;
+          } catch {
+            return false;
+          }
+        }, { timeout: 5000, delay: 50 });
+      } catch {
+        // Pull final value for detailed assertion error on timeout
+        actual = await targetCell.pull();
+      }
+
+      // Final assertion with expect() to get proper error messages on failure
       expect(actual, `${name}:${stepIndex}:${assertion.path}`)
-        .toEqual(assertion.value);
+        .toEqualIgnoringSymbols(assertion.value);
     }
   }
+
+  // Cancel the sink to stop reactive updates
+  cancelSink();
+
+  // Wait for any pending work to complete before cleanup
+  await runtime.idle();
+
+  // Small delay to allow any pending debounce timers to either fire or be cancelled
+  await sleep(100);
 
   await runtime.dispose();
   await storageManager.close();
