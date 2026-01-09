@@ -10,6 +10,31 @@ export function isRecord(
 }
 
 /**
+ * Predicate for narrowing a `function` type.
+ * @param value - The value to check
+ * @returns True if the value is a function
+ */
+export function isFunction(value: unknown): value is function {
+  return typeof value === "function";
+}
+
+/**
+ * Predicate for narrowing an instance, that is, a non-`null` non-plain
+ * non-array `object`.
+ * @param value - The value to check
+ * @returns True if the value is an instance
+ */
+export function isInstance(value: unknown): value is object {
+  if ((typeof value !== "object") || (value === null) || Array.isArray(value)) {
+    return false;
+  }
+
+  const proto = Object.getPrototypeOf(value);
+
+  return (proto !== null) && (proto !== Object.prototype);
+}
+
+/**
  * Predicate for narrowing a non-array/non-null `object` type.
  * @param value - The value to check
  * @returns True if the value is an object (not array or null)
