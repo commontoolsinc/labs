@@ -1563,9 +1563,9 @@ export const DietaryRestrictionsModule = recipe<
               Your Restrictions
             </span>
             <ct-hstack gap="2" wrap>
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-              {(restrictions as any as Writable<RestrictionEntry[]>).map(
-                (item, index: number) => {
+              {restrictions.map(
+                // deno-lint-ignore no-explicit-any
+                (item: any, index: number) => {
                   // Get style reactively based on item.level
                   const style = getLevelStyle(item.level);
                   return (
