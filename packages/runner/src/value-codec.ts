@@ -1,16 +1,14 @@
 import { isFunction, isInstance } from "@commontools/utils/types";
 
 /**
- * Converts a value to a storable (JSON-encodable) form. If the value is already
- * JSON-encodable (primitives, plain objects, arrays), it is returned as-is. If
- * the value is a function or instance (non-plain object), this attempts to
- * convert it via `toJSON()`. Throws if the value is a function or instance
- * without a `toJSON()` method, or if `toJSON()` itself returns a function or
- * instance.
+ * Converts a value to a storable (JSON-encodable) form. JSON-encodable values
+ * pass through as-is. Functions and instances (non-plain objects) are converted
+ * via `toJSON()` if available. Throws on non-encodable primitives (`bigint`,
+ * `symbol`) or if a function/instance can't be converted.
  *
  * @param value - The value to convert.
  * @returns The storable value (original or converted).
- * @throws Error if the value is a function/instance that can't be converted.
+ * @throws Error if the value can't be converted to a JSON-encodable form.
  */
 export function toStorableValue(value: unknown): unknown {
   const typeName = typeof value;
