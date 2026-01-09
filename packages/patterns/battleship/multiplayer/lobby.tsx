@@ -21,7 +21,7 @@ import {
   Writable,
 } from "commontools";
 
-import BattleshipRoom from "./battleship-room.tsx";
+import BattleshipRoom from "./room.tsx";
 import {
   createEmptyGrid,
   generateRandomShips,
@@ -29,7 +29,7 @@ import {
   parseGameStateJson,
   parsePlayerJson,
   PlayerData,
-} from "./battleship-types.ts";
+} from "./types.ts";
 
 // =============================================================================
 // LOBBY PATTERN
