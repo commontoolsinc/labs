@@ -49,7 +49,7 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
     const items = computed(() => {
       const defaultItems: Item[] = [
         { title: "Item A", [UI]: <div>Hello World!!!</div> },
-        counter as unknown as Item,
+        counter as any, // TODO(seefeld): fix this, title is indeed missing
         { title: "Item C" },
       ];
 
