@@ -19,6 +19,7 @@ import {
   type IsThisObject,
   type IStreamable,
   type JSONSchema,
+  type JSONValue,
   type NodeFactory,
   type NodeRef,
   type Opaque,
@@ -160,6 +161,7 @@ declare module "@commontools/api" {
     ): SigilWriteRedirectLink;
     getRaw(options?: IReadOptions): Immutable<T> | undefined;
     setRaw(value: any): void;
+    setAsJSONValue(value: any): Cell<JSONValue>;
     getSourceCell<T>(
       schema?: JSONSchema,
     ):
@@ -713,6 +715,27 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     return this as unknown as Cell<T>;
   }
 
+  /**
+   * Sets this instance's value based on `newValue` interpreted as a
+   * JSON-serializable "data value." This contrasts with {@link #set}, which
+   * accepts arbitrary values / references and performs no data conversions.
+   * See {@link toJSONValue} for details about how `newValue` gets transformed.
+   *
+   * @param newValue - The value whose sanitized clone is to be stored in the
+   *     cell.
+   * @param onCommit - Same as with {@link #set}.
+   * @returns `this`, always.
+   */
+  setAsJSONValue(
+    newValue: AnyCellWrapping<T> | T,
+    onCommit?: (tx: IExtendedStorageTransaction) => void,
+  ): Cell<JSONValue> {
+    const origValue: any = isCell(newValue) ? newValue.get() : newValue;
+    const jsonValue = toJSONValue(origValue);
+
+    return (this as unknown as Cell<JSONValue>).set(jsonValue, onCommit);
+  }
+
   send(
     event: AnyCellWrapping<T>,
     onCommit?: (tx: IExtendedStorageTransaction) => void,
@@ -1151,7 +1174,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     if (!this.synced) this.sync();
 
     try {
-      value = JSON.parse(JSON.stringify(value));
+      value = toJSONValue(value);
     } catch (e) {
       console.error("Can't set raw value, it's not JSON serializable", e);
       return;
@@ -1920,4 +1943,62 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       return cell;
     },
   } satisfies CellTypeConstructor<Wrap>;
+}
+
+/**
+ * Clones a given arbitrary value, converting it if possible to a JSON-encodable
+ * form. If it can't do so (e.g., it encounters a circular reference or an
+ * object whose `toJSON()` method throws), this function transparently throws
+ * the same error. If given a `Cell` as `value`, perform the conversion on the
+ * unwrapped value.
+ *
+ * This function treats some (non-plain) objects specially. Notably, and as of
+ * this writing only, `Error` objects are converted into plain objects in a
+ * human-recognizable form that includes the typical `Error` properties.
+ *
+ * @param value Value to convert.
+ * @returns The converted value.
+ */
+export function toJSONValue(
+  value: any,
+): JSONValue {
+  // Note: This function works by round-tripping through a JSON string, which
+  // isn't particularly efficient.
+
+  const replacer = (_key: string, value: any) => {
+    if ((typeof value !== "object") || (value === null)) {
+      return value;
+    }
+
+    if (Error.isError(value)) {
+      const error = value as Error;
+      // This returns a single-key object whose key in a form unlikely to be
+      // mistaken as being for other purposes. Note: Using `@` as the sigil for
+      // a special object key is used elsewhere in the system, though the
+      // specific pattern of using a single-property object with an `@key` to
+      // encode (the state of) an instance of a class is not (yet?) an
+      // established pattern in the system.
+      return {
+        "@Error": {
+          ...error,
+          name: error.name,
+          message: error.message,
+          stack: error.stack,
+        },
+      };
+    }
+
+    // TODO(@danfuzz): Consider other library objects for special-case handling,
+    // such as `Map`, `Set`, and `RegExp`.
+
+    return value;
+  };
+
+  const origValue = isCell(value) ? value.value : value;
+
+  // Note: `JSON.stringify()` will fail on circular objects (regardless of
+  // whether or not we perform object replacement). This isn't believed to be
+  // a practical issue in the current system; other tactics can be used if
+  // this belief turns out to be(come) wrong.
+  return JSON.parse(JSON.stringify(origValue, replacer));
 }
