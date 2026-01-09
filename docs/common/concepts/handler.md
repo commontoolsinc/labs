@@ -1,4 +1,4 @@
-`handler` constructs a `Stream` that exposes `.send()` to trigger it. When binding in JSX, handlers 
+`handler` constructs a `Stream` that exposes `.send()` to trigger it.
 
 ```typescript
 import { pattern, UI, Stream, handler, Cell, Writable } from "commontools";
