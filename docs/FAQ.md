@@ -13,5 +13,5 @@ When entries are added or modified, provenance can be found in this file's git h
 
 | Question | Answer Location | Last Updated |
 |----------|-----------------|--------------|
-| What type should handlers use in Output interfaces? | `docs/common/concepts/types-and-schemas.md` - Section "Handler Types in Output Interfaces". Use `Stream<T>` (not `OpaqueRef<T>`) for handlers in Output interfaces. `Stream<T>` represents a write-only channel that other charms can call via `.send()`. | 2025-01-09 |
+| What type should handlers use in Output interfaces? | `docs/common/concepts/types-and-schemas.md` - Section "Handler Types in Output Interfaces". Use `Stream<T>` (not `OpaqueRef<T>`) for handlers in Output interfaces. `Stream<T>` represents a write-only channel that other charms can call via `.send()`. | 2026-01-09 |
 | How do I run the ct command? | `.claude/skills/ct/SKILL.md` - Section "Running CT". Always use `deno task ct [command]`. There is no binary to build or verify for normal development - ct runs TypeScript directly via deno. | 2025-12-16 |
