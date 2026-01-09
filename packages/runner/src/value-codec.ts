@@ -23,14 +23,16 @@ export function toStorableValue(value: unknown): unknown {
       if (Number.isFinite(value) && !Object.is(value, -0)) {
         return value;
       } else {
-        // TODO(@danfuzz): This is allowed for now, even though it isn't
-        // JSON-encodable, specifically because there is a test which explicitly
-        // expects `NaN` to become `null`. To be clear, this _does_ match the
-        // behavior of `JSON.stringify()`, however in the spirit of "Death
-        // before confusion!" I think the test in question should get tweaked,
-        // and then this clause should `throw`.
-        return value;
-        // throw new Error("Cannot store non-finite number or negative zero");
+        if (Number.isNaN(value)) {
+          // TODO(@danfuzz): This is allowed for now, even though it isn't
+          // JSON-encodable, specifically because there is a test which
+          // explicitly expects `NaN` to become `null`. To be clear, this _does_
+          // match the behavior of `JSON.stringify()`, however in the spirit of
+          // "Death before confusion!" I think the test in question should get
+          // tweaked, and then this `if` statement should be removed.
+          return null;
+        }
+        throw new Error("Cannot store non-finite number or negative zero");
       }
     }
 
