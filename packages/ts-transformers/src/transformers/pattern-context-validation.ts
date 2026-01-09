@@ -273,11 +273,11 @@ export class PatternContextValidationTransformer extends Transformer {
     if (callKind.kind === "array-map") return true;
 
     // Check builder-based safe wrappers (computed, action, lift, handler)
+    // Note: derive is handled separately above (it has its own kind, not "builder")
     if (callKind.kind === "builder") {
       const safeBuilders = new Set([
         "computed",
         "action",
-        "derive",
         "lift",
         "handler",
       ]);
@@ -314,7 +314,10 @@ export class PatternContextValidationTransformer extends Transformer {
 
     // Check if lift() is immediately invoked: lift(fn)(args)
     // In this case, suggest computed() instead
-    const isImmediatelyInvoked = ts.isCallExpression(node.parent);
+    // We verify node.parent.expression === node to ensure lift() is the callee,
+    // not just an argument (e.g., someFunction(lift(fn)) should not match)
+    const isImmediatelyInvoked = ts.isCallExpression(node.parent) &&
+      node.parent.expression === node;
 
     if (builderName === "lift" && isImmediatelyInvoked) {
       context.reportDiagnostic({
