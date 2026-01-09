@@ -1,47 +1,15 @@
 /// <cts-enable />
 /**
- * MINIMAL REPRO: Cross-Pattern .send() Issue
+ * Test Pattern: KanbanBoard Cross-Pattern Stream Invocation
  *
- * This test demonstrates the cross-pattern .send() issue where a test pattern
- * instantiates KanbanBoard and tries to call .send() on the board's exported
- * Stream handlers.
+ * This test demonstrates calling .send() on Streams exported by a nested pattern.
+ * It validates that cross-pattern Stream invocation works correctly.
  *
- * EXPECTED: board.addCard.send({ ... }) adds a card to the kanban board
- * ACTUAL: Fails - Streams lose their .send() method when accessed cross-pattern
+ * Two approaches are tested:
+ * 1. Passing Stream as handler state parameter
+ * 2. Accessing Stream via closure (using action())
  *
- * ============================================================================
- * ERROR: "stream.send is not a function" / "board.addCard.send is not a function"
- * ============================================================================
- *
- * Both approaches fail with the same error:
- *
- * APPROACH 1: Passing Stream as handler state parameter
- *   handler<void, { stream: typeof board.addCard }>((_event, { stream }) => {
- *     stream.send({ ... });  // TypeError: stream.send is not a function
- *   })({ stream: board.addCard });
- *
- * APPROACH 2: Accessing Stream via closure (using action())
- *   action(() => {
- *     board.addCard.send({ ... });  // TypeError: board.addCard.send is not a function
- *   });
- *
- * What the Stream actually is at runtime (verified via debugging):
- *   {
- *     "typeofStream": "object",
- *     "streamValue": "[object Object]",
- *     "streamKeys": [],           // <-- EMPTY! No properties at all
- *     "hasSend": false,
- *     "constructorName": "Object" // <-- Plain object, not Stream/Cell
- *   }
- *
- * ROOT CAUSE: When a Stream is accessed from a nested pattern's return value,
- * it gets dereferenced/serialized to an empty `{}` object. The Stream's
- * methods (.send()) and internal state are completely lost.
- *
- * ============================================================================
- * RUN THIS TEST
- * ============================================================================
- * deno task ct test packages/patterns/kanban-board/main.test.tsx --verbose
+ * Run: deno task ct test packages/patterns/kanban-board/main.test.tsx --verbose
  */
 import { action, Cell, computed, handler, pattern } from "commontools";
 import KanbanBoard, { type Column } from "./main.tsx";
@@ -57,10 +25,7 @@ export default pattern(() => {
   // Instantiate the kanban board pattern
   const board = KanbanBoard({ columns: columnsCell });
 
-  // ============ APPROACH 1: Pass Stream as handler state ============
-  // Expected: stream.send() adds a card
-  // Actual: TypeError: stream.send is not a function
-  // Reason: stream becomes {} (empty object) when passed through handler state
+  // Approach 1: Pass Stream as handler state parameter
   const action_via_state = handler<void, { stream: typeof board.addCard }>(
     (_event, { stream }) => {
       stream.send({
@@ -71,11 +36,7 @@ export default pattern(() => {
     },
   )({ stream: board.addCard });
 
-  // ============ APPROACH 2: Access Stream via closure (using action) ============
-  // Expected: board.addCard.send() adds a card
-  // Actual: Error: Transaction required for .set()
-  // Reason: Stream's Cell has no tx context from definition time
-  // Note: action() closes over all data, no binding step needed
+  // Approach 2: Access Stream via closure (using action())
   const action_via_closure = action(() => {
     board.addCard.send({
       columnId: "todo",
@@ -84,21 +45,21 @@ export default pattern(() => {
     });
   });
 
-  // ============ ASSERTIONS ============
+  // Assertions
   const assert_initial_zero_cards = computed(() => board.totalCards === 0);
   const assert_one_card = computed(() => board.totalCards === 1);
   const assert_two_cards = computed(() => board.totalCards === 2);
 
-  // ============ TEST SEQUENCE ============
+  // Test sequence: verify both approaches work
   return {
     tests: [
       assert_initial_zero_cards,
 
-      // Run approach 2 first (action closure) - shows "send is not a function" error
+      // Test action() closure approach
       action_via_closure,
       assert_one_card,
 
-      // Run approach 1 (handler state) - also shows "send is not a function" error
+      // Test handler state approach
       action_via_state,
       assert_two_cards,
     ],
