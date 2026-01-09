@@ -1,5 +1,6 @@
 import { Command } from "@cliffy/command";
 import { join } from "@std/path";
+import { expandGlob } from "@std/fs";
 import { discoverTestFiles, runTests } from "../lib/test-runner.ts";
 
 export const test = new Command()
@@ -14,6 +15,10 @@ export const test = new Command()
     "Run all .test.tsx files in a directory (recursive).",
   )
   .example(
+    "ct test './*.test.tsx'",
+    "Run all test files matching a glob pattern.",
+  )
+  .example(
     "ct test ./counter.test.tsx --timeout 10000",
     "Run with custom timeout (10 seconds).",
   )
@@ -26,44 +31,58 @@ export const test = new Command()
     "--verbose",
     "Show detailed execution logs.",
   )
-  .arguments("<path:string>")
-  .action(async (options, path) => {
-    const fullPath = join(Deno.cwd(), path);
+  .arguments("<paths...:string>")
+  .action(async (options, ...paths) => {
+    const testFiles: string[] = [];
 
-    // Check if path exists
-    let stat: Deno.FileInfo;
-    try {
-      stat = await Deno.stat(fullPath);
-    } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
-        console.error(`Error: Path not found: ${fullPath}`);
+    for (const path of paths) {
+      const fullPath = join(Deno.cwd(), path);
+
+      // Check if it's a glob pattern
+      if (path.includes("*")) {
+        // Expand glob pattern
+        for await (const entry of expandGlob(fullPath)) {
+          if (entry.isFile && entry.name.endsWith(".test.tsx")) {
+            testFiles.push(entry.path);
+          }
+        }
       } else {
-        console.error(`Error accessing path ${fullPath}:`, error);
+        // Check if path exists
+        let stat: Deno.FileInfo;
+        try {
+          stat = await Deno.stat(fullPath);
+        } catch (error) {
+          if (error instanceof Deno.errors.NotFound) {
+            console.error(`Error: Path not found: ${fullPath}`);
+          } else {
+            console.error(`Error accessing path ${fullPath}:`, error);
+          }
+          Deno.exit(1);
+        }
+
+        if (stat.isDirectory) {
+          // Discover test files in directory
+          const discovered = await discoverTestFiles(fullPath);
+          testFiles.push(...discovered);
+        } else if (stat.isFile) {
+          // Single file - warn but allow non-.test.tsx for flexibility
+          if (!path.endsWith(".test.tsx")) {
+            console.warn(`Warning: ${path} does not end with .test.tsx`);
+          }
+          testFiles.push(fullPath);
+        } else {
+          console.error(`Error: ${fullPath} is not a file or directory`);
+          Deno.exit(1);
+        }
       }
+    }
+
+    if (testFiles.length === 0) {
+      console.error(`Error: No test files found`);
       Deno.exit(1);
     }
 
-    let testFiles: string[];
-
-    if (stat.isDirectory) {
-      // Discover test files in directory
-      testFiles = await discoverTestFiles(fullPath);
-      if (testFiles.length === 0) {
-        console.error(`Error: No .test.tsx files found in ${fullPath}`);
-        Deno.exit(1);
-      }
-      console.log(`Found ${testFiles.length} test file(s)`);
-    } else if (stat.isFile) {
-      // Single file
-      if (!path.endsWith(".test.tsx")) {
-        console.error(`Error: Test files must end with .test.tsx`);
-        Deno.exit(1);
-      }
-      testFiles = [fullPath];
-    } else {
-      console.error(`Error: ${fullPath} is not a file or directory`);
-      Deno.exit(1);
-    }
+    console.log(`Found ${testFiles.length} test file(s)`);
 
     // Run tests
     const { failed } = await runTests(testFiles, {

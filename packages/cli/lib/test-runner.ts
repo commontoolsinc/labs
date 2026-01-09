@@ -13,6 +13,7 @@ import { Engine, isCell, isStream, Runtime } from "@commontools/runner";
 import type { Cell, Recipe, Stream } from "@commontools/runner";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { basename } from "@std/path";
+import { timeout } from "@commontools/utils/sleep";
 
 export interface TestResult {
   name: string;
@@ -34,14 +35,6 @@ export interface TestRunnerOptions {
   verbose?: boolean;
 }
 
-/**
- * Creates a timeout promise that rejects after the specified duration.
- */
-function createTimeout(ms: number, message: string): Promise<never> {
-  return new Promise((_, reject) => {
-    setTimeout(() => reject(new Error(message)), ms);
-  });
-}
 
 /**
  * Run a single test pattern file.
@@ -163,7 +156,7 @@ export async function runTestPattern(
         try {
           await Promise.race([
             runtime.idle(),
-            createTimeout(
+            timeout(
               TIMEOUT,
               `Action ${lastActionName} timed out after ${TIMEOUT}ms`,
             ),

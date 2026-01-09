@@ -1,7 +1,7 @@
 import { Command } from "@cliffy/command";
-import { dirname, join } from "@std/path";
+import { join } from "@std/path";
 import { render } from "../lib/render.ts";
-import { process, runTests } from "../lib/dev.ts";
+import { process } from "../lib/dev.ts";
 import { isRecord } from "@commontools/utils/types";
 
 export const dev = new Command()
@@ -18,10 +18,6 @@ export const dev = new Command()
   .example(
     "ct dev ./recipe.tsx --no-check",
     "Locally compile and evaluate recipe without typechecking.",
-  )
-  .example(
-    "ct dev ./recipe.tsx --test",
-    "Run tests for the pattern from __tests__/ subdirectory.",
   )
   .option("--no-run", "Do not execute input, only type check.")
   .option("--no-check", "Do not type check input.")
@@ -41,23 +37,9 @@ export const dev = new Command()
     "--main-export <export:string>",
     'Named export from entry for recipe definition. Defaults to "default".',
   )
-  .option(
-    "--test",
-    "Run tests for the pattern from __tests__/ subdirectory.",
-  )
   .arguments("<main:string>")
   .action(async (options, main) => {
     const mainPath = join(Deno.cwd(), main);
-
-    // If --test flag is used, run tests instead of processing the pattern
-    if (options.test) {
-      const testDir = join(dirname(mainPath), "__tests__");
-      const exitCode = await runTests(testDir, main);
-      if (exitCode !== 0) {
-        Deno.exit(exitCode);
-      }
-      return;
-    }
 
     const { main: exports } = await process({
       main: mainPath,
