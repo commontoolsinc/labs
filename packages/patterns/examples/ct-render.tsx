@@ -75,11 +75,13 @@ export default pattern<RecipeState>((state) => {
     // These three methods are all functionally equivalent
     [UI]: (
       <div>
-        <div>{counter}</div>
-        <Counter value={state.value} />
+        <div>Inline: {counter}</div>
+        <div>
+          Component: <Counter value={state.value} />
+        </div>
         {/* ct-render will NOT usually appear in a recipe, rather, it's used within other ct- component internals */}
         <div>
-          <ct-render $cell={counter} />
+          ct-render: <ct-render $cell={counter} />
         </div>
       </div>
     ),

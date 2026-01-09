@@ -131,11 +131,11 @@ describe("ct-render integration test", () => {
     });
   });
 
-  it("should verify only ONE counter display", async () => {
+  it("should verify exactly THREE counters display", async () => {
     const page = shell.page();
 
     await waitFor(async () => {
-      // Find all counter result elements (should be 1 for ct-render, not 2 like nested-counter)
+      // Find all counter result elements (should be 1 for ct-render and two others)
       const counterResults = await page.$$("#counter-result", {
         strategy: "pierce",
       });
