@@ -16,21 +16,22 @@ interface CheckboxDemoInput {
 
 interface CheckboxDemoOutput extends CheckboxDemoInput {}
 
+// Handler for checkbox changes - only needed when you want additional logic
+// Defined at module scope as required by the pattern system
+const toggleWithLogging = handler<
+  { detail: { checked: boolean } },
+  { enabled: Writable<boolean> }
+>(
+  ({ detail }, { enabled }) => {
+    const newValue = detail?.checked ?? false;
+    enabled.set(newValue);
+    // Additional side effects
+    console.log("Checkbox toggled to:", newValue);
+  },
+);
+
 export default pattern<CheckboxDemoInput, CheckboxDemoOutput>(
   ({ simpleEnabled, trackedEnabled }) => {
-    // Handler for checkbox changes - only needed when you want additional logic
-    const toggleWithLogging = handler<
-      { detail: { checked: boolean } },
-      { enabled: Writable<boolean> }
-    >(
-      ({ detail }, { enabled }) => {
-        const newValue = detail?.checked ?? false;
-        enabled.set(newValue);
-        // Additional side effects
-        console.log("Checkbox toggled to:", newValue);
-      },
-    );
-
     return {
       [NAME]: "Checkbox Demo",
       [UI]: (

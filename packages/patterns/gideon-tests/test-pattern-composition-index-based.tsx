@@ -26,42 +26,43 @@ interface ShoppingItem {
   category: Default<string, "Uncategorized">;
 }
 
+// INDEX-BASED removal handler - no .equals() needed
+const removeItemByIndex = handler<
+  unknown,
+  { items: Writable<ShoppingItem[]>; index: number }
+>(
+  (_event, { items: itemsList, index }) => {
+    const current = itemsList.get();
+    if (index >= 0 && index < current.length) {
+      itemsList.set(current.toSpliced(index, 1));
+    }
+  },
+);
+
+// Add item handler
+const addItem = handler<
+  { detail: { message: string } },
+  { items: Writable<ShoppingItem[]> }
+>(
+  ({ detail }, { items: itemsList }) => {
+    const input = detail?.message?.trim();
+    if (input) {
+      const [title, category = "Uncategorized"] = input.split(":");
+      itemsList.push({
+        title: title.trim(),
+        done: false,
+        category: category.trim(),
+      });
+    }
+  },
+);
+
 // Sub-pattern 1: Basic list view
 interface BasicListInput {
   items: Writable<ShoppingItem[]>;
 }
 
 const BasicList = pattern<BasicListInput>(({ items }) => {
-  // INDEX-BASED removal - no .equals() needed
-  const removeItemByIndex = handler<
-    unknown,
-    { items: Writable<ShoppingItem[]>; index: number }
-  >(
-    (_event, { items: itemsList, index }) => {
-      const current = itemsList.get();
-      if (index >= 0 && index < current.length) {
-        itemsList.set(current.toSpliced(index, 1));
-      }
-    },
-  );
-
-  const addItem = handler<
-    { detail: { message: string } },
-    { items: Writable<ShoppingItem[]> }
-  >(
-    ({ detail }, { items: itemsList }) => {
-      const input = detail?.message?.trim();
-      if (input) {
-        const [title, category = "Uncategorized"] = input.split(":");
-        itemsList.push({
-          title: title.trim(),
-          done: false,
-          category: category.trim(),
-        });
-      }
-    },
-  );
-
   return {
     [NAME]: "Basic Shopping List (Index)",
     [UI]: (
@@ -118,19 +119,6 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
         cats.add(item.category || "Uncategorized");
       }
       return Array.from(cats).sort();
-    },
-  );
-
-  // INDEX-BASED removal - no .equals() needed
-  const removeItemByIndex = handler<
-    unknown,
-    { items: Writable<ShoppingItem[]>; index: number }
-  >(
-    (_event, { items: itemsList, index }) => {
-      const current = itemsList.get();
-      if (index >= 0 && index < current.length) {
-        itemsList.set(current.toSpliced(index, 1));
-      }
     },
   );
 

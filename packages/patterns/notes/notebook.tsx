@@ -4,7 +4,6 @@ import {
   type Default,
   equals,
   handler,
-  lift,
   NAME,
   navigateTo,
   pattern,
@@ -1061,13 +1060,9 @@ const Notebook = pattern<Input, Output>(
   ({ title, notes, isNotebook, isHidden }) => {
     const { allCharms } = wish<{ allCharms: NoteCharm[] }>("/");
 
-    // Use lift() for proper reactive tracking of notes.length
-    const noteCount = lift((args: { n: NoteCharm[] }) => args.n.length)({
-      n: notes,
-    });
-    const hasNotes = lift((args: { n: NoteCharm[] }) => args.n.length > 0)({
-      n: notes,
-    });
+    // Use computed() for proper reactive tracking of notes.length
+    const noteCount = computed(() => notes.length);
+    const hasNotes = computed(() => notes.length > 0);
 
     // Selection state for multi-select
     const selectedNoteIndices = Writable.of<number[]>([]);
@@ -1134,62 +1129,44 @@ const Notebook = pattern<Input, Output>(
 
     // Child notebooks (notebooks that are in this notebook's notes)
     // Use isNotebook property (not [NAME] which doesn't work on nested refs)
-    const childNotebooks = lift(
-      (args: { notesList: unknown[]; notebookList: unknown[] }) => {
-        // Get titles of notebooks in our notes list (use isNotebook property, not [NAME])
-        const childTitles = (args.notesList ?? [])
-          .filter((n: any) => n?.isNotebook === true)
-          .map((n: any) => n?.title)
-          .filter((t: any) => typeof t === "string");
-        // Find matching notebooks from allCharms by title
-        return args.notebookList.filter((nb: any) => {
-          const nbTitle = nb?.title;
-          return typeof nbTitle === "string" && childTitles.includes(nbTitle);
-        });
-      },
-    )({ notesList: notes, notebookList: notebooks });
-
-    // Sibling notebooks (other notebooks from space, excluding current, parents, and children)
-    const siblingNotebooks = lift(
-      (args: {
-        currentTitle: string;
-        parentList: unknown[];
-        childList: unknown[];
-        notebookList: unknown[];
-      }) => {
-        // Use title property for matching (works on nested refs)
-        const parentTitles = args.parentList
-          .map((p: any) => p?.title)
-          .filter((t: any) => typeof t === "string");
-        const childTitles = args.childList
-          .map((c: any) => c?.title)
-          .filter((t: any) => typeof t === "string");
-        return args.notebookList.filter((nb: any) => {
-          const nbTitle = nb?.title;
-          if (typeof nbTitle !== "string") return false;
-          // Skip current notebook
-          if (nbTitle === args.currentTitle) return false;
-          // Skip parent notebooks
-          if (parentTitles.includes(nbTitle)) return false;
-          // Skip child notebooks (they're shown in their own section)
-          if (childTitles.includes(nbTitle)) return false;
-          return true;
-        });
-      },
-    )({
-      currentTitle: title,
-      parentList: parentNotebooks,
-      childList: childNotebooks,
-      notebookList: notebooks,
+    const childNotebooks = computed(() => {
+      // Get titles of notebooks in our notes list (use isNotebook property, not [NAME])
+      const childTitles = (notes ?? [])
+        .filter((n: any) => n?.isNotebook === true)
+        .map((n: any) => n?.title)
+        .filter((t: any) => typeof t === "string");
+      // Find matching notebooks from allCharms by title
+      return notebooks.filter((nb: any) => {
+        const nbTitle = nb?.title;
+        return typeof nbTitle === "string" && childTitles.includes(nbTitle);
+      });
     });
 
-    // Use lift() for proper reactive tracking of notebook list lengths
-    const hasParentNotebooks = lift((args: { list: unknown[] }) =>
-      args.list.length > 0
-    )({ list: parentNotebooks });
-    const hasSiblingNotebooks = lift((args: { list: unknown[] }) =>
-      args.list.length > 0
-    )({ list: siblingNotebooks });
+    // Sibling notebooks (other notebooks from space, excluding current, parents, and children)
+    const siblingNotebooks = computed(() => {
+      // Use title property for matching (works on nested refs)
+      const parentTitles = parentNotebooks
+        .map((p: any) => p?.title)
+        .filter((t: any) => typeof t === "string");
+      const childTitles = childNotebooks
+        .map((c: any) => c?.title)
+        .filter((t: any) => typeof t === "string");
+      return notebooks.filter((nb: any) => {
+        const nbTitle = nb?.title;
+        if (typeof nbTitle !== "string") return false;
+        // Skip current notebook
+        if (nbTitle === title) return false;
+        // Skip parent notebooks
+        if (parentTitles.includes(nbTitle)) return false;
+        // Skip child notebooks (they're shown in their own section)
+        if (childTitles.includes(nbTitle)) return false;
+        return true;
+      });
+    });
+
+    // Use computed() for proper reactive tracking of notebook list lengths
+    const hasParentNotebooks = computed(() => parentNotebooks.length > 0);
+    const hasSiblingNotebooks = computed(() => siblingNotebooks.length > 0);
 
     // Check if "All Notes" charm exists in the space
     const allNotesCharm = computed(() =>

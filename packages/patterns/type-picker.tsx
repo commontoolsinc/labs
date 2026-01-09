@@ -34,6 +34,9 @@ import {
 } from "./record/template-registry.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 
+// Filter function at module scope to avoid transformer errors
+const isNotBlankTemplate = (t: TemplateDefinition): boolean => t.id !== "blank";
+
 // ===== Self-Describing Metadata =====
 export const MODULE_METADATA: ModuleMetadata = {
   type: "type-picker",
@@ -142,9 +145,7 @@ export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
     const { entries, trashedEntries, createModule } = context;
 
     // Get templates to display (excluding blank)
-    const templates = getTemplateList().filter(
-      (t: TemplateDefinition) => t.id !== "blank",
-    );
+    const templates = getTemplateList().filter(isNotBlankTemplate);
 
     return {
       [NAME]: "Choose Type",

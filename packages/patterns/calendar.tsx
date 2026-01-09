@@ -73,6 +73,12 @@ const getSortedDates = lift((grouped: Record<string, Event[]>): string[] => {
   return Object.keys(grouped).sort();
 });
 
+const getEventsForDate = lift(
+  (args: { grouped: Record<string, Event[]>; date: string }): Event[] => {
+    return args.grouped[args.date] || [];
+  },
+);
+
 export default pattern<Input, Output>(({ events }) => {
   const todayDate = getTodayDate();
 
@@ -100,9 +106,7 @@ export default pattern<Input, Output>(({ events }) => {
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="3" style="padding: 1rem;">
             {dates.map((date) => {
-              const dateEvents = lift((
-                args: { g: Record<string, Event[]>; d: string },
-              ) => args.g[args.d] || [])({ g: grouped, d: date });
+              const dateEvents = getEventsForDate({ grouped, date });
               const dateIsToday = isToday(date);
               const dateIsPast = isPast(date);
 
