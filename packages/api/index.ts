@@ -29,7 +29,7 @@ export declare const CELL_BRAND: unique symbol;
 /**
  * Symbol for phantom property that enables type inference from AnyBrandedCell.
  * This property doesn't exist at runtime - it's purely for TypeScript's benefit.
- * See docs/common/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
+ * See packages/api/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
  */
 export declare const CELL_INNER_TYPE: unique symbol;
 
