@@ -1238,7 +1238,7 @@ export interface ImageData {
 export type BuiltInLLMTool =
   & { description?: string }
   & (
-    | { pattern: Recipe; handler?: never }
+    | { pattern: Recipe; handler?: never; extraParams?: Record<string, any> }
     | { handler: Stream<any> | OpaqueRef<any>; pattern?: never }
   );
 
@@ -1436,13 +1436,22 @@ export type RecipeFunction = {
   ): RecipeFactory<StripCell<T>, StripCell<R>>;
 };
 
+/**
+ * Result of patternTool() - an LLM tool definition with a pattern and optional pre-filled params.
+ * This is the actual runtime return type, not a cast.
+ */
+export interface PatternToolResult<E = Record<PropertyKey, never>> {
+  pattern: Recipe;
+  extraParams: E;
+}
+
 export type PatternToolFunction = <
   T,
   E extends Partial<T> = Record<PropertyKey, never>,
 >(
   fnOrRecipe: ((input: OpaqueRef<Required<T>>) => any) | RecipeFactory<T, any>,
   extraParams?: Opaque<E>,
-) => OpaqueRef<Omit<T, keyof E>>;
+) => PatternToolResult<E>;
 
 export type LiftFunction = {
   <T extends JSONSchema = JSONSchema, R extends JSONSchema = JSONSchema>(
