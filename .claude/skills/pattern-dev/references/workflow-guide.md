@@ -88,9 +88,9 @@ patterns/feature/
 
 1. Read TypeScript error message
 2. Identify category:
-   - Style-related? → See `COMPONENTS.md`
-   - Handler types? → See `HANDLERS.md`
-   - Cell operations? → See `RECIPES.md`
+   - Style-related? → See `docs/components/*`
+   - Handler types? → See `handler()` docs
+   - Cell operations? → See `docs/concepts/*`
 3. Find similar example in `packages/patterns/`
 4. Apply fix
 5. Verify with `deno task ct dev --no-run` (via ct skill)
@@ -122,7 +122,7 @@ patterns/feature/
 - **Don't build everything before testing** - Deploy incrementally
 - **Don't use handlers for simple updates** - Use `$prop` bidirectional binding
 - **Don't access DOM directly** - Use cells and reactive patterns
-- **Don't guess at types** - Check `HANDLERS.md` for correct Cell types
+- **Don't guess at types** - Check `handler()` docs for correct Cell types
 - **Don't create new patterns for everything** - Check if existing pattern + linking solves it
 
 ## Multi-Pattern Architectures
