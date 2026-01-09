@@ -7,10 +7,10 @@
  * use as extraction sources.
  */
 import {
+  computed,
   type Default,
   handler,
   ifElse,
-  lift,
   NAME,
   recipe,
   str,
@@ -119,34 +119,34 @@ export const TextImportModule = recipe<
   TextImportModuleOutput
 >("TextImportModule", ({ content, filename }) => {
   // Check if we have content
-  const hasContent = lift(({ c }: { c: string }) => !!c && c.length > 0)({
-    c: content,
-  });
+  const hasContent = computed(() => !!content && content.length > 0);
 
   // Display text for NAME
-  const displayText = lift(
-    ({ hasFile, fname }: { hasFile: boolean; fname: string }) => {
-      if (hasFile && fname) return fname;
-      if (hasFile) return "Text imported";
-      return "No file";
-    },
-  )({ hasFile: hasContent, fname: filename });
+  const displayText = computed(() => {
+    const hasFile = hasContent;
+    const fname = filename;
+    if (hasFile && fname) return fname;
+    if (hasFile) return "Text imported";
+    return "No file";
+  });
 
   // Truncated preview of content (first 500 chars)
-  const contentPreview = lift(({ c }: { c: string }) => {
+  const contentPreview = computed(() => {
+    const c = content;
     if (!c) return "";
     if (c.length <= 500) return c;
     return c.slice(0, 500) + "...";
-  })({ c: content });
+  });
 
   // File size display
-  const contentSize = lift(({ c }: { c: string }) => {
+  const contentSize = computed(() => {
+    const c = content;
     if (!c) return "";
     const bytes = new Blob([c]).size;
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  })({ c: content });
+  });
 
   return {
     [NAME]: str`${MODULE_METADATA.icon} ${displayText}`,

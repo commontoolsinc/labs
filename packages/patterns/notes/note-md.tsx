@@ -19,6 +19,19 @@ type MentionableCharm = {
   backlinks: MentionableCharm[];
 };
 
+// Handler for clicking a backlink chip - must be at module scope
+const handleBacklinkClick = (charm: MentionableCharm) => {
+  return navigateTo(charm as any);
+};
+
+// Handler for Edit button - go back to note editor (module scope)
+const goToEdit = handler<void, { sourceNote: any }>((_ev, { sourceNote }) => {
+  const noteRef = sourceNote?.get?.() ?? sourceNote;
+  if (noteRef) {
+    return navigateTo(noteRef);
+  }
+});
+
 interface NoteData {
   title?: string;
   content?: string;
@@ -64,11 +77,6 @@ export default pattern<Input, Output>(({ note }) => {
     );
   });
 
-  // Handler for clicking a backlink chip
-  const handleBacklinkClick = (charm: MentionableCharm) => {
-    return navigateTo(charm as any);
-  };
-
   // Find source note by noteId using wish()
   const { allCharms } = wish<{ allCharms: any[] }>("/");
   const sourceNote = computed(() => {
@@ -76,16 +84,6 @@ export default pattern<Input, Output>(({ note }) => {
     if (!myNoteId) return null;
     return allCharms.find((charm: any) => charm?.noteId === myNoteId);
   });
-
-  // Handler for Edit button - go back to note editor
-  const goToEdit = handler<void, { sourceNote: any }>(
-    (_, { sourceNote }) => {
-      const noteRef = sourceNote?.get?.() ?? sourceNote;
-      if (noteRef) {
-        return navigateTo(noteRef);
-      }
-    },
-  );
 
   // Scrollable content with markdown + backlinks (for print support)
   const markdownViewer = (

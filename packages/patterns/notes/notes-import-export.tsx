@@ -2311,6 +2311,13 @@ function _getNoteNotebooksPlain(
   return result;
 }
 
+// Helper to generate export filename with timestamp
+const getExportFilename = (prefix: string) => {
+  const now = new Date();
+  const timestamp = now.toISOString().slice(0, 19).replace(/[T:]/g, "-");
+  return `${prefix}-${timestamp}.md`;
+};
+
 const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
   const { allCharms } = wish<{ allCharms: AllCharmsType }>("/");
 
@@ -2412,13 +2419,6 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
     { label: "────────────", value: "_divider", disabled: true },
     { label: "New Notebook...", value: "new" },
   ]);
-
-  // Helper to generate export filename with timestamp
-  const getExportFilename = (prefix: string) => {
-    const now = new Date();
-    const timestamp = now.toISOString().slice(0, 19).replace(/[T:]/g, "-");
-    return `${prefix}-${timestamp}.md`;
-  };
 
   // Computed filenames for exports (re-evaluate each time modal is shown)
   const notesExportFilename = computed(() => getExportFilename("notes-export"));
@@ -2540,22 +2540,14 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
   });
 
   // noteCount derived from notes array for reactive UI display
-  // Use lift() for proper reactive tracking (computed() doesn't track array.length correctly)
-  const noteCount = lift((args: { n: NoteCharm[] }) => args.n.length)({
-    n: notes,
-  });
-  const notebookCount = lift((args: { n: NotebookCharm[] }) => args.n.length)({
-    n: notebooks,
-  });
+  const noteCount = computed(() => notes.length);
+  const notebookCount = computed(() => notebooks.length);
 
-  // Boolean display helpers using lift() - needed because computed(() => array.length > 0)
-  // doesn't properly track dependencies on computed arrays
-  const notesDisplayStyle = lift((args: { n: NoteCharm[] }) =>
-    args.n.length > 0 ? "flex" : "none"
-  )({ n: notes });
-  const notebooksDisplayStyle = lift((args: { n: NotebookCharm[] }) =>
-    args.n.length > 0 ? "flex" : "none"
-  )({ n: notebooks });
+  // Boolean display helpers for conditional rendering
+  const notesDisplayStyle = computed(() => notes.length > 0 ? "flex" : "none");
+  const notebooksDisplayStyle = computed(() =>
+    notebooks.length > 0 ? "flex" : "none"
+  );
 
   // exportedMarkdown is computed on-demand when Export All modal opens (lazy for performance)
   const exportedMarkdown = Writable.of<string>("");
@@ -2793,9 +2785,9 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                         }}
                       >
                         <ct-switch
-                          checked={lift((args: { n: unknown }) =>
-                            !((args.n as any)?.isHidden ?? false)
-                          )({ n: note })}
+                          checked={computed(() =>
+                            !((note as any)?.isHidden ?? false)
+                          )}
                           onct-change={toggleNoteVisibility({ note })}
                         />
                       </div>
@@ -3072,22 +3064,14 @@ const NotesImportExport = pattern<Input, Output>(({ importMarkdown }) => {
                           }}
                         >
                           <ct-switch
-                            checked={lift(
-                              (args: {
-                                charms: unknown[];
-                                nb: unknown;
-                              }) => {
-                                // Find the notebook in allCharms by NAME and read its isHidden
-                                const nbName = (args.nb as any)?.[NAME] ?? "";
-                                const found = args.charms.find((c: any) => {
-                                  const name = c?.[NAME];
-                                  return name === nbName;
-                                });
-                                return !((found as any)?.isHidden ?? false);
-                              },
-                            )({
-                              charms: allCharms,
-                              nb: notebook,
+                            checked={computed(() => {
+                              // Find the notebook in allCharms by NAME and read its isHidden
+                              const nbName = (notebook as any)?.[NAME] ?? "";
+                              const found = allCharms.find((c: any) => {
+                                const name = c?.[NAME];
+                                return name === nbName;
+                              });
+                              return !((found as any)?.isHidden ?? false);
                             })}
                             onct-change={toggleNotebookVisibility({
                               notebook,
