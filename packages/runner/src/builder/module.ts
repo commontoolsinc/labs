@@ -235,7 +235,7 @@ function handlerInternal<E, T>(
     // the actual inputs, so they'll be available as `this`
     bind: (inputs: Opaque<StripCell<T>>) => factory(inputs),
     toJSON: () => moduleToJSON(module),
-    ...(schema !== undefined ? { argumentSchema: schema } : {}),
+    ...(schema !== undefined && { argumentSchema: schema }),
   };
 
   const factory = Object.assign((props: Opaque<StripCell<T>>): Stream<E> => {

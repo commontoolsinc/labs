@@ -860,10 +860,10 @@ export class Runner {
       const { $defs, definitions, ...rest } = recipe.argumentSchema;
       (processCellSchema as any).properties.argument = rest ?? true;
       if (isRecord($defs)) {
-        (processCellSchema as any).$defs = $defs;
+        processCellSchema.$defs = { ...$defs };
       }
       if (isRecord(definitions)) {
-        (processCellSchema as any).definitions = definitions;
+        processCellSchema.definitions = { ...definitions };
       }
     }
 
