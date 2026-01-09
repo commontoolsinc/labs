@@ -36,14 +36,14 @@ const formatDate = (timestamp: number) => {
 
 // ============ TYPES ============
 
-interface Card {
+export interface Card {
   id: string;
   title: string;
   description: Default<string, "">;
   createdAt: Default<number, 0>; // timestamp
 }
 
-interface Column {
+export interface Column {
   id: string;
   title: string;
   cards: Default<Card[], []>;
@@ -68,6 +68,7 @@ interface Output {
   columns: Column[];
   totalCards: number;
   cardCounts: Record<string, number>;
+  columnCount: number;
   // Handlers as Streams
   addCard: Stream<{ columnId: string; title: string; description?: string }>;
   removeCard: Stream<{ columnId: string; cardId: string }>;
@@ -176,7 +177,7 @@ const removeColumnHandler = handler<
 
 // ============ PATTERN ============
 
-export default pattern<State>(({ columns }) => {
+export default pattern<State, Output>(({ columns }) => {
   // ============ BOUND HANDLERS ============
 
   const addCard = addCardHandler({ columns });
@@ -631,6 +632,7 @@ export default pattern<State>(({ columns }) => {
     columns,
     totalCards,
     cardCounts,
+    columnCount,
 
     // Handlers (as Streams for cross-charm communication)
     addCard,
